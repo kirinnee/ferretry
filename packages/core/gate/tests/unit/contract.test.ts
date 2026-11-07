@@ -25,6 +25,8 @@ import {
 } from '../../contract/index.ts';
 import {
   credentialProviderConformance,
+  deviceStanding,
+  StandInAdmission,
   FakeDeviceProvider,
   FakeStepUpWitness,
   fakeSignature,
@@ -101,7 +103,7 @@ describe('policy vocabulary', () => {
 });
 
 describe('standing', () => {
-  test('G7 a ferret token is an agent caller, never a person', () => {
+  test('a ferret token is an agent caller, never a person (G7)', () => {
     const ferret = 'f1' as FerretId;
     const call = ferretStanding(ferret);
     expect(callerIsAgent(call.credential, call.actor)).toBe(true);
@@ -183,5 +185,36 @@ describe('inventory projection (§9.6)', () => {
         LIMITED_DEVICE_GRANTS,
       ),
     ).toBe(false);
+  });
+});
+
+describe('StandInAdmission', () => {
+  const request = (path: string) =>
+    ({ method: 'GET', path, query: new Map(), headers: new Map(), arrival: { kind: 'carried', carrier: 'relay' }, text: async () => '' }) as never;
+  const route = (extra: object) => ({
+    table: 'route' as const,
+    request: request('/v1/x'),
+    params: new Map(),
+    descriptor: { method: 'GET', path: '/v1/x', minimum: 'operator' as const, caller: 'any' as const, audit: { skip: 'x' }, guard: { none: 'x' } as const, ...extra },
+  });
+  test('a person route refuses a ferret with owner_only (G7)', () => {
+    const admission = new StandInAdmission(() => ferretStanding('f1' as FerretId));
+    const decision = admission.admit(route({ caller: 'person' }));
+    expect(decision.outcome === 'refused' && JSON.parse(decision.response.body).code).toBe('owner_only');
+  });
+  test('a limited device is refused a terminal it was not granted, by its own half', () => {
+    const admission = new StandInAdmission(() => deviceStanding('d1', LIMITED_DEVICE_GRANTS, true));
+    const decision = admission.admit(route({ capability: { capability: CAPABILITIES.terminal, axis: 'use' } }));
+    expect(decision.outcome === 'refused' && JSON.parse(decision.response.body).code).toBe('grant_device_not_granted');
+  });
+  test('an undetermined policy fails closed', () => {
+    const admission = new StandInAdmission(() => deviceStanding('d1'), () => undefined);
+    const decision = admission.admit(route({ capability: { capability: CAPABILITIES.fleet, axis: 'use' } }));
+    expect(decision.outcome === 'refused' && JSON.parse(decision.response.body).code).toBe('grant_undetermined');
+  });
+  test('the warden never reaches an operator route; the owner reaches everything', () => {
+    expect(new StandInAdmission(() => wardenStanding('w1' as FerretId)).admit(route({})).outcome).toBe('refused');
+    expect(new StandInAdmission(() => ownerStanding()).admit(route({ minimum: 'admin-token' })).outcome).toBe('admitted');
+    expect(new StandInAdmission(() => ownerStanding()).admit(route({ capability: { capability: CAPABILITIES.secrets, axis: 'configure' } })).outcome).toBe('admitted');
   });
 });

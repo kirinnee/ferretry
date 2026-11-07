@@ -3,7 +3,22 @@
  * `credentials` and `step-up` values through the suites below; the fakes pass the same suites (tests/unit).
  */
 import { describe, expect, test } from 'bun:test';
-import type { CallStanding, FerretId, HolderId, PolicyRef, SessionId, SessionPrincipal } from '@ferretry/kernel/contract';
+import {
+  type Admission,
+  type AdmissionDecision,
+  type AdmissionInput,
+  type ApiRequest,
+  arrivedPrivileged,
+  type CallStanding,
+  errorResponse,
+  type FerretId,
+  type HolderId,
+  type MemberStanding,
+  type PolicyRef,
+  type ScopedRoute,
+  type SessionId,
+  type SessionPrincipal,
+} from '@ferretry/kernel/contract';
 import { addDuration, type Instant, instantFromEpochMs, minutes } from '@ferretry/std';
 import type { AuditDraft } from '../audit.ts';
 import type {
@@ -17,10 +32,19 @@ import type {
   StepUpVerified,
   StepUpWitness,
 } from '../credentials.ts';
-import { DEFAULT_GATE_CONFIG, type GateConfig } from '../gate-config.ts';
-import { type CapabilityGrants, FULL_DEVICE_GRANTS } from '../policy.ts';
+import { asksStepUpPerAction, DEFAULT_GATE_CONFIG, type GateConfig } from '../gate-config.ts';
+import {
+  type CapabilityGrants,
+  coreCapabilityName,
+  FULL_DEVICE_GRANTS,
+  grantRefusalCode,
+  OWNER_ONLY_CODE,
+  ownerOnlyWords,
+  STEP_UP_REQUIRED_CODE,
+  STEP_UP_USE_CAPABILITIES,
+} from '../policy.ts';
 import type { GateApi } from '../port.ts';
-import { deviceActor, ferretActor, wardenActor } from '../standing.ts';
+import { callerIsAgent, deviceActor, ferretActor, wardenActor } from '../standing.ts';
 
 /** 2026-11-07T12:00:00Z. */
 export const T0: Instant = instantFromEpochMs(1_794_052_800_000);
@@ -287,4 +311,81 @@ export function stepUpWitnessConformance(name: string, make: () => StepUpWitness
       expect(answer).toMatchObject({ holder: id, act, subject: 'st_0123456789abcdef01234567' });
     });
   });
+}
+
+// ─── a stand-in admission ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** Today's `meetsMinimum`, verbatim in meaning. */
+function meetsMinimum(credential: CallStanding['credential'], minimum: ScopedRoute['minimum']): boolean {
+  switch (minimum) {
+    case 'none':
+    case 'authenticated':
+      return true;
+    case 'operator':
+      return credential?.tokenClass !== 'warden';
+    case 'admin-token':
+      return credential?.tokenClass === 'admin';
+  }
+}
+
+/**
+ * A stand-in `Admission` for test hosts and handler tests, in today's boundary order: person-or-ferret, credential
+ * minimum, privileged arrival, capability (daemon-wide ∧ device, with today's step-up rule), warden remedy. The
+ * standing comes from `standingFor` (a test decides who is calling); it is NOT Gate: no bearer is checked, no unlock,
+ * no stream re-admission. The real Gate passes `@ferretry/kernel/testing`'s descriptor suites; this does not claim to.
+ */
+export class StandInAdmission implements Admission {
+  constructor(
+    private readonly standingFor: (request: ApiRequest) => CallStanding | undefined,
+    private readonly policy: () => GateConfig | undefined = () => DEFAULT_GATE_CONFIG,
+  ) {}
+
+  admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision {
+    const { descriptor, request } = input;
+    const standing = this.standingFor(request);
+    if (standing === undefined)
+      return descriptor.minimum === 'none' && descriptor.wardenRemedy === undefined
+        ? { outcome: 'admitted', standing: {} }
+        : { outcome: 'refused', response: errorResponse(401, 'this call needs a credential', 'unauthorized') };
+    if (descriptor.caller === 'person' && callerIsAgent(standing.credential, standing.actor))
+      return { outcome: 'refused', response: errorResponse(403, ownerOnlyWords(`may use ${request.method} ${request.path}`), OWNER_ONLY_CODE) };
+    const admin = standing.credential?.tokenClass === 'admin';
+    if (
+      !meetsMinimum(standing.credential, descriptor.minimum) ||
+      (descriptor.privilegedOnly === true && !arrivedPrivileged(request, admin))
+    )
+      return { outcome: 'refused', response: errorResponse(403, `the presented credential may not use ${request.method} ${request.path}`, 'forbidden') };
+    const demand = descriptor.capability;
+    // Ungoverned: the admin token on the host, and a ferret's own token (today's `loopback` presentation).
+    if (demand !== undefined && standing.presentation?.local !== true) {
+      const name = coreCapabilityName(demand.capability);
+      const policy = this.policy();
+      const device = standing.presentation?.deviceGrants;
+      const daemonWide = name === undefined || policy === undefined ? undefined : policy.grants[name];
+      const own = name === undefined || device === undefined || device === null ? undefined : device[name];
+      const refusal =
+        daemonWide === undefined || device === null
+          ? 'undetermined'
+          : !daemonWide.use || (demand.axis === 'configure' && !daemonWide.configure)
+            ? 'not-granted'
+            : own !== undefined && (!own.use || (demand.axis === 'configure' && !own.configure))
+              ? 'device-not-granted'
+              : undefined;
+      if (refusal !== undefined) return { outcome: 'refused', response: errorResponse(403, refusal, grantRefusalCode(refusal)) };
+      const needsStepUp =
+        demand.narrowing !== true &&
+        (demand.axis === 'configure' || (name !== undefined && STEP_UP_USE_CAPABILITIES.includes(name)));
+      if (needsStepUp && standing.presentation?.stepUp !== true && (policy === undefined || asksStepUpPerAction(policy.security)))
+        return { outcome: 'refused', response: errorResponse(403, 'needs a passkey confirmation', STEP_UP_REQUIRED_CODE) };
+    }
+    return { outcome: 'admitted', standing };
+  }
+
+  admitMember(): AdmissionDecision<MemberStanding> {
+    return { outcome: 'refused', response: errorResponse(403, 'the stand-in admission serves no member routes', 'forbidden') };
+  }
+
+  readmit(): boolean {
+    return true;
+  }
 }

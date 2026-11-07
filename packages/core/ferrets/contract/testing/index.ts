@@ -92,7 +92,7 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       await subject.runner.stop(started.value.handle, 'now');
       expect(await subject.runner.alive(started.value.handle)).toBe(false);
     });
-    test('D15 attach adopts a live handle without starting anything', async () => {
+    test('attach adopts a live handle without starting anything (D15)', async () => {
       const subject = await make();
       const handle = await subject.adoptable();
       const before = subject.starts();
@@ -102,7 +102,7 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       expect(subject.starts()).toBe(before);
       expect(await subject.runner.alive(handle)).toBe(true);
     });
-    test('D15 attach to a handle with nothing behind it is refused, never a start', async () => {
+    test('attach to a handle with nothing behind it is refused, never a start (D15)', async () => {
       const subject = await make();
       const before = subject.starts();
       const attached = await subject.runner.attach('%99999' as RunnerHandle);

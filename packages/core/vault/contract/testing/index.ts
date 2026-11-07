@@ -147,7 +147,7 @@ export function inputHoldsConformance(name: string, make: () => HoldsSubject): v
     test('an op not in OP_EFFECTS is refused', () => {
       expect(make().holds.decide(page, 'teleport' as Op, 'ferret')).toEqual({ refused: 'unknown_op' });
     });
-    test('I52 a pending card with a non-code field refuses every ferret write, allows reads', () => {
+    test('a pending card with a non-code field refuses every ferret write, allows reads (I52)', () => {
       const subject = make();
       subject.pendingCard(page, { codeOnly: false });
       for (const op of ['keys', 'type', 'press', 'fill', 'script', 'navigate', 'open', 'close'] as const)
@@ -155,7 +155,7 @@ export function inputHoldsConformance(name: string, make: () => HoldsSubject): v
       expect(subject.holds.decide(page, 'read', 'ferret')).toBe('allow');
       expect(subject.holds.decide(page, 'type', 'owner-input')).toBe('allow');
     });
-    test('I32 a code-only card lets terminal_send and browser_type through, and only those', () => {
+    test('a code-only card lets terminal_send and browser_type through, and only those (I32)', () => {
       const subject = make();
       subject.pendingCard(page, { codeOnly: true });
       expect(subject.holds.decide(page, 'type', 'ferret')).toBe('allow');
@@ -163,20 +163,20 @@ export function inputHoldsConformance(name: string, make: () => HoldsSubject): v
       for (const op of ['press', 'fill', 'script', 'navigate', 'open', 'close'] as const)
         expect(refused(subject.holds.decide(page, op, 'ferret'))).toBe(true);
     });
-    test('I72 a quarantined terminal refuses reads for the ferret and owner-tools, still takes keys', () => {
+    test('a quarantined terminal refuses reads for the ferret and owner-tools, still takes keys (I72)', () => {
       const subject = make();
       subject.quarantine(pane);
       expect(subject.holds.decide(pane, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
       expect(subject.holds.decide(pane, 'wait', 'owner-tools')).toEqual({ refused: 'quarantined' });
       expect(subject.holds.decide(pane, 'keys', 'ferret')).toBe('allow');
     });
-    test('I77 the viewer stream of a quarantined terminal needs an audited reveal', () => {
+    test('the viewer stream of a quarantined terminal needs an audited reveal (I77)', () => {
       const subject = make();
       subject.quarantine(pane);
       expect(refused(subject.holds.decide(pane, 'stream', 'owner-viewer'))).toBe(true);
       expect(subject.holds.decide(pane, 'stream', 'owner-viewer', subject.reveal(pane))).toBe('allow');
     });
-    test('I117 a page hold on the held document refuses reads, script and pictures; writes are allowed', () => {
+    test('a page hold on the held document refuses reads, script and pictures; writes are allowed (I117)', () => {
       const subject = make();
       subject.pageHold(page, { onHeldDocument: true });
       for (const op of ['read', 'wait', 'script', 'picture', 'stream'] as const)
@@ -185,7 +185,7 @@ export function inputHoldsConformance(name: string, make: () => HoldsSubject): v
       for (const op of ['type', 'press', 'fill', 'navigate', 'open', 'close'] as const)
         expect(subject.holds.decide(page, op, 'ferret')).toBe('allow');
     });
-    test('I116 after a new document reads are masked, pictures still refused (except until-moved-on)', () => {
+    test('after a new document reads are masked, pictures still refused (except until-moved-on) (I116)', () => {
       const subject = make();
       subject.pageHold(page, { onHeldDocument: false });
       expect(subject.holds.decide(page, 'read', 'ferret')).toBe('allow-masked');
@@ -321,7 +321,7 @@ export function redactionConformance(name: string, make: () => RedactionSubject 
       const out = await subject.redaction.read(scope => scope.text(`token=${subject.value}.`));
       expect(out.includes(subject.value)).toBe(false);
     });
-    test('I105 cells are masked same-width, exactly the matched cells', async () => {
+    test('cells are masked same-width, exactly the matched cells (I105)', async () => {
       const subject = await make();
       const cells = ['a', ...subject.value.split(''), 'z'];
       const grid = await subject.redaction.read(scope => scope.cells({ columns: cells.length, rows: [cells] }));
@@ -331,7 +331,7 @@ export function redactionConformance(name: string, make: () => RedactionSubject 
       expect(row[row.length - 1]).toBe('z');
       expect(row.slice(1, -1).every(cell => /^\*+$/u.test(cell))).toBe(true);
     });
-    test('I106 a value wrapped across rows is masked in each row', async () => {
+    test('a value wrapped across rows is masked in each row (I106)', async () => {
       const subject = await make();
       const half = Math.floor(subject.value.length / 2);
       const lines = await subject.redaction.read(scope =>
@@ -486,7 +486,7 @@ export function vaultConformance(name: string, make: () => VaultSubject | Promis
       await vault.put(NAME, VALUE);
       expect(JSON.stringify(await vault.names()).includes(VALUE)).toBe(false);
     });
-    test('S14 a run that prints the value returns it masked', async () => {
+    test('a run that prints the value returns it masked (S14)', async () => {
       const { vault } = await make();
       await vault.put(NAME, VALUE);
       const result = await vault.run({ command: ['sh', '-c', 'echo $API_KEY'], cwd: '/tmp', secrets: [NAME], env: {}, timeoutMs: 1_000 });
