@@ -60,17 +60,27 @@ function subsystem(documents = new MemorySecretDocuments(), identityKey?: Daemon
   const crypto = CLONE_CRYPTO;
   const identity = { load: async () => identityKey };
   let changes = 0;
+  let seals = 0;
+  // Counts every seal that actually ran, so a refusal before it is visible as zero.
+  const exports = new SecretExportService({ crypto, identity, vault, clock: CLOCK });
+  const seal = exports.seal.bind(exports);
+  Object.assign(exports, {
+    seal: async (...args: Parameters<typeof seal>) => {
+      seals += 1;
+      return await seal(...args);
+    },
+  });
   const handlers = secretRouteHandlers({
     directory,
     references: NO_REFERENCES,
     uses: new SecretUseService(vault, runner, ENVS),
     imports: new SecretImportService({ crypto, identity, directory, clock: CLOCK }),
-    exports: new SecretExportService({ crypto, identity, vault, clock: CLOCK }),
+    exports,
     changed: () => {
       changes += 1;
     },
   });
-  return { directory, handlers, runner, changes: () => changes };
+  return { directory, handlers, runner, changes: () => changes, seals: () => seals };
 }
 
 /** A call as the kernel hands one to a handler: the request, the raw path parameters, Gate's standing. */
@@ -316,6 +326,116 @@ describe('the secret routes', () => {
     // Assert — refused before anything is opened; the clone is kept and the keys are offered again on a retry.
     should(answer.status).equal(403);
     should(JSON.parse(answer.body)).match({ code: 'grant_step_up_required', demand: { act: 'clone-secrets' } });
+  });
+
+  describe('S159 S147 one proof, one seal: the proof is claimed before anything is sealed', () => {
+    /** ONE fresh passkey proof: `claim` takes it in one step (Gate's registry), `taken` counts the winners. */
+    function oneProof() {
+      let held = true;
+      let taken = 0;
+      const claim = (() => {
+        if (!held) return false;
+        held = false;
+        taken += 1;
+        return true;
+      }) as NonNullable<ReturnType<typeof ownerStanding>['claimFreshStepUp']>;
+      return { claim, taken: () => taken };
+    }
+    /** A governed device the admission snapshot says is FRESH — every call is built so before any of them runs. */
+    const governedOn = (claim: NonNullable<ReturnType<typeof ownerStanding>['claimFreshStepUp']>) => {
+      const base = deviceStanding('phone', undefined, true);
+      return {
+        ...base,
+        presentation: { ...base.presentation, freshStepUp: true },
+        governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' as const }) },
+        claimFreshStepUp: claim,
+      };
+    };
+
+    /** A source machine and a real offer from a target, so a seal that runs produces a real bundle. */
+    async function sourceAndOffer() {
+      const [sourceIdentity, targetIdentity] = await Promise.all([makeIdentity(), makeIdentity()]);
+      const source = subsystem(new MemorySecretDocuments(), sourceIdentity);
+      const target = subsystem(new MemorySecretDocuments(), targetIdentity);
+      await source.directory.put('API_KEY', TOKEN);
+      const opened = await target.handlers['POST /v1/secrets/imports'](call(ownerStanding()));
+      const offer = JSON.parse(opened.body) as { readonly importId: string };
+      const seal = (standing: ReturnType<typeof governedOn> | ReturnType<typeof ownerStanding>) =>
+        source.handlers['POST /v1/secrets/exports/:importId'](
+          call(standing as never, { offer, names: ['API_KEY'] }, { importId: offer.importId }),
+        );
+      return { source, seal };
+    }
+
+    it('S159 two seals admitted on ONE fresh proof, both snapshotted fresh before either runs: exactly one seals, nothing is sealed for the other', async () => {
+      // Arrange
+      const { source, seal } = await sourceAndOffer();
+      const proof = oneProof();
+      const first = governedOn(proof.claim);
+      const second = governedOn(proof.claim);
+
+      // Act
+      const answers = await Promise.all([seal(first), seal(second)]);
+
+      // Assert
+      should(answers.map(answer => answer.status).sort()).deepEqual([200, 403]);
+      const refused = answers.find(answer => answer.status === 403);
+      should(JSON.parse(refused?.body ?? '{}')).match({
+        code: 'grant_step_up_required',
+        demand: { act: 'clone-secrets' },
+      });
+      should(refused?.body).not.containEql('bundle');
+      should(source.seals()).equal(1);
+      should(proof.taken()).equal(1);
+      for (const answer of answers) should(answer.body).not.containEql(TOKEN);
+    });
+
+    it('S159 a seal and a config loosening on one fresh proof, the loosening judged first: exactly one acts, nothing is sealed', async () => {
+      // Arrange — the other act takes the proof through the claim every admitted call carries, as Gate's judge does.
+      const { source, seal } = await sourceAndOffer();
+      const proof = oneProof();
+      const standing = governedOn(proof.claim);
+
+      // Act
+      const loosening = standing.claimFreshStepUp() ? 'apply' : 'hold';
+      const answer = await seal(standing);
+
+      // Assert
+      should([loosening, answer.status]).deepEqual(['apply', 403]);
+      should(source.seals()).equal(0);
+      should(proof.taken()).equal(1);
+    });
+
+    it('S159 one fresh proof and no race: the seal runs and the proof is gone, so the next seal asks again', async () => {
+      // Arrange
+      const { source, seal } = await sourceAndOffer();
+      const proof = oneProof();
+
+      // Act
+      const sealed = await seal(governedOn(proof.claim));
+      const again = await seal(governedOn(proof.claim));
+
+      // Assert
+      should(sealed.status).equal(200);
+      should(JSON.parse(sealed.body)).have.property('bundle');
+      should(again.status).equal(403);
+      should(source.seals()).equal(1);
+      should(proof.taken()).equal(1);
+    });
+
+    it('S159 the owner at the machine claims no proof at all', async () => {
+      // Arrange
+      const { source, seal } = await sourceAndOffer();
+      const proof = oneProof();
+
+      // Act
+      const sealed = await seal({ ...ownerStanding(), claimFreshStepUp: proof.claim });
+
+      // Assert
+      should(sealed.status).equal(200);
+      should(source.seals()).equal(1);
+      should(proof.taken()).equal(0);
+    });
   });
 
   it('S141 a listing over a damaged store says damaged with a diagnosis, never an empty list', async () => {
