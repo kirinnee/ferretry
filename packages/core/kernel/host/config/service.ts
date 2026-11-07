@@ -336,17 +336,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   };
 
   /** What was accepted for THIS plugin at this path: a record of another plugin, or of none, is nothing. */
-  const acceptedFor = (
-    plugin: string,
-    stored: Awaited<ReturnType<typeof readStored>>,
-  ): AcceptedConfig | undefined =>
+  const acceptedFor = (plugin: string, stored: Awaited<ReturnType<typeof readStored>>): AcceptedConfig | undefined =>
     stored?.plugin === plugin ? { etag: stored.etag, text: stored.text } : undefined;
 
-  const writeAccepted = async (
-    plugin: string,
-    path: string,
-    accepted: AcceptedConfig | undefined,
-  ): Promise<void> => {
+  const writeAccepted = async (plugin: string, path: string, accepted: AcceptedConfig | undefined): Promise<void> => {
     const name = acceptedName(path);
     if (accepted === undefined) return await state.remove(acceptedConfigFile, name);
     const record = { etag: accepted.etag, text: accepted.text, plugin };
@@ -502,9 +495,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         digest,
         binary,
       });
-      // A record that is not this plugin's is left alone unless this plugin has one of its own to put in its place.
-      const foreign = stored !== undefined && mine === undefined;
-      if (JSON.stringify(evaluated.accepted) !== JSON.stringify(mine) && !(foreign && evaluated.accepted === undefined))
+      // Compared with this plugin's own record, so another plugin's record is never removed by a load that accepts nothing.
+      if (JSON.stringify(evaluated.accepted) !== JSON.stringify(mine))
         await writeAccepted(plugin, slot.path, evaluated.accepted);
       const diskText = disk.kind === 'text' ? disk.text : undefined;
       next.set(slot.path, {

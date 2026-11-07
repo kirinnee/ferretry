@@ -56,7 +56,6 @@ describe('NN2 an accepted config record is in effect for the plugin it was accep
     const text = 'limit: 50\n';
     fs.seed(`${HOME}/config/updates.yaml`, text);
     const state = createStatePort({ home: HOME, pluginId: 'kernel', files: [acceptedConfigFile], fs });
-    
     await state.write(
       acceptedConfigFile,
       { etag: createHash('sha256').update(text).digest('hex'), text },
