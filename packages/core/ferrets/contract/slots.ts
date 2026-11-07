@@ -33,6 +33,11 @@ export interface ChosenFerretAccount {
     readonly id: string;
     readonly label?: string;
     readonly available: boolean;
+    /**
+     * Whether the model has a fast mode. `false`: it has none, and the page turns the Fast switch off for it and never
+     * sends `fast`. Absent: the panel could not say, and the page lets the daemon accept or refuse it.
+     */
+    readonly fast?: boolean;
   }[];
   /** The login's model catalog, when it reads one; `customIds` means the model box also takes a typed id. */
   readonly modelCatalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };

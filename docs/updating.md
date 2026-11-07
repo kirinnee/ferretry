@@ -88,8 +88,10 @@ as a switch, not as an update.
 - **Failure**: the check never fails a boot and never retries in a loop. A failed check is reported
   as such ("could not reach GitHub"), and the last good answer, if any, stays on screen with its age.
 - **Off**: a development build run from source never asks (it has no release to compare with), and
-  `FY_UPDATE_CHECK=off` in the daemon's environment switches the check off — which is also how a
-  suite that boots a real daemon stays off the network.
+  `FY_UPDATE_CHECK=off` in the daemon's environment is meant to switch the check off — which is also how a
+  suite that boots a real daemon stays off the network. **Declared GAP:** the Updates plugin does not read that
+  variable on 5.0 yet (honouring it is a kernel item), so today it keeps the check off only for the Claude Code
+  update service that reads it; do not rely on it to silence the daemon's own release check.
 
 ## Applying an update
 

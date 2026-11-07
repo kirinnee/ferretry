@@ -438,6 +438,80 @@ export type LoginList = z.infer<typeof LoginListSchema>;
 export const LoginCheckRequestSchema = z.strictObject({});
 export type LoginCheckRequest = z.infer<typeof LoginCheckRequestSchema>;
 
+// ── Login changes (today's `credential.*` account changes, owned here) ─────────────────────────────────────────────
+//
+// A caller names ONE intent and the daemon derives the login file it means, holds it for review, and applies exactly
+// what was previewed. The six intents are the ones a person makes of a single login; a runtime's switch or removal
+// along with it (today's `switchRuntimes`/`removeRuntimes`) is Runtimes' to carry out before it asks for the removal.
+
+const ChangeLabelSchema = NonEmptyStringSchema.max(200);
+
+export const LoginChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('login.add'),
+    id: z.string().min(1).max(200),
+    /** The CLI. For a preset with both halves, the one listed first. */
+    harness: HarnessKindSchema,
+    label: ChangeLabelSchema.optional(),
+    /** Absent (or `ferretry`) is an empty slot Ferretry keeps; `host` is the person's own login, shared in place. */
+    store: LoginStoreSchema.optional(),
+    /** `store: environment` only: the preset it is made from. */
+    preset: NonEmptyStringSchema.max(64).optional(),
+    /** `store: environment` only: each variable as a plain value or a `${secret:NAME}` reference. */
+    env: z.record(z.string().max(128), z.string().max(4096)).optional(),
+    /** `store: environment` only: `aws-profile:<name>`, `gcloud-adc[:<path>]` or `azure-cli`. */
+    cloudCredential: NonEmptyStringSchema.max(512).optional(),
+  }),
+  z.strictObject({ kind: z.literal('login.label'), id: NonEmptyStringSchema, label: ChangeLabelSchema.nullable() }),
+  z.strictObject({ kind: z.literal('login.remove'), id: NonEmptyStringSchema }),
+  z.strictObject({ kind: z.literal('login.signout'), id: NonEmptyStringSchema }),
+  z.strictObject({
+    kind: z.literal('login.disable'),
+    id: NonEmptyStringSchema,
+    reason: NonEmptyStringSchema.max(200).optional(),
+    until: InstantSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('login.enable'), id: NonEmptyStringSchema }),
+]);
+export type LoginChange = z.infer<typeof LoginChangeSchema>;
+
+/** A change held for review: what it does, in sentences, and when the hold ends. */
+export const LoginChangeViewSchema = z.strictObject({
+  id: NonEmptyStringSchema,
+  change: LoginChangeSchema,
+  summary: NonEmptyStringSchema,
+  /** The sentences a confirm card shows: who else it changes, what it signs out, what it leaves behind. */
+  consequences: z.array(NonEmptyStringSchema).readonly(),
+  /** Secret NAMES (never values) that only a removed login referred to: left in the store, said aloud. */
+  orphanedSecrets: z.array(NonEmptyStringSchema).readonly().optional(),
+  expiresAt: InstantSchema,
+  state: z.enum(['pending', 'consumed']),
+});
+export type LoginChangeView = z.infer<typeof LoginChangeViewSchema>;
+
+/**
+ * What applying a change did. `held`: the file was written but it loosens something (a removed budget), so the
+ * tighter version stays in effect until the owner confirms; `sentences` say what widened.
+ */
+export const LoginChangeOutcomeSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({ outcome: z.literal('applied') }),
+  z.strictObject({ outcome: z.literal('held'), sentences: z.array(NonEmptyStringSchema).readonly() }),
+  z.strictObject({ outcome: z.literal('signed-out'), login: LoginViewSchema }),
+  z.strictObject({ outcome: z.literal('sign-out-failed'), reason: NonEmptyStringSchema, login: LoginViewSchema }),
+]);
+export type LoginChangeOutcome = z.infer<typeof LoginChangeOutcomeSchema>;
+
+/** Every refusal a change answers with, so a client branches on cause. */
+export const LOGIN_CHANGE_REFUSAL_CODES = [
+  'login_change_refused',
+  'login_change_unknown',
+  'login_change_expired',
+  'login_change_consumed',
+  'login_change_stale',
+  'login_change_failed',
+] as const;
+export type LoginChangeRefusalCode = (typeof LOGIN_CHANGE_REFUSAL_CODES)[number];
+
 // ── Provider presets ─────────────────────────────────────────────────────────────────────────────
 
 /** One variable a preset fills in. */

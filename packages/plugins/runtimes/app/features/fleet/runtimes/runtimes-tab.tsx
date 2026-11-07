@@ -60,8 +60,7 @@ const loginLine = (runtime: RuntimeView, data: MachineData): string => {
 /**
  * The link to the New session form with this runtime picked, by its wrapper. A hint only: the form decides.
  *
- * GAP(ferrets): no manifest declares the new-ferret page (`/new`) yet, so this link opens nothing until Ferrets' app
- * half draws it; the launch button stays, because the address is the contract the page will read.
+ * The address is Ferrets' `new-ferret` screen (`new`, per daemon), which reads `?agent=`.
  */
 export const launchHref = (daemon: string | null, wrapper: string): string =>
   `${daemon === null ? '' : daemonHomeHref(daemon)}/new?agent=${encodeURIComponent(wrapper)}`;

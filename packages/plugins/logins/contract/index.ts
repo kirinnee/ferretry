@@ -197,6 +197,8 @@ export const LOGINS_AUDIT = {
   signInAnswer: 'fleet.configured:sign-in-answer',
   signInCancel: 'fleet.configured:sign-in-cancel',
   loginTest: 'secrets.used:login-test',
+  changeStage: 'fleet.configured:propose',
+  changeApply: 'fleet.configured:apply',
 } as const;
 
 export type { EndpointFile, LocalModels, ModelCatalogFile, ModelCatalogRefreshResult };

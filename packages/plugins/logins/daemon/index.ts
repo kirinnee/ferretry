@@ -9,7 +9,14 @@
 import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
 import { type Instant, milliseconds } from '@ferretry/std';
 import manifest from '../manifest.ts';
-import { type LoginId, type LoginsApi, LoginChanged, LoginSignedIn, ModelsChanged } from '../contract/index.ts';
+import {
+  type LoginId,
+  type LoginsApi,
+  LOGINS_CONFIG,
+  LoginChanged,
+  LoginSignedIn,
+  ModelsChanged,
+} from '../contract/index.ts';
 import { HostedModelCatalog, StateModelCatalogCache } from './adapters/models/index.ts';
 import { spendHostsOf, spendableHosts, spendSecretOf } from './lib/credentials/spend-secret.ts';
 import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-probe/index.ts';
@@ -33,6 +40,8 @@ import { modelCatalogsView, type PublishedCatalogState } from './lib/models/view
 import { presetFromFile, type ProviderPreset, type ProviderPresetFile } from './lib/presets/schema.ts';
 import { ProviderPresetService } from './lib/provider-probe/presets.ts';
 import { ProviderProbeService } from './lib/provider-probe/service.ts';
+import { LoginChangeService } from './lib/changes/service.ts';
+import { changeRoutes } from './lib/routes/changes.ts';
 import { loginRoutes } from './lib/routes/logins.ts';
 import { modelRoutes } from './lib/routes/models.ts';
 import { signInRoutes } from './lib/routes/sign-in.ts';
@@ -238,6 +247,24 @@ export function buildLoginsDaemon() {
         },
       });
 
+      // Logins OWNS its change routes: add, sign out, disable, enable, label, remove. A change edits this plugin's own
+      // `config/logins/<id>.yaml` through the kernel's config write port, so the one writer's rules hold (a raw secret
+      // refused, the last good version kept, a loosening held for the owner).
+      const changes = new LoginChangeService({
+        files,
+        presets: async () => Object.values(await presetService.presets()),
+        machineName: () => 'this machine',
+        view: id => api.get(id as LoginId),
+        signOut: id => credentials.signOut(id),
+        write: (id, patch) => config.write(LOGINS_CONFIG, id, { patch }),
+        remove: id => config.remove(LOGINS_CONFIG, id),
+        changed: (loginId, change) => {
+          events.publish(LoginChanged, { loginId: loginId as LoginId, change });
+        },
+        now: () => clock.nowMs(),
+        mintId: () => String(kernel.ids.mint('change')),
+      });
+
       const kinds = loginKinds({
         clock,
         files,
@@ -253,6 +280,7 @@ export function buildLoginsDaemon() {
         routes: {
           ...signInRoutes(harnessLogin),
           ...loginRoutes(credentials),
+          ...changeRoutes(changes),
           ...modelRoutes({
             view: modelsView,
             refresh: () => published.refresh(true),
