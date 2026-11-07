@@ -122,9 +122,9 @@ noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `
    - Carried: each OAuth MCP server's sign-in record, refresh token and registered client secret.
    - Not carried: the **access tokens**. They lived in the old `state/secrets.json`, which this runbook never carries
      (its values are retyped, step 6).
-   - **On Ferretry 5 each OAuth MCP server needs a new sign-in.** Each shows "needs sign-in" until the owner signs in
-     to it again. The carried refresh token is not used to renew it at launch; it is kept so a later release can
-     renew it, and so signing out can revoke it. Do not promise the owner that any sign-in comes back by itself.
+   - **Carried sign-ins renew at the next launch that uses them, as today.** That launch spends the carried refresh
+     token for a new access token before the ferret starts. A server whose provider refuses the refresh shows
+     "needs sign-in" until the owner signs in to it again; the launch still starts.
 4. After the main step 4 (Settings) adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)
