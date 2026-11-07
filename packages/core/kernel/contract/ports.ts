@@ -91,6 +91,16 @@ export interface SqliteHandle {
   close(): void;
 }
 
+/** A JSONL file read line by line: every record that checked, and how many lines did not (never their text). */
+export interface JsonlRecords<Shape> {
+  readonly records: readonly Shape[];
+  /** Lines that were not JSON, not UTF-8, too large, or failed the format check. A torn last line is not counted. */
+  readonly unreadable: number;
+}
+
+/** The most `tail` reads from the end of a file. */
+export const MAX_STATE_TAIL_BYTES = 64 * 1024 * 1024;
+
 /**
  * `state/<id>/` and nothing else: atomic JSON/JSONL, SQLite transactions, each declared file's format check. `name`
  * fills the `*` of a collection path. Writes stamp `format` first.
@@ -106,6 +116,19 @@ export interface StatePort {
   ): Promise<Result<Shape, StateDamage>>;
   append<Shape>(file: StateFileDef<string, Shape>, entry: Shape, name?: string): Promise<void>;
   lines<Shape>(file: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape>;
+  /**
+   * Every line checked on its own (a log, a journal): a bad line is skipped and counted rather than damaging the file,
+   * so one torn or hand-edited line never hides the rest. A missing file is no records.
+   */
+  records<Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>>;
+  /**
+   * The same, over only the last `maxBytes` of the file (at most {@link MAX_STATE_TAIL_BYTES}): a line cut by the
+   * window's start is dropped, not counted. Reads no more than that from disk.
+   */
+  tail<Shape>(
+    file: StateFileDef<string, Shape>,
+    options: { readonly maxBytes: number; readonly name?: string },
+  ): Promise<JsonlRecords<Shape>>;
   list(file: StateFileDef): Promise<readonly string[]>;
   remove(file: StateFileDef, name?: string): Promise<void>;
   sqlite(file: StateFileDef, name?: string): SqliteHandle;

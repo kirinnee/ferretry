@@ -52,3 +52,28 @@ describe('the test host state port mirrors the real one for secret and opaque st
     expect(folder.raw(Doc)).toBe('{"format":1,"n":3}');
   });
 });
+
+describe('the test host state port: records() and tail() as the real one', () => {
+  const Log = defineState({
+    name: 'log',
+    path: 'log.jsonl',
+    store: 'jsonl',
+    format: 1,
+    schema: z.strictObject({ n: z.number() }),
+  });
+  test('2 valid + 2 malformed lines: 2 records and unreadable 2; a torn last line is not counted', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log]);
+    folder.plant(Log, '{"format":1,"n":1}\n{ bad\n{"format":1,"n":"x"}\n{"format":1,"n":2}\n{"format":1,"n');
+    expect(await port.records(Log)).toEqual({ records: [{ n: 1 }, { n: 2 }], unreadable: 2 });
+  });
+  test('tail reads the end and drops the line its window cut', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log]);
+    folder.plant(Log, `${Array.from({ length: 100 }, (_, n) => `{"format":1,"n":${n}}`).join('\n')}\n`);
+    const tail = await port.tail(Log, { maxBytes: 40 });
+    expect(tail.records.at(-1)).toEqual({ n: 99 });
+    expect(tail.unreadable).toBe(0);
+    expect(tail.records.length).toBeLessThan(3);
+  });
+});

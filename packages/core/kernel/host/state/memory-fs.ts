@@ -49,6 +49,12 @@ export function createMemoryHostFs(clock: () => number = () => 0): MemoryHostFs 
     async readBytes(path) {
       return files.get(path)?.bytes.slice();
     },
+    async readTail(path, maxBytes) {
+      const entry = files.get(path);
+      if (entry === undefined) return undefined;
+      const from = Math.max(0, entry.bytes.byteLength - maxBytes);
+      return { bytes: entry.bytes.slice(from), from };
+    },
     async info(path): Promise<HostFileInfo | undefined> {
       const entry = files.get(path);
       if (entry !== undefined)

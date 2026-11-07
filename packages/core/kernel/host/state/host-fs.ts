@@ -31,6 +31,11 @@ export interface HostFs {
   /** The file's text, or `undefined` when it does not exist. A link, or any other fault, throws. */
   readText(path: string): Promise<string | undefined>;
   readBytes(path: string): Promise<Uint8Array | undefined>;
+  /**
+   * At most the last `maxBytes` of a regular file and the offset they start at; `undefined` when it does not exist.
+   * A link is refused, never followed.
+   */
+  readTail(path: string, maxBytes: number): Promise<{ readonly bytes: Uint8Array; readonly from: number } | undefined>;
   /** `lstat`: `undefined` when the path does not exist. */
   info(path: string): Promise<HostFileInfo | undefined>;
   /** The entries of a directory; `[]` when it does not exist. */
@@ -87,6 +92,30 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
     },
     async readBytes(path) {
       return (await writer.readBytes(path)) ?? undefined;
+    },
+    async readTail(path, maxBytes) {
+      let handle: FileHandle;
+      try {
+        handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      } catch (error) {
+        if (isMissing(error)) return undefined;
+        throw error;
+      }
+      try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) throw new Error('not a regular file');
+        const from = Math.max(0, stats.size - maxBytes);
+        const bytes = new Uint8Array(stats.size - from);
+        let read = 0;
+        while (read < bytes.byteLength) {
+          const { bytesRead } = await handle.read(bytes, read, bytes.byteLength - read, from + read);
+          if (bytesRead === 0) break;
+          read += bytesRead;
+        }
+        return { bytes: bytes.subarray(0, read), from };
+      } finally {
+        await handle.close();
+      }
     },
     async info(path) {
       try {

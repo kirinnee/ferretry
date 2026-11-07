@@ -1,10 +1,19 @@
 import { err, type Instant, ok, type Result } from '@ferretry/std';
-import type { Clock, SqliteHandle, StateDamage, StateFileDef, StatePort, StateRead } from '../../contract/index.ts';
+import {
+  type Clock,
+  type JsonlRecords,
+  MAX_STATE_TAIL_BYTES,
+  type SqliteHandle,
+  type StateDamage,
+  type StateFileDef,
+  type StatePort,
+  type StateRead,
+} from '../../contract/index.ts';
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
 import type { HostFs } from './host-fs.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
-import { readBytesFile, readJsonDocument, readJsonlRecords } from './readers.ts';
+import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
 import { nodeSqliteFiles, openSqlite, type SqliteFiles } from './sqlite-store.ts';
 
@@ -110,6 +119,23 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     narrowed.delete(label);
   };
 
+  /** Line-by-line reading (`records` / `tail`): only an io fault or a missing required file is a damage. */
+  const lenient = async <Shape>(
+    def: StateFileDef<string, Shape>,
+    name: string | undefined,
+    maxBytes: number | undefined,
+  ): Promise<JsonlRecords<Shape>> => {
+    const at = locate(def, name);
+    if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read line by line`);
+    const read = await readJsonlLines(fs, def, at.path, at.label, maxBytes);
+    if (!read.ok) {
+      note(def, read.error);
+      if (def.onDamaged === 'subsystem') throw new StoreDamagedError(read.error);
+      return { records: [], unreadable: 0 };
+    }
+    return read.value;
+  };
+
   /** A file once found damaged is never written over: it is looked at again, and cleared only if it was repaired. */
   const guardWrite = async (def: StateFileDef, at: Located): Promise<void> => {
     if (!damaged.has(at.label) && !narrowed.has(at.label)) return;
@@ -205,6 +231,20 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       }
       healthy(at.label);
       for (const record of records.value) yield record;
+    },
+
+    async records<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>> {
+      return await lenient(def, name, undefined);
+    },
+
+    async tail<Shape>(
+      def: StateFileDef<string, Shape>,
+      options: { readonly maxBytes: number; readonly name?: string },
+    ): Promise<JsonlRecords<Shape>> {
+      const { maxBytes } = options;
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_STATE_TAIL_BYTES)
+        throw new TypeError(`state ${def.name}: tail reads 1 to ${MAX_STATE_TAIL_BYTES} bytes`);
+      return await lenient(def, options.name, maxBytes);
     },
 
     async list(def: StateFileDef): Promise<readonly string[]> {

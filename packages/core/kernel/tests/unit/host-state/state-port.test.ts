@@ -279,3 +279,42 @@ describe('StatePort: jsonl files', () => {
     await expect(port.read(logFile)).rejects.toBeInstanceOf(TypeError);
   });
 });
+
+describe('StatePort: records() and tail() check each line on its own', () => {
+  const two = '{"format":1,"count":1}\n{"format":1,"count":2}\n';
+  test('T 2 valid + 2 malformed lines: 2 records and unreadable 2, and the file is not damaged', async () => {
+    const { port, fs, path } = memoryStore();
+    fs.seed(
+      path('log.jsonl'),
+      `{"format":1,"count":1}\n{ not json\n{"format":1,"count":"x"}\n{"format":1,"count":2}\n`,
+    );
+    expect(await port.records(logFile)).toEqual({ records: [{ count: 1 }, { count: 2 }], unreadable: 2 });
+    expect(port.damaged()).toEqual([]);
+  });
+
+  test('a torn last line is not counted; a missing file is no records', async () => {
+    const { port, fs, path } = memoryStore();
+    expect(await port.records(logFile)).toEqual({ records: [], unreadable: 0 });
+    fs.seed(path('log.jsonl'), `${two}{"format":1,"cou`);
+    expect(await port.records(logFile)).toEqual({ records: [{ count: 1 }, { count: 2 }], unreadable: 0 });
+  });
+
+  test('U tail reads only the end of a large file, drops the line its window cut, and checks each line', async () => {
+    const { port, fs, path } = memoryStore();
+    const many = Array.from({ length: 5000 }, (_, i) => `{"format":1,"count":${i}}`).join('\n');
+    fs.seed(path('log.jsonl'), `${many}\n{ bad\n{"format":1,"count":5000}\n`);
+    const tail = await port.tail(logFile, { maxBytes: 64 });
+    expect(tail.records.at(-1)).toEqual({ count: 5000 });
+    expect(tail.unreadable).toBe(1);
+    expect(tail.records.length).toBeLessThan(4);
+    // the whole file fits: every record, nothing dropped
+    expect((await port.tail(logFile, { maxBytes: 1024 * 1024 })).records).toHaveLength(5001);
+  });
+
+  test('tail refuses a window outside 1..MAX_STATE_TAIL_BYTES, and a non-jsonl file', async () => {
+    const { port } = memoryStore();
+    await expect(port.tail(logFile, { maxBytes: 0 })).rejects.toThrow(TypeError);
+    await expect(port.tail(logFile, { maxBytes: 2 ** 40 })).rejects.toThrow(TypeError);
+    await expect(port.records(counterFile as never)).rejects.toThrow(TypeError);
+  });
+});

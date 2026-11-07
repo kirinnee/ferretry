@@ -2,7 +2,14 @@ import { Database } from 'bun:sqlite';
 import type { Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import type { StateFileDef } from '../contract/define.ts';
-import type { SqliteHandle, StateDamage, StatePort, StateRead } from '../contract/ports.ts';
+import {
+  type JsonlRecords,
+  MAX_STATE_TAIL_BYTES,
+  type SqliteHandle,
+  type StateDamage,
+  type StatePort,
+  type StateRead,
+} from '../contract/ports.ts';
 
 /** Thrown by the write that `crashAfterNextWrite()` armed: the write landed, then the process "died". */
 export class SimulatedCrash extends Error {
@@ -100,6 +107,24 @@ export function parseDocument<Shape>(file: StateFileDef<string, Shape>, text: st
   return stamped.success ? ok(stamped.data) : err(damage(file, 'schema', 'it does not match its schema'));
 }
 
+/** Line-by-line reading as the real port: a bad line is counted; a last line with no newline that fails is torn. */
+function lenientLines<Shape>(file: StateFileDef<string, Shape>, text: string): JsonlRecords<Shape> {
+  const records: Shape[] = [];
+  let unreadable = 0;
+  const lines = text.split('\n');
+  lines.forEach((line, index) => {
+    if (line.trim() === '') return;
+    const parsed = parseDocument(file, line);
+    if (parsed.ok) {
+      if (parsed.value !== undefined) records.push(parsed.value);
+      return;
+    }
+    const torn = index === lines.length - 1 && parsed.error.reason === 'unparsable';
+    if (!torn) unreadable += 1;
+  });
+  return { records, unreadable };
+}
+
 function stamp(file: StateFileDef, value: unknown): string {
   return JSON.stringify({ format: file.format, ...(value as object) });
 }
@@ -182,6 +207,26 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
         if (!parsed.ok) throw new Error(parsed.error.sentence);
         if (parsed.value !== undefined) yield parsed.value;
       }
+    },
+    async records(file, name) {
+      guard(file);
+      if (file.store !== 'jsonl') throw new TypeError(`state ${file.name}: only a jsonl file is read line by line`);
+      return lenientLines(file, folder.files.get(pathOf(file, name)) ?? '');
+    },
+    async tail(file, options) {
+      guard(file);
+      if (file.store !== 'jsonl') throw new TypeError(`state ${file.name}: only a jsonl file is read line by line`);
+      const { maxBytes } = options;
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_STATE_TAIL_BYTES)
+        throw new TypeError(`state ${file.name}: tail reads 1 to ${MAX_STATE_TAIL_BYTES} bytes`);
+      const bytes = new TextEncoder().encode(folder.files.get(pathOf(file, options.name)) ?? '');
+      const from = Math.max(0, bytes.byteLength - maxBytes);
+      let window = bytes.subarray(from);
+      if (from > 0) {
+        const firstBreak = window.indexOf(0x0a);
+        window = firstBreak < 0 ? new Uint8Array() : window.subarray(firstBreak + 1);
+      }
+      return lenientLines(file, new TextDecoder().decode(window));
     },
     async list(file) {
       guard(file);
