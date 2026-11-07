@@ -1,4 +1,4 @@
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, relative } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import type { SkillSourceProblem } from '../../contract/index.ts';
 import type { ReadSkillFolder, SkillFolderReader } from '../lib/installs/ports.ts';
@@ -25,19 +25,32 @@ const textOf = (bytes: Uint8Array): string | undefined => {
 };
 
 /**
- * A skill folder, turned into the files a copy carries, through a root handle opened ONCE on the folder the owner
- * named (`imports`). NOTHING IS SKIPPED SILENTLY: every entry the walk found is carried or listed with its reason.
+ * A skill folder, turned into the files a copy carries, through imports handles on the folder and its inventory
+ * boundary. Recheck that boundary before listing and every read. Every entry found is carried or given a reason.
  * A link is never followed out of the folder (the handle refuses it), a file that is not text, over 256 KiB, named
  * like a credential, or past the bounds is left out and said.
  */
 export class RootSkillFolderReader implements SkillFolderReader {
-  constructor(private readonly open: (folder: string) => RootHandle) {}
+  constructor(
+    private readonly open: (
+      folder: string,
+      boundary: string,
+    ) => { readonly root: RootHandle; readonly boundary: RootHandle },
+  ) {}
 
-  async read(manifestPath: string, _boundary: string): Promise<ReadSkillFolder> {
+  async read(manifestPath: string, boundary: string): Promise<ReadSkillFolder> {
     const folder = dirname(manifestPath);
-    const root = this.open(folder);
+    const { root, boundary: inventoryRoot } = this.open(folder, boundary);
+    const within = relative(boundary, folder);
+    // Today's NodeSkillFolder.#rootWithin check, through the inventory's imports handle: stat resolves the
+    // source again within that boundary. Keep the tighter folder handle for every child traversal as well.
+    const rootWithin = async (): Promise<boolean> => {
+      if (within === '' || within.startsWith('..') || isAbsolute(within)) return false;
+      const source = inventoryRoot.resolve(folder);
+      return source.ok && (await inventoryRoot.stat(source.value).catch(() => undefined))?.kind === 'directory';
+    };
     const start = root.resolve(folder);
-    if (!start.ok)
+    if (!start.ok || !(await rootWithin()))
       return {
         files: [],
         problems: [],
@@ -51,6 +64,7 @@ export class RootSkillFolderReader implements SkillFolderReader {
     let visited = 0;
     let truncated = false;
     const walk = async (relative: string, depth: number): Promise<void> => {
+      if (!(await rootWithin())) return;
       const here = root.resolve(relative === '' ? folder : `${folder}/${relative}`);
       if (!here.ok) return;
       const names = await root.list(here.value).catch(() => [] as readonly string[]);
@@ -115,9 +129,10 @@ export class RootSkillFolderReader implements SkillFolderReader {
         continue;
       }
       const resolved = root.resolve(`${folder}/${entry.path}`);
-      const bytes = resolved.ok
-        ? await root.readBytes(resolved.value as FencedPath, FILE_MAX_BYTES).catch(() => undefined)
-        : undefined;
+      const bytes =
+        resolved.ok && (await rootWithin())
+          ? await root.readBytes(resolved.value as FencedPath, FILE_MAX_BYTES).catch(() => undefined)
+          : undefined;
       if (bytes === undefined) {
         skip(entry.path, 'it could not be read');
         continue;

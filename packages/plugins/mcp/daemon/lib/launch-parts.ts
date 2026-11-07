@@ -1,6 +1,6 @@
 import type { HarnessKey, LaunchPart } from '@ferretry/core-ferrets/contract';
 import type { JsonValue } from '@ferretry/std';
-import type { McpItem } from '../../contract/index.ts';
+import { McpEnvSchema, type McpItem } from '../../contract/index.ts';
 
 /**
  * The `launch.parts` a launch gets from `config/mcp/*.yaml` (§4.9): one `mcp` part per item the harness may run (an
@@ -11,6 +11,10 @@ export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: HarnessKe
   const parts: LaunchPart[] = [];
   for (const [name, item] of [...items].sort(([left], [right]) => left.localeCompare(right))) {
     if (item.harness !== undefined && item.harness !== harness) continue;
+    if (item.env !== undefined && !McpEnvSchema.safeParse(item.env).success)
+      throw new Error(
+        `The MCP server environment is invalid. Store credentials with fy secret set NAME and use \${secret:NAME}.`,
+      );
     const { harness: _harness, ...config } = item;
     parts.push({ kind: 'mcp', name, config: config as JsonValue });
   }

@@ -93,7 +93,10 @@ export default implementDaemon(manifest, {
       crypto: { sha256 },
       store: new StateLocalSkillInstallStore(kernel.state),
       skills: { list: async () => await machine.machinePaths() },
-      skillTree: new RootSkillFolderReader(folder => kernel.roots.root('imports', { subfolder: folder })),
+      skillTree: new RootSkillFolderReader((folder, boundary) => ({
+        root: kernel.roots.root('imports', { subfolder: folder }),
+        boundary: kernel.roots.root('imports', { subfolder: boundary }),
+      })),
       fleetDirectory: '',
       projectRoots: async () => [],
       skillFiles: {

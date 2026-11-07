@@ -57,9 +57,10 @@ interface LoginCalls {
   layered: { profile: string; layers: readonly string[] }[];
 }
 
-function login(
-  options: { profiles?: McpLoginProfile[]; items?: string[]; runtimes?: McpLoginRuntime[] } = {},
-): { login: McpLoginTarget; calls: LoginCalls } {
+function login(options: { profiles?: McpLoginProfile[]; items?: string[]; runtimes?: McpLoginRuntime[] } = {}): {
+  login: McpLoginTarget;
+  calls: LoginCalls;
+} {
   const calls: LoginCalls = { puts: [], layered: [] };
   const runtimes = options.runtimes ?? [
     { name: 'claude-work', profile: 'work' },
@@ -182,7 +183,7 @@ describe('adding to the project file', () => {
     });
   });
 
-  it('should write exactly the previewed change against the previewed etag', async () => {
+  it('G177 a ferret below a known root writes the longest known root file against the previewed etag', async () => {
     const files = new FakeFiles({ text: '{"keep":1}', etag: ETAG });
 
     const added = await service({ files }).addProject('s1', { name: 'acme', server: COMMAND, etag: ETAG });
@@ -196,6 +197,16 @@ describe('adding to the project file', () => {
         expected: ETAG,
       },
     ]);
+  });
+
+  it('G177 refuses previews and adds in an unregistered folder before any file access', async () => {
+    const files = new FakeFiles();
+    const subject = service({ views: [ferret('s1', { folder: '/tmp/scratch' })], files });
+    const preview = await refusal(subject.previewProject('s1', { name: 'acme', server: COMMAND }));
+    const add = await refusal(subject.addProject('s1', { name: 'acme', server: COMMAND, etag: null }));
+    should([preview.code, add.code]).deepEqual(['mcp_project_unavailable', 'mcp_project_unavailable']);
+    should(files.reads).be.empty();
+    should(files.writes).be.empty();
   });
 
   it('should refuse an add with no etag, a stale etag, or a file that moved during the write', async () => {

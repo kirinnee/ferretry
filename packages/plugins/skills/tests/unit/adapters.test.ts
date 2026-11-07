@@ -77,7 +77,10 @@ describe('RootSkillFolderReader', () => {
       },
       [`${folder}/escape`],
     );
-    const read = await new RootSkillFolderReader(() => root).read(`${folder}/SKILL.md`, '/fleet');
+    const read = await new RootSkillFolderReader(() => ({ root, boundary: root })).read(
+      `${folder}/SKILL.md`,
+      '/home/me',
+    );
     expect(read.refusal).toBeUndefined();
     expect(read.files.map(file => file.path)).toEqual(['SKILL.md', 'notes.txt']);
     const reasons = Object.fromEntries(read.problems.map(problem => [problem.subject, problem.reason]));
@@ -88,14 +91,105 @@ describe('RootSkillFolderReader', () => {
 
   test('refuses a folder with no SKILL.md among the files it can carry', async () => {
     const root = memoryRoot({ [`${folder}/notes.txt`]: 'n' });
-    const read = await new RootSkillFolderReader(() => root).read(`${folder}/SKILL.md`, '/fleet');
+    const read = await new RootSkillFolderReader(() => ({ root, boundary: root })).read(
+      `${folder}/SKILL.md`,
+      '/home/me',
+    );
     expect(read.refusal).toMatch(/SKILL\.md cannot be carried/u);
   });
 
   test('a folder that cannot be resolved is refused as gone', async () => {
     const root = memoryRoot({}, [folder]);
-    const read = await new RootSkillFolderReader(() => root).read(`${folder}/SKILL.md`, '/fleet');
+    const read = await new RootSkillFolderReader(() => ({ root, boundary: root })).read(
+      `${folder}/SKILL.md`,
+      '/home/me',
+    );
     expect(read.refusal).toMatch(/cannot be read any more/u);
+  });
+
+  test('G175 refuses a source replaced with a link outside its inventory boundary before listing', async () => {
+    const root = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo') });
+    let listed = false;
+    root.list = async () => {
+      listed = true;
+      return [];
+    };
+    const boundary = memoryRoot({});
+    // Lexical resolution succeeds, but stat's resolved containment check catches the swapped link.
+    boundary.stat = async () => {
+      throw new Error('link_escape');
+    };
+    const opened: string[][] = [];
+    const read = await new RootSkillFolderReader((source, confinedTo) => {
+      opened.push([source, confinedTo]);
+      return { root, boundary };
+    }).read(`${folder}/SKILL.md`, '/home/me');
+    expect(opened).toEqual([[folder, '/home/me']]);
+    expect(read.refusal).toMatch(/cannot be read any more/u);
+    expect(read.files).toEqual([]);
+    expect(listed).toBe(false);
+  });
+
+  test('G175 rechecks the inventory boundary before each nested listing and file read', async () => {
+    const root = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo'), [`${folder}/nested/notes.txt`]: 'notes' });
+    const boundary = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo') });
+    let escaped = false;
+    const originalStat = boundary.stat;
+    boundary.stat = async path => {
+      if (escaped) throw new Error('link_escape');
+      return await originalStat(path);
+    };
+    const originalList = root.list;
+    const listings: string[] = [];
+    root.list = async path => {
+      listings.push(path);
+      const names = await originalList(path);
+      escaped = true;
+      return names;
+    };
+    let reads = 0;
+    root.readBytes = async () => {
+      reads += 1;
+      return new Uint8Array();
+    };
+    const read = await new RootSkillFolderReader(() => ({ root, boundary })).read(`${folder}/SKILL.md`, '/home/me');
+    expect(listings).toEqual([folder]);
+    expect(reads).toBe(0);
+    expect(read.files).toEqual([]);
+    expect(read.refusal).toMatch(/SKILL\.md cannot be carried/u);
+  });
+
+  test('G175 rechecks a source that escapes its inventory boundary between two file reads', async () => {
+    const root = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo'), [`${folder}/notes.txt`]: 'outside content' });
+    const boundary = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo') });
+    let escaped = false;
+    const originalStat = boundary.stat;
+    boundary.stat = async path => {
+      if (escaped) throw new Error('link_escape');
+      return await originalStat(path);
+    };
+    const originalRead = root.readBytes;
+    const reads: string[] = [];
+    root.readBytes = async (path, limit) => {
+      reads.push(path);
+      const bytes = await originalRead(path, limit);
+      escaped = true;
+      return bytes;
+    };
+    const read = await new RootSkillFolderReader(() => ({ root, boundary })).read(`${folder}/SKILL.md`, '/home/me');
+    expect(reads).toEqual([`${folder}/SKILL.md`]);
+    expect(read.files.map(file => file.path)).toEqual(['SKILL.md']);
+    expect(read.problems).toContainEqual({ subject: 'notes.txt', reason: 'it could not be read' });
+  });
+
+  test('G175 keeps child traversal confined to the skill folder inside an allowed inventory boundary', async () => {
+    const root = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo'), [`${folder}/sibling/notes.txt`]: 'sibling' }, [
+      `${folder}/sibling`,
+    ]);
+    const boundary = memoryRoot({ [`${folder}/SKILL.md`]: doc('demo') });
+    const read = await new RootSkillFolderReader(() => ({ root, boundary })).read(`${folder}/SKILL.md`, '/home/me');
+    expect(read.files.map(file => file.path)).toEqual(['SKILL.md']);
+    expect(read.problems.find(problem => problem.subject === 'sibling')?.reason).toMatch(/never followed/u);
   });
 });
 

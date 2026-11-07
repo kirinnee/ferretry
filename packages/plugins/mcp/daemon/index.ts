@@ -1,13 +1,7 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
-import {
-  MCP_CONFIG,
-  McpServerAdded,
-  McpSignInChanged,
-  type McpApi,
-  type McpItem,
-} from '../contract/index.ts';
+import { MCP_CONFIG, McpServerAdded, McpSignInChanged, type McpApi, type McpItem } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { ConfigMcpServers } from './adapters/config-servers.ts';
 import { RootMcpHarnessDocuments } from './adapters/harness-documents.ts';
@@ -46,7 +40,7 @@ export default implementDaemon(manifest, {
     const { kernel } = ctx;
     const { ferrets, vault } = ctx.needs;
 
-    // ── what a ferret's folder is: the only folders this half may read or write are ferret work roots ──────────────
+    // ── what a ferret's folder is: these folders are inventory read roots, never project registrations ────────────
     const owners = new Map<string, FerretId>();
     const refreshOwners = async (): Promise<readonly string[]> => {
       const all = await ferrets.list();
@@ -54,7 +48,8 @@ export default implementDaemon(manifest, {
       for (const ferret of all) owners.set(ferret.folder, ferret.id);
       return all.map(ferret => ferret.folder);
     };
-    const inside = (folder: string, path: string): boolean => path === folder || path.startsWith(`${folder.replace(/\/+$/u, '')}/`);
+    const inside = (folder: string, path: string): boolean =>
+      path === folder || path.startsWith(`${folder.replace(/\/+$/u, '')}/`);
     const workRootFor = (path: string): FerretRoot => {
       const owner = [...owners].filter(([folder]) => inside(folder, path)).sort(([a], [b]) => b.length - a.length)[0];
       if (owner === undefined)
@@ -96,7 +91,11 @@ export default implementDaemon(manifest, {
     const inventory = new McpInventoryService({
       accounts: async () => [],
       components: async () =>
-        [...items()].map(([name, item]) => ({ name, runtimes: [], ...(item.auth === undefined ? {} : { auth: item.auth }) })),
+        [...items()].map(([name, item]) => ({
+          name,
+          runtimes: [],
+          ...(item.auth === undefined ? {} : { auth: item.auth }),
+        })),
       folders: new KnownAndFerretFolders(async () => [], refreshOwners),
       connections: async () => await oauth.connections(),
       documents: new RootMcpHarnessDocuments(
@@ -144,7 +143,9 @@ export default implementDaemon(manifest, {
           }));
         },
       },
-      projectRoots: refreshOwners,
+      // Catalogs exposes installs only, Projects' contract is empty, and there is no managed-worktree port.
+      // G177: refuse project adds until registered projects and worktrees can supply the known-root set.
+      projectRoots: async () => [],
       files: new RootMcpProjectFiles(async ferret => {
         const summary = await ferrets.get(ferret as FerretId);
         if (summary === undefined) throw new McpDocumentUnreadable(`no ferret ${ferret}`);
@@ -218,9 +219,7 @@ export default implementDaemon(manifest, {
       },
       provides: { mcp: api },
       hooks: {
-        'launch.parts': () => [
-          { id: 'mcp', item: { parts: async spec => mcpParts(items(), spec.harness) } },
-        ],
+        'launch.parts': () => [{ id: 'mcp', item: { parts: async spec => mcpParts(items(), spec.harness) } }],
       },
     };
   },

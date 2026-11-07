@@ -35,26 +35,23 @@ describe('adding an MCP server for one ferret', () => {
     expect(await post('project', 'filesystem.use', 'fleet.configure')).toBe(403);
     expect(await post('login', 'filesystem.configure', 'fleet.use')).toBe(403);
     // The right one is admitted.
-    expect(await post('project/preview', 'filesystem.use')).toBe(200);
+    expect(await post('project/preview', 'filesystem.use')).toBe(409);
     expect(await post('login/preview', 'fleet.use')).toBe(409);
   });
 
-  test('G177 a project add lands at the ferret folder root, against the previewed etag, and a changed file is refused', async () => {
+  test('G177 project adds fail closed until registered projects and managed worktrees have a contract', async () => {
     const h = await host();
     const device = as('filesystem.use', 'filesystem.configure');
 
     const preview = await h.request('POST', '/v1/ferrets/f1/mcp/project/preview', { body: ADD, as: device });
-    expect(preview.json()).toMatchObject({ scope: 'project', path: '/work/app/.mcp.json', etag: null, replaces: false });
+    expect(preview.status).toBe(409);
+    expect(preview.json()).toMatchObject({ code: 'mcp_project_unavailable' });
     const missing = await h.request('POST', '/v1/ferrets/f1/mcp/project', { body: ADD, as: device });
     expect(missing.status).toBe(400);
     expect(missing.json<{ code: string }>().code).toBe('mcp_etag_required');
     const added = await h.request('POST', '/v1/ferrets/f1/mcp/project', { body: { ...ADD, etag: null }, as: device });
-    expect(added.status).toBe(200);
-    expect(added.json()).toMatchObject({ scope: 'project', name: 'acme', path: '/work/app/.mcp.json' });
-    // The file now exists, so the stale (absent) etag no longer matches: compare-and-swap.
-    const stale = await h.request('POST', '/v1/ferrets/f1/mcp/project', { body: { ...ADD, etag: null }, as: device });
-    expect(stale.status).toBe(409);
-    expect(stale.json<{ code: string }>().code).toBe('mcp_file_changed');
+    expect(added.status).toBe(409);
+    expect(added.json()).toMatchObject({ code: 'mcp_project_unavailable' });
     // A ferret that does not exist has no project.
     const nobody = await h.request('GET', '/v1/ferrets/nobody/mcp', { as: as('filesystem.use') });
     expect(nobody.status).toBe(404);
@@ -65,13 +62,16 @@ describe('adding an MCP server for one ferret', () => {
     const h = await host();
     const refused = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: ADD, as: as('fleet.configure') });
     // A ferret itself is refused before anything is read (a login add is a person route).
-    const byFerret = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: ADD, as: { kind: 'ferret', id: 'f1' } });
+    const byFerret = await h.request('POST', '/v1/ferrets/f1/mcp/login', {
+      body: ADD,
+      as: { kind: 'ferret', id: 'f1' },
+    });
     expect(byFerret.status).toBe(403);
     expect(refused.status).toBe(409);
     expect(refused.json<{ code: string }>().code).toBe('mcp_runtime_unknown');
   });
 
-  test('G179 an add is logged as fleet.configured with its scope, a preview is not, and the event names the server only', async () => {
+  test('G179 an add declares fleet.configured with its scope, and previews and refused adds publish no event', async () => {
     expect(route('POST /v1/ferrets/:ferretId/mcp/project')?.audit as unknown).toEqual({
       record: 'fleet.configured:mcp-add-project',
     });
@@ -88,10 +88,12 @@ describe('adding an MCP server for one ferret', () => {
     const server = { transport: 'command', command: 'npx', args: ['--key-in-args'], env: { A: 'plain' } };
     await h.request('POST', '/v1/ferrets/f1/mcp/project/preview', { body: { name: 'acme', server }, as: device });
     expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([]);
-    await h.request('POST', '/v1/ferrets/f1/mcp/project', { body: { name: 'acme', server, etag: null }, as: device });
-    expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([
-      { event: McpServerAdded.name, payload: { name: 'acme', scope: 'project' } },
-    ]);
+    const refused = await h.request('POST', '/v1/ferrets/f1/mcp/project', {
+      body: { name: 'acme', server, etag: null },
+      as: device,
+    });
+    expect(refused.status).toBe(409);
+    expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([]);
   });
 
   test('G180 no secret value crosses either route: a raw key is refused by the form rule and by the service', async () => {
