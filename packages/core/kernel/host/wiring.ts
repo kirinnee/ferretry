@@ -3,6 +3,7 @@ import { systemClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
 import { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
 import { createConfigFiles } from './config/index.ts';
+import { acquireHomeLock } from './state/home-lock.ts';
 import type { HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import {
@@ -93,6 +94,7 @@ export function realAdapters(
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
+    homeLock: async lockedHome => await acquireHomeLock({ home: lockedHome, binary: options.binary }),
   };
 }
 

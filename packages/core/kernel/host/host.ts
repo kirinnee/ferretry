@@ -1,4 +1,5 @@
 import type { Instant } from '@ferretry/std';
+import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
 import type { InputHolds, OutputGuard, Admission, Redaction, WorkFolders } from '../contract/bound.ts';
 import {
@@ -58,8 +59,9 @@ import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { openChildEnvironments, restrictFetch, restrictSpawn } from './permissions.ts';
-import { openHome } from './home.ts';
+import { openHome, probeHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
+import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { type DaemonIdentity, loadIdentity } from './identity.ts';
 import {
@@ -97,6 +99,12 @@ export interface HostAdapters {
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
   readonly workers: WorkersPort;
+  /**
+   * Takes the home's lifetime lock (`run/daemon.lock`, §9.2): held from just after the nonmutating home decision until
+   * stop, so a second daemon on the same home is refused (G57) before it writes anything or removes the socket.
+   * Throws {@link StateHomeLockedError} when another daemon holds it.
+   */
+  readonly homeLock: (home: string) => Promise<HomeLockLease>;
 }
 
 export interface Listening {
@@ -209,12 +217,38 @@ function deadlineFrom(clock: Clock): Deadline {
 export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { adapters, home } = options;
   const trace: string[] = [];
+  // 2. Home: refuse a home that is not ours before creating anything, but decide for real under the lifetime lock —
+  // this reading is stale the moment another daemon sets up the same home (today's `storage-factory.ts` order).
+  trace.push('home');
+  const preliminary = decideHome(home, await probeHome(adapters.fs, home));
+  if (preliminary.kind === 'refuse') return { kind: 'refused', sentence: preliminary.sentence, trace };
+  if (preliminary.kind === 'create') await adapters.fs.mkdirp(home, 0o700);
+  trace.push('lock');
+  let lease: HomeLockLease;
+  try {
+    lease = await adapters.homeLock(home);
+  } catch (error) {
+    if (error instanceof StateHomeLockedError) return { kind: 'refused', sentence: error.message, trace };
+    throw error;
+  }
+  // Held until stop; released on every boot that does not end running.
+  try {
+    const outcome = await bootLocked(options, trace, lease);
+    if (outcome.kind !== 'running') await lease.release();
+    return outcome;
+  } catch (error) {
+    await lease.release();
+    throw error;
+  }
+}
+
+async function bootLocked(options: HostOptions, trace: string[], lease: HomeLockLease): Promise<BootOutcome> {
+  const { adapters, home } = options;
   const log = scopedLog(adapters.logSink, 'kernel');
   const clock = adapters.clock;
   const deadline = deadlineFrom(clock);
 
-  // 2. Home and fence, identity (before anything is read from the home).
-  trace.push('home');
+  // Home and fence, identity (before anything is read from the home).
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
   if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
   trace.push('identity');
@@ -331,6 +365,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
+      { random: adapters.random },
     ),
     events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
     jobs: jobs.portFor(manifest.id),
@@ -653,6 +688,9 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
         await record.lifecycle.stop(() => log.warn('an onStop handler failed', { plugin: manifest.id }));
         await record.state?.close().catch(() => undefined);
       }
+      // Last: the home is free only once nothing of this daemon still writes in it.
+      trace.push('stop:lock');
+      await lease.release();
     })();
     return stopping;
   };
