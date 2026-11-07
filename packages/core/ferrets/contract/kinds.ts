@@ -171,6 +171,16 @@ export interface TranscriptReader {
   find(ferret: FerretId, entry: string): Promise<TranscriptEntry | undefined>;
 }
 
+/**
+ * A {@link TranscriptReader} bound to one ferret: the harness seam hands it out for the ferret it was opened for, and it
+ * takes no ferret argument, so it can read no other ferret's conversation.
+ */
+export interface BoundTranscriptReader {
+  read(after?: string, limit?: number): Promise<readonly TranscriptEntry[]>;
+  follow(signal: AbortSignal): AsyncIterable<TranscriptEntry>;
+  find(entry: string): Promise<TranscriptEntry | undefined>;
+}
+
 export interface TurnUsage {
   readonly turn: number;
   readonly at: Instant;
