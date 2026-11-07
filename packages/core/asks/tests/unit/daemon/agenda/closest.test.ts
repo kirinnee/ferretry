@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
-import type { WorkHit, WorkRelatedResponse } from '@ferretry/protocol';
+import type { RelatedMatches } from '../../../../daemon/lib/agenda/closest.ts';
 import should from 'should';
 import { closestAgenda, closestAgendaLink } from '../../../../daemon/lib/agenda/closest.ts';
 
@@ -22,7 +22,10 @@ const item = (id: AgendaItem['id'], overrides: Record<string, unknown> = {}): Ag
     ...overrides,
   }) as AgendaItem;
 
-const hit = (id: AgendaItem['id'], sessionId = SESSION): WorkHit => ({
+const hit = (
+  id: AgendaItem['id'],
+  sessionId = SESSION,
+): RelatedMatches['matches'][number]['hit'] & Record<string, unknown> => ({
   kind: 'agenda',
   id,
   sessionId,
@@ -34,7 +37,7 @@ const hit = (id: AgendaItem['id'], sessionId = SESSION): WorkHit => ({
   score: 3,
 });
 
-const related = (...matches: WorkRelatedResponse['matches']): WorkRelatedResponse => ({ matches });
+const related = (...matches: RelatedMatches['matches']): RelatedMatches => ({ matches });
 
 describe('closestAgenda', () => {
   it("should pick the daemon's first strong match among the session's open topics", () => {

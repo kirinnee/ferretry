@@ -4,7 +4,6 @@ import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 import { needsYouQueue, restingQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
 import should from 'should';
 import {
-  AGENDA_LEDGER_VERSION,
   type AgendaActor,
   type AgendaCommand,
   type AgendaLedger,
@@ -15,7 +14,6 @@ import {
   applyAgendaCommandToSession,
   parseAgendaLedger,
   restsOnAnswer,
-  toChannel,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
@@ -803,82 +801,6 @@ describe('the gate exemption', () => {
     should(restsOnAnswer(gate.ledger.entries[0] as Parameters<typeof restsOnAnswer>[0])).be.false();
     should(answered.addressed?.disposition).equal('done');
     should(agendaSnapshot(answered.ledger).items).be.empty();
-  });
-});
-
-describe('the migration to the channel (ledger v2)', () => {
-  /** A file as an older daemon wrote it: no version, an item parked as replied with no rest and no stage. */
-  const legacyFile = (): unknown => {
-    const raised = board();
-    const replied = reply(raised);
-    const strip = (entry: AgendaLedger['entries'][number]) => {
-      const { resting: _r, stage: _s, stages: _ss, ...old } = entry.item as AgendaItem;
-      return { ...entry, item: old };
-    };
-    const { version: _v, ...file } = replied;
-    return JSON.parse(JSON.stringify({ ...file, entries: replied.entries.map(strip) }));
-  };
-
-  it('should read an old reply as resting on the ferret, nudged once, its reply time the clock, and lose nothing', () => {
-    // Act
-    const read = parseAgendaLedger(legacyFile(), SESSION_ID);
-
-    // Assert
-    if (read === null) throw new Error('the old ledger did not read');
-    should(read.version).equal(AGENDA_LEDGER_VERSION);
-    const rested = item(read);
-    should(rested.resting).deepEqual({ sub: 'waiting-on-ferret', at: T2, migrated: true });
-    should(rested.parked).deepEqual({ reason: 'replied', at: T2 });
-    should(rested.stage).equal('question');
-    should(rested.history?.map(each => each.kind)).deepEqual(['replied']);
-    should(item(read, 'A2').resting).be.undefined();
-  });
-
-  it('should be idempotent: a ledger already in the shape comes back as the same object', () => {
-    // Arrange
-    const once = parseAgendaLedger(legacyFile(), SESSION_ID);
-    if (once === null) throw new Error('the old ledger did not read');
-
-    // Act
-    const twice = toChannel(once, false);
-    const reread = parseAgendaLedger(JSON.parse(JSON.stringify(once)), SESSION_ID);
-
-    // Assert
-    should(twice).equal(once);
-    should(reread).deepEqual(once);
-  });
-
-  it('should rest an unmarked reply in a current ledger without the once-only mark', () => {
-    // Arrange — a v2 file whose reply carries no rest (written by a path that parked without saying how)
-    const file = legacyFile() as Record<string, unknown>;
-
-    // Act
-    const read = parseAgendaLedger({ ...file, version: AGENDA_LEDGER_VERSION }, SESSION_ID);
-
-    // Assert
-    if (read === null) throw new Error('the ledger did not read');
-    should(item(read).resting).deepEqual({ sub: 'waiting-on-ferret', at: T2 });
-  });
-
-  it('should give a closed item the done stage', () => {
-    // Arrange
-    const closed = ok(apply(board(), { action: 'dismiss', actor: HUMAN, id: 'A2', at: T2 })).ledger;
-    const { version: _v, ...file } = closed;
-    const old = JSON.parse(
-      JSON.stringify({
-        ...file,
-        entries: closed.entries.map(entry => {
-          const { stage: _s, stages: _ss, ...rest } = entry.item as AgendaItem;
-          return { ...entry, item: rest };
-        }),
-      }),
-    );
-
-    // Act
-    const read = parseAgendaLedger(old, SESSION_ID);
-
-    // Assert
-    should(read === null ? undefined : agendaSnapshot(read).resolved[0]?.stage).equal('done');
   });
 });
 

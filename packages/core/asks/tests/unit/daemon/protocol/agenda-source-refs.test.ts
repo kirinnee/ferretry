@@ -8,7 +8,8 @@ import {
   isDaemonSourceRef,
   isHarnessQuestionId,
 } from '../../../../daemon/lib/protocol/agenda-source-refs.ts';
-import { laneProposalReference } from '../../src/lib/board-lanes.ts';
+/** Board's lane-proposal reference (`board-lanes.ts`), spelled here: Asks only routes on its prefix. */
+const laneProposalReference = (projectId: string, version: number): string => `lanes:${projectId}:${String(version)}`;
 
 describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', () => {
   it('knows every daemon producer’s grammar', () => {

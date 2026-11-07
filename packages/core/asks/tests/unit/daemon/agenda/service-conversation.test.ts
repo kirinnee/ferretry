@@ -157,7 +157,7 @@ describe('Agenda service: versions', () => {
 });
 
 it('paginates every byte of an oversized conversation without sending an oversized item', async () => {
-  const { AgendaConversationPageSchema } = await import('@ferretry/protocol');
+  const { AgendaConversationPageSchema } = await import('../../../../daemon/lib/protocol/agenda-versions.ts');
   const text = `    ${'😀\n'.repeat(90_000)}END\n`;
   const { service } = await world(chatOf({ large: { at: NOW, text, owner: true } }));
   should((await service.log(SESSION, 'A1', 'reply', 'OK', AGENT, 'large')).ok).be.true();
@@ -179,7 +179,7 @@ it('paginates every byte of an oversized conversation without sending an oversiz
 
 it('reads a frozen version thread rather than the current thread when paging a historical version', async () => {
   // Arrange
-  const { AgendaVersionSchema } = await import('@ferretry/protocol');
+  const { AgendaVersionSchema } = await import('../../../../daemon/lib/protocol/agenda-versions.ts');
   const entry = { at: NOW, by: 'owner' as const, via: 'chat-log' as const, text: 'Historical owner words' };
   const versions: AgendaVersionStore = {
     record: async () => undefined,

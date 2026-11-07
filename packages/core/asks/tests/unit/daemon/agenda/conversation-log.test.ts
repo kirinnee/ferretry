@@ -454,7 +454,7 @@ it('accepts a 100k ferret answer below the own-content budget without counting i
 });
 
 it('refuses overlong rest notes and invalid source timestamps atomically', async () => {
-  const { MAX_AGENDA_REST_WHY_LENGTH } = await import('@ferretry/protocol');
+  const { MAX_AGENDA_REST_WHY_LENGTH } = await import('../../../../daemon/lib/protocol/agenda-state.ts');
   const ledger = raise(null).ledger;
   const base = {
     action: 'log' as const,
@@ -474,7 +474,7 @@ it('refuses overlong rest notes and invalid source timestamps atomically', async
 });
 
 it('refuses merging foreign items, notices and more cards than one item can carry', async () => {
-  const { MAX_AGENDA_CARDS } = await import('@ferretry/protocol');
+  const { MAX_AGENDA_CARDS } = await import('../../../../daemon/lib/protocol/agenda.ts');
   let ledger = raise(null).ledger;
   ledger = raise(ledger, { subject: 'Which quota?' }).ledger;
   const foreign = {

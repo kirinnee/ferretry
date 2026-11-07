@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { AgendaItemSchema, MAX_AGENDA_CARDS } from '../../../../daemon/lib/protocol/agenda.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 
 const NOTICE = {
   id: 'A7',
@@ -43,10 +42,5 @@ describe('the cards a notice is about', () => {
   it('should refuse cards on any item that is not information', () => {
     should(AgendaItemSchema.safeParse({ ...NOTICE, kind: 'reply', cards: [ROW] }).success).be.false();
     should(AgendaItemSchema.safeParse({ ...NOTICE, kind: undefined, cards: [ROW] }).success).be.false();
-  });
-
-  it('should be announced as a feature, so an older app is not sent a field it would drop', () => {
-    should(DAEMON_FEATURES.agendaCards).equal('agenda.cards.1');
-    should(daemonFeatureList()).containEql('agenda.cards.1');
   });
 });

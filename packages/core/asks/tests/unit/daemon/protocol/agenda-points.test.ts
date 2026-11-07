@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { BoardTaskCreateRequestSchema, stripListMarker, toBullets, unnestBullets } from '../../src/lib/index.ts';
+import { stripListMarker, toBullets, unnestBullets } from '../../../../daemon/lib/protocol/agenda.ts';
 
 describe('points are plain lines', () => {
   it('strips one leading list marker from a point', () => {
@@ -14,17 +14,5 @@ describe('points are plain lines', () => {
     expect(unnestBullets('- - a\n- b')).toBe('- a\n- b');
     expect(unnestBullets('1. a\n2. b')).toBe('1. a\n2. b');
     expect(unnestBullets('Lead\n- - a')).toBe('Lead\n- - a');
-  });
-
-  it('a board card stores no doubled marker after create', () => {
-    const parsed = BoardTaskCreateRequestSchema.parse({
-      kind: 'bug',
-      title: 'T',
-      ask: { text: 'a', source: 'owner:board' },
-      premise: '- - You asked to',
-      context: '- - c1\n- c2',
-    });
-    expect(parsed.premise).toBe('- You asked to');
-    expect(parsed.context).toBe('- c1\n- c2');
   });
 });

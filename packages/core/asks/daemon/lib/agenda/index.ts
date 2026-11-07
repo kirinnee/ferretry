@@ -9,3 +9,4 @@ export * from './reply-batch.ts';
 export * from './service.ts';
 export * from './state-machine.ts';
 export * from './writing-lint.ts';
+export * from './owner-chat.ts';

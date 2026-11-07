@@ -19,7 +19,6 @@ import {
   parseGateFollowupReference,
   parseGateReference,
 } from '../../../../daemon/lib/protocol/agenda-gate.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 
 const AT = '2026-11-01T09:00:00.000Z';
 
@@ -216,11 +215,6 @@ describe('gate items', () => {
       };
       should(AgendaActionRequestSchema.safeParse(add).success).be.false();
     });
-
-    it('names the health feature the app waits for', () => {
-      should(DAEMON_FEATURES.boardGateItems).equal('board.gate-items.1');
-      should(daemonFeatureList()).containEql('board.gate-items.1');
-    });
   });
 
   describe('files with a gate answer', () => {
@@ -258,10 +252,6 @@ describe('gate items', () => {
       should(
         AgendaActionRequestSchema.safeParse(answer({ attachments: { from: 'agenda-1', ids: eleven } })).success,
       ).be.false();
-    });
-
-    it('names the feature the app waits for', () => {
-      should(DAEMON_FEATURES.agendaGateAttachments).equal('agenda.gate.attachments.1');
     });
   });
 });

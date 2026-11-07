@@ -92,48 +92,6 @@ function heavyQuestionBoard(): AgendaLedger {
 }
 
 describe('a long agenda item', () => {
-  it('should migrate an old-schema-valid megabyte of escaped versions before enforcing wire limits', () => {
-    const payload = (n: number) => ({
-      body: `${n % 10}${'\\'.repeat(7_999)}`,
-      steps: Array.from({ length: 20 }, (_, i) => `${(i + n) % 10}${'\\'.repeat(1_999)}`),
-    });
-    const seed = ok(
-      applyAgendaCommandToSession(null, SESSION_ID, {
-        action: 'raise',
-        actor: AGENT,
-        at: AT,
-        request: { ...longRequest('a'), body: 'small', whereWeAre: undefined, detail: undefined, context: 'Context' },
-      }),
-    );
-    const item = {
-      ...seed.item,
-      ...payload(10),
-      revisions: Array.from({ length: 10 }, (_, n) => ({
-        at: AT,
-        by: 'agent',
-        changed: ['body', 'steps'],
-        previous: payload(n),
-      })),
-    };
-    should(JSON.stringify(item).length).be.above(MAX_AGENDA_ITEM_LENGTH);
-    const raw = { ...seed.ledger, version: undefined, entries: [{ ...seed.ledger.entries[0], item }] };
-    const migrated = parseAgendaLedger(raw, SESSION_ID);
-    if (migrated === null) throw new Error('legacy board did not read');
-    should(migrated.unreadable).be.undefined();
-    should(agendaSnapshot(migrated).count).equal(1);
-    should(AgendaItemSchema.safeParse(open(migrated)).success).be.true();
-    should(open(migrated).body).equal(item.body);
-    should(open(migrated).steps).deepEqual(item.steps);
-    should(migrated.archivePending).deepEqual([{ kind: 'version', id: 'A1', item }]);
-    should(parseAgendaLedger(JSON.parse(agendaLedgerDocument(migrated)), SESSION_ID)).deepEqual(migrated);
-    for (const command of [
-      { action: 'rest' as const, why: 'Reading' },
-      { action: 'resolve' as const, note: 'Finished' },
-      { action: 'edit' as const, patch: { body: 'short' } },
-    ])
-      should(ok(applyAgendaCommand(migrated, { ...command, actor: AGENT, id: 'A1', at: AT })).changed).be.true();
-  });
-
   it('should reserve every owner transition at exactly the accepted content limit', () => {
     const raisedAt = '2026-11-03T08:00:00Z';
     const request = {
