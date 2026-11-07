@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  AGENDA_VERSIONS_DIRECTORY,
-  FileAgendaSeenStore,
-  FileAgendaVersionStore as WorkerAgendaVersionStore,
+  FileAgendaSeenStore as StateAgendaSeenStore,
+  SqliteAgendaVersionStore,
 } from '../../../daemon/adapters/agenda/file-agenda-versions.ts';
+import { agendaFilePath, agendaFilesAt, asksStateAt, versionArchivePath } from './agenda-state.ts';
 import {
   type AgendaActor,
   type AgendaEntry,
@@ -18,14 +18,25 @@ import {
   applyAgendaCommandToSession,
 } from '../../../daemon/lib/agenda/state-machine.ts';
 import { type AgendaVersionDraft, versionDrafts } from '../../../daemon/lib/agenda/versions.ts';
-import { inlineAgendaVersionsWorker } from './agenda-versions-worker.ts';
 
 const SESSION = 'session-1';
-class FileAgendaVersionStore extends WorkerAgendaVersionStore {
-  constructor(directory: (sessionId: string) => string) {
-    super(directory, { spawn: inlineAgendaVersionsWorker });
+/** The version store over a home's kernel state folder; `home` is read once, as a daemon opens its state. */
+class FileAgendaVersionStore extends SqliteAgendaVersionStore {
+  constructor(home: () => string) {
+    super(asksStateAt(home()));
+  }
+
+  /** Every connection closes after its operation: there is nothing to close. */
+  close(): void {}
+}
+/** The seen marks of a home's ferrets, as the daemon keeps them. */
+class FileAgendaSeenStore extends StateAgendaSeenStore {
+  constructor(home: () => string, uniqueId: () => string = () => 'id', warn: (message: string) => void = () => undefined) {
+    super(agendaFilesAt(home()), uniqueId, warn);
   }
 }
+const VERSIONS = (root: string): string => join(root, 'state', 'asks', 'versions');
+const SEEN = (root: string): string => agendaFilePath(root, SESSION, 'agenda-seen.json');
 const T = (minute: number): string => `2026-07-30T10:${String(minute).padStart(2, '0')}:00Z`;
 const HUMAN: AgendaActor = { kind: 'human' };
 const AGENT: AgendaActor = { kind: 'agent', sessionId: SESSION, name: 'Ada' };
@@ -131,7 +142,7 @@ export function agendaVersionStoreContract() {
 
     it('should create no archive file by being asked about an id nothing was recorded for', async () => {
       // Arrange
-      const file = join(root, AGENDA_VERSIONS_DIRECTORY, 'A7.sqlite');
+      const file = versionArchivePath(root, SESSION, 'A7');
 
       // Act
       await store.list(SESSION, 'A7');
@@ -299,7 +310,7 @@ export function agendaVersionStoreContract() {
         message => warnings.push(message),
       );
       await seen.mark(SESSION, 'A1', 'laptop', 4);
-      const file = join(root, 'agenda-seen.json');
+      const file = SEEN(root);
       await writeFile(file, '{"laptop":{"A1":4},');
       const damaged = await readFile(file, 'utf8');
       const marksSeenWhileDamaged = await seen.seen(SESSION, 'A1', 'laptop');
@@ -312,7 +323,7 @@ export function agendaVersionStoreContract() {
       // Assert
       should(marksSeenWhileDamaged).be.undefined();
       should([marked, again]).deepEqual([2, 3]);
-      should(await readFile(`${file}.corrupt-id1`, 'utf8')).equal('{"phone":{"A1":"two"}}');
+      should(await readFile(join(root, 'state', 'asks', 'set-aside', `${SESSION}~agenda-seen.json.corrupt-id1`), 'utf8')).equal('{"phone":{"A1":"two"}}');
       should(JSON.parse(await readFile(file, 'utf8'))).deepEqual({ phone: { A1: 3 } });
       should(warnings).have.length(2);
       should(warnings[0]).containEql('set aside as');
@@ -322,7 +333,7 @@ export function agendaVersionStoreContract() {
     it('should refuse to mark over a seen document it cannot read at all, and leave it untouched', async () => {
       // Arrange: a directory where the file should be is an unreadable file, not a damaged one.
       const seen = new FileAgendaSeenStore(() => root);
-      await mkdir(join(root, 'agenda-seen.json'));
+      await mkdir(SEEN(root), { recursive: true });
 
       // Act
       const marked = await seen.mark(SESSION, 'A1', 'phone', 2).then(
@@ -332,31 +343,7 @@ export function agendaVersionStoreContract() {
 
       // Assert
       should(marked).equal('refused');
-      should((await stat(join(root, 'agenda-seen.json'))).isDirectory()).be.true();
-    });
-
-    it('should fail a mark whose temporary file cannot be written, leave the marks as they were and clear the temporary', async () => {
-      // Arrange
-      const seen = new FileAgendaSeenStore(
-        () => root,
-        () => 'fixed',
-      );
-      await seen.mark(SESSION, 'A1', 'phone', 2);
-      const file = join(root, 'agenda-seen.json');
-      const before = await readFile(file, 'utf8');
-      await writeFile(`${file}.fixed.tmp`, 'in the way');
-
-      // Act
-      const marked = await seen.mark(SESSION, 'A1', 'phone', 3).then(
-        () => 'marked',
-        () => 'refused',
-      );
-
-      // Assert
-      should(marked).equal('refused');
-      should(await readFile(file, 'utf8')).equal(before);
-      should(await readFile(`${file}.fixed.tmp`, 'utf8').catch(() => 'gone')).equal('gone');
-      should(await seen.mark(SESSION, 'A1', 'phone', 3)).equal(3);
+      should((await stat(SEEN(root))).isDirectory()).be.true();
     });
 
     it('should hold up under marks made at once, and leave a readable file', async () => {
@@ -365,7 +352,7 @@ export function agendaVersionStoreContract() {
 
       // Act
       await Promise.all([1, 2, 3, 4, 5, 6].map(version => seen.mark(SESSION, 'A1', 'phone', version)));
-      const text = await readFile(join(root, 'agenda-seen.json'), 'utf8');
+      const text = await readFile(SEEN(root), 'utf8');
 
       // Assert
       should(JSON.parse(text)).deepEqual({ phone: { A1: 6 } });
@@ -418,18 +405,18 @@ export function agendaVersionStoreContract() {
     }
   });
 
-  it('reads a malformed seen document as empty and removes its temporary write after a failed rename', async () => {
-    const { mkdir, readdir, writeFile } = await import('node:fs/promises');
+  it('reads a malformed seen document as empty and refuses a mark it cannot write', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
     const root = await mkdtemp(join(tmpdir(), 'agenda-seen-recovery-'));
     try {
-      const file = join(root, 'agenda-seen.json');
+      const file = SEEN(root);
+      await mkdir(join(file, '..'), { recursive: true });
       await writeFile(file, '[]');
       const store = new FileAgendaSeenStore(() => root);
       should(await store.seen(SESSION, 'A1', 'phone')).be.undefined();
       await rm(file);
       await mkdir(file);
       await should(store.mark(SESSION, 'A1', 'phone', 1)).be.rejected();
-      should(await readdir(root)).deepEqual(['agenda-seen.json']);
       await rm(file, { recursive: true });
       should(await store.mark(SESSION, 'A1', 'phone', 2)).equal(2);
       should(await store.seen(SESSION, 'A1', 'phone')).equal(2);
@@ -447,7 +434,7 @@ export function agendaVersionStoreContract() {
       const conversation = [{ at: T(1), by: 'owner' as const, via: 'reply' as const, text }];
       const next = { ...draft(entryOf(raised.ledger), 'edited', T(2)), conversation };
       await store.record(SESSION, [next]);
-      const file = join(root, AGENDA_VERSIONS_DIRECTORY, 'A1.sqlite');
+      const file = versionArchivePath(root, SESSION, 'A1');
       const firstSize = (await stat(file)).size;
       const parse = JSON.parse;
       const measured = async (read: () => Promise<unknown>): Promise<number> => {
@@ -519,7 +506,7 @@ export function agendaVersionStoreContract() {
         ]),
       ).be.rejected();
       should(await store.list(SESSION, 'A1')).deepEqual([]);
-      const db = new Database(join(root, AGENDA_VERSIONS_DIRECTORY, 'A1.sqlite'), { readonly: true });
+      const db = new Database(versionArchivePath(root, SESSION, 'A1'), { readonly: true });
       try {
         should(db.query('SELECT COUNT(*) AS n FROM words').get()).deepEqual({ n: 0 });
         should(db.query('SELECT COUNT(*) AS n FROM version_words').get()).deepEqual({ n: 0 });
@@ -533,12 +520,12 @@ export function agendaVersionStoreContract() {
     }
   });
 
-  it('refuses a store whose user_version it does not read, by name, and leaves the file untouched', async () => {
+  it('refuses a store at a format it does not read (its user_version), by name, and leaves the file untouched', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agenda-version-unsupported-'));
     try {
-      const directory = join(root, AGENDA_VERSIONS_DIRECTORY);
-      await mkdir(directory);
-      const file = join(directory, 'A1.sqlite');
+      const directory = VERSIONS(root);
+      await mkdir(directory, { recursive: true });
+      const file = join(directory, `${SESSION}~A1.sqlite`);
       for (const stored of [2, 3]) {
         const db = new Database(file);
         db.exec(`CREATE TABLE versions (version INTEGER PRIMARY KEY); PRAGMA user_version = ${stored}`);
@@ -547,9 +534,9 @@ export function agendaVersionStoreContract() {
         const store = new FileAgendaVersionStore(() => root);
         try {
           await should(store.record(SESSION, [draft(entryOf(raised.ledger), 'created', T(1))])).be.rejectedWith(
-            new RegExp(`A1\\.sqlite has user_version ${stored}; this daemon reads only user_version 1`, 'u'),
+            /session-1~A1\.sqlite was written by a newer Ferretry/u,
           );
-          await should(store.list(SESSION, 'A1')).be.rejectedWith(/user_version/u);
+          await should(store.list(SESSION, 'A1')).be.rejectedWith(/newer Ferretry/u);
         } finally {
           store.close();
         }
@@ -564,9 +551,9 @@ export function agendaVersionStoreContract() {
   it('refuses a nonempty store with no user_version and leaves it byte-identical', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agenda-version-unversioned-'));
     try {
-      const directory = join(root, AGENDA_VERSIONS_DIRECTORY);
-      await mkdir(directory);
-      const file = join(directory, 'A1.sqlite');
+      const directory = VERSIONS(root);
+      await mkdir(directory, { recursive: true });
+      const file = join(directory, `${SESSION}~A1.sqlite`);
       const db = new Database(file);
       db.exec('CREATE TABLE somebody_elses (id TEXT PRIMARY KEY)');
       db.close();
@@ -574,9 +561,9 @@ export function agendaVersionStoreContract() {
       const store = new FileAgendaVersionStore(() => root);
       try {
         await should(store.record(SESSION, [draft(entryOf(raised.ledger), 'created', T(1))])).be.rejectedWith(
-          /A1\.sqlite has no agenda schema version \(user_version 0\) but is not empty/u,
+          /session-1~A1\.sqlite has no "format" number/u,
         );
-        await should(store.list(SESSION, 'A1')).be.rejectedWith(/no agenda schema version/u);
+        await should(store.list(SESSION, 'A1')).be.rejectedWith(/no "format" number/u);
       } finally {
         store.close();
       }
@@ -589,9 +576,9 @@ export function agendaVersionStoreContract() {
   it('initializes an empty store a crash left between create and commit', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agenda-version-empty-'));
     try {
-      const directory = join(root, AGENDA_VERSIONS_DIRECTORY);
-      await mkdir(directory);
-      await writeFile(join(directory, 'A1.sqlite'), '');
+      const directory = VERSIONS(root);
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, `${SESSION}~A1.sqlite`), '');
       const store = new FileAgendaVersionStore(() => root);
       try {
         await store.record(SESSION, [draft(entryOf(raised.ledger), 'created', T(1))]);

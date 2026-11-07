@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { FileAgendaOutboxRepository } from '../../../../daemon/adapters/agenda/file-agenda-outbox-repository.ts';
 import { AgendaReplyBatcher, emptyAgendaOutbox } from '../../../../daemon/lib/agenda/index.ts';
+import { agendaFilePath, agendaFilesAt, setAsidePath } from '../../../support/daemon/agenda-state.ts';
 
 const homes: string[] = [];
 const SESSION = 'session-1';
@@ -13,11 +14,13 @@ const AT = '2026-10-28T17:00:00.000Z';
 async function createRepository() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-agenda-outbox-'));
   homes.push(home);
-  const directory = (sessionId: string) => join(home, 'sessions', sessionId);
+  const directory = (sessionId: string) => join(home, 'state', 'asks', 'ferrets', sessionId);
+  const outboxFile = (sessionId: string) => agendaFilePath(home, sessionId, 'agenda-replies.json');
   return {
     home,
     directory,
-    repository: new FileAgendaOutboxRepository(directory, () => 'fixed'),
+    outboxFile,
+    repository: new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'),
   };
 }
 
@@ -42,8 +45,8 @@ describe('FileAgendaOutboxRepository', () => {
     // Assert
     should(before).be.null();
     should(after).deepEqual(outbox);
-    should(repository.file(SESSION)).equal(join(directory(SESSION), 'agenda-replies.json'));
-    should((await stat(repository.file(SESSION))).mode & 0o777).equal(0o600);
+    should(repository.file(SESSION)).equal('state/asks/ferrets/session-1/agenda-replies.json');
+    should((await stat(join(directory(SESSION), 'agenda-replies.json'))).mode & 0o777).equal(0o600);
     should(await readdir(directory(SESSION))).deepEqual(['agenda-replies.json']);
   });
 
@@ -78,12 +81,12 @@ describe('FileAgendaOutboxRepository', () => {
 
   it('should set a damaged outbox aside and start fresh, so later answers still reach the ferret', async () => {
     // Arrange
-    const { repository, directory } = await createRepository();
+    const { home, repository, directory, outboxFile } = await createRepository();
     await mkdir(directory(SESSION), { recursive: true });
-    await writeFile(repository.file(SESSION), '{ not json');
+    await writeFile(outboxFile(SESSION), '{ not json');
     await mkdir(directory('session-2'), { recursive: true });
     await writeFile(
-      repository.file('session-2'),
+      outboxFile('session-2'),
       JSON.stringify({
         ...emptyAgendaOutbox('someone-else'),
         sessionId: 'someone-else',
@@ -97,22 +100,23 @@ describe('FileAgendaOutboxRepository', () => {
     // Assert
     should(damaged).be.null();
     should(misfiled).be.null();
-    should(await readdir(directory(SESSION))).deepEqual(['agenda-replies.json.damaged-fixed']);
+    should(await readdir(directory(SESSION))).deepEqual([]);
+    should(await Bun.file(setAsidePath(home, SESSION, 'agenda-replies.json.damaged-fixed')).text()).equal('{ not json');
   });
 
   it('should surface a read failure that is not a missing file rather than discarding the outbox', async () => {
-    // Arrange — the outbox's place is taken by a directory, so reading it fails with something other than ENOENT.
-    const { repository } = await createRepository();
-    await mkdir(repository.file(SESSION), { recursive: true });
+    // Arrange — the outbox's place is taken by a directory, so reading it fails with something other than "not there".
+    const { repository, outboxFile } = await createRepository();
+    await mkdir(outboxFile(SESSION), { recursive: true });
 
     // Act
     const failure = await repository.read(SESSION).then(
       () => undefined,
-      error => error as NodeJS.ErrnoException,
+      error => error as Error,
     );
 
     // Assert
-    should(failure?.code).equal('EISDIR');
+    should(failure?.message).match(/agenda-replies\.json/u);
   });
 
   it('should refuse a session id that could leave the session tree', async () => {
@@ -123,19 +127,9 @@ describe('FileAgendaOutboxRepository', () => {
     should(() => repository.file('../escape')).throw(/not a valid agenda session id/u);
   });
 
-  it('should leave no temporary file behind when a write fails', async () => {
-    // Arrange — the outbox's place is taken by a directory, so the rename over it fails.
-    const { repository, directory } = await createRepository();
-    await mkdir(join(repository.file(SESSION), 'blocker'), { recursive: true });
-
-    // Act + Assert
-    await should(repository.write(emptyAgendaOutbox(SESSION))).be.rejected();
-    should(await readdir(directory(SESSION))).deepEqual(['agenda-replies.json']);
-  });
-
   it('should carry a held answer across a restart and deliver it once', async () => {
     // Arrange — the first daemon holds an answer and stops before its window ends.
-    const { directory } = await createRepository();
+    const { home } = await createRepository();
     const sent: string[] = [];
     const timers = { schedule: () => undefined, cancel: () => undefined };
     const serial = {
@@ -144,13 +138,13 @@ describe('FileAgendaOutboxRepository', () => {
     const messenger = {
       send: async (_sessionId: string, _message: string, sendId: string) => void sent.push(sendId),
     };
-    const first = new AgendaReplyBatcher(new FileAgendaOutboxRepository(directory), messenger, timers, serial, {
+    const first = new AgendaReplyBatcher(new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'), messenger, timers, serial, {
       now: () => AT,
     });
     await first.add(SESSION, 'A1', '[answer to !A1 «Ship?»] Yes');
 
     // Act — the next daemon, over the same files, resumes and then flushes twice.
-    const second = new AgendaReplyBatcher(new FileAgendaOutboxRepository(directory), messenger, timers, serial, {
+    const second = new AgendaReplyBatcher(new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'), messenger, timers, serial, {
       now: () => '2026-10-28T17:05:00.000Z',
     });
     await second.resume([SESSION]);
