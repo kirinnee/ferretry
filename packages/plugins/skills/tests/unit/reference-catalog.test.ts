@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { ReferenceCatalog, type ReferenceCatalogCaller } from '@ferretry/plugin-conversation/contract';
+import {
+  ReferenceCatalog,
+  type ReferenceCatalogCaller,
+  ReferenceCatalogEntrySchema,
+} from '@ferretry/plugin-conversation/contract';
 import type { FerretSkills } from '../../contract/index.ts';
 import skills from '../../daemon/index.ts';
 import { skillEntries, skillReferenceProvider } from '../../daemon/lib/reference-catalog.ts';
@@ -33,6 +37,26 @@ describe('the `/` and `$` composer menu entries (reference.catalog)', () => {
   test('cut a long description to the catalog’s bound instead of refusing the whole menu', () => {
     const [entry] = skillEntries({ harness: 'codex', skills: [available('long', 'x'.repeat(2_000))] });
     expect(entry?.detail).toHaveLength(512);
+  });
+
+  test('leave out a name past the token bound and cut a long name’s label, so the menu still parses', () => {
+    const entries = skillEntries({
+      harness: 'claude-code',
+      skills: [available('n'.repeat(600), 'too long to insert'), available('m'.repeat(300), 'long label')],
+    });
+    expect(entries.map(entry => entry.token.length)).toEqual([300]);
+    expect(entries[0]?.label).toHaveLength(256);
+    expect(ReferenceCatalogEntrySchema.array().safeParse(entries).success).toBe(true);
+  });
+
+  test('narrow by the name or the description, case ignored', () => {
+    const list = {
+      harness: 'claude-code' as const,
+      skills: [available('alpha', 'Deploys'), available('beta', 'tests')],
+    };
+    expect(skillEntries(list, 'DEPLOY').map(entry => entry.token)).toEqual(['alpha']);
+    expect(skillEntries(list, 'bet').map(entry => entry.token)).toEqual(['beta']);
+    expect(skillEntries(list, '  ').map(entry => entry.token)).toEqual(['alpha', 'beta']);
   });
 
   test('answer no entries for a ferret this daemon does not know, and read the list for the ferret asked about', async () => {
