@@ -43,7 +43,7 @@ import type {
   ToolHandler,
   ToolResult,
 } from '../manifest/implement.ts';
-import type { Manifest, ToolDecl } from '../manifest/types.ts';
+import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
@@ -69,6 +69,7 @@ import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { livePort } from './live-port.ts';
+import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
 import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
@@ -134,6 +135,8 @@ export interface HostConfig {
   startWatching?(): () => void;
   /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
   secretReferences?(plugin: string): ReadonlySet<string>;
+  /** The same names, from the plugin's credential-record defs alone (what a provider counts as its own). Absent: none. */
+  credentialRecordReferences?(plugin: string): ReadonlySet<string>;
 }
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
@@ -546,11 +549,22 @@ async function bootLocked(
     const key = record === undefined ? undefined : provideKey(record.manifest, token);
     return record === undefined || key === undefined ? undefined : { record, key };
   };
-  const liveProvided = (record: PluginRecord, key: string): unknown =>
-    livePort((record.half?.provides as Record<string, unknown> | undefined)?.[key], () => {
-      if (record.status !== 'serving')
-        throw new ApiError(503, `${record.manifest.title} is not running.`, 'plugin_unavailable');
-    });
+  // A per-needer provides entry is built once for each plugin it is bound for (§3.7), with that plugin's id and
+  // effective permissions; a shared value is handed to every needer as it is.
+  const perNeeder = new ProvidedPerNeeder();
+  const liveProvided = (record: PluginRecord, key: string, needer: Needer): unknown =>
+    livePort(
+      perNeeder.valueFor(
+        record.manifest.id,
+        key,
+        (record.half?.provides as Record<string, unknown> | undefined)?.[key],
+        needer,
+      ),
+      () => {
+        if (record.status !== 'serving')
+          throw new ApiError(503, `${record.manifest.title} is not running.`, 'plugin_unavailable');
+      },
+    );
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
   const ownerPaths: PathsPort = Object.freeze({ home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/' });
@@ -668,6 +682,7 @@ async function bootLocked(
       continue;
     }
     const needs: Record<string, unknown> = {};
+    const needer = neederOf(manifest, () => config.credentialRecordReferences?.(manifest.id) ?? new Set<string>());
     let missing: string | undefined;
     for (const [key, token] of Object.entries(manifest.needs ?? {})) {
       const provider = providerHalf(token);
@@ -675,10 +690,16 @@ async function bootLocked(
         missing = provider?.record.manifest.title ?? token.name;
         break;
       }
-      needs[key] =
-        provider.record.status === 'skeleton'
-          ? unavailablePort(provider.record.manifest.title)
-          : liveProvided(provider.record, provider.key);
+      try {
+        needs[key] =
+          provider.record.status === 'skeleton'
+            ? unavailablePort(provider.record.manifest.title)
+            : liveProvided(provider.record, provider.key, needer);
+      } catch {
+        // A per-needer factory that throws binds nothing: the need is unmet, as if its provider were not running.
+        missing = provider.record.manifest.title;
+        break;
+      }
     }
     if (missing !== undefined) {
       await failed(manifest.id, `${manifest.title} needs ${missing}, which is not running.`);
@@ -704,7 +725,7 @@ async function bootLocked(
           if (phase === 'building') throw new TypeError(`${manifest.id}: an optional port is unbound during build`);
           const provider = providerHalf(token);
           if (provider === undefined || provider.record.status !== 'serving') return undefined;
-          return liveProvided(provider.record, provider.key);
+          return liveProvided(provider.record, provider.key, needer);
         },
       };
     const ctx = {
@@ -746,7 +767,7 @@ async function bootLocked(
     const provider = providerHalf(token as PortToken<unknown>);
     if (provider === undefined || !isCore(provider.record.manifest.id) || provider.record.status !== 'serving')
       return undefined;
-    return liveProvided(provider.record, provider.key) as T | undefined;
+    return liveProvided(provider.record, provider.key, KERNEL_NEEDER) as T | undefined;
   };
   Object.defineProperties(bound, {
     admission: { get: () => boundValue(AdmissionPort) },
@@ -862,8 +883,7 @@ async function bootLocked(
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
       const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        | ToolHandler
-        | undefined;
+        ToolHandler | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

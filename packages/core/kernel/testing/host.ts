@@ -62,6 +62,7 @@ import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import { matchingHook } from '../host/hooks.ts';
 import { CORE_IDS } from '../contract/ids.ts';
+import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from '../host/needer.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
@@ -76,7 +77,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
-import type { HookTake, Manifest, ToolDecl } from '../manifest/types.ts';
+import type { HookTake, Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
 import { type DrivenClock, fixedClock } from './clock.ts';
@@ -182,7 +183,11 @@ export interface TestHost {
   crashAfterNextWrite(): void;
   /** Builds the same halves again on the same state and clock (a daemon restart after a crash). */
   restart(): Promise<TestHost>;
-  provided<Api>(token: PortToken<Api>): Api;
+  /**
+   * What a loaded plugin provides for `token`, as the kernel would hand it to `as` (a loaded plugin's id, or a needer):
+   * a per-needer entry is built for that needer, once. Omitted, the caller is the kernel, a core caller.
+   */
+  provided<Api>(token: PortToken<Api>, as?: string | Needer): Api;
   state(pluginId: string): MemoryStateFolder;
   setConfig(fileOrCollection: string, value: unknown): void;
   runJob(id: string): Promise<void>;
@@ -342,6 +347,24 @@ async function start(world: World): Promise<TestHost> {
   const built: Built[] = [];
   const bootContexts = new Map<string, DaemonContext<Manifest>>();
   const providedBy = new Map<string, unknown>();
+  // As the kernel does: a per-needer provides entry (or fake) is built once for each plugin it is bound for.
+  const perNeeder = new ProvidedPerNeeder();
+  // The `${secret:NAME}` references the plugin's own config names IN EFFECT (a held write is not in the world yet).
+  const ownedReferences = (manifest: Manifest, only?: 'credential-records'): ReadonlySet<string> => {
+    const named = new Set<string>();
+    for (const def of manifest.data?.config ?? [])
+      if (only === undefined || def.credentialRecords === true)
+        secretReferencesIn(world.config.get(def.shape === 'file' ? def.file : def.collection), named);
+    return named;
+  };
+  // The cache slot is (where the value came from, token, needer): a `fakes` entry, a `uses` entry and the loaded
+  // provider's own value for one token are three different values and never share a slot.
+  const boundFor = (
+    token: PortToken<unknown>,
+    value: unknown,
+    needer: Needer,
+    source: 'fake' | 'uses' | 'provided' = 'provided',
+  ): unknown => (value === undefined ? undefined : perNeeder.valueFor(source, token.name, value, needer));
   const usesBound = { done: false };
 
   const subscribersOf = (name: string): ((payload: unknown) => void | Promise<void>)[] =>
@@ -788,8 +811,7 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
+                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
                 )?.[name],
               parsed.host,
             )
@@ -813,8 +835,7 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
+                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
                 )?.[name],
               parsed.host,
             )
@@ -839,12 +860,7 @@ async function start(world: World): Promise<TestHost> {
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
-        () => {
-          const named = new Set<string>();
-          for (const def of manifest.data?.config ?? [])
-            secretReferencesIn(world.config.get(def.shape === 'file' ? def.file : def.collection), named);
-          return named;
-        },
+        () => ownedReferences(manifest),
         () => (options.vault === undefined ? undefined : { resolve: async name => options.vault?.[name] }),
       ),
       signer: signerFor(manifest.id, identitySigner),
@@ -889,8 +905,15 @@ async function start(world: World): Promise<TestHost> {
     if (kernelOnly !== undefined)
       throw new Error(`testHost: ${manifest.id} asks for ${kernelOnly.name}, which only the kernel may hold`);
     const needs: Record<string, unknown> = {};
+    const needer = neederOf(manifest, () => ownedReferences(manifest, 'credential-records'));
     for (const [field, token] of Object.entries(manifest.needs ?? {})) {
-      const value = lookup(options.fakes ?? {}, field, token) ?? providedBy.get(token.name);
+      const fake = lookup(options.fakes ?? {}, field, token);
+      const value = boundFor(
+        token,
+        fake ?? providedBy.get(token.name),
+        needer,
+        fake === undefined ? 'provided' : 'fake',
+      );
       if (value === undefined) throw new Error(`testHost: ${manifest.id} needs ${field} (${token.name}); pass a fake`);
       needs[field] = value;
     }
@@ -899,7 +922,13 @@ async function start(world: World): Promise<TestHost> {
       uses[field] = {
         current: () => {
           if (!usesBound.done) throw new Error(`${manifest.id}: uses.${field}.current() during build`);
-          return lookup(options.uses ?? {}, field, token) ?? providedBy.get(token.name);
+          const supplied = lookup(options.uses ?? {}, field, token);
+          return boundFor(
+            token,
+            supplied ?? providedBy.get(token.name),
+            needer,
+            supplied === undefined ? 'provided' : 'uses',
+          );
         },
       };
     const ctx = {
@@ -1189,9 +1218,15 @@ async function start(world: World): Promise<TestHost> {
       await host.stop().catch(() => undefined);
       return start(world);
     },
-    provided<Api>(token: PortToken<Api>): Api {
+    provided<Api>(token: PortToken<Api>, as?: string | Needer): Api {
       if (!providedBy.has(token.name)) throw new Error(`nothing loaded provides ${token.name}`);
-      return providedBy.get(token.name) as Api;
+      let needer: Needer = KERNEL_NEEDER;
+      if (typeof as === 'string') {
+        const manifest = options.plugins.find(plugin => plugin.manifest.id === as)?.manifest;
+        if (manifest === undefined) throw new Error(`provided: no loaded plugin ${as}`);
+        needer = neederOf(manifest as Manifest, () => ownedReferences(manifest as Manifest, 'credential-records'));
+      } else if (as !== undefined) needer = as;
+      return boundFor(token as PortToken<unknown>, providedBy.get(token.name), needer) as Api;
     },
     state(pluginId) {
       const state = world.states.get(pluginId);

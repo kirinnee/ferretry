@@ -217,6 +217,11 @@ export interface ConfigFiles {
    * nothing yet): what `kernel.secrets` checks a name against.
    */
   secretReferences(plugin: string): ReadonlySet<string>;
+  /**
+   * The same references, counted only in the plugin's defs that are marked `credentialRecords`: the owner-written
+   * secrets of its credential records, which a provider acting for it (the Vault) may count as its own.
+   */
+  credentialRecordReferences(plugin: string): ReadonlySet<string>;
 }
 
 /** A write result as the contract says it: never thrown, `conflict` on its own. */
@@ -935,6 +940,13 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const named = new Set<string>();
       for (const entry of settled.values())
         if (entry.slot.declaration.plugin === plugin) secretReferencesIn(entry.evaluated.value, named);
+      return named;
+    },
+    credentialRecordReferences: plugin => {
+      const named = new Set<string>();
+      for (const entry of settled.values())
+        if (entry.slot.declaration.plugin === plugin && entry.slot.declaration.def.credentialRecords === true)
+          secretReferencesIn(entry.evaluated.value, named);
       return named;
     },
     held: () => heldOf(settled),

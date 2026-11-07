@@ -2,7 +2,9 @@ import {
   allowedDestination,
   type AuthorizedOutcome,
   type CredentialPlacement,
+  CredentialPlacementSchema,
   type OutboundHttpRequest,
+  OutboundHttpRequestSchema,
   type SecretName,
 } from '../../../contract/index.ts';
 import { SecretStoreError } from './types.ts';
@@ -57,10 +59,19 @@ export class OutboundProviderAuthorizer {
 
   async send(
     secretName: SecretName,
-    hostAllowlist: readonly string[],
-    request: OutboundHttpRequest,
-    placement: CredentialPlacement = DEFAULT_PLACEMENT,
+    allowlist: readonly string[],
+    asked: OutboundHttpRequest,
+    credentialPlacement: CredentialPlacement = DEFAULT_PLACEMENT,
   ): Promise<AuthorizedOutcome> {
+    // What the caller passed is PARSED once into plain strings, numbers and records of our own, and only that copy is
+    // checked and sent (S162): a getter, or an object standing in for the URL whose `toString` answers differently the
+    // second time, cannot show the check one host and the send another. A request that does not parse is refused.
+    const parsedRequest = OutboundHttpRequestSchema.safeParse(asked);
+    const parsedPlacement = CredentialPlacementSchema.safeParse(credentialPlacement);
+    if (!parsedRequest.success || !parsedPlacement.success) return { kind: 'refused' };
+    const request = parsedRequest.data;
+    const placement = parsedPlacement.data;
+    const hostAllowlist = [...allowlist].map(String);
     if (!allowedDestination(request.url, hostAllowlist)) return { kind: 'refused' };
     if (carriesHeader(request.headers, placement.header)) return { kind: 'refused' };
 

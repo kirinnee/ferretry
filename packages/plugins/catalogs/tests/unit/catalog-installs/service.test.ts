@@ -1142,6 +1142,63 @@ describe('catalog install: secret names are only told to a caller who may list t
   });
 });
 
+describe('catalog install: the Vault’s secret names are read only for a caller who may list them', () => {
+  const FERRET = { id: 'agents', mayListSecrets: false };
+  const HOST = { id: 'host', mayListSecrets: true };
+
+  it('§3.7 should not ask the Vault for any secret name when the caller may not list secrets (a preview through Catalogs)', async () => {
+    const r = rig();
+    const asked = await request(alice, mcpItem(alice.daemonId), projectTarget());
+    await r.as(FERRET).preview('project', asked);
+    should(r.secretNameReads).equal(0);
+    await r.as(HOST).preview('project', asked);
+    should(r.secretNameReads).equal(1);
+  });
+
+  it('§3.7 should not ask the Vault for any secret name when the caller may not list secrets (an install through Catalogs)', async () => {
+    const r = rig();
+    r.secrets = new Set(['ACME_TOKEN_OWN']);
+    const asked = await request(alice, mcpItem(alice.daemonId), projectTarget());
+    const ferret = r.as(FERRET);
+    const reviewed = await ferret.preview('project', asked);
+    const bind = async (secret: string | null) =>
+      await ferret.apply(
+        'project',
+        { previewId: reviewed.previewId, secretBindings: { ACME_TOKEN: secret } },
+        GOVERNANCE,
+        STEP_UP,
+      );
+    // A held name and a name that does not exist are refused in the same words: the install is no existence check.
+    const held = await refusal(bind('ACME_TOKEN_OWN'));
+    const missing = await refusal(bind('ACME_NOT_HELD'));
+    should(held.code).equal('catalog_bindings_invalid');
+    should(missing.code).equal('catalog_bindings_invalid');
+    should(held.message.replace('ACME_TOKEN_OWN', 'X')).equal(missing.message.replace('ACME_NOT_HELD', 'X'));
+    should(r.secretNameReads).equal(0);
+    // Leaving the placeholder unbound still installs, and still reads no name.
+    await bind(null);
+    should(r.secretNameReads).equal(0);
+    should(r.store.state.installs).have.length(1);
+  });
+
+  it('should still check a listing caller’s binding against the names the Vault holds', async () => {
+    const r = rig();
+    r.secrets = new Set(['ACME_TOKEN_OWN']);
+    const asked = await request(alice, mcpItem(alice.daemonId), projectTarget());
+    const host = r.as(HOST);
+    const reviewed = await host.preview('project', asked);
+    const bind = async (secret: string) =>
+      await host.apply(
+        'project',
+        { previewId: reviewed.previewId, secretBindings: { ACME_TOKEN: secret } },
+        GOVERNANCE,
+        STEP_UP,
+      );
+    should((await refusal(bind('ACME_NOT_HELD'))).code).equal('catalog_bindings_invalid');
+    should(r.secretNameReads).equal(2);
+  });
+});
+
 describe('catalog install: a target is one place however it is spelled', () => {
   it('should remove a project skill installed through a root spelled with a trailing slash', async () => {
     const r = rig();
