@@ -1,170 +1,77 @@
-import { type BoardTaskId, parseCompactAt, type StartSessionRequestInput } from '@ferretry/protocol';
+import { isAbsolute, resolve } from 'node:path';
 import { SessionCommandError } from './errors.ts';
-import type { SessionEnvironment } from './ports.ts';
+import type { SessionEnvironment, StartBody } from './ports.ts';
 
 /**
- * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it
- * a couple of minutes to come up") rather than a work ceiling — the exact misread that killed a
- * healthy session in the source system.
+ * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): the model, the supervision timers,
+ * remote control and the rest are other plugins' launch parts now. A typed one is refused by name rather than sent
+ * and dropped, because a flag that was accepted and ignored is worse than a refusal.
  */
-export const TURN_TIMEOUT_HINT_SECONDS = 600;
+export const START_FLAGS_ELSEWHERE: readonly string[] = [
+  'model',
+  'fast',
+  'compact-at',
+  'rc',
+  'harness-flag',
+  'file',
+  'prompt-file',
+  'interval',
+  'turn-timeout',
+  'nudge-after',
+  'stall-kill-after',
+  'direct-max',
+  'max-snapshots',
+  'detach',
+  'request-id',
+  'label',
+  'card',
+  'parent',
+  'teammate-fallback',
+];
 
-/** The numeric `start` flags, kept together so one validator covers all of them. */
-interface StartNumericFlags {
-  readonly interval?: number;
-  readonly turnTimeout?: number;
-  readonly nudgeAfter?: number;
-  readonly stallKillAfter?: number;
-  readonly directMax?: number;
-  readonly maxSnapshots?: number;
-}
-
-/** Every `start` flag, already parsed out of argv by the composition root. */
-export interface StartFlags extends StartNumericFlags {
-  /** Omitted to use this machine's own "Default runtime for new agents" (T), resolved daemon-side. */
+/** Every `start` flag Ferrets' start takes, already read out of argv by the CLI half. */
+export interface StartFlags {
+  /** Omitted to use this machine's own default runtime for new agents, resolved daemon-side. */
   readonly agent?: string;
   readonly mode: 'auto' | 'interactive';
   readonly prompt?: string;
-  readonly name?: string;
+  /** The first name to give it (`--teammate`), else the daemon picks a free callsign. */
   readonly teammate?: string;
-  readonly teammateFallback?: boolean;
-  readonly label?: string;
-  readonly parent?: string;
-  /** An existing card the new session takes over (`--card`): assigned to it, no second card made. */
-  readonly card?: BoardTaskId;
-  readonly model?: string;
-  /** Only set when the caller typed `--fast`/`--no-fast`; unset leaves the harness's own default (off). */
-  readonly fast?: boolean;
-  /** What was typed after `--compact-at` (`auto`, `250k`, `250000`); parsed here so a bad value is refused in plain words. */
-  readonly compactAt?: string;
-  /** Only set when the caller actually passed `--rc`/`--no-rc`; unset leaves the daemon default. */
-  readonly remoteControl?: boolean;
-  readonly harnessFlags?: readonly string[];
+  readonly harness?: string;
+  readonly login?: string;
+  readonly pack?: string;
   readonly cwd?: string;
-  readonly detach?: boolean;
-  readonly attachments?: ReadonlyArray<{ filename: string; mime?: string; base64: string }>;
-}
-
-export interface StartPlan {
-  readonly request: StartSessionRequestInput;
-  /** Advisory notes for stderr — never a refusal, and never on stdout where `--json` would break. */
-  readonly warnings: readonly string[];
 }
 
 /**
- * Which session, if any, becomes the parent.
+ * Turns the `start` flags into Ferrets' start body.
  *
- * An `auto` teammate started from inside a pane inherits that pane, so delegated teammate trees
- * draw correctly in `ps` and in the lineage view. An `interactive` session does not: it is the
- * human's own terminal, and parenting it under whichever agent happened to type the command renders
- * the lineage backwards. An explicit `--parent` always wins.
+ * Auto mode still needs a task — an autonomous teammate with no assignment can only misbehave — while an interactive
+ * one is a terminal for a human and may start bare. The folder is the one the command was typed in unless `--cwd`
+ * names another (relative to it); a parent is never sent: a ferret's start is its own helper, from its token.
  */
-export function resolveParent(input: {
-  explicit?: string;
-  callerSessionId?: string;
-  mode: 'auto' | 'interactive';
-}): string | undefined {
-  const explicit = input.explicit?.trim();
-  if (explicit !== undefined && explicit !== '') return explicit;
-  if (input.mode === 'interactive') return undefined;
-  const caller = input.callerSessionId?.trim();
-  return caller === undefined || caller === '' ? undefined : caller;
-}
-
-const NUMERIC_FLAG_NAMES: ReadonlyArray<[keyof StartNumericFlags, string, boolean]> = [
-  ['interval', '--interval', true],
-  ['turnTimeout', '--turn-timeout', true],
-  ['nudgeAfter', '--nudge-after', false],
-  ['stallKillAfter', '--stall-kill-after', false],
-  ['directMax', '--direct-max', false],
-  ['maxSnapshots', '--max-snapshots', true],
-];
-
-/**
- * Rejects numeric flags argv could not turn into a number.
- *
- * Commander hands back `NaN` for `--interval banana`, and the source passed it straight to the wire
- * where it surfaced as an opaque schema error naming a field the caller never typed.
- */
-function assertNumericFlags(flags: StartNumericFlags): void {
-  for (const [key, flag, positive] of NUMERIC_FLAG_NAMES) {
-    const value = flags[key];
-    if (value === undefined) continue;
-    const floor = positive ? 1 : 0;
-    if (!Number.isInteger(value) || value < floor)
-      throw new SessionCommandError(`${flag} must be an integer of at least ${floor}`);
-  }
-}
-
-/**
- * Turns the `start` flags into a wire request.
- *
- * Three source defects are fixed here. `--timeout` and its `--kill-after-seconds` alias both meant
- * "kill a turn that overruns", while a separately spelled `--kill-after` meant "kill a session with
- * no life signs" — one letter apart, opposite subjects. They are now `--turn-timeout` and
- * `--stall-kill-after`, with the small-value hint kept. Numeric flags are validated here instead of
- * failing on the wire.
- */
-export function buildStartRequest(flags: StartFlags, environment: SessionEnvironment): StartPlan {
-  assertNumericFlags(flags);
-
+export function buildStartRequest(flags: StartFlags, environment: SessionEnvironment): StartBody {
   const prompt = flags.prompt?.trim() ?? '';
-  // An interactive session is a terminal for a human: starting one bare is the normal case, and
-  // nothing is typed into it. Auto mode still needs a task — an autonomous teammate with no
-  // assignment can only misbehave.
   if (prompt === '' && flags.mode !== 'interactive')
-    throw new SessionCommandError(
-      'provide a prompt (arguments and/or --prompt-file), or use --mode interactive to start bare',
-    );
-
-  const warnings =
-    flags.turnTimeout !== undefined && flags.turnTimeout < TURN_TIMEOUT_HINT_SECONDS
-      ? [
-          `note: --turn-timeout is a hard KILL timer — the session is terminated when a turn runs longer than ${flags.turnTimeout}s. It is not a readiness wait, and a value this small will kill healthy work early.`,
-        ]
-      : [];
-
-  const compactAt = flags.compactAt === undefined ? undefined : parseCompactAt(flags.compactAt);
-  if (compactAt?.ok === false) throw new SessionCommandError(`--compact-at: ${compactAt.reason}`);
-
-  const parent = resolveParent({
-    explicit: flags.parent,
-    callerSessionId: environment.callerSessionId,
-    mode: flags.mode,
-  });
-  const common = {
-    // Omitted entirely, not sent as `agent: undefined`, so the daemon reads "nothing was named"
-    // and resolves its own default (T) — never a client guessing at one.
-    ...(flags.agent === undefined ? {} : { agent: flags.agent }),
-    cwd: flags.cwd ?? environment.cwd,
-    harnessFlags: [...(flags.harnessFlags ?? [])],
-    ...(flags.name === undefined ? {} : { name: flags.name }),
-    ...(flags.teammate === undefined ? {} : { teammate: flags.teammate }),
-    ...(flags.teammateFallback === true ? { teammateFallback: true } : {}),
-    ...(flags.label === undefined ? {} : { label: flags.label }),
-    ...(parent === undefined ? {} : { parent }),
-    ...(flags.card === undefined ? {} : { card: flags.card }),
-    ...(flags.model === undefined ? {} : { model: flags.model }),
-    ...(flags.fast === undefined ? {} : { fast: flags.fast }),
-    ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),
-    ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
-    ...(flags.interval === undefined ? {} : { intervalSeconds: flags.interval }),
-    ...(flags.turnTimeout === undefined ? {} : { timeoutSeconds: flags.turnTimeout }),
-    ...(flags.nudgeAfter === undefined ? {} : { nudgeAfterSeconds: flags.nudgeAfter }),
-    ...(flags.stallKillAfter === undefined ? {} : { killAfterSeconds: flags.stallKillAfter }),
-    ...(flags.directMax === undefined ? {} : { directSendMaxChars: flags.directMax }),
-    ...(flags.maxSnapshots === undefined ? {} : { maxSnapshots: flags.maxSnapshots }),
-    ...(flags.detach === true ? { detach: true } : {}),
-    ...(flags.attachments === undefined || flags.attachments.length === 0
-      ? {}
-      : { initialAttachments: flags.attachments.map(attachment => ({ ...attachment })) }),
+    throw new SessionCommandError('provide a prompt, or use --mode interactive to start bare');
+  const base = environment.cwd;
+  const typed = flags.cwd?.trim();
+  const folder =
+    typed !== undefined && typed !== ''
+      ? isAbsolute(typed)
+        ? typed
+        : base === undefined
+          ? undefined
+          : resolve(base, typed)
+      : base;
+  if (folder === undefined) throw new SessionCommandError('name the folder to start in with --cwd <absolute path>');
+  return {
+    folder,
+    ...(flags.agent === undefined ? {} : { runtime: flags.agent }),
+    ...(flags.teammate === undefined ? {} : { name: flags.teammate }),
+    ...(flags.harness === undefined ? {} : { harness: flags.harness }),
+    ...(flags.login === undefined ? {} : { login: flags.login }),
+    ...(flags.pack === undefined ? {} : { pack: flags.pack }),
+    ...(prompt === '' ? {} : { prompt }),
   };
-
-  // The wire request is a discriminated union: `auto` carries a prompt, `interactive` may not.
-  const request: StartSessionRequestInput =
-    flags.mode === 'auto'
-      ? { ...common, mode: 'auto', prompt }
-      : { ...common, mode: 'interactive', ...(prompt === '' ? {} : { prompt }) };
-
-  return { request, warnings };
 }

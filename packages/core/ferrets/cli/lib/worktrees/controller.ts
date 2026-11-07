@@ -4,7 +4,7 @@ import type {
   CreateWorktreeRequest,
   WorktreeBase,
   WorktreeRemovalDecision,
-} from '@ferretry/protocol';
+} from '../../../daemon/lib/protocol/worktrees.ts';
 import {
   grantedConfirmations,
   grantedOverrides,

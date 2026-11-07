@@ -1,203 +1,72 @@
-import type { SessionState, SessionView } from '@ferretry/protocol';
-import { formatTaskRef } from '@ferretry/protocol/board-refs';
-import { describeCompactAt } from '@ferretry/protocol/compact-at';
-import { displayModel } from '@ferretry/protocol/session-subtree';
-import { harnessReadySeconds } from './harness-startup.ts';
+import type { FerretSummary } from '../../../contract/index.ts';
 import type { ICellColour } from './ports.ts';
 
-/** Statuses a session never leaves; `ps` hides them unless asked for everything. */
-export const TERMINAL_STATUSES: readonly string[] = ['completed', 'failed', 'stalled', 'stopped'];
+/** The one state a ferret leaves only by a resume; `ps` hides it unless asked for everything. */
+export const TERMINAL_STATUSES: readonly string[] = ['stopped'];
 
-type UsageState = Pick<SessionState, 'usage5hPercent' | 'usageWeeklyPercent' | 'usageAtLimit' | 'usageAuthOk'>;
-
-/** Long-form quota label for the detail view, or undefined when the daemon reported no usage. */
-export function quotaLabel(state: UsageState): string | undefined {
-  if (state.usageAuthOk === false) return 'AUTH REQUIRED';
-  const parts = [
-    state.usage5hPercent === undefined ? '' : `5h ${state.usage5hPercent}%`,
-    state.usageWeeklyPercent === undefined ? '' : `wk ${state.usageWeeklyPercent}%`,
-    state.usageAtLimit === true ? 'AT LIMIT' : '',
-  ].filter(part => part !== '');
-  return parts.length === 0 ? undefined : parts.join(' · ');
+/** `hadi` → `Hadi`, `mary-jane` → `Mary-Jane`: how every surface shows a first name. */
+export function displayName(callsign: string): string {
+  return callsign
+    .split('-')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('-');
 }
 
-/** Fixed-width quota cell for the `ps` table. */
-export function compactQuota(state: UsageState): string {
-  if (state.usageAuthOk === false) return 'AUTH!';
-  if (state.usage5hPercent === undefined && state.usageWeeklyPercent === undefined) return '—';
-  const fiveHour = state.usage5hPercent === undefined ? '—' : `${state.usage5hPercent}%`;
-  const weekly = state.usageWeeklyPercent === undefined ? '—' : `${state.usageWeeklyPercent}%`;
-  return `${fiveHour}/${weekly}${state.usageAtLimit === true ? '!' : ''}`;
-}
-
-/**
- * Status cell, with a declared park made visible.
- *
- * A deliberate park and an unanswered question both report `waiting`, so the marker is the only way
- * a lead reading `ps` can tell "parked on purpose" from "stuck". A peer park names the peer.
- */
-export function statusLabel(state: Pick<SessionState, 'status' | 'waiting'>): string {
-  if (state.waiting === undefined) return state.status;
-  const peer = state.waiting.peerName ?? state.waiting.peer;
-  return `${state.status} PARKED${peer === undefined ? '' : `←${peer}`}`;
-}
-
-/** Seconds since an instant, clamped at zero; `-` when the daemon never observed it. */
-export function ageLabel(nowMs: number, instant?: string): string {
-  if (instant === undefined) return '-';
-  const observedMs = Date.parse(instant);
-  if (Number.isNaN(observedMs)) return '-';
-  return `${Math.max(0, Math.floor((nowMs - observedMs) / 1000))}s`;
-}
-
-function headline(view: SessionView): string {
-  const { config, state } = view;
+function headline(view: FerretSummary): string {
   return [
-    `${config.teammate ?? '-'} (${config.id})`,
-    statusLabel(state),
-    config.agent,
-    `model=${displayModel(config, state)}`,
-    config.label === undefined ? '' : `label=${config.label}`,
-    config.parent === undefined ? '' : `parent=${config.parent}`,
-    config.mode,
-    `turn ${state.turn}`,
+    `${view.name} (${view.id})`,
+    view.state,
+    view.harness,
+    view.runtime === undefined ? '' : `runtime=${view.runtime}`,
+    view.login === undefined ? '' : `login=${view.login}`,
+    view.pack === undefined ? '' : `pack=${view.pack}`,
+    view.parent === undefined ? '' : `parent=${view.parent}`,
+    view.role,
   ]
     .filter(part => part !== '')
     .join('  ');
 }
 
-/**
- * `ready in 4.2 s`, or `not ready after 31.4 s` when the start gave up waiting (the time from launch until it gave up,
- * at least the 30 s bound); empty when nothing was measured.
- */
-function startupVital(state: SessionState): string {
-  if (state.harnessStartupMs !== undefined) return `ready in ${harnessReadySeconds(state.harnessStartupMs)}`;
-  return state.harnessNotReadyAfterMs === undefined
-    ? ''
-    : `not ready after ${harnessReadySeconds(state.harnessNotReadyAfterMs)}`;
-}
-
-function vitals(view: SessionView): string[] {
-  const quota = quotaLabel(view.state);
-  const parts = [
-    view.config.compactAt === undefined ? '' : `compact at ${describeCompactAt(view.config.compactAt)}`,
-    startupVital(view.state),
-    view.state.contextPercent === undefined ? '' : `context ${view.state.contextPercent}% used`,
-    quota === undefined ? '' : `quota ${quota}`,
-    view.state.lastToolStartedAt === undefined ? '' : `last tool started ${view.state.lastToolStartedAt}`,
-  ].filter(part => part !== '');
-  return parts.length === 0 ? [] : [`  ${parts.join('  ')}`];
-}
-
-function liveness(view: SessionView, nowMs: number): string {
-  const ledger = [
-    `transcript ${ageLabel(nowMs, view.state.lastTranscriptAt)}`,
-    `counters ${ageLabel(nowMs, view.state.lastCounterAdvanceAt)}`,
-    `tokens ${ageLabel(nowMs, view.state.lastTokenAdvanceAt)}`,
-    `subprocess ${ageLabel(nowMs, view.state.lastSubprocessAt)}`,
-    `pane ${ageLabel(nowMs, view.state.lastPaneAt)}`,
-  ];
-  return `  liveness: ${ledger.join('  ')}${view.state.nudgedAt === undefined ? '' : '  ⚠ nudged'}`;
-}
-
-function declaredWait(view: SessionView): string[] {
-  const waiting = view.state.waiting;
-  if (waiting === undefined) return [];
-  const peer = waiting.peerName ?? waiting.peer;
-  const subject = peer === undefined ? (waiting.condition ?? 'external condition') : `reply from ${peer}`;
-  const deadline = waiting.until === undefined ? ' (open-ended)' : ` until ${waiting.until}`;
-  return [
-    `  ⏸ DECLARED WAIT: ${subject}${deadline} — parked on purpose; the idle kill and the turn ceiling are suspended`,
-  ];
-}
-
-function questions(view: SessionView): string[] {
-  const lines: string[] = [];
-  for (const question of view.state.pendingQuestion?.questions ?? []) {
-    lines.push(`  question: ${question.question}`);
-    if (question.options !== undefined && question.options.length > 0) {
-      const labels = question.options.map(option => option.label).join(', ');
-      lines.push(`  options: ${labels}${question.multiSelect === true ? ' (choose one or more)' : ''}`);
-    }
-  }
-  return lines;
-}
-
-/** The single-session detail block printed by `status`, `start`, `send`, and the lifecycle verbs. */
-export function renderSessionView(view: SessionView, nowMs: number): string[] {
+/** The single-ferret detail block printed by `status`, `start`, `resume` and `rename --json`-less answers. */
+export function renderFerret(view: FerretSummary): string[] {
   return [
     headline(view),
-    `  ${view.config.cwd}`,
-    ...vitals(view),
-    liveness(view, nowMs),
-    ...declaredWait(view),
-    ...(view.state.needsHuman === undefined ? [] : [`  🚨 NEEDS HUMAN: ${view.state.needsHuman}`]),
-    ...(view.state.reason === undefined ? [] : [`  ${view.state.reason}`]),
-    ...questions(view),
-    `  ${view.directory}`,
+    `  ${view.folder}`,
+    `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`,
   ];
 }
 
-const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATUS', 'MODEL', 'AGENT', 'MODE', 'QUOTA', 'CARD', 'TASK', 'LABEL'] as const;
-const CARD_COLUMN = TABLE_HEADER.indexOf('CARD');
+const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATE', 'HARNESS', 'RUNTIME', 'ROLE', 'PACK', 'PARENT'] as const;
 
 /** The PIN column's mark: this ferret is pinned to the top of the sidebar. */
 const PINNED_MARK = '*';
 
-/** The CARD cell: the focus card with its lane, or the dash that says there is none. */
-export interface CardCell {
-  readonly text: string;
-  /** Amber — attention — when a RUNNING session has no focus card; a finished one shows a plain dash. */
-  readonly amber: boolean;
-}
-
-/**
- * The CARD cell of one row (`board-design.md` §3.4): `&F18 Plan/Design` when the lane is known,
- * `&F18` alone when it is not (the board unreadable, or the card not on it), and `—` when the
- * session has no focus card at all.
- */
-export function cardCell(view: SessionView, laneName: string | undefined): CardCell {
-  const focus = view.config.focusTask;
-  if (focus === undefined) {
-    return { text: '—', amber: !TERMINAL_STATUSES.includes(view.state.status) };
-  }
-  return { text: laneName === undefined ? formatTaskRef(focus) : `${formatTaskRef(focus)} ${laneName}`, amber: false };
-}
+/** A listed ferret, with the pin mark the fleet list may carry. */
+export type ListedFerret = FerretSummary & { readonly pinnedAt?: string };
 
 /**
  * The `ps` table.
  *
- * Column widths are measured from the data — fixed widths misalign the moment a value outgrows
- * them — and the variable-length columns sit last, where the final one is never padded. The one
- * cell that carries colour is the amber CARD dash, painted after padding so the widths stay
- * measured on plain text. A leading PIN column marks the pinned ferrets and appears only while one is
- * listed, so a fleet with no pins reads exactly as it always has.
+ * Column widths are measured from the data — fixed widths misalign the moment a value outgrows them — and the
+ * variable-length column sits last, where it is never padded. A leading PIN column marks the pinned ferrets and
+ * appears only while one is listed, so a fleet with no pins reads exactly as it always has. A running ferret with no
+ * runtime of its own is the cell a reader must notice, painted amber after padding.
  */
-export function renderSessionTable(
-  views: readonly SessionView[],
-  lanes: ReadonlyMap<string, string>,
-  colour: ICellColour,
-): string[] {
-  const cards = views.map(view => {
-    const focus = view.config.focusTask;
-    return cardCell(view, focus === undefined ? undefined : lanes.get(focus.id));
-  });
+export function renderSessionTable(views: readonly ListedFerret[], colour: ICellColour): string[] {
   const showPins = views.some(view => view.pinnedAt !== undefined);
   const header: readonly string[] = showPins ? ['PIN', ...TABLE_HEADER] : TABLE_HEADER;
-  const cardColumn = CARD_COLUMN + (showPins ? 1 : 0);
-  const rows = views.map((view, index) => [
+  const rows = views.map(view => [
     ...(showPins ? [view.pinnedAt === undefined ? '' : PINNED_MARK] : []),
-    view.config.teammate ?? '-',
-    view.config.id,
-    statusLabel(view.state),
-    displayModel(view.config, view.state),
-    view.config.agent,
-    view.config.mode,
-    compactQuota(view.state),
-    cards[index]?.text ?? '—',
-    view.config.name,
-    view.config.label ?? '-',
+    view.name,
+    view.id,
+    view.state,
+    view.harness,
+    view.runtime ?? '-',
+    view.role,
+    view.pack ?? '-',
+    view.parent ?? '-',
   ]);
+  const runtimeColumn = header.indexOf('RUNTIME');
   const widths = header.map((title, column) =>
     Math.max(title.length, ...rows.map(cells => (cells[column] ?? '').length)),
   );
@@ -205,8 +74,14 @@ export function renderSessionTable(
     cells
       .map((cell, column) => {
         const padded = column === cells.length - 1 ? cell : cell.padEnd(widths[column] ?? 0);
-        return column === cardColumn && amber ? colour.amber(padded) : padded;
+        return column === runtimeColumn && amber ? colour.amber(padded) : padded;
       })
       .join('  ');
-  return [render(header, false), ...rows.map((cells, index) => render(cells, cards[index]?.amber === true))];
+  return [
+    render(header, false),
+    ...rows.map((cells, index) => {
+      const view = views[index];
+      return render(cells, view !== undefined && view.runtime === undefined && !TERMINAL_STATUSES.includes(view.state));
+    }),
+  ];
 }
