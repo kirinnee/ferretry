@@ -21,6 +21,8 @@ export interface PlaceSourceInput {
 }
 
 export function placeSource(input: PlaceSourceInput): CommandBarSource {
+  // The caller may supply Map.values(), which is consumed once. Queries and reopenings reuse this source.
+  const screens = [...input.screens];
   return () => {
     const entries: CommandBarEntry[] = [];
     const go = (id: string, label: string, href: string, extra: Partial<CommandBarEntry> = {}): void => {
@@ -34,7 +36,7 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       });
     }
     const seen = new Set<string>();
-    for (const screen of input.screens) {
+    for (const screen of screens) {
       const key = `${screen.plugin}.${screen.id}`;
       // A screen that needs a subject is not a destination on its own; a bare id also listed qualified is one place.
       if (seen.has(key) || screen.path.includes(':')) continue;

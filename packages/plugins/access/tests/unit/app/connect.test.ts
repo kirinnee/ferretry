@@ -40,7 +40,7 @@ describe('the device claims Access provides the app shell', () => {
 
     should(claim?.deviceId).equal('fy_device_id_two');
     should(claim?.appSession).equal('page-load-1');
-    should((claim as { key: TestKeyHandle }).key.key).equal(privateKey);
+    should((claim as unknown as { key: TestKeyHandle }).key.key).equal(privateKey);
   });
 
   it('says a key store it cannot read is unreadable, not missing', async () => {

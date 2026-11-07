@@ -187,7 +187,7 @@ function ShellCommandBar(props: {
       placeSource({
         daemons,
         daemon: props.daemon,
-        screens: views.screens.values(),
+        screens: [...views.screens.values()],
         routes,
         navigate: href => router.navigate(href),
       }),

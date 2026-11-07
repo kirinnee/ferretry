@@ -1,0 +1,36 @@
+{
+  "recorded": "Claude Code 2.1.281 in tmux 3.6a, SIGSTOPped 4000 ms / running 150 ms by scripts/local/soak-composer-landing.ts",
+  "payload": "soak96ltn000x look thru the emails",
+  "keys": [
+    {
+      "atMs": 6,
+      "key": "soak96ltn000x look thru the emails"
+    },
+    {
+      "atMs": 2519,
+      "key": "Enter"
+    }
+  ],
+  "frames": [
+    {
+      "atMs": -1,
+      "cursor": "2|12",
+      "visible": " ▐▛███▛█   Claude Code v2.1.281\n▝▜██████▀  Haiku 4.5 · Claude Max\n  ▝▝ ▝▝    /tmp/claude-1000/soak/rec1/cwd\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ Try \"how do I log an error?\"\n────────────────────────────────────────────────────────────────────────────────────────────────────\n  👤 kirinnee97 │ 🤖 Haiku 4.5 │ 📂 cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tra…\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+    },
+    {
+      "atMs": 2513,
+      "cursor": "36|18",
+      "visible": " ▐▛███▛█   Claude Code v2.1.281\n▝▜██████▀  Haiku 4.5 · Claude Max\n  ▝▝ ▝▝    /tmp/claude-1000/soak/rec1/cwd\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ soak96ltn000x look thru the emails\n────────────────────────────────────────────────────────────────────────────────────────────────────\n  👤 kirinnee97 │ 🤖 Haiku 4.5 │ 📂 cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+    },
+    {
+      "atMs": 6553,
+      "cursor": "36|24",
+      "visible": " ▐▛███▛█   Claude Code v2.1.281\n▝▜██████▀  Haiku 4.5 · Claude Max\n  ▝▝ ▝▝    /tmp/claude-1000/soak/rec1/cwd\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ soak96ltnClaudeoCodehv2.1.281mails ▐▛███▛█\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ soak96ltn000x look thru the emails\n────────────────────────────────────────────────────────────────────────────────────────────────────\n  👤 kirinnee97 │ 🤖 Haiku 4.5 │ 📂 cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n\n\n\n\n\n\n\n\n\n\n\n"
+    },
+    {
+      "atMs": 6805,
+      "cursor": "2|28",
+      "visible": " ▐▛███▛█   Claude Code v2.1.281\n▝▜██████▀  Haiku 4.5 · Claude Max\n  ▝▝ ▝▝    /tmp/claude-1000/soak/rec1/cwd\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯  ▐▛███▛█ ClaudeoCode v2.1.281\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ soak96ltnClaudeoCodehv2.1.281mails ▐▛███▛█\n▝▜██████▀──Haiku─4.5─·─Claude─Max───────────────────────────────────────────────────────────────────\n  ▝▝ ▝▝rinn/tmp/claude-1000/soak/rec1/cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n❯ soak96ltn000x look thru the emails\n\n* Elucidating…\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────\n  👤 kirinnee97 │ 🤖 Haiku 4.5 │ 📂 cwd\n  📊 0% (0/200k)\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n\n\n\n\n\n\n\n"
+    }
+  ]
+}

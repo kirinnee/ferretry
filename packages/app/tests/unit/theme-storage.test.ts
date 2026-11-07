@@ -137,6 +137,14 @@ describe('theme items', () => {
 test('the app theme reader uses the authoritative Layouts schema and accepts the same families and tokens', async () => {
   const { ThemeSchema, THEME_FAMILY_IDS } = await import('@ferretry/plugin-layouts/contract');
   expect(ThemeItemSchema).toBe(ThemeSchema);
+  expect(
+    ThemeItemSchema.safeParse({
+      id: 'probe',
+      label: 'Probe',
+      base: 'studio',
+      light: { bg: 'url(https://example.invalid/probe)' },
+    }).success,
+  ).toBe(false);
   for (const base of THEME_FAMILY_IDS) {
     for (const light of [
       { accent: '#123456', 'font-body': 'sans-serif', 'flow-1': '2rem' },
