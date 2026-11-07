@@ -781,10 +781,12 @@ async function bootLocked(
         if (fn !== undefined) events.subscribe(manifest.id, event, fn);
       }
     } catch (error) {
-      const why = `${manifest.title} failed to build: ${error instanceof Error ? error.message.slice(0, 200) : 'unknown error'}`;
-      log.error('a plugin failed to build', { plugin: manifest.id });
-      if (isCore(manifest.id)) return { kind: 'refused', sentence: why, trace };
-      await failed(manifest.id, why);
+      const thrown = error instanceof Error ? error.message.slice(0, 200) : 'unknown error';
+      // The thrown text may carry a path or a value a parser echoed: it stays in the local log and, for a core package
+      // (the daemon does not boot), on the operator's own stderr. The record, and so `GET /v1/doctor`, says only which plugin.
+      log.error('a plugin failed to build', { plugin: manifest.id, error: thrown });
+      if (isCore(manifest.id)) return { kind: 'refused', sentence: `${manifest.title} failed to build: ${thrown}`, trace };
+      await failed(manifest.id, `${manifest.title} failed to build.`);
     }
   }
 

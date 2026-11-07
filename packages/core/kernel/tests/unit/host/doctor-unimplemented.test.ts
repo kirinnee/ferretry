@@ -114,3 +114,44 @@ test('R-0081 GET /v1/doctor is the kernel’s: it runs every plugin’s declared
     await rm(root, { recursive: true, force: true });
   }
 });
+
+const leaky = definePlugin({ id: 'leaky', title: 'Leaky', version: '5.0.0', api: 5, core: false, kinds: [] });
+
+test('R-0081 the doctor body never carries a plugin’s thrown build-error text; the local log does', async () => {
+  const root = await mkdtemp(`${tmpdir()}/doctor-leak-`);
+  const home = `${root}/home`;
+  const logged: string[] = [];
+  const thrown = "ENOENT '/secret/path/state.json' sk-ant-0123456789abcdef";
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...realAdapters(home, () => {}, { binary: 'fy' }),
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+      logSink: record => logged.push(JSON.stringify(record)),
+    },
+    implementations: [
+      implementDaemon(gate, { build: () => ({ provides: { admission: recordingAdmission() } }) }),
+      implementDaemon(leaky, {
+        build: () => {
+          throw new Error(thrown);
+        },
+      }),
+    ],
+  });
+  try {
+    if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+    const response = await outcome.host.dispatch(request('GET', '/v1/doctor'));
+    expect(response.status).toBe(200);
+    const report = DoctorReportSchema.parse(JSON.parse(response.body));
+    expect(report.checks.map(check => check.summary)).toContain('Leaky failed to build.');
+    expect(response.body).not.toContain('/secret/path');
+    expect(response.body).not.toContain('sk-ant');
+    expect(JSON.stringify(await outcome.host.doctor())).not.toContain('/secret/path');
+    expect(logged.join('\n')).toContain('/secret/path');
+  } finally {
+    if (outcome.kind === 'running') await outcome.host.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
