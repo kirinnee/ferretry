@@ -221,3 +221,4 @@ route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1
 tool	card_plan	added	tasks are cards (design §1.4): today's task_plan; descriptor fields unchanged
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
 route	GET /v1/plans	added	new in 5.0: the owner's list of staged plans (design §3.3)
+route	GET /v1/ferrets/:ferretId/question	added	today the ferret view carried pendingQuestion; Conversation serves the pending question on its own read route so `fy answer` needs no id (lead ruling)

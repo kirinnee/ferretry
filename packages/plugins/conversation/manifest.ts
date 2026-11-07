@@ -140,6 +140,7 @@ export default definePlugin({
       }),
 
       // ── questions, compaction, hypermedia ─────────────────────────────────────────────────────
+      route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/answer', {
         ...PERSON,
         audit: { record: QUESTION_ANSWERED_AUDIT },

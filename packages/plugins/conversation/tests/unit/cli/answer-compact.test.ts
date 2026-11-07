@@ -4,61 +4,76 @@ import { AnswerQuestionController, InterruptController } from '../../../cli/lib/
 import { planAnswer } from '../../../cli/lib/answer/plan.ts';
 import { CompactAtController } from '../../../cli/lib/compact-at/controller.ts';
 import { CommandError } from '../../../cli/lib/errors.ts';
-import type { AnswerRequest, CompactAtPatch, FerretCompactAt } from '../../../contract/index.ts';
+import type { AnswerRequest, CompactAtPatch, FerretCompactAt, Question } from '../../../contract/index.ts';
+import { at } from '../../support/instant.ts';
 
 const out = (): { lines: string[]; out(line: string): void; note(line: string): void } => {
   const lines: string[] = [];
   return { lines, out: line => lines.push(line), note: line => lines.push(`note: ${line}`) };
 };
 
+const asked = (toolUseId = 'tool-1'): Question => ({
+  format: 1,
+  toolUseId,
+  text: 'Ship it?',
+  options: [{ label: 'yes' }, { label: 'no' }],
+  multiple: false,
+  askedAt: at('2026-11-06T09:00:00.000Z'),
+});
+
 describe('planAnswer', () => {
-  it('should answer with labels against the named question', () => {
-    should(planAnswer({ toolUseId: 'tool-1', labels: ['yes'] })).deepEqual({
-      toolUseId: 'tool-1',
-      labels: ['yes'],
-    });
+  it('should answer with labels against the question the ferret is waiting on', () => {
+    should(planAnswer({ labels: ['yes'] }, asked())).deepEqual({ toolUseId: 'tool-1', labels: ['yes'] });
   });
 
   it('should drop blank labels rather than sending empty choices', () => {
-    should(planAnswer({ toolUseId: 'tool-1', labels: ['  ', 'no'] }).labels).deepEqual(['no']);
+    should(planAnswer({ labels: ['  ', 'no'] }, asked()).labels).deepEqual(['no']);
   });
 
-  it('should carry a free-form Other response and one response per question', () => {
-    should(planAnswer({ toolUseId: 't', other: 'not yet' })).deepEqual({
+  it('should carry a free-form Other response and a single response', () => {
+    should(planAnswer({ other: 'not yet' }, asked('t'))).deepEqual({ toolUseId: 't', labels: [], other: 'not yet' });
+    should(planAnswer({ responses: ['yes'] }, asked('t'))).deepEqual({
       toolUseId: 't',
       labels: [],
-      other: 'not yet',
-    });
-    should(planAnswer({ toolUseId: 't', responses: ['yes', 'no'] })).deepEqual({
-      toolUseId: 't',
-      labels: [],
-      responses: ['yes', 'no'],
+      responses: ['yes'],
     });
   });
 
-  it('should refuse an answer that chose nothing at all, and one that names no question', () => {
-    should(() => planAnswer({ toolUseId: 't', labels: [' '] })).throw(/provide labels/);
-    should(() => planAnswer({ labels: ['yes'] })).throw(/--question/);
+  it('should refuse an answer that chose nothing, more responses than questions, and a ferret asking nothing', () => {
+    should(() => planAnswer({ labels: [' '] }, asked())).throw(/provide labels/);
+    should(() => planAnswer({ responses: ['a', 'b'] }, asked())).throw(/exactly one --response/);
+    should(() => planAnswer({ labels: ['yes'] }, undefined)).throw(/no pending question/);
   });
 });
 
 describe('answer and interrupt', () => {
-  it('should send the plan to the gateway and say it was answered', async () => {
+  const gatewayOf = (sent: AnswerRequest[], question: Question | null = asked()) => ({
+    question: async () => question ?? undefined,
+    answer: async (_ferret: string, request: AnswerRequest) => void sent.push(request),
+    interrupt: async () => undefined,
+  });
+
+  it('should read the pending question, send the answer to it and say it was answered', async () => {
     const sent: AnswerRequest[] = [];
     const output = out();
-    const gateway = {
-      answer: async (_ferret: string, request: AnswerRequest) => void sent.push(request),
-      interrupt: async () => undefined,
-    };
-    await new AnswerQuestionController(gateway, output).execute('hadi', { toolUseId: 't1', labels: ['yes'] });
-    should(sent).deepEqual([{ toolUseId: 't1', labels: ['yes'] }]);
+    await new AnswerQuestionController(gatewayOf(sent), output).execute('hadi', { labels: ['yes'] });
+    should(sent).deepEqual([{ toolUseId: 'tool-1', labels: ['yes'] }]);
     should(output.lines).deepEqual(['hadi: answered']);
+  });
+
+  it('should send nothing when no question is waiting', async () => {
+    const sent: AnswerRequest[] = [];
+    await new AnswerQuestionController(gatewayOf(sent, null), out()).execute('hadi', { labels: ['yes'] }).then(
+      () => should.fail(undefined, undefined, 'expected a refusal'),
+      error => should(error).be.instanceOf(CommandError),
+    );
+    should(sent).be.empty();
   });
 
   it('should interrupt and print JSON on request', async () => {
     const output = out();
     const called: string[] = [];
-    const gateway = { answer: async () => undefined, interrupt: async (ferret: string) => void called.push(ferret) };
+    const gateway = { ...gatewayOf([]), interrupt: async (ferret: string) => void called.push(ferret) };
     await new InterruptController(gateway, output).execute('hadi', { json: true });
     should(called).deepEqual(['hadi']);
     should(JSON.parse(output.lines[0] ?? '')).deepEqual({ ferret: 'hadi', interrupted: true });

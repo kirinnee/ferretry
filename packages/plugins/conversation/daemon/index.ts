@@ -2,11 +2,10 @@ import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { AskSources } from '@ferretry/core-asks/contract';
 import { SitrepLines } from '@ferretry/core-ferrets/contract';
-import { type ConversationApi, QuestionSchema } from '../contract/index.ts';
+import { type ConversationApi, LinkKept, QuestionSchema } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { buildConversationA } from './host.ts';
-// PART B REGISTRATION: its routes, sockets, tools and the half of `ConversationApi` it owns.
-import { buildReader } from './reader/index.ts';
+import { buildReading } from './reading.ts';
 
 type Half = ReturnType<typeof implementDaemon<typeof manifest>>;
 type Build = NonNullable<Half['build']>;
@@ -20,7 +19,7 @@ const unavailable =
 
 /**
  * Conversation's daemon half (§2.3): what you say to a ferret and what it says back. Part a (this file's `host.ts`)
- * owns messages, the queue, turns, questions and drafts; part b registers through `./reader`. A declared route that
+ * owns messages, the queue, turns, questions and drafts; part b (`./reading.ts`: reader, links, attachments, renders, search) is built over the same ports. A declared route that
  * neither part serves yet answers 503 with its sentence, never a missing route.
  */
 export default implementDaemon(manifest, {
@@ -31,13 +30,18 @@ export default implementDaemon(manifest, {
       asks: ctx.needs.asks,
       hooks: ctx.hooks,
     });
-    const b = buildReader();
+    const b = buildReading({
+      kernel: ctx.kernel,
+      ferrets: ctx.needs.ferrets,
+      asks: ctx.needs.asks,
+      onKept: (ferret, link) => ctx.kernel.events.publish(LinkKept, { ferret, link }),
+    });
     ctx.kernel.lifecycle.onStop(() => a.stop());
 
     const routes: Record<string, RouteHandler> = { ...a.routes, ...b.routes };
     for (const declared of manifest.actions.routes)
       routes[declared.key] ??= unavailable('This part of Conversation is not ready yet.');
-    const sockets: Record<string, SocketAccept> = { ...a.sockets, ...b.sockets };
+    const sockets: Record<string, SocketAccept> = { ...a.sockets };
 
     const api: ConversationApi = { ...b.api, ...a.api };
 
@@ -45,7 +49,7 @@ export default implementDaemon(manifest, {
       routes,
       sockets,
       tools: {
-        search_work: b.tools.search_work ?? (async () => ({ ok: false, error: 'Search is not ready yet.' })),
+        search_work: b.tools.search_work,
       },
       provides: { conversation: api },
       hooks: {

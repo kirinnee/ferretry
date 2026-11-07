@@ -8,8 +8,8 @@ import { queueCancelVerb, queueEditVerb, queueVerb } from './lib/queue/commands.
 import { ClientQueueGateway } from './lib/queue/gateway.ts';
 import { SendMessageController } from './lib/send/controller.ts';
 import type { ConversationOutput, SendFiles, SendWaitClock } from './lib/send/ports.ts';
-// PART B REGISTRATION: the verbs of the reader, links, search and renders.
-import { readerVerbs } from './reader/index.ts';
+// The reading verbs: logs, search, render, link and transcript.
+import { readingVerbs } from './reading/verbs.ts';
 
 /** Exit code a verb that is not ready answers with (the skeleton's), after saying so. */
 const NOT_READY = 69;
@@ -112,10 +112,8 @@ export default implementCli(manifest, {
       });
     const answer = guarded(async invocation => {
       const ferret = first(invocation, 'ferret');
-      const toolUseId = text(invocation, 'question');
       const other = text(invocation, 'other');
       await new AnswerQuestionController(gateway, output).execute(ferret, {
-        ...(toolUseId === undefined ? {} : { toolUseId }),
         labels: invocation.args.slice(1),
         ...(other === undefined ? {} : { other }),
         responses: list(invocation, 'response'),
@@ -156,7 +154,7 @@ export default implementCli(manifest, {
       'queue edit': queueEditVerb(queuePorts),
       'queue cancel': queueCancelVerb(queuePorts),
     };
-    const theirs = readerVerbs({ client: ctx.client, io: ctx.io });
+    const theirs = readingVerbs({ client: ctx.client, io: ctx.io });
     const verbs: Record<string, VerbHandler> = { ...mine, ...theirs };
     for (const declared of manifest.actions.cli) verbs[declared.verb] ??= notReady(declared.verb);
     return { verbs } as never;

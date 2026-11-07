@@ -1,5 +1,6 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { StoredRenderMetaSchema } from './wire-media.ts';
 import { LinksFileSchema } from './wire-link.ts';
 import { QuestionSchema } from './wire-question.ts';
 
@@ -26,13 +27,39 @@ export const QUESTION_STATE = defineState({
   schema: QuestionSchema,
 });
 export const DRAFTS_STATE = defineState({ name: 'drafts', path: '*/drafts', store: 'opaque', format: 1 });
-export const ATTACHMENTS_STATE = defineState({
-  name: 'attachments',
-  path: '*/attachments',
+/**
+ * An attachment is two byte files, `attachments/<ferret>~<attachment id>.original` and `….manifest`: a collection,
+ * which one opaque path per ferret cannot hold. `~` is in neither a ferret id nor an attachment id (`att_<hex>`), so a
+ * name splits one way only. The manifest is parsed by the store, which owns what a usable one is; the original never is.
+ */
+export const ATTACHMENT_ORIGINAL_STATE = defineState({
+  name: 'attachment-original',
+  path: 'attachments/*.original',
   store: 'opaque',
   format: 1,
 });
-export const RENDERS_STATE = defineState({ name: 'renders', path: 'renders', store: 'opaque', format: 1 });
+export const ATTACHMENT_MANIFEST_STATE = defineState({
+  name: 'attachment-manifest',
+  path: 'attachments/*.manifest',
+  store: 'opaque',
+  format: 1,
+});
+/** A render is two files: `renders/<id>.json`, its meta, and `renders/<id>.payload`, the payload text exactly as saved. */
+export const RENDER_META_STATE = defineState({
+  name: 'render-meta',
+  path: 'renders/*.json',
+  store: 'json',
+  format: 1,
+  schema: StoredRenderMetaSchema,
+  // A meta that does not parse is not a render and is never served; it does not take the plugin down.
+  onDamaged: { narrower: 'a render whose meta does not parse is skipped: it is not served, so it grants nothing' },
+});
+export const RENDER_PAYLOAD_STATE = defineState({
+  name: 'render-payload',
+  path: 'renders/*.payload',
+  store: 'opaque',
+  format: 1,
+});
 export const LINKS_STATE = defineState({
   name: 'links',
   path: 'links.json',
@@ -71,8 +98,10 @@ export const CONVERSATION_STATE = [
   TURNS_STATE,
   QUESTION_STATE,
   DRAFTS_STATE,
-  ATTACHMENTS_STATE,
-  RENDERS_STATE,
+  ATTACHMENT_ORIGINAL_STATE,
+  ATTACHMENT_MANIFEST_STATE,
+  RENDER_META_STATE,
+  RENDER_PAYLOAD_STATE,
   LINKS_STATE,
   FINDER_STATE,
   SEARCH_STATE,

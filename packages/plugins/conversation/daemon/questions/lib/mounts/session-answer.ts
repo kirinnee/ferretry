@@ -1,3 +1,4 @@
+import type { Question } from '../../../../contract/index.ts';
 import { AnswerSessionRequestSchema, FY_REQUEST_ID_HEADER, type SessionView } from '../../../seams/protocol.ts';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
@@ -43,6 +44,8 @@ export class SessionAnswerError extends Error {
 
 /** The bounded capability that answers an already-rendered structured question. */
 export interface SessionAnswerSubsystem {
+  /** The question the ferret is waiting on, or none. */
+  question(sessionId: string): Promise<Question | undefined>;
   answer(
     sessionId: string,
     request: {
@@ -117,6 +120,12 @@ function refuse(error: unknown): never {
  */
 export function sessionAnswerRoutes(subsystem: SessionAnswerSubsystem): readonly MountRoute[] {
   return [
+    {
+      method: 'GET',
+      path: '/v1/ferrets/:ferretId/question',
+      handle: async context =>
+        jsonResponse({ question: (await subsystem.question(id(context))) ?? null }) as ApiResponse,
+    },
     {
       method: 'POST',
       path: '/v1/ferrets/:ferretId/answer',

@@ -4,7 +4,7 @@ import manifest from '../../manifest.ts';
 describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
-    expect(routes).toHaveLength(39);
+    expect(routes).toHaveLength(40);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);

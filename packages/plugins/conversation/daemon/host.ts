@@ -17,6 +17,7 @@ import {
   QueueChanged,
   type QueuedMessage,
   QUESTION_STATE,
+  type Question,
   type SendRecord,
   TurnEnded,
 } from '../contract/index.ts';
@@ -66,6 +67,7 @@ export interface ConversationAHalf {
     | 'cancelSend'
     | 'enterSend'
     | 'composer'
+    | 'question'
     | 'answer'
     | 'compactAt'
     | 'setCompactAt'
@@ -173,6 +175,12 @@ export function buildConversationA(deps: {
   const records = async (id: string): Promise<readonly SendRecord[]> =>
     (await ledger.list(parseSessionId(id))).map(sendRecordView);
 
+  /** `question.json`: the question the ferret is waiting on, as the harness asked it (written where the transcript is read). */
+  const askedQuestion = async (ferret: string): Promise<Question | undefined> => {
+    const read = await kernel.state.read(QUESTION_STATE, ferret);
+    return read.ok ? read.value : undefined;
+  };
+
   const mounts: MountRoute[] = [
     ...sessionSendRoutes(
       {
@@ -198,7 +206,7 @@ export function buildConversationA(deps: {
       },
       sentDraftClearer(drafts),
     ),
-    ...sessionAnswerRoutes({ answer: async () => pending() }),
+    ...sessionAnswerRoutes({ question: askedQuestion, answer: async () => pending() }),
     ...sessionCompactAtRoutes({ get: async () => pending(), set: async () => pending() }),
     ...sharedDraftRoutes(drafts),
   ];
@@ -257,6 +265,7 @@ export function buildConversationA(deps: {
     cancelSend: async () => err(pendingRefusal()),
     enterSend: async () => err(pendingRefusal()),
     composer: async () => err(pendingRefusal()),
+    question: async ferret => await askedQuestion(ferret),
     answer: async () => err(pendingRefusal()),
     compactAt: async () => undefined,
     setCompactAt: async () => err(pendingRefusal()),

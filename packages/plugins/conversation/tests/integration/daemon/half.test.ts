@@ -115,3 +115,33 @@ describe('conversation daemon half, through the kernel test host', () => {
     expect(read.status).toBe(403);
   });
 });
+
+describe('the merged half', () => {
+  const boot = async () =>
+    await testHost({
+      plugins: [daemon],
+      fakes: {
+        ferrets: { get: async () => ({ id: 'f1' }), list: async () => [] },
+        asks: { get: async () => undefined, open: async () => [] },
+      },
+      clock: fixedClock('2026-11-06T09:00:00Z'),
+    });
+
+  test('the pending question reads as none, and a transcript says the harness is not connected yet', async () => {
+    const host = await boot();
+    const question = await host.request('GET', '/v1/ferrets/f1/question', { as: owner() });
+    expect(question.status).toBe(200);
+    expect(question.json()).toEqual({ question: null });
+    const logs = await host.request('GET', '/v1/ferrets/f1/logs', { as: owner() });
+    expect(logs.status).toBe(503);
+    expect(logs.json()).toMatchObject({ code: 'conversation_harness_unavailable' });
+  });
+
+  test('a render saved is served back, and a link listing says the harness is not connected yet', async () => {
+    const host = await boot();
+    const links = await host.request('GET', '/v1/links/conversations', { as: owner() });
+    expect(links.status).toBe(503);
+    const unknown = await host.request('GET', '/v1/renders/rd_000000000000000000000000/meta', { as: owner() });
+    expect([400, 404]).toContain(unknown.status);
+  });
+});

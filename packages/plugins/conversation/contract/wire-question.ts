@@ -38,3 +38,7 @@ export const AnswerRecordSchema = z.strictObject({
   answeredAt: InstantSchema,
 });
 export type AnswerRecord = z.infer<typeof AnswerRecordSchema>;
+
+/** `GET /v1/ferrets/:ferretId/question`: the question the ferret is waiting on, or none (today's ferret view carried it as `pendingQuestion`). */
+export const AskedQuestionViewSchema = z.strictObject({ question: QuestionSchema.nullable() });
+export type AskedQuestionView = z.infer<typeof AskedQuestionViewSchema>;

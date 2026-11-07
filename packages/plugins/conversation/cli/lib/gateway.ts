@@ -1,6 +1,8 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type AnswerRequest,
+  AskedQuestionViewSchema,
+  type Question,
   type CompactAtPatch,
   CompactAtPatchResultSchema,
   type FerretCompactAt,
@@ -20,6 +22,7 @@ const ROUTES = {
   send: 'POST /v1/ferrets/:ferretId/send',
   sendStatus: 'GET /v1/ferrets/:ferretId/sends/:sendId',
   interrupt: 'POST /v1/ferrets/:ferretId/interrupt',
+  question: 'GET /v1/ferrets/:ferretId/question',
   answer: 'POST /v1/ferrets/:ferretId/answer',
   compactAt: 'GET /v1/ferrets/:ferretId/compact-at',
   setCompactAt: 'PATCH /v1/ferrets/:ferretId/compact-at',
@@ -62,6 +65,10 @@ export class ClientConversationGateway implements SendGateway, AnswerGateway, Co
     options: { readonly peer: string; readonly until?: string; readonly condition: string },
   ): Promise<void> {
     await this.client.call(ROUTES.signal, { ...at(caller), body: { kind: 'waiting', ...options } });
+  }
+
+  async question(ferret: string): Promise<Question | undefined> {
+    return AskedQuestionViewSchema.parse(await this.client.call(ROUTES.question, at(ferret))).question ?? undefined;
   }
 
   async answer(ferret: string, request: AnswerRequest): Promise<void> {

@@ -1,8 +1,10 @@
-import type { AnswerRequest } from '../../../contract/index.ts';
+import type { AnswerRequest, Question } from '../../../contract/index.ts';
 import type { ConversationOutput } from '../send/ports.ts';
 import { type AnswerFlags, planAnswer } from './plan.ts';
 
 export interface AnswerGateway {
+  /** The question the ferret is waiting on, or none. */
+  question(ferret: string): Promise<Question | undefined>;
   answer(ferret: string, request: AnswerRequest): Promise<void>;
   interrupt(ferret: string): Promise<void>;
 }
@@ -19,7 +21,7 @@ export class AnswerQuestionController {
   ) {}
 
   async execute(ferret: string, flags: AnswerCommandFlags): Promise<void> {
-    const plan = planAnswer(flags);
+    const plan = planAnswer(flags, await this.gateway.question(ferret));
     await this.gateway.answer(ferret, {
       toolUseId: plan.toolUseId,
       labels: plan.labels,

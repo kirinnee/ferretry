@@ -78,13 +78,17 @@ describe('conversation wire schemas', () => {
   });
   test('keeping a conversation twice in one request, or starting too many, is refused', () => {
     const one = { id: 'c1', start: false };
+    const copy = { id: 'c2', start: false, copy: true };
+    expect(KeepRequestSchema.safeParse({ harness: 'claude-code', runtime: 'r', conversations: [copy] }).success).toBe(
+      true,
+    );
     expect(KeepRequestSchema.safeParse({ harness: 'claude-code', runtime: 'r', conversations: [one] }).success).toBe(
       true,
     );
     expect(
       KeepRequestSchema.safeParse({ harness: 'claude-code', runtime: 'r', conversations: [one, one] }).success,
     ).toBe(false);
-    const six = Array.from({ length: 6 }, (_, n) => ({ id: `c${n}`, start: true }));
+    const six = Array.from({ length: 11 }, (_, n) => ({ id: `c${n}`, start: true }));
     expect(KeepRequestSchema.safeParse({ harness: 'claude-code', runtime: 'r', conversations: six }).success).toBe(
       false,
     );
