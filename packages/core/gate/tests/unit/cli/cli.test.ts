@@ -93,21 +93,27 @@ describe('fy daemon security', () => {
 describe('fy daemon config', () => {
   const grantView = (fleetUse: boolean) => ({
     capabilities: [
-      { capability: 'fleet', configure: true, granted: { use: fleetUse, configure: true }, configureRefusal: 'granted', origin: 'default' },
+      {
+        capability: 'fleet',
+        configure: true,
+        granted: { use: fleetUse, configure: true },
+        configureRefusal: 'granted',
+        origin: 'default',
+      },
     ],
   });
 
-  test('V-0226 V-0228 V-0230 ls reads GET /v1/grants and names the origin of each value', async () => {
+  test('V-0226 V-0230 ls reads GET /v1/grants and names the origin of each value', async () => {
     const { verbs, calls, out } = run(grantView(true));
-    expect(await verbs['daemon config list']({ args: [], options: {} })).toBe(0);
+    expect(await verbs['daemon config ls']({ args: [], options: {} })).toBe(0);
     expect(calls[0]?.route).toBe('GET /v1/grants');
     expect(out[0]).toContain('This command line is ungoverned.');
     expect(out[0]).toContain('fleet  use=on   configure=on   (default)');
   });
 
-  test('V-0227 V-0229 history reads GET /v1/grants/audit and says damage out loud', async () => {
+  test('V-0227 history reads GET /v1/grants/audit and says damage out loud', async () => {
     const { verbs, calls, out } = run({ entries: [], unreadable: 1, truncated: false });
-    expect(await verbs['daemon config log']({ args: [], options: {} })).toBe(0);
+    expect(await verbs['daemon config history']({ args: [], options: {} })).toBe(0);
     expect(calls[0]?.route).toBe('GET /v1/grants/audit');
     expect(out[0]).toContain('no grant has been changed on this machine');
     expect(out[0]).toContain('1 line in this window could not be read');
@@ -121,5 +127,16 @@ describe('fy daemon config', () => {
     expect(await verbs['daemon config set <capability>']({ args: ['fleet'], options: { use: false } })).toBe(0);
     expect(calls.map(call => call.route)).toEqual(['GET /v1/grants', 'PATCH /v1/grants']);
     expect(calls[1]?.init).toEqual({ body: { fleet: { use: false } } });
+  });
+});
+
+describe('removed aliases', () => {
+  test('V-0228 V-0229 daemon config list and log are not verbs (removed by design: no aliases)', () => {
+    const declared = (manifest.actions.cli ?? []).map(declared => declared.verb as string);
+    expect(declared).not.toContain('daemon config list');
+    expect(declared).not.toContain('daemon config log');
+    const { verbs } = run({});
+    expect(Object.keys(verbs)).not.toContain('daemon config list');
+    expect(Object.keys(verbs)).not.toContain('daemon config log');
   });
 });

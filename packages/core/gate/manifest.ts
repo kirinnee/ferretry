@@ -47,7 +47,13 @@ export const AuditKeptRotatedFile = defineState({
 });
 
 /** `state/gate/grant-audit.jsonl` (F-0251): who changed a daemon-wide grant, when. Parsed by the daemon half. */
-export const GrantAuditFile = defineState({ name: 'grant-audit', path: 'grant-audit.jsonl', store: 'jsonl', format: 1, mode: 0o600 });
+export const GrantAuditFile = defineState({
+  name: 'grant-audit',
+  path: 'grant-audit.jsonl',
+  store: 'jsonl',
+  format: 1,
+  mode: 0o600,
+});
 
 /**
  * Gate (§2.2): checks every call before it runs. Core; cannot be turned off. It provides the kernel-bound admission,
@@ -128,9 +134,7 @@ export default definePlugin({
     cli: [
       verb('daemon config', { summary: 'read and change what a caller NOT on this host may do' }),
       verb('daemon config ls', { summary: 'show every capability, both axes, and where each value came from' }),
-      verb('daemon config list', { summary: 'the same as daemon config ls' }),
       verb('daemon config history', { summary: 'who changed a grant on this machine, and when' }),
-      verb('daemon config log', { summary: 'who changed a grant on this machine, and when' }),
       verb('daemon config set <capability>', { summary: 'grant or revoke one capability, by axis' }),
       verb('daemon audit', {
         summary: 'show the audit: who was paired, removed or refused, and what was done, newest first',

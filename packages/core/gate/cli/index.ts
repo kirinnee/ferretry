@@ -59,7 +59,9 @@ export function parseSkip(raw: string | undefined): number | undefined {
 export function parseSettingValue(field: SecuritySettingField, value: string): SecuritySettingsPatch | string {
   if (isSecuritySwitch(field)) {
     const word = SWITCH_WORDS[value.trim().toLowerCase()];
-    return word === undefined ? `${field} takes on, off, true or false, not ${JSON.stringify(value)}` : { [field]: word };
+    return word === undefined
+      ? `${field} takes on, off, true or false, not ${JSON.stringify(value)}`
+      : { [field]: word };
   }
   if (!/^[+-]?\d+$/u.test(value.trim())) return `${field} takes a whole number, not ${JSON.stringify(value)}`;
   return { [field]: Number.parseInt(value, 10) };
@@ -103,9 +105,7 @@ export default implementCli(manifest, {
       verbs: {
         'daemon config': grants,
         'daemon config ls': grants,
-        'daemon config list': grants,
         'daemon config history': history,
-        'daemon config log': history,
         'daemon config set <capability>': async invocation => {
           const [capability] = invocation.args;
           const target = CAPABILITY_NAMES.find(candidate => candidate === capability);
@@ -117,10 +117,15 @@ export default implementCli(manifest, {
           const use = axisOf(invocation, 'use');
           const configure = axisOf(invocation, 'configure');
           if (use === undefined && configure === undefined)
-            return fail(io, 'nothing to change: name at least one axis, as `--use`/`--no-use` or `--configure`/`--no-configure`');
+            return fail(
+              io,
+              'nothing to change: name at least one axis, as `--use`/`--no-use` or `--configure`/`--no-configure`',
+            );
           const before = await client.call<GrantsReport>('GET /v1/grants');
           const after = await client.call<GrantsReport>('PATCH /v1/grants', {
-            body: { [target]: { ...(use === undefined ? {} : { use }), ...(configure === undefined ? {} : { configure }) } },
+            body: {
+              [target]: { ...(use === undefined ? {} : { use }), ...(configure === undefined ? {} : { configure }) },
+            },
           });
           io.out(renderGrantChange(grantDifference(before, after), CLIENT_NAME));
           return 0;
@@ -128,7 +133,10 @@ export default implementCli(manifest, {
         'daemon audit': async invocation => {
           const limit = parseLimit(text(invocation, 'limit'));
           if (limit === undefined)
-            return fail(io, `--limit must be a whole number of 1 or more; the most that can be shown is ${String(AUDIT_MAX_LIMIT)}`);
+            return fail(
+              io,
+              `--limit must be a whole number of 1 or more; the most that can be shown is ${String(AUDIT_MAX_LIMIT)}`,
+            );
           const keptOffset = parseSkip(text(invocation, 'kept-skip'));
           if (keptOffset === undefined) return fail(io, '--kept-skip must be a whole number of 0 or more');
           const view = await client.call<AuditView>('GET /v1/audit', {
@@ -147,7 +155,8 @@ export default implementCli(manifest, {
               io,
               `${JSON.stringify(field ?? '')} is not a security setting; expected one of ${SECURITY_SETTING_FIELDS.join(', ')}`,
             );
-          if (value === undefined) return fail(io, `say the value: ${CLIENT_NAME} daemon security set ${target} <value>`);
+          if (value === undefined)
+            return fail(io, `say the value: ${CLIENT_NAME} daemon security set ${target} <value>`);
           const patch = parseSettingValue(target, value);
           if (typeof patch === 'string') return fail(io, patch);
           const change = await client.call<{ readonly view: SecuritySettingsView; readonly devicesExpiring: number }>(
