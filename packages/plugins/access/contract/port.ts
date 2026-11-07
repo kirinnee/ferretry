@@ -4,10 +4,9 @@
  */
 import { defineEvent, definePort } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { type Buzz, type PairedDevice, PairedDeviceIdSchema } from './wire.ts';
-
-/** The WebAuthn algorithms a passkey may use (COSE ids): ES256 and RS256, as today. */
-export type PasskeyAlgorithmId = -7 | -257;
+import { type PairedDevice, PairedDeviceIdSchema } from './pairing.ts';
+import type { PasskeyAlgorithmId } from './step-up.ts';
+import type { Buzz } from './wire.ts';
 
 /** A verifier's answer: the facts it proved, or why it refused. Never throws for a bad ceremony. */
 export type PasskeyVerdict<T> =

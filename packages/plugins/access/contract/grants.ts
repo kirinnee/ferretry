@@ -1,0 +1,181 @@
+/**
+ * The device-grant views (today's `protocol/src/lib/grants.ts`, the part Gate's contract does not already own). The
+ * capability names, axes, grant schemas, default sets and refusals are Gate's and imported from it.
+ */
+import { InstantSchema } from '@ferretry/std';
+import { z } from 'zod';
+import {
+  CAPABILITY_NAMES,
+  type CapabilityName,
+  CapabilityGrantSchema,
+  CapabilityNameSchema,
+  GrantRefusalSchema,
+} from '@ferretry/core-gate/contract';
+
+/** One capability as the UI is told about it. */
+export const CapabilityGrantViewSchema = z.strictObject({
+  capability: CapabilityNameSchema,
+  /** May this caller exercise the capability right now? */
+  use: z.boolean(),
+  /** May this caller change the capability's host behaviour right now — step-up included? */
+  configure: z.boolean(),
+  /** What the operator's document says, before a step-up is considered. */
+  granted: CapabilityGrantSchema,
+  /**
+   * What THIS device has been granted, when the caller is a governed paired device — absent for a
+   * caller on the host (ungoverned) and for a credential that is not a device (a remote warden).
+   * The effective answer is `granted` AND this, axis by axis.
+   */
+  deviceGranted: CapabilityGrantSchema.optional(),
+  /** Why `use` reads the way it does. */
+  useRefusal: GrantRefusalSchema,
+  /** Why `configure` reads the way it does. */
+  configureRefusal: GrantRefusalSchema,
+  /**
+   * May THIS caller turn this capability on?
+   *
+   * `false` for every remote caller, always — widening is a local act and no step-up buys it. It is
+   * on the wire so a UI is TOLD rather than left to infer it from a rule it would have to encode a
+   * second time, and so an off capability can render as "only from the machine" instead of a dead
+   * toggle that fails when somebody presses it. It equals `hostLocal`.
+   *
+   * It is also the warning a remote caller needs BEFORE switching something off: this is a one-way
+   * door, and the moment to say so is before it closes.
+   */
+  mayGrant: z.boolean(),
+  /**
+   * Whether the operator wrote this capability down, or the product answered for them.
+   *
+   * THE SAME PROVENANCE TREATMENT `--print-config` GIVES EVERY OTHER VALUE, and for the same reason:
+   * a person reading a permission report is usually asking why something is refused, and "which of
+   * these did I choose and which did something choose for me" is the question. An operator may write
+   * a value identical to the default, so this cannot be derived by comparison — it is what the
+   * document actually holds.
+   */
+  origin: z.enum(['default', 'config file']),
+});
+export type CapabilityGrantView = z.infer<typeof CapabilityGrantViewSchema>;
+
+/**
+ * The whole picture, as one read.
+ *
+ * ONE call rather than a probe per control, because a UI that discovers its limits by watching calls
+ * fail cannot explain anything before the person clicks — and explaining before the click is the
+ * entire requirement.
+ */
+export const GrantsViewSchema = z.strictObject({
+  capabilities: z.array(CapabilityGrantViewSchema).readonly(),
+  /**
+   * Whether the operator's grants GOVERN this caller at all.
+   *
+   * The inverse of `hostLocal` today: the owner at the machine (the admin token over loopback) is
+   * ungoverned and every other caller, a browser on the host included, is governed. Both fields stay on the wire because they answer different
+   * questions — "do the grants apply to me" and "am I at the machine" — and a screen should read the
+   * one it means rather than a rule it would have to restate.
+   *
+   * SERVED RATHER THAN INFERRED, because the browser cannot work it out and the two ways it would try
+   * are both wrong. A page loaded from a loopback address can be reaching this daemon through the relay,
+   * whose tunnel sets `loopback: false` unconditionally, so anything derived from a URL or a hostname
+   * would tell a remote phone it is standing at the machine — the exact inversion this whole layer
+   * exists to prevent. Nor can it be read off the refusals: an ungoverned caller sees `granted` on every
+   * axis, and so does a remote caller holding a step-up on a fully granted machine.
+   *
+   * It is what lets a UI say WHICH sentence is true — "you have this because you are at the machine",
+   * "you have this because you confirmed with your passkey", or "you have this because it was granted" —
+   * instead of picking one and being wrong for a real configuration.
+   */
+  governed: z.boolean(),
+  /**
+   * Whether this request ARRIVED on the machine the daemon runs on.
+   *
+   * THE LOCALITY FACT, ON ITS OWN. Widening is a local act and no step-up buys it, so this is what
+   * decides whether a switch can ever travel back — and it is what a screen reads to say "you are at
+   * this machine".
+   *
+   * It is the SAME carrier fact `PairedDevicesView.hostLocal` carries, spelled the same way, from one
+   * source: `ApiRequest.loopback`. Neither view re-derives it, and no header can move it.
+   */
+  hostLocal: z.boolean(),
+  /**
+   * Whether this caller's device holds a recent passkey step-up for this app session right now.
+   * Always `false` for a caller with no proven device; an ungoverned caller does not need one.
+   */
+  steppedUp: z.boolean(),
+});
+export type GrantsView = z.infer<typeof GrantsViewSchema>;
+
+/**
+ * How many recorded changes one read returns, newest first.
+ *
+ * BOUNDED, because the journal is append-only and a machine that has been reconfigured for a year
+ * would otherwise be asked to materialise its whole history to answer "what changed recently". The
+ * question people actually have is the last few, and a person who needs more can read the file.
+ */
+export const GRANT_AUDIT_MAX_ENTRIES = 50 as const;
+
+/** One recorded grant change, as a reader is told about it. */
+export const GrantAuditEntryViewSchema = z.strictObject({
+  at: InstantSchema,
+  /**
+   * WHO, as the resolved actor — `admin-cli`, `admin-ui`, `device:<id>`. Never a token: a durable
+   * record of who did something must not become a durable record of the credential they did it with.
+   */
+  actor: z.string().min(1).max(256),
+  /**
+   * Each axis that moved, as `capability.axis=on|off` for the daemon-wide document, or
+   * `<deviceId>/capability.axis=on|off` for one device's own grant. Empty is impossible — a patch that
+   * changed nothing is not recorded.
+   */
+  changes: z.array(z.string().min(1).max(96)).readonly(),
+});
+export type GrantAuditEntryView = z.infer<typeof GrantAuditEntryViewSchema>;
+
+/**
+ * The recent history of who changed what.
+ *
+ * `unreadable` IS NOT DECORATION. A journal line this daemon cannot parse is damage, and silently
+ * dropping it would let a tampered or truncated history read as a clean one — the exact
+ * absent-evidence-as-benign-result defect the rest of this contract is built to refuse. The count
+ * travels with the entries so a reader is told their history is incomplete rather than shown a
+ * shorter one.
+ */
+export const GrantAuditViewSchema = z.strictObject({
+  entries: z.array(GrantAuditEntryViewSchema).readonly(),
+  /** Lines in the window that could not be read as a record. Non-zero means the history is damaged. */
+  unreadable: z.number().int().nonnegative(),
+  /** Whether older records exist outside the window this read covered. */
+  truncated: z.boolean(),
+});
+export type GrantAuditView = z.infer<typeof GrantAuditViewSchema>;
+
+/**
+ * A change to the grants themselves.
+ *
+ * PARTIAL, so a UI may change one answer without restating four it did not look at — restating them
+ * is how a stale tab silently reverts a decision made in another one.
+ *
+ * Changing capability X's grant is itself a `configure` act ON X, so a governed caller must hold the
+ * `configure` axis for every capability the patch names. That is what keeps the configure axis
+ * meaningful for capabilities whose own settings do not yet have a route: an operator who says the UI
+ * may not configure `terminal` is also saying the UI may not re-grant itself `terminal`.
+ *
+ * WIDENING IS HOST-ONLY; A GOVERNED CALLER MAY ONLY NARROW. Turning an axis ON is the one change that
+ * gives a remote browser more than it had, so only a caller on the host may make it. A governed caller
+ * may turn axes OFF, and because that is a `configure` act it needs the same passkey step-up as any
+ * other configure demand — one touch on the device already in hand, never a host-side change.
+ */
+export const GrantsPatchSchema = z
+  .strictObject(
+    Object.fromEntries(
+      CAPABILITY_NAMES.map(capability => [
+        capability,
+        z.strictObject({ use: z.boolean().optional(), configure: z.boolean().optional() }).optional(),
+      ]),
+    ) as {
+      readonly [K in CapabilityName]: z.ZodOptional<
+        z.ZodObject<{ use: z.ZodOptional<z.ZodBoolean>; configure: z.ZodOptional<z.ZodBoolean> }>
+      >;
+    },
+  )
+  .refine(patch => Object.values(patch).some(value => value !== undefined), 'a grant patch must change something');
+export type GrantsPatch = z.infer<typeof GrantsPatchSchema>;

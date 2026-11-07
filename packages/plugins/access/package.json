@@ -20,7 +20,8 @@
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ferretry/plugin-connections": "workspace:*"
   },
   "sideEffects": false
 }
