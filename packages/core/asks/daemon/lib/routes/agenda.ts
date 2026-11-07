@@ -37,6 +37,10 @@ import {
 } from '../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
 import { type AgendaGatePort, answerGate, refuseGateDismissal } from './agenda-gates.ts';
+import type { SourceAnswer } from './agenda-gates.ts';
+import type { AgendaMutation } from '../agenda/index.ts';
+
+type SourceAnswers = (answer: SourceAnswer) => Promise<AgendaMutation | undefined>;
 
 /**
  * The agenda board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -226,13 +230,29 @@ async function apply(
   config: AgendaConfigPort | undefined,
   gates: AgendaGatePort | undefined,
   context: Call,
+  sources?: SourceAnswers,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
+  const sourced =
+    request.action === 'resolve' && sources !== undefined
+      ? await sources({
+          sessionId,
+          id: request.id,
+          response: request.response,
+          note: request.note,
+          actor,
+          cardAsk: request.cardAsk,
+          askVersion: request.askVersion,
+          ...(context.credential?.tokenClass === 'device'
+            ? { holder: String(context.credential.principal.holder) }
+            : {}),
+        })
+      : undefined;
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
-    request.action === 'resolve' && request.response !== undefined && gates !== undefined
+    sourced === undefined && request.action === 'resolve' && request.response !== undefined && gates !== undefined
       ? await answerGate(gates, context, {
           sessionId,
           id: request.id,
@@ -264,59 +284,61 @@ async function apply(
         })
       : undefined;
   if (confirmed?.proceed === false) return confirmed.response;
-  const mutation = await (gated !== undefined
-    ? gated
-    : request.action === 'add'
-      ? agenda.raise(sessionId, await raiseRequestOf(request, config), actor)
-      : request.action === 'edit'
-        ? agenda.edit(sessionId, request.id, editPatch(request), actor, request.now === true)
-        : request.action === 'progress'
-          ? agenda.progress(sessionId, request.id, request.step, request.done, actor)
-          : request.action === 'needs-info'
-            ? agenda.needsInfo(sessionId, request.id, actor, request.note)
-            : request.action === 'discuss'
-              ? agenda.discuss(sessionId, request.id, actor, request.note)
-              : request.action === 'surface'
-                ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
-                : request.action === 'rest'
-                  ? agenda.rest(sessionId, request.id, request.why, actor)
-                  : request.action === 'log'
-                    ? agenda.log(sessionId, request.id, request.mode, request.text, actor, request.messageId)
-                    : request.action === 'merge'
-                      ? agenda.merge(sessionId, request.id, request.from, actor)
-                      : request.action === 'split'
-                        ? agenda.split(
-                            sessionId,
-                            request.id,
-                            { source: 'agent-raised', sourceRef: null, ...request.item },
-                            actor,
-                            request.moveCards,
-                          )
-                        : request.action === 'snooze'
-                          ? agenda.snooze(sessionId, request.id, request.until, actor)
-                          : request.action === 'unsnooze'
-                            ? agenda.unsnooze(sessionId, request.id, actor)
-                            : request.action === 'dismiss'
-                              ? agenda.dismiss(sessionId, request.id, actor, request.note, request.askVersion)
-                              : request.response === undefined
-                                ? agenda.resolve(
-                                    sessionId,
-                                    request.id,
-                                    actor,
-                                    request.note,
-                                    'board',
-                                    request.askVersion,
-                                  )
-                                : agenda.answer(
-                                    sessionId,
-                                    request.id,
-                                    request.response,
-                                    actor,
-                                    confirmed?.note ?? request.note,
-                                    'board',
-                                    undefined,
-                                    request.askVersion,
-                                  ));
+  const mutation = await (sourced !== undefined
+    ? sourced
+    : gated !== undefined
+      ? gated
+      : request.action === 'add'
+        ? agenda.raise(sessionId, await raiseRequestOf(request, config), actor)
+        : request.action === 'edit'
+          ? agenda.edit(sessionId, request.id, editPatch(request), actor, request.now === true)
+          : request.action === 'progress'
+            ? agenda.progress(sessionId, request.id, request.step, request.done, actor)
+            : request.action === 'needs-info'
+              ? agenda.needsInfo(sessionId, request.id, actor, request.note)
+              : request.action === 'discuss'
+                ? agenda.discuss(sessionId, request.id, actor, request.note)
+                : request.action === 'surface'
+                  ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
+                  : request.action === 'rest'
+                    ? agenda.rest(sessionId, request.id, request.why, actor)
+                    : request.action === 'log'
+                      ? agenda.log(sessionId, request.id, request.mode, request.text, actor, request.messageId)
+                      : request.action === 'merge'
+                        ? agenda.merge(sessionId, request.id, request.from, actor)
+                        : request.action === 'split'
+                          ? agenda.split(
+                              sessionId,
+                              request.id,
+                              { source: 'agent-raised', sourceRef: null, ...request.item },
+                              actor,
+                              request.moveCards,
+                            )
+                          : request.action === 'snooze'
+                            ? agenda.snooze(sessionId, request.id, request.until, actor)
+                            : request.action === 'unsnooze'
+                              ? agenda.unsnooze(sessionId, request.id, actor)
+                              : request.action === 'dismiss'
+                                ? agenda.dismiss(sessionId, request.id, actor, request.note, request.askVersion)
+                                : request.response === undefined
+                                  ? agenda.resolve(
+                                      sessionId,
+                                      request.id,
+                                      actor,
+                                      request.note,
+                                      'board',
+                                      request.askVersion,
+                                    )
+                                  : agenda.answer(
+                                      sessionId,
+                                      request.id,
+                                      request.response,
+                                      actor,
+                                      confirmed?.note ?? request.note,
+                                      'board',
+                                      undefined,
+                                      request.askVersion,
+                                    ));
   if (!mutation.ok) return refusal(mutation.error);
   const written =
     mutation.change === 'created' ||
@@ -369,6 +391,7 @@ export function agendaRoutes(
   config?: AgendaConfigPort,
   /** The card asks an answer may move a card through; absent, a card ask is answered like any other choice. */
   gates?: AgendaGatePort,
+  sources?: SourceAnswers,
 ) {
   // Every ferret agenda route passes here, including future item reads. Refuse the reserved ledger before parsing
   // a body or cursor, consulting gates, delivering replies, or touching any service.
@@ -390,7 +413,7 @@ export function agendaRoutes(
     }),
     'GET /v1/ferrets/:ferretId/agenda': guarded(async call => await list(agenda, replies, call)),
     'POST /v1/ferrets/:ferretId/agenda': guarded(
-      async call => await apply(agenda, notifications, replies, config, gates, call),
+      async call => await apply(agenda, notifications, replies, config, gates, call, sources),
     ),
     'GET /v1/ferrets/:ferretId/agenda/:id/conversation': guarded(async call => {
       const query = AgendaConversationQuerySchema.safeParse({

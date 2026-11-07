@@ -33,7 +33,7 @@ const OBLIGATION_PREFIX = 'ask:';
 const obligationOf = (source: string, entry: string): string => `${OBLIGATION_PREFIX}${source}:${entry}`;
 
 /** The obligation an item carries, or `undefined` for an item raised outside the port (a ferret's own `fy agenda add`). */
-function parseObligation(sourceRef: string | null): { source: SourceKey; entry: EntryId } | undefined {
+export function parseObligation(sourceRef: string | null): { source: SourceKey; entry: EntryId } | undefined {
   if (sourceRef === null || !sourceRef.startsWith(OBLIGATION_PREFIX)) return undefined;
   const rest = sourceRef.slice(OBLIGATION_PREFIX.length);
   const at = rest.indexOf(':');
@@ -96,9 +96,9 @@ function effectOf(response: AgendaResponse | undefined, disposition: string): An
 
 /** An answer's own id, stable across reads: the digest of where it was recorded and when. */
 const answerIdOf = (ferret: string, item: ResolvedAgendaItem): AnswerId =>
-  `an_${createHash('sha256').update(`${ferret}~${item.id}~${item.resolvedAt}`).digest('hex').slice(0, 24)}` as AnswerId;
+  `an_${(item.answerReceipt ?? createHash('sha256').update(`${ferret}~${item.id}~${item.resolvedAt}`).digest('hex')).slice(0, 24)}` as AnswerId;
 
-function answerOf(ferret: string, item: ResolvedAgendaItem): AskAnswer | undefined {
+export function answerOf(ferret: string, item: ResolvedAgendaItem): AskAnswer | undefined {
   const obligation = parseObligation(item.sourceRef);
   if (obligation === undefined || item.resolvedBy !== 'human') return undefined;
   const response = item.response;

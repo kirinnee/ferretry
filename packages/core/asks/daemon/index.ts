@@ -22,6 +22,7 @@ import { AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts'
 import manifest from '../manifest.ts';
 import { askDelivery } from './adapters/ask-delivery.ts';
 import { asksPort } from './adapters/asks-port.ts';
+import { sourceAnswers } from './adapters/source-answers.ts';
 import { CARD_SOURCE, cardAskAnswers } from './adapters/card-ask-answers.ts';
 import { FileAgendaLedgerRepository } from './adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaOutboxRepository } from './adapters/agenda/file-agenda-outbox-repository.ts';
@@ -90,6 +91,7 @@ export default implementDaemon(manifest, {
           undefined,
           undefined,
           cardAskAnswers(agenda, () => sources(CARD_SOURCE), now),
+          sourceAnswers(agenda, sources, now),
         ),
         ...agendaClearRoutes(undefined),
       },

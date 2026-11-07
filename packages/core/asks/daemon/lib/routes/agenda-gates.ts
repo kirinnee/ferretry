@@ -73,6 +73,11 @@ export interface AgendaGatePort {
   isGate(sessionId: string, id: AgendaId): Promise<boolean>;
 }
 
+/** An answer to a source obligation, including a bare Done. */
+export type SourceAnswer = Omit<GateAnswer, 'response' | 'caller'> & {
+  readonly response?: GateAnswer['response'] | undefined;
+};
+
 const FLEET_USE = cap('fleet', 'use');
 
 const STATUS: Readonly<Record<GateRefusal['code'], readonly [number, string]>> = {

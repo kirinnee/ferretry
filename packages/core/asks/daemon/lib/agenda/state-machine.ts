@@ -279,6 +279,7 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      readonly receipt?: string;
       /** The ask this close was given from (a to-do's Done); refused `ask_changed` once the ask moved on. */
       readonly askVersion?: number;
       readonly at: string;
@@ -1371,7 +1372,7 @@ function addressById(
   // THE EXCEPTION IS AN INPUT CARD: the owner's field next to it may hold a password, and the app sends
   // whatever is in the composer with Resolve or Dismiss. Only the daemon's own status words are kept.
   const note = target.item.kind === 'input' && command.actor.kind !== 'daemon' ? null : (command.note ?? null);
-  const receipt = command.action === 'answer' ? command.receipt : undefined;
+  const receipt = command.action === 'answer' || command.action === 'resolve' ? command.receipt : undefined;
   const closed = addressed(
     ledger,
     target,

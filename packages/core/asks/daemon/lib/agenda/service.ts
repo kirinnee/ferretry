@@ -15,6 +15,7 @@ import { MACHINE_AGENDA_ID, MAX_AGENDA_TITLE_LENGTH } from '../protocol/agenda.t
 import { MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH } from '../protocol/agenda-versions.ts';
 import { formatTaskRef } from '../protocol/board-refs.ts';
 import type { CardAskOperation } from './card-asks.ts';
+import { KeyedSerialQueue } from './serial-queue.ts';
 import {
   isAncestorOf,
   isSubFerret,
@@ -217,6 +218,7 @@ const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined 
 const CLOSE_OFFERED_KINDS: ReadonlySet<AgendaKind> = new Set<AgendaKind>(['task', 'review']);
 
 export class AgendaService {
+  private readonly mutations = new KeyedSerialQueue();
   constructor(
     private readonly repository: AgendaLedgerRepository,
     private readonly clock: AgendaClock,
@@ -367,6 +369,37 @@ export class AgendaService {
       },
       via,
     );
+  }
+
+  /** Validate under the board's mutation queue, apply in the source, then commit the same answer and receipt. */
+  async answerAfter(
+    sessionId: string,
+    id: AgendaId,
+    response: AgendaResponse | undefined,
+    actor: AgendaActor,
+    note: string | undefined,
+    receipt: string,
+    askVersion: number | undefined,
+    before: () => Promise<void>,
+  ): Promise<AgendaMutation> {
+    return this.mutations.run(sessionId, async () => {
+      const denied = await this.authorize(sessionId, actor);
+      if (denied !== null) return { ok: false, error: denied };
+      const command = {
+        ...(response === undefined ? { action: 'resolve' as const } : { action: 'answer' as const, response }),
+        actor,
+        id,
+        note,
+        receipt,
+        at: this.clock.now(),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      };
+      const current = await this.read(sessionId);
+      const preview = applyAgendaCommandToSession(current, sessionId, command);
+      if (!preview.ok || !preview.changed) return preview;
+      await before();
+      return this.applyNow(sessionId, command);
+    });
   }
 
   /**
@@ -835,6 +868,14 @@ export class AgendaService {
   }
 
   private async apply(
+    sessionId: string,
+    asked: Parameters<typeof applyAgendaCommandToSession>[2],
+    via: AgendaVia = 'board',
+  ): Promise<AgendaMutation> {
+    return this.mutations.run(sessionId, () => this.applyNow(sessionId, asked, via));
+  }
+
+  private async applyNow(
     sessionId: string,
     asked: Parameters<typeof applyAgendaCommandToSession>[2],
     via: AgendaVia = 'board',
