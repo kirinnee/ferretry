@@ -1,0 +1,15 @@
+{
+  "name": "@ferretry/std",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Generic helpers with no Ferretry noun: results, brands, instants, durations, JSON",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "sideEffects": false
+}

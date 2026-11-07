@@ -1,0 +1,4 @@
+/** `@ferretry/kernel/manifest` — the plugin SDK: `definePlugin`, the builders, and the halves' shapes (§3.3). */
+export * from './builders.ts';
+export * from './implement.ts';
+export * from './types.ts';

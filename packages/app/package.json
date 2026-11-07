@@ -1,0 +1,12 @@
+{
+  "name": "@ferretry/app",
+  "version": "5.0.0",
+  "private": true,
+  "description": "The app shell: router, layout engine, slots, theme tokens, sealed session client, reference grammar. Holds no feature.",
+  "type": "module",
+  "dependencies": {
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

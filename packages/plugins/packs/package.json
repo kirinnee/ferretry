@@ -1,0 +1,25 @@
+{
+  "name": "@ferretry/plugin-packs",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Packs (plugins piece of Ferretry 5)",
+  "type": "module",
+  "ferretry": {
+    "id": "packs",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/testing": "./contract/testing/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "sideEffects": false
+}
