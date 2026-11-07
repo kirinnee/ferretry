@@ -353,9 +353,15 @@
       "name": "@ferretry/plugin-usage",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-conversation": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "should": "^13.2.3",
       },
     },
     "packages/plugins/voice": {
