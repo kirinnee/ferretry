@@ -53,6 +53,9 @@ const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
 const PERSON = { minimum: 'operator', caller: 'person', noStore: true } as const;
 /** The body can show a ferret's words, a transcript, a pane or a draft: built inside one `Redaction.read` (§7.3). */
 const SECRETS = { guard: 'secrets' } as const;
+const OWN_DRAFT = {
+  guard: { none: "the owner's own draft, person caller only, served raw as today: positional edits need the raw text" },
+} as const;
 const READ = { audit: { skip: 'read' } } as const;
 const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault text' } } as const;
 
@@ -182,11 +185,13 @@ export default definePlugin({
       route('GET /v1/renders/:id', { minimum: 'operator', caller: 'any', ...READ, ...SECRETS }),
 
       // ── shared drafts: owner-only, twice (`operator` and `person`) ────────────────────────────
-      route('GET /v1/ferrets/:ferretId/shared-draft', { ...PERSON, ...READ, ...SECRETS }),
+      // Served raw, as today: the owner's own words, and an edit is a run of positions in the stored text, so a mask
+      // of another width would move every offset after it (and the stream carries the same raw text).
+      route('GET /v1/ferrets/:ferretId/shared-draft', { ...PERSON, ...READ, ...OWN_DRAFT }),
       route('POST /v1/ferrets/:ferretId/shared-draft', {
         ...PERSON,
         audit: { record: DRAFT_EDITED_AUDIT },
-        ...SECRETS,
+        ...OWN_DRAFT,
       }),
 
       // ── links (§6.2; today's conversation-import and foreign-history) ─────────────────────────

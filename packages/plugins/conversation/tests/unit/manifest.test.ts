@@ -27,13 +27,17 @@ describe('conversation manifest', () => {
   test('a body that can show a transcript, pane or draft is built under the secrets guard', () => {
     const secrets = (path: string) =>
       [...routes, ...manifest.actions.sockets].filter(route => route.path === path).map(route => route.guard);
-    for (const path of [
-      '/v1/ferrets/:ferretId/messages',
-      '/v1/ferrets/:ferretId/logs',
-      '/v1/ferrets/:ferretId/shared-draft',
-    ])
+    for (const path of ['/v1/ferrets/:ferretId/messages', '/v1/ferrets/:ferretId/logs'])
       expect(secrets(path).every(guard => guard === 'secrets')).toBe(true);
     expect(secrets('/v1/ferrets/:ferretId/shared-draft/stream')).toEqual(['secrets']);
+  });
+  test("the shared draft's GET and POST are the owner's own draft, served raw: an edit's positions are the raw text's", () => {
+    const draft = routes.filter(route => route.path === '/v1/ferrets/:ferretId/shared-draft');
+    expect(draft.map(route => route.method).sort()).toEqual(['GET', 'POST']);
+    for (const route of draft) {
+      expect(route.caller).toBe('person');
+      expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });
+    }
   });
   test('takes the question source, sitrep lines, ferret.changed and ferret.stopping; offers message.before-send, turn.ended and search.sources', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([

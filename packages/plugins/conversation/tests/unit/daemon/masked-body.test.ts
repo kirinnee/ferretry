@@ -60,6 +60,65 @@ describe('maskedBody', () => {
   });
 });
 
+/**
+ * The real daemon half on a test host that knows {@link SECRET} as a secret. Every call is stamped as the owner's CLI
+ * (`admin-cli`), as Gate would: the test host's admission stamps no actor, and a draft is the owner's only.
+ */
+async function ownersConversation() {
+  const ferrets = new FakeFerrets();
+  const F1 = ferretId('f1');
+  ferrets.add({ id: F1 });
+  const implementation = {
+    ...daemon,
+    build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
+      const build = daemon.build;
+      if (build === undefined) throw new Error('the conversation daemon half has no build');
+      const half = build({ ...ctx, kernel: { ...ctx.kernel, state: memoryStatePort(CONVERSATION_STATE) } });
+      const routes = Object.fromEntries(
+        Object.entries(half.routes ?? {}).map(([key, handler]) => [
+          key,
+          (call: Parameters<typeof handler>[0]) => handler({ ...call, actor: 'admin-cli' } as typeof call),
+        ]),
+      );
+      return { ...half, routes } as typeof half;
+    },
+  } as typeof daemon;
+  return await testHost({
+    plugins: [implementation],
+    fakes: { ferrets, asks: new FakeAsks() },
+    clock: fixedClock('2026-11-07T09:00:00Z'),
+    secrets: [SECRET],
+  });
+}
+
+describe("the owner's shared draft is served raw, so its positional edits land where they were made", () => {
+  test('a draft holding a known secret reads back raw on GET and POST, and the next edit counts from the raw text', async () => {
+    const host = await ownersConversation();
+    type Snapshot = { generation: string; epoch: number; rev: number; text: string };
+    const empty = await host.request('GET', '/v1/ferrets/f1/shared-draft', { as: owner() });
+    expect(empty.status).toBe(200);
+    const start = empty.json<Snapshot>();
+    const typed = `pw ${SECRET}`;
+    const first = await host.request('POST', '/v1/ferrets/f1/shared-draft', {
+      as: owner(),
+      body: { generation: start.generation, epoch: start.epoch, base: start.rev, text: [typed] },
+    });
+    expect(first.status).toBe(200);
+    const afterFirst = first.json<{ snapshot: Snapshot }>().snapshot;
+    expect(afterFirst.text).toBe(typed);
+    // A composer seeded from GET counts its retain over the raw text; a masked GET would put " ok" somewhere else.
+    const seeded = (await host.request('GET', '/v1/ferrets/f1/shared-draft', { as: owner() })).json<Snapshot>();
+    expect(seeded.text).toBe(typed);
+    const second = await host.request('POST', '/v1/ferrets/f1/shared-draft', {
+      as: owner(),
+      body: { generation: seeded.generation, epoch: seeded.epoch, base: seeded.rev, text: [seeded.text.length, ' ok'] },
+    });
+    expect(second.status).toBe(200);
+    expect(second.json<{ snapshot: Snapshot }>().snapshot.text).toBe(`${typed} ok`);
+    await host.stop();
+  });
+});
+
 describe('the daemon masks its secrets-guarded answers', () => {
   test('an attachment named with a pasted secret is served masked, its bytes untouched', async () => {
     const ferrets = new FakeFerrets();
