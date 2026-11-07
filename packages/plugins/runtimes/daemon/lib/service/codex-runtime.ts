@@ -32,7 +32,7 @@
  * when it cannot reach it. The pane is left showing a JSON-RPC error and nothing else, so a session
  * that failed this way is told so in words: {@link CODEX_OFFLINE_LAUNCH_ERROR}.
  */
-import { wrapperNameOf } from '@ferretry/fleet';
+import { wrapperNameOf } from '../manifest.ts';
 
 /** The sentence a launch failure starts with when Codex could not reach the network while starting. */
 export const CODEX_OFFLINE_LAUNCH_ERROR = 'Codex needs a network connection to start';

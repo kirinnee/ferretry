@@ -11,70 +11,67 @@
  */
 import {
   type AccountModel,
-  applyFixedLayer,
-  COMPONENT_KIND_WORDS,
   type ComponentKind,
-  type Conflict,
-  componentPartialSupport,
-  componentScope,
-  describeConflict,
-  describePartialSupport,
-  describeScopeConflict,
-  type FixedEntry,
-  type FlatLayer,
-  fixedLayerFor,
-  flattenProfile,
-  freeName,
-  HARNESS_DISPLAY_NAMES,
-  type HarnessKind,
   type LayerReferenceText,
+  parseLayerReference,
+  resolveDefaultRuntime,
+  wouldIncludeItself,
+} from '../account/schema.ts';
+import { applyFixedLayer, type FixedEntry, fixedLayerFor } from '../account/fixed-layer.ts';
+import {
+  COMPONENT_KIND_WORDS,
+  componentScope,
+  describeScopeConflict,
   layersScope,
   layerWords,
-  loginModelCatalog,
-  looksSecret,
-  type ModelCatalogSources,
-  type PartialSupport,
   type ProfileScope,
-  parseLayerReference,
   profileScope,
-  type ResolvedProfile,
-  resolveDefaultRuntime,
-  resolveProfile,
-  SECRET_TOKEN_SOURCE,
-  runtimeDisable,
-  type BudgetHolds,
   runtimeHarness,
-  runtimeModels,
-  type SettingsObject,
+} from '../account/scope.ts';
+import {
+  type Conflict,
+  describeConflict,
+  type FlatLayer,
+  flattenProfile,
+  HARNESS_DISPLAY_NAMES,
+  type PartialSupport,
+  type ResolvedProfile,
+  resolveProfile,
   type SkippedLayer,
-  wouldIncludeItself,
-} from '@ferretry/fleet';
-import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/protocol';
-import type {
-  AutoResumeSummary,
-  FleetCatalogAct,
-  FleetCatalogFormat,
-  FleetComponentCatalog,
-  FleetComponentContent,
-  FleetComponentView,
-  FleetComponentDetail,
-  FleetCredentialStatusWord,
-  FleetEnvEntry,
-  FleetFixedLayerView,
-  FleetLayerConflict,
-  FleetLayeredProfileCatalog,
-  FleetMachineAuthority,
-  FleetMachineView,
-  FleetProfileDraftRequest,
-  FleetProfileDraftView,
-  FleetProfileScope,
-  FleetRuntimeCatalog,
-  FleetRuntimeModelSet,
-  FleetRuntimeModels,
-  FleetSettingsEntry,
-  FleetStackView,
-} from '@ferretry/protocol';
-import { claudeFastSupport } from '../session/harness/fast-mode.ts';
+} from '../account/layering.ts';
+import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
+import { freeName, looksSecret, SECRET_TOKEN_SOURCE } from '../account/import.ts';
+import { type HarnessKind } from '../manifest.ts';
+import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
+import { type SettingsObject } from '../settings.ts';
+import {
+  type AutoResumeSummary,
+  type CatalogAct,
+  type CatalogFormat,
+  type ComponentCatalog,
+  type ComponentContent,
+  type ComponentView,
+  type ComponentDetail,
+  type CredentialStatusWord,
+  type EnvEntry,
+  type FixedLayerView,
+  type LayerConflict,
+  type LayeredProfileCatalog,
+  type MachineAuthority,
+  type MachineView,
+  type ProfileDraftRequest,
+  type ProfileDraftView,
+  type ProfileScope as ProfileScopeView,
+  type RuntimeCatalog,
+  type RuntimeModelSet,
+  type RuntimeModels,
+  type SettingsEntry,
+  type StackView,
+} from '../../../contract/index.ts';
+import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
+import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';
+import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
+import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
 
@@ -161,7 +158,7 @@ export function editConsequence(usage: CatalogUsage): string | undefined {
 
 /** The facts a projection reads that the configuration does not hold. */
 export interface CatalogFacts {
-  readonly format: FleetCatalogFormat;
+  readonly format: CatalogFormat;
   readonly machineName: string;
   /** The command each harness resolves to on this machine, `undefined` when it is not installed. */
   readonly tools: Readonly<Record<HarnessKind, string | undefined>>;
@@ -182,7 +179,7 @@ export interface CatalogFacts {
   /** MCP commands this machine does not have (K6, E8). */
   readonly missingCommands?: ReadonlySet<string>;
   /** Each credential's status word, from the credentials surface's own reading. */
-  readonly credentialStatus?: Readonly<Record<string, FleetCredentialStatusWord>>;
+  readonly credentialStatus?: Readonly<Record<string, CredentialStatusWord>>;
   /** Whether the installed Claude accepts Auto mode (O4). Measured on the pinned version; nothing is launched to find out. */
   readonly acceptsAutoPermissionMode: boolean;
   /** The model catalogs and presets in effect (docs/model-catalog.md); absent, runtimes show their model set only. */
@@ -197,15 +194,11 @@ export interface CatalogFacts {
 
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
 
-const act = (reason: string | undefined): FleetCatalogAct =>
+const act = (reason: string | undefined): CatalogAct =>
   reason === undefined ? { available: true } : { available: false, reason };
 
 /** `GET /v1/fleet/machine`, with what the caller asking may do to it. */
-export function machineView(
-  model: AccountModel,
-  facts: CatalogFacts,
-  authority: FleetMachineAuthority,
-): FleetMachineView {
+export function machineView(model: AccountModel, facts: CatalogFacts, authority: MachineAuthority): MachineView {
   const runtimeCount = Object.keys(model.runtimes).length;
   return {
     name: facts.machineName,
@@ -225,7 +218,7 @@ export function machineView(
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];
       return {
-        harness,
+        harness: harnessKey(harness),
         label: HARNESS_DISPLAY_NAMES[harness],
         installed: command !== undefined,
         ...(command === undefined ? {} : { command }),
@@ -248,12 +241,12 @@ const KIND_GROUPS: readonly { readonly kind: ComponentKind; readonly label: stri
 ];
 
 /** One environment entry as it may travel: a value only when it is not a secret (K4). */
-const envEntries = (env: Readonly<Record<string, string>> | undefined): FleetEnvEntry[] =>
+const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry[] =>
   Object.entries(env ?? {})
     .toSorted(([left], [right]) => byName(left, right))
     .map(([name, value]) => (looksSecret(name, value) ? { name, hidden: true as const } : { name, value }));
 
-function componentDetail(kind: ComponentKind, component: Record<string, unknown>): FleetComponentDetail {
+function componentDetail(kind: ComponentKind, component: Record<string, unknown>): ComponentDetail {
   const env = component.env as Readonly<Record<string, string>> | undefined;
   const text = (key: string) => (typeof component[key] === 'string' ? { [key]: component[key] as string } : {});
   switch (kind) {
@@ -565,14 +558,14 @@ export function flattenSettings(settings: SettingsObject): readonly (readonly [s
 export const settingsValueText = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value);
 
-function settingsEntries(settings: SettingsObject): FleetSettingsEntry[] {
+function settingsEntries(settings: SettingsObject): SettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
     return looksSecret(key, text) ? { key, hidden: true as const } : { key, value: text };
   });
 }
 
-function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts): FleetComponentContent | undefined {
+function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts): ComponentContent | undefined {
   if (kind === 'settings') {
     const body = facts.settingsBodies?.[name];
     return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body) };
@@ -615,7 +608,7 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
 }
 
 /** `GET /v1/fleet/components`. */
-export function componentCatalog(model: AccountModel, facts: CatalogFacts): FleetComponentCatalog {
+export function componentCatalog(model: AccountModel, facts: CatalogFacts): ComponentCatalog {
   const partial = partialSupportOf(model, facts);
   return {
     format: facts.format,
@@ -635,12 +628,12 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             reference,
             kind: group.kind,
             name,
-            ...(harness === undefined ? {} : { harness }),
-            scope: componentScope(group.kind, component),
+            ...(harness === undefined ? {} : { harness: harnessKey(harness) }),
+            scope: scopeKey(componentScope(group.kind, component)),
             detail: componentDetail(group.kind, component),
             partial: partial
               .filter(entry => entry.reference === reference)
-              .map(entry => ({ harness: entry.harness, reason: describePartialSupport(entry) })),
+              .map(entry => ({ harness: harnessKey(entry.harness), reason: describePartialSupport(entry) })),
             warnings: missing ? [`Command not found: ${command as string}`] : [],
             usedBy: { profiles: usage.profiles, runtimes: usage.runtimes },
             editNote: editConsequence(usage) ?? 'Nothing uses it yet.',
@@ -655,7 +648,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             ...(typeof component.clonedFromDaemon === 'string' ? { clonedFromDaemon: component.clonedFromDaemon } : {}),
             ...(component.installedFrom === undefined
               ? {}
-              : { installedFrom: component.installedFrom as FleetComponentView['installedFrom'] }),
+              : { installedFrom: component.installedFrom as ComponentView['installedFrom'] }),
           };
         }),
     })),
@@ -697,9 +690,9 @@ function unavailableReason(resolved: ResolvedProfile): string | undefined {
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
-function conflictView(conflict: Conflict): FleetLayerConflict {
+function conflictView(conflict: Conflict): LayerConflict {
   return {
-    harness: conflict.harness,
+    harness: harnessKey(conflict.harness),
     field: conflict.field,
     key: conflict.key,
     sentence: describeConflict(conflict),
@@ -726,10 +719,10 @@ function resolvedFor(
   return result.ok ? result.resolved : undefined;
 }
 
-function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind): FleetStackView {
+function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind): StackView {
   if (resolved === undefined) {
     return {
-      harness,
+      harness: harnessKey(harness),
       available: { available: false, reason: 'This profile cannot be read.' },
       applied: [],
       skipped: [],
@@ -738,7 +731,7 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
     };
   }
   return {
-    harness,
+    harness: harnessKey(harness),
     available: act(unavailableReason(resolved)),
     applied: resolved.applied.map(layer => layer.reference),
     skipped: resolved.skipped.map(skip => ({
@@ -751,11 +744,13 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
 }
 
 /** A profile's derived scope as the wire carries it: a mixed one as the sentence naming its layers. */
-const scopeView = (scope: ProfileScope, name: string | undefined): FleetProfileScope =>
-  scope.kind === 'mixed' ? { kind: 'mixed', sentence: describeScopeConflict(scope, name) } : scope;
+const scopeView = (scope: ProfileScope, name: string | undefined): ProfileScopeView =>
+  scope.kind === 'mixed'
+    ? { kind: 'mixed', sentence: describeScopeConflict(scope, name) }
+    : { kind: 'scoped', scope: scopeKey(scope.scope) };
 
 /** `GET /v1/fleet/profiles`. */
-export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetLayeredProfileCatalog {
+export function profileCatalog(model: AccountModel, facts: CatalogFacts): LayeredProfileCatalog {
   const partial = partialSupportOf(model, facts);
   return {
     format: facts.format,
@@ -783,7 +778,7 @@ export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetL
   };
 }
 
-function modelSetView(resolved: ResolvedProfile | undefined): FleetRuntimeModelSet {
+function modelSetView(resolved: ResolvedProfile | undefined): RuntimeModelSet {
   const set = resolved?.modelSet;
   if (set === undefined || set.source === 'harness-default') return { source: 'harness-default' };
   return {
@@ -801,7 +796,7 @@ function modelsView(
   harness: HarnessKind,
   credential: AccountModel['credentials'][string],
   sources: ModelCatalogSources | undefined,
-): { readonly models?: FleetRuntimeModels } {
+): { readonly models?: RuntimeModels } {
   if (sources === undefined) return {};
   const derived = runtimeModels({
     harness,
@@ -847,7 +842,7 @@ function fixedLayerView(
   harness: HarnessKind,
   resolved: ResolvedProfile | undefined,
   facts: CatalogFacts,
-): { readonly view?: FleetFixedLayerView; readonly refusal?: string } {
+): { readonly view?: FixedLayerView; readonly refusal?: string } {
   const result =
     harness === 'claude'
       ? fixedLayerFor({
@@ -896,7 +891,7 @@ function fixedLayerView(
 }
 
 /** `GET /v1/fleet/runtimes`. */
-export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetRuntimeCatalog {
+export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): RuntimeCatalog {
   const partial = partialSupportOf(model, facts);
   return {
     format: facts.format,
@@ -933,7 +928,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
             name,
             // The wrapper is named after the runtime (`<bin>/<name>`), and `fy start --agent` takes that name.
             wrapper: name,
-            harness,
+            harness: harnessKey(harness),
             credential: {
               id: runtime.credential,
               store: credential.store,
@@ -1016,9 +1011,9 @@ const DRAFT_NAME = 'draft';
  */
 export function profileDraftView(
   model: AccountModel,
-  request: FleetProfileDraftRequest,
+  request: ProfileDraftRequest,
   facts: CatalogFacts,
-): FleetProfileDraftView {
+): ProfileDraftView {
   const name = request.editing ?? freeName(DRAFT_NAME, candidate => model.profiles[candidate] !== undefined);
   const draft = {
     ...model,

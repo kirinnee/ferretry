@@ -7,8 +7,7 @@
  *
  * The machine, components, profile and runtime reads answer the configuration IN EFFECT — the
  * configuration files, each at its last good version (docs/config-files.md) — and no configuration at
- * all as an empty model. A retired single-file `fleet/config.yaml` is refused as unreadable, with the
- * sentence saying how to set the machine up again — never converted, never touched. Nothing is launched and no provider is called; the only facts outside the configuration
+ * all as an empty model. Nothing is launched and no provider is called; the only facts outside the configuration
  * are the component files it names, the harness commands this daemon's one rule resolves, and the
  * credential statuses the credentials surface already knows.
  *
@@ -30,57 +29,45 @@
  * live passkey step-up. The order is: read the change, consume synchronously, check it is still current,
  * then act — restoring it only while it is certain nothing was attempted.
  */
+import { type AccountModel } from '../account/schema.ts';
+import { type ClaudeStatuslineCommand, skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
+import { EMPTY_RUNTIME_IDS, type RuntimeIds, renameRuntimeId } from '../account/ids.ts';
 import {
-  type AccountModel,
-  type ClaudeStatuslineCommand,
-  EMPTY_RUNTIME_IDS,
-  expandAssetPath,
   FleetApplyFailureError,
   type FleetApplyPreview,
   type FleetDocumentWrite,
   type FleetLayout,
   type FleetModelApplyPlan,
   type FleetProvisioner,
-  type HarnessKind,
-  joinPath,
-  type MaterialiseBodies,
-  type ModelCatalogSources,
-  materialiseFleet,
-  nextDisableExpiry,
-  type BudgetHolds,
-  type ProviderPreset,
-  parseSettings,
-  type RuntimeIds,
-  type RuntimeRename,
-  renameRuntimeId,
-  type SettingsObject,
-  skillFrontmatterKeys,
-  skillSourceReference,
-} from '@ferretry/fleet';
-import type {
-  AutoResumeSummary,
-  FleetAccountChange,
-  FleetAccountChangeOutcome,
-  FleetAccountChangePreview,
-  FleetAccountChangeView,
-  FleetAgentControl,
-  FleetCatalogInstallChange,
-  FleetCatalogFormat,
-  FleetCatalogRefusalCode,
-  FleetComponentCatalog,
-  FleetCredentialList,
-  FleetLayeredProfileCatalog,
-  FleetMachineAuthority,
-  FleetMachineView,
-  FleetProfileDraftRequest,
-  FleetProfileDraftView,
-  FleetRunningSession,
-  FleetRuntimeCatalog,
-  SessionStatus,
-} from '@ferretry/protocol';
-import { FleetCatalogInstallChangeSchema } from '@ferretry/protocol';
-import type { CallerGovernance, CapabilityPresentation } from '../api/capability.ts';
-import { ApiError } from '../api/error.ts';
+} from '../provisioning.ts';
+import { type HarnessKind } from '../manifest.ts';
+import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
+import { nextDisableExpiry } from '../account/disabled.ts';
+import { type BudgetHolds } from '../account/disabled-runtime.ts';
+import { type ProviderPreset } from '../presets/schema.ts';
+import { parseSettings, type SettingsObject } from '../settings.ts';
+import {
+  type AccountChange,
+  type AutoResumeSummary,
+  type AccountChangeOutcome,
+  type AccountChangePreview,
+  type AccountChangeView,
+  type AgentControl,
+  type CatalogInstallChange,
+  type CatalogFormat,
+  type CatalogRefusalCode,
+  type ComponentCatalog,
+  type LayeredProfileCatalog,
+  type MachineAuthority,
+  type MachineView,
+  type ProfileDraftRequest,
+  type ProfileDraftView,
+  type RunningSession,
+  type RuntimeCatalog,
+  CatalogInstallChangeSchema,
+} from '../../../contract/index.ts';
+import { cap, type CallerGovernance, type CapabilityPresentation } from '@ferretry/core-gate/contract';
+import { ApiError } from '@ferretry/kernel/contract';
 import {
   type CatalogFacts,
   componentCatalog,
@@ -91,7 +78,16 @@ import {
   runtimeCatalog,
   runtimesUsingCredential,
 } from './catalog.ts';
-import { FleetCredentialRefusal, type FleetCredentialSignOutOutcome } from './credentials-service.ts';
+import { type RuntimeRename, type SessionStatus } from './foreign.ts';
+import { expandAssetPath, joinPath } from '../paths.ts';
+import { type ModelCatalogSources } from '../models/catalog.ts';
+import {
+  type LoginList,
+  LoginRefusal,
+  type LoginsReader,
+  type LoginSignOutOutcome,
+  type RuntimeConfigWriter,
+} from './ports.ts';
 import {
   type AccountChangeFacts,
   type AccountComponentFile,
@@ -114,7 +110,7 @@ import { applyFailureSummary, applyResultSummary, operationSummary, skippedWithi
 /** Every refusal this surface answers with, so a client branches on cause rather than on prose. */
 export class FleetCatalogRefusal extends Error {
   constructor(
-    readonly code: FleetCatalogRefusalCode,
+    readonly code: CatalogRefusalCode,
     message: string,
   ) {
     super(message);
@@ -136,7 +132,7 @@ export class FleetCatalogFreshStepUpRequired extends Error {
   }
 }
 
-const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = [
+const AGENT_CONTROL_KINDS: readonly (keyof AgentControl)[] = [
   'terminals',
   'browsers',
   'files',
@@ -146,7 +142,7 @@ const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = [
 
 /** Whether `next` turns ON a kind `current` did not already allow — the half of a write that ever
  *  needs a fresh passkey. Unchanged values, a narrowed kind and a kind left out never count. */
-function agentControlWidened(current: FleetAgentControl, next: Partial<FleetAgentControl>): boolean {
+function agentControlWidened(current: AgentControl, next: Partial<AgentControl>): boolean {
   return AGENT_CONTROL_KINDS.some(kind => !current[kind] && next[kind] === true);
 }
 
@@ -163,7 +159,7 @@ export interface FreshStepUpContext {
 
 /** The machine's configuration as one read: its format, its model, and the digest it was read at. */
 export interface AccountDocumentReading {
-  readonly format: FleetCatalogFormat;
+  readonly format: CatalogFormat;
   /** The model in effect, or an empty one when there is no configuration. */
   readonly model: AccountModel;
   /** A digest of the fleet files in effect, or `ABSENT_DOCUMENT_REVISION` when there are none. */
@@ -194,15 +190,15 @@ export interface ExecutorCaller {
 }
 
 /** A first-run import or a clone, carried out by its own executor (U15). */
-export interface AccountChangeExecutor<Change extends FleetAccountChange> {
+export interface AccountChangeExecutor<Change extends AccountChange> {
   /** What applying would do, in words, for the confirm card. Writes nothing. */
   describe(change: Change, caller?: ExecutorCaller): Promise<string>;
   /** Do it. Answers the one-line summary of what was done. */
   execute(change: Change, caller?: ExecutorCaller): Promise<string>;
 }
 
-type SetupChange = Extract<FleetAccountChange, { kind: 'setup.import' }>;
-type CloneChange = Extract<FleetAccountChange, { kind: 'clone.import' }>;
+type SetupChange = Extract<AccountChange, { kind: 'setup.import' }>;
+type CloneChange = Extract<AccountChange, { kind: 'clone.import' }>;
 
 export interface FleetCatalogServiceDeps {
   /**
@@ -241,10 +237,9 @@ export interface FleetCatalogServiceDeps {
   renameSessions?(rename: SessionRuntimeRename): Promise<number>;
   machineName(): string;
   /** The credentials surface: its list for status words and sign-out sentences, its sign-out executor. */
-  readonly credentials: {
-    list(): Promise<FleetCredentialList>;
-    signOut(id: string): Promise<FleetCredentialSignOutOutcome>;
-  };
+  readonly credentials: LoginsReader;
+  /** Writes the configuration documents of a change. GAP(kernel): no plugin config write port; see `ports.ts`. */
+  readonly configWriter: RuntimeConfigWriter;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
   readonly layout: FleetLayout;
   /** A fresh runtime id (a UUID). */
@@ -349,30 +344,30 @@ type ChangePayload =
       readonly kind: 'apply';
       readonly plan: FleetModelApplyPlan;
       readonly documents: readonly FleetDocumentWrite[];
-      readonly preview: Extract<FleetAccountChangePreview, { kind: 'apply' }>;
+      readonly preview: Extract<AccountChangePreview, { kind: 'apply' }>;
       readonly consequences: readonly string[];
     }
   | {
       readonly kind: 'sign-out';
-      readonly preview: Extract<FleetAccountChangePreview, { kind: 'sign-out' }>;
+      readonly preview: Extract<AccountChangePreview, { kind: 'sign-out' }>;
       readonly consequences: readonly string[];
     }
   | {
       readonly kind: 'executor';
-      readonly preview: Extract<FleetAccountChangePreview, { kind: 'executor' }>;
+      readonly preview: Extract<AccountChangePreview, { kind: 'executor' }>;
       /** Runs the executor on exactly the change that was described, for whoever applies it. */
       readonly run: (caller: ExecutorCaller | undefined) => Promise<string>;
       readonly consequences: readonly string[];
     };
 
-type ChangeRecord = FleetProposalRecord<ChangePayload, FleetAccountChange>;
+type ChangeRecord = FleetProposalRecord<ChangePayload, AccountChange>;
 
 const PROPOSAL_CODES = {
   unknown: 'fleet_change_unknown',
   expired: 'fleet_change_expired',
   consumed: 'fleet_change_consumed',
   exhausted: 'fleet_change_refused',
-} as const satisfies Record<FleetProposalRefusal['problem'], FleetCatalogRefusalCode>;
+} as const satisfies Record<FleetProposalRefusal['problem'], CatalogRefusalCode>;
 
 const COMMITTED: ReadonlySet<string> = new Set(['committed', 'committed-with-history-failure']);
 
@@ -383,7 +378,7 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error && error.message.length > 0 ? error.message : String(error);
 
 /** The change as a view repeats it: a component's text is reported by size, never echoed back. */
-function stagedChange(change: FleetAccountChange): FleetAccountChange {
+function stagedChange(change: AccountChange): AccountChange {
   if (change.kind !== 'component.put' || change.content === undefined) return change;
   const { content: _reportedBySize, ...rest } = change;
   return rest;
@@ -411,40 +406,40 @@ const textUsers = (model: AccountModel, change: AccountPlanChange): ReadonlySet<
  * has one built — but "nobody could tell me where this caller stands" must never render as an open
  * Apply button.
  */
-export function machineAuthority(governance: CallerGovernance | undefined): FleetMachineAuthority {
+export function machineAuthority(governance: CallerGovernance | undefined): MachineAuthority {
   if (governance === undefined) return { mayApply: false, applyRefusal: 'undetermined' };
-  const configure = governance.decide({ capability: 'fleet', axis: 'configure' });
+  const configure = governance.decide(cap('fleet', 'configure'));
   return { mayApply: configure.allowed, applyRefusal: configure.refusal };
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
 
 export class FleetCatalogService {
-  readonly #changes: FleetProposalStore<ChangePayload, FleetAccountChange>;
+  readonly #changes: FleetProposalStore<ChangePayload, AccountChange>;
   /** What the last apply left as it was, by runtime id. Memory only: it ends with the daemon or the next apply. */
   #skipped: Readonly<Record<string, readonly string[]>> = {};
 
   constructor(private readonly deps: FleetCatalogServiceDeps) {
-    this.#changes = new FleetProposalStore<ChangePayload, FleetAccountChange>({
+    this.#changes = new FleetProposalStore<ChangePayload, AccountChange>({
       now: () => deps.now(),
       mintId: () => deps.mintId(),
     });
   }
 
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */
-  async machine(governance: CallerGovernance | undefined): Promise<FleetMachineView> {
+  async machine(governance: CallerGovernance | undefined): Promise<MachineView> {
     const reading = await this.#read();
     return machineView(reading.model, await this.#facts(reading), machineAuthority(governance));
   }
 
   /** `GET /v1/fleet/components`. */
-  async components(): Promise<FleetComponentCatalog> {
+  async components(): Promise<ComponentCatalog> {
     const reading = await this.#read();
     return componentCatalog(reading.model, await this.#facts(reading));
   }
 
   /** `GET /v1/fleet/profiles`. */
-  async profiles(): Promise<FleetLayeredProfileCatalog> {
+  async profiles(): Promise<LayeredProfileCatalog> {
     const reading = await this.#read();
     return profileCatalog(reading.model, await this.#facts(reading));
   }
@@ -464,7 +459,7 @@ export class FleetCatalogService {
   }
 
   /** `GET /v1/fleet/runtimes`. */
-  async runtimes(): Promise<FleetRuntimeCatalog> {
+  async runtimes(): Promise<RuntimeCatalog> {
     const reading = await this.#read();
     return runtimeCatalog(reading.model, await this.#facts(reading));
   }
@@ -516,7 +511,7 @@ export class FleetCatalogService {
   }
 
   /** `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved. Writes nothing. */
-  async previewProfile(request: FleetProfileDraftRequest): Promise<FleetProfileDraftView> {
+  async previewProfile(request: ProfileDraftRequest): Promise<ProfileDraftView> {
     const reading = await this.#read();
     return profileDraftView(reading.model, request, await this.#facts(reading));
   }
@@ -526,7 +521,7 @@ export class FleetCatalogService {
    * cannot be applied is refused now rather than stored, because a proposal nobody can apply is
    * worse than a refusal nobody stored.
    */
-  async propose(change: FleetAccountChange, caller?: ExecutorCaller): Promise<FleetAccountChangeView> {
+  async propose(change: AccountChange, caller?: ExecutorCaller): Promise<AccountChangeView> {
     const reading = await this.#read();
     const staged = await this.#stage(reading, change, caller);
     const record = this.#proposals(() =>
@@ -544,19 +539,15 @@ export class FleetCatalogService {
    * Install one verified catalog item: stage it, check the configuration has not moved, and apply it
    * in this one call. It never enters the proposal store, so `/v1/fleet/proposals` can neither stage,
    * read nor apply it — its only caller is the catalog installer, after the installer's own checks
-   * (signature, digest, publisher pin, passkey, no ferret). The same `fleet.configure` decision as an
-   * ordinary apply still has to come with it.
+   * (signature, digest, publisher pin, passkey, no ferret); this port carries no caller, because that
+   * decision was made there.
    */
   async installCatalogItem(
-    change: FleetCatalogInstallChange,
-    governance: CallerGovernance | undefined,
-  ): Promise<{ readonly outcome: FleetAccountChangeOutcome; readonly component: unknown }> {
-    if (governance === undefined) {
-      throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
-    }
+    change: CatalogInstallChange,
+  ): Promise<{ readonly outcome: AccountChangeOutcome; readonly component: unknown }> {
     // The same rules the installer applied, again, so no caller of this method can hand the executor a
     // path or a provenance the installer would not have produced.
-    const checked = FleetCatalogInstallChangeSchema.safeParse(change);
+    const checked = CatalogInstallChangeSchema.safeParse(change);
     if (!checked.success)
       throw new FleetCatalogRefusal(
         'fleet_change_refused',
@@ -588,7 +579,7 @@ export class FleetCatalogService {
   }
 
   /** `GET /v1/fleet/proposals/:id`. */
-  async read(id: string): Promise<FleetAccountChangeView> {
+  async read(id: string): Promise<AccountChangeView> {
     return this.#view(this.#proposals(() => this.#changes.require(id)));
   }
 
@@ -609,7 +600,7 @@ export class FleetCatalogService {
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,
-  ): Promise<FleetAccountChangeOutcome> {
+  ): Promise<AccountChangeOutcome> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
@@ -639,7 +630,7 @@ export class FleetCatalogService {
       agent: freshStepUp?.agent === true,
       spend: () => freshStepUp?.spend(),
     };
-    let outcome: FleetAccountChangeOutcome;
+    let outcome: AccountChangeOutcome;
     try {
       outcome = await this.#execute(record, caller);
     } catch (error) {
@@ -751,7 +742,7 @@ export class FleetCatalogService {
   async #credentialStatus(): Promise<CatalogFacts['credentialStatus']> {
     try {
       const list = await this.deps.credentials.list();
-      return Object.fromEntries(list.credentials.map(credential => [credential.id, credential.status.word]));
+      return Object.fromEntries(list.logins.map(login => [login.id, login.status.word]));
     } catch {
       return {};
     }
@@ -761,7 +752,7 @@ export class FleetCatalogService {
 
   async #stage(
     reading: AccountDocumentReading,
-    change: FleetAccountChange,
+    change: AccountChange,
     caller?: ExecutorCaller,
   ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
     if (isAccountPlanChange(change)) return await this.#stagePlan(reading, change);
@@ -903,7 +894,7 @@ export class FleetCatalogService {
     credential: string,
     ids: RuntimeIds,
   ): Promise<Pick<AccountChangeFacts, 'runningByRuntime' | 'runningOn'>> {
-    const byRuntime: Record<string, readonly FleetRunningSession[]> = {};
+    const byRuntime: Record<string, readonly RunningSession[]> = {};
     for (const name of runtimesUsingCredential(model, credential)) {
       const { runningOn } = await this.#runtimeFacts(name, ids);
       if (runningOn !== undefined) byRuntime[name] = runningOn.map(session => ({ ...session, runtime: name }));
@@ -922,8 +913,8 @@ export class FleetCatalogService {
     candidate: AccountModel,
     bodies: ReadBodies,
     textUsers: ReadonlySet<string>,
-  ): Promise<Extract<FleetAccountChangePreview, { kind: 'apply' }>['runtimes']> {
-    const rows = (catalog: FleetRuntimeCatalog): ReadonlyMap<string, string> =>
+  ): Promise<Extract<AccountChangePreview, { kind: 'apply' }>['runtimes']> {
+    const rows = (catalog: RuntimeCatalog): ReadonlyMap<string, string> =>
       new Map(catalog.runtimes.map(runtime => [runtime.name, JSON.stringify(runtime)]));
     const before = rows(runtimeCatalog(reading.model, await this.#facts(reading)));
     const after = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }, bodies));
@@ -933,13 +924,13 @@ export class FleetCatalogService {
   }
 
   async #stageSignOut(id: string): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
-    let list: FleetCredentialList;
+    let list: LoginList;
     try {
       list = await this.deps.credentials.list();
     } catch (error) {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
     }
-    const row = list.credentials.find(credential => credential.id === id);
+    const row = list.logins.find(login => login.id === id);
     if (row === undefined)
       throw new FleetCatalogRefusal('fleet_change_refused', `no login ${id} exists on this machine`);
     if (!row.signOut.available) {
@@ -1002,14 +993,16 @@ export class FleetCatalogService {
   async #execute(
     record: {
       readonly payload: ChangePayload;
-      readonly mutation: FleetAccountChange | FleetCatalogInstallChange;
+      readonly mutation: AccountChange | CatalogInstallChange;
     },
     caller?: ExecutorCaller,
-  ): Promise<FleetAccountChangeOutcome> {
+  ): Promise<AccountChangeOutcome> {
     const payload = record.payload;
     if (payload.kind === 'apply') {
       try {
-        const result = await this.deps.provisioner.apply(payload.plan, payload.documents);
+        // The documents are the source of truth, so they land first; a plan that then fails is republished from them.
+        await this.deps.configWriter.write(payload.documents);
+        const result = await this.deps.provisioner.apply(payload.plan, []);
         this.#skipped = skippedWithinRuntimes(result.skipped, payload.plan.manifest.accounts);
         if (record.mutation.kind === 'runtime.rename') await this.#renameSessions(record.mutation);
         return { outcome: 'applied', apply: { outcome: 'committed', result: applyResultSummary(result) } };
@@ -1024,14 +1017,12 @@ export class FleetCatalogService {
       }
     }
     if (payload.kind === 'sign-out') {
-      let outcome: FleetCredentialSignOutOutcome;
+      let outcome: LoginSignOutOutcome;
       try {
         // U13's executor: the harness's own logout against the one store. Never re-implemented here.
         outcome = await this.deps.credentials.signOut(payload.preview.credential);
       } catch (error) {
-        throw error instanceof FleetCredentialRefusal
-          ? new FleetCatalogRefusal('fleet_change_failed', error.message)
-          : error;
+        throw error instanceof LoginRefusal ? new FleetCatalogRefusal('fleet_change_failed', error.message) : error;
       }
       return outcome.outcome === 'signed-out'
         ? { outcome: 'signed-out', credential: outcome.credential }
@@ -1045,7 +1036,7 @@ export class FleetCatalogService {
    * never a reason to report the rename as failed: a record left on the old name still resolves
    * through `ids.json`, and the next rename or restart finds it the same way.
    */
-  async #renameSessions(change: Extract<FleetAccountChange, { kind: 'runtime.rename' }>): Promise<void> {
+  async #renameSessions(change: Extract<AccountChange, { kind: 'runtime.rename' }>): Promise<void> {
     const bin = this.deps.layout.binDirectory;
     await this.deps
       .renameSessions?.({
@@ -1069,7 +1060,7 @@ export class FleetCatalogService {
     }
   }
 
-  #view(record: ChangeRecord): FleetAccountChangeView {
+  #view(record: ChangeRecord): AccountChangeView {
     const view = redactProposal(record, payload => payload);
     return {
       id: view.id,

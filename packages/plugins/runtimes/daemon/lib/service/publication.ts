@@ -42,9 +42,20 @@
  * again.
  */
 
-import type { RuntimeIds } from '@ferretry/fleet';
-import type { AccountInventoryPort, CoreAccount } from '../core/inventory.ts';
-import type { RuntimeNamesPort } from './start-resolution.ts';
+import { type RuntimeIds } from '../account/ids.ts';
+
+/**
+ * The runtime names the fleet recorded in `ids.json`, read for the one thing a start needs from them.
+ * GAP(ferrets): a start's own resolution (`session/start-resolution.ts`) is Ferrets'.
+ */
+export interface RuntimeNamesPort {
+  ids(): Promise<RuntimeIds | undefined>;
+}
+
+/** The accounts a start may use, as the published fleet lists them. GAP(ferrets): the account type is the start's. */
+export interface AccountInventoryPort<Account> {
+  accounts(): Promise<readonly Account[]>;
+}
 
 /** Applies exclusively, reads between applies. */
 export class FleetPublication {
@@ -92,13 +103,13 @@ export class FleetPublication {
  * Both halves are gated: the runtime names (`ids.json`) are published by the same apply as the
  * manifest and are moved aside the same way.
  */
-export class PublishedFleetInventory implements AccountInventoryPort, RuntimeNamesPort {
+export class PublishedFleetInventory<Account> implements AccountInventoryPort<Account>, RuntimeNamesPort {
   constructor(
-    private readonly inner: AccountInventoryPort & RuntimeNamesPort,
+    private readonly inner: AccountInventoryPort<Account> & RuntimeNamesPort,
     private readonly publication: FleetPublication,
   ) {}
 
-  async accounts(): Promise<readonly CoreAccount[]> {
+  async accounts(): Promise<readonly Account[]> {
     return await this.publication.reading(async () => await this.inner.accounts());
   }
 

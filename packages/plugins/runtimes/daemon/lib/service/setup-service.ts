@@ -37,22 +37,17 @@
  */
 import {
   analyseCloneSettings,
-  analyseCloneUpdate,
-  applyCloneToBase,
   applyControls,
   type CloneSettingsAnalysis,
   type CloneSettingsInput,
   type CloneSettingsPlan,
   controlsDocument,
   EMPTY_CLONE_SETTINGS_PLAN,
-  parseAccountModel,
   planCloneSettings,
   reviewCloneSettings,
-  classifyCloneKeys,
-  CloneSourceIdSchema,
-  recordCloneKeys,
-  assignOriginKeys,
-  type AccountModel,
+} from '../account/clone-settings.ts';
+import {
+  analyseCloneUpdate,
   type CloneAnalysis,
   cloneBaseFor,
   type CloneUpdatePlan,
@@ -60,70 +55,72 @@ import {
   planCloneUpdate,
   resolveCloneLogins,
   reviewCloneUpdate,
-  buildCloneBundle,
+} from '../account/clone-update.ts';
+import {
+  applyCloneToBase,
+  CloneSourceIdSchema,
   CLONE_BASE_FILE,
-  type ClonePlan,
-  CREDENTIALS_DIRECTORY,
-  CloneRefusal,
   cloneSourceIdentity,
   CloneSourceMismatch,
-  cloneSources,
-  describeClone,
-  EMPTY_RUNTIME_IDS,
-  EXPORT_KEYS_FILE,
-  expandAssetPath,
-  FleetApplyFailureError,
-  type FleetDocumentWrite,
   findCloneSources,
   forgetCloneSource,
-  type FleetModelApplyPlan,
+  parseCloneBase,
+  serializeCloneBase,
+} from '../account/clone-base.ts';
+import { parseAccountModel, type AccountModel, isRuntimeName, type LayerReferenceText } from '../account/schema.ts';
+import { classifyCloneKeys, recordCloneKeys } from '../account/clone-keys.ts';
+import { assignOriginKeys, EXPORT_KEYS_FILE, parseExportKeys, serializeExportKeys } from '../account/export-keys.ts';
+import {
+  buildCloneBundle,
+  type ClonePlan,
+  cloneSources,
+  describeClone,
+  parseCloneBundle,
+  planClone,
+} from '../account/clone.ts';
+import { CloneRefusal } from '../account/clone-parts.ts';
+import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
+import { FleetApplyFailureError, type FleetDocumentWrite, type FleetModelApplyPlan } from '../provisioning.ts';
+import {
   freeName,
-  HARNESS_DISPLAY_NAMES,
-  type HarnessKind,
   type HostHarnessScan,
   type ImportPlan,
   type ImportRecord,
-  isRuntimeName,
-  type LayerReferenceText,
-  type MaterialiseBodies,
-  materialiseFleet,
-  type ModelCatalogSources,
   mergeImport,
   mergeImportRecord,
-  parseCloneBase,
-  parseCloneBundle,
-  parseExportKeys,
-  parseSettings,
-  planClone,
   planImport,
-  serializeCloneBase,
-  type SettingsObject,
-  skillFrontmatterKeys,
-  serializeExportKeys,
-  skillSourceReference,
-} from '@ferretry/fleet';
+} from '../account/import.ts';
+import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
+import { type HarnessKind } from '../manifest.ts';
+import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
+import { parseSettings, type SettingsObject } from '../settings.ts';
+import { skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
   CLONE_REVIEW_STALE,
   type CloneSettingsDoc,
   type CloneSettingsText,
-  type FleetAccountChange,
-  type FleetCloneBundle,
-  type FleetCloneFile,
-  type FleetCloneKeysRecordRequest,
-  type FleetCloneKeysRecordResult,
-  type FleetCloneReview,
-  type FleetCloneReviewRequest,
-  type FleetSetupRefusalCode,
-  type FleetSetupScan,
-  secretReferencesIn,
-  type FleetSetupTool,
-  type FleetToolInstallRequest,
-  type FleetToolInstallResult,
-} from '@ferretry/protocol';
-import type { CallerGovernance } from '../api/capability.ts';
-import { ApiError } from '../api/error.ts';
-import { ConfigFileConflictError, ConfigFileInvalidError, configFileWriteRefusal } from '../config-files/index.ts';
+  type AccountChange,
+  type CloneBundle,
+  type CloneFile,
+  type CloneKeysRecordRequest,
+  type CloneKeysRecordResult,
+  type CloneReview,
+  type CloneReviewRequest,
+  type SetupRefusalCode,
+  type SetupScan,
+  type SetupTool,
+  type ToolInstallRequest,
+  type ToolInstallResult,
+} from '../../../contract/index.ts';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import { ApiError } from '@ferretry/kernel/contract';
+import type { ConfigText } from '../ports.ts';
+import { CREDENTIALS_DIRECTORY, harnessKey, harnessKind } from './foreign.ts';
+import { type ModelCatalogSources } from '../models/catalog.ts';
+import { expandAssetPath } from '../paths.ts';
+import { ConfigWriteConflict, ConfigWriteInvalid, configFileWriteRefusal } from './ports.ts';
 import {
   type AccountChangeExecutor,
   type AccountDocumentReading,
@@ -141,7 +138,7 @@ import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } 
 /** A bundle compared against this machine, with what the apply needs to record it. */
 interface UpdateAnalysis {
   readonly analysis: CloneAnalysis;
-  readonly bundle: FleetCloneBundle;
+  readonly bundle: CloneBundle;
   readonly machine: string;
   readonly source: ReturnType<typeof cloneSourceIdentity>;
   readonly record: ReturnType<typeof parseCloneBase>;
@@ -182,7 +179,7 @@ export interface CloneConfigFiles {
 /** Every refusal the setup routes answer with, so a client branches on cause rather than on prose. */
 export class FleetSetupRefusal extends Error {
   constructor(
-    readonly code: FleetSetupRefusalCode,
+    readonly code: SetupRefusalCode,
     message: string,
   ) {
     super(message);
@@ -234,7 +231,7 @@ export interface FleetSetupServiceDeps {
   readonly tools: {
     plans(harnesses: readonly HarnessKind[]): readonly ToolInstallPreview[];
     install(
-      request: FleetToolInstallRequest,
+      request: ToolInstallRequest,
       governance: CallerGovernance | undefined,
     ): Promise<readonly ToolInstallOutcome[]>;
   };
@@ -268,6 +265,8 @@ export interface FleetSetupServiceDeps {
    * that carries `warden.yaml`, `learning.yaml` or `voice.yaml` is then refused rather than half applied.
    */
   readonly configFiles?: CloneConfigFiles;
+  /** Reads and edits a settings file's YAML text, keeping its comments. Needed with `configFiles`. GAP(kernel): the config layer's. */
+  readonly configText?: ConfigText;
   /**
    * `setup/clone-base.json` outside a copy: forgetting a source and remembering the keys a copy filed write it on
    * their own (a copy writes it in its own batch, which checks the revision it planned against).
@@ -294,12 +293,23 @@ export const IMPORT_RECORD_FILE = 'setup/import.json';
  */
 export const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
 
+/** Stands in when only the machine's own controls are compared, which read no file. */
+const NO_CONFIG_TEXT: ConfigText = {
+  read: () => ({ ok: false, errors: [{ message: 'no settings file can be read here' }] }),
+  edit: () => {
+    throw new CloneRefusal('No settings file can be edited here yet.');
+  },
+  hasRawSecret: () => false,
+  loosening: () => undefined,
+  modeline: () => '',
+};
+
 const DOCUMENT_MODE = 0o600;
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
 const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 
-type SetupChange = Extract<FleetAccountChange, { kind: 'setup.import' }>;
-type CloneChange = Extract<FleetAccountChange, { kind: 'clone.import' }>;
+type SetupChange = Extract<AccountChange, { kind: 'setup.import' }>;
+type CloneChange = Extract<AccountChange, { kind: 'clone.import' }>;
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error && error.message.length > 0 ? error.message : String(error);
@@ -380,7 +390,7 @@ export class FleetSetupService {
   // ── Scan ───────────────────────────────────────────────────────────────────────────────────────
 
   /** `GET /v1/fleet/setup/scan`: what the first run and Import again would find. No value of anything. */
-  async scan(): Promise<FleetSetupScan> {
+  async scan(): Promise<SetupScan> {
     const catalog = this.deps.catalog;
     const reading = await this.#read();
     const scans = await this.#scans();
@@ -394,7 +404,7 @@ export class FleetSetupService {
       format: reading.format,
       tools: this.#tools(),
       harnesses: plan.preview.harnesses.map(harness => ({
-        harness: harness.harness,
+        harness: harnessKey(harness.harness),
         installed: harness.installed,
         account: { ...harness.account },
         ...(harness.instructions === undefined ? {} : { instructions: { ...harness.instructions } }),
@@ -408,21 +418,21 @@ export class FleetSetupService {
       ...(plan.preview.instructionsIdentical === undefined
         ? {}
         : { instructionsIdentical: plan.preview.instructionsIdentical }),
-      runtimes: this.#runtimesOf(plan, reading.model).map(entry => ({ ...entry })),
+      runtimes: this.#runtimesOf(plan, reading.model).map(entry => ({ ...entry, harness: harnessKey(entry.harness) })),
       updates: plan.updates.map(update => ({ reference: update.reference, sources: [...update.sources] })),
-      duplicates: plan.duplicates.map(duplicate => ({ ...duplicate })),
-      notes: plan.notes.map(note => ({ ...note })),
+      duplicates: plan.duplicates.map(duplicate => ({ ...duplicate, harness: harnessKey(duplicate.harness) })),
+      notes: plan.notes.map(note => ({ ...note, harness: harnessKey(note.harness) })),
       importing: { available: true },
     };
   }
 
-  #tools(): FleetSetupTool[] {
+  #tools(): SetupTool[] {
     return this.deps.tools.plans(HARNESSES).map(preview => {
       const label = HARNESS_DISPLAY_NAMES[preview.harness];
-      if (preview.installed) return { harness: preview.harness, label, installed: true };
+      if (preview.installed) return { harness: harnessKey(preview.harness), label, installed: true };
       const plan = preview.plan;
       return {
-        harness: preview.harness,
+        harness: harnessKey(preview.harness),
         label,
         installed: false,
         install:
@@ -437,15 +447,15 @@ export class FleetSetupService {
 
   /** `POST /v1/fleet/machine/tools/install`: the installer's own refusals, in this surface's codes. */
   async installTools(
-    request: FleetToolInstallRequest,
+    request: ToolInstallRequest,
     governance: CallerGovernance | undefined,
-  ): Promise<FleetToolInstallResult> {
+  ): Promise<ToolInstallResult> {
     let outcomes: readonly ToolInstallOutcome[];
     try {
       outcomes = await this.deps.tools.install(request, governance);
     } catch (error) {
       if (!(error instanceof ToolInstallRefusal)) throw error;
-      const code: FleetSetupRefusalCode =
+      const code: SetupRefusalCode =
         error.code === 'tool_install_unauthorized'
           ? 'fleet_setup_unauthorized'
           : error.code === 'tool_install_in_progress'
@@ -457,10 +467,10 @@ export class FleetSetupService {
     return {
       outcomes: outcomes.map(outcome =>
         outcome.outcome === 'already-installed'
-          ? { harness: outcome.harness, outcome: 'already-installed' }
+          ? { harness: harnessKey(outcome.harness), outcome: 'already-installed' }
           : outcome.outcome === 'installed'
-            ? { harness: outcome.harness, outcome: 'installed', command: outcome.command }
-            : { ...outcome },
+            ? { harness: harnessKey(outcome.harness), outcome: 'installed', command: outcome.command }
+            : { ...outcome, harness: harnessKey(outcome.harness) },
       ),
     };
   }
@@ -468,7 +478,7 @@ export class FleetSetupService {
   // ── Export ─────────────────────────────────────────────────────────────────────────────────────
 
   /** `GET /v1/fleet/export`: the Clone bundle. No credential, no history, no secret value. */
-  async exportBundle(): Promise<FleetCloneBundle> {
+  async exportBundle(): Promise<CloneBundle> {
     const catalog = this.deps.catalog;
     const reading = await this.#read();
     if (Object.keys(reading.model.runtimes).length === 0) {
@@ -478,7 +488,7 @@ export class FleetSetupService {
       );
     }
     const sources = cloneSources(reading.model);
-    const files: FleetCloneFile[] = [];
+    const files: CloneFile[] = [];
     const notCopied: { path: string; reason: string }[] = sources.outside.map(path => ({
       path,
       reason: "it is outside Ferretry's own files",
@@ -547,7 +557,7 @@ export class FleetSetupService {
         // The next export re-derives what it can; a renamed item then looks new rather than copying wrongly.
       }
     }
-    return { ...bundle, version: 2, daemon, keys };
+    return { ...bundle, daemon, keys };
   }
 
   async #storedKeys(path: string): Promise<{ readonly text: string | undefined; readonly readable: boolean }> {
@@ -561,7 +571,7 @@ export class FleetSetupService {
   async #emails(): Promise<Record<string, string | undefined>> {
     try {
       const list = await this.deps.catalog.credentials.list();
-      return Object.fromEntries(list.credentials.map(credential => [credential.id, credential.email]));
+      return Object.fromEntries(list.logins.map(login => [login.id, login.email]));
     } catch {
       return {};
     }
@@ -627,13 +637,13 @@ export class FleetSetupService {
     try {
       return (await write.put(write.path, write.text, write.etag, mayLoosen)).outcome === 'pending' ? 1 : 0;
     } catch (error) {
-      if (error instanceof ConfigFileConflictError) {
+      if (error instanceof ConfigWriteConflict) {
         throw new FleetCatalogRefusal(
           'fleet_change_stale',
           `${write.path} changed on this machine after it was reviewed; review it again`,
         );
       }
-      if (error instanceof ConfigFileInvalidError) {
+      if (error instanceof ConfigWriteInvalid) {
         throw new FleetCatalogRefusal(
           'fleet_change_refused',
           `${write.path} would not check on this machine, so it was not written: ${errorMessage(error)}`,
@@ -661,7 +671,7 @@ export class FleetSetupService {
       );
     }
     const raw = planImport(scans, {
-      ...(change.include === undefined ? {} : { include: change.include }),
+      ...(change.include === undefined ? {} : { include: change.include.map(harnessKind) }),
       ...(existing === undefined ? {} : { existing }),
       ...(await this.#recordOption()),
       existingSecrets,
@@ -704,7 +714,7 @@ export class FleetSetupService {
         `importing would leave ${catalog.machineName()} with a setup it cannot read: ${errorMessage(error)}`,
       );
     }
-    const assets: FleetCloneFile[] = [];
+    const assets: CloneFile[] = [];
     for (const file of [...plan.files, ...updates.flatMap(update => update.files)]) {
       if (file.kind === 'write') {
         assets.push({ path: file.path, content: file.content });
@@ -813,7 +823,7 @@ export class FleetSetupService {
     const host = catalog.machineName();
     // The person's names for the two machines, when the app sent them; the hostnames are only what each calls itself.
     const machine = change.names?.target ?? host;
-    let bundle: FleetCloneBundle;
+    let bundle: CloneBundle;
     let plan: ClonePlan;
     let source: ReturnType<typeof cloneSourceIdentity>;
     const reading = await this.#read();
@@ -872,7 +882,7 @@ export class FleetSetupService {
   }
 
   /** `POST /v1/fleet/clone/review`: what a copy from this source would change here, and why. Writes nothing. */
-  async reviewClone(request: FleetCloneReviewRequest, governance?: CallerGovernance): Promise<FleetCloneReview> {
+  async reviewClone(request: CloneReviewRequest, governance?: CallerGovernance): Promise<CloneReview> {
     const reading = await this.#read();
     try {
       const found = await this.#analyseUpdate(request, reading);
@@ -900,7 +910,7 @@ export class FleetSetupService {
    * logins name and the ones the last copy from this source recorded, against what the source listed. Nothing
    * is answered without a list from the source, and no value is read to answer.
    */
-  async #reviewKeys(request: FleetCloneReviewRequest, found: UpdateAnalysis): Promise<FleetCloneReview['keys']> {
+  async #reviewKeys(request: CloneReviewRequest, found: UpdateAnalysis): Promise<CloneReview['keys']> {
     if (request.sourceSecrets === undefined) return [];
     const wanted = found.bundle.credentials.flatMap(credential =>
       secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}])),
@@ -923,7 +933,7 @@ export class FleetSetupService {
    * change; a source with no record and a name no copy can carry are skipped. The read-modify-write of the record
    * is one step with no other writer between (`cloneBase.update`). Timestamps only: nothing here reads a secret.
    */
-  async recordCloneKeys(request: FleetCloneKeysRecordRequest): Promise<FleetCloneKeysRecordResult> {
+  async recordCloneKeys(request: CloneKeysRecordRequest): Promise<CloneKeysRecordResult> {
     if (!CloneSourceIdSchema.safeParse(request.source.daemonId).success) return { recorded: 0 };
     const filedAt = Date.parse(request.filedAt);
     const made = new Map((await this.deps.secrets.held()).map(secret => [secret.name, secret.createdAt] as const));
@@ -1033,7 +1043,11 @@ export class FleetSetupService {
         effective: effective[SETTINGS_KIND[document.path]],
       });
     }
-    return { analysis: analyseCloneSettings(inputs, base), etags };
+    const config = this.deps.configText;
+    if (config === undefined && inputs.some(input => input.path !== 'controls')) {
+      throw new CloneRefusal('This machine cannot merge settings documents yet. Leave them out and copy the rest.');
+    }
+    return { analysis: analyseCloneSettings(inputs, base, config ?? NO_CONFIG_TEXT), etags };
   }
 
   /** Why this caller may not write a settings file, in words; none when it may (or, staging, only needs a passkey). */
@@ -1047,12 +1061,12 @@ export class FleetSetupService {
   }
 
   /** The documents this machine's own items own, as the export would carry them: what an update compares against. */
-  async #targetFiles(model: AccountModel): Promise<FleetCloneFile[]> {
+  async #targetFiles(model: AccountModel): Promise<CloneFile[]> {
     const catalog = this.deps.catalog;
     const sources = cloneSources(model);
     const asset = (path: string): string =>
       expandAssetPath(path, catalog.layout.userHome, catalog.layout.assetsDirectory);
-    const files: FleetCloneFile[] = [];
+    const files: CloneFile[] = [];
     for (const path of sources.documents) {
       const content = await catalog.readAsset(asset(path));
       if (content !== undefined) files.push({ path, content });
@@ -1297,7 +1311,7 @@ export class FleetSetupService {
   async #documents(
     reading: AccountDocumentReading,
     model: AccountModel,
-    assets: readonly FleetCloneFile[],
+    assets: readonly CloneFile[],
     absolute: readonly { readonly path: string; readonly content: string }[],
     removals: readonly string[] = [],
   ): Promise<FleetDocumentWrite[]> {

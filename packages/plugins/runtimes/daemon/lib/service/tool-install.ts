@@ -23,11 +23,14 @@
  * Afterwards the result is checked with the daemon's one harness resolver (`locateHarnessCommand`), so
  * "installed" means this daemon can now find the tool, not merely that a manager exited zero.
  */
-import { HARNESS_PACKAGES } from '@ferretry/protocol';
-import type { CallerGovernance } from '../api/capability.ts';
-import type { ExecutableResolverPort, HarnessLocation } from '../core/harness-readiness.ts';
-import type { HarnessKind } from '../core/inventory.ts';
-import { stripTerminalEscapes } from '../fleet-login/output.ts';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import type { HarnessKind } from '../manifest.ts';
+import {
+  type ExecutableResolverPort,
+  HARNESS_PACKAGES,
+  type HarnessLocation,
+  stripTerminalEscapes,
+} from './foreign.ts';
 
 /** The package managers a harness may be installed through. */
 export type PackageManager = 'brew' | 'apt' | 'npm';

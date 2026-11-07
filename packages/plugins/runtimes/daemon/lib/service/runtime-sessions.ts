@@ -10,8 +10,9 @@
  *
  * Pure: the records are read and written by the caller.
  */
-import type { HarnessKind } from '@ferretry/fleet';
-import type { FleetRunningSession, SessionStatus } from '@ferretry/protocol';
+import { type HarnessKind } from '../manifest.ts';
+import { harnessKey, type SessionStatus } from './foreign.ts';
+import { type RunningSession } from '../../../contract/index.ts';
 
 /** A session as a runtime change needs to know it. */
 export interface RuntimeSessionRecord {
@@ -73,10 +74,10 @@ export const sessionRunning = (status: SessionStatus): boolean => SESSION_RUNNIN
 export function runningSessionsOn(
   records: readonly RuntimeSessionRecord[],
   runtime: RuntimeSpellings,
-): readonly FleetRunningSession[] {
+): readonly RunningSession[] {
   return records
     .filter(record => sessionRunning(record.status) && sessionRunsOn(record, runtime))
-    .map(record => ({ id: record.id, name: record.name, harness: record.harness }))
+    .map(record => ({ id: record.id, name: record.name, harness: harnessKey(record.harness) }))
     .toSorted((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 }
 

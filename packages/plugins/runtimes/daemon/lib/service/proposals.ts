@@ -24,6 +24,8 @@
  *
  * Pure apart from injected identity and time.
  */
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
+
 /** How many proposals one daemon will hold at once, across every client. */
 export const MAX_OPEN_PROPOSALS = 8;
 /** How many applied changes are remembered, so a repeat apply is told it already happened. */
@@ -61,7 +63,7 @@ interface FleetProposalView<View, Mutation> {
   readonly revision: string;
   readonly mutation: Mutation;
   readonly summary: string;
-  readonly expiresAt: string;
+  readonly expiresAt: Instant;
   readonly state: FleetProposalState;
   readonly preview: View;
 }
@@ -233,7 +235,7 @@ export function redactProposal<Payload, View, Mutation>(
     revision: record.revision,
     mutation: record.mutation,
     summary: record.summary,
-    expiresAt: new Date(record.expiresAt).toISOString(),
+    expiresAt: instantFromEpochMs(record.expiresAt),
     state: record.state,
     preview: viewOf(record.payload),
   };

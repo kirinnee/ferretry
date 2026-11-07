@@ -13,8 +13,10 @@
  *
  * Pure.
  */
-import { type Conflict, type FlatLayer, looksSecret, type ResolvedProfile, settingsKey } from '@ferretry/fleet';
-import type { FleetResolvedEntry, FleetResolvedField, FleetResolvedSetter } from '@ferretry/protocol';
+import { type Conflict, type FlatLayer, type ResolvedProfile, settingsKey } from '../account/layering.ts';
+import { harnessKey } from './foreign.ts';
+import { looksSecret } from '../account/import.ts';
+import { type ResolvedEntry, type ResolvedField, type ResolvedSetter } from '../../../contract/index.ts';
 
 /** What a hidden value is replaced by. */
 export const RESOLVED_HIDDEN_TEXT = '‹hidden›';
@@ -22,7 +24,7 @@ export const RESOLVED_HIDDEN_TEXT = '‹hidden›';
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
 /** A value in words, hidden when it looks like a credential under this name. */
-function said(name: string, value: unknown): Pick<FleetResolvedSetter, 'value' | 'hidden'> {
+function said(name: string, value: unknown): Pick<ResolvedSetter, 'value' | 'hidden'> {
   const text = shown(value);
   return looksSecret(name, text) ? { value: RESOLVED_HIDDEN_TEXT, hidden: true } : { value: text };
 }
@@ -52,21 +54,21 @@ function serverLine(server: {
  * One harness's final values, in merge order: instructions, MCP servers, skills, settings keys,
  * environment, flags, hooks, then the model.
  */
-export function resolvedEntries(resolved: ResolvedProfile): readonly FleetResolvedEntry[] {
+export function resolvedEntries(resolved: ResolvedProfile): readonly ResolvedEntry[] {
   const { harness } = resolved;
-  const beaten = (field: Conflict['field'], key: string): readonly FleetResolvedSetter[] =>
+  const beaten = (field: Conflict['field'], key: string): readonly ResolvedSetter[] =>
     resolved.conflicts
       .filter(conflict => conflict.field === field && conflict.key === key)
       .flatMap(conflict =>
         conflict.overridden.map(setter => ({ ...said(key, setter.value), from: setter.layer.origin })),
       );
   const entry = (
-    field: FleetResolvedField,
+    field: ResolvedField,
     key: string,
-    value: Pick<FleetResolvedSetter, 'value' | 'hidden'>,
+    value: Pick<ResolvedSetter, 'value' | 'hidden'>,
     layer: FlatLayer,
-    overridden: readonly FleetResolvedSetter[] = [],
-  ): FleetResolvedEntry => ({ harness, field, key, ...value, from: layer.origin, overridden });
+    overridden: readonly ResolvedSetter[] = [],
+  ): ResolvedEntry => ({ harness: harnessKey(harness), field, key, ...value, from: layer.origin, overridden });
 
   return [
     ...resolved.instructions.map(({ layer, component }) =>
