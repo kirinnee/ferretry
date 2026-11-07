@@ -4,7 +4,7 @@ import {
   type WorktreeRemovalBlocker,
   type WorktreeRemovalDecision,
   type WorktreeRemovalOverride,
-} from '../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../contract/index.ts';
 
 /** The flags that authorize one class of destructive removal. */
 export interface RemovalConsentFlags {

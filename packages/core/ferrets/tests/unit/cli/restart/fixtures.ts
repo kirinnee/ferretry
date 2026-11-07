@@ -1,9 +1,4 @@
-import type {
-  RestartCancelResult,
-  RestartRequest,
-  RestartResult,
-  RestartStatus,
-} from '../../../../daemon/lib/protocol/session-restart.ts';
+import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from '../../../../contract/index.ts';
 import type { IRestartGateway } from '../../../../cli/lib/restart/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 

@@ -14,26 +14,24 @@
  * - the daemon says `keyRotated` → the pending key is PROMOTED and the old one is gone;
  * - the daemon answers anything else → it did not swap, so the pending key is DISCARDED;
  * - no answer at all → the pending key STAYS, and the carrier tries it once if the old key is refused.
+ *
+ * In 5.0 it is the ONE implementation behind the session layer's `SessionKeyRotation` port (`@ferretry/app`), which
+ * Access provides beside its device claims: the shell's session transport applies it to `POST /v1/unlock` and
+ * `POST /v1/step-up` on the session carrying them, settles it on the answer, and tries the pending key once on a
+ * refused session. The request and the answer are the transport's (a JSON value, a status), not `fetch`'s.
  */
 
+import type { AmendedRotation, RotatingSession, RotationRequest, SessionKeyRotation } from '@ferretry/app';
 import { UnlockGrantedSchema } from '@ferretry/core-gate/contract';
-import type { z } from 'zod';
-import type { DeviceKeyRotationSchema } from '../../contract/index.ts';
 import { StepUpGrantedSchema } from '../../contract/index.ts';
 import type { PrivateKeyHandle } from '../shell-pairing.ts';
 import { type DeviceKeyGenerator, type DeviceKeyStore, mintDeviceKey } from './device-keys.ts';
 
-/** A replacement key and its proof. Gate's contract exports the schema only, so the type is read off it here. */
-type DeviceKeyRotation = z.infer<typeof DeviceKeyRotationSchema>;
-
 /** The routes a rotation rides: the two passkey ceremonies, because the daemon's refusal and acceptance are there. */
 const ROTATING_PATHS: readonly string[] = ['/v1/step-up', '/v1/unlock'];
 
-/** What a session must offer: when it was told to rotate, and a proof only it can make. */
-export interface RotatingSession {
-  rotateBy(): string | undefined;
-  signRotation(deviceId: string, newKey: PrivateKeyHandle, newPublicKey: string): Promise<DeviceKeyRotation>;
-}
+/** What a session must offer: when it was told to rotate, and a proof only it can make (the session layer's). */
+export type { RotatingSession };
 
 /** The WebCrypto this needs: a key to mint and the handle the session signs with. */
 export interface KeyRotationCrypto extends DeviceKeyGenerator {
@@ -47,13 +45,21 @@ export interface KeyRotationDependencies {
   readonly now?: () => number;
 }
 
-/** A request, and whether it now carries a replacement key whose fate must be settled afterwards. */
-export interface AmendedRequest {
-  readonly init: RequestInit;
-  readonly rotated: boolean;
-}
+/** The body a ceremony wrote: the JSON object (or its text), or `undefined` for anything else. */
+const assertionOf = (body: unknown): Readonly<Record<string, unknown>> | undefined => {
+  let value: unknown = body;
+  if (typeof body === 'string') {
+    try {
+      value = JSON.parse(body);
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  return value as Readonly<Record<string, unknown>>;
+};
 
-export class KeyRotation {
+export class KeyRotation implements SessionKeyRotation {
   readonly #store: DeviceKeyStore;
   readonly #crypto: KeyRotationCrypto;
   readonly #now: () => number;
@@ -72,23 +78,16 @@ export class KeyRotation {
    * unreadable instant counts as not due: the daemon is the judge, and it will refuse a step-up that
    * needed a rotation in words that say so.
    */
-  async amend(
+  async amend<Request extends RotationRequest>(
     session: RotatingSession,
     daemon: { readonly daemonId: string; readonly deviceId: string },
-    url: string,
-    init: RequestInit,
-  ): Promise<AmendedRequest> {
-    const unchanged = { init, rotated: false };
-    if ((init.method ?? 'GET').toUpperCase() !== 'POST' || !ROTATING_PATHS.includes(new URL(url).pathname))
-      return unchanged;
-    if (!this.#due(session.rotateBy()) || typeof init.body !== 'string') return unchanged;
-    let assertion: unknown;
-    try {
-      assertion = JSON.parse(init.body);
-    } catch {
-      return unchanged;
-    }
-    if (typeof assertion !== 'object' || assertion === null || Array.isArray(assertion)) return unchanged;
+    request: Request,
+  ): Promise<AmendedRotation<Request>> {
+    const unchanged = { request, rotated: false };
+    if (request.method.toUpperCase() !== 'POST' || !ROTATING_PATHS.includes(request.path)) return unchanged;
+    if (!this.#due(session.rotateBy())) return unchanged;
+    const assertion = assertionOf(request.body);
+    if (assertion === undefined) return unchanged;
     const minted = await mintDeviceKey(this.#crypto);
     // BEFORE it is sent, and the whole of the recovery rests on this line.
     await this.#store.savePending(daemon.daemonId, minted.privateKey);
@@ -97,12 +96,13 @@ export class KeyRotation {
       this.#crypto.deviceKeyHandle(minted.privateKey),
       minted.publicKey,
     );
-    return { init: { ...init, body: JSON.stringify({ ...assertion, rotation }) }, rotated: true };
+    return { request: { ...request, body: { ...assertion, rotation } }, rotated: true };
   }
 
   /** Reads the daemon's answer to an unlock or step-up that carried a rotation, and settles the pending key. */
-  async settle(daemonId: string, response: Response): Promise<void> {
-    if (response.ok && (await grantedRotation(response))) await this.#store.promotePending(daemonId);
+  async settle(daemonId: string, answer: Parameters<SessionKeyRotation['settle']>[1]): Promise<void> {
+    const ok = answer.status >= 200 && answer.status < 300;
+    if (ok && grantedRotation(answer.body)) await this.#store.promotePending(daemonId);
     else await this.#store.discardPending(daemonId);
   }
 
@@ -129,15 +129,10 @@ export class KeyRotation {
   }
 }
 
-/** Whether a granted unlock or step-up says the daemon swapped the key. Read from a copy; the body stays. */
-const grantedRotation = async (response: Response): Promise<boolean> => {
-  try {
-    const body: unknown = await response.clone().json();
-    const parsed = StepUpGrantedSchema.safeParse(body);
-    if (parsed.success) return parsed.data.keyRotated === true;
-    const unlocked = UnlockGrantedSchema.safeParse(body);
-    return unlocked.success && unlocked.data.keyRotated === true;
-  } catch {
-    return false;
-  }
+/** Whether a granted unlock or step-up says the daemon swapped the key. */
+const grantedRotation = (body: unknown): boolean => {
+  const parsed = StepUpGrantedSchema.safeParse(body);
+  if (parsed.success) return parsed.data.keyRotated === true;
+  const unlocked = UnlockGrantedSchema.safeParse(body);
+  return unlocked.success && unlocked.data.keyRotated === true;
 };

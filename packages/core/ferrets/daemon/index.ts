@@ -35,6 +35,12 @@ import {
   AgentPinsFile,
   FerretDetailsFile,
   FerretPinsFile,
+  lookupStartRequest,
+  StartRequestsFile,
+  withStartRequest,
+  RestartQueueEntrySchema,
+  FerretSummaryFiles,
+  FerretWaitFiles,
 } from '../contract/index.ts';
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
@@ -51,7 +57,6 @@ import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
 import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
 import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
-import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
 import { AGENT_READ_FENCE, SessionFilesystem } from './lib/session/filesystem/index.ts';
 import { KernelGitRunner } from './adapters/git/runner.ts';
@@ -69,9 +74,7 @@ import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
 import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
-import { RestartQueueEntrySchema } from './lib/protocol/session-restart.ts';
 import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { FerretSummaryFiles, FerretWaitFiles } from './lib/state.ts';
 import { FerretSignals } from './lib/ferrets/signals.ts';
 import { SessionSignalService } from './lib/session/signal/service.ts';
 import {

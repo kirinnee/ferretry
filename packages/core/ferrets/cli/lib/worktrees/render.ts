@@ -6,7 +6,7 @@ import type {
   WorktreeListResponse,
   WorktreeLiveState,
   WorktreeRemovalDecision,
-} from '../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../contract/index.ts';
 import type { UnclearedBlocker } from './overrides.ts';
 
 const INDENT = '    ';

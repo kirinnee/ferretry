@@ -1,4 +1,4 @@
-import type { BranchDeletionBlocker, WorktreeRemovalBlocker } from '../protocol/worktrees.ts';
+import type { BranchDeletionBlocker, WorktreeRemovalBlocker } from '../../../contract/index.ts';
 
 /**
  * Why a managed-worktree operation was refused.
