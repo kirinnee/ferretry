@@ -1,25 +1,20 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
-import { ApiError, type KernelPorts, type RouteHandler, type StateFileDef } from '@ferretry/kernel/contract';
+import { ApiError, type KernelPorts, type RouteHandler } from '@ferretry/kernel/contract';
 import type { ToolHandler } from '@ferretry/kernel/manifest';
-import { err, ok, type Result } from '@ferretry/std';
-import {
-  type ConversationApi,
-  type ConversationRefusal,
-  MESSAGE_TOKEN_KEY_STATE,
-  type RenderBody,
-  type RenderMeta,
-} from '../contract/index.ts';
+import { err, milliseconds, ok, type Result } from '@ferretry/std';
+import type { ConversationApi, ConversationRefusal, RenderBody, RenderMeta } from '../contract/index.ts';
 import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks } from './links/index.ts';
 import type { LinkHarness, LinkKeeper } from './links/lib/service.ts';
 import { registerReader } from './reader/index.ts';
 import type { TranscriptReadRedactor } from './reader/lib/reads.ts';
-import type { SessionTranscriptMessageTokenCodec } from './reader/lib/session/message-token.ts';
+import { messageTokenCodec } from './reader/adapters/message-token-key.ts';
 import { buildRenders } from './renders/index.ts';
 import { RenderError } from './renders/lib/types.ts';
-import { buildSearch } from './search/index.ts';
+import { buildSearch, WORK_SEARCH_WARM_DELAY_MS, type WorkSource } from './search/index.ts';
+import { tryParseSessionId } from './seams/ferret-id.ts';
 
 /** Said by everything that needs a harness plugin's transcript reader or conversation lists. */
 export const HARNESS_PENDING =
@@ -32,36 +27,6 @@ const harnessPending = (): never => {
 
 const KEEP_PENDING =
   'Keeping a conversation as a ferret waits on Ferrets starting a ferret from a harness conversation.';
-
-/** The bytes in a buffer the platform's crypto accepts. */
-const own = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy;
-};
-
-/** The daemon-private MAC for message tokens: two operations, never the key bytes. */
-function messageTokenCodec(kernel: KernelPorts): SessionTranscriptMessageTokenCodec {
-  const file = MESSAGE_TOKEN_KEY_STATE as unknown as StateFileDef<string, Uint8Array>;
-  let key: Promise<CryptoKey> | undefined;
-  const load = async (): Promise<CryptoKey> => {
-    const read = await kernel.state.read(file);
-    let bytes = read.ok ? read.value : undefined;
-    if (bytes === undefined) {
-      bytes = crypto.getRandomValues(new Uint8Array(32));
-      await kernel.state.write(file, bytes);
-    }
-    return await crypto.subtle.importKey('raw', own(bytes), { name: 'HMAC', hash: 'SHA-256' }, false, [
-      'sign',
-      'verify',
-    ]);
-  };
-  const keyed = (): Promise<CryptoKey> => (key ??= load());
-  return {
-    tag: async input => new Uint8Array(await crypto.subtle.sign('HMAC', await keyed(), own(input))),
-    matches: async (input, tag) => await crypto.subtle.verify('HMAC', await keyed(), own(tag), own(input)),
-  };
-}
 
 const scrubData = (value: unknown, text: (s: string) => string): unknown => {
   if (typeof value === 'string') return text(value);
@@ -117,10 +82,12 @@ type ReadingApi = Pick<
 
 export interface ReadingHalf {
   readonly routes: Readonly<Record<string, RouteHandler>>;
-  readonly tools: Readonly<Record<string, ToolHandler>>;
+  readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
   /** A ferret stopped or is gone: its attachment plaintext is zeroed and forgotten. */
   release(ferret: string): void;
+  /** The daemon is stopping: nothing more is scheduled. */
+  stop(): void;
 }
 
 /**
@@ -133,6 +100,8 @@ export function buildReading(deps: {
   readonly ferrets: FerretsApi;
   readonly asks: Pick<AsksApi, 'open'>;
   readonly onKept: (ferret: FerretId, link: string) => void;
+  /** The work other plugins hand the work search through `search.sources` (Board's cards), asked on every use. */
+  readonly searchSources?: () => readonly WorkSource[];
 }): ReadingHalf {
   const { kernel, ferrets, asks } = deps;
   const history = kernel.roots.root('harness-history');
@@ -140,8 +109,11 @@ export function buildReading(deps: {
 
   const reader = registerReader({
     transcripts: async () => harnessPending(),
-    exists: async ferret => (await ferrets.get(ferret as FerretId)) !== undefined,
-    codec: messageTokenCodec(kernel),
+    exists: async ferret => {
+      const id = tryParseSessionId(ferret);
+      return id !== undefined && (await ferrets.get(id)) !== undefined;
+    },
+    codec: messageTokenCodec(kernel.state),
     redactor: readRedactor(kernel),
     history,
     locate: { locate: async () => harnessPending() },
@@ -173,9 +145,12 @@ export function buildReading(deps: {
   const search = buildSearch({
     asks,
     redaction: kernel.redaction,
+    ...(deps.searchSources === undefined ? {} : { sources: deps.searchSources }),
     now: () => kernel.clock.nowMs(),
     warn: message => kernel.log.warn(message),
   });
+  // Today's warm-up: the index is built a little after start, so the first search rarely waits for it.
+  const cancelWarm = kernel.clock.after(milliseconds(WORK_SEARCH_WARM_DELAY_MS), () => search.service.warm());
 
   const pendingRefusal = async () => err({ code: 'conversation_harness_unavailable', message: HARNESS_PENDING });
   const api: ReadingApi = {
@@ -237,5 +212,6 @@ export function buildReading(deps: {
     tools: search.tools,
     api,
     release: ferret => attachments.release(ferret),
+    stop: () => cancelWarm(),
   };
 }

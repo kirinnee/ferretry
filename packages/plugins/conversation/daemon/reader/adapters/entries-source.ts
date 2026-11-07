@@ -161,8 +161,9 @@ export class EntriesTranscriptSource
     let truncated = false;
     for (let index = whole.events.length - 1; index >= 0; index -= 1) {
       const event = whole.events[index] as TranscriptEvent;
-      if (!query.accept(event)) continue;
+      // The raw needle is the cheap prefilter; `accept` (which may scrub) only runs on what it let through.
       if (query.needle !== undefined && !JSON.stringify(event).toLowerCase().includes(query.needle)) continue;
+      if (!query.accept(event)) continue;
       if (found.length >= query.limit) {
         truncated = true;
         break;

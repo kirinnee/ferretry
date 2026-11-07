@@ -6,6 +6,8 @@ import { StateDraftRepository } from '../../../daemon/drafts/adapters/index.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { buildConversationA } from '../../../daemon/host.ts';
 import { TurnBoundaries } from '../../../daemon/turns/lib/index.ts';
+import { AskIdSchema } from '@ferretry/core-asks/contract';
+import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 
 const summary = (state: string) => ({ id: 'f1', state });
 
@@ -20,11 +22,12 @@ function recording(options: { rewrite?: (text: string) => string; refuse?: strin
       return { ok: true as const, value: { ...value, text: options.rewrite?.(value.text) ?? value.text } };
     },
   } as unknown as HookInvoker;
+  const built: { half?: ReturnType<NonNullable<typeof daemon.build>> } = {};
   const implementation = {
     ...daemon,
-    build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => daemon.build!({ ...ctx, hooks }),
+    build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => (built.half = daemon.build!({ ...ctx, hooks })),
   } as typeof daemon;
-  return { seen, implementation };
+  return { seen, implementation, built };
 }
 
 const send = (host: Awaited<ReturnType<typeof testHost>>) =>
@@ -68,28 +71,25 @@ describe('message.before-send', () => {
 
 describe('turn.ended', () => {
   test('is observed once when a working ferret goes idle, named by when its round began', async () => {
-    let state = 'working';
-    const { seen, implementation } = recording();
+    const { seen, implementation, built } = recording();
     const host = await testHost({
       plugins: [implementation],
       fakes: {
-        ferrets: { get: async () => summary(state), list: async () => [summary(state)] },
+        ferrets: { get: async () => summary('working'), list: async () => [] },
         asks: { get: async () => undefined },
       },
       clock: fixedClock('2026-11-06T09:00:00Z'),
     });
-    await host.clock.advance(2_000);
-    await host.settle();
+    const changed = built.half?.hooks['ferret.changed'];
+    changed?.({ ferret: ferretId('f1'), state: 'working', previous: 'idle', change: 'state' });
     expect(seen.filter(entry => entry.hook === 'turn.ended')).toHaveLength(0);
-    state = 'idle';
-    await host.clock.advance(2_000);
-    await host.settle();
+    changed?.({ ferret: ferretId('f1'), state: 'idle', previous: 'working', change: 'state' });
     const ended = seen.filter(entry => entry.hook === 'turn.ended');
     expect(ended).toHaveLength(1);
     expect(ended[0]?.value).toMatchObject({ ferret: 'f1', outcome: 'completed' });
-    await host.clock.advance(4_000);
-    await host.settle();
+    changed?.({ ferret: ferretId('f1'), state: 'idle', previous: 'idle', change: 'renamed' });
     expect(seen.filter(entry => entry.hook === 'turn.ended')).toHaveLength(1);
+    await host.stop();
   });
 });
 
@@ -139,18 +139,18 @@ describe('an answered ask', () => {
     const repository = new StateDraftRepository(state, new KeyedSerialExecutor());
     for (const slot of [undefined, 'A7', 'A8']) await repository.save(snapshot(slot) as never);
     const half = build(kernel, { get: async (id: string) => ({ id, state: 'answered', ferret: 'f1' }) });
-    await half.onAskAnswered('A7');
+    await half.onAskAnswered({ ferret: 'f1', askId: AskIdSchema.parse('A7') });
     expect(await repository.items('f1' as never)).toEqual(['A8']);
     expect(await repository.load('f1')).toBeDefined();
     half.stop();
   });
 
-  test('an ask nobody can place does nothing', async () => {
+  test('an answer on another ferret’s board leaves this ferret’s drafts alone', async () => {
     const { state, kernel } = world();
     const repository = new StateDraftRepository(state, new KeyedSerialExecutor());
     await repository.save(snapshot('A7') as never);
     const half = build(kernel, { get: async () => undefined });
-    await half.onAskAnswered('A7');
+    await half.onAskAnswered({ ferret: 'f2', askId: AskIdSchema.parse('A7') });
     expect(await repository.items('f1' as never)).toEqual(['A7']);
     half.stop();
   });

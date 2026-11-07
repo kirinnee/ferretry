@@ -9,6 +9,8 @@ import {
 import type { PortableConversationRow } from '../../../daemon/reader/lib/session/digest.ts';
 import type { SessionTranscriptMessageTokenContext } from '../../../daemon/reader/lib/session/message-token.ts';
 import type { TranscriptEvent } from '../../../daemon/reader/lib/transcript/types.ts';
+import type { TranscriptEntry, TranscriptReader } from '@ferretry/core-ferrets/contract';
+import { EntriesTranscriptSource } from '../../../daemon/reader/adapters/entries-source.ts';
 
 /**
  * R265, G41: everything the transcript reads answer is scrubbed, and a vault that cannot be opened refuses the read
@@ -114,5 +116,51 @@ describe('the transcript reads are scrubbed', () => {
       expect(error).toBeInstanceOf(Error);
       expect(error).not.toBeInstanceOf(TranscriptReadError);
     }
+  });
+});
+
+describe('a log search cannot tell whether a secret appears (the probe of review finding 6)', () => {
+  const HIDDEN = 'hunter2secret';
+  const entry = (id: string, text: string): TranscriptEntry => ({
+    id,
+    at: INSTANT as Instant,
+    role: 'assistant',
+    text,
+  });
+  const entries = [
+    entry('e1', `the key was ${HIDDEN}`),
+    entry('e2', `and again ${HIDDEN}`),
+    entry('e3', 'the key was rotated'),
+  ];
+  const reader: TranscriptReader = {
+    read: async (_ferret, after) => (after === undefined ? entries : []),
+    follow: async function* () {},
+    find: async (_ferret, id) => entries.find(each => each.id === id),
+  };
+  const source = new EntriesTranscriptSource(async () => ({ harness: 'claude', reader }));
+  const hiding = (): TranscriptReadRedactor => {
+    const hide = (text: string): string => text.split(HIDDEN).join('[redacted]');
+    return {
+      redact: async text => hide(text),
+      batch: async work => work({ text: hide, data: value => JSON.parse(hide(JSON.stringify(value))) as unknown }),
+    };
+  };
+  const reads = () => new TranscriptReadService(source, source, CODEC, hiding(), source, source);
+
+  test('a guessed secret answers exactly what a word nobody wrote answers: no matches, not truncated', async () => {
+    const guessed = await reads().logSearch('f1', { q: HIDDEN, limit: 1 });
+    const absent = await reads().logSearch('f1', { q: 'zzznotthere', limit: 1 });
+    expect({ matches: guessed.matches, truncated: guessed.truncated }).toEqual({ matches: [], truncated: false });
+    expect({ matches: absent.matches, truncated: absent.truncated }).toEqual({ matches: [], truncated: false });
+  });
+
+  test('the limit and truncated count masked matches, and a snippet is cut from the masked text', async () => {
+    const answer = await reads().logSearch('f1', { q: 'key was', limit: 1 });
+    expect(answer.matches).toHaveLength(1);
+    expect(answer.truncated).toBe(true);
+    expect(JSON.stringify(answer)).not.toContain(HIDDEN);
+    const all = await reads().logSearch('f1', { q: 'key was', limit: 5 });
+    expect(all.matches.map(match => match.snippet)).toEqual(['the key was [redacted]', 'the key was rotated']);
+    expect(all.truncated).toBe(false);
   });
 });

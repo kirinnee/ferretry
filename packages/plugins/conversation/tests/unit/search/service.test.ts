@@ -90,3 +90,40 @@ describe('the work search service', () => {
     expect(answer.matches[0]?.hit.id).toBe('F1');
   });
 });
+
+describe('a value that became a secret after it was indexed (no epoch moved)', () => {
+  const secretCard = () =>
+    new FakeSource('cards', [cardWork({ id: 'F1', title: 'Login', fields: { summary: 'the password is hunter2' } })]);
+
+  test('is no longer found, counted or quoted by a search', async () => {
+    const redaction = new FakeRedaction();
+    const { service } = build([secretCard()], { redaction });
+    expect((await service.search(query('hunter2'))).total).toBe(1);
+    redaction.values = ['hunter2'];
+    const answer = await service.search(query('hunter2', { all: true }));
+    expect(answer).toMatchObject({ hits: [], total: 0, olderHidden: 0 });
+    const other = await service.search(query('password'));
+    expect(other.total).toBe(1);
+    expect(other.hits[0]?.match.line).toBe('the password is [redacted]');
+  });
+
+  test('is no longer what a related check matches on', async () => {
+    const redaction = new FakeRedaction();
+    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Quokka zebra' })], true);
+    const { service } = build([cards], { redaction });
+    expect((await service.related({ kind: 'card', title: 'Quokka zebra' })).matches).toHaveLength(1);
+    redaction.values = ['Quokka zebra'];
+    expect((await service.related({ kind: 'card', title: 'Quokka zebra' })).matches).toEqual([]);
+  });
+
+  test('a redaction that cannot open refuses the answer instead of answering from older text', async () => {
+    const redaction = new FakeRedaction();
+    const { service } = build([secretCard()], { redaction });
+    await service.search(query('hunter2'));
+    redaction.batch = async () => {
+      throw new Error('the vault will not open');
+    };
+    await expect(service.search(query('hunter2'))).rejects.toThrow('the vault will not open');
+    await expect(service.related({ kind: 'card', title: 'Login' })).rejects.toThrow('the vault will not open');
+  });
+});

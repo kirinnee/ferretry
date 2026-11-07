@@ -10,20 +10,21 @@
  *   every {@link WORK_SEARCH_SWEEP_MS} a search also starts a background sweep of every source, so an edit made outside
  *   this daemon is found within the sweep interval, never later.
  * - **Secrets.** Every text passes the redactor's scrub before it is indexed. When the set of known values changes (its
- *   epoch), the next search rebuilds the whole index before it answers, so a value registered as a secret after it was
- *   written on a card stops being findable at once.
+ *   epoch), the next search rebuilds the whole index before it answers. The kernel's redaction carries no epoch yet, so
+ *   every answer is ALSO re-judged on its matched work scrubbed again inside one redaction read: a value registered as a
+ *   secret after it was written on a card stops being findable at once, and a redaction that cannot open refuses.
  *
  * The first search waits for the first full build; {@link warm} starts it at boot so it rarely has to.
  */
 import {
   MAX_WORK_RELATED_HITS,
-  type WorkHit,
   type WorkRelatedRequest,
   type WorkRelatedResponse,
   type WorkSearchQuery,
   type WorkSearchResponse,
+  type WorkSource,
 } from '../../../contract/index.ts';
-import { type RawWork, type ScrubText, workDocument } from './documents.ts';
+import { type RawWork, type ScrubText, type WorkDocument, workDocument } from './documents.ts';
 import { WorkIndex } from './work-index.ts';
 
 /** How stale a sweep of every source may grow before a search starts the next. */
@@ -46,16 +47,7 @@ const chunksOf = <T>(items: readonly T[], size: number): T[][] => {
   return chunks;
 };
 
-/**
- * Where some of the work comes from. `list` returns the same object for a piece of work while it has not changed, so
- * the service can tell by identity what to re-index.
- */
-export interface WorkSource {
-  readonly id: string;
-  /** Read on every search (a source held in memory) rather than only when it changed or a sweep runs. */
-  readonly cheap?: true;
-  list(): Promise<readonly RawWork[]>;
-}
+export type { WorkSource };
 
 /** The secret redactor, as indexing needs it: a scrub for one batch, and a name for the current values. */
 export interface WorkRedaction {
@@ -65,7 +57,8 @@ export interface WorkRedaction {
 }
 
 export interface WorkSearchDependencies {
-  readonly sources: readonly WorkSource[];
+  /** Every source of work; a function is asked again on each use (the sources other plugins contribute). */
+  readonly sources: readonly WorkSource[] | (() => readonly WorkSource[]);
   readonly redaction: WorkRedaction;
   readonly now: () => number;
   readonly warn: (message: string) => void;
@@ -85,6 +78,12 @@ export class WorkSearchService {
 
   constructor(private readonly ports: WorkSearchDependencies) {}
 
+  /** The sources as they stand now. */
+  private sources(): readonly WorkSource[] {
+    const { sources } = this.ports;
+    return typeof sources === 'function' ? sources() : sources;
+  }
+
   /** Builds the index now, in the background, so the first search does not pay for it. */
   warm(): void {
     void this.ready().catch((error: unknown) =>
@@ -92,12 +91,21 @@ export class WorkSearchService {
     );
   }
 
-  // read-scoped: none — every hit is masked by the epoch-keyed read redaction before it leaves the service
+  // read-scoped: none — the scope is opened inside: every hit is re-judged in one redaction read, on text scrubbed now
   async search(query: WorkSearchQuery): Promise<WorkSearchResponse> {
     await this.current();
-    const { hits, total, olderHidden } = this.index.search(query, this.ports.now());
+    const nowMs = this.ports.now();
+    const keys = this.index.matchingKeys(query);
+    const { hits, total, olderHidden } =
+      keys.length === 0
+        ? { hits: [], total: 0, olderHidden: 0 }
+        : await this.ports.redaction.batch(scrub => {
+            const now = new WorkIndex();
+            for (const document of this.rescrubbed(keys, scrub).values()) now.put(document);
+            return now.search(query, nowMs);
+          });
     return {
-      hits: await this.masked(hits),
+      hits: [...hits],
       total,
       indexed: this.index.size,
       ...(query.all === undefined ? {} : { olderHidden }),
@@ -106,20 +114,38 @@ export class WorkSearchService {
 
   async related(request: WorkRelatedRequest): Promise<WorkRelatedResponse> {
     await this.current();
-    const matches = this.index.related(request.title, request.ask ?? '', this.ports.now(), MAX_WORK_RELATED_HITS);
-    const hits = await this.masked(matches.map(match => match.hit));
-    return { matches: matches.map((match, at) => ({ strength: match.strength, hit: hits[at] ?? match.hit })) };
+    const nowMs = this.ports.now();
+    const ask = request.ask ?? '';
+    const keys = this.index.relatedKeys(request.title, ask, nowMs);
+    if (keys.length === 0) return { matches: [] };
+    const matches = await this.ports.redaction.batch(scrub =>
+      this.index.relatedAmong(request.title, ask, nowMs, MAX_WORK_RELATED_HITS, this.rescrubbed(keys, scrub)),
+    );
+    return { matches: [...matches] };
   }
 
   /**
-   * The answer scrubbed once more, as it leaves: the index was built from scrubbed text, and this covers a value that
-   * became known after its document was indexed and before the epoch could say so.
+   * The matched pieces of work as documents scrubbed with the values known NOW. The index was built from text scrubbed
+   * with the values known then, and the kernel's redaction says nothing when a value becomes a secret, so a match is
+   * only an answer when it still holds on this text: a hit never confirms that a secret appears in an item, and a
+   * redaction that cannot open refuses the whole answer (it throws) instead of answering from the older text.
    */
-  private async masked(hits: readonly WorkHit[]): Promise<WorkHit[]> {
-    if (hits.length === 0) return [];
-    return await this.ports.redaction.batch(scrub =>
-      hits.map(hit => ({ ...hit, title: scrub(hit.title), match: { ...hit.match, line: scrub(hit.match.line) } })),
-    );
+  private rescrubbed(keys: readonly string[], scrub: ScrubText): ReadonlyMap<string, WorkDocument> {
+    const documents = new Map<string, WorkDocument>();
+    for (const key of keys) {
+      const raw = this.rawOf(key);
+      if (raw !== undefined) documents.set(key, workDocument(raw, scrub));
+    }
+    return documents;
+  }
+
+  /** A piece of work as its source last handed it over. */
+  private rawOf(key: string): RawWork | undefined {
+    for (const pieces of this.seen.values()) {
+      const raw = pieces.get(key);
+      if (raw !== undefined) return raw;
+    }
+    return undefined;
   }
 
   /** A source changed: it is re-read before the next answer. */
@@ -133,7 +159,7 @@ export class WorkSearchService {
     await this.serial(async () => {
       const epoch = await this.ports.redaction.epoch();
       if (epoch !== this.epoch) await this.rebuild(epoch);
-      else await this.refresh(this.ports.sources.filter(source => source.cheap === true || this.dirty.has(source.id)));
+      else await this.refresh(this.sources().filter(source => source.cheap === true || this.dirty.has(source.id)));
     });
     if (this.ports.now() - this.lastSweepMs >= WORK_SEARCH_SWEEP_MS) this.startSweep();
   }
@@ -155,7 +181,7 @@ export class WorkSearchService {
     this.epoch = undefined;
     for (const key of [...this.index.keys()]) this.index.remove(key);
     this.seen.clear();
-    await this.refresh(this.ports.sources);
+    await this.refresh(this.sources());
     this.epoch = epoch;
     this.lastSweepMs = this.ports.now();
   }
@@ -198,7 +224,7 @@ export class WorkSearchService {
   private startSweep(): void {
     if (this.sweeping !== undefined) return;
     this.lastSweepMs = this.ports.now();
-    this.sweeping = this.serial(async () => await this.refresh(this.ports.sources))
+    this.sweeping = this.serial(async () => await this.refresh(this.sources()))
       .catch((error: unknown) => this.ports.warn(`work search could not sweep its sources: ${message(error)}`))
       .finally(() => {
         this.sweeping = undefined;

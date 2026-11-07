@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ApiRequest } from '@ferretry/kernel/contract';
 import { buildSearch } from '../../../daemon/search/index.ts';
-import { NOW_MS } from '../../support/work.ts';
+import { cardWork, FakeSource, NOW_MS, query } from '../../support/work.ts';
 
 const asks = {
   open: async ({ state }: { state?: string }) =>
@@ -63,5 +63,58 @@ describe('the search routes and tool', () => {
     expect(result.text).toContain('!a1 ask [open] (ask of lead) Pick a search backend');
     expect(result.isError).toBeUndefined();
     expect((await built.tools.search_work(undefined, { query: '' })).isError).toBe(true);
+  });
+});
+
+describe('buildSearch', () => {
+  const plain = {
+    read: async <T>(fn: (scope: never) => T | Promise<T>) => await fn({ text: (s: string) => s } as never),
+  };
+  const none = { open: async () => [] } as never;
+
+  test('searches the sources other plugins contribute, asked again on every search', async () => {
+    const contributed: FakeSource[] = [];
+    const search = buildSearch({
+      asks: none,
+      redaction: plain as never,
+      sources: () => contributed,
+      now: () => NOW_MS,
+      warn: () => undefined,
+    });
+    expect((await search.service.search(query('relay'))).total).toBe(0);
+    contributed.push(new FakeSource('cards', [cardWork({ id: 'F7', title: 'Relay carrier' })], true));
+    expect((await search.service.search(query('relay'))).hits.map(hit => hit.id)).toEqual(['F7']);
+  });
+
+  test('a redaction generation that moves rebuilds the index; one that cannot be read fails closed', async () => {
+    let generation: string | Error = 'g1';
+    let lists = 0;
+    const source = new FakeSource('cards', [cardWork({ id: 'F7', title: 'Relay carrier' })]);
+    const counting = {
+      id: 'cards',
+      list: async () => {
+        lists += 1;
+        return await source.list();
+      },
+    };
+    const search = buildSearch({
+      asks: none,
+      redaction: plain as never,
+      generation: () => {
+        if (generation instanceof Error) throw generation;
+        return generation;
+      },
+      sources: () => [counting],
+      now: () => NOW_MS,
+      warn: () => undefined,
+    });
+    await search.service.search(query('relay'));
+    await search.service.search(query('relay'));
+    expect(lists).toBe(1);
+    generation = 'g2';
+    await search.service.search(query('relay'));
+    expect(lists).toBe(2);
+    generation = new Error('the vault will not say');
+    await expect(search.service.search(query('relay'))).rejects.toThrow('the vault will not say');
   });
 });

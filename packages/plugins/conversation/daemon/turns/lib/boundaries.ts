@@ -5,9 +5,9 @@
  * round the owner interrupted ends as `interrupted` whichever way the ferret then settles. The only memory held is the
  * previous phase per ferret and when its round began: a restart costs at most one missed boundary, never a wrong one.
  *
- * What feeds it is whatever the daemon can see of a ferret's phase. Today that is Ferrets' own state; the transcript
- * and pane evidence of the full turn watcher (`./service.ts`) feeds the same {@link TurnBoundaries.look} when its ports
- * exist.
+ * What feeds it is Ferrets' `ferret.changed`: every write of a ferret's state is one look, so no round is missed
+ * between two polls. The transcript and pane evidence of the full turn watcher (`./service.ts`) feeds the same
+ * {@link TurnBoundaries.look} when its ports exist.
  */
 export type TurnPhase = 'starting' | 'working' | 'idle' | 'stopped';
 
@@ -57,12 +57,9 @@ export class TurnBoundaries {
     return held?.phase === 'working' ? held.began : undefined;
   }
 
-  /** Forgets ferrets that are no longer on the roster. */
-  keepOnly(roster: ReadonlySet<string>): void {
-    for (const ferret of this.#held.keys())
-      if (!roster.has(ferret)) {
-        this.#held.delete(ferret);
-        this.#interrupted.delete(ferret);
-      }
+  /** Forgets a ferret that is gone. */
+  forget(ferret: string): void {
+    this.#held.delete(ferret);
+    this.#interrupted.delete(ferret);
   }
 }

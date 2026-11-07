@@ -35,10 +35,14 @@ describe('conversation manifest', () => {
       expect(secrets(path).every(guard => guard === 'secrets')).toBe(true);
     expect(secrets('/v1/ferrets/:ferretId/shared-draft/stream')).toEqual(['secrets']);
   });
-  test('takes the question source and sitrep lines, offers message.before-send and turn.ended', () => {
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ask.sources', 'sitrep.lines']);
+  test('takes the question source, sitrep lines and ferret.changed; offers message.before-send, turn.ended and search.sources', () => {
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ask.sources', 'sitrep.lines', 'ferret.changed']);
     expect(manifest.hooks.takes[0]?.key).toBe('question');
-    expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual(['message.before-send', 'turn.ended']);
+    expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual([
+      'message.before-send',
+      'turn.ended',
+      'search.sources',
+    ]);
   });
   test('state files are format 1 and the two caches are marked as caches', () => {
     for (const file of manifest.data.state) expect(file.format).toBe(1);

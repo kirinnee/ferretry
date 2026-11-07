@@ -570,7 +570,8 @@ export class TranscriptReadService {
    * is cut from that scrubbed text — so the search cannot be used to ask whether a secret value appears,
    * and no snippet carries one. The raw text only chooses which records are worth scrubbing.
    *
-   * `truncated` says older records were not read because `limit` matches were found first.
+   * `truncated` says older records were not read because `limit` matches were found first; both count scrubbed
+   * matches only.
    */
   async logSearch(
     sessionId: string,
@@ -593,10 +594,42 @@ export class TranscriptReadService {
       (event.kind === 'message' ||
         (query.tools === true &&
           (event.kind === 'reasoning' || event.kind === 'tool-call' || event.kind === 'tool-result')));
-    const result = await this.search.search(sessionId, {
-      needle: prefilterNeedle(text),
-      accept: event => shown(event) && body(event).toLowerCase().includes(needle),
-      limit,
+    // One redaction read for the whole search: an event is accepted, and counted against `limit` and `truncated`, only
+    // when its SCRUBBED text holds the query, so neither the matches nor `truncated` can say a secret appears. The raw
+    // needle only chooses which records are worth scrubbing.
+    const { result, matches } = await this.redactor.batch(async scrub => {
+      const scrubbed = new Map<TranscriptEvent, string>();
+      const scrubbedBody = (event: TranscriptEvent): string => {
+        let held = scrubbed.get(event);
+        if (held === undefined) {
+          held = scrub.text(body(event));
+          scrubbed.set(event, held);
+        }
+        return held;
+      };
+      const found = await this.search.search(sessionId, {
+        needle: prefilterNeedle(text),
+        accept: event => shown(event) && scrubbedBody(event).toLowerCase().includes(needle),
+        limit,
+      });
+      if (found.kind !== 'read') return { result: found, matches: [] };
+      return {
+        result: found,
+        matches: found.events.flatMap((event): LogSearchMatch[] => {
+          const shownText = scrubbedBody(event);
+          const at = shownText.toLowerCase().indexOf(needle);
+          if (at < 0) return [];
+          return [
+            {
+              offset: event.byteOffset ?? 0,
+              role: event.role,
+              kind: event.kind,
+              snippet: snippetAround(shownText, at, needle.length),
+              ...(event.timestamp === undefined ? {} : { at: event.timestamp }),
+            },
+          ];
+        }),
+      };
     });
     if (result.kind === 'unresolved')
       throw new TranscriptReadError(
@@ -608,25 +641,6 @@ export class TranscriptReadService {
         'transcript_unreadable',
         `session ${sessionId} has a proved transcript, but this daemon could not read it`,
       );
-    const matches =
-      result.events.length === 0
-        ? []
-        : await this.redactor.batch(scrub =>
-            result.events.flatMap((event): LogSearchMatch[] => {
-              const scrubbed = scrub.text(body(event));
-              const at = scrubbed.toLowerCase().indexOf(needle);
-              if (at < 0) return [];
-              return [
-                {
-                  offset: event.byteOffset ?? 0,
-                  role: event.role,
-                  kind: event.kind,
-                  snippet: snippetAround(scrubbed, at, needle.length),
-                  ...(event.timestamp === undefined ? {} : { at: event.timestamp }),
-                },
-              ];
-            }),
-          );
     return {
       v: 1,
       ferret: sessionId as FerretId,

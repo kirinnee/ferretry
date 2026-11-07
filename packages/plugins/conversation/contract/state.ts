@@ -86,6 +86,8 @@ export const MESSAGE_TOKEN_KEY_STATE = defineState({
   path: 'message-token.key',
   store: 'secret',
   format: 1,
+  /** The kernel never parses a secret file: it hands back the bytes, and the codec checks their width itself. */
+  schema: z.instanceof(Uint8Array),
   mode: 0o600,
 });
 

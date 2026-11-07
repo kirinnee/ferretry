@@ -12,7 +12,9 @@
  * it. Plain notices are not asks and are not offered.
  */
 import type { z } from 'zod';
-import type { WorkFieldSchema, WorkHit, WorkKind } from '../../../contract/index.ts';
+import type { RawWork, WorkFieldSchema, WorkIdentity, WorkKind } from '../../../contract/index.ts';
+
+export type { RawWork };
 
 /** The named pieces of text a piece of work is searched by (the contract's list). */
 export type WorkField = z.infer<typeof WorkFieldSchema>;
@@ -22,9 +24,6 @@ interface WorkDocumentField {
   readonly field: WorkField;
   readonly text: string;
 }
-
-/** A hit without its match and score: who the document is, as every answer about it says. */
-type WorkIdentity = WorkHit extends infer Hit ? (Hit extends WorkHit ? Omit<Hit, 'match' | 'score'> : never) : never;
 
 /** One indexed piece of work. */
 export interface WorkDocument {
@@ -38,16 +37,6 @@ export interface WorkDocument {
 
 /** Masks known secret values in one text. The redactor's scrub, for the duration of one indexing batch. */
 export type ScrubText = (text: string) => string;
-
-/** A piece of work as its source knows it: nothing scrubbed yet. */
-export interface RawWork {
-  readonly key: string;
-  readonly kind: WorkKind;
-  readonly identity: WorkIdentity;
-  readonly updatedAtMs: number;
-  /** In a fixed order; empties are dropped. */
-  readonly fields: readonly (readonly [WorkField, string | null | undefined])[];
-}
 
 export const cardKey = (id: string): string => `card:${id}`;
 export const askKey = (id: string): string => `ask:${id}`;

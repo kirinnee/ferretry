@@ -118,21 +118,8 @@ export class WorkIndex {
   /** Adds or replaces a document. */
   put(document: WorkDocument): void {
     this.remove(document.key);
-    const weights = new Map<string, number>();
-    const core = new Set<string>();
-    for (const field of document.fields) {
-      const weight = FIELD_WEIGHT[field.field];
-      for (const token of tokensOf(field.text)) if ((weights.get(token) ?? 0) < weight) weights.set(token, weight);
-      if (CORE_FIELDS.has(field.field)) for (const token of meaningfulTokens(field.text)) core.add(token);
-    }
-    const title = document.fields.find(field => field.field === 'title')?.text ?? '';
-    const indexed: Indexed = {
-      document,
-      weights,
-      core,
-      title: new Set(meaningfulTokens(title)),
-      phrase: normalizePhrase(title),
-    };
+    const indexed = indexedOf(document);
+    const { weights, core } = indexed;
     this.documents.set(document.key, indexed);
     for (const [token, weight] of weights) {
       let posting = this.postings.get(token);
@@ -175,22 +162,21 @@ export class WorkIndex {
     if (this.byId.get(id)?.size === 0) this.byId.delete(id);
   }
 
+  /**
+   * Every document the query matches as it was indexed, of any age and before the window: the set the service
+   * re-checks against text scrubbed now, so an answer never rests on text indexed before a value became a secret.
+   */
+  matchingKeys(query: WorkSearchQuery): readonly string[] {
+    const { scores } = this.scored(query);
+    return [...scores.keys()].filter(key => {
+      const indexed = this.documents.get(key);
+      return indexed !== undefined && passes(query, indexed.document);
+    });
+  }
+
   // read-scoped: none — an index over documents already scrubbed at index time; it holds no unmasked text
   search(query: WorkSearchQuery, nowMs: number): WorkSearchResult {
-    const text = query.q.trim();
-    const bare = text.replace(SIGILS, '');
-    const tokens = tokensOf(text);
-    const scores = new Map<string, number>();
-    const named = new Set<string>();
-    if (TASK_ID.test(bare) || AGENDA_ID.test(bare))
-      for (const key of this.byId.get(bare.toUpperCase()) ?? []) {
-        scores.set(key, ID_SCORE);
-        named.add(key);
-      }
-    if (tokens.length > 0)
-      for (const [key, score] of this.textScores(tokens, normalizePhrase(text))) {
-        scores.set(key, (scores.get(key) ?? 0) + score);
-      }
+    const { tokens, scores, named } = this.scored(query);
     const candidates = [...scores]
       .map(([key, score]) => ({ indexed: this.documents.get(key), score }))
       .filter((entry): entry is { indexed: Indexed; score: number } => entry.indexed !== undefined)
@@ -222,6 +208,41 @@ export class WorkIndex {
    * Closed work is at most `weak`: a near copy of finished work is more often a follow-up than a mistake.
    */
   related(title: string, ask: string, nowMs: number, limit: number): readonly WorkRelatedMatch[] {
+    return this.relatedMatches(title, ask, nowMs, key => this.documents.get(key))
+      .slice(0, limit)
+      .map(({ strength, hit }) => ({ strength, hit }));
+  }
+
+  /** The keys {@link related} would answer with, every one of them, as the documents were indexed. */
+  relatedKeys(title: string, ask: string, nowMs: number): readonly string[] {
+    return this.relatedMatches(title, ask, nowMs, key => this.documents.get(key)).map(match => match.key);
+  }
+
+  /**
+   * {@link related}, judged on the documents given instead of the ones indexed (the same pieces of work, scrubbed
+   * again now): a piece of work missing from `documents` is not an answer. The rarity of each word is still the
+   * index's, so strengths agree with an ordinary related check.
+   */
+  relatedAmong(
+    title: string,
+    ask: string,
+    nowMs: number,
+    limit: number,
+    documents: ReadonlyMap<string, WorkDocument>,
+  ): readonly WorkRelatedMatch[] {
+    const held = new Map<string, Indexed>();
+    for (const [key, document] of documents) held.set(key, indexedOf(document));
+    return this.relatedMatches(title, ask, nowMs, key => held.get(key))
+      .slice(0, limit)
+      .map(({ strength, hit }) => ({ strength, hit }));
+  }
+
+  private relatedMatches(
+    title: string,
+    ask: string,
+    nowMs: number,
+    documentOf: (key: string) => Indexed | undefined,
+  ): readonly (WorkRelatedMatch & { readonly key: string })[] {
     const newTitle = meaningfulTokens(title);
     const asked = meaningfulTokens(`${title}\n${ask}`);
     if (asked.length === 0) return [];
@@ -238,7 +259,7 @@ export class WorkIndex {
     for (const token of asked) for (const key of this.postings.get(token)?.keys() ?? []) candidates.add(key);
     const matches: { strength: WorkRelatedStrength; closeness: number; indexed: Indexed }[] = [];
     for (const key of candidates) {
-      const indexed = this.documents.get(key);
+      const indexed = documentOf(key);
       if (indexed === undefined || !withinWindow(indexed.document, nowMs)) continue;
       const shared = asked.filter(token => indexed.core.has(token));
       if (shared.length === 0) continue;
@@ -266,11 +287,34 @@ export class WorkIndex {
           right.closeness - left.closeness ||
           right.indexed.document.updatedAtMs - left.indexed.document.updatedAtMs,
       )
-      .slice(0, limit)
       .map(({ strength, closeness, indexed }) => ({
+        key: indexed.document.key,
         strength,
         hit: hitOf(indexed.document, Math.round(closeness * 100), asked, 0),
       }));
+  }
+
+  /** The query's scores per document: an exact id first, then every word matched. */
+  private scored(query: WorkSearchQuery): {
+    readonly tokens: readonly string[];
+    readonly scores: ReadonlyMap<string, number>;
+    readonly named: ReadonlySet<string>;
+  } {
+    const text = query.q.trim();
+    const bare = text.replace(SIGILS, '');
+    const tokens = tokensOf(text);
+    const scores = new Map<string, number>();
+    const named = new Set<string>();
+    if (TASK_ID.test(bare) || AGENDA_ID.test(bare))
+      for (const key of this.byId.get(bare.toUpperCase()) ?? []) {
+        scores.set(key, ID_SCORE);
+        named.add(key);
+      }
+    if (tokens.length > 0)
+      for (const [key, score] of this.textScores(tokens, normalizePhrase(text))) {
+        scores.set(key, (scores.get(key) ?? 0) + score);
+      }
+    return { tokens, scores, named };
   }
 
   /** Every document matching every token, with its text score. */
@@ -330,6 +374,19 @@ export class WorkIndex {
 }
 
 const rank = (strength: WorkRelatedStrength): number => (strength === 'strong' ? 1 : 0);
+
+/** What one document contributes: each token's best weight, and the words its title, summary and ask are about. */
+const indexedOf = (document: WorkDocument): Indexed => {
+  const weights = new Map<string, number>();
+  const core = new Set<string>();
+  for (const field of document.fields) {
+    const weight = FIELD_WEIGHT[field.field];
+    for (const token of tokensOf(field.text)) if ((weights.get(token) ?? 0) < weight) weights.set(token, weight);
+    if (CORE_FIELDS.has(field.field)) for (const token of meaningfulTokens(field.text)) core.add(token);
+  }
+  const title = document.fields.find(field => field.field === 'title')?.text ?? '';
+  return { document, weights, core, title: new Set(meaningfulTokens(title)), phrase: normalizePhrase(title) };
+};
 
 /** Two sorted lists as one, a word in both kept once. */
 const mergeSorted = (left: readonly string[], right: readonly string[]): readonly string[] => {

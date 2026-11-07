@@ -40,12 +40,13 @@ import {
   SEND_CANCELLED_AUDIT,
   SEND_ENTERED_AUDIT,
   SEND_RETRIED_AUDIT,
+  SearchSources,
   SearchWorkToolInputSchema,
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretsPort, SitrepLines } from '@ferretry/core-ferrets/contract';
+import { FerretChanged, FerretsPort, SitrepLines } from '@ferretry/core-ferrets/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -298,8 +299,10 @@ export default definePlugin({
     takes: [
       { hook: AskSources, key: 'question', schema: QuestionSchema },
       { hook: SitrepLines, priority: 50 },
+      // A ferret that stops has its unlocked attachments zeroed; every change of state is a look for `turn.ended`.
+      { hook: FerretChanged },
     ],
-    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }],
+    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }],
   },
 
   // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner
