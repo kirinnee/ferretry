@@ -2,10 +2,17 @@
  * The router: one `fy` invocation, from argv to an exit code. The shell holds no feature: it resolves a verb line
  * against the manifests' declarations, opens the guarded client, and hands the plugin's own `cli` half the call.
  */
-import { skeletonSentence } from '@ferretry/kernel/contract';
+import { type Cancel, skeletonSentence } from '@ferretry/kernel/contract';
 import type { VerbHandler } from '@ferretry/kernel/manifest';
 import { parseArgs } from './argv.ts';
-import { type ClientDeps, pluginClient, routeFactsBeforeContact, type Surfaces, surfacesOf } from './client.ts';
+import {
+  type ClientDeps,
+  type FollowingClient,
+  pluginClient,
+  routeFactsBeforeContact,
+  type Surfaces,
+  surfacesOf,
+} from './client.ts';
 import { AS_OWNER_NOTE, inPane } from './credential.ts';
 import { askVerb } from './commands/ask.ts';
 import {
@@ -21,7 +28,7 @@ import {
 } from './commands/daemon.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
-import { eventsVerb, snapshotVerb } from './commands/reads.ts';
+import { streamVerb } from './commands/reads.ts';
 import {
   machineCloneVerb,
   machineExportVerb,
@@ -63,9 +70,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'machine install': machineInstallVerb,
   'machine export': machineExportVerb,
   'machine clone': machineCloneVerb,
-  snapshot: snapshotVerb,
-  events: eventsVerb,
-  view: eventsVerb,
+  stream: streamVerb,
   update: updateVerb,
 };
 
@@ -229,21 +234,35 @@ async function runPluginVerb(
  * refused before the daemon is probed, started or sent anything, as today's `refuseOwnerCommandInPane` refuses before
  * the gateway.
  */
-function lazyClient(
-  deps: () => Promise<ClientDeps>,
-  id: string,
-  surfaces: Surfaces,
-  paned: boolean,
-): ReturnType<typeof pluginClient> {
+function lazyClient(deps: () => Promise<ClientDeps>, id: string, surfaces: Surfaces, paned: boolean): FollowingClient {
+  const follow: FollowingClient['follow'] = (event, listener, onEnd) => {
+    let cancel: Cancel | undefined;
+    let stopped = false;
+    // The connection opens when the first listener asks, like a call; a refusal to connect ends the feed with its words.
+    void deps().then(
+      opened => {
+        if (stopped) return;
+        try {
+          cancel = pluginClient(opened, id).follow(event, listener, onEnd);
+        } catch (error) {
+          onEnd(errorText(error));
+        }
+      },
+      (error: unknown) => {
+        if (!stopped) onEnd(errorText(error));
+      },
+    );
+    return () => {
+      stopped = true;
+      cancel?.();
+    };
+  };
   return {
     call: async (route, init) => {
       routeFactsBeforeContact(surfaces, paned, route);
       return await pluginClient(await deps(), id).call(route, init);
     },
-    subscribe: (event, listener) => {
-      void event;
-      void listener;
-      throw new ShellError('events are not available to fy verbs in this build', EXIT.unavailable);
-    },
+    subscribe: (event, listener) => follow(event, listener, () => undefined),
+    follow,
   };
 }

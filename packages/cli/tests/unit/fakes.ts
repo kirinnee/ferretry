@@ -16,6 +16,7 @@ import {
   type DaemonReply,
   type DaemonTransport,
   InventoryCache,
+  type RawEvent,
   type SendOptions,
   surfacesOf,
 } from '../../src/lib/client.ts';
@@ -156,6 +157,33 @@ export class RecordingTransport implements DaemonTransport {
   }
 }
 
+/** A transport that also holds the event feed open: a test pushes events in, and closes the feed. */
+export class FeedingTransport extends RecordingTransport {
+  opened = 0;
+  cancelled = 0;
+  #listener: ((event: RawEvent) => void) | undefined;
+  #closed: ((reason: string) => void) | undefined;
+
+  events(listener: (event: RawEvent) => void, onClose: (reason: string) => void): () => void {
+    this.opened += 1;
+    this.#listener = listener;
+    this.#closed = onClose;
+    return () => {
+      this.cancelled += 1;
+    };
+  }
+
+  /** The daemon sends one event. */
+  push(name: string, payload: unknown): void {
+    this.#listener?.({ name, payload });
+  }
+
+  /** The feed ends, as when the daemon goes away. */
+  close(reason: string): void {
+    this.#closed?.(reason);
+  }
+}
+
 export function depsOf(
   registry: CommandRegistry,
   inventory: PluginInventory | (() => PluginInventory),
@@ -183,6 +211,8 @@ export interface FakeWorldOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly launch?: LaunchResult;
   readonly transport?: RecordingTransport;
+  /** An interrupt the test raises by hand; absent, the world offers none. */
+  readonly interrupt?: AbortController;
   /** Reads the inventory through the connection, instead of answering `inventory`. */
   readonly readInventory?: () => Promise<PluginInventory>;
 }
@@ -209,6 +239,9 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     registry: options.registry ?? registryOf(),
     probe: async () => probe,
     launch: async () => options.launch ?? { started: true, baseUrl: probe.baseUrl },
+    ...(options.interrupt === undefined
+      ? {}
+      : { interrupt: () => ({ signal: options.interrupt?.signal as AbortSignal, release: () => undefined }) }),
     connect: async ({ asOwner }): Promise<Connection> => {
       connects.push({ asOwner });
       return {

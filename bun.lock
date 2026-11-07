@@ -51,6 +51,7 @@
         "fy": "bin/fy.ts",
       },
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-updates": "workspace:*",

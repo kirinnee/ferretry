@@ -50,14 +50,10 @@ const SHELL_VERB_LINES = [
       'copy a setup exported from another machine; a repeat copy is an update that shows only what differs (--dry-run to look first)',
   },
   {
-    verb: 'snapshot',
-    summary: "snapshot <id>: capture the ferret's live screen (a dead pane is refused, never served as blank)",
+    verb: 'stream',
+    summary:
+      'stream [id]: follow one ferret, or every ferret, as its state changes, until interrupted (--json for one event per line)',
   },
-  {
-    verb: 'events',
-    summary: 'events <id>: read the durable events the daemon recorded for a ferret (--after, --limit, --json)',
-  },
-  { verb: 'view', summary: 'view <id>: the same as events' },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 

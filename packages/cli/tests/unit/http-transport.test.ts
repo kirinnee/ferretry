@@ -150,3 +150,114 @@ describe('the transport checks every attempt (S57)', () => {
     expect(rig.tokenReads).toBe(1);
   });
 });
+
+describe('the event feed goes through the same checks as a request (S57)', () => {
+  class FakeFeedSocket {
+    onmessage: ((event: { readonly data: unknown }) => void) | null = null;
+    onclose: ((event: { readonly reason?: string; readonly code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    closed: string | undefined;
+    close(_code?: number, reason?: string): void {
+      this.closed = reason ?? '';
+    }
+  }
+
+  function feedRig(base: string, table: string, opened: { url: string; authorization: string | undefined }[]) {
+    const rig: Rig = { base, table, checked: [], sent: [], tokenReads: 0, sleeps: 0 };
+    const socket = new FakeFeedSocket();
+    const ports: ListenerGuardPorts = { tables: async () => [rig.table], uid: () => OWN_UID };
+    const transport = new HttpTransport({
+      baseUrl: async () => rig.base,
+      authorization: async () => {
+        rig.tokenReads += 1;
+        return CREDENTIAL;
+      },
+      beforeSend: async checked => {
+        rig.checked.push(checked);
+        if (!isLocalDaemonUrl(checked)) throw new Error(`refusing to send the daemon admin token to ${checked}`);
+        await assertOwnLoopbackListener(checked, 'the daemon admin token', ports);
+      },
+      headers: { 'x-ferretry-client': 'cli', authorization: 'Bearer not-this-one' },
+      feedSocket: (url, headers) => {
+        opened.push({ url, authorization: headers.authorization });
+        return socket;
+      },
+    });
+    return { rig, socket, transport };
+  }
+
+  const settle = () => Bun.sleep(5);
+
+  it('S57 opens the feed at the freshly read address with the credential read after the check, and hands frames over raw', async () => {
+    const opened: { url: string; authorization: string | undefined }[] = [];
+    const { rig, socket, transport } = feedRig(
+      'http://127.0.0.1:7431',
+      [HEADER, listening(7431, OWN_UID)].join('\n'),
+      opened,
+    );
+    const heard: unknown[] = [];
+    transport.events(
+      event => heard.push(event),
+      () => {},
+    );
+    await settle();
+    expect(opened).toEqual([{ url: 'ws://127.0.0.1:7431/v1/events', authorization: CREDENTIAL }]);
+    expect(rig.checked).toEqual(['http://127.0.0.1:7431']);
+    socket.onmessage?.({ data: JSON.stringify({ name: 'ferrets.changed', payload: { ferret: 'ada' } }) });
+    socket.onmessage?.({ data: 'not json' });
+    socket.onmessage?.({ data: JSON.stringify({ name: 'x'.repeat(129), payload: {} }) });
+    expect(heard).toEqual([{ name: 'ferrets.changed', payload: { ferret: 'ada' } }]);
+  });
+
+  it('S57 a foreign listener on the daemon address ends the feed unopened and the token is never read', async () => {
+    const opened: { url: string; authorization: string | undefined }[] = [];
+    const { rig, transport } = feedRig(
+      'http://127.0.0.1:7431',
+      [HEADER, listening(7431, OTHER_UID)].join('\n'),
+      opened,
+    );
+    const reasons: string[] = [];
+    transport.events(
+      () => {},
+      reason => reasons.push(reason),
+    );
+    await settle();
+    expect(opened).toEqual([]);
+    expect(rig.tokenReads).toBe(0);
+    expect(reasons.length).toBe(1);
+  });
+
+  it('S57 a remote address ends the feed unopened', async () => {
+    const opened: { url: string; authorization: string | undefined }[] = [];
+    const { rig, transport } = feedRig('http://example.test:7431', '', opened);
+    const reasons: string[] = [];
+    transport.events(
+      () => {},
+      reason => reasons.push(reason),
+    );
+    await settle();
+    expect(opened).toEqual([]);
+    expect(rig.tokenReads).toBe(0);
+    expect(reasons[0]).toContain('refusing to send the daemon admin token');
+  });
+
+  it('says why the daemon closed the feed once, and says nothing after a cancel', async () => {
+    const opened: { url: string; authorization: string | undefined }[] = [];
+    const { socket, transport } = feedRig(
+      'http://127.0.0.1:7431',
+      [HEADER, listening(7431, OWN_UID)].join('\n'),
+      opened,
+    );
+    const reasons: string[] = [];
+    const cancel = transport.events(
+      () => {},
+      reason => reasons.push(reason),
+    );
+    await settle();
+    socket.onclose?.({ reason: '' });
+    socket.onerror?.();
+    expect(reasons).toEqual(['the daemon closed the event feed']);
+    cancel();
+    expect(socket.closed).toBe('cancelled');
+  });
+});

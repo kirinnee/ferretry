@@ -1,167 +1,137 @@
 import { describe, it } from 'bun:test';
-import { definePlugin, route } from '@ferretry/kernel/manifest';
+import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import { registry as generated } from '../../src/generated/commands.ts';
-import { EVENTS_ROUTE, renderEvent, SNAPSHOT_ROUTE } from '../../src/lib/commands/reads.ts';
+import { renderChange } from '../../src/lib/commands/reads.ts';
 import { runFy } from '../../src/lib/run.ts';
 import { buildVerbTable, resolveVerb } from '../../src/lib/verbs.ts';
-import { fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';
+import { FeedingTransport, fakeWorld, inventoryOf } from './fakes.ts';
 
-const SCOPE = { minimum: 'authenticated', audit: { skip: 'test' }, guard: { none: 'test' } } as const;
+const owner = (words: string[]) => {
+  const resolved = resolveVerb(buildVerbTable(generated), words);
+  return resolved.kind === 'verb' ? resolved.entry.owner : 'unknown';
+};
 
-/** The two owners as they will declare the routes: Ferrets the journal, Terminals the screen. */
-const owners = () =>
-  registryOf(
-    skeletonEntry(
-      definePlugin({
-        id: 'ferrets',
-        title: 'Ferrets',
-        version: '5.0.0',
-        api: 5,
-        core: true,
-        kinds: [],
-        actions: { routes: [route(EVENTS_ROUTE, { ...SCOPE, caller: 'any' })] },
-      }),
-      'h-ferrets',
-    ),
-    skeletonEntry(
-      definePlugin({
-        id: 'terminals',
-        title: 'Terminals',
-        version: '5.0.0',
-        api: 5,
-        core: false,
-        kinds: ['command'],
-        actions: { routes: [route(SNAPSHOT_ROUTE, { ...SCOPE, caller: 'any' })] },
-      }),
-      'h-terminals',
-    ),
-  );
+/** Lets the guard's per-frame check (asynchronous) and the verb's own wiring run. */
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+  await Bun.sleep(0);
+};
 
-const inventory = () => inventoryOf({ id: 'terminals', contract: 'h-terminals' });
+const change = (ferret: string, extra: object = {}) => ({ ferret, generation: 3, state: 'working', ...extra });
 
-const event = (sequence: number, extra: object = {}) => ({
-  sequence,
-  time: '2026-11-07T01:02:03.000Z',
-  type: 'turn.started',
-  source: 'daemon',
-  ...extra,
-});
+/** A `fy stream` in flight: its output so far, and the handles a test pulls. */
+async function streaming(args: string[], options: { ferretsOn?: boolean } = {}) {
+  const transport = new FeedingTransport();
+  const interrupt = new AbortController();
+  const { world, io } = fakeWorld({
+    transport,
+    interrupt,
+    inventory: inventoryOf({ id: 'ferrets', on: options.ferretsOn ?? true, contract: 'h-ferrets' }),
+  });
+  const done = runFy(['stream', ...args], world);
+  await settle();
+  return { transport, interrupt, io, done };
+}
 
 describe('the retained read verbs', () => {
   it('V-0058 V-0311 attach and logs are the Terminals and Conversation verbs, so the shell holds no second copy', () => {
     const table = buildVerbTable(generated);
-    const owner = (words: string[]) => {
-      const resolved = resolveVerb(table, words);
-      return resolved.kind === 'verb' ? resolved.entry.owner : 'unknown';
-    };
     should(owner(['attach', 'a'])).equal('terminals');
     should(owner(['logs', 'a'])).equal('conversation');
     should(table.conflicts.filter(conflict => ['attach', 'logs'].includes(conflict.line))).deepEqual([]);
   });
 
-  it('V-0442 should print the live screen of a ferret, asking the daemon for the live one', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({ status: 200, body: 'line one\nline two' });
-    should(await runFy(['snapshot', 'ada'], world)).equal(0);
-    should(io.stdout()).equal('line one\nline two\n');
-    should(transport.sent[0]?.path).equal('/v1/ferrets/ada/snapshot?live=true');
+  it('V-0442 V-0258 V-0495 snapshot, events and view are not shell verbs, so no copy can shadow their owners', () => {
+    for (const verb of ['snapshot', 'events', 'view']) should(owner([verb, 'ada'])).not.equal('shell');
+  });
+});
+
+describe('fy stream', () => {
+  it('V-0452 prints each change of every ferret as the daemon announces it, until interrupted', async () => {
+    const { transport, interrupt, io, done } = await streaming([]);
+    transport.push('ferrets.changed', change('ada'));
+    transport.push('ferrets.changed', change('bo', { gone: true, state: undefined }));
+    await settle();
+    interrupt.abort();
+    should(await done).equal(0);
+    should(io.stdout()).equal('ada working (generation 3)\nbo gone (generation 3)\n');
+    should(transport.opened).equal(1);
+    should(transport.cancelled).equal(1);
   });
 
-  it('V-0442 should print the screen as one JSON line with --json', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({ status: 200, body: 'hi\n' });
-    should(await runFy(['snapshot', 'ada', '--json'], world)).equal(0);
-    should(JSON.parse(io.stdout())).deepEqual({ ferretId: 'ada', snapshot: 'hi\n' });
-  });
-
-  it('V-0442 should say a dead pane was refused, and exit 1, rather than print a blank screen', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({ status: 409, body: { error: 'the pane of ada is dead' } });
-    should(await runFy(['snapshot', 'ada'], world)).equal(1);
-    should(io.stderr()).containEql('the pane of ada is dead');
-    should(io.stdout()).equal('');
-  });
-
-  it('V-0442 V-0258 should name the ferret when none is given', async () => {
-    const { world, io } = fakeWorld({ registry: owners(), inventory: inventory() });
-    should(await runFy(['snapshot'], world)).equal(2);
-    should(await runFy(['events'], world)).equal(2);
-    should(io.stderr()).containEql('name the ferret: fy snapshot <id>');
-    should(io.stderr()).containEql('name the ferret: fy events <id>');
-  });
-
-  it('V-0258 should print each recorded event on a line led by its sequence, the turn only when recorded', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({
-      status: 200,
-      body: [event(1), event(2, { turn: 3, data: { a: 1 } })],
-    });
-    should(await runFy(['events', 'ada'], world)).equal(0);
-    should(io.stdout()).equal(
-      '#1 2026-11-07T01:02:03.000Z turn.started (daemon)\n#2 2026-11-07T01:02:03.000Z turn.started turn=3 (daemon) {"a":1}\n',
-    );
-    should(transport.sent[0]?.path).equal('/v1/ferrets/ada/events?after=0&limit=1000');
-  });
-
-  it('V-0258 should print one protocol event per line with --json, from --after, at most --limit', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({ status: 200, body: [event(8), event(9)] });
-    should(await runFy(['events', 'ada', '--after', '7', '--limit', '2', '--json'], world)).equal(0);
+  it('V-0452 follows one ferret only when it is named, and prints the event as one JSON line with --json', async () => {
+    const { transport, interrupt, io, done } = await streaming(['ada', '--json']);
+    transport.push('ferrets.changed', change('bo'));
+    transport.push('ferrets.changed', change('ada'));
+    await settle();
+    interrupt.abort();
+    should(await done).equal(0);
     should(
       io
         .stdout()
         .trim()
         .split('\n')
-        .map(line => (JSON.parse(line) as { sequence: number }).sequence),
-    ).deepEqual([8, 9]);
-    should(transport.sent[0]?.path).equal('/v1/ferrets/ada/events?after=7&limit=2');
+        .map(line => JSON.parse(line)),
+    ).deepEqual([change('ada')]);
   });
 
-  it('V-0258 should read page after page, from the last sequence, until a short page ends it', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    const full = Array.from({ length: 1000 }, (_, index) => event(index + 1));
-    transport.replies.push({ status: 200, body: full }, { status: 200, body: [event(1001)] });
-    should(await runFy(['events', 'ada'], world)).equal(0);
-    should(io.stdout().trim().split('\n').length).equal(1001);
-    should(transport.sent.map(request => request.path)).deepEqual([
-      '/v1/ferrets/ada/events?after=0&limit=1000',
-      '/v1/ferrets/ada/events?after=1000&limit=1000',
-    ]);
+  it('V-0452 drops an event whose payload is not the shape its owner declared, and an event nobody follows', async () => {
+    const { transport, interrupt, io, done } = await streaming([]);
+    transport.push('ferrets.changed', { ferret: 7 });
+    transport.push('board.changed', change('ada'));
+    await settle();
+    interrupt.abort();
+    await done;
+    should(io.stdout()).equal('');
   });
 
-  it('V-0258 should refuse a page that does not move the cursor instead of looping', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({ status: 200, body: Array.from({ length: 1000 }, () => event(0)) });
-    should(await runFy(['events', 'ada'], world)).equal(1);
-    should(io.stderr()).containEql('did not advance its cursor');
+  it('V-0452 hears nothing while the Ferrets plugin is off: the guard judges every frame like a call', async () => {
+    const { transport, interrupt, io, done } = await streaming([], { ferretsOn: false });
+    transport.push('ferrets.changed', change('ada'));
+    await settle();
+    interrupt.abort();
+    await done;
+    should(io.stdout()).equal('');
   });
 
-  it('V-0258 should refuse a cursor or a limit that is not a whole number before asking the daemon', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    should(await runFy(['events', 'ada', '--after=-1'], world)).equal(2);
-    should(await runFy(['events', 'ada', '--limit', '0'], world)).equal(2);
-    should(await runFy(['events', 'ada', '--limit', 'x'], world)).equal(2);
-    should(io.stderr()).containEql('--after must be a non-negative integer');
-    should(io.stderr()).containEql('--limit must be a positive integer');
-    should(transport.sent).deepEqual([]);
+  it('V-0452 ends with the feed’s own reason and exit 1 when the daemon goes away', async () => {
+    const { transport, io, done } = await streaming([]);
+    transport.close('the daemon closed the event feed');
+    should(await done).equal(1);
+    should(io.stderr()).equal('fy stream: the daemon closed the event feed\n');
   });
 
-  it('V-0495 should answer fy view exactly as fy events', async () => {
-    const { world, io, transport } = fakeWorld({ registry: owners(), inventory: inventory() });
-    transport.replies.push({ status: 200, body: [event(5)] });
-    should(await runFy(['view', 'ada'], world)).equal(0);
-    should(io.stdout()).containEql('#5 ');
+  it('V-0452 refuses --after, saying the stream has no sequence to resume from, before it connects', async () => {
+    const transport = new FeedingTransport();
+    const { world, io, connects } = fakeWorld({ transport });
+    should(await runFy(['stream', '--after', '4'], world)).equal(2);
+    should(io.stderr()).containEql('has no --after');
+    should(connects).deepEqual([]);
+    should(transport.opened).equal(0);
   });
 
-  it('V-0258 should say no plugin declares the route, and send nothing, until its owner declares it', async () => {
-    const { world, io, transport } = fakeWorld({ registry: registryOf(), inventory: inventoryOf() });
-    should(await runFy(['events', 'ada'], world)).equal(1);
-    should(io.stderr()).containEql(`no plugin declares the route ${EVENTS_ROUTE}`);
-    should(transport.sent).deepEqual([]);
+  it('V-0452 follows one ferret or all of them, so a second id is refused', async () => {
+    const { world, io } = fakeWorld({ transport: new FeedingTransport() });
+    should(await runFy(['stream', 'ada', 'bo'], world)).equal(2);
+    should(io.stderr()).containEql('fy stream [id]');
   });
 
-  it('V-0258 renders a turn only when the producer recorded one', () => {
-    should(renderEvent({ ...event(4), data: null })).equal('#4 2026-11-07T01:02:03.000Z turn.started (daemon)');
+  it('V-0452 says a connection that cannot hold a feed open cannot be followed, rather than ending silently', async () => {
+    const { world, io } = fakeWorld({ interrupt: new AbortController() });
+    const done = runFy(['stream'], world);
+    await settle();
+    should(await done).equal(1);
+    should(io.stderr()).containEql('does not subscribe to events');
+  });
+
+  it('V-0452 renders a change by what happened to the ferret', () => {
+    should(renderChange({ ferret: 'ada', generation: 1, state: 'idle' })).equal('ada idle (generation 1)');
+    should(renderChange({ ferret: 'ada', generation: 2, gone: true })).equal('ada gone (generation 2)');
+    should(renderChange({ ferret: 'ada', generation: 2 })).equal('ada changed (generation 2)');
+  });
+
+  it('V-0452 FerretsChanged is the owner’s own definition, not a copy', () => {
+    should(FerretsChanged.name).equal('ferrets.changed');
   });
 });

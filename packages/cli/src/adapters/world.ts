@@ -98,6 +98,19 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     registry,
     probe,
     launch,
+    interrupt: () => {
+      const controller = new AbortController();
+      const stop = (): void => controller.abort();
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+      return {
+        signal: controller.signal,
+        release: () => {
+          process.off('SIGINT', stop);
+          process.off('SIGTERM', stop);
+        },
+      };
+    },
     prompt: terminalPrompt,
     readText: path => Bun.file(path).text(),
     daemon: reads =>

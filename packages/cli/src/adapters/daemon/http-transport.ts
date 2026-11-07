@@ -1,4 +1,4 @@
-import type { DaemonReply, DaemonTransport, SendOptions } from '../../lib/client.ts';
+import type { DaemonReply, DaemonTransport, RawEvent, SendOptions } from '../../lib/client.ts';
 import type { DaemonRequest } from '../../lib/request.ts';
 import {
   type Attempt,
@@ -12,6 +12,27 @@ import {
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
+
+/** What the event feed needs of a socket; a `WebSocket` is one. */
+export interface FeedSocket {
+  onmessage: ((event: { readonly data: unknown }) => void) | null;
+  onclose: ((event: { readonly reason?: string; readonly code?: number }) => void) | null;
+  onerror: (() => void) | null;
+  close(code?: number, reason?: string): void;
+}
+
+/** Opens the feed's socket. Production passes `new WebSocket`; tests pass a fake, so no test opens a connection. */
+export type FeedSocketOpener = (url: string, headers: Readonly<Record<string, string>>) => FeedSocket;
+
+/** Bun's `WebSocket` takes request headers as a second argument, which the DOM type does not know. */
+const bunSocket: FeedSocketOpener = (url, headers) =>
+  new (WebSocket as unknown as new (target: string, options: { headers: Record<string, string> }) => FeedSocket)(url, {
+    headers: { ...headers },
+  });
+
+/** The daemon's event feed: a socket that sends one `{ name, payload }` JSON frame per event. */
+const EVENTS_PATH = '/v1/events';
+const MAX_EVENT_NAME = 128;
 
 export interface RestartWaiting {
   readonly patience: RestartPatience;
@@ -30,6 +51,8 @@ export interface HttpTransportOptions {
   readonly headers?: Readonly<Record<string, string>>;
   readonly fetcher?: Fetcher;
   readonly restart?: RestartWaiting;
+  /** Opens the event feed's socket; the default is a `WebSocket`. */
+  readonly feedSocket?: FeedSocketOpener;
   readonly timeoutMs?: number;
 }
 
@@ -103,6 +126,59 @@ export class HttpTransport implements DaemonTransport {
     if (outcome.kind !== 'answered') throw outcome.error;
     const text = await outcome.value.text();
     return { status: outcome.value.status, body: parseBody(text) };
+  }
+
+  /**
+   * Opens the event feed. It goes through the SAME address and credential rules as a request: the address is read now
+   * and judged by `beforeSend` BEFORE the credential is read, and a refusal ends the feed unopened. A feed does not
+   * reconnect; its end is reported, and whoever follows it decides.
+   */
+  events(listener: (event: RawEvent) => void, onClose: (reason: string) => void): () => void {
+    let cancelled = false;
+    let ended = false;
+    let socket: FeedSocket | undefined;
+    const end = (reason: string): void => {
+      if (cancelled || ended) return;
+      ended = true;
+      onClose(reason);
+    };
+    void (async () => {
+      try {
+        const base = await this.options.baseUrl();
+        await this.options.beforeSend?.(base);
+        const headers: Record<string, string> = { ...this.options.headers };
+        for (const name of Object.keys(headers)) if (name.toLowerCase() === 'authorization') delete headers[name];
+        const authorization = await this.options.authorization();
+        if (authorization !== undefined) headers.authorization = authorization;
+        const url = new URL(EVENTS_PATH, base);
+        url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        if (cancelled) return;
+        const open = this.options.feedSocket ?? bunSocket;
+        const opened = open(url.toString(), headers);
+        socket = opened;
+        opened.onmessage = message => {
+          if (typeof message.data !== 'string') return;
+          let value: unknown;
+          try {
+            value = JSON.parse(message.data);
+          } catch {
+            return;
+          }
+          if (typeof value !== 'object' || value === null) return;
+          const { name, payload } = value as { name?: unknown; payload?: unknown };
+          if (typeof name === 'string' && name.length <= MAX_EVENT_NAME) listener({ name, payload });
+        };
+        opened.onclose = closed =>
+          end(closed.reason === undefined || closed.reason === '' ? 'the daemon closed the event feed' : closed.reason);
+        opened.onerror = () => end('the event feed failed');
+      } catch (error) {
+        end(error instanceof Error ? error.message : String(error));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      socket?.close(1000, 'cancelled');
+    };
   }
 }
 

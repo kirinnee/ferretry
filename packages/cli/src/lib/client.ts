@@ -15,7 +15,7 @@
  * about exactly that address before the request (and its credential) goes out. A refusal there is final. The
  * remaining window is the moment between that check and the connect, which no user-space client can close.
  */
-import { type PluginInventory, PluginsChanged } from '@ferretry/kernel/contract';
+import { type Cancel, type EventDef, type PluginInventory, PluginsChanged } from '@ferretry/kernel/contract';
 import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
 import { DaemonRefusal, EXIT, ShellError } from './errors.ts';
 import { type CompiledContracts, judgeCall, PluginPausedError, pausedSentence } from './guard.ts';
@@ -40,6 +40,11 @@ export interface SendOptions {
 /** Sends one request, with whatever credential the connection chose. Never throws for an HTTP status. */
 export interface DaemonTransport {
   send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply>;
+  /**
+   * Opens the daemon's event feed (`/v1/events`): every event is handed over raw, and `onClose` says why it ended.
+   * Returns the cancel. Absent where a transport cannot hold a feed open.
+   */
+  events?(listener: (event: RawEvent) => void, onClose: (reason: string) => void): Cancel;
 }
 
 /**
@@ -180,8 +185,129 @@ export async function sendChecked(deps: ClientDeps, request: DaemonRequest, ids:
   return reply.body;
 }
 
-/** The client a plugin's half gets as `ctx.client`. */
-export function pluginClient(deps: ClientDeps, caller: Manifest['id']): PluginClient {
+/** One event as the daemon's feed carries it, before anyone has checked its payload. */
+export interface RawEvent {
+  readonly name: string;
+  readonly payload: unknown;
+}
+
+/** The package that owns an event: the words before its first dot (`ferrets.changed` is Ferrets'). */
+export const eventOwner = (eventName: string): string => {
+  const dot = eventName.indexOf('.');
+  return dot === -1 ? eventName : eventName.slice(0, dot);
+};
+
+/** A client that can also be told when its feed ends, which a verb that follows events until interrupted needs. */
+export interface FollowingClient extends PluginClient {
+  /**
+   * Like `subscribe`, and `onEnd` is told why when the feed can no longer deliver: the connection was refused, or the
+   * daemon went away. After `onEnd` nothing more is delivered. The returned cancel never calls `onEnd`.
+   */
+  follow<Name extends string, Payload>(
+    event: EventDef<Name, Payload>,
+    listener: (payload: Payload) => void,
+    onEnd: (reason: string) => void,
+  ): Cancel;
+}
+
+interface Following {
+  readonly event: EventDef;
+  readonly deliver: (payload: unknown) => void;
+  readonly end: (reason: string) => void;
+}
+
+/**
+ * The one event feed of a connection: opened on the first listener, closed when the last one leaves. A frame of an
+ * event nobody follows is dropped UNPARSED. `kernel.plugins-changed` is heard here too, so a held inventory is dropped
+ * by the same frame that tells a follower about it.
+ */
+class EventFeed {
+  readonly #following = new Set<Following>();
+  #stop: (() => void) | undefined;
+
+  constructor(private readonly deps: ClientDeps) {}
+
+  add(following: Following): Cancel {
+    const open = this.deps.transport.events;
+    if (open === undefined)
+      throw new ShellError(`${this.deps.binary} does not subscribe to events on this connection`, EXIT.unavailable);
+    this.#following.add(following);
+    if (this.#stop === undefined) {
+      this.#stop = open.call(
+        this.deps.transport,
+        raw => this.#heard(raw),
+        reason => this.#closed(reason),
+      );
+    }
+    return () => {
+      this.#following.delete(following);
+      if (this.#following.size === 0) {
+        this.#stop?.();
+        this.#stop = undefined;
+      }
+    };
+  }
+
+  #heard(raw: RawEvent): void {
+    this.deps.inventory.heard(raw.name);
+    for (const following of this.#following) {
+      if (following.event.name !== raw.name) continue;
+      const parsed = following.event.schema.safeParse(raw.payload);
+      if (parsed.success) following.deliver(parsed.data);
+    }
+  }
+
+  #closed(reason: string): void {
+    const ended = [...this.#following];
+    this.#following.clear();
+    this.#stop = undefined;
+    for (const following of ended) following.end(reason);
+  }
+}
+
+const feeds = new WeakMap<ClientDeps, EventFeed>();
+const feedOf = (deps: ClientDeps): EventFeed => {
+  let feed = feeds.get(deps);
+  if (feed === undefined) {
+    feed = new EventFeed(deps);
+    feeds.set(deps, feed);
+  }
+  return feed;
+};
+
+/**
+ * The client a plugin's half gets as `ctx.client`. An event is HEARD only while the caller and the event's owner are
+ * allowed, asked again for every frame; a frame that fails the check is dropped, unseen.
+ */
+export function pluginClient(deps: ClientDeps, caller: Manifest['id']): FollowingClient {
+  const follow: FollowingClient['follow'] = (event, listener, onEnd) => {
+    const ids = [caller, eventOwner(event.name)];
+    // One chain per listener, so frames reach it in the order they arrived even though each is checked asynchronously.
+    let chain: Promise<void> = Promise.resolve();
+    let live = true;
+    const cancel = feedOf(deps).add({
+      event,
+      deliver: payload => {
+        chain = chain.then(async () => {
+          try {
+            await ensureAllAllowed(deps, ids);
+          } catch {
+            return;
+          }
+          if (live) listener(payload as never);
+        });
+      },
+      end: reason => {
+        chain = chain.then(() => {
+          if (live) onEnd(reason);
+        });
+      },
+    });
+    return () => {
+      live = false;
+      cancel();
+    };
+  };
   return {
     async call<Answer = unknown>(route: string, init?: CallInit): Promise<Answer> {
       const facts = routeFactsBeforeContact(deps.surfaces, deps.inPane, route);
@@ -190,8 +316,7 @@ export function pluginClient(deps: ClientDeps, caller: Manifest['id']): PluginCl
       await ensureAllAllowed(deps, ids);
       return (await sendChecked(deps, request, ids)) as Answer;
     },
-    subscribe() {
-      throw new ShellError(`${deps.binary} does not subscribe to events in this build`, EXIT.unavailable);
-    },
+    subscribe: (event, listener) => follow(event, listener, () => undefined),
+    follow,
   };
 }

@@ -1,12 +1,14 @@
 import { describe, it } from 'bun:test';
+import { defineEvent } from '@ferretry/kernel/contract';
 import should from 'should';
+import { z } from 'zod';
 import { pluginClient, type SendOptions } from '../../src/lib/client.ts';
 import { DaemonRefusal } from '../../src/lib/errors.ts';
 import { PluginPausedError } from '../../src/lib/guard.ts';
 import { PERSON_ONLY_REFUSAL } from '../../src/lib/credential.ts';
 import { ToolClient, toolPath } from '../../src/lib/tool-client.ts';
 import type { DaemonRequest } from '../../src/lib/request.ts';
-import { boardEntry, depsOf, inventoryOf, RecordingTransport, registryOf } from './fakes.ts';
+import { boardEntry, depsOf, FeedingTransport, inventoryOf, RecordingTransport, registryOf } from './fakes.ts';
 
 const registry = registryOf(boardEntry());
 const healthy = inventoryOf({ id: 'board', contract: 'h-board' });
@@ -154,11 +156,44 @@ describe('the guarded client', () => {
     should(transport.sent.length).equal(1);
   });
 
-  it('should say when no plugin declares the route, and never subscribe', async () => {
+  it('should say when no plugin declares the route', async () => {
     const { deps } = depsOf(registry, healthy);
     const client = pluginClient(deps, 'board');
     await should(client.call('GET /v1/nothing')).be.rejectedWith(/no plugin declares the route/u);
-    should(() => client.subscribe({} as never, () => undefined)).throw(/does not subscribe/u);
+  });
+
+  it('should refuse to subscribe over a transport that cannot hold a feed open, saying so', () => {
+    const { deps } = depsOf(registry, healthy);
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    should(() => pluginClient(deps, 'board').subscribe(moved, () => undefined)).throw(/does not subscribe/u);
+  });
+
+  it('should open one feed for every listener, hand each event its payload, and close the feed with the last', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, healthy, { transport });
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    const heard: string[] = [];
+    const first = pluginClient(deps, 'board').subscribe(moved, payload => heard.push('a:' + payload.id));
+    const second = pluginClient(deps, 'board').subscribe(moved, payload => heard.push('b:' + payload.id));
+    should(transport.opened).equal(1);
+    transport.push('board.moved', { id: '1' });
+    transport.push('board.moved', { id: 2 });
+    await Bun.sleep(10);
+    should(heard).deepEqual(['a:1', 'b:1']);
+    first();
+    should(transport.cancelled).equal(0);
+    second();
+    should(transport.cancelled).equal(1);
+  });
+
+  it('should drop the held inventory when the feed announces kernel.plugins-changed', async () => {
+    const transport = new FeedingTransport();
+    const { deps, reads } = depsOf(registry, healthy, { transport });
+    await deps.inventory.current();
+    pluginClient(deps, 'board').subscribe(defineEvent('board.moved', z.strictObject({})), () => undefined);
+    transport.push('kernel.plugins-changed', { generation: 2 });
+    await deps.inventory.current();
+    should(reads.count).equal(2);
   });
 });
 
