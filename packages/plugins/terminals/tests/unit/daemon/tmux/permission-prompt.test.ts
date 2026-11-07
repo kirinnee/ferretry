@@ -3,7 +3,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type PermissionOptionKind, PermissionRequestSchema } from '../../../../daemon/lib/protocol/permission.ts';
 import should from 'should';
-import { paneBlockingPermission, parsePermissionPrompt, permissionAnswerKeys } from '../../../src/lib/index.ts';
+import {
+  paneBlockingPermission,
+  parsePermissionPrompt,
+  permissionAnswerKeys,
+} from '../../../../daemon/lib/tmux/permission-prompt.ts';
 
 /**
  * The permission prompt a harness is parked on, read off real captured panes.
@@ -12,7 +16,7 @@ import { paneBlockingPermission, parsePermissionPrompt, permissionAnswerKeys } f
  * drawn; the synthetic frames below reach the branches no fixture happens to take.
  */
 
-const FIXTURES = join(import.meta.dir, '../../fixtures/permission-prompts');
+const FIXTURES = join(import.meta.dir, '../../../fixtures/permission-prompts');
 const fixture = (name: string): string => readFileSync(join(FIXTURES, `${name}.txt`), 'utf8');
 
 const RULE = '─'.repeat(40);

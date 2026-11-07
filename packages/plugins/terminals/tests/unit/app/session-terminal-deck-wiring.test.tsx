@@ -11,13 +11,14 @@
  * socket, reaches the network, or touches the daemon running on this box.
  */
 
+import type { Instant } from '@ferretry/std';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { browserTerminalDeckDependencies } from '../../../app/components/session-terminal-deck.tsx';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import type { RelayClientSession } from '../../src/lib/relay-session.ts';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import type { RelayClientSession } from '../../../../connections/app/lib/relay-session.ts';
 import type { TerminalStreamHandlers } from '../../../app/lib/web-terminals.ts';
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -70,9 +71,9 @@ const terminal = {
   cols: 80,
   rows: 24,
   viewers: 0,
-  createdAt: '2026-08-01T10:00:00.000Z',
-  lastActivityAt: '2026-08-01T10:05:00.000Z',
-  idleDeadline: '2026-08-01T11:05:00.000Z',
+  createdAt: '2026-08-01T10:00:00.000Z' as Instant,
+  lastActivityAt: '2026-08-01T10:05:00.000Z' as Instant,
+  idleDeadline: '2026-08-01T11:05:00.000Z' as Instant,
 };
 
 const listing = {
@@ -110,7 +111,7 @@ describe('browserTerminalDeckDependencies', () => {
     expect(renamed.title).toBe('watch');
     expect(closed).toEqual({ closed: true, id: TERMINAL });
     // Every path is the paired daemon's, and every one names the session.
-    expect(calls.every(call => call.url.startsWith('https://alpha.example.test/v1/sessions/shared/terminals'))).toBe(
+    expect(calls.every(call => call.url.startsWith('https://alpha.example.test/v1/ferrets/shared/terminals'))).toBe(
       true,
     );
   });
@@ -136,7 +137,7 @@ describe('browserTerminalDeckDependencies', () => {
       return fakeStreamSession();
     }).attach(alpha, scope, TERMINAL, noHandlers());
 
-    expect(asked).toEqual([`/v1/sessions/shared/terminals/${TERMINAL}/stream`]);
+    expect(asked).toEqual([`/v1/ferrets/shared/terminals/${TERMINAL}/stream`]);
     expect(calls).toEqual([]);
   });
 

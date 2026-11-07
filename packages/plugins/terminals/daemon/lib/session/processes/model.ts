@@ -1,5 +1,9 @@
-import { type SessionProcessKind, type SessionProcessOutputAvailability, type SessionProcessState } from '../../protocol/session-processes.ts';
-import { classifyPaneProcesses, type PaneProcess, type PaneProcessRole } from '../../warden/pane-processes.ts';
+import type {
+  SessionProcessKind,
+  SessionProcessOutputAvailability,
+  SessionProcessState,
+} from '../../protocol/session-processes.ts';
+import { classifyPaneProcesses, type PaneProcess, type PaneProcessRole } from './pane-processes.ts';
 import { claudeTaskId, commandLabel, liveOutputAvailability, outputFileOf } from './commands.ts';
 import type { ProcessDetailRow } from './ports.ts';
 

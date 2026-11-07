@@ -1,32 +1,37 @@
 import { describe, it } from 'bun:test';
-import { type CapabilityGrants, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
-import { SessionProcessListSchema, type SessionProcessList, SessionProcessOutputSchema, type SessionProcessOutput, SessionProcessStopResultSchema, type SessionProcessStopResult } from '../../../../../daemon/lib/protocol/session-processes.ts';
+import type { Instant } from '@ferretry/std';
 import should from 'should';
-import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import {
-  sessionProcessRoutes,
+  type SessionProcessList,
+  SessionProcessListSchema,
+  type SessionProcessOutput,
+  SessionProcessOutputSchema,
+  type SessionProcessStopResult,
+  SessionProcessStopResultSchema,
+} from '../../../../../daemon/lib/protocol/session-processes.ts';
+import {
+  processHandlers,
   type SessionProcessSubsystem,
 } from '../../../../../daemon/lib/runtime/mounts/session-processes.ts';
 import { SessionAttachError, type SessionAttachFailure } from '../../../../../daemon/lib/session/attach/index.ts';
-import { SessionProcessError, type SessionProcessFailure } from '../../../../../daemon/lib/session/processes/service.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, grantSubsystem, human, sessionDirectory, sessionView } from './support.ts';
+import {
+  SessionProcessError,
+  type SessionProcessFailure,
+} from '../../../../../daemon/lib/session/processes/service.ts';
+import { type Answer, answer, type CallInit, ferretDirectory } from './processes-support.ts';
 
 /**
  * THE PROCESSES TAB'S THREE ROUTES, with only the processes subsystem replaced.
  *
- * Who may call them is the authorization boundary's question, asked from each route's `terminal.use`
- * declaration. What is asserted is that the declaration is there and holds end to end (a governed caller
- * without the grant is refused before the subsystem is touched), what the route itself owes — bad input
- * is a 400, an unknown session a 404 before the subsystem — and that every refusal is a status a client
- * can act on and every answer is the wire shape.
+ * Who may call them is the manifest descriptor's (`terminal.use`, operator) and the kernel's question. What is
+ * asserted is what the handler itself owes: bad input is a 400, an unknown ferret a 404 before the subsystem, and
+ * every refusal is a status a client can act on and every answer is the wire shape.
  */
 
 const ID = '4242.987654';
 const LIST: SessionProcessList = {
   sessionId: 's1',
-  observedAt: '2026-10-29T10:00:00.000Z',
+  observedAt: '2026-10-29T10:00:00.000Z' as Instant,
   available: true,
   processes: [
     {
@@ -36,7 +41,7 @@ const LIST: SessionProcessList = {
       commandTruncated: false,
       kind: 'command',
       state: 'running',
-      startedAt: '2026-10-29T09:59:00.000Z',
+      startedAt: '2026-10-29T09:59:00.000Z' as Instant,
       output: { source: 'file' },
       stoppable: true,
     },
@@ -54,7 +59,6 @@ const OUTPUT: SessionProcessOutput = {
   complete: false,
 };
 const STOPPED: SessionProcessStopResult = { processId: ID, signalled: 2 };
-
 class FakeProcesses implements SessionProcessSubsystem {
   readonly calls: string[] = [];
   failure: Error | undefined;
@@ -78,96 +82,47 @@ class FakeProcesses implements SessionProcessSubsystem {
   }
 }
 
-const sessions = () => sessionDirectory([sessionView('s1')]);
-
 function fixture(processes: SessionProcessSubsystem = new FakeProcesses()) {
-  const dispatcher = new ApiDispatcher(
-    new ApiRouter(sessionProcessRoutes(processes, sessions())),
-    CREDENTIALS,
-    GRANTED,
-  );
-  return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
-    await dispatcher.dispatch(request(overrides));
+  const handlers = processHandlers(processes, ferretDirectory());
+  return {
+    list: async (ferretId = 's1'): Promise<Answer> => await answer(handlers.list, { params: { ferretId } }),
+    output: async (init: { processId?: string; ferretId?: string; query?: CallInit['query'] } = {}): Promise<Answer> =>
+      await answer(handlers.output, {
+        params: { ferretId: init.ferretId ?? 's1', processId: init.processId ?? ID },
+        ...(init.query === undefined ? {} : { query: init.query }),
+      }),
+    stop: async (init: { processId?: string; ferretId?: string } = {}): Promise<Answer> =>
+      await answer(handlers.stop, { params: { ferretId: init.ferretId ?? 's1', processId: init.processId ?? ID } }),
+  };
 }
 
-const list = (path = '/v1/sessions/s1/processes') => ({ method: 'GET', path, headers: human, loopback: true }) as const;
-const output = (path = `/v1/sessions/s1/processes/${ID}/output`, query: readonly [string, string][] = []) =>
-  ({ method: 'GET', path, headers: human, loopback: true, query }) as const;
-const stop = (path = `/v1/sessions/s1/processes/${ID}/stop`) =>
-  ({ method: 'POST', path, headers: human, loopback: true }) as const;
-
-const codeOf = (response: ApiResponse): unknown => jsonBody(response).code;
-
-describe('the session processes routes’ declarations', () => {
-  it('should declare all three as operator routes needing terminal use, and never cached', () => {
-    // Arrange
-    const routes = sessionProcessRoutes(new FakeProcesses(), sessions());
-
-    // Act
-    const declared = routes.map(route => ({
-      method: route.method,
-      path: route.path,
-      minimum: route.minimum,
-      capability: route.capability,
-      noStore: route.noStore,
-    }));
-
-    // Assert
-    const terminalUse = { capability: 'terminal', axis: 'use' };
-    should(declared).deepEqual([
-      {
-        method: 'GET',
-        path: '/v1/sessions/:sessionId/processes',
-        minimum: 'operator',
-        capability: terminalUse,
-        noStore: true,
-      },
-      {
-        method: 'GET',
-        path: '/v1/sessions/:sessionId/processes/:processId/output',
-        minimum: 'operator',
-        capability: terminalUse,
-        noStore: true,
-      },
-      {
-        method: 'POST',
-        path: '/v1/sessions/:sessionId/processes/:processId/stop',
-        minimum: 'operator',
-        capability: terminalUse,
-        noStore: true,
-      },
-    ]);
-  });
-});
-
-describe('the session processes routes', () => {
-  it('should list a session’s processes as the wire list, uncached', async () => {
+describe('the ferret processes routes', () => {
+  it('should list a ferret’s processes as the wire list', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
-    const response = await dispatch(list());
+    const response = await routes.list();
 
     // Assert
     should(response.status).equal(200);
-    should(SessionProcessListSchema.parse(jsonBody(response))).deepEqual(LIST);
-    should(response.headers.get('cache-control')).eql('no-store');
+    should(SessionProcessListSchema.parse(response.body)).deepEqual(LIST);
     should(processes.calls).deepEqual(['list s1']);
   });
 
   it('should read output from the offset after, and from the tail with none', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
-    const followed = await dispatch(output(undefined, [['after', '120']]));
-    const tail = await dispatch(output());
+    const followed = await routes.output({ query: [['after', '120']] });
+    const tail = await routes.output();
 
     // Assert
     should(followed.status).equal(200);
-    should(SessionProcessOutputSchema.parse(jsonBody(followed))).deepEqual(OUTPUT);
+    should(SessionProcessOutputSchema.parse(followed.body)).deepEqual(OUTPUT);
     should(tail.status).equal(200);
     should(processes.calls).deepEqual([`output s1 ${ID} 120`, `output s1 ${ID} none`]);
   });
@@ -175,10 +130,10 @@ describe('the session processes routes', () => {
   it('should treat an empty after as no offset', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
-    const response = await dispatch(output(undefined, [['after', '']]));
+    const response = await routes.output({ query: [['after', '']] });
 
     // Assert
     should(response.status).equal(200);
@@ -188,22 +143,21 @@ describe('the session processes routes', () => {
   it('should stop a process and answer how many were signalled', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
-    const response = await dispatch(stop());
+    const response = await routes.stop();
 
     // Assert
     should(response.status).equal(200);
-    should(SessionProcessStopResultSchema.parse(jsonBody(response))).deepEqual(STOPPED);
-    should(response.headers.get('cache-control')).eql('no-store');
+    should(SessionProcessStopResultSchema.parse(response.body)).deepEqual(STOPPED);
     should(processes.calls).deepEqual([`stop s1 ${ID}`]);
   });
 
   it('should refuse a process id that is not pid.start with 400, before the subsystem is touched', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
     const bad = [
       'abc',
       '0.1',
@@ -218,14 +172,14 @@ describe('the session processes routes', () => {
     ];
 
     // Act
-    const responses = [] as ApiResponse[];
-    for (const id of bad) {
-      responses.push(await dispatch(output(`/v1/sessions/s1/processes/${id}/output`)));
-      responses.push(await dispatch(stop(`/v1/sessions/s1/processes/${id}/stop`)));
+    const responses: Answer[] = [];
+    for (const processId of bad) {
+      responses.push(await routes.output({ processId }));
+      responses.push(await routes.stop({ processId }));
     }
 
     // Assert
-    should(responses.map(response => [response.status, codeOf(response)])).deepEqual(
+    should(responses.map(response => [response.status, response.code])).deepEqual(
       responses.map(() => [400, 'invalid_process_id']),
     );
     should(processes.calls).deepEqual([]);
@@ -234,47 +188,68 @@ describe('the session processes routes', () => {
   it('should refuse an encoded path-traversal process id with 400', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
-    const response = await dispatch(output('/v1/sessions/s1/processes/..%2Fetc%2Fpasswd/output'));
+    const response = await routes.output({ processId: '..%2Fetc%2Fpasswd' });
 
     // Assert
-    should([response.status, codeOf(response)]).deepEqual([400, 'invalid_process_id']);
+    should([response.status, response.code]).deepEqual([400, 'invalid_process_id']);
+    should(processes.calls).deepEqual([]);
+  });
+
+  it('should refuse an unusable ferret id with 400 before anything else', async () => {
+    // Arrange
+    const processes = new FakeProcesses();
+    const routes = fixture(processes);
+
+    // Act
+    const responses = [
+      await routes.list('%2f'),
+      await routes.output({ ferretId: '..', processId: 'abc' }),
+      await routes.stop({ ferretId: '' }),
+    ];
+
+    // Assert — the ferret id is checked first, so a bad process id behind it is not what is reported.
+    should(responses.map(response => [response.status, response.code])).deepEqual([
+      [400, 'invalid_session_id'],
+      [400, 'invalid_session_id'],
+      [400, 'invalid_session_id'],
+    ]);
     should(processes.calls).deepEqual([]);
   });
 
   it('should refuse a bad after with 400 invalid_query', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
     const bad = ['-1', '1.5', 'abc', '0x10x', '9007199254740993', 'NaN', 'Infinity'];
 
     // Act
-    const responses = [] as ApiResponse[];
-    for (const after of bad) responses.push(await dispatch(output(undefined, [['after', after]])));
+    const responses: Answer[] = [];
+    for (const after of bad) responses.push(await routes.output({ query: [['after', after]] }));
 
     // Assert
-    should(responses.map(response => [response.status, codeOf(response)])).deepEqual(
+    should(responses.map(response => [response.status, response.code])).deepEqual(
       bad.map(() => [400, 'invalid_query']),
     );
     should(processes.calls).deepEqual([]);
   });
 
-  it('should answer an unknown session 404 not-found on all three routes, without asking the subsystem', async () => {
+  it('should answer an unknown ferret 404 not-found on all three routes, without asking the subsystem', async () => {
     // Arrange
     const processes = new FakeProcesses();
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
     const responses = [
-      await dispatch(list('/v1/sessions/ghost/processes')),
-      await dispatch(output(`/v1/sessions/ghost/processes/${ID}/output`)),
-      await dispatch(stop(`/v1/sessions/ghost/processes/${ID}/stop`)),
+      await routes.list('ghost'),
+      await routes.output({ ferretId: 'ghost' }),
+      await routes.stop({ ferretId: 'ghost' }),
     ];
 
     // Assert
-    should(responses.map(response => [response.status, codeOf(response)])).deepEqual([
+    should(responses.map(response => [response.status, response.code])).deepEqual([
       [404, 'not-found'],
       [404, 'not-found'],
       [404, 'not-found'],
@@ -292,16 +267,16 @@ describe('the session processes routes', () => {
       // Arrange
       const processes = new FakeProcesses();
       processes.failure = new SessionProcessError(failure, `that is ${failure}`);
-      const dispatch = fixture(processes);
+      const routes = fixture(processes);
 
       // Act
-      const read = await dispatch(output());
-      const stopped = await dispatch(stop());
+      const read = await routes.output();
+      const stopped = await routes.stop();
 
       // Assert
-      should([read.status, codeOf(read)]).deepEqual([status, code]);
-      should([stopped.status, codeOf(stopped)]).deepEqual([status, code]);
-      should(String(jsonBody(stopped).error)).equal(`that is ${failure}`);
+      should([read.status, read.code]).deepEqual([status, code]);
+      should([stopped.status, stopped.code]).deepEqual([status, code]);
+      should(stopped.error).equal(`that is ${failure}`);
     });
   }
 
@@ -310,151 +285,22 @@ describe('the session processes routes', () => {
     const processes = new FakeProcesses();
     const failure: SessionAttachFailure = 'pane_unavailable';
     processes.failure = new SessionAttachError(failure, 'the pane is not there');
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
     // Act
-    const response = await dispatch(list());
+    const response = await routes.list();
 
     // Assert
-    should([response.status, codeOf(response)]).deepEqual([409, 'attach_pane_unavailable']);
+    should([response.status, response.code]).deepEqual([409, 'attach_pane_unavailable']);
   });
 
   it('should not turn a defect into a refusal', async () => {
     // Arrange
     const processes = new FakeProcesses();
     processes.failure = new Error('the vault could not be opened');
-    const dispatch = fixture(processes);
+    const routes = fixture(processes);
 
-    // Act
-    const response = await dispatch(list());
-
-    // Assert
-    should(response.status).equal(500);
-    should(JSON.stringify(jsonBody(response))).not.containEql('the vault could not be opened');
-  });
-});
-
-describe('the session processes routes behind the grants', () => {
-  const deviceId = `fy_device_id_${'d'.repeat(22)}`;
-  const phone = { deviceId, appSession: 'app-one' } as const;
-  const credentials = {
-    admin: 'admin-secret',
-    warden: 'warden-secret',
-    devices: { has: (id: string) => id === deviceId, grants: () => DEFAULT_CAPABILITY_GRANTS },
-  };
-
-  async function governed(granted: CapabilityGrants) {
-    const processes = new FakeProcesses();
-    const grants = grantSubsystem({ grants: granted });
-    await grants.refresh();
-    const dispatcher = new ApiDispatcher(
-      new ApiRouter(sessionProcessRoutes(processes, sessions())),
-      credentials,
-      grants,
-    );
-    const ask = (method: string, path: string) =>
-      dispatcher.dispatch(request({ method, path, device: phone, loopback: false }));
-    return { processes, ask };
-  }
-
-  const surface = [
-    ['list', 'GET', '/v1/sessions/s1/processes'],
-    ['output', 'GET', `/v1/sessions/s1/processes/${ID}/output`],
-    ['stop', 'POST', `/v1/sessions/s1/processes/${ID}/stop`],
-  ] as const;
-
-  it('should refuse a governed caller 403 on list, output and stop when terminal use is not granted', async () => {
-    // Arrange
-    const { processes, ask } = await governed({
-      ...DEFAULT_CAPABILITY_GRANTS,
-      terminal: { use: false, configure: false },
-    });
-
-    // Act
-    const responses = [] as ApiResponse[];
-    for (const [, method, path] of surface) responses.push(await ask(method, path));
-
-    // Assert
-    should(responses.map(response => response.status)).deepEqual([403, 403, 403]);
-    for (const response of responses)
-      should(String(jsonBody(response).error)).match(/has not granted the UI the use of session terminals/u);
-    should(processes.calls).deepEqual([]);
-  });
-
-  it('should refuse a governed caller when the machine cannot say what it granted', async () => {
-    // Arrange
-    const processes = new FakeProcesses();
-    const dispatcher = new ApiDispatcher(
-      new ApiRouter(sessionProcessRoutes(processes, sessions())),
-      credentials,
-      grantSubsystem({ broken: true }),
-    );
-
-    // Act
-    const responses = [] as ApiResponse[];
-    for (const [, method, path] of surface)
-      responses.push(await dispatcher.dispatch(request({ method, path, device: phone, loopback: false })));
-
-    // Assert
-    should(responses.map(response => [response.status, codeOf(response)])).deepEqual(
-      surface.map(() => [403, 'grant_undetermined']),
-    );
-    should(processes.calls).deepEqual([]);
-  });
-
-  it('should still refuse a governed caller holding the grant but no step-up, 403 grant_step_up_required', async () => {
-    // Arrange — terminal use is a gated act: an unlock buys it, a grant alone does not.
-    const { processes, ask } = await governed(DEFAULT_CAPABILITY_GRANTS);
-
-    // Act
-    const responses = [] as ApiResponse[];
-    for (const [, method, path] of surface) responses.push(await ask(method, path));
-
-    // Assert
-    should(responses.map(response => [response.status, codeOf(response)])).deepEqual(
-      surface.map(() => [403, STEP_UP_REQUIRED_CODE]),
-    );
-    should(processes.calls).deepEqual([]);
-  });
-
-  it('should leave a caller at this machine ungoverned, whatever the grants', async () => {
-    // Arrange
-    const processes = new FakeProcesses();
-    const grants = grantSubsystem({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } },
-    });
-    await grants.refresh();
-    const dispatcher = new ApiDispatcher(
-      new ApiRouter(sessionProcessRoutes(processes, sessions())),
-      credentials,
-      grants,
-    );
-
-    // Act
-    const responses = [] as ApiResponse[];
-    for (const [, method, path] of surface)
-      responses.push(await dispatcher.dispatch(request({ method, path, headers: human, loopback: true })));
-
-    // Assert
-    should(responses.map(response => response.status)).deepEqual([200, 200, 200]);
-  });
-
-  it('should refuse a caller with no credentials, not merely one without the grant', async () => {
-    // Arrange
-    const { processes } = await governed(DEFAULT_CAPABILITY_GRANTS);
-    const dispatcher = new ApiDispatcher(
-      new ApiRouter(sessionProcessRoutes(processes, sessions())),
-      credentials,
-      GRANTED,
-    );
-
-    // Act
-    const response = await dispatcher.dispatch(
-      request({ method: 'GET', path: '/v1/sessions/s1/processes', loopback: false }),
-    );
-
-    // Assert
-    should(response.status).equal(401);
-    should(processes.calls).deepEqual([]);
+    // Act / Assert — the kernel answers a non-ApiError as its own 500, without the message.
+    await should(routes.list()).be.rejectedWith('the vault could not be opened');
   });
 });

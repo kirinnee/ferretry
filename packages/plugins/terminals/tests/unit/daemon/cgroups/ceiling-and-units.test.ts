@@ -33,7 +33,7 @@ describe('the memory budget', () => {
   it('should read the daemon’s own cgroup path out of /proc/self/cgroup text', () => {
     // Arrange / Act / Assert
     should(ownCgroupPath(`0::${own}\n`)).equal(own);
-    should(ownCgroupPath('12:memory:/legacy\n')).equal(undefined);
+    should(ownCgroupPath('12:memory:/user.slice\n')).equal(undefined);
     should(ownCgroupPath('')).equal(undefined);
   });
 

@@ -6,13 +6,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { SessionTerminalDeck } from '../../../app/components/session-terminal-deck.tsx';
-import { LinkBehaviourProvider, type LinkOpener } from '../../src/features/browser/external-link.tsx';
-import type { ComputerLinkPort } from '../../src/features/browser/local-computer.ts';
-import type { OpenLinksIn } from '../../src/lib/controls.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { LinkBehaviourProvider, type LinkOpener } from '../../../../browsers/app/features/browser/external-link.tsx';
+import type { ComputerLinkPort } from '../../../../browsers/app/features/browser/local-computer.ts';
+import type { OpenLinksIn } from '@ferretry/app';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
 import type { LinkClick } from '../../../app/lib/terminal-links.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../../support/app/terminal-deck.ts';
 import { terminalBuffer } from '../../support/app/terminal-buffer.ts';
 

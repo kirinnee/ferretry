@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadTerminalFont, terminalFontLoader } from '../../../app/components/terminal-font-loader.ts';
 import { TERMINAL_FONT_FACE, terminalFontFamily } from '../../../app/lib/terminal-font.ts';
-import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
-import '../support/dom.ts';
+import { THEME_FAMILIES } from '@ferretry/app';
+import '@ferretry/app/testing';
 
 /**
  * WHY A TERMINAL DREW `b u n  d e v`, AND THE TWO THINGS THAT STOP IT.

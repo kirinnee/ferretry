@@ -1,19 +1,44 @@
-import { type CloseFinishedTerminalsResponse, type CloseTerminalResponse, type CreateTerminalRequest, CreateTerminalRequestSchema, RenameTerminalRequestSchema, type SurfaceOpener, type TerminalErrorCode, type TerminalHoldersView, TerminalIdSchema, type TerminalListView, type TerminalView } from '../../../../contract/index.ts';
+import type { AuthenticatedCredential } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  jsonResponse,
+  type RouteHandler,
+  type SocketAccept,
+  type SocketDownstream,
+  type SocketHandler,
+} from '@ferretry/kernel/contract';
+import {
+  type CloseFinishedTerminalsResponse,
+  type CloseTerminalResponse,
+  type CreateTerminalRequest,
+  CreateTerminalRequestSchema,
+  RenameTerminalRequestSchema,
+  type SurfaceOpener,
+  type TerminalErrorCode,
+  type TerminalHoldersView,
+  TerminalIdSchema,
+  type TerminalListView,
+  type TerminalView,
+} from '../../../../contract/index.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { AuditedRouteRule, AuditedSocketRule } from '../../audit/routes.ts';
-import type { ModuleContribution } from '../modules.ts';
-import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
-import type { InputRequestService } from '../../input-requests/service.ts';
 import type { TerminalCloseTrigger } from '../../terminal/contracts.ts';
-import { decideTerminalOpener } from '../../terminal/ownership.ts';
+import { decideTerminalOpener, type TerminalOpenerCredential } from '../../terminal/ownership.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
-import { answered, ownerOf } from './input-requests.ts';
-import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
-import type { SessionDirectorySubsystem } from './sessions.ts';
+
+/**
+ * The credential the ownership decision reads, from Gate's standing (today's `context.credential`): a ferret's own
+ * token names the ferret, a paired device its holder. Server-derived, never the request body.
+ */
+export function openerCredential(call: CallContext): TerminalOpenerCredential | undefined {
+  const credential = (call as { readonly credential?: AuthenticatedCredential }).credential;
+  if (credential === undefined) return undefined;
+  if (credential.tokenClass === 'ferret') return { tokenClass: 'session', sessionId: credential.ferret };
+  if (credential.tokenClass === 'device') return { tokenClass: 'device', deviceId: credential.principal.holder };
+  return { tokenClass: credential.tokenClass };
+}
 
 /**
  * Independent shell terminals attached to a session's working directory.
@@ -129,13 +154,13 @@ function reraise(error: unknown): never {
 
 /** A decoded path parameter. `decodeParameter` refuses a traversal or a separator, so a crafted
  *  value can never name a terminal outside the session that owns it. */
-function pathParameter(context: RouteContext, name: string, code: string): string {
+function pathParameter(context: CallContext, name: string, code: string): string {
   const decoded = decodeParameter(context.params.get(name) ?? '');
   if (decoded === undefined || decoded === '') throw new ApiError(400, `the ${name} in the path is not usable`, code);
   return decoded;
 }
 
-const pathSessionId = (context: RouteContext): string => pathParameter(context, 'sessionId', 'invalid_session_id');
+const pathSessionId = (context: CallContext): string => pathParameter(context, 'ferretId', 'invalid_session_id');
 
 /**
  * The terminal named in the path.
@@ -145,7 +170,7 @@ const pathSessionId = (context: RouteContext): string => pathParameter(context, 
  * it is refused as a bad request instead of being looked up and reported as a 404 the caller would
  * read as "it was closed".
  */
-function pathTerminalId(context: RouteContext): string {
+function pathTerminalId(context: CallContext): string {
   const raw = pathParameter(context, 'terminalId', 'invalid_terminal_id');
   const parsed = TerminalIdSchema.safeParse(raw);
   if (!parsed.success) throw new ApiError(400, 'the terminalId in the path is not a terminal id', 'bad_request');
@@ -163,7 +188,7 @@ async function closeFinished(subsystem: TerminalSubsystem): Promise<ApiResponse>
 }
 
 /** Every terminal the session owns, with the limits the caller is being held to. */
-async function list(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function list(subsystem: TerminalSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   return jsonResponse(await subsystem.list(sessionId).catch(reraise));
 }
@@ -178,12 +203,12 @@ async function list(subsystem: TerminalSubsystem, context: RouteContext): Promis
  * rather than silently recorded as a human, because a reader who consults ownership before typing
  * into a shell is owed a refusal instead of a plausible wrong answer.
  */
-async function create(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function create(subsystem: TerminalSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   // Every field is optional, so an empty body means "open me a terminal, you choose" rather than a
   // malformed request — which is exactly what a PWA button sends.
   const request = await parseOptionalBody(context.request, CreateTerminalRequestSchema);
-  const decision = decideTerminalOpener(context.credential, request.agentSessionId);
+  const decision = decideTerminalOpener(openerCredential(context), request.agentSessionId);
   if (decision.outcome === 'refused') throw new ApiError(403, decision.reason, 'forbidden');
   const opened =
     decision.outcome === 'attributed'
@@ -193,14 +218,14 @@ async function create(subsystem: TerminalSubsystem, context: RouteContext): Prom
 }
 
 /** One terminal, as it stands now. */
-async function detail(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function detail(subsystem: TerminalSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const terminalId = pathTerminalId(context);
   return jsonResponse(await subsystem.get(sessionId, terminalId).catch(reraise));
 }
 
 /** Retitles one terminal. */
-async function rename(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function rename(subsystem: TerminalSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const terminalId = pathTerminalId(context);
   const request = await parseBody(context.request, RenameTerminalRequestSchema);
@@ -208,7 +233,7 @@ async function rename(subsystem: TerminalSubsystem, context: RouteContext): Prom
 }
 
 /** Closes one terminal, killing the shell behind it. */
-async function close(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function close(subsystem: TerminalSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const terminalId = pathTerminalId(context);
   await subsystem.close(sessionId, terminalId).catch(reraise);
@@ -217,169 +242,37 @@ async function close(subsystem: TerminalSubsystem, context: RouteContext): Promi
 }
 
 /**
- * `admin` scope throughout: a terminal is an unsupervised shell in the session's working directory,
- * which is the most powerful thing this API can hand out. A warden-scoped token judges sessions; it
- * has no business opening one.
- *
- * `noStore` because the list is what a human is looking at to decide whether to open another, and a
- * cached one shows terminals that have already been closed.
+ * The route handlers, keyed as the manifest declares them. `operator` throughout: a terminal is an unsupervised
+ * shell in the ferret's working directory, which is the most powerful thing this API can hand out. `noStore` (the
+ * descriptor's) because the list is what a person is looking at to decide whether to open another.
  */
-export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/terminals',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async () => await holders(subsystem),
-    },
-    {
-      method: 'POST',
-      path: '/v1/terminals/close-finished',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async () => await closeFinished(subsystem),
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/terminals',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await list(subsystem, context),
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/terminals',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await create(subsystem, context),
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/terminals/:terminalId',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await detail(subsystem, context),
-    },
-    {
-      method: 'PATCH',
-      path: '/v1/sessions/:sessionId/terminals/:terminalId',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await rename(subsystem, context),
-    },
-    {
-      method: 'DELETE',
-      path: '/v1/sessions/:sessionId/terminals/:terminalId',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await close(subsystem, context),
-    },
-  ];
+export function terminalRouteHandlers(subsystem: TerminalSubsystem) {
+  return {
+    'GET /v1/terminals': async () => await holders(subsystem),
+    'POST /v1/terminals/close-finished': async () => await closeFinished(subsystem),
+    'GET /v1/ferrets/:ferretId/terminals': async (call: CallContext) => await list(subsystem, call),
+    'POST /v1/ferrets/:ferretId/terminals': async (call: CallContext) => await create(subsystem, call),
+    'GET /v1/ferrets/:ferretId/terminals/:terminalId': async (call: CallContext) => await detail(subsystem, call),
+    'PATCH /v1/ferrets/:ferretId/terminals/:terminalId': async (call: CallContext) => await rename(subsystem, call),
+    'DELETE /v1/ferrets/:ferretId/terminals/:terminalId': async (call: CallContext) => await close(subsystem, call),
+  } as const satisfies Readonly<Record<string, RouteHandler>>;
 }
 
 /**
  * Terminal input and output, over the socket transport the protocol always described for them.
  *
- * `admin` scope, for the same reason the lifecycle is: this socket carries keystrokes into an
- * unsupervised shell, which is strictly more authority than opening one. A warden-scoped token
- * judges sessions and may not type into them.
+ * AUTHORIZATION AND EXISTENCE ARE BOTH PROVEN BEFORE THE SWITCH. `accept` runs on the admitted call, and it reads the
+ * terminal through `get` — the same lookup the detail route serves — so an upgrade aimed at a terminal that was never
+ * opened, or at a ferret this daemon does not hold, is refused with the 404 a viewer can act on.
  *
- * AUTHORIZATION AND EXISTENCE ARE BOTH PROVEN BEFORE THE SWITCH. `accept` runs on the authenticated
- * request, and it reads the terminal through `get` — the same lookup the detail route serves — so an
- * upgrade aimed at a terminal that was never opened, or at a session this daemon does not hold, is
- * refused with the 404 a viewer can act on. Switching protocols first and closing afterwards would
- * hand a client a close code that cannot tell "it is gone" from "the daemon broke", and would let an
- * unauthenticated peer probe which terminals exist by timing how fast the socket dies.
+ * "Show anyway" (`?reveal=1`, I77) is not served yet: a reveal is a Vault `RevealGrant` handed to `InputHolds.decide`,
+ * and the act runner takes none, so a held terminal shows its notice to every viewer (stricter, never looser).
  */
-export function terminalSocketRoutes(
-  subsystem: TerminalSubsystem,
-  quarantine?: Pick<InputRequestService, 'revealed'>,
-): readonly SocketRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      accept: async context => {
-        const sessionId = pathSessionId(context);
-        const terminalId = pathTerminalId(context);
-        await subsystem.get(sessionId, terminalId).catch(reraise);
-        const reveal = quarantine !== undefined && context.request.query.get('reveal')?.[0] === '1';
-        if (reveal) await quarantine.revealed(ownerOf(context), sessionId, terminalId).catch(answered);
-        return async downstream => await subsystem.stream(sessionId, terminalId, downstream, { reveal });
-      },
-    },
-  ];
-}
-
-/**
- * The security log's rules for the terminal surface. Opening a terminal records the session; typing into the session's
- * own pane from the Console is counted on the session and folded per window, exactly as a terminal socket's
- * keystrokes are — the request body is never read.
- */
-const TERMINAL_AUDIT_RULES: readonly AuditedRouteRule[] = [
-  { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
-  // Typing into the session's own pane from the Console: counted on the session and folded per window,
-  // exactly as a terminal socket's keystrokes are — the request body is never read.
-  {
-    method: 'POST',
-    path: '/v1/sessions/:sessionId/console/input',
-    event: 'terminal.input',
-    subject: 'sessionId',
-    detail: { mode: 'console' },
-  },
-];
-
-/** The terminal stream socket: opening it is recorded, and so is each binary frame typed into it (folded, never captured). */
-const TERMINAL_AUDIT_SOCKETS: readonly AuditedSocketRule[] = [
-  {
-    path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
-    event: 'terminal.opened',
-    subject: 'terminalId',
-    inputEvent: 'terminal.input',
-  },
-];
-
-/** What the terminal module serves: the shell terminals, and the Console's input into a session's own pane. */
-export interface TerminalSubsystems {
-  readonly terminals: TerminalSubsystem;
-  readonly sessionConsole: SessionConsoleSubsystem;
-  readonly sessions: SessionDirectorySubsystem;
-  /** The quarantine a stream's `reveal` is checked against. */
-  readonly inputRequests: Pick<InputRequestService, 'revealed'>;
-}
-
-/**
- * What the terminal module adds to the daemon: the terminal lifecycle routes, the Console input route, the terminal
- * stream socket, and their audit rules. It claims no protocol feature.
- *
- * Every path is a literal no other subsystem uses (`/v1/terminals`) or sits under `/v1/sessions/:sessionId` ending in
- * `terminals…` or `console/input`, so none can shadow or be shadowed.
- */
-export function terminalsContribution(subsystems: TerminalSubsystems): ModuleContribution {
-  return {
-    routes: [
-      ...terminalRoutes(subsystems.terminals),
-      ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
-    ],
-    sockets: terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
-    audit: { routes: TERMINAL_AUDIT_RULES, sockets: TERMINAL_AUDIT_SOCKETS },
+export function terminalStreamAccept(subsystem: TerminalSubsystem): SocketAccept {
+  return async call => {
+    const sessionId = pathSessionId(call);
+    const terminalId = pathTerminalId(call);
+    await subsystem.get(sessionId, terminalId).catch(reraise);
+    return async downstream => await subsystem.stream(sessionId, terminalId, downstream);
   };
 }

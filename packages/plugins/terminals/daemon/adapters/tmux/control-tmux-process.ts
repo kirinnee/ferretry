@@ -77,7 +77,6 @@ type Phase =
 const randomNonce = (): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 
-
 /**
  * ONE connected control-mode client: `tmux -C attach-session`, kept for as long as tmux keeps it.
  *
@@ -448,7 +447,11 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
 }
 
 /** Whether every one of `children` exited within `withinMs`. */
-async function exitedWithin(children: readonly ControlChild[], withinMs: number, after: ControlTimer): Promise<boolean> {
+async function exitedWithin(
+  children: readonly ControlChild[],
+  withinMs: number,
+  after: ControlTimer,
+): Promise<boolean> {
   let timer: (() => void) | undefined;
   const deadline = new Promise<false>(resolve => {
     timer = after(withinMs, () => resolve(false));

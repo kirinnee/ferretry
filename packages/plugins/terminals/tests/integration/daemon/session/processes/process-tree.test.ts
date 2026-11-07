@@ -12,6 +12,7 @@ import {
   SigtermProcessSignal,
 } from '../../../../../daemon/adapters/session/processes/index.ts';
 import type { ProcessDetailRow } from '../../../../../daemon/lib/session/processes/ports.ts';
+import { bunSpawn } from '@ferretry/kernel/host';
 import { waitFor, waitForValue } from '../../support/wait-for.ts';
 
 /**
@@ -20,6 +21,8 @@ import { waitFor, waitForValue } from '../../support/wait-for.ts';
  */
 
 const linux = process.platform === 'linux';
+/** The kernel's real spawn port, as the daemon builds it. */
+const spawn = bunSpawn({ PATH: process.env.PATH ?? '/usr/bin:/bin' });
 
 let directory: string;
 const spawned: Array<ReturnType<typeof Bun.spawn>> = [];
@@ -257,21 +260,13 @@ describe('SigtermProcessSignal', () => {
 describe('PsProcessTree', () => {
   const ps = Bun.which('ps');
 
-  it('should refuse a ps executable that is not an absolute path', () => {
-    // Act
-    const construct = () => new PsProcessTree('ps');
-
-    // Assert
-    should(construct).throw(/absolute path/u);
-  });
-
   it.skipIf(!linux || ps === null)(
     'should list a spawned child from one ps table, with no descriptors and no listener information',
     async () => {
       // Arrange
       const child = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
       spawned.push(child);
-      const tree = new PsProcessTree(ps as string);
+      const tree = new PsProcessTree(spawn, ps as string);
 
       // Act
       const read = await tree.tree(process.pid);
@@ -325,7 +320,7 @@ describe('the process-tree adapters, the rest of their surface', () => {
     // Arrange
     const child = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
     spawned.push(child);
-    const tree = new PsProcessTree(ps as string);
+    const tree = new PsProcessTree(spawn, ps as string);
 
     // Act
     const live = await tree.startOf(child.pid);
@@ -340,7 +335,7 @@ describe('the process-tree adapters, the rest of their surface', () => {
 
   it('should say the table could not be read when ps cannot run', async () => {
     // Arrange
-    const tree = new PsProcessTree(join(directory, 'no-such-ps'));
+    const tree = new PsProcessTree(spawn, join(directory, 'no-such-ps'));
 
     // Act
     const read = await tree.tree(process.pid);
@@ -351,8 +346,8 @@ describe('the process-tree adapters, the rest of their surface', () => {
 
   it('should pick procfs on Linux and ps everywhere else', () => {
     // Act
-    const onLinux = processTreeFor('linux');
-    const onMac = processTreeFor('darwin');
+    const onLinux = processTreeFor(spawn, 'linux');
+    const onMac = processTreeFor(spawn, 'darwin');
 
     // Assert
     should(onLinux).be.instanceOf(ProcfsProcessTree);

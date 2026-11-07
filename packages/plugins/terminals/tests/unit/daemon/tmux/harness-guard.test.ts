@@ -4,11 +4,10 @@ import {
   launchGuardActive,
   RealHarnessRefusedError,
   realHarnessInstall,
-  type TmuxCommandPort,
-  TmuxController,
-  type TmuxLaunch,
   type TmuxLaunchGuard,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/harness-guard.ts';
+import type { TmuxCommandPort, TmuxLaunch } from '../../../../daemon/lib/tmux/contracts.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 
 class RecordingTmux implements TmuxCommandPort {
   readonly received: string[][] = [];

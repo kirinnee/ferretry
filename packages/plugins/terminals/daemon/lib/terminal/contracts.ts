@@ -1,4 +1,4 @@
-import { type SurfaceOpener, type TerminalSize } from '../../../contract/index.ts';
+import type { SurfaceOpener, TerminalSize } from '../../../contract/index.ts';
 import type { TerminalHolderStanding } from './standing.ts';
 import type { TerminalCapture } from './redraw.ts';
 
@@ -18,6 +18,11 @@ export interface TerminalRecord extends TerminalSize {
   readonly openedBy?: SurfaceOpener;
   /** The terminal's human name, when it was opened with one. Unique within its session. */
   readonly name?: string;
+  /**
+   * tmux's pane id (`%12`): what an act on this terminal is keyed by (`targetRef('terminal', paneId)`), because it
+   * is what the Vault sees in a card's facts (`paneProof.paneId`). Absent where tmux did not say.
+   */
+  readonly paneId?: string;
 }
 
 export interface TerminalSession {

@@ -6,7 +6,7 @@
  * and is it working?". The view is built from the file in effect, the last probe of the machine, the
  * disk scheduler and the memory watcher's last look — nothing here touches a ferret.
  */
-import { type LimitsConfig, type LimitsView } from '../protocol/limits.ts';
+import type { LimitsConfig, LimitsView } from '../protocol/limits.ts';
 import { failureText } from './apply.ts';
 import type {
   CgroupHostFacts,

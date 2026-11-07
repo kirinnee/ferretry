@@ -1,6 +1,15 @@
-import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
-import { hasSafeTerminalPaneIdentity, type RegisteredTerminalPane, terminalPaneIdentityMatches } from '../reap.ts';
-import type { RegisteredPaneObserver, TerminalPaneRegistry } from '../reap-service.ts';
+import type { SessionAttachTarget } from '../../protocol/session-processes.ts';
+import {
+  hasSafeTerminalPaneIdentity,
+  type RegisteredPaneObserver,
+  type RegisteredTerminalPane,
+  terminalPaneIdentityMatches,
+} from './identity.ts';
+
+/** The pane the tmux runner recorded for a ferret (its runner handle and identity), or nothing. */
+export interface TerminalPaneRegistry {
+  paneOf(sessionId: string): Promise<RegisteredTerminalPane | undefined>;
+}
 
 /** Every fail-closed reason an attach target can be withheld. */
 export type SessionAttachFailure =
@@ -20,27 +29,15 @@ export class SessionAttachError extends Error {
   }
 }
 
-function exactRegistration(
-  daemonId: string,
-  sessionId: string,
-  registrations: readonly RegisteredTerminalPane[],
-): RegisteredTerminalPane {
-  const matches = registrations.filter(
-    registration => registration.daemonId === daemonId && registration.sessionId === sessionId,
-  );
-  if (matches.length === 0)
+function exactRegistration(sessionId: string, found: RegisteredTerminalPane | undefined): RegisteredTerminalPane {
+  // One ferret, one runner handle: the runner records exactly one pane per ferret, so there is no second
+  // registration to be ambiguous with. A ferret with none was never started here, or has stopped.
+  if (found === undefined)
     throw new SessionAttachError(
       'missing_registration',
       `session ${sessionId} has no pane registration owned by this daemon`,
     );
-  if (matches.length !== 1)
-    throw new SessionAttachError(
-      'ambiguous_registration',
-      `session ${sessionId} has ${matches.length} pane registrations owned by this daemon`,
-    );
-  // The two cardinality refusals above prove this indexed access; the assertion only teaches
-  // TypeScript that array bounds did not change between those checks and this read.
-  const registration = matches[0] as RegisteredTerminalPane;
+  const registration = found;
   if (!hasSafeTerminalPaneIdentity(registration))
     throw new SessionAttachError(
       'invalid_registration',
@@ -50,33 +47,32 @@ function exactRegistration(
 }
 
 /**
- * Resolves a short-lived attach proof from one daemon's durable pane registry.
+ * Resolves a short-lived attach proof from the pane the tmux runner recorded for the ferret.
  *
- * A name is never a candidate. The session must have exactly one registration for this daemon, and
+ * A name is never a candidate. The ferret must have its one registration, and
  * the complete pane id, pid and process-start incarnation must still match a fresh observation from
  * the daemon's private tmux server. Missing or contradictory evidence is always a refusal.
  */
 export class SessionAttachService {
   constructor(
-    private readonly daemonId: string,
     private readonly socketPath: string,
     private readonly registry: TerminalPaneRegistry,
     private readonly observer: RegisteredPaneObserver,
   ) {}
 
   async resolve(sessionId: string): Promise<SessionAttachTarget> {
-    if (this.daemonId === '' || !this.socketPath.startsWith('/') || sessionId === '')
+    if (!this.socketPath.startsWith('/') || sessionId === '')
       throw new SessionAttachError('invalid_registration', 'the daemon attach identity is incomplete');
-    let registrations: readonly RegisteredTerminalPane[];
+    let registered: RegisteredTerminalPane | undefined;
     try {
-      registrations = await this.registry.list(this.daemonId);
+      registered = await this.registry.paneOf(sessionId);
     } catch (error) {
       throw new SessionAttachError(
         'invalid_registration',
         `session ${sessionId}'s durable pane registration could not be validated: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    const registration = exactRegistration(this.daemonId, sessionId, registrations);
+    const registration = exactRegistration(sessionId, registered);
     const observed = await this.observer.observe(registration);
     if (observed === undefined)
       throw new SessionAttachError(

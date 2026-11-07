@@ -1,8 +1,5 @@
 import type { SpawnPort } from '@ferretry/kernel/contract';
-import { hostEnvironment, hostPlatform } from '../host/fs.ts';
-import { constants } from '../host/fs.ts';
-import { access, readFile, stat } from '../host/fs.ts';
-import { userInfo } from '../host/fs.ts';
+import { access, constants, hostEnvironment, hostPlatform, hostUserId, readFile, stat, userInfo } from '../host/fs.ts';
 import {
   chooseLoginShell,
   describeShellChoice,
@@ -138,7 +135,7 @@ export function systemLoginShell(
   const username = accountName(() => userInfo().username);
   return new SystemLoginShell({
     platform: hostPlatform,
-    uid: process.getuid?.(),
+    uid: hostUserId,
     username,
     environmentShell: environment.SHELL,
     passwdFile: '/etc/passwd',

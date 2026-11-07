@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ManagedTerminalService, TerminalServiceError } from '../../../src/adapters/index.ts';
+import { ManagedTerminalService, TerminalServiceError } from '../../../../daemon/adapters/terminal/service.ts';
+import type { TerminalCapture } from '../../../../daemon/lib/terminal/redraw.ts';
 import type {
-  TerminalCapture,
   TerminalRecord,
   TerminalRuntimePort,
   TerminalSessionResolver,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/terminal/contracts.ts';
 
 /** What the fake pane shows. */
 const SCREEN: TerminalCapture = { lines: ['ready $'], cols: 100, rows: 1, cursorX: 7, cursorY: 0, historySize: 0 };

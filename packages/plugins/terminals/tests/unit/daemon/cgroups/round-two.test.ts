@@ -14,15 +14,11 @@ import {
 import { expect, test } from 'bun:test';
 import { GIBIBYTE } from '../../../../daemon/lib/protocol/limits.ts';
 import { TmuxTerminalRuntime } from '../../../../daemon/adapters/terminal/tmux-terminal-runtime.ts';
-import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { CgroupLaunchPlanner } from '../../../../daemon/lib/cgroups/launch.ts';
 import { EnforcementRuntime } from '../../../../daemon/lib/cgroups/runtime.ts';
 import { buildLimitsView } from '../../../../daemon/lib/cgroups/view.ts';
 import { FleetMemoryWatcher } from '../../../../daemon/lib/cgroups/watch.ts';
-import { type TerminalSubsystem, terminalRoutes } from '../../../../daemon/lib/runtime/mounts/terminals.ts';
-import { WARDEN_LABEL } from '../../../src/lib/warden/types.ts';
-import { request } from '../api/support.ts';
+import { WARDEN_LABEL } from '../../../../daemon/lib/cgroups/index.ts';
 
 const host = {
   platform: 'linux',
@@ -65,50 +61,15 @@ test('regression: a terminal in the Warden session keeps the ordinary opener’s
     { shell: async () => '/bin/zsh' },
     planner(),
   );
-  let recorded: Parameters<TmuxTerminalRuntime['create']>[0]['openedBy'];
-  const subsystem = {
-    create: async (
-      sessionId: string,
-      _input: unknown,
-      openedBy: Parameters<TmuxTerminalRuntime['create']>[0]['openedBy'],
-    ) => {
-      recorded = openedBy;
-      const record = await runtime.create({
-        ownerId: sessionId,
-        id: '0123456789ab',
-        title: 'dev',
-        cwd: '/tmp',
-        size: { cols: 100, rows: 30 },
-        openedBy,
-      });
-      return { id: record.id, sessionId };
-    },
-  } as unknown as TerminalSubsystem;
-  const credential = `fys_${'a'.repeat(43)}`; // Synthetic, never a real credential.
-  const dispatcher = new ApiDispatcher(
-    new ApiRouter(terminalRoutes(subsystem)),
-    {
-      admin: 'synthetic-admin',
-      sessions: { resolve: async presented => (presented === credential ? { sessionId: 'agent-session' } : undefined) },
-    },
-    {
-      decide: () => ({ allowed: true, refusal: 'granted' }),
-      explain: () => '',
-      governance: () => ({ governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) }),
-    },
-  );
-  const answer = await dispatcher.dispatch(
-    request({
-      method: 'POST',
-      path: '/v1/sessions/warden-session/terminals',
-      loopback: true,
-      privilegedLoopback: true,
-      headers: { authorization: `Bearer ${credential}` },
-      body: '',
-    }),
-  );
-  expect(answer.status).toBe(201);
-  expect(recorded).toEqual({ by: 'agent', sessionId: 'agent-session' });
+  // An agent's own credential opened it (the route records the opener; Gate proves who that is).
+  await runtime.create({
+    ownerId: 'warden-session',
+    id: '0123456789ab',
+    title: 'dev',
+    cwd: '/tmp',
+    size: { cols: 100, rows: 30 },
+    openedBy: { by: 'agent', sessionId: 'agent-session' },
+  });
   const argv = commands[0] as string[];
   const words = argv.slice(argv.indexOf('30') + 1, argv.indexOf(';'));
   expect(words[0]).toBe('systemd-run');

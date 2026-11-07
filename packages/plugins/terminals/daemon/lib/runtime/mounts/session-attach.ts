@@ -1,10 +1,7 @@
-import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
-import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { ApiError, type ApiResponse, type CallContext, jsonResponse } from '@ferretry/kernel/contract';
+import type { SessionAttachTarget } from '../../protocol/session-processes.ts';
 import { SessionAttachError, type SessionAttachFailure } from '../../session/attach/index.ts';
-import type { SessionDirectorySubsystem } from './sessions.ts';
+import { type FerretDirectory, knownFerret, pathFerret } from './ferret-path.ts';
 
 /** The daemon-authoritative attach proof. */
 export interface SessionAttachSubsystem {
@@ -22,13 +19,6 @@ export const ATTACH_REFUSALS: Readonly<
   invalid_registration: { status: 500, code: 'attach_registration_invalid' },
 };
 
-function sessionId(context: RouteContext): string {
-  const decoded = decodeParameter(context.params.get('sessionId') ?? '');
-  if (decoded === undefined || decoded === '')
-    throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
-  return decoded;
-}
-
 function refuse(error: unknown): never {
   if (error instanceof SessionAttachError) {
     const refusal = ATTACH_REFUSALS[error.failure];
@@ -37,41 +27,24 @@ function refuse(error: unknown): never {
   throw error;
 }
 
-async function attachTarget(
-  attach: SessionAttachSubsystem,
-  sessions: SessionDirectorySubsystem,
-  context: RouteContext,
-): Promise<ApiResponse> {
-  const id = sessionId(context);
-  const session = await sessions.get(id);
-  if (session === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
-  try {
-    return jsonResponse(await attach.resolve(id));
-  } catch (error) {
-    return refuse(error);
-  }
-}
-
 /**
- * The only route that reveals a host tmux address.
+ * `GET /v1/ferrets/:ferretId/attach` — the only route that reveals a host tmux address.
  *
- * An operator credential and privileged arrival are both required: this hands a human an interactive
- * terminal, and the path is meaningful only on the machine whose daemon proved the process identity.
+ * An operator credential and privileged arrival are both required (the manifest's descriptor): this hands a human
+ * an interactive terminal, and the path is meaningful only on the machine whose daemon proved the process identity.
  * `noStore` because the proof is short-lived — a resume replaces the pane and invalidates it immediately.
  */
-export function sessionAttachRoutes(
+export function attachHandler(
   attach: SessionAttachSubsystem,
-  sessions: SessionDirectorySubsystem,
-): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/attach',
-      minimum: 'operator',
-      caller: 'person',
-      privilegedOnly: true,
-      noStore: true,
-      handle: async context => await attachTarget(attach, sessions, context),
-    },
-  ];
+  ferrets: FerretDirectory,
+): (call: CallContext) => Promise<ApiResponse> {
+  return async call => {
+    const id = pathFerret(call);
+    await knownFerret(ferrets, id);
+    try {
+      return jsonResponse(await attach.resolve(id));
+    } catch (error) {
+      return refuse(error);
+    }
+  };
 }

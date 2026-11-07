@@ -171,6 +171,7 @@ export class TmuxPaneDelivery {
    * and charging it against the budget meant a fresh install could run out of attempts before the
    * harness had even drawn its prompt.
    */
+  // read-scoped: none — it reads the pane only to decide readiness; no pane text leaves it or is kept
   async waitReady(session: string, options: StartupDialogOptions = {}): Promise<void> {
     const attemptsByKind = new Map<StartupDialogAction['kind'], number>();
     // Backoff rather than a fixed interval: a harness that is slow to draw is usually slow because
@@ -245,6 +246,7 @@ export class TmuxPaneDelivery {
    * answers `timed-out` rather than failing, because a slow harness is not a failed one and the caller
    * must not mistake the bound for a measured startup time.
    */
+  // read-scoped: none — it reads the pane only to decide whether startup settled; no pane text leaves it
   async waitStartupSettled(session: string): Promise<'settled' | 'timed-out'> {
     // A step below one millisecond would never advance `waited`, so the bound could not end the loop.
     const step = Math.max(1, this.settings.pollMs);

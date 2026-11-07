@@ -1,9 +1,12 @@
 import { hostPlatform } from '../../host/fs.ts';
 import { constants, type Stats } from '../../host/fs.ts';
-import { type FileHandle, lstat, open, readlink } from '../../host/fs.ts';
+import { type FileHandle, lstat, open, readFile, readlink, signalProcess } from '../../host/fs.ts';
 import { isAbsolute, join } from 'node:path';
-import type { ConfiguredServersPort } from '../../../lib/migrate/configured-servers.ts';
-import { identifyKnownProcesses } from '../../../lib/migrate/harness-provenance.ts';
+import {
+  type ConfiguredServersPort,
+  configuredServersOf,
+  identifyKnownProcesses,
+} from '../../../lib/session/processes/provenance.ts';
 import { readWindow } from '../../../lib/session/processes/output.ts';
 import type {
   OutputFilePort,
@@ -63,7 +66,7 @@ export class RegularOutputFile implements OutputFilePort {
 export class SigtermProcessSignal implements ProcessSignalPort {
   async terminate(pid: number): Promise<boolean> {
     try {
-      process.kill(pid, 'SIGTERM');
+      signalProcess(pid, 'SIGTERM');
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
@@ -73,7 +76,7 @@ export class SigtermProcessSignal implements ProcessSignalPort {
 }
 
 /**
- * Which rows are the harness's own, by the same provenance the Warden and a migration use: the harness
+ * Which rows are the harness's own, by the same provenance the Warden and the process inventory use: the harness
  * process, Ferretry's tools server, a language server, and the MCP servers the project's `.mcp.json`
  * names (read from the directory the pane runs in, where that is readable).
  */
@@ -95,5 +98,16 @@ export class HarnessProcessProvenance implements ProcessProvenancePort {
       rows.map(row => ({ pid: row.pid, ppid: row.ppid, startedSecondsAgo: 0, argv: row.argv })),
       { rootPid, binaryName: this.binaryName, configuredServers },
     );
+  }
+}
+
+/** The stdio servers a project's `.mcp.json` names (today's `ProjectMcpServers`); anything unreadable names none. */
+export class ProjectMcpServers implements ConfiguredServersPort {
+  async read(directory: string) {
+    try {
+      return configuredServersOf(await readFile(join(directory, '.mcp.json'), 'utf8'));
+    } catch {
+      return [];
+    }
   }
 }

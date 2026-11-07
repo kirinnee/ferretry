@@ -1,14 +1,14 @@
 import { afterEach, describe, it } from 'bun:test';
+import { BunTmuxProcess, controlOptions } from '../support/host-spawn.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  BunTmuxProcess,
   type ControlChild,
   type ControlModeOptions,
   ControlModeTmuxProcess,
-} from '../../../src/adapters/index.ts';
+} from '../../../../daemon/adapters/tmux/control-tmux-process.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 import type { TmuxControlNotification } from '../../../../daemon/lib/tmux/control-protocol.ts';
 import { waitFor } from '../support/wait-for.ts';
@@ -31,13 +31,13 @@ class CountingSpawn implements TmuxCommandPort {
 }
 
 /** A private tmux server with sessions in it, and a control transport over the same socket. */
-async function server(options: ControlModeOptions = {}) {
+async function server(options: Partial<ControlModeOptions> = {}) {
   if (TMUX === null) throw new Error('tmux is required for this test and was not found');
   const root = await mkdtemp(join(tmpdir(), 'fy-ctl-'));
   const socket = join(root, 's');
   const direct = new BunTmuxProcess(TMUX, socket);
   const spawned = new CountingSpawn(direct);
-  const subject = new ControlModeTmuxProcess(TMUX, socket, spawned, options);
+  const subject = new ControlModeTmuxProcess(TMUX, socket, spawned, controlOptions(options));
   cleanups.push(async () => {
     subject.close();
     await direct.execute(['kill-server']);
@@ -74,7 +74,7 @@ const HOSTILE =
   "printf 'a\\tb é\\n%%end 1 2 1\\n%%begin 3 4 1\\n%%error 5 6 1\\n\\033[31mred\\033[0m \\\\x\\n'; seq 1 3000; sleep 600";
 
 describe('ControlModeTmuxProcess over a real tmux', () => {
-  it('should answer every read exactly as a spawned tmux does, without spawning once connected', async () => {
+  it('R566 should answer every read exactly as a spawned tmux does, without spawning once connected', async () => {
     // Arrange
     const { direct, spawned, subject } = await server();
     await subject.execute(['new-session', '-d', '-s', 'work', '-x', '80', '-y', '8', HOSTILE]);
@@ -243,10 +243,17 @@ describe('ControlModeTmuxProcess over a real tmux', () => {
     should((await subject.execute(['has-session', '-t', 'work'])).code).equal(0);
   }, 30_000);
 
-  it('should refuse a relative executable or socket', () => {
-    // Act + Assert
-    should(() => new ControlModeTmuxProcess('tmux', '/tmp/s')).throw(/absolute/);
-    should(() => new ControlModeTmuxProcess('/usr/bin/tmux', 's')).throw(/absolute/);
+  it('should refuse a relative socket', () => {
+    // Act + Assert — the executable is a program the kernel's spawn port runs by name; the socket must be absolute.
+    should(
+      () =>
+        new ControlModeTmuxProcess(
+          '/usr/bin/tmux',
+          's',
+          new BunTmuxProcess('/usr/bin/tmux', '/tmp/s'),
+          controlOptions(),
+        ),
+    ).throw(/absolute/);
   });
 });
 
@@ -312,7 +319,7 @@ class ScriptedChild implements ControlChild {
 }
 
 /** A transport whose control client is {@link ScriptedChild}, over a spawn path that always answers. */
-function scripted(options: ControlModeOptions & { readonly child?: () => ControlChild } = {}) {
+function scripted(options: Partial<ControlModeOptions> & { readonly child?: () => ControlChild } = {}) {
   const children: ControlChild[] = [];
   const spawned: string[][] = [];
   const fallback: TmuxCommandPort = {
@@ -324,6 +331,7 @@ function scripted(options: ControlModeOptions & { readonly child?: () => Control
   };
   let counter = 0;
   const subject = new ControlModeTmuxProcess('/usr/bin/tmux', '/tmp/fy-scripted.sock', fallback, {
+    ...controlOptions(),
     nonce: () => `${String(++counter).padStart(16, '0')}abc`.replace(/[^0-9a-f]/gu, 'a'),
     replyTimeoutMs: 1_000,
     ...options,
@@ -569,12 +577,17 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
           : { code: 1, stdout: '', stderr: 'no server running on /tmp/x\n' },
     };
     let dialled = 0;
-    const subject = new ControlModeTmuxProcess('/usr/bin/tmux', '/tmp/x', refusing, {
-      spawn: () => {
-        dialled += 1;
-        return new ScriptedChild();
-      },
-    });
+    const subject = new ControlModeTmuxProcess(
+      '/usr/bin/tmux',
+      '/tmp/x',
+      refusing,
+      controlOptions({
+        spawn: () => {
+          dialled += 1;
+          return new ScriptedChild();
+        },
+      }),
+    );
 
     // Act
     const actual = await subject.execute(HAS);
@@ -586,14 +599,15 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
 });
 
 describe('ControlModeTmuxProcess construction', () => {
-  it('should refuse a relative executable or socket even when the spawn path is injected', () => {
+  it('should refuse a relative socket even when the spawn path is injected', () => {
     // Arrange — the default spawn path refuses relative paths itself, before the transport can; an
-    // injected one must not let a relative path reach the control client.
+    // injected one must not let a relative socket reach the control client.
     const injected: TmuxCommandPort = { execute: async () => ({ code: 0, stdout: '', stderr: '' }) };
 
     // Act / Assert
-    should(() => new ControlModeTmuxProcess('tmux', '/run/fy/tmux.sock', injected)).throw(/must both be absolute/u);
-    should(() => new ControlModeTmuxProcess('/usr/bin/tmux', 'tmux.sock', injected)).throw(/must both be absolute/u);
+    should(() => new ControlModeTmuxProcess('/usr/bin/tmux', 'tmux.sock', injected, controlOptions())).throw(
+      /must be absolute/u,
+    );
   });
 
   it('should refuse to attach read-only, and accept the same attach without it', () => {
@@ -601,10 +615,12 @@ describe('ControlModeTmuxProcess construction', () => {
     // client as that target: one such client would refuse the daemon's keystrokes into every agent.
     const injected: TmuxCommandPort = { execute: async () => ({ code: 0, stdout: '', stderr: '' }) };
     const attach = (flags: string) => () =>
-      new ControlModeTmuxProcess('/usr/bin/tmux', '/run/fy/tmux.sock', injected, {
-        attach: { target: 'agent', flags },
-        mutations: 'refuse',
-      });
+      new ControlModeTmuxProcess(
+        '/usr/bin/tmux',
+        '/run/fy/tmux.sock',
+        injected,
+        controlOptions({ attach: { target: 'agent', flags }, mutations: 'refuse' }),
+      );
 
     // Act / Assert
     should(attach('ignore-size,read-only,no-output')).throw(/must not attach read-only/u);

@@ -84,7 +84,8 @@ export class SpawnCgroupCommands implements CgroupCommandPort {
         readOrAbandon(child.stdout, abandoned.promise),
         readOrAbandon(child.stderr, abandoned.promise),
       ]);
-      if (code !== ABANDONED) return { code, stdout, stderr };
+      // A child killed by a signal has no exit code; it did not succeed, so it reads as a refusal.
+      if (code !== ABANDONED) return { code: code ?? -1, stdout, stderr };
       // Reaped in the background: the signal has been sent and this daemon must not wait on the
       // exit of something it has already stopped waiting for.
       void child.exited.catch(() => undefined);

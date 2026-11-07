@@ -1,10 +1,15 @@
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
 /** One ferret's processes as the daemon lists them: every kind, a child, an ended failure and unreadable output. */
 
-import type { SessionProcess, SessionProcessList, SessionProcessOutput } from '@ferretry/protocol';
+import type {
+  SessionProcess,
+  SessionProcessList,
+  SessionProcessOutput,
+} from '../../../app/lib/protocol/session-processes.ts';
 
 export const PROCESSES_NOW = Date.parse('2026-10-29T12:00:00.000Z');
 
-const ago = (seconds: number): string => new Date(PROCESSES_NOW - seconds * 1000).toISOString();
+const ago = (seconds: number): Instant => instantFromEpochMs(PROCESSES_NOW - seconds * 1000);
 
 const MB = 1024 * 1024;
 
@@ -95,7 +100,7 @@ export const processList = (
   extra: Partial<SessionProcessList> = {},
 ): SessionProcessList => ({
   sessionId: 'agent-session',
-  observedAt: new Date(PROCESSES_NOW).toISOString(),
+  observedAt: instantFromEpochMs(PROCESSES_NOW),
   available: true,
   processes: [...processes],
   ...extra,

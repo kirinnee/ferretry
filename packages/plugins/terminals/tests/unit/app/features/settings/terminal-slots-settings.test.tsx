@@ -1,16 +1,20 @@
-import '../../../support/dom.ts';
+import '@ferretry/app/testing';
 import { describe, expect, it } from 'bun:test';
-import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '@ferretry/protocol';
-import { SETTINGS_LINKS, settingsPaletteEntries } from '../../../../src/features/settings/settings-catalog.ts';
+import type {
+  CloseFinishedTerminalsResponse,
+  TerminalHolder,
+  TerminalHoldersView,
+} from '../../../../../contract/index.ts';
+import { SETTINGS_LINKS, settingsPaletteEntries } from '@ferretry/app';
 import type { TerminalSlotsClient } from '../../../../../app/features/settings/terminal-slots-api.ts';
 import {
   TerminalSlotsSettings,
   terminalSlotsSettingsTab,
 } from '../../../../../app/features/settings/terminal-slots-settings.tsx';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../support/dom.ts';
-import { runAsync } from '../../../support/react.ts';
-import { settleUntil } from '../../../support/settle.ts';
+import { daemonConnection } from '../../../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { runAsync } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',

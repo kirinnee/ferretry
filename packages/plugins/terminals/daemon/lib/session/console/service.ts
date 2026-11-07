@@ -1,4 +1,4 @@
-import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
+import type { SessionAttachTarget } from '../../protocol/session-processes.ts';
 import { hexInputChunks } from '../../terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../../tmux/contracts.ts';
 

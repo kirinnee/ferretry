@@ -5,21 +5,23 @@ import should from 'should';
 import {
   type ComposerCursor,
   composerHoldsOtherText,
-  countlessPasteOf,
   composerInput,
-  composerLanding,
   composerRows,
-  composerState,
-  type DeliveryFrame,
   heldAt,
-  occupiedComposer,
   paneHoldOf,
   readComposer,
   readHarnessQueue,
   readPendingInputs,
-  needsQueueKey,
   showsPayload,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/composer-screen.ts';
+import { countlessPasteOf } from '../../../../daemon/lib/tmux/composer.ts';
+import {
+  composerLanding,
+  composerState,
+  type DeliveryFrame,
+  occupiedComposer,
+} from '../../../../daemon/lib/tmux/delivery.ts';
+import { needsQueueKey } from '../../../../daemon/lib/tmux/queue.ts';
 
 /**
  * What a Codex composer holds, read from REAL pane captures.
@@ -31,7 +33,7 @@ import {
  */
 
 const VERSIONS = ['0.145.0', '0.156.1', '0.163.0'] as const;
-const FIXTURES = join(import.meta.dir, '../../fixtures/composer');
+const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
 
 function capture(version: string, state: string): DeliveryFrame {
   const visible = readFileSync(join(FIXTURES, `codex-${version}-${state}.txt`), 'utf8');
@@ -343,7 +345,7 @@ describe('Claude Code 2.1.281 queue on real captures', () => {
 });
 
 /**
- * A NAMED Claude Code session — `claude -n "[Aime] MXO OCI Migration"` — read from live 2.1.281
+ * A NAMED Claude Code session — `claude -n "[Aime] MXO OCI Upgrading"` — read from live 2.1.281
  * captures at the 82 columns of the incident pane, plus the incident's own frame rebuilt from the
  * owner's screenshot: one person's question with SIX copies of one turn pointer typed onto it.
  */
@@ -373,7 +375,7 @@ describe('the composer of a titled Claude Code session', () => {
   it('should read past the title in the rule above it, to the suggestion an empty composer shows', () => {
     const empty = titled('idle-empty');
 
-    should(empty.visible).containEql('[Aime] MXO OCI Migration');
+    should(empty.visible).containEql('[Aime] MXO OCI Upgrading');
     should(readComposer(empty.visible, cursorOf(empty))?.placeholder).be.true();
     should(composerState(empty)).deepEqual({ kind: 'empty' });
     // The suggestion's own wording proves it is a placeholder when tmux reports no cursor.

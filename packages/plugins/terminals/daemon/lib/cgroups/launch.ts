@@ -21,7 +21,7 @@
  * serial executor.
  */
 import { type LimitsConfig, type ResolvedLimits, resolveLimits } from '../protocol/limits.ts';
-import { WARDEN_LABEL } from '../warden/types.ts';
+import { WARDEN_LABEL } from './product.ts';
 import { CgroupError, failureText, runCgroupCommand } from './apply.ts';
 import type { EnforcementState } from './enforcement.ts';
 import { launchIsExempt, resolveFleetExemption } from './exemption.ts';

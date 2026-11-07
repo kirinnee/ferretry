@@ -22,7 +22,7 @@ import {
   slicePropertyCommand,
   sliceCgroupPath,
 } from '../../../../daemon/lib/cgroups/index.ts';
-import { WARDEN_LABEL } from '../../../src/lib/warden/index.ts';
+import { WARDEN_LABEL } from '../../../../daemon/lib/cgroups/index.ts';
 
 const runner = (results: readonly { code: number; stdout?: string; stderr?: string }[]): CgroupCommandPort => {
   const queue = [...results];

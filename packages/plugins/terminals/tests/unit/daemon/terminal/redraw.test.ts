@@ -149,7 +149,7 @@ describe('planTerminalRedraw', () => {
     );
   });
 
-  it('should push only the newly scrolled lines through the screen when output scrolled', () => {
+  it('R562 should push only the newly scrolled lines through the screen when output scrolled', () => {
     // Arrange — two lines left the screen for the history: "$ ls" and "a".
     const scrolled = capture(['h1', '$ ls', 'a', 'b', '$ '], 2, { x: 2, y: 1 });
     const before = capture(['h1', '$ ls', ''], 2, { x: 4, y: 0 });

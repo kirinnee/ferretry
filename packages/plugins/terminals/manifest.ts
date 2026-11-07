@@ -1,7 +1,7 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
-import { InputTargets } from '@ferretry/core-vault/contract';
-import { Runners } from '@ferretry/core-ferrets/contract';
+import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
+import { FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
 import {
   AUDIT,
   GUARD_ACK,
@@ -48,6 +48,8 @@ export default definePlugin({
   words: TERMINALS_WORDS,
 
   provides: { terminals: TerminalsPort },
+  /** Who holds terminals and where a ferret works (Ferrets); input cards a ferret raises (Vault). */
+  needs: { ferrets: FerretsPort, vault: VaultPort },
 
   actions: {
     routes: [
@@ -59,7 +61,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/attach', {
+      route('GET /v1/ferrets/:ferretId/attach', {
         minimum: 'operator',
         caller: 'person',
         privilegedOnly: true,
@@ -67,7 +69,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/console/input', {
+      route('POST /v1/ferrets/:ferretId/console/input', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -75,7 +77,7 @@ export default definePlugin({
         audit: { record: AUDIT.terminalInput },
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/processes', {
+      route('GET /v1/ferrets/:ferretId/processes', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -83,7 +85,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: 'secrets',
       }),
-      route('GET /v1/sessions/:sessionId/processes/:processId/output', {
+      route('GET /v1/ferrets/:ferretId/processes/:processId/output', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -91,7 +93,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: 'secrets',
       }),
-      route('POST /v1/sessions/:sessionId/processes/:processId/stop', {
+      route('POST /v1/ferrets/:ferretId/processes/:processId/stop', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -99,7 +101,7 @@ export default definePlugin({
         audit: { record: AUDIT.terminalInput },
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/surfaces/terminals/control', {
+      route('GET /v1/ferrets/:ferretId/surfaces/terminals/control', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -107,7 +109,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/surfaces/terminals/control', {
+      route('POST /v1/ferrets/:ferretId/surfaces/terminals/control', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -115,7 +117,7 @@ export default definePlugin({
         audit: { record: AUDIT.surfaceControl },
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/surfaces/terminals/tools', {
+      route('POST /v1/ferrets/:ferretId/surfaces/terminals/tools', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -123,7 +125,7 @@ export default definePlugin({
         audit: { record: AUDIT.agentTool },
         guard: 'secrets',
       }),
-      route('GET /v1/sessions/:sessionId/terminals', {
+      route('GET /v1/ferrets/:ferretId/terminals', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -131,7 +133,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: 'secrets',
       }),
-      route('POST /v1/sessions/:sessionId/terminals', {
+      route('POST /v1/ferrets/:ferretId/terminals', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -139,7 +141,7 @@ export default definePlugin({
         audit: { record: AUDIT.terminalOpened },
         guard: 'secrets',
       }),
-      route('DELETE /v1/sessions/:sessionId/terminals/:terminalId', {
+      route('DELETE /v1/ferrets/:ferretId/terminals/:terminalId', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -147,7 +149,7 @@ export default definePlugin({
         audit: SKIP_UNRECORDED,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/terminals/:terminalId', {
+      route('GET /v1/ferrets/:ferretId/terminals/:terminalId', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -155,7 +157,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: 'secrets',
       }),
-      route('PATCH /v1/sessions/:sessionId/terminals/:terminalId', {
+      route('PATCH /v1/ferrets/:ferretId/terminals/:terminalId', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -181,7 +183,7 @@ export default definePlugin({
       }),
     ],
     sockets: [
-      socket('GET /v1/sessions/:sessionId/terminals/:terminalId/stream', {
+      socket('GET /v1/ferrets/:ferretId/terminals/:terminalId/stream', {
         minimum: 'operator',
         caller: 'any',
         capability: USE.terminal,
@@ -291,6 +293,8 @@ export default definePlugin({
     ],
     readModels: ['terminals', 'holders'],
     publishes: [TerminalChanged],
+    /** A hold began or ended on a terminal: the viewer's frames built before it are not sent (§7.3). */
+    subscribes: [HoldsChanged],
   },
 
   hooks: {
@@ -302,5 +306,13 @@ export default definePlugin({
 
   doctor: ['tmux', 'user-slice'],
 
-  permissions: { spawn: ['tmux', 'systemd-run', 'systemctl'] },
+  permissions: {
+    /**
+     * tmux (the server and its control client); systemd-run, systemctl, ionice, taskpolicy, nice (ferret limits); ps (process trees and
+     * incarnations on macOS); stty (a terminal's echo and line mode, for an input card); getent (the login shell).
+     */
+    spawn: ['tmux', 'systemd-run', 'systemctl', 'ionice', 'taskpolicy', 'nice', 'ps', 'stty', 'getent'],
+    /** `downloads`: only to locate Terminals' state folder for tmux's socket (no kernel port names it). */
+    roots: ['downloads'],
+  },
 });

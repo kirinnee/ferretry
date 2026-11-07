@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type TerminalHolder } from '../../../../contract/index.ts';
+import type { TerminalHolder } from '../../../../contract/index.ts';
 import should from 'should';
 import type { TerminalOwnerStanding } from '../../../../daemon/lib/terminal/contracts.ts';
 import {

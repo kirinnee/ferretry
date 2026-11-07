@@ -1,10 +1,8 @@
 import { describe, it } from 'bun:test';
-import { type CloseFinishedTerminalsResponse, type TerminalHoldersView } from '../../../../contract/index.ts';
 import should from 'should';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import type { CloseFinishedTerminalsResponse, TerminalHoldersView } from '../../../../contract/index.ts';
 import { TerminalSlotsController } from '../../../../cli/lib/terminal-slots/controller.ts';
-import type { ITerminalSlotsGateway } from '../../../../cli/lib/terminal-slots/ports.ts';
-import { capturedPresenter } from '../session/controller-doubles.ts';
+import { capturedIo, recordingClient } from '../../../support/cli/doubles.ts';
 
 const HOLDERS: TerminalHoldersView = {
   limit: 24,
@@ -22,28 +20,25 @@ const CLOSED: CloseFinishedTerminalsResponse = {
 };
 
 function harness(reply: unknown) {
-  const paths: { path: string; method?: string }[] = [];
-  const gateway = {
-    request: async (path: string, _schema: unknown, init?: RequestInit) => {
-      paths.push({ path, ...(init?.method === undefined ? {} : { method: init.method }) });
-      return reply;
-    },
-  } as unknown as ITerminalSlotsGateway;
-  const { io, presenter } = capturedPresenter();
-  return { paths, io, sut: new TerminalSlotsController(gateway, presenter) };
+  const { calls, client } = recordingClient(() => reply);
+  const io = capturedIo();
+  return { calls, io, sut: new TerminalSlotsController(client, io) };
 }
+
+const lines = (printed: readonly string[]): string[] => printed.join('').trimEnd().split('\n');
 
 describe('TerminalSlotsController', () => {
   it('should show who holds the slots and point at the cleanup when a finished ferret holds some', async () => {
     // Arrange
-    const { sut, io, paths } = harness(HOLDERS);
+    const { sut, io, calls } = harness(HOLDERS);
 
     // Act
-    await sut.slots({});
+    const code = await sut.slots({});
 
     // Assert
-    should(paths).deepEqual([{ path: '/v1/terminals' }]);
-    should(io.out).deepEqual([
+    should(code).equal(0);
+    should(calls).deepEqual([{ route: 'GET /v1/terminals' }]);
+    should(lines(io.printed)).deepEqual([
       '7 terminals open of 24.',
       '  fitzgerald (stopped): 6 terminals',
       '  wren (running): 1 terminal',
@@ -59,7 +54,7 @@ describe('TerminalSlotsController', () => {
     await sut.slots({});
 
     // Assert
-    should(io.out).deepEqual(['1 terminal open of 24.', '  wren (running): 1 terminal']);
+    should(lines(io.printed)).deepEqual(['1 terminal open of 24.', '  wren (running): 1 terminal']);
   });
 
   it('should say so when nothing is open', async () => {
@@ -70,7 +65,7 @@ describe('TerminalSlotsController', () => {
     await sut.slots({});
 
     // Assert
-    should(io.out).deepEqual(['No terminals are open (limit 24).']);
+    should(lines(io.printed)).deepEqual(['No terminals are open (limit 24).']);
   });
 
   it('should print the holders as JSON on request', async () => {
@@ -81,19 +76,20 @@ describe('TerminalSlotsController', () => {
     await sut.slots({ json: true });
 
     // Assert
-    should(JSON.parse(io.out.join('\n'))).deepEqual(HOLDERS);
+    should(JSON.parse(io.printed.join(''))).deepEqual(HOLDERS);
   });
 
   it('should close the finished ferrets’ terminals and say who still holds the rest', async () => {
     // Arrange
-    const { sut, io, paths } = harness(CLOSED);
+    const { sut, io, calls } = harness(CLOSED);
 
     // Act
-    await sut.closeFinished({});
+    const code = await sut.closeFinished({});
 
     // Assert
-    should(paths).deepEqual([{ path: '/v1/terminals/close-finished', method: 'POST' }]);
-    should(io.out).deepEqual(['Closed 6 terminals.', 'Still open:', '  wren (running): 1 terminal']);
+    should(code).equal(0);
+    should(calls).deepEqual([{ route: 'POST /v1/terminals/close-finished' }]);
+    should(lines(io.printed)).deepEqual(['Closed 6 terminals.', 'Still open:', '  wren (running): 1 terminal']);
   });
 
   it('should say when no finished ferret held a terminal', async () => {
@@ -104,7 +100,7 @@ describe('TerminalSlotsController', () => {
     await sut.closeFinished({});
 
     // Assert
-    should(io.out).deepEqual(['No finished ferret holds a terminal.']);
+    should(lines(io.printed)).deepEqual(['No finished ferret holds a terminal.']);
   });
 
   it('should print the close result as JSON on request', async () => {
@@ -115,7 +111,7 @@ describe('TerminalSlotsController', () => {
     await sut.closeFinished({ json: true });
 
     // Assert
-    should(JSON.parse(io.out.join('\n'))).deepEqual(CLOSED);
+    should(JSON.parse(io.printed.join(''))).deepEqual(CLOSED);
   });
 
   it('should exit non-zero when a terminal could not be closed', async () => {
@@ -123,10 +119,24 @@ describe('TerminalSlotsController', () => {
     const { sut, io } = harness({ closed: 1, failed: 1, holders: [] });
 
     // Act
-    const failure = await sut.closeFinished({}).catch((error: unknown) => error);
+    const code = await sut.closeFinished({});
 
     // Assert
-    should(failure).be.instanceOf(SessionCommandError);
-    should(io.out).deepEqual(['Closed 1 terminal.', 'Could not close 1 terminal; try again.']);
+    should(code).equal(1);
+    should(lines(io.printed)).deepEqual(['Closed 1 terminal.', 'Could not close 1 terminal; try again.']);
+    should(io.errors).deepEqual(['1 terminal(s) could not be closed\n']);
+  });
+
+  it('should exit non-zero, saying why, when the daemon answers a shape it does not read', async () => {
+    // Arrange
+    const { sut, io } = harness({ limit: 'many' });
+
+    // Act
+    const code = await sut.slots({});
+
+    // Assert
+    should(code).equal(1);
+    should(io.printed).deepEqual([]);
+    should(io.errors.length).equal(1);
   });
 });

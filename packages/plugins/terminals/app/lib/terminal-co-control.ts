@@ -28,7 +28,7 @@
  * than inline in an effect where nobody could test it.
  */
 
-import type { SurfaceOwnership } from './surface-references.ts';
+import type { SurfaceOwnership } from '@ferretry/app';
 
 /** Where one viewer socket stands, as the deck's lamp and status line read it. */
 export type TerminalLinkState =

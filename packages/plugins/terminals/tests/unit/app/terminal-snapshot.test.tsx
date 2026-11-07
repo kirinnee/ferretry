@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({
   daemonId: 'pane-daemon',
@@ -258,7 +258,7 @@ describe('terminal snapshot view', () => {
     }) as unknown as typeof fetch;
     try {
       const view = await mount(<TerminalSnapshotView daemon={daemon} scope={scope} tmuxSession="pane" now={() => 0} />);
-      expect(seen).toEqual(['https://pane.example.test/v1/sessions/pane-session/snapshot?live=false']);
+      expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane-session/snapshot?live=false']);
       expect(view.container.textContent).toContain('default reader frame');
       await view.unmount();
     } finally {

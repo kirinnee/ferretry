@@ -9,11 +9,11 @@
  * pair and refuses a scope that belongs to a different daemon.
  */
 
-import type { SnapshotScope } from '@ferretry/protocol';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { daemonRequest } from '../lib/daemon-transport.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
+import type { SnapshotScope } from '../lib/protocol/holds.ts';
+import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
 
 /**
  * `live=false` is the original's choice and the reason the header says
@@ -25,7 +25,7 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runt
  * carry over the relay. It is omitted for `history`, so the default URL is the one it always was.
  */
 export const snapshotUrl = (scope: DaemonSessionScope, live = false, extent: SnapshotScope = 'history'): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/snapshot?live=${live ? 'true' : 'false'}${
+  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/snapshot?live=${live ? 'true' : 'false'}${
     extent === 'screen' ? '&scope=screen' : ''
   }`;
 

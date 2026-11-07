@@ -1,4 +1,4 @@
-import { type SessionAttachTarget } from '../../../../../daemon/lib/protocol/session-processes.ts';
+import type { SessionAttachTarget } from '../../../../../daemon/lib/protocol/session-processes.ts';
 import { ProcessHistory } from '../../../../../daemon/lib/session/processes/history.ts';
 import { readWindow } from '../../../../../daemon/lib/session/processes/output.ts';
 import type {
@@ -15,8 +15,8 @@ import type {
   SessionTranscriptTailPort,
 } from '../../../../../daemon/lib/session/processes/ports.ts';
 import { SessionProcessService } from '../../../../../daemon/lib/session/processes/service.ts';
-import type { TranscriptTailResult } from '../../../../src/lib/session/reads/service.ts';
-import type { TranscriptEvent, TranscriptJsonValue } from '../../../../src/lib/transcript/types.ts';
+import type { TranscriptTailResult } from '../../../../../daemon/lib/session/processes/transcript.ts';
+import type { TranscriptEvent, TranscriptJsonValue } from '../../../../../daemon/lib/session/processes/transcript.ts';
 
 /**
  * THE PROCESSES SERVICE'S PORTS, IN MEMORY. Every fake records what it was asked, so "nothing was
@@ -236,6 +236,8 @@ export const taskNotification = (taskId: string, status: string, summary: string
 export interface ProcessWorldOptions {
   readonly secrets?: ReadonlyMap<string, string>;
   readonly refusedOutputRoots?: readonly string[];
+  /** The redactor the service masks through, in place of the in-memory one (the kernel's, over a fake vault). */
+  readonly redaction?: ProcessTextRedactor;
 }
 
 /** The service over every fake, with the real history and a clock the test moves. */
@@ -256,7 +258,7 @@ export function processWorld(options: ProcessWorldOptions = {}) {
     files,
     signals,
     transcript,
-    redactor,
+    redactor: options.redaction ?? redactor,
     history,
     clock: { nowMs: () => clock.now },
     refusedOutputRoots: options.refusedOutputRoots ?? ['/home/kirin/.ferretry'],

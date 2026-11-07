@@ -13,7 +13,7 @@ import { type DeliveryFrame, needsQueueKey, queuedWhere } from '../../../../daem
 
 const TEXT = 'read the queued brief';
 const WORKING = '✻ Lollygagging… (34s · ⚒ 2.1k tokens)';
-const FIXTURES = join(import.meta.dir, '../../fixtures/composer');
+const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
 
 /** A frame with no cursor: the composer cannot be told from a placeholder, so the older search runs. */
 function bare(visible: string): DeliveryFrame {

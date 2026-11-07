@@ -4,11 +4,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
-import { LinkBehaviourProvider, type LinkOpener } from '../../src/features/browser/external-link.tsx';
-import type { OpenLinksIn } from '../../src/lib/controls.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { LinkBehaviourProvider, type LinkOpener } from '../../../../browsers/app/features/browser/external-link.tsx';
+import type { OpenLinksIn } from '@ferretry/app';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({ daemonId: 'pane-daemon', baseUrl: 'https://pane.example.test', deviceId: 'token' });
 const scope = daemonSessionScope(daemon, 'pane-session');

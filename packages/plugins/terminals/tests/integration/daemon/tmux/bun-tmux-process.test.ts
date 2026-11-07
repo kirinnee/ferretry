@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
+import { BunTmuxProcess } from '../support/host-spawn.ts';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess } from '../../../src/adapters/index.ts';
 
 describe('BunTmuxProcess', () => {
   it('should invoke only its injected tmux executable with its mandatory isolated socket', async () => {

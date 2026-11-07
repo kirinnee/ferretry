@@ -1,6 +1,14 @@
 import { instantFromEpochMs } from '@ferretry/std';
 import { isAbsolute, resolve } from 'node:path';
-import { type CloseFinishedTerminalsResponse, type SurfaceOpener, type TerminalHolder, type TerminalHoldersView, type TerminalListView, type TerminalSize, type TerminalView } from '../../../contract/index.ts';
+import type {
+  CloseFinishedTerminalsResponse,
+  SurfaceOpener,
+  TerminalHolder,
+  TerminalHoldersView,
+  TerminalListView,
+  TerminalSize,
+  TerminalView,
+} from '../../../contract/index.ts';
 import { describeCapacity, groupTerminalHolders, isReclaimable } from '../../lib/terminal/holders.ts';
 import type {
   TerminalClock,

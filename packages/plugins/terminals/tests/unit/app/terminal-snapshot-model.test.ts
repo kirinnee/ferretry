@@ -10,9 +10,9 @@ import {
   readPaneSnapshot,
   snapshotUrl,
 } from '../../../app/components/terminal-snapshot-model.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
 
 const daemon = daemonConnection({
   daemonId: 'pane-daemon',
@@ -29,13 +29,13 @@ const other = daemonConnection({
 
 describe('terminal snapshot url', () => {
   it('asks for the cached snapshot by default and escapes the session id', () => {
-    expect(snapshotUrl(scope)).toBe('/v1/sessions/pane%2Fsession/snapshot?live=false');
-    expect(snapshotUrl(scope, true)).toBe('/v1/sessions/pane%2Fsession/snapshot?live=true');
+    expect(snapshotUrl(scope)).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=false');
+    expect(snapshotUrl(scope, true)).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=true');
   });
 
   it('adds the screen scope only when asked, so the default URL never changes', () => {
-    expect(snapshotUrl(scope, true, 'history')).toBe('/v1/sessions/pane%2Fsession/snapshot?live=true');
-    expect(snapshotUrl(scope, true, 'screen')).toBe('/v1/sessions/pane%2Fsession/snapshot?live=true&scope=screen');
+    expect(snapshotUrl(scope, true, 'history')).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=true');
+    expect(snapshotUrl(scope, true, 'screen')).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=true&scope=screen');
   });
 });
 
@@ -47,7 +47,7 @@ describe('reading a pane snapshot', () => {
       return new Response('$ bun test\nok');
     });
     expect(text).toBe('$ bun test\nok');
-    expect(seen).toEqual(['https://pane.example.test/v1/sessions/pane%2Fsession/snapshot?live=false']);
+    expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane%2Fsession/snapshot?live=false']);
   });
 
   it('reads only the visible screen when asked', async () => {
@@ -63,7 +63,7 @@ describe('reading a pane snapshot', () => {
       true,
       'screen',
     );
-    expect(seen).toEqual(['https://pane.example.test/v1/sessions/pane%2Fsession/snapshot?live=true&scope=screen']);
+    expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane%2Fsession/snapshot?live=true&scope=screen']);
   });
 
   it('refuses a scope belonging to another daemon rather than crossing the pair', async () => {

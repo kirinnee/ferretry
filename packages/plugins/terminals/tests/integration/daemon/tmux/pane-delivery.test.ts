@@ -2,16 +2,15 @@ import { describe, it } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
+import { ComposerOccupiedError, ComposerUnconfirmedError } from '../../../../daemon/adapters/tmux/composer-fill.ts';
 import {
-  ComposerOccupiedError,
-  ComposerUnconfirmedError,
   PaneDeliveryError,
   PaneNotReadyError,
-  PaneStartupExitedError,
+  type PaneStartupExitedError,
   PaneStrandedError,
   TmuxPaneDelivery,
-} from '../../../src/adapters/index.ts';
-import { TmuxController } from '../../../src/lib/index.ts';
+} from '../../../../daemon/adapters/tmux/pane-delivery.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 import { FakeTmuxServer } from '../support/fake-tmux-server.ts';
 import { loadRecording, RecordedPane } from '../support/recorded-pane.ts';
 
@@ -55,7 +54,7 @@ describe('tmux pane delivery — readiness', () => {
     // Arrange — the screen as it draws: no numbers, the cursor on the option that ends the session.
     const server = new FakeTmuxServer();
     server.modal = (
-      await readFile(join(import.meta.dir, '../../fixtures/startup-dialogs/claude-2.1.281-folder-trust.txt'), 'utf8')
+      await readFile(join(import.meta.dir, '../../../fixtures/startup-dialogs/claude-2.1.281-folder-trust.txt'), 'utf8')
     ).trimEnd();
     const { subject } = delivery(server);
 
@@ -106,7 +105,7 @@ describe('tmux pane delivery — readiness', () => {
   it("should name Codex's hooks-review dialog when it keeps the pane from ever being ready", async () => {
     // Arrange — the pane Codex 0.156.1 really drew, which no startup rule answers on the person's behalf.
     const frame = await readFile(
-      join(import.meta.dir, '../../fixtures/harness-dialogs/codex-0.156.1-hooks-review.txt'),
+      join(import.meta.dir, '../../../fixtures/harness-dialogs/codex-0.156.1-hooks-review.txt'),
       'utf8',
     );
     // The fake draws a composer under every modal; a real dialog owns the whole screen, footer last.
@@ -928,7 +927,7 @@ describe('tmux pane delivery — a one-line paste Claude draws with no count (&B
 
   it('should never press Enter into a permission prompt that came up after the paste landed (review round 2)', async () => {
     const prompt = (
-      await readFile(join(import.meta.dir, '../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8')
+      await readFile(join(import.meta.dir, '../../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8')
     ).trimEnd();
     const server = new ChangingAfterLanding(pane => {
       pane.modal = prompt;
@@ -942,7 +941,7 @@ describe('tmux pane delivery — a one-line paste Claude draws with no count (&B
 
   it('should never press a retry Enter into a permission prompt that came up after the first was swallowed', async () => {
     const prompt = (
-      await readFile(join(import.meta.dir, '../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8')
+      await readFile(join(import.meta.dir, '../../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8')
     ).trimEnd();
     const server = new FakeTmuxServer();
     server.countlessOneLinePaste = true;

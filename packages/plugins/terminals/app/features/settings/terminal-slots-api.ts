@@ -8,12 +8,15 @@
 import {
   CloseFinishedTerminalsResponseSchema,
   type CloseFinishedTerminalsResponse,
-  type IFyApiClient,
   type TerminalHoldersView,
   TerminalHoldersViewSchema,
-} from '@ferretry/protocol';
+} from '../../../contract/index.ts';
+import type { z } from 'zod';
 
-export type TerminalSlotsClient = Pick<IFyApiClient, 'request'>;
+/** What the tab asks of a client: one parsed request (today's `IFyApiClient.request`). */
+export interface TerminalSlotsClient {
+  request<T>(path: string, schema: z.ZodType<T>, init?: { readonly method?: string }): Promise<T>;
+}
 
 /** Who holds the open terminals, and the machine's limit. */
 export async function readTerminalHolders(client: TerminalSlotsClient): Promise<TerminalHoldersView> {

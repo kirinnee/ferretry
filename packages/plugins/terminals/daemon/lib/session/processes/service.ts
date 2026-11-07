@@ -1,4 +1,14 @@
-import { SESSION_PROCESS_COMMAND_MAX, SESSION_PROCESS_OUTPUT_READ_MAX, type SessionProcess, type SessionProcessExit, type SessionProcessList, type SessionProcessOutput, type SessionProcessOutputAvailability, type SessionProcessStopResult } from '../../protocol/session-processes.ts';
+import { instantFromEpochMs } from '@ferretry/std';
+import {
+  SESSION_PROCESS_COMMAND_MAX,
+  SESSION_PROCESS_OUTPUT_READ_MAX,
+  type SessionProcess,
+  type SessionProcessExit,
+  type SessionProcessList,
+  type SessionProcessOutput,
+  type SessionProcessOutputAvailability,
+  type SessionProcessStopResult,
+} from '../../protocol/session-processes.ts';
 import { truncateCommand } from './commands.ts';
 import type { EndedProcess, ProcessHistory } from './history.ts';
 import { cpuPercent, type ProcessEntry, parseProcessId, processEntries, stopOrder } from './model.ts';
@@ -81,7 +91,7 @@ export class SessionProcessService {
 
   async list(sessionId: string): Promise<SessionProcessList> {
     const look = await this.look(sessionId);
-    const observedAt = new Date(look.kind === 'looked' ? look.look.nowMs : this.deps.clock.nowMs()).toISOString();
+    const observedAt = instantFromEpochMs(look.kind === 'looked' ? look.look.nowMs : this.deps.clock.nowMs());
     if (look.kind === 'unavailable') {
       const ended = await this.endedProcesses(look.ended, look.evidence);
       return await this.redactList({
@@ -270,7 +280,7 @@ export class SessionProcessService {
       processes.push({
         ...base,
         state: 'exited',
-        endedAt: new Date(item.endedAtMs).toISOString(),
+        endedAt: instantFromEpochMs(item.endedAtMs),
         ...(exit === undefined ? {} : { exit }),
         output: await this.endedAvailability(entry, result !== undefined),
         stoppable: false,
@@ -359,7 +369,7 @@ function wireBase(entry: ProcessEntry): Omit<SessionProcess, 'state' | 'output' 
     commandTruncated: false,
     ...(entry.label === undefined ? {} : { label: entry.label }),
     kind: entry.kind,
-    startedAt: new Date(entry.row.startedAtMs).toISOString(),
+    startedAt: instantFromEpochMs(entry.row.startedAtMs),
   };
 }
 

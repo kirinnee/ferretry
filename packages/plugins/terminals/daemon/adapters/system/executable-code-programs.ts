@@ -1,4 +1,4 @@
-import { readlink, realpath } from '../host/fs.ts';
+import { hostUserId, readlink, realpath } from '../host/fs.ts';
 import { basename, isAbsolute } from 'node:path';
 import { CODE_PROGRAMS, type CodeProgramPort } from '../../lib/inputs/index.ts';
 import { ROOT_PROGRAM_FOLDERS, replaceableBy } from './replaceable-file.ts';
@@ -30,7 +30,7 @@ export class ExecutableCodePrograms implements CodeProgramPort {
    * to be the kernel's executable path rather than a name the process chose (`exec -a`), and no other reading is
    * wired. GAP: a macOS daemon never keeps an echo-off ssh code prompt a code.
    */
-  static forPlatform(platform: string, account: number | undefined = process.getuid?.()): ExecutableCodePrograms {
+  static forPlatform(platform: string, account: number | undefined = hostUserId): ExecutableCodePrograms {
     const executable = async (pid: number): Promise<string | undefined> =>
       platform === 'linux' ? await readlink(`/proc/${String(pid)}/exe`).catch(() => undefined) : undefined;
     return new ExecutableCodePrograms(

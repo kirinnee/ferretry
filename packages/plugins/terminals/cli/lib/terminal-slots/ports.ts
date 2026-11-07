@@ -1,4 +1,4 @@
-import type { IFyApiClient } from '@ferretry/protocol';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 
-/** The one daemon call the terminal-slot commands need: a typed request to a route. */
-export type ITerminalSlotsGateway = Pick<IFyApiClient, 'request'>;
+/** The one daemon call the terminal-slot verbs need: a declared route, through the plugin's client. */
+export type ITerminalSlotsGateway = Pick<PluginClient, 'call'>;

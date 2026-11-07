@@ -13,7 +13,7 @@ import {
   parseControlNotification,
   parsePaneWatch,
   SESSION_WORKER_ATTACH_FLAGS,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/control-protocol.ts';
 
 const NONCE = '0123456789abcdef0123456789abcdef';
 

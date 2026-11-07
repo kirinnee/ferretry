@@ -10,7 +10,7 @@ import {
   type EnforcementState,
   type SessionSpawnFacts,
 } from '../../../../daemon/lib/cgroups/index.ts';
-import { WARDEN_LABEL } from '../../../src/lib/warden/index.ts';
+import { WARDEN_LABEL } from '../../../../daemon/lib/cgroups/index.ts';
 
 const HOST: CgroupHostFacts = {
   platform: 'linux',

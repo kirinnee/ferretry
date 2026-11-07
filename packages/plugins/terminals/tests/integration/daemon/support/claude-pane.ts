@@ -1,4 +1,4 @@
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /**
  * A Claude Code 2.1.281 pane, drawn the way the live captures under `tests/fixtures/composer/claude-*`
@@ -49,7 +49,7 @@ export class ClaudePane implements TmuxCommandPort {
     private readonly now: () => string,
     /** Columns, 82 as in the incident pane; the title is dropped where it would not fit. */
     private readonly width = 82,
-    private readonly title = '[Aime] MXO OCI Migration',
+    private readonly title = '[Aime] MXO OCI Upgrading',
   ) {}
 
   /** Every literal or paste that reached the pane, in order. */

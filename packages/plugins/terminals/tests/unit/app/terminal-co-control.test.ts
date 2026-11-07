@@ -1,6 +1,6 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
-import type { SurfaceOwnership } from '../../src/lib/surface-references.ts';
+import type { SurfaceOwnership } from '@ferretry/app';
 import {
   describeCoControl,
   shouldReopenTerminalStream,

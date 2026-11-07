@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /** One frame a real pane showed, and when: milliseconds after the payload was first typed (-1: before). */
 export interface RecordedFrame {
@@ -19,7 +19,7 @@ export interface Recording {
 }
 
 export async function loadRecording(name: string): Promise<Recording> {
-  return JSON.parse(await readFile(join(import.meta.dir, '../../fixtures/composer', name), 'utf8')) as Recording;
+  return JSON.parse(await readFile(join(import.meta.dir, '../../../fixtures/composer', name), 'utf8')) as Recording;
 }
 
 /**

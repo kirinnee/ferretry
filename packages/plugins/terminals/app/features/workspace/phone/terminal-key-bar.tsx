@@ -23,7 +23,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard, type LucideIcon } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import { applyStickyCtrl, type TerminalBarKey, terminalKeySequence } from './terminal-keys.ts';
 
 const KEYS: readonly { readonly key: TerminalBarKey; readonly label: string; readonly icon?: LucideIcon }[] = [

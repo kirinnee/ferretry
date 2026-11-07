@@ -30,7 +30,7 @@
  * Pure: no IO of its own — the walk reads through the port it is handed.
  */
 
-import { WARDEN_LABEL } from '../warden/types.ts';
+import { WARDEN_LABEL } from './product.ts';
 import type { SessionSpawnFacts, SessionSpawnFactsPort } from './ports.ts';
 
 /** What the walk concluded about one session. */

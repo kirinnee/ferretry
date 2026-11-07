@@ -7,9 +7,10 @@ import {
   ComposerOccupiedError,
   ComposerUnconfirmedError,
   ComposerUnreadableError,
-  TmuxPaneQueue,
-} from '../../../src/adapters/index.ts';
-import { type TmuxCommandPort, type TmuxCommandResult, TmuxController } from '../../../src/lib/index.ts';
+} from '../../../../daemon/adapters/tmux/composer-fill.ts';
+import { TmuxPaneQueue } from '../../../../daemon/adapters/tmux/pane-queue.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 
 const SESSION = 'fy-session-1';
 
@@ -387,7 +388,7 @@ describe('tmux pane queue', () => {
   }
   // The bottom of a real Claude 2.1.281 permission prompt (tests/fixtures/permission-prompts/claude-2.1.281-bash.txt).
   const permissionPrompt = async (): Promise<readonly string[]> =>
-    (await readFile(join(import.meta.dir, '../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8'))
+    (await readFile(join(import.meta.dir, '../../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8'))
       .trimEnd()
       .split('\n')
       .slice(-14);

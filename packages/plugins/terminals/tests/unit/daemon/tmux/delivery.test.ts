@@ -4,32 +4,35 @@ import { join } from 'node:path';
 import should from 'should';
 import {
   classifySubmit,
-  codexUpdateAction,
-  composerContains,
-  composerEvidence,
-  composerHolds,
   composerLanding,
   composerState,
-  composerTransport,
   type DeliveryFrame,
   draftBlockingReadiness,
   frameCursor,
   harnessExitReason,
   landingDeadlineMs,
-  landingEvidence,
   MAX_STARTUP_DIALOG_ATTEMPTS,
   nextReadinessStep,
   occupiedComposer,
-  PASTE_TRANSPORT_CHARS,
   paneResponded,
-  paneShowsOpenPicker,
-  paneShowsStartupWait,
-  promptIsReady,
+  startupSettleStep,
+} from '../../../../daemon/lib/tmux/delivery.ts';
+import {
+  codexUpdateAction,
   resumeMenuAction,
   type StartupDialogAction,
   startupDialogAction,
-  startupSettleStep,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/startup.ts';
+import { composerContains } from '../../../../daemon/lib/tmux/composer-screen.ts';
+import {
+  composerEvidence,
+  composerHolds,
+  composerTransport,
+  landingEvidence,
+  PASTE_TRANSPORT_CHARS,
+} from '../../../../daemon/lib/tmux/composer.ts';
+import { paneShowsOpenPicker } from '../../../../daemon/lib/tmux/picker-screen.ts';
+import { paneShowsStartupWait, promptIsReady } from '../../../../daemon/lib/tmux/pane.ts';
 
 const IDLE: DeliveryFrame = { alive: true, dead: false, promptReady: true, visible: '> ' };
 const noAttempts = new Map<StartupDialogAction['kind'], number>();
@@ -159,7 +162,7 @@ describe('startup dialogs', () => {
 
 describe('codex folder trust screen (0.156+)', () => {
   const frame = (name: string): string =>
-    readFileSync(join(import.meta.dir, '../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
+    readFileSync(join(import.meta.dir, '../../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
 
   it('should trust the launch folder the fixed layer already trusts, with the cursor on its row', () => {
     // Act
@@ -202,7 +205,7 @@ describe('codex folder trust screen (0.156+)', () => {
 
 describe('codex update prompt', () => {
   const frame = (name: string): string =>
-    readFileSync(join(import.meta.dir, '../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
+    readFileSync(join(import.meta.dir, '../../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
   const UPDATES = ['codex-0.145.0-update', 'codex-0.156.1-update'];
 
   /** The same prompt with its cursor on row `row`. */
@@ -572,7 +575,7 @@ describe('submit classification', () => {
 
 describe('submit classification read from the composer', () => {
   const capture = (state: string): DeliveryFrame => {
-    const dir = join(import.meta.dir, '../../fixtures/composer');
+    const dir = join(import.meta.dir, '../../../fixtures/composer');
     const [x, y] = readFileSync(join(dir, `codex-0.156.1-${state}.cursor`), 'utf8')
       .trim()
       .split('|');
@@ -720,7 +723,7 @@ describe('tmux delivery — a frame with the ink of its composer', () => {
 
 describe('startup dialogs drawn without numbers', () => {
   const fixture = (name: string): string =>
-    readFileSync(join(import.meta.dir, '../../fixtures/startup-dialogs', name), 'utf8');
+    readFileSync(join(import.meta.dir, '../../../fixtures/startup-dialogs', name), 'utf8');
 
   it('should answer Claude 2.1.281’s folder-trust screen, its first option `No, exit`, with Down, Enter', () => {
     // Arrange — captured from the real screen: `❯ No, exit` selected, `Yes, I trust this folder` below it.
@@ -779,7 +782,7 @@ describe('startup dialogs drawn without numbers', () => {
 });
 
 describe('a peer message pasted into a Claude composer', () => {
-  const dir = join(import.meta.dir, '../../fixtures/composer');
+  const dir = join(import.meta.dir, '../../../fixtures/composer');
   const [x, y] = readFileSync(join(dir, 'claude-2.1.281-ink-pasted.cursor'), 'utf8').trim().split('|');
   // Real capture: Claude collapsed a 4-line paste into `[Pasted text #2 +4 lines]`.
   const chip: DeliveryFrame = {
@@ -819,7 +822,7 @@ describe('a submission Codex 0.166 parks until its startup ends', () => {
   // Real panes from codex-cli 0.166.0 at 80x24: the composer is drawn before startup ends, and a
   // payload submitted then stays drawn in it above `Waiting for startup · esc cancel`.
   const capture = (state: string): DeliveryFrame => {
-    const dir = join(import.meta.dir, '../../fixtures/composer');
+    const dir = join(import.meta.dir, '../../../fixtures/composer');
     const [x, y] = readFileSync(join(dir, `codex-0.166.0-${state}.cursor`), 'utf8')
       .trim()
       .split('|');

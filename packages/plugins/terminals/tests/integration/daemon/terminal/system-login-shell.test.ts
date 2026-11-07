@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
+import { hostSpawn, runProgram } from '../support/host-spawn.ts';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
   accountName,
-  runProgram,
   SystemLoginShell,
   type SystemLoginShellSources,
   systemLoginShell,
-} from '../../../src/adapters/index.ts';
+} from '../../../../daemon/adapters/terminal/system-login-shell.ts';
 
 let dir = '';
 let zsh = '';
@@ -244,7 +244,12 @@ describe('runProgram', () => {
 describe('systemLoginShell', () => {
   it('should resolve to an absolute shell on this machine without ever rejecting', async () => {
     // Arrange — the real account database; only the shape of the answer is machine-independent.
-    const subject = systemLoginShell(async () => undefined, { SHELL: undefined });
+    const subject = systemLoginShell(
+      async () => undefined,
+      hostSpawn,
+      () => undefined,
+      { SHELL: undefined },
+    );
 
     // Act
     const shell = await subject.shell();

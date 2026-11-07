@@ -1,16 +1,37 @@
 import { describe, it } from 'bun:test';
-import { SessionStatusSchema } from '@ferretry/protocol';
-import { type TerminalHolder } from '../../../../contract/index.ts';
+import type { TerminalHolder } from '../../../../contract/index.ts';
 import should from 'should';
-import { ManagedTerminalService, TerminalServiceError } from '../../../src/adapters/index.ts';
+import { ManagedTerminalService, TerminalServiceError } from '../../../../daemon/adapters/terminal/service.ts';
 import { standingOfSessionStatus } from '../../../../daemon/lib/terminal/holders.ts';
+import type { TerminalCapture } from '../../../../daemon/lib/terminal/redraw.ts';
 import type {
-  TerminalCapture,
   TerminalOwnerDirectory,
   TerminalOwnerStanding,
   TerminalRecord,
   TerminalRuntimePort,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/terminal/contracts.ts';
+
+/** Every status a ferret has been in (today's session statuses, and 5.0's ferret states): only stopped and completed finish one. */
+const STATUSES = [
+  'created',
+  'starting',
+  'running',
+  'thinking',
+  'tool_running',
+  'awaiting_question',
+  'awaiting_user',
+  'interrupted',
+  'rate_limited',
+  'retrying',
+  'kill_failed',
+  'waiting',
+  'completed',
+  'failed',
+  'stalled',
+  'stopped',
+  'working',
+  'idle',
+] as const;
 
 const SCREEN: TerminalCapture = { lines: [], cols: 100, rows: 1, cursorX: 0, cursorY: 0, historySize: 0 };
 
@@ -262,7 +283,7 @@ describe('ManagedTerminalService saying who holds the slots', () => {
 describe('ManagedTerminalService and a ferret that is live but idle', () => {
   it('should close only the terminals of stopped, completed and removed ferrets, whatever status a live one is in', async () => {
     // Arrange
-    const statuses = [...SessionStatusSchema.options, undefined];
+    const statuses = [...STATUSES, undefined];
     const held = statuses.map((_status, index) => record(`owner-${String(index)}`, `t${String(index)}`));
     const byOwner = new Map(statuses.map((status, index) => [`owner-${String(index)}`, status]));
     const owners: TerminalOwnerDirectory = {
@@ -279,7 +300,7 @@ describe('ManagedTerminalService and a ferret that is live but idle', () => {
     should(
       survivors.filter(status => status === 'completed' || status === 'stopped' || status === undefined),
     ).deepEqual([]);
-    should(survivors).have.length(SessionStatusSchema.options.length - 2);
+    should(survivors).have.length(STATUSES.length - 2);
     should(survivors).containEql('awaiting_user');
     should(survivors).containEql('rate_limited');
     should(survivors).containEql('waiting');

@@ -8,7 +8,7 @@ import {
   paneShowsActiveWork,
   paneShowsPermissionPrompt,
   promptIsReady,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/pane.ts';
 
 /** Claude 2.1.281's one-shot auto-mode dialog, as a bypass agent showed it: rows with no numbers. */
 const AUTO_NUDGE = [
@@ -232,7 +232,7 @@ describe('paneBlockingPrompt', () => {
 });
 
 describe('pane readiness under a permission prompt', () => {
-  const FIXTURES = join(import.meta.dir, '../../fixtures/permission-prompts');
+  const FIXTURES = join(import.meta.dir, '../../../fixtures/permission-prompts');
 
   it('should never call a pane ready while it shows a permission prompt, wherever tmux puts the cursor', () => {
     for (const name of readdirSync(FIXTURES)) {
@@ -253,7 +253,7 @@ describe('pane readiness under a permission prompt', () => {
 });
 
 describe('pane readiness under a harness dialog', () => {
-  const FIXTURES = join(import.meta.dir, '../../fixtures/harness-dialogs');
+  const FIXTURES = join(import.meta.dir, '../../../fixtures/harness-dialogs');
 
   it('should never call a pane ready while it shows a harness dialog, wherever tmux puts the cursor', () => {
     // Arrange — Codex’s `› 1. Review hooks` row is shaped like a composer line.
@@ -295,7 +295,7 @@ describe('pane readiness under the feedback-draft panel', () => {
   // A REAL Claude Code 2.1.281 frame (80 columns), captured from a session the daemon held at "working"
   // for three hours: the turn is done (`done 12:09 AM · 5 shells still running`), the panel above the
   // composer truncates its title with `…`, and the composer holds a dim ghost suggestion.
-  const FIXTURES = join(import.meta.dir, '../../fixtures/composer');
+  const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
   const NAME = 'claude-2.1.281-feedback-draft-idle';
   const frame = readFileSync(join(FIXTURES, `${NAME}.txt`), 'utf8');
   const [cursorX, cursorY] = readFileSync(join(FIXTURES, `${NAME}.cursor`), 'utf8')

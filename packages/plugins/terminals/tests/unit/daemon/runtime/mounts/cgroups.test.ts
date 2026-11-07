@@ -1,24 +1,59 @@
 import { describe, it } from 'bun:test';
-import { type LimitsView, LimitsViewSchema } from '../../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
-import { cgroupConfigView } from '../../../../../protocol/tests/fixtures.ts';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { cgroupRoutes, type LimitsSubsystem } from '../../../../../daemon/lib/runtime/mounts/cgroups.ts';
-import { request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, human } from './support.ts';
+import manifest from '../../../../../manifest.ts';
+import { type LimitsView, LimitsViewSchema } from '../../../../../daemon/lib/protocol/limits.ts';
+import { limitsHandler, type LimitsSubsystem } from '../../../../../daemon/lib/runtime/mounts/cgroups.ts';
 
 /**
- * Ferret limits, over the real dispatcher and the real credentials.
- *
- * What cannot be checked by calling a route function directly is who may reach the route, and what a
- * request to a route that no longer exists is answered with. A warden must not read it: a supervision
- * session has no business with the cap on the fleet it supervises.
+ * Ferret limits: the read the settings surface and `fy daemon status` make. Who may reach it is the descriptor's — a
+ * Warden must not read it (a supervision ferret has no business with the cap on the fleet it supervises), which the
+ * operator minimum and the kernel's admission hold.
  */
 
-const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
-
-const VIEW: LimitsView = cgroupConfigView;
+const GIB = 1073741824;
+const VIEW = {
+  switchedOn: true,
+  enforcement: 'cgroups',
+  explicit: false,
+  platform: 'linux',
+  budget: {
+    ceilingBytes: 48 * GIB,
+    physicalBytes: 61 * GIB,
+    swapBytes: 32 * GIB,
+    cpus: 32,
+    pidMax: 4_194_304,
+    source: 'memory.high of user-1000.slice',
+    reserveBytes: 4 * GIB,
+  },
+  fleet: {
+    cpuWeight: 50,
+    memoryHighBytes: 44 * GIB,
+    memoryMaxBytes: 46 * GIB,
+    swapMaxBytes: Math.floor(4.8 * GIB),
+    tasksMax: 16_384,
+    cpuPercent: null,
+  },
+  perFerret: {
+    cpuWeight: 100,
+    interactiveCpuWeight: 200,
+    memoryHighBytes: 12 * GIB,
+    memoryMaxBytes: Math.floor(14.4 * GIB),
+    tasksMax: 4_096,
+    cpuPercent: null,
+  },
+  daemonCpuWeight: 1000,
+  voiceCpuWeight: 200,
+  voiceState: 'running',
+  disk: { ionice: true, scheduler: 'none', effect: 'none' },
+  throttled: [],
+  killed: [],
+  overBudget: [],
+  file: 'limits.yaml',
+  lines: [
+    'ferrets: memory 44 GiB soft / 46 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 1000, voice 200) · disk priority: no effect on this disk (scheduler none)',
+  ],
+  warnings: [],
+} satisfies LimitsView;
 
 class FakeLimits implements LimitsSubsystem {
   async view(): Promise<LimitsView> {
@@ -26,48 +61,30 @@ class FakeLimits implements LimitsSubsystem {
   }
 }
 
-const dispatcher = (subsystem: LimitsSubsystem = new FakeLimits()): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(cgroupRoutes(subsystem)), CREDENTIALS, GRANTED);
-
-const get = (headers: Readonly<Record<string, string>> = human) =>
-  request({ method: 'GET', path: '/v1/cgroups/config', headers });
+const limitRoutes = () => manifest.actions.routes.filter(route => route.key.includes('/v1/cgroups/'));
 
 describe('reading the ferret limits', () => {
   it('should answer with a body the client can parse', async () => {
     // Arrange / Act
-    const response = await dispatcher().dispatch(get());
+    const response = await limitsHandler(new FakeLimits())();
 
     // Assert
     should(response.status).equal(200);
-    should(() => LimitsViewSchema.parse(JSON.parse(response.body))).not.throw();
+    should(LimitsViewSchema.parse(JSON.parse(response.body))).deepEqual(VIEW);
   });
 
-  it('should refuse a warden', async () => {
-    // Arrange / Act / Assert
-    should((await dispatcher().dispatch(get(warden))).status).equal(403);
-  });
-
-  it('should never be cached: the live part is a measurement of this moment', () => {
+  it('should never be cached, and govern the read with the fleet capability on the use axis', () => {
     // Arrange / Act
-    const routes = cgroupRoutes(new FakeLimits());
+    const routes = limitRoutes();
 
-    // Assert
-    should(routes.every(route => route.noStore === true)).be.true();
-  });
-
-  it('should govern the read with the fleet capability, on the use axis', () => {
-    // Arrange / Act
-    const route = cgroupRoutes(new FakeLimits()).find(candidate => candidate.method === 'GET');
-
-    // Assert
-    should(route?.capability).deepEqual({ capability: 'fleet', axis: 'use' });
+    // Assert — the live part (ferrets slowed or killed for memory) is a measurement of this moment.
+    should(routes.map(route => [route.noStore, route.minimum, route.capability])).deepEqual([
+      [true, 'operator', { capability: 'fleet', axis: 'use' }],
+    ]);
   });
 
   it('should have no save: limits.yaml is the one writer, and its writer holds a loosening for the owner', () => {
-    // Arrange / Act
-    const routes = cgroupRoutes(new FakeLimits());
-
-    // Assert
-    should(routes.map(route => route.method)).deepEqual(['GET']);
+    // Arrange / Act / Assert
+    should(limitRoutes().map(route => route.key)).deepEqual(['GET /v1/cgroups/config']);
   });
 });

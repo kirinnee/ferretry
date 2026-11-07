@@ -1,30 +1,32 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionAttachError, SessionAttachService } from '../../../../../daemon/lib/session/attach/index.ts';
-import type { RegisteredPaneObserver, TerminalPaneRegistry } from '../../../../src/lib/session/reap-service.ts';
-import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
+import {
+  type ObservedTerminalPane,
+  type RegisteredPaneObserver,
+  type RegisteredTerminalPane,
+  SessionAttachError,
+  SessionAttachService,
+  type TerminalPaneRegistry,
+} from '../../../../../daemon/lib/session/attach/index.ts';
 
 /**
  * Who a local attach is actually authorized by.
  *
- * A session NAME is never evidence. The daemon must hold exactly one durable pane registration of
- * its own for the session, and the complete process incarnation behind it — tmux session, pane id,
+ * A session NAME is never evidence. The tmux runner must have recorded the ferret's one pane, and
+ * the complete process incarnation behind it — tmux session, pane id,
  * pid and start ticks — must still be there when it is looked at again. Every other state is a
  * refusal, and the refusals are distinct because an operator acts differently on each: a pane that
- * has exited is a session to resume, two registrations are damaged daemon state.
+ * has exited is a session to resume, an unreadable record is damaged daemon state.
  *
  * The second thing asserted throughout is that a refused registration is never OBSERVED. The
  * observer reads a private tmux server by pane id; asking it about a record the domain has already
  * rejected is how a name-shaped candidate would reach the process boundary at all.
  */
 
-const DAEMON = 'daemon-attach';
 const SOCKET = '/state/fy/tmux.sock';
 const SESSION = 'msa1ny28-4f0f298e';
 
 const PANE: RegisteredTerminalPane = {
-  daemonId: DAEMON,
-  sessionId: SESSION,
   tmuxSession: `fy-${SESSION}`,
   paneId: '%41',
   pid: 812,
@@ -32,20 +34,21 @@ const PANE: RegisteredTerminalPane = {
 };
 
 class Registry implements TerminalPaneRegistry {
-  /** Every daemon id the registry was asked about, so a lookup by anything else is visible. */
+  /** Every ferret the registry was asked about, so a lookup by anything else is visible. */
   readonly asked: string[] = [];
 
   constructor(
-    private readonly values: readonly RegisteredTerminalPane[],
+    /** What the runner recorded, by ferret. */
+    private readonly values: ReadonlyMap<string, RegisteredTerminalPane>,
     /** What the durable store refuses with. Its own reader fails closed over malformed evidence
      *  rather than reporting an empty registration set. */
     private readonly failure?: Error,
   ) {}
 
-  async list(daemonId: string): Promise<readonly RegisteredTerminalPane[]> {
-    this.asked.push(daemonId);
+  async paneOf(sessionId: string): Promise<RegisteredTerminalPane | undefined> {
+    this.asked.push(sessionId);
     if (this.failure !== undefined) throw this.failure;
-    return this.values;
+    return this.values.get(sessionId);
   }
 }
 
@@ -62,9 +65,9 @@ class Observer implements RegisteredPaneObserver {
 }
 
 interface AttachWorld {
-  readonly daemonId?: string;
   readonly socketPath?: string;
-  readonly registrations?: readonly RegisteredTerminalPane[];
+  /** What the runner recorded for SESSION; explicitly `undefined` for none. */
+  readonly registration?: RegisteredTerminalPane | undefined;
   /** What the durable registration store refuses the whole read with. */
   readonly registryFailure?: Error;
   /** Set explicitly to `undefined` for a pane the daemon's own tmux server no longer holds. */
@@ -72,12 +75,16 @@ interface AttachWorld {
 }
 
 function subject(world: AttachWorld = {}) {
-  const registry = new Registry(world.registrations ?? [PANE], world.registryFailure);
+  const registration = Object.hasOwn(world, 'registration') ? world.registration : PANE;
+  const registry = new Registry(
+    new Map(registration === undefined ? [] : [[SESSION, registration]]),
+    world.registryFailure,
+  );
   const observer = new Observer(Object.hasOwn(world, 'observation') ? world.observation : PANE);
   return {
     registry,
     observer,
-    service: new SessionAttachService(world.daemonId ?? DAEMON, world.socketPath ?? SOCKET, registry, observer),
+    service: new SessionAttachService(world.socketPath ?? SOCKET, registry, observer),
   };
 }
 
@@ -93,7 +100,7 @@ async function refusal(work: () => Promise<unknown>): Promise<string | undefined
 }
 
 describe('SessionAttachService', () => {
-  it('should prove an attach target from the registration and the daemon it belongs to', async () => {
+  it('should prove an attach target from the pane the runner recorded', async () => {
     // Arrange
     const harness = subject();
 
@@ -109,36 +116,24 @@ describe('SessionAttachService', () => {
       pid: PANE.pid,
       processStartTicks: PANE.processStartTicks,
     });
-    should(harness.registry.asked).deepEqual([DAEMON]);
+    should(harness.registry.asked).deepEqual([SESSION]);
     should(harness.observer.asked).deepEqual([PANE]);
   });
 
-  it('should refuse a session this daemon holds no registration for, without reading tmux', async () => {
-    // Arrange — one registry with nothing at all, one holding a pane another daemon owns.
-    const empty = subject({ registrations: [] });
-    const foreign = subject({ registrations: [{ ...PANE, daemonId: 'daemon-b' }] });
+  it('should refuse a ferret the runner recorded no pane for, without reading tmux', async () => {
+    // Arrange — no record for this ferret, and a record that exists only for another ferret.
+    const empty = subject({ registration: undefined });
+    const other = subject();
 
     // Act
     const emptyFailure = await refusal(async () => await empty.service.resolve(SESSION));
-    const foreignFailure = await refusal(async () => await foreign.service.resolve(SESSION));
+    const otherFailure = await refusal(async () => await other.service.resolve('another-ferret'));
 
-    // Assert — another daemon's pane is not a candidate, and neither refusal touched the process
+    // Assert — another ferret's pane is not a candidate, and neither refusal touched the process
     // boundary: a tmux read for an unowned record is the observation this design exists to prevent.
-    should([emptyFailure, foreignFailure]).deepEqual(['missing_registration', 'missing_registration']);
+    should([emptyFailure, otherFailure]).deepEqual(['missing_registration', 'missing_registration']);
     should(empty.observer.asked).deepEqual([]);
-    should(foreign.observer.asked).deepEqual([]);
-  });
-
-  it('should refuse rather than choose when the daemon holds two registrations for one session', async () => {
-    // Arrange
-    const harness = subject({ registrations: [PANE, { ...PANE, paneId: '%42', pid: 900 }] });
-
-    // Act
-    const failure = await refusal(async () => await harness.service.resolve(SESSION));
-
-    // Assert — picking either would hand a human a terminal the daemon cannot prove is the session's.
-    should(failure).equal('ambiguous_registration');
-    should(harness.observer.asked).deepEqual([]);
+    should(other.observer.asked).deepEqual([]);
   });
 
   it('should refuse a registration whose process identity is incomplete', async () => {
@@ -149,7 +144,7 @@ describe('SessionAttachService', () => {
       { ...PANE, paneId: '%' },
       { ...PANE, pid: 1 },
       { ...PANE, processStartTicks: 0 },
-    ].map(registration => subject({ registrations: [registration] }));
+    ].map(registration => subject({ registration }));
 
     // Act
     const failures = [];
@@ -160,9 +155,9 @@ describe('SessionAttachService', () => {
     should(worlds.flatMap(world => world.observer.asked)).deepEqual([]);
   });
 
-  it('should refuse when the durable registration store cannot be read', async () => {
-    // Arrange — the store fails closed over unreadable or malformed evidence of its OWN
-    // registrations rather than reporting an empty set.
+  it('should refuse when the runner’s record cannot be read', async () => {
+    // Arrange — the record fails closed over unreadable or malformed evidence rather than
+    // reporting no pane.
     const harness = subject({ registryFailure: new Error('pane registration record failed validation') });
 
     // Act
@@ -217,22 +212,20 @@ describe('SessionAttachService', () => {
   });
 
   it('should refuse before any lookup when its own attach identity is unusable', async () => {
-    // Arrange — a daemon with no id, a tmux socket that is not an absolute path, and an empty
-    // session id. None of these can be authorized against, so none of them reaches the registry.
-    const nameless = subject({ daemonId: '' });
+    // Arrange — a tmux socket that is not an absolute path, and an empty session id. Neither can be
+    // authorized against, so neither reaches the registry.
     const relative = subject({ socketPath: 'tmux.sock' });
     const blank = subject();
 
     // Act
     const failures = [
-      await refusal(async () => await nameless.service.resolve(SESSION)),
       await refusal(async () => await relative.service.resolve(SESSION)),
       await refusal(async () => await blank.service.resolve('')),
     ];
 
     // Assert
-    should(failures).deepEqual(Array.from({ length: 3 }, () => 'invalid_registration'));
-    should([...nameless.registry.asked, ...relative.registry.asked, ...blank.registry.asked]).deepEqual([]);
+    should(failures).deepEqual(Array.from({ length: 2 }, () => 'invalid_registration'));
+    should([...relative.registry.asked, ...blank.registry.asked]).deepEqual([]);
   });
 
   it('should name the session in every refusal it raises', async () => {

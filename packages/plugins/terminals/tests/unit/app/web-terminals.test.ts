@@ -1,7 +1,9 @@
+import type { Instant } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, type TerminalListView, type TerminalView } from '@ferretry/protocol';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import type { TerminalListView, TerminalView } from '../../../contract/index.ts';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
 import {
   browserTerminalStreamAttach,
   closeSessionTerminal,
@@ -37,8 +39,8 @@ const terminal = {
   cols: 80,
   rows: 24,
   viewers: 1,
-  createdAt: '2026-07-31T10:00:00.000Z',
-  lastActivityAt: '2026-07-31T10:01:00.000Z',
+  createdAt: '2026-07-31T10:00:00.000Z' as Instant,
+  lastActivityAt: '2026-07-31T10:01:00.000Z' as Instant,
 } satisfies TerminalView;
 
 const list = {
@@ -63,7 +65,7 @@ describe('web terminal transport', () => {
   it('addresses every call to the paired daemon, never the page origin, and carries no credential', async () => {
     const { calls, fetcher } = recorder(list);
     expect(await listSessionTerminals(daemonA, scopeA, fetcher)).toEqual(list);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/terminals');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/terminals');
     const headers = new Headers(calls[0]?.init?.headers);
     expect(headers.has('authorization')).toBe(false);
     expect(headers.get(FY_REQUEST_ID_HEADER)).toBeNull();
@@ -99,7 +101,7 @@ describe('web terminal transport', () => {
     const renamed = { ...terminal, title: 'tests' };
     const { calls, fetcher } = recorder(renamed, { closed: true, id: TERMINAL_ID });
     expect(await renameSessionTerminal(daemonA, scopeA, TERMINAL_ID, 'tests', fetcher)).toEqual(renamed);
-    expect(calls[0]?.url).toBe(`https://a.example.test/v1/sessions/shared%2Fsession/terminals/${TERMINAL_ID}`);
+    expect(calls[0]?.url).toBe(`https://a.example.test/v1/ferrets/shared%2Fsession/terminals/${TERMINAL_ID}`);
     expect(calls[0]?.init?.method).toBe('PATCH');
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ title: 'tests' });
     expect(await closeSessionTerminal(daemonA, scopeA, TERMINAL_ID, fetcher)).toEqual({
@@ -160,13 +162,13 @@ describe('typing into the Console', () => {
   it('posts the keys to the session’s own pane on its own daemon, as a mutation', async () => {
     const { calls, fetcher } = recorder({ written: 3 });
     expect(await typeIntoSessionConsole(daemonA, scopeA, 'ls\r', fetcher)).toBe(3);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/console/input');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/console/input');
     expect(calls[0]?.init?.method).toBe('POST');
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ data: 'ls\r' });
     expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).not.toBeNull();
   });
 
-  it('sends a long paste as ordered writes and refuses another daemon’s scope', async () => {
+  it('R546 sends a long paste as ordered writes and refuses another daemon’s scope', async () => {
     const { calls, fetcher } = recorder({ written: 4_096 }, { written: 1 });
     expect(await typeIntoSessionConsole(daemonA, scopeA, 'x'.repeat(4_097), fetcher)).toBe(4_097);
     expect(calls.map(call => (JSON.parse(String(call.init?.body)) as { data: string }).data.length)).toEqual([
@@ -193,10 +195,10 @@ describe('typing into the Console', () => {
 
 describe('terminal quarantine transport', () => {
   it('reads the session quarantines from its own daemon and parses what comes back', async () => {
-    const quarantines = [{ key: 'dev', until: '2026-10-30T10:02:00.000Z' }];
+    const quarantines = [{ key: 'dev', until: '2026-10-30T10:02:00.000Z' as Instant }];
     const { calls, fetcher } = recorder({ quarantines });
     expect(await listSessionQuarantines(daemonA, scopeA, fetcher)).toEqual({ quarantines });
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/input-quarantines');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/input-quarantines');
     expect(calls[0]?.init?.method ?? 'GET').toBe('GET');
     await expect(
       listSessionQuarantines(daemonA, scopeA, recorder({ quarantines: [{ key: 'dev' }] }).fetcher),
@@ -209,7 +211,7 @@ describe('terminal quarantine transport', () => {
   it('ends one quarantine by key as a mutation, and fails when the daemon did not end it', async () => {
     const { calls, fetcher } = recorder({ ended: true });
     await endSessionQuarantine(daemonA, scopeA, 'dev', fetcher);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/input-quarantines/dev/end');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/input-quarantines/dev/end');
     expect(calls[0]?.init?.method).toBe('POST');
     expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).not.toBeNull();
     await expect(endSessionQuarantine(daemonA, scopeA, 'dev', recorder({ ended: false }).fetcher)).rejects.toThrow(

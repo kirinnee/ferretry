@@ -11,7 +11,7 @@
  * did pressing Enter actually deliver it?
  */
 
-import { paneShowsOpenPicker } from '../session/harness/picker-screen.ts';
+import { paneShowsOpenPicker } from './picker-screen.ts';
 import type { LandingEvidence } from './composer.ts';
 import { composerHolds } from './composer.ts';
 import type { ComposerInk } from './composer-ink.ts';

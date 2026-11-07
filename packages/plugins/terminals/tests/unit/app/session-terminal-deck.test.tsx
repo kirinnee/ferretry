@@ -1,15 +1,19 @@
+import type { Instant } from '@ferretry/std';
 import { describe, expect, test } from 'bun:test';
 
-import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../../app/components/session-terminal-deck.tsx';
-import { RECONNECTING_GRACE_MS } from '../../src/lib/connection-health.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../../src/lib/grants.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import {
+  browserTerminalDeckDependencies,
+  SessionTerminalDeck,
+} from '../../../app/components/session-terminal-deck.tsx';
+import { RECONNECTING_GRACE_MS } from '../../../../connections/app/lib/connection-health.ts';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { grantRefusalNotice } from '../../../../access/app/lib/grants.ts';
+import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
 import { TERMINAL_REOPEN_BASE_MS } from '../../../app/lib/terminal-co-control.ts';
 import { TerminalStreamRefused } from '../../../app/lib/web-terminals.ts';
-import '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
+import '@ferretry/app/testing';
+import { render, run, runAsync } from '@ferretry/app/testing';
 import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../../support/app/terminal-deck.ts';
 
 const alpha = daemonConnection({
@@ -178,7 +182,7 @@ describe('SessionTerminalDeck', () => {
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
-    expect(deck.urls).toEqual([`wss://alpha/v1/sessions/shared/terminals/${FIRST}/stream?ticket=t`]);
+    expect(deck.urls).toEqual([`wss://alpha/v1/ferrets/shared/terminals/${FIRST}/stream?ticket=t`]);
     run(() => page.unmount());
   });
 
@@ -1176,7 +1180,7 @@ describe('SessionTerminalDeck on screen', () => {
 });
 
 describe('SessionTerminalDeck quarantine', () => {
-  const until = '2026-10-30T10:02:00.000Z';
+  const until = '2026-10-30T10:02:00.000Z' as Instant;
 
   /** The button whose visible text is `label` — these two are worded, not icon buttons. */
   const textButton = (page: Rendered, label: string) =>

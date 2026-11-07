@@ -3,8 +3,8 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import should from 'should';
-import { RealHarnessLaunchGuard } from '../../../src/adapters/index.ts';
-import { RealHarnessRefusedError } from '../../../src/lib/index.ts';
+import { RealHarnessLaunchGuard } from '../../../../daemon/adapters/tmux/harness-launch-guard.ts';
+import { RealHarnessRefusedError } from '../../../../daemon/lib/tmux/harness-guard.ts';
 
 async function executable(path: string): Promise<string> {
   await mkdir(join(path, '..'), { recursive: true });

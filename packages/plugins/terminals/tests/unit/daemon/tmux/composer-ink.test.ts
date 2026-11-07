@@ -2,7 +2,8 @@ import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
-import { composerInk, composerRows } from '../../../src/lib/index.ts';
+import { composerInk } from '../../../../daemon/lib/tmux/composer-ink.ts';
+import { composerRows } from '../../../../daemon/lib/tmux/composer-screen.ts';
 
 /**
  * The ink of a composer, read from REAL `capture-pane -e` frames of Claude Code 2.1.281 and Codex 0.156.1
@@ -10,7 +11,7 @@ import { composerInk, composerRows } from '../../../src/lib/index.ts';
  * harness did not happen to draw. Each fixture is one frame captured twice — plain and with attributes.
  */
 
-const FIXTURES = join(import.meta.dir, '../../fixtures/composer');
+const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
 const ESC = '\u001b';
 
 /** The attributed rows `captureFrame` would ask tmux for: just the composer's, from the plain frame's own rows. */

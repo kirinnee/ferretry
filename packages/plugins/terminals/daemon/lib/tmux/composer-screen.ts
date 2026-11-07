@@ -31,7 +31,7 @@
  *     so this block is the ONLY proof a held message has. Missing it called the message lost, and
  *     the daemon typed it again — four copies in one queue, and the sender told it never arrived.
  *   * A named session (`claude -n`) draws its name inside the rule ABOVE the composer
- *     (`──── [Aime] MXO OCI Migration ─`). Nothing here reads that rule, so the title changes nothing.
+ *     (`──── [Aime] MXO OCI Upgrading ─`). Nothing here reads that rule, so the title changes nothing.
  *   * An empty idle composer suggests something to type, `Try "edit <filepath> to..."`, with the
  *     cursor at its first column. That wording is a placeholder even when tmux reports no cursor.
  *   * After a turn Claude also suggests the person's NEXT prompt as dim ghost text (SGR 2, seen with

@@ -2,7 +2,7 @@ import type { InputForegroundSchema } from '@ferretry/core-vault/contract';
 import type { z } from 'zod';
 
 type InputForeground = z.infer<typeof InputForegroundSchema>;
-import { type InputTarget, type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputTarget, InputTargetFacts } from '@ferretry/core-vault/contract';
 import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';

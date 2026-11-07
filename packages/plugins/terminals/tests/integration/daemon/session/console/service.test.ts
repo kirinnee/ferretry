@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess } from '../../../../src/adapters/index.ts';
-import { SessionConsoleError, SessionConsoleService } from '../../../../src/lib/index.ts';
+import { bunSpawn } from '@ferretry/kernel/host';
+import { KernelTmuxProcess } from '../../../../../daemon/adapters/tmux/kernel-tmux-process.ts';
+import { SessionConsoleError, SessionConsoleService } from '../../../../../daemon/lib/session/console/index.ts';
 import { waitForValue } from '../../support/wait-for.ts';
 
 /**
@@ -19,7 +20,7 @@ async function world() {
   const tmux = Bun.which('tmux');
   if (tmux === null) throw new Error('tmux is required for this test and was not found');
   const root = await mkdtemp(join(tmpdir(), 'fy-console-'));
-  const server = new BunTmuxProcess(tmux, join(root, 's'));
+  const server = new KernelTmuxProcess(bunSpawn({ PATH: process.env.PATH ?? '/usr/bin:/bin' }), join(root, 's'), tmux);
   const created = await server.execute(['new-session', '-d', '-s', 'agent', '-x', '80', '-y', '10', 'cat']);
   should(created.code).equal(0, created.stderr);
   const paneId = (await server.execute(['display-message', '-p', '-t', 'agent', '#{pane_id}'])).stdout.trim();

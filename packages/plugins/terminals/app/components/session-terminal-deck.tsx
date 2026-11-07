@@ -32,7 +32,8 @@
  * rather than leaving an empty box.
  */
 
-import type { InputQuarantine, InputQuarantineList, TerminalListView, TerminalView } from '@ferretry/protocol';
+import type { InputQuarantine, InputQuarantineList } from '../lib/protocol/holds.ts';
+import type { TerminalListView, TerminalView } from '../../contract/index.ts';
 import { Check, Clipboard, Pencil, Plus, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react';
 import {
   type FormEvent,
@@ -43,16 +44,16 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useLinkBehaviour } from '../features/browser/external-link.tsx';
-import { useDocumentVisible } from '../hooks/use-document-visible.ts';
-import { useFullscreen } from '../hooks/use-fullscreen.ts';
-import { RECONNECTING_GRACE_MS } from '../lib/connection-health.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../lib/grants.ts';
-import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../lib/keyboard-capture.ts';
-import type { DaemonFetch } from '../lib/runtime-models.ts';
-import { describeSurfaceOwnership, type SurfaceOwnership } from '../lib/surface-references.ts';
+import { useLinkBehaviour } from '../../../browsers/app/features/browser/external-link.tsx';
+import { useDocumentVisible } from '@ferretry/app';
+import { useFullscreen } from '@ferretry/app';
+import { RECONNECTING_GRACE_MS } from '../../../connections/app/lib/connection-health.ts';
+import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { grantRefusalNotice } from '../../../access/app/lib/grants.ts';
+import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../../../conversation/app/lib/keyboard-capture.ts';
+import type { DaemonFetch } from '../../../runtimes/app/lib/runtime-models.ts';
+import { describeSurfaceOwnership, type SurfaceOwnership } from '@ferretry/app';
 import {
   describeCoControl,
   shouldReopenTerminalStream,
@@ -82,8 +83,8 @@ import {
   TerminalStreamRefused,
   terminalLimitLabel,
 } from '../lib/web-terminals.ts';
-import { Button } from '../shell/primitives.tsx';
-import { FullscreenToggle } from './fullscreen-toggle.tsx';
+import { Button } from '@ferretry/app';
+import { FullscreenToggle } from '@ferretry/app';
 import { loadTerminalFont } from './terminal-font-loader.ts';
 
 type XtermModules = {
@@ -161,6 +162,16 @@ export const browserTerminalDeckDependencies = (
   attach: browserTerminalStreamAttach(openStream),
   quarantines: (daemon, scope) => listSessionQuarantines(daemon, scope, fetcher),
   endQuarantine: (daemon, scope, key) => endSessionQuarantine(daemon, scope, key, fetcher),
+  ...browserTerminalDeckHost(),
+});
+
+/** The parts of a deck's dependencies that are this browser's, not the daemon's: emulator, theme, dialogs, clipboard. */
+export type TerminalDeckHost = Pick<
+  TerminalDeckDependencies,
+  'loadXterm' | 'watchTheme' | 'confirmClose' | 'confirmLink' | 'writeClipboard'
+>;
+
+export const browserTerminalDeckHost = (): TerminalDeckHost => ({
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };

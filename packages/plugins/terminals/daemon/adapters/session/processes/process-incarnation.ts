@@ -1,6 +1,10 @@
 import { hostPlatform, readText } from '../../host/fs.ts';
 import type { SpawnPort } from '@ferretry/kernel/contract';
-import { type ProcessIncarnation, procStatStartTicks, psStartSeconds } from '../../../lib/protocol/process-incarnation.ts';
+import {
+  type ProcessIncarnation,
+  procStatStartTicks,
+  psStartSeconds,
+} from '../../../lib/protocol/process-incarnation.ts';
 
 /** Linux: the kernel's start time in clock ticks, exact per incarnation. */
 export class ProcStatProcessIncarnation implements ProcessIncarnation {

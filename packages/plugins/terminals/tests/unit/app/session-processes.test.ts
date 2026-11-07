@@ -3,10 +3,10 @@ import {
   applyOutput,
   EMPTY_OUTPUT,
   PROCESS_OUTPUT_HELD_MAX,
-} from '../../src/features/workspace/use-session-processes.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+} from '../../../../layouts/app/features/workspace/use-session-processes.ts';
+import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
 import {
   formatElapsed,
   formatMemory,
@@ -141,7 +141,7 @@ describe('the client', () => {
       calls.push({ url: String(url), method: init?.method ?? 'GET' });
       return json(ALL_PROCESSES);
     });
-    expect(calls).toEqual([{ url: 'https://proc.example.test/v1/sessions/agent-session/processes', method: 'GET' }]);
+    expect(calls).toEqual([{ url: 'https://proc.example.test/v1/ferrets/agent-session/processes', method: 'GET' }]);
     expect(list.processes).toHaveLength(6);
   });
 
@@ -170,8 +170,8 @@ describe('the client', () => {
     await readSessionProcessOutput(daemon, scope, '100.1', undefined, reader);
     await readSessionProcessOutput(daemon, scope, '100.1', 4096, reader);
     expect(urls).toEqual([
-      'https://proc.example.test/v1/sessions/agent-session/processes/100.1/output',
-      'https://proc.example.test/v1/sessions/agent-session/processes/100.1/output?after=4096',
+      'https://proc.example.test/v1/ferrets/agent-session/processes/100.1/output',
+      'https://proc.example.test/v1/ferrets/agent-session/processes/100.1/output?after=4096',
     ]);
   });
 
@@ -182,7 +182,7 @@ describe('the client', () => {
       return json({ processId: '100.1', signalled: 3 });
     });
     expect(result.signalled).toBe(3);
-    expect(seen[0]?.url).toBe('https://proc.example.test/v1/sessions/agent-session/processes/100.1/stop');
+    expect(seen[0]?.url).toBe('https://proc.example.test/v1/ferrets/agent-session/processes/100.1/stop');
     expect(seen[0]?.init?.method).toBe('POST');
     expect(seen[0]?.init?.body).toBeUndefined();
   });

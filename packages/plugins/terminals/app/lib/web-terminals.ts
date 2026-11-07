@@ -3,32 +3,37 @@ import {
   CloseTerminalResponseSchema,
   type CreateTerminalRequest,
   CreateTerminalRequestSchema,
-  FY_REQUEST_ID_HEADER,
-  type InputQuarantineList,
-  InputQuarantineListSchema,
   RenameTerminalRequestSchema,
-  SESSION_CONSOLE_INPUT_MAX,
-  SessionConsoleInputRequestSchema,
-  SessionConsoleInputResultSchema,
   TerminalIdSchema,
   type TerminalListView,
   TerminalListViewSchema,
   type TerminalView,
   TerminalViewSchema,
-} from '@ferretry/protocol';
-import type { DaemonConnection } from './daemon-connection.ts';
-import type { DaemonSessionScope } from './daemon-scope.ts';
-import { daemonRequest } from './daemon-transport.ts';
-import type { RelayStreamRequest } from './relay-carrier.ts';
-import { type RelayClientSession, type RelayStreamFrame, RelayStreamRefusedError } from './relay-session.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+} from '../../contract/index.ts';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { type InputQuarantineList, InputQuarantineListSchema } from './protocol/holds.ts';
+import {
+  SESSION_CONSOLE_INPUT_MAX,
+  SessionConsoleInputRequestSchema,
+  SessionConsoleInputResultSchema,
+} from './protocol/session-processes.ts';
+import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
+import type { RelayStreamRequest } from '../../../connections/app/lib/relay-carrier.ts';
+import {
+  type RelayClientSession,
+  type RelayStreamFrame,
+  RelayStreamRefusedError,
+} from '../../../connections/app/lib/relay-session.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
 };
 
 const terminalsPath = (scope: DaemonSessionScope): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/terminals`;
+  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/terminals`;
 
 /**
  * Terminal identity is daemon-issued and lands in a URL path, so it is parsed
@@ -148,7 +153,7 @@ export const listSessionQuarantines = async (
     await terminalJson(
       daemon,
       scope,
-      `/v1/sessions/${encodeURIComponent(scope.sessionId)}/input-quarantines`,
+      `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/input-quarantines`,
       { method: 'GET' },
       fetcher,
     ),
@@ -164,7 +169,7 @@ export const endSessionQuarantine = async (
   const body = await terminalJson(
     daemon,
     scope,
-    `/v1/sessions/${encodeURIComponent(scope.sessionId)}/input-quarantines/${encodeURIComponent(key)}/end`,
+    `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/input-quarantines/${encodeURIComponent(key)}/end`,
     { method: 'POST' },
     fetcher,
   );
@@ -208,7 +213,7 @@ export const typeIntoSessionConsole = async (
     const body = await terminalJson(
       daemon,
       scope,
-      `/v1/sessions/${encodeURIComponent(scope.sessionId)}/console/input`,
+      `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/console/input`,
       { method: 'POST', body: JSON.stringify(SessionConsoleInputRequestSchema.parse({ data: chunk })) },
       fetcher,
     );

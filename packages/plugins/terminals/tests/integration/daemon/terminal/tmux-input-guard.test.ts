@@ -1,16 +1,13 @@
 import { describe, it } from 'bun:test';
+import { BunTmuxProcess } from '../support/host-spawn.ts';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess } from '../../../src/adapters/index.ts';
-import {
-  SttyTerminalModes,
-  TmuxInputTarget,
-  type ProgramRunner,
-  type TerminalLocator,
-  type TmuxCommandPort,
-} from '../../../src/lib/index.ts';
+
+import { SttyTerminalModes, type ProgramRunner } from '../../../../daemon/lib/inputs/terminal-modes.ts';
+import { TmuxInputTarget, type TerminalLocator } from '../../../../daemon/lib/inputs/terminal-target.ts';
+import type { TmuxCommandPort } from '../../../../daemon/lib/tmux/contracts.ts';
 import { waitFor, waitForValue } from '../support/wait-for.ts';
 
 /**

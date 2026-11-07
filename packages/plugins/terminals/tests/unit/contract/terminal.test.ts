@@ -11,9 +11,40 @@ import type {
   TerminalResizeFrame,
   TerminalSize,
   TerminalView,
-} from '../../src/lib/index.ts';
-import * as terminal from '../../../daemon/lib/protocol/terminal.ts';
-import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
+} from '../../../contract/index.ts';
+import type { Instant } from '@ferretry/std';
+import { z } from 'zod';
+import * as wire from '../../../contract/index.ts';
+
+/** Today's `protocol/src/lib/terminal.ts` module, as the contract now carries it: the terminal wire, and the binary
+ *  frame the stream sends (raw pane bytes, never JSON). */
+const terminal = {
+  CloseFinishedTerminalsResponseSchema: wire.CloseFinishedTerminalsResponseSchema,
+  CloseTerminalResponseSchema: wire.CloseTerminalResponseSchema,
+  CreateTerminalRequestSchema: wire.CreateTerminalRequestSchema,
+  RenameTerminalRequestSchema: wire.RenameTerminalRequestSchema,
+  TERMINAL_MAX_COLUMNS: wire.TERMINAL_MAX_COLUMNS,
+  TERMINAL_MAX_GLOBAL: wire.TERMINAL_MAX_GLOBAL,
+  TERMINAL_MAX_PER_SESSION: wire.TERMINAL_MAX_PER_SESSION,
+  TERMINAL_MAX_ROWS: wire.TERMINAL_MAX_ROWS,
+  TERMINAL_MAX_TITLE_LENGTH: wire.TERMINAL_MAX_TITLE_LENGTH,
+  TERMINAL_MIN_COLUMNS: wire.TERMINAL_MIN_COLUMNS,
+  TERMINAL_MIN_ROWS: wire.TERMINAL_MIN_ROWS,
+  TERMINAL_SCROLLBACK_LINES: wire.TERMINAL_SCROLLBACK_LINES,
+  TerminalBinaryFrameSchema: z.instanceof(Uint8Array),
+  TerminalErrorCodeSchema: wire.TerminalErrorCodeSchema,
+  TerminalHolderSchema: wire.TerminalHolderSchema,
+  TerminalHolderStandingSchema: wire.TerminalHolderStandingSchema,
+  TerminalHoldersViewSchema: wire.TerminalHoldersViewSchema,
+  TerminalIdSchema: wire.TerminalIdSchema,
+  TerminalListViewSchema: wire.TerminalListViewSchema,
+  TerminalResizeFrameSchema: wire.TerminalResizeFrameSchema,
+  TerminalSizeSchema: wire.TerminalSizeSchema,
+  TerminalViewSchema: wire.TerminalViewSchema,
+};
+/** std's `InstantSchema` keeps milliseconds, so a round trip reads back the canonical form. */
+const INSTANT = '2026-07-30T12:00:00.000Z' as Instant;
+const LATER_INSTANT = '2026-07-30T12:01:00.000Z' as Instant;
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const SESSION_ID = 'session-1';

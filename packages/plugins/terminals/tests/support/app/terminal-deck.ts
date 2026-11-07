@@ -9,9 +9,14 @@
  * in these tests, and a real emulator in happy-dom is both slow and unreliable.
  */
 
-import type { TerminalListView, TerminalView } from '@ferretry/protocol';
+import type { Instant } from '@ferretry/std';
+import type { TerminalListView, TerminalView } from '../../../contract/index.ts';
 import type { TerminalDeckDependencies } from '../../../app/components/session-terminal-deck.tsx';
-import type { LinkableBuffer, TerminalHyperlinkHandler, TerminalLinkProvider } from '../../../app/lib/terminal-links.ts';
+import type {
+  LinkableBuffer,
+  TerminalHyperlinkHandler,
+  TerminalLinkProvider,
+} from '../../../app/lib/terminal-links.ts';
 import type { TerminalStream, TerminalStreamHandlers } from '../../../app/lib/web-terminals.ts';
 
 export const terminalView = (id: string, patch: Partial<TerminalView> = {}, sessionId = 'shared'): TerminalView => ({
@@ -22,9 +27,9 @@ export const terminalView = (id: string, patch: Partial<TerminalView> = {}, sess
   cols: 80,
   rows: 24,
   viewers: 0,
-  createdAt: '2026-08-01T10:00:00.000Z',
-  lastActivityAt: '2026-08-01T10:05:00.000Z',
-  idleDeadline: '2026-08-01T11:05:00.000Z',
+  createdAt: '2026-08-01T10:00:00.000Z' as Instant,
+  lastActivityAt: '2026-08-01T10:05:00.000Z' as Instant,
+  idleDeadline: '2026-08-01T11:05:00.000Z' as Instant,
   ...patch,
 });
 
@@ -152,7 +157,7 @@ export const fakeDeck = (
     },
     attach: async (daemon, scope, id, handlers, options) => {
       deck.reveals.push(options?.reveal === true);
-      const url = `wss://${daemon.daemonId}/v1/sessions/${scope.sessionId}/terminals/${id}/stream?ticket=t`;
+      const url = `wss://${daemon.daemonId}/v1/ferrets/${scope.sessionId}/terminals/${id}/stream?ticket=t`;
       deck.urls.push(url);
       const socket = new FakeSocket(url, handlers);
       deck.sockets.push(socket);

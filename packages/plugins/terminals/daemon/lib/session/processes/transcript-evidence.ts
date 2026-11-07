@@ -1,5 +1,5 @@
-import { type SessionProcessExit } from '../../protocol/session-processes.ts';
-import type { TranscriptEvent, TranscriptJsonValue } from '../../transcript/types.ts';
+import type { SessionProcessExit } from '../../protocol/session-processes.ts';
+import type { TranscriptEvent, TranscriptJsonValue } from './transcript.ts';
 
 /**
  * WHAT THE HARNESS ITSELF RECORDED ABOUT ITS TOOL COMMANDS, read off the conversation. Pure.

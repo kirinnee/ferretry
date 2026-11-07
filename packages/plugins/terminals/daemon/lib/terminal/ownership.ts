@@ -17,7 +17,7 @@
  * NOTHING and the terminal reads as unrecorded. That is not the same as `local`:
  * `local` is evidence that the box's own credential opened it, and no-evidence is
  * the absence of any. Inventing the benign reading here is the failure this
- * migration has already hit three times.
+ * port has already hit three times.
  *
  * THE DURABLE FORM IS THE PANE'S OWN. The encoding below is written into a tmux
  * user option beside the terminal's id and title, so ownership survives a daemon

@@ -1,10 +1,13 @@
 import { afterEach, describe, it } from 'bun:test';
+import { BunTmuxProcess, controlOptions } from '../support/host-spawn.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess, ControlModeTmuxProcess, captureFrame } from '../../../src/adapters/index.ts';
-import { composerState, TmuxController } from '../../../src/lib/index.ts';
+import { ControlModeTmuxProcess } from '../../../../daemon/adapters/tmux/control-tmux-process.ts';
+import { captureFrame } from '../../../../daemon/adapters/tmux/composer-fill.ts';
+import { composerState } from '../../../../daemon/lib/tmux/delivery.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');
@@ -20,7 +23,7 @@ async function paneDrawing(composerRow: string): Promise<TmuxController> {
   const root = await mkdtemp(join(tmpdir(), 'fy-ink-'));
   const socket = join(root, 's');
   const direct = new BunTmuxProcess(TMUX, socket);
-  const control = new ControlModeTmuxProcess(TMUX, socket, direct);
+  const control = new ControlModeTmuxProcess(TMUX, socket, direct, controlOptions());
   cleanups.push(async () => {
     control.close();
     await direct.execute(['kill-server']);

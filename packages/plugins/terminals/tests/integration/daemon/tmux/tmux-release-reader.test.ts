@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
+import { hostSpawn, realAfter } from '../support/host-spawn.ts';
 import { TmuxReleaseReader } from '../../../../daemon/adapters/tmux/tmux-release-reader.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
@@ -37,7 +38,7 @@ describe('TmuxReleaseReader', () => {
 
     try {
       // Act
-      const actual = await new TmuxReleaseReader(tmux.path, port).read();
+      const actual = await new TmuxReleaseReader(hostSpawn, tmux.path, port, realAfter).read();
 
       // Assert
       should(actual).deepEqual({ program: 'tmux 3.6a', server: '3.6a' });
@@ -53,7 +54,7 @@ describe('TmuxReleaseReader', () => {
     if (executable === null) throw new Error('the integration tier runs with tmux installed');
 
     // Act
-    const actual = await new TmuxReleaseReader(executable, noServer).read();
+    const actual = await new TmuxReleaseReader(hostSpawn, executable, noServer, realAfter).read();
 
     // Assert
     should(actual.program).match(/^tmux \S+$/u);
@@ -68,9 +69,9 @@ describe('TmuxReleaseReader', () => {
     try {
       // Act
       const actual = await Promise.all([
-        new TmuxReleaseReader(join(tmpdir(), 'no-such-dir', 'tmux'), noServer).read(),
-        new TmuxReleaseReader(failing.path, noServer).read(),
-        new TmuxReleaseReader(silent.path, noServer).read(),
+        new TmuxReleaseReader(hostSpawn, join(tmpdir(), 'no-such-dir', 'tmux'), noServer, realAfter).read(),
+        new TmuxReleaseReader(hostSpawn, failing.path, noServer, realAfter).read(),
+        new TmuxReleaseReader(hostSpawn, silent.path, noServer, realAfter).read(),
       ]);
 
       // Assert — every failure is an absent answer, never a guess.
@@ -87,7 +88,7 @@ describe('TmuxReleaseReader', () => {
 
     try {
       // Act
-      const actual = await new TmuxReleaseReader(hung.path, silentServer, 50).read();
+      const actual = await new TmuxReleaseReader(hostSpawn, hung.path, silentServer, realAfter, 50).read();
 
       // Assert — it settled at all: a wedged tmux cannot hold a doctor report.
       should(actual).deepEqual({});
@@ -107,8 +108,8 @@ describe('TmuxReleaseReader', () => {
     try {
       // Act
       const actual = await Promise.all([
-        new TmuxReleaseReader(tmux.path, empty).read(),
-        new TmuxReleaseReader(tmux.path, throwing).read(),
+        new TmuxReleaseReader(hostSpawn, tmux.path, empty, realAfter).read(),
+        new TmuxReleaseReader(hostSpawn, tmux.path, throwing, realAfter).read(),
       ]);
 
       // Assert

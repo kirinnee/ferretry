@@ -12,24 +12,20 @@ import {
   newSessionArguments,
   paneIdentityArguments,
   paneMetadataArguments,
-  paneProofArguments,
   paneSessionClientsArguments,
   parseControlClients,
-  parsePaneMetadata,
   pasteBufferName,
-  promptIsReady,
   releasedKillArguments,
-  retryDelays,
   sendKeyArguments,
   sendLiteralArguments,
   sessionClientsArguments,
-  sessionTarget,
-  TmuxAddressError,
-  type TmuxCommandPort,
-  type TmuxCommandResult,
-  TmuxController,
-  windowTarget,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/commands.ts';
+import { paneProofArguments } from '../../../../daemon/lib/tmux/pane-proof.ts';
+import { parsePaneMetadata, promptIsReady } from '../../../../daemon/lib/tmux/pane.ts';
+import { retryDelays } from '../../../../daemon/lib/tmux/retry.ts';
+import { sessionTarget, TmuxAddressError, windowTarget } from '../../../../daemon/lib/tmux/address.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 
 class FakeTmux implements TmuxCommandPort {
   readonly received: string[][] = [];

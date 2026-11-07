@@ -3,18 +3,18 @@ import should from 'should';
 import {
   type CapturedFrame,
   capturedFrameIsCurrent,
-  type PaneActivity,
-  paneActivityArguments,
-  paneActivityFormat,
-  paneIdentityTableArguments,
   paneStateFrom,
   parsePaneActivity,
   parsePaneIdentityTable,
   resolveSessionTarget,
-  type TmuxCommandPort,
-  type TmuxCommandResult,
-  TmuxController,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/pane.ts';
+import type { PaneActivity, TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
+import {
+  paneActivityArguments,
+  paneActivityFormat,
+  paneIdentityTableArguments,
+} from '../../../../daemon/lib/tmux/commands.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 
 class FakeTmux implements TmuxCommandPort {
   readonly received: string[][] = [];

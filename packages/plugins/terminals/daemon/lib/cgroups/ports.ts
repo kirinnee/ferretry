@@ -110,9 +110,9 @@ export interface ServiceWeightsPort {
   read(): Promise<ServiceWeights>;
 }
 
-/** One per-ferret slice (or a legacy scope) and what the kernel says about its combined memory. */
+/** One per-ferret slice (or a per-launch agent scope) and what the kernel says about its combined memory. */
 export interface ScopeSighting {
-  /** The per-ferret slice unit name, or a legacy `<product>-agent-<id>-<nonce>.scope`. */
+  /** The per-ferret slice unit name, or a per-launch `<product>-agent-<id>-<nonce>.scope`. */
   readonly scope: string;
   readonly events: MemoryEvents;
   /** `memory.current`; absent where unreadable. */

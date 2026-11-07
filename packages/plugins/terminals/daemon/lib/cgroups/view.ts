@@ -7,7 +7,14 @@
  *
  * Pure: no IO, no clock, no globals.
  */
-import { GIBIBYTE, type LimitsConfig, type LimitsDiskEffect, type LimitsView, resolveLimits, VOICE_CPU_WEIGHT } from '../protocol/limits.ts';
+import {
+  GIBIBYTE,
+  type LimitsConfig,
+  type LimitsDiskEffect,
+  type LimitsView,
+  resolveLimits,
+  VOICE_CPU_WEIGHT,
+} from '../protocol/limits.ts';
 import type { EnforcementState } from './enforcement.ts';
 import { ownerStep } from './owner-step.ts';
 import type { AppliedCaps, CgroupHostFacts, DiskSchedulerReading, ServiceWeights } from './ports.ts';

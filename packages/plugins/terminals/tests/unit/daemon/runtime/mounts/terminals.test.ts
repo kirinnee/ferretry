@@ -1,65 +1,39 @@
 import { describe, it } from 'bun:test';
-import { CloseFinishedTerminalsResponseSchema, CloseTerminalResponseSchema, TerminalHoldersViewSchema, TerminalListViewSchema, type TerminalView, TerminalViewSchema } from '../../../../../contract/index.ts';
+import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import type { FerretId } from '@ferretry/kernel/contract';
 import should from 'should';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { ApiSocketDispatcher, type SocketDownstream } from '../../../../src/lib/api/socket.ts';
 import {
-  TerminalMountError,
-  terminalRoutes,
-  terminalSocketRoutes,
-} from '../../../../../daemon/lib/runtime/mounts/terminals.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, FakeTerminals, GRANTED, human } from './support.ts';
+  CloseFinishedTerminalsResponseSchema,
+  CloseTerminalResponseSchema,
+  TerminalHoldersViewSchema,
+  TerminalListViewSchema,
+  type TerminalView,
+  TerminalViewSchema,
+} from '../../../../../contract/index.ts';
+import { TerminalRuntimeError } from '../../../../../daemon/adapters/terminal/index.ts';
+import { ferretSummary } from '../../../../support/daemon/half.ts';
+import { type Caller, FERRET, jsonBody, type MountHalf, mountHalf } from './support.ts';
 
 /**
- * The terminal lifecycle's HTTP surface, driven through the real router.
+ * The terminal lifecycle's HTTP surface, driven through the kernel's test host and Terminals' real half.
  *
  * The tmux pane is replaced; the sizing, titling and idle policies behind every answer are the
- * production ones, and every response is validated against the protocol schema before a case looks
+ * production ones, and every response is validated against the contract schema before a case looks
  * at it — an answer the wire would reject is a failure however plausible it reads.
  */
 
-function dispatcher(terminals: FakeTerminals = new FakeTerminals()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), CREDENTIALS, GRANTED);
-}
+const BASE = `/v1/ferrets/${FERRET}/terminals`;
 
-const send = (
-  method: 'POST' | 'PATCH',
-  path: string,
-  body?: unknown,
-  headers: Readonly<Record<string, string>> = human,
-) =>
-  request({
-    method,
-    path,
-    headers: { ...headers, 'content-type': 'application/json' },
-    body: body === undefined ? '' : JSON.stringify(body),
-  });
+const post = async (half: MountHalf, path: string, body?: unknown, as: Caller = 'owner') =>
+  await half.call('POST', path, body, as);
+const get = async (half: MountHalf, path: string, as: Caller = 'owner') => await half.call('GET', path, undefined, as);
 
-const post = (path: string, body?: unknown, headers: Readonly<Record<string, string>> = human) =>
-  send('POST', path, body, headers);
-
-const patch = (path: string, body?: unknown) => send('PATCH', path, body);
-
-/** The same request from a paired device: whoever its session proved, with no header credential. */
-const devicePost = (path: string, body?: unknown) =>
-  request({
-    method: 'POST',
-    path,
-    headers: { 'content-type': 'application/json' },
-    body: body === undefined ? '' : JSON.stringify(body),
-    device: { deviceId: 'device-1', appSession: 'app-one' },
-  });
-
-/** Opens one terminal and hands back the dispatcher that owns it. */
-async function withTerminal(
-  terminals: FakeTerminals = new FakeTerminals(),
-): Promise<{ readonly dispatch: ApiDispatcher; readonly terminal: TerminalView }> {
-  const dispatch = dispatcher(terminals);
-  const created = await dispatch.dispatch(post('/v1/sessions/s1/terminals'));
+/** Opens one terminal and hands back the half that owns it. */
+async function withTerminal(half?: MountHalf): Promise<{ readonly half: MountHalf; readonly terminal: TerminalView }> {
+  const owned = half ?? (await mountHalf());
+  const created = await post(owned, BASE);
   should(created.status).equal(201);
-  return { dispatch, terminal: TerminalViewSchema.parse(jsonBody(created)) };
+  return { half: owned, terminal: TerminalViewSchema.parse(jsonBody(created)) };
 }
 
 describe('the terminal mount', () => {
@@ -72,17 +46,15 @@ describe('the terminal mount', () => {
       // Assert
       should(terminal.title).equal('Terminal 1');
       should([terminal.cols, terminal.rows]).deepEqual([100, 30]);
-      should(terminal.sessionId).equal('s1');
+      should(terminal.sessionId).equal(FERRET);
     });
 
     it('should honour the title and size the caller asked for', async () => {
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const created = await dispatch.dispatch(
-        post('/v1/sessions/s1/terminals', { title: 'Build watch', cols: 120, rows: 40 }),
-      );
+      const created = await post(half, BASE, { title: 'Build watch', cols: 120, rows: 40 });
 
       // Assert
       should(created.status).equal(201);
@@ -93,10 +65,10 @@ describe('the terminal mount', () => {
 
     it('should number the second terminal after the first', async () => {
       // Arrange
-      const { dispatch } = await withTerminal();
+      const { half } = await withTerminal();
 
       // Act
-      const second = await dispatch.dispatch(post('/v1/sessions/s1/terminals'));
+      const second = await post(half, BASE);
 
       // Assert
       should(TerminalViewSchema.parse(jsonBody(second)).title).equal('Terminal 2');
@@ -114,12 +86,10 @@ describe('the terminal mount', () => {
       // This is #34's whole point: a reader must be able to see, on the row
       // itself, that an agent is driving this shell before typing into it.
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const created = await dispatch.dispatch(
-        post('/v1/sessions/s1/terminals', { agentSessionId: 'mse7wwti-2a75bd9c' }),
-      );
+      const created = await post(half, BASE, { agentSessionId: 'mse7wwti-2a75bd9c' });
 
       // Assert
       should(created.status).equal(201);
@@ -131,10 +101,10 @@ describe('the terminal mount', () => {
 
     it('should record a paired device as the human holding it', async () => {
       // Arrange — the device credential is the one a phone or a browser presents.
-      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(new FakeTerminals())), CREDENTIALS, GRANTED);
+      const half = await mountHalf();
 
       // Act
-      const created = await dispatch.dispatch(devicePost('/v1/sessions/s1/terminals'));
+      const created = await post(half, BASE, undefined, 'device');
 
       // Assert
       should(created.status).equal(201);
@@ -146,14 +116,11 @@ describe('the terminal mount', () => {
       // an agent's would make every agent badge unreadable, and recording it as
       // a human anyway would hide that the caller asked for something else.
       // Arrange
-      const terminals = new FakeTerminals();
-      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), CREDENTIALS, GRANTED);
+      const half = await mountHalf();
 
       // Act
-      const refused = await dispatch.dispatch(devicePost('/v1/sessions/s1/terminals', { agentSessionId: 'mse7wwti' }));
-      const listed = await dispatch.dispatch(
-        request({ method: 'GET', path: '/v1/sessions/s1/terminals', headers: human }),
-      );
+      const refused = await post(half, BASE, { agentSessionId: 'mse7wwti' }, 'device');
+      const listed = await get(half, BASE);
 
       // Assert
       should(refused.status).equal(403);
@@ -165,10 +132,10 @@ describe('the terminal mount', () => {
 
     it('should refuse an agent identity the wire could not carry', async () => {
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const refused = await dispatch.dispatch(post('/v1/sessions/s1/terminals', { agentSessionId: 'not a session' }));
+      const refused = await post(half, BASE, { agentSessionId: 'not a session' });
 
       // Assert
       should(refused.status).equal(403);
@@ -178,18 +145,10 @@ describe('the terminal mount', () => {
       // A device id the protocol cannot represent is no reason to refuse the shell, but it is a reason
       // not to print an owner nobody could render: the terminal opens unrecorded.
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const created = await dispatch.dispatch(
-        request({
-          method: 'POST',
-          path: '/v1/sessions/s1/terminals',
-          headers: { 'content-type': 'application/json' },
-          body: '',
-          device: { deviceId: 'device with spaces', appSession: 'app-one' },
-        }),
-      );
+      const created = await post(half, BASE, undefined, 'odd-device');
 
       // Assert
       should(created.status).equal(201);
@@ -198,10 +157,10 @@ describe('the terminal mount', () => {
 
     it('should refuse a size the protocol does not allow', async () => {
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const created = await dispatch.dispatch(post('/v1/sessions/s1/terminals', { cols: 5, rows: 5 }));
+      const created = await post(half, BASE, { cols: 5, rows: 5 });
 
       // Assert
       should(created.status).equal(400);
@@ -212,10 +171,10 @@ describe('the terminal mount', () => {
       // `strictObject` is what makes a typo in a client an error instead of a silently dropped
       // request — a caller that asked for a shell and got the default would never know.
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const created = await dispatch.dispatch(post('/v1/sessions/s1/terminals', { shell: '/bin/zsh' }));
+      const created = await post(half, BASE, { shell: '/bin/zsh' });
 
       // Assert
       should(created.status).equal(400);
@@ -225,11 +184,11 @@ describe('the terminal mount', () => {
       // The request was well formed; the fleet's own state is what refused it, so a client can tell
       // "close one and retry" apart from "you asked wrongly".
       // Arrange
-      const dispatch = dispatcher(new FakeTerminals(['s1'], 1));
-      await dispatch.dispatch(post('/v1/sessions/s1/terminals'));
+      const half = await mountHalf({ config: { 'terminals.yaml': { perFerret: 1 } } });
+      await post(half, BASE);
 
       // Act
-      const refused = await dispatch.dispatch(post('/v1/sessions/s1/terminals'));
+      const refused = await post(half, BASE);
 
       // Assert
       should(refused.status).equal(409);
@@ -240,10 +199,10 @@ describe('the terminal mount', () => {
   describe('reading terminals', () => {
     it('should list a session‘s terminals with the limits it is held to', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
+      const { half, terminal } = await withTerminal();
 
       // Act
-      const listed = await dispatch.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
+      const listed = await get(half, BASE);
 
       // Assert
       should(listed.status).equal(200);
@@ -255,12 +214,10 @@ describe('the terminal mount', () => {
 
     it('should read one terminal back by id', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
+      const { half, terminal } = await withTerminal();
 
       // Act
-      const detail = await dispatch.dispatch(
-        request({ path: `/v1/sessions/s1/terminals/${terminal.id}`, headers: human }),
-      );
+      const detail = await get(half, `${BASE}/${terminal.id}`);
 
       // Assert
       should(detail.status).equal(200);
@@ -269,10 +226,10 @@ describe('the terminal mount', () => {
 
     it('should report a session it cannot resolve as not found', async () => {
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const listed = await dispatch.dispatch(request({ path: '/v1/sessions/absent/terminals', headers: human }));
+      const listed = await get(half, '/v1/ferrets/absent/terminals');
 
       // Assert
       should(listed.status).equal(404);
@@ -283,10 +240,10 @@ describe('the terminal mount', () => {
       // A twelve-hex id is the protocol's shape. Looking up anything else and answering 404 would
       // read as "it was closed" when the caller in fact asked a malformed question.
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/terminals/zzz', headers: human }));
+      const detail = await get(half, `${BASE}/zzz`);
 
       // Assert
       should(detail.status).equal(400);
@@ -295,10 +252,10 @@ describe('the terminal mount', () => {
 
     it('should refuse a path parameter that decodes to nothing usable', async () => {
       // Arrange
-      const dispatch = dispatcher();
+      const half = await mountHalf();
 
       // Act
-      const listed = await dispatch.dispatch(request({ path: '/v1/sessions/%2e%2e/terminals', headers: human }));
+      const listed = await get(half, '/v1/ferrets/%2e%2e/terminals');
 
       // Assert
       should(listed.status).equal(400);
@@ -309,12 +266,10 @@ describe('the terminal mount', () => {
   describe('retitling and closing', () => {
     it('should retitle a terminal and report the new title', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
+      const { half, terminal } = await withTerminal();
 
       // Act
-      const renamed = await dispatch.dispatch(
-        patch(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'Deploy log' }),
-      );
+      const renamed = await half.call('PATCH', `${BASE}/${terminal.id}`, { title: 'Deploy log' });
 
       // Assert
       should(renamed.status).equal(200);
@@ -323,12 +278,10 @@ describe('the terminal mount', () => {
 
     it('should not serve a retitle sent as POST, the method the app does not use', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
+      const { half, terminal } = await withTerminal();
 
       // Act
-      const renamed = await dispatch.dispatch(
-        post(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'Deploy log' }),
-      );
+      const renamed = await post(half, `${BASE}/${terminal.id}`, { title: 'Deploy log' });
 
       // Assert
       should(renamed.status).equal(405);
@@ -337,10 +290,10 @@ describe('the terminal mount', () => {
 
     it('should refuse a title of control characters', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
+      const { half, terminal } = await withTerminal();
 
       // Act
-      const renamed = await dispatch.dispatch(patch(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'a\u0007b' }));
+      const renamed = await half.call('PATCH', `${BASE}/${terminal.id}`, { title: 'a\u0007b' });
 
       // Assert
       should(renamed.status).equal(400);
@@ -348,13 +301,11 @@ describe('the terminal mount', () => {
 
     it('should close a terminal and stop listing it', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
+      const { half, terminal } = await withTerminal();
 
       // Act
-      const closed = await dispatch.dispatch(
-        request({ method: 'DELETE', path: `/v1/sessions/s1/terminals/${terminal.id}`, headers: human }),
-      );
-      const listed = await dispatch.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
+      const closed = await half.call('DELETE', `${BASE}/${terminal.id}`);
+      const listed = await get(half, BASE);
 
       // Assert
       should(closed.status).equal(200);
@@ -364,15 +315,11 @@ describe('the terminal mount', () => {
 
     it('should report closing a terminal that is already gone as not found', async () => {
       // Arrange
-      const { dispatch, terminal } = await withTerminal();
-      await dispatch.dispatch(
-        request({ method: 'DELETE', path: `/v1/sessions/s1/terminals/${terminal.id}`, headers: human }),
-      );
+      const { half, terminal } = await withTerminal();
+      await half.call('DELETE', `${BASE}/${terminal.id}`);
 
       // Act
-      const again = await dispatch.dispatch(
-        request({ method: 'DELETE', path: `/v1/sessions/s1/terminals/${terminal.id}`, headers: human }),
-      );
+      const again = await half.call('DELETE', `${BASE}/${terminal.id}`);
 
       // Assert
       should(again.status).equal(404);
@@ -382,50 +329,11 @@ describe('the terminal mount', () => {
   describe('how failures are reported', () => {
     it('should report a tmux failure as an upstream failure, not as the caller‘s fault', async () => {
       // Arrange
-      const failing = new ApiDispatcher(
-        new ApiRouter(
-          terminalRoutes({
-            holders: async () => {
-              throw new Error('unreachable');
-            },
-            closeFinished: async () => {
-              throw new Error('unreachable');
-            },
-            list: async () => {
-              throw new TerminalMountError('upstream_failed', 'tmux command failed');
-            },
-            create: async () => {
-              throw new Error('unreachable');
-            },
-            get: async () => {
-              throw new Error('unreachable');
-            },
-            rename: async () => {
-              throw new Error('unreachable');
-            },
-            close: async () => {
-              throw new Error('unreachable');
-            },
-            write: async () => {
-              throw new Error('not exercised by the lifecycle routes');
-            },
-            text: async () => {
-              throw new Error('not exercised by the lifecycle routes');
-            },
-            foreground: async () => {
-              throw new Error('not exercised by the lifecycle routes');
-            },
-            stream: async () => {
-              throw new Error('unreachable');
-            },
-          }),
-        ),
-        CREDENTIALS,
-        GRANTED,
-      );
+      const half = await mountHalf();
+      half.runtime.listFails = new TerminalRuntimeError('tmux command failed');
 
       // Act
-      const listed = await failing.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
+      const listed = await get(half, BASE);
 
       // Assert
       should(listed.status).equal(502);
@@ -434,50 +342,11 @@ describe('the terminal mount', () => {
 
     it('should let a genuine defect become a 500 rather than blame the caller', async () => {
       // Arrange
-      const broken = new ApiDispatcher(
-        new ApiRouter(
-          terminalRoutes({
-            holders: async () => {
-              throw new Error('unreachable');
-            },
-            closeFinished: async () => {
-              throw new Error('unreachable');
-            },
-            list: async () => {
-              throw new Error('the session index is closed');
-            },
-            create: async () => {
-              throw new Error('unreachable');
-            },
-            get: async () => {
-              throw new Error('unreachable');
-            },
-            rename: async () => {
-              throw new Error('unreachable');
-            },
-            close: async () => {
-              throw new Error('unreachable');
-            },
-            write: async () => {
-              throw new Error('not exercised by the lifecycle routes');
-            },
-            text: async () => {
-              throw new Error('not exercised by the lifecycle routes');
-            },
-            foreground: async () => {
-              throw new Error('not exercised by the lifecycle routes');
-            },
-            stream: async () => {
-              throw new Error('unreachable');
-            },
-          }),
-        ),
-        CREDENTIALS,
-        GRANTED,
-      );
+      const half = await mountHalf();
+      half.runtime.listFails = new Error('the session index is closed');
 
       // Act
-      const listed = await broken.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
+      const listed = await get(half, BASE);
 
       // Assert
       should(listed.status).equal(500);
@@ -485,12 +354,7 @@ describe('the terminal mount', () => {
 
     it('should refuse a warden-scoped caller: a terminal is an unsupervised shell', async () => {
       // Arrange / Act
-      const listed = await dispatcher().dispatch(
-        request({
-          path: '/v1/sessions/s1/terminals',
-          headers: { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' },
-        }),
-      );
+      const listed = await get(await mountHalf(), BASE, 'warden');
 
       // Assert
       should(listed.status).equal(403);
@@ -501,14 +365,31 @@ describe('the terminal mount', () => {
 describe('the owner’s view of the terminal slots', () => {
   const holder = { sessionId: 's-1', label: 'fitzgerald', standing: 'finished', status: 'stopped', count: 6 } as const;
 
+  /** Six terminals left open by a ferret that has stopped. */
+  async function heldByAStoppedFerret(): Promise<MountHalf> {
+    const stopped: FerretSummary = {
+      ...ferretSummary('s-1' as FerretId),
+      name: 'fitzgerald',
+      state: 'stopped',
+    } as FerretSummary;
+    const half = await mountHalf({ ferrets: [ferretSummary(), stopped] });
+    for (let at = 0; at < 6; at += 1)
+      await half.runtime.create({
+        ownerId: 's-1',
+        id: `00000000000${String(at)}`,
+        title: `Terminal ${String(at + 1)}`,
+        cwd: '/work/fitzgerald',
+        size: { cols: 100, rows: 30 },
+      });
+    return half;
+  }
+
   it('should say who holds the open terminals and what the limit is', async () => {
     // Arrange
-    const terminals = new FakeTerminals();
-    terminals.holding.open = 6;
-    terminals.holding.holders = [holder];
+    const half = await heldByAStoppedFerret();
 
     // Act
-    const answered = await dispatcher(terminals).dispatch(request({ path: '/v1/terminals', headers: human }));
+    const answered = await get(half, '/v1/terminals');
 
     // Assert
     should(answered.status).equal(200);
@@ -517,12 +398,10 @@ describe('the owner’s view of the terminal slots', () => {
 
   it('should close the finished ferrets’ terminals as the owner and report who held them', async () => {
     // Arrange
-    const terminals = new FakeTerminals();
-    terminals.holding.open = 6;
-    terminals.holding.holders = [holder];
+    const half = await heldByAStoppedFerret();
 
     // Act
-    const answered = await dispatcher(terminals).dispatch(post('/v1/terminals/close-finished'));
+    const answered = await post(half, '/v1/terminals/close-finished');
 
     // Assert
     should(answered.status).equal(200);
@@ -531,23 +410,20 @@ describe('the owner’s view of the terminal slots', () => {
       failed: 0,
       holders: [holder],
     });
-    should(terminals.reclaims).deepEqual(['owner']);
+    // The closing is said with its trigger: the owner, not a sweep.
+    should(
+      half.host.logs.filter(entry => entry.message === 'terminals closed').map(entry => entry.fields?.trigger),
+    ).deepEqual(['owner']);
   });
 
   it('should report a failing tmux as an upstream failure on both routes', async () => {
     // Arrange
-    const failing = new FakeTerminals();
-    failing.holders = async () => {
-      throw new TerminalMountError('upstream_failed', 'tmux command failed');
-    };
-    failing.closeFinished = async () => {
-      throw new TerminalMountError('upstream_failed', 'tmux command failed');
-    };
-    const dispatch = dispatcher(failing);
+    const half = await mountHalf();
+    half.runtime.listFails = new TerminalRuntimeError('tmux command failed');
 
     // Act
-    const read = await dispatch.dispatch(request({ path: '/v1/terminals', headers: human }));
-    const closed = await dispatch.dispatch(post('/v1/terminals/close-finished'));
+    const read = await get(half, '/v1/terminals');
+    const closed = await post(half, '/v1/terminals/close-finished');
 
     // Assert
     should([read.status, closed.status]).deepEqual([502, 502]);
@@ -555,12 +431,7 @@ describe('the owner’s view of the terminal slots', () => {
 
   it('should refuse a warden-scoped caller, as for every other terminal route', async () => {
     // Arrange / Act
-    const answered = await dispatcher().dispatch(
-      request({
-        path: '/v1/terminals',
-        headers: { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' },
-      }),
-    );
+    const answered = await get(await mountHalf(), '/v1/terminals', 'warden');
 
     // Assert
     should(answered.status).equal(403);
@@ -576,140 +447,68 @@ describe('the owner’s view of the terminal slots', () => {
  * unauthorized peer map which terminals exist by watching how fast each socket died.
  */
 describe('the mounted terminal stream', () => {
-  function sockets(terminals: FakeTerminals = new FakeTerminals()): ApiSocketDispatcher {
-    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, GRANTED);
-  }
-
-  /** A downstream that records, standing in for the socket the transport would supply. */
-  function downstream(): { readonly sent: string[]; readonly port: SocketDownstream } {
-    const sent: string[] = [];
-    return {
-      sent,
-      port: {
-        send: frame => sent.push(typeof frame === 'string' ? frame : new TextDecoder().decode(frame)),
-        close: () => undefined,
-        bufferedBytes: () => 0,
-      },
-    };
-  }
+  const frames = (socket: { readonly frames: readonly (string | Uint8Array)[] } | undefined): string =>
+    (socket?.frames ?? []).map(frame => (typeof frame === 'string' ? frame : new TextDecoder().decode(frame))).join('');
 
   it('should attach a viewer to a terminal that exists', async () => {
     // Arrange
-    const terminals = new FakeTerminals();
-    const { terminal } = await withTerminal(terminals);
-    const viewer = downstream();
+    const { half, terminal } = await withTerminal();
 
     // Act
-    const decision = await sockets(terminals).upgrade(
-      request({ path: `/v1/sessions/s1/terminals/${terminal.id}/stream`, headers: human }),
-    );
-    if (decision.outcome === 'accepted') await (await decision.attach(viewer.port)).open();
+    const opened = await half.stream(`${BASE}/${terminal.id}/stream`);
 
-    // Assert
-    should(decision.outcome).equal('accepted');
-    should(terminals.streamed).deepEqual([`s1/${terminal.id}`]);
-    should(viewer.sent).deepEqual([`open:s1/${terminal.id}`]);
+    // Assert — accepted, and the viewer is drawn that terminal's own screen.
+    should(opened.status).be.undefined();
+    should(opened.socket?.handler).not.be.undefined();
+    should(frames(opened.socket)).containEql('$');
+    opened.socket?.handler?.close();
   });
 
   it('should refuse a stream for a terminal that was never opened, before switching protocols', async () => {
     // Arrange / Act
-    const decision = await sockets().upgrade(
-      request({ path: '/v1/sessions/s1/terminals/0123456789ab/stream', headers: human }),
-    );
+    const refused = await (await mountHalf()).stream(`${BASE}/0123456789ab/stream`);
 
     // Assert
-    should(decision.outcome).equal('refused');
-    should(decision.outcome === 'refused' ? decision.response.status : 0).equal(404);
-    should(decision.outcome === 'refused' ? jsonBody(decision.response) : {}).have.property('code', 'not_found');
+    should(refused.socket).be.undefined();
+    should(refused.status).equal(404);
+    should(refused.code).equal('not_found');
   });
 
   it('should refuse a stream for a session this daemon does not hold', async () => {
     // Arrange / Act
-    const decision = await sockets().upgrade(
-      request({ path: '/v1/sessions/nope/terminals/0123456789ab/stream', headers: human }),
-    );
+    const refused = await (await mountHalf()).stream('/v1/ferrets/nope/terminals/0123456789ab/stream');
 
     // Assert
-    should(decision.outcome === 'refused' ? decision.response.status : 0).equal(404);
+    should(refused.status).equal(404);
   });
 
   it('should refuse a terminal id that could not name a terminal this daemon minted', async () => {
     // Parsed against the protocol's own shape rather than looked up, so a crafted id is a bad request
     // instead of a 404 a viewer would read as "it was closed".
     // Arrange / Act
-    const decision = await sockets().upgrade(
-      request({ path: '/v1/sessions/s1/terminals/not-a-terminal/stream', headers: human }),
-    );
+    const refused = await (await mountHalf()).stream(`${BASE}/not-a-terminal/stream`);
 
     // Assert
-    should(decision.outcome === 'refused' ? decision.response.status : 0).equal(400);
-    should(decision.outcome === 'refused' ? jsonBody(decision.response) : {}).have.property('code', 'bad_request');
+    should(refused.status).equal(400);
+    should(refused.code).equal('bad_request');
   });
 
   it('should refuse an unauthenticated viewer, and a warden-scoped one', async () => {
     // A terminal socket carries keystrokes into an unsupervised shell — strictly more authority than
     // opening one — so the scope answer must match the lifecycle's.
     // Arrange
-    const terminals = new FakeTerminals();
-    const { terminal } = await withTerminal(terminals);
-    const path = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
+    const { half, terminal } = await withTerminal();
+    const path = `${BASE}/${terminal.id}/stream`;
 
     // Act
-    const anonymous = await sockets(terminals).upgrade(request({ path }));
-    const warden = await sockets(terminals).upgrade(
-      request({ path, headers: { authorization: `Bearer ${CREDENTIALS.warden}` } }),
-    );
+    const anonymous = await half.stream(path, 'anonymous');
+    const warden = await half.stream(path, 'warden');
 
     // Assert
-    should(anonymous.outcome === 'refused' ? anonymous.response.status : 0).equal(401);
-    should(warden.outcome === 'refused' ? warden.response.status : 0).equal(403);
+    should(anonymous.status).equal(401);
+    should(warden.status).equal(403);
     // Nothing was attached: an unauthorized peer never reaches a terminal.
-    should(terminals.streamed).be.empty();
-  });
-});
-
-describe('the mounted terminal stream: "show anyway" for a quarantined terminal', () => {
-  const asked: string[] = [];
-  const recorder = {
-    revealed: async (_caller: unknown, sessionId: string, key: string) => void asked.push(`${sessionId}/${key}`),
-  };
-  const sockets = (terminals: FakeTerminals) =>
-    new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals, recorder)), CREDENTIALS, GRANTED);
-
-  it('should reveal only when the viewer asks, and record that one viewer’s choice', async () => {
-    const terminals = new FakeTerminals();
-    const { terminal } = await withTerminal(terminals);
-    const base = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
-    asked.length = 0;
-
-    const plain = await sockets(terminals).upgrade(request({ path: base, headers: human }));
-    const shown = await sockets(terminals).upgrade(request({ path: base, query: [['reveal', '1']], headers: human }));
-    if (plain.outcome === 'accepted')
-      await plain.attach({ send: () => undefined, close: () => undefined, bufferedBytes: () => 0 });
-    if (shown.outcome === 'accepted')
-      await shown.attach({ send: () => undefined, close: () => undefined, bufferedBytes: () => 0 });
-
-    should(terminals.reveals).eql([false, true]);
-    should(asked).eql([`s1/${terminal.id}`]);
-  });
-
-  it('should ignore a reveal request where nothing can record it', async () => {
-    const terminals = new FakeTerminals();
-    const { terminal } = await withTerminal(terminals);
-    const decision = await new ApiSocketDispatcher(
-      new ApiRouter(terminalSocketRoutes(terminals)),
-      CREDENTIALS,
-      GRANTED,
-    ).upgrade(
-      request({
-        path: `/v1/sessions/s1/terminals/${terminal.id}/stream`,
-        query: [['reveal', '1']],
-        headers: human,
-      }),
-    );
-    if (decision.outcome === 'accepted')
-      await decision.attach({ send: () => undefined, close: () => undefined, bufferedBytes: () => 0 });
-
-    should(terminals.reveals).eql([false]);
+    should(anonymous.socket).be.undefined();
+    should(warden.socket).be.undefined();
   });
 });

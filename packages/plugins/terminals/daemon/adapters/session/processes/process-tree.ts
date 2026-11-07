@@ -2,7 +2,11 @@ import { hostPlatform } from '../../host/fs.ts';
 import { lstat, readdir, readFile, readlink } from '../../host/fs.ts';
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import { isAbsolute, join } from 'node:path';
-import { type ProcessIncarnation, procStatStartTicks, psStartSeconds } from '../../../lib/protocol/process-incarnation.ts';
+import {
+  type ProcessIncarnation,
+  procStatStartTicks,
+  psStartSeconds,
+} from '../../../lib/protocol/process-incarnation.ts';
 import { processIncarnationFor } from './process-incarnation.ts';
 import { ProcfsListeningProbe, parseElapsed } from './listening.ts';
 import type {

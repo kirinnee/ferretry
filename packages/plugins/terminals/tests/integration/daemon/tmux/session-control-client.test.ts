@@ -9,12 +9,13 @@
  * to a spawned tmux either — while staying a client tmux lets the daemon type past. This holds it to both.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { BunTmuxProcess, controlOptions } from '../support/host-spawn.ts';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess, ControlModeTmuxProcess } from '../../../src/adapters/index.ts';
+import { ControlModeTmuxProcess } from '../../../../daemon/adapters/tmux/control-tmux-process.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 import {
   PANE_WATCH_FORMAT,
@@ -49,10 +50,12 @@ async function attached(target = 'agent') {
   await direct.execute(['new-session', '-d', '-s', 'agent', '-x', '80', '-y', '8', 'cat']);
   await direct.execute(['new-session', '-d', '-s', 'neighbour', '-x', '80', '-y', '8', 'cat']);
   const spawned = new CountingSpawn(direct);
-  const subject = new ControlModeTmuxProcess(TMUX, socket, spawned, {
-    attach: { target, flags: SESSION_WORKER_ATTACH_FLAGS },
-    mutations: 'refuse',
-  });
+  const subject = new ControlModeTmuxProcess(
+    TMUX,
+    socket,
+    spawned,
+    controlOptions({ attach: { target, flags: SESSION_WORKER_ATTACH_FLAGS }, mutations: 'refuse' }),
+  );
   cleanups.push(async () => {
     subject.close();
     await direct.execute(['kill-server']);
@@ -149,7 +152,12 @@ describe('a session worker’s attached control client', () => {
     should(loaded.code).equal(1);
     should(
       () =>
-        new ControlModeTmuxProcess('/usr/bin/tmux', '/tmp/s', undefined, { attach: { target: '=evil', flags: '' } }),
+        new ControlModeTmuxProcess(
+          '/usr/bin/tmux',
+          '/tmp/s',
+          new BunTmuxProcess('/usr/bin/tmux', '/tmp/s'),
+          controlOptions({ attach: { target: '=evil', flags: '' } }),
+        ),
     ).throw(/is not a session a control client may attach to/);
   });
 });
@@ -205,10 +213,12 @@ describe('a session worker’s pane subscription', () => {
     const root = await mkdtemp(join(tmpdir(), 'fy-worker-ctl-'));
     const socket = join(root, 's');
     const direct = new BunTmuxProcess(TMUX, socket);
-    const subject = new ControlModeTmuxProcess(TMUX, socket, direct, {
-      attach: { target: 'agent', flags: SESSION_WORKER_ATTACH_FLAGS },
-      mutations: 'refuse',
-    });
+    const subject = new ControlModeTmuxProcess(
+      TMUX,
+      socket,
+      direct,
+      controlOptions({ attach: { target: 'agent', flags: SESSION_WORKER_ATTACH_FLAGS }, mutations: 'refuse' }),
+    );
     cleanups.push(async () => {
       subject.close();
       await direct.execute(['kill-server']);

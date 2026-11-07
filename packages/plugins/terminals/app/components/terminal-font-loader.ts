@@ -11,8 +11,8 @@
  */
 
 import { TERMINAL_FONT_FACE } from '../lib/terminal-font.ts';
-import regularFace from '../assets/fonts/jetbrains-mono-latin-400-normal.woff2';
-import boldFace from '../assets/fonts/jetbrains-mono-latin-700-normal.woff2';
+import regularFace from '../../../../app/src/assets/fonts/jetbrains-mono-latin-400-normal.woff2';
+import boldFace from '../../../../app/src/assets/fonts/jetbrains-mono-latin-700-normal.woff2';
 
 /** The two browser facilities this needs, injected so a test can stand in for both. */
 export interface TerminalFontEnvironment {

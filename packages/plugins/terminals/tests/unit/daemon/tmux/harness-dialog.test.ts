@@ -1,9 +1,18 @@
 import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type HarnessDialog, type HarnessDialogOption, HarnessDialogSchema } from '../../../../daemon/lib/protocol/harness-dialog.ts';
+import {
+  type HarnessDialog,
+  type HarnessDialogOption,
+  HarnessDialogSchema,
+} from '../../../../daemon/lib/protocol/harness-dialog.ts';
 import should from 'should';
-import { DIALOG_KEYS, dialogCursorMoves, paneBlockingDialog, parseHarnessDialog } from '../../../src/lib/index.ts';
+import {
+  DIALOG_KEYS,
+  dialogCursorMoves,
+  paneBlockingDialog,
+  parseHarnessDialog,
+} from '../../../../daemon/lib/tmux/harness-dialog.ts';
 
 /**
  * The harness's own dialog a pane is parked on, read off real captured frames.
@@ -12,8 +21,8 @@ import { DIALOG_KEYS, dialogCursorMoves, paneBlockingDialog, parseHarnessDialog 
  * drawn; the synthetic frames below reach the branches no fixture happens to take.
  */
 
-const DIALOGS = join(import.meta.dir, '../../fixtures/harness-dialogs');
-const PERMISSIONS = join(import.meta.dir, '../../fixtures/permission-prompts');
+const DIALOGS = join(import.meta.dir, '../../../fixtures/harness-dialogs');
+const PERMISSIONS = join(import.meta.dir, '../../../fixtures/permission-prompts');
 const fixture = (name: string): string => readFileSync(join(DIALOGS, `${name}.txt`), 'utf8');
 
 const RULE = '─'.repeat(40);
@@ -218,7 +227,7 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     selected: 2,
   },
   // 0.164 asks it at startup when the configured model has a successor; Ferretry reads it as a generic dialog.
-  'codex-0.164.0-model-migration': {
+  'codex-0.164.0-model-successor': {
     harness: 'codex',
     kind: 'other',
     title: 'Meet GPT-6 Sol',

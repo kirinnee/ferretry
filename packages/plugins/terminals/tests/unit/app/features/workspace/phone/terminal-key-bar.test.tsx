@@ -4,7 +4,7 @@ import {
   TerminalKeyBar,
   useStickyCtrl,
 } from '../../../../../../app/features/workspace/phone/terminal-key-bar.tsx';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let mounted: Mounted | null = null;
 afterEach(async () => {

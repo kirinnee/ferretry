@@ -3,16 +3,11 @@ import { GIBIBYTE, resolveLimits } from '../../../../daemon/lib/protocol/limits.
 import should from 'should';
 import {
   describeProcess,
-  exitedByKillSignal,
   FleetMemoryWatcher,
   type FleetSighting,
-  killedForMemoryReason,
-  MemoryKillExitPort,
   THROTTLE_MEMORY_MS,
   type TreeProcess,
 } from '../../../../daemon/lib/cgroups/index.ts';
-import type { ExitedSessionTransition, SessionExitObservation } from '../../../src/lib/session/health/exit.ts';
-import type { SessionExitPort } from '../../../src/lib/session/health/service.ts';
 
 const SESSION = 'aaaaaaaa-1111-2222-3333-444444444444';
 const SCOPE = `ferretry-agent-${SESSION}-a1b2c3d4.scope`;
@@ -226,74 +221,6 @@ describe('watching memory where the kernel keeps no counters (macOS)', () => {
       { sessionId: SESSION, bytes: 13 * GIBIBYTE, callsign: 'gertrude' },
     ]);
     should(notes).have.length(1);
-  });
-});
-
-describe('the end reason of a ferret the kernel killed', () => {
-  const observation = (exit: SessionExitObservation['exit']): SessionExitObservation => ({
-    id: SESSION,
-    status: 'running',
-    registration: {} as never,
-    exit,
-  });
-  const transition: ExitedSessionTransition = {
-    status: 'failed',
-    health: 'crashed',
-    reason: 'the agent was ended by signal 9',
-  };
-
-  function subject(kill: { what?: string; bytes?: number } | undefined) {
-    const settled: ExitedSessionTransition[] = [];
-    const inner: SessionExitPort = {
-      observe: async () => [],
-      settle: async (_observation, next) => (settled.push(next), true),
-    };
-    return { settled, port: new MemoryKillExitPort(inner, { killedRecently: () => kill }) };
-  }
-
-  it('should say killed for memory when SIGKILL and the kernel’s counter agree', async () => {
-    // Arrange
-    const { port, settled } = subject({ what: 'bun test' });
-
-    // Act
-    await port.settle(observation({ kind: 'exited', signal: 9 }), transition);
-
-    // Assert
-    should(settled[0]?.reason).equal(killedForMemoryReason({ what: 'bun test' }));
-    should(settled[0]?.reason).match(/killed for memory/u);
-  });
-
-  it('should pass a survey through to the port it wraps', async () => {
-    // Arrange
-    const seen: unknown[] = [];
-    const inner: SessionExitPort = {
-      observe: async survey => (seen.push(survey), []),
-      settle: async () => true,
-    };
-    const port = new MemoryKillExitPort(inner, { killedRecently: () => undefined });
-
-    // Act
-    const actual = await port.observe([]);
-
-    // Assert
-    should(actual).deepEqual([]);
-    should(seen).have.length(1);
-  });
-
-  it('should leave an exit alone that was not a kill, or that the kernel did not count', async () => {
-    // Arrange
-    const noKill = subject(undefined);
-    const clean = subject({ what: 'bun test' });
-
-    // Act
-    await noKill.port.settle(observation({ kind: 'exited', signal: 9 }), transition);
-    await clean.port.settle(observation({ kind: 'exited', exitStatus: 0 }), { ...transition, status: 'completed' });
-
-    // Assert
-    should(noKill.settled[0]).equal(transition);
-    should(clean.settled[0]?.reason).equal(transition.reason);
-    should(exitedByKillSignal(observation({ kind: 'exited', exitStatus: 137 }))).equal(true);
-    should(exitedByKillSignal(observation({ kind: 'gone' }))).equal(false);
   });
 });
 

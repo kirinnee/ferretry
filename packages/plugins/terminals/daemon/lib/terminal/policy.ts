@@ -1,4 +1,11 @@
-import { TERMINAL_MAX_COLUMNS, TERMINAL_MAX_ROWS, TERMINAL_MAX_TITLE_LENGTH, TERMINAL_MIN_COLUMNS, TERMINAL_MIN_ROWS, type TerminalSize } from '../../../contract/index.ts';
+import {
+  TERMINAL_MAX_COLUMNS,
+  TERMINAL_MAX_ROWS,
+  TERMINAL_MAX_TITLE_LENGTH,
+  TERMINAL_MIN_COLUMNS,
+  TERMINAL_MIN_ROWS,
+  type TerminalSize,
+} from '../../../contract/index.ts';
 
 export const DEFAULT_TERMINAL_SIZE: TerminalSize = { cols: 100, rows: 30 };
 

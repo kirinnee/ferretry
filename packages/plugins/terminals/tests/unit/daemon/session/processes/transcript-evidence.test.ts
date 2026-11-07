@@ -6,7 +6,7 @@ import {
   type TranscriptEvidence,
   transcriptEvidence,
 } from '../../../../../daemon/lib/session/processes/transcript-evidence.ts';
-import type { TranscriptEvent, TranscriptJsonValue } from '../../../../src/lib/transcript/types.ts';
+import type { TranscriptEvent, TranscriptJsonValue } from '../../../../../daemon/lib/session/processes/transcript.ts';
 
 /**
  * WHAT THE HARNESS ITSELF RECORDED ABOUT ITS TOOL COMMANDS, read off hand-built conversation events.

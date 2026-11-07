@@ -5,8 +5,8 @@
  * current.
  */
 
+import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
 import {
-  FY_REQUEST_ID_HEADER,
   type SessionProcess,
   SessionProcessIdSchema,
   type SessionProcessList,
@@ -15,12 +15,12 @@ import {
   SessionProcessOutputSchema,
   type SessionProcessStopResult,
   SessionProcessStopResultSchema,
-} from '@ferretry/protocol';
-import type { DaemonConnection } from './daemon-connection.ts';
-import type { DaemonSessionScope } from './daemon-scope.ts';
-import { daemonRequest } from './daemon-transport.ts';
-import { grantRefusalNotice } from './grants.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+} from './protocol/session-processes.ts';
+import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
+import { grantRefusalNotice } from '../../../access/app/lib/grants.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
 
 /** What a 403 means to the reader: the grant is the answer, in the words the brief fixes. */
 export const PROCESSES_FORBIDDEN_TEXT =
@@ -30,7 +30,7 @@ export const PROCESSES_FORBIDDEN_TEXT =
 export const PROCESS_CHANGED_TEXT = 'That process already ended or was replaced — nothing was stopped.';
 
 const processesPath = (scope: DaemonSessionScope): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/processes`;
+  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/processes`;
 
 const processPath = (scope: DaemonSessionScope, processId: string): string =>
   `${processesPath(scope)}/${encodeURIComponent(SessionProcessIdSchema.parse(processId))}`;

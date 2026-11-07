@@ -8,12 +8,12 @@
  * completed, stopped or been removed are ever closed — a running ferret's are never touched.
  */
 
-import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '@ferretry/protocol';
+import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '../../../contract/index.ts';
 import { CircleAlert, SquareTerminal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { Badge, Button } from '../../shell/primitives.tsx';
+import type { DaemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { Badge, Button } from '@ferretry/app';
 import { closeFinishedTerminals, readTerminalHolders, type TerminalSlotsClient } from './terminal-slots-api.ts';
 
 export type TerminalSlotsClientFactory = (connection: DaemonConnection) => Promise<TerminalSlotsClient>;

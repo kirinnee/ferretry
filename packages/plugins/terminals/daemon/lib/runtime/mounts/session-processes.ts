@@ -1,12 +1,21 @@
-import { SessionProcessIdSchema, type SessionProcessList, type SessionProcessOutput, type SessionProcessStopResult } from '../../protocol/session-processes.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import {
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  jsonResponse,
+  queryValue,
+} from '@ferretry/kernel/contract';
+import {
+  SessionProcessIdSchema,
+  type SessionProcessList,
+  type SessionProcessOutput,
+  type SessionProcessStopResult,
+} from '../../protocol/session-processes.ts';
 import { SessionAttachError } from '../../session/attach/index.ts';
 import { SessionProcessError, type SessionProcessFailure } from '../../session/processes/service.ts';
+import { type FerretDirectory, knownFerret, pathFerret } from './ferret-path.ts';
 import { ATTACH_REFUSALS } from './session-attach.ts';
-import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /** A ferret's processes: list, follow one's output, stop one. See `SessionProcessService`. */
 export interface SessionProcessSubsystem {
@@ -21,22 +30,15 @@ const PROCESS_REFUSALS: Readonly<Record<SessionProcessFailure, { readonly status
   not_stoppable: { status: 409, code: 'process_not_stoppable' },
 };
 
-function sessionId(context: RouteContext): string {
-  const decoded = decodeParameter(context.params.get('sessionId') ?? '');
-  if (decoded === undefined || decoded === '')
-    throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
-  return decoded;
-}
-
-function processId(context: RouteContext): string {
-  const decoded = decodeParameter(context.params.get('processId') ?? '');
+function processId(call: CallContext): string {
+  const decoded = decodeParameter(call.params.get('processId') ?? '');
   const parsed = SessionProcessIdSchema.safeParse(decoded);
   if (!parsed.success) throw new ApiError(400, 'the process id in the path is not usable', 'invalid_process_id');
   return parsed.data;
 }
 
-function after(context: RouteContext): number | undefined {
-  const raw = queryValue(context.request, 'after');
+function after(call: CallContext): number | undefined {
+  const raw = queryValue(call.request, 'after');
   if (raw === undefined || raw === '') return undefined;
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 0)
@@ -56,74 +58,39 @@ function refuse(error: unknown): never {
   throw error;
 }
 
-async function known(sessions: SessionDirectorySubsystem, id: string): Promise<void> {
-  if ((await sessions.get(id)) === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
-}
-
 /**
- * The Processes tab's three routes.
- *
- * `terminal` / `use` ON ALL THREE, because each is something a session terminal already lets its holder
- * do, and nothing a session terminal does not:
- *
- * - the LIST is every command line under the pane — what `ps` shows somebody with a shell there;
- * - an OUTPUT read is what those commands print, exactly what a terminal would show;
- * - STOP is SIGTERM to a command the agent started, which is less than typing Ctrl-C into the Console.
- *
- * So a caller at this machine is ungoverned, and a paired device, a browser across the network or a
- * relayed session needs the `terminal` grant and a current step-up — which the unlock holds by default —
- * exactly as the Console does (docs/grants.md). The authorization boundary decides that from these
- * declarations before any handler runs.
- *
- * Stop is audited as `terminal.input` (`detail.mode: 'process-stop'`): a person acting on the ferret's
- * pane, folded per window like a keystroke.
+ * The Processes tab's three routes (G34): `terminal` / `use` on all three, because each is something a ferret's
+ * terminal already lets its holder do — the LIST is every command line under the pane, an OUTPUT read is what those
+ * commands print, STOP is SIGTERM to a command the agent started (less than typing Ctrl-C into the Console). The
+ * manifest's descriptors carry that, and Stop is audited as `terminal.input`. Every string they answer is scrubbed
+ * by the service (S17); the route guard is `secrets`.
  */
-export function sessionProcessRoutes(
+export function processHandlers(
   processes: SessionProcessSubsystem,
-  sessions: SessionDirectorySubsystem,
-): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/processes',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const id = sessionId(context);
-        await known(sessions, id);
-        return jsonResponse(await processes.list(id).catch(refuse));
-      },
+  ferrets: FerretDirectory,
+): {
+  readonly list: (call: CallContext) => Promise<ApiResponse>;
+  readonly output: (call: CallContext) => Promise<ApiResponse>;
+  readonly stop: (call: CallContext) => Promise<ApiResponse>;
+} {
+  return {
+    list: async call => {
+      const id = pathFerret(call);
+      await knownFerret(ferrets, id);
+      return jsonResponse(await processes.list(id).catch(refuse));
     },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/processes/:processId/output',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async (context): Promise<ApiResponse> => {
-        const id = sessionId(context);
-        const process = processId(context);
-        const offset = after(context);
-        await known(sessions, id);
-        return jsonResponse(await processes.output(id, process, offset).catch(refuse));
-      },
+    output: async call => {
+      const id = pathFerret(call);
+      const process = processId(call);
+      const offset = after(call);
+      await knownFerret(ferrets, id);
+      return jsonResponse(await processes.output(id, process, offset).catch(refuse));
     },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/processes/:processId/stop',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const id = sessionId(context);
-        const process = processId(context);
-        await known(sessions, id);
-        return jsonResponse(await processes.stop(id, process).catch(refuse));
-      },
+    stop: async call => {
+      const id = pathFerret(call);
+      const process = processId(call);
+      await knownFerret(ferrets, id);
+      return jsonResponse(await processes.stop(id, process).catch(refuse));
     },
-  ];
+  };
 }

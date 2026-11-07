@@ -1,4 +1,4 @@
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /**
  * A tmux server the tests own.

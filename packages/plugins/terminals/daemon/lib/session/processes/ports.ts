@@ -1,5 +1,5 @@
-import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
-import type { TranscriptTailResult } from '../reads/service.ts';
+import type { SessionAttachTarget } from '../../protocol/session-processes.ts';
+import type { TranscriptTailResult } from './transcript.ts';
 
 /**
  * Where one of a process's standard streams points, as the kernel reports it.

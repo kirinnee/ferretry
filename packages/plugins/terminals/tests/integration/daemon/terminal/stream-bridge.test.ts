@@ -5,17 +5,17 @@ import {
   type TerminalStreamScheduler,
   type TerminalStreamService,
   type TerminalStreamTimer,
-} from '../../../src/adapters/index.ts';
+} from '../../../../daemon/adapters/terminal/stream-bridge.ts';
 import {
   TERMINAL_INPUT_REDRAW_LADDER_MS,
   TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
   TERMINAL_MAX_INPUT_FRAME_BYTES,
   TERMINAL_MAX_QUEUED_INPUT_BYTES,
   TERMINAL_POLL_HISTORY_LINES,
-  TERMINAL_REATTACH_LINES,
   TERMINAL_REDRAW_POLL_MS,
-  type TerminalCapture,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/terminal/stream-policy.ts';
+import { TERMINAL_REATTACH_LINES } from '../../../../daemon/lib/terminal/runtime-policy.ts';
+import type { TerminalCapture } from '../../../../daemon/lib/terminal/redraw.ts';
 
 /**
  * Let everything already queued run. The service and scheduler here are fakes that settle in microtasks,
@@ -254,7 +254,7 @@ describe('TerminalStreamBridge', () => {
     should(service.calls).deepEqual(['capture']);
   });
 
-  it('should not resend an unchanged pane, but resend one the transport dropped or a resize reflowed', async () => {
+  it('R552 should not resend an unchanged pane, but resend one the transport dropped or a resize reflowed', async () => {
     // An idle terminal polled ten times a second was ten identical full redraws a second for as long
     // as anyone watched — each a sealed record and a metered frame over a relay. A redraw equal to the
     // one the viewer already holds carries nothing. A redraw the transport answered `0` for never
@@ -302,7 +302,7 @@ describe('TerminalStreamBridge', () => {
     should(service.calls.filter(call => call === 'capture')).have.length(5);
   });
 
-  it('should capture the echo of a keystroke soon after it reaches the pane, not on the next ordinary tick', async () => {
+  it('R560 should capture the echo of a keystroke soon after it reaches the pane, not on the next ordinary tick', async () => {
     // Arrange
     const service = new FakeService();
     const scheduler = new FakeScheduler();
@@ -338,7 +338,7 @@ describe('TerminalStreamBridge', () => {
     should(Math.max(...TERMINAL_INPUT_REDRAW_LADDER_MS)).be.below(TERMINAL_REDRAW_POLL_MS);
   });
 
-  it("should send a viewer of the pane's own size only the row a keystroke changed", async () => {
+  it("R547 should send a viewer of the pane's own size only the row a keystroke changed", async () => {
     // A keystroke used to cost a complete redraw — the whole history and screen, for one character.
     // Arrange
     const service = new FakeService();
@@ -370,7 +370,7 @@ describe('TerminalStreamBridge', () => {
     should(service.depths).deepEqual([TERMINAL_REATTACH_LINES, TERMINAL_REATTACH_LINES, TERMINAL_POLL_HISTORY_LINES]);
   });
 
-  it('should keep sending deltas when a viewer repeats the size it already has, and redraw only when it changes', async () => {
+  it('R561 should keep sending deltas when a viewer repeats the size it already has, and redraw only when it changes', async () => {
     // A resize control used to forget the picture the viewer holds even when it named the size the
     // viewer already was, so a client re-sending its size turned every following poll into a complete
     // redraw of up to the byte budget. Only a size that CHANGED reflows the emulator.

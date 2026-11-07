@@ -1,0 +1,24 @@
+  - bullet two
+
+  Second paragraph: ```
+  code line
+  End.
+
+❯ [message from ferret geraldine (session mvsrxp4z-35ae1b1b) — not from the
+  owner]
+  No reply needed. To reply: fy send geraldine "<reply>"
+
+  short second queued message
+  ctrl+x ctrl+s to send now
+
+✢ Waddling… (1m 16s · ↓ 443 tokens)
+  ⎿  Tip: Use /permissions to pre-approve and pre-deny bash, edit, and MCP tools
+
+────────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 claude-haiku-5-5 │ 📂 send-probe
+  📊 26% (51k/200k) │ 💰 $0.01
+  ⏳ 5h 0% │ 📅 wk 16%
+  ⏵⏵ bypass permissions on · 1 shell · ← for agents
+

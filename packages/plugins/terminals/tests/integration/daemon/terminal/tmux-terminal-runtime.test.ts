@@ -1,10 +1,12 @@
 import { describe, it } from 'bun:test';
+import { BunTmuxProcess } from '../support/host-spawn.ts';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BunTmuxProcess, TmuxTerminalRuntime } from '../../../src/adapters/index.ts';
-import type { LoginShellPort, TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+import { TmuxTerminalRuntime } from '../../../../daemon/adapters/terminal/tmux-terminal-runtime.ts';
+import type { LoginShellPort } from '../../../../daemon/lib/terminal/login-shell.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 import { waitForValue } from '../support/wait-for.ts';
 
 /** A fixed shell: these cases are about tmux commands, not about which shell is chosen. */

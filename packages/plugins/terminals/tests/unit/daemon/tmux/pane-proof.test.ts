@@ -8,10 +8,9 @@ import {
   parsePaneSighting,
   provePane,
   stampToRecord,
-  type TmuxCommandPort,
-  type TmuxCommandResult,
-  TmuxController,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/tmux/pane-proof.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
+import { TmuxController } from '../../../../daemon/lib/tmux/controller.ts';
 
 const CREATED = 1_792_626_406;
 
@@ -66,7 +65,7 @@ describe('parsePaneSighting', () => {
 
 describe('provePane and stampToRecord', () => {
   const stamp: PaneStamp = { paneId: '%12', pid: 4821, sessionCreated: CREATED };
-  const legacy: PaneStamp = { paneId: '%12', pid: 4821 };
+  const unstamped: PaneStamp = { paneId: '%12', pid: 4821 };
   const sighting = (fields: Partial<PaneSighting>): PaneSighting => ({
     paneId: '%12',
     pid: 4821,
@@ -88,21 +87,21 @@ describe('provePane and stampToRecord', () => {
     ['a session created in another second', sighting({ sessionCreated: CREATED + 1 }), stamp, 'refuted'],
     ['a dead pane on tmux 3.8 in another session', deadOn38({ sessionCreated: CREATED + 1 }), stamp, 'refuted'],
     ['a live pane with no pid', { paneId: '%12', dead: false, sessionCreated: CREATED }, stamp, 'refuted'],
-    ['a registration with no creation second, by its pid', sighting({ dead: true }), legacy, 'proven'],
-    ['a registration with no creation second, dead on tmux 3.8', deadOn38(), legacy, 'pane-id-only'],
-    ['another pane, dead on tmux 3.8, against that registration', deadOn38({ paneId: '%13' }), legacy, 'refuted'],
+    ['a registration with no creation second, by its pid', sighting({ dead: true }), unstamped, 'proven'],
+    ['a registration with no creation second, dead on tmux 3.8', deadOn38(), unstamped, 'pane-id-only'],
+    ['another pane, dead on tmux 3.8, against that registration', deadOn38({ paneId: '%13' }), unstamped, 'refuted'],
   ])('should say how %s is proven the registered pane', (_name, seen, registered, expected) => {
     // Act + Assert
     should(provePane(seen as PaneSighting, registered as PaneStamp)).equal(expected);
   });
 
   it.each([
-    ['a live pane proven by pid, for a registration with no creation second', sighting({}), legacy, CREATED],
+    ['a live pane proven by pid, for a registration with no creation second', sighting({}), unstamped, CREATED],
     ['a registration that already has one', sighting({}), stamp, undefined],
-    ['a dead pane, which can no longer be proven by pid', sighting({ dead: true }), legacy, undefined],
-    ['another pid', sighting({ pid: 4822 }), legacy, undefined],
-    ['another pane id', sighting({ paneId: '%13' }), legacy, undefined],
-    ['a pane whose session time tmux did not print', { paneId: '%12', pid: 4821, dead: false }, legacy, undefined],
+    ['a dead pane, which can no longer be proven by pid', sighting({ dead: true }), unstamped, undefined],
+    ['another pid', sighting({ pid: 4822 }), unstamped, undefined],
+    ['another pane id', sighting({ paneId: '%13' }), unstamped, undefined],
+    ['a pane whose session time tmux did not print', { paneId: '%12', pid: 4821, dead: false }, unstamped, undefined],
   ])('should give the creation second to record for %s', (_name, seen, registered, expected) => {
     // Act + Assert
     should(stampToRecord(seen as PaneSighting, registered as PaneStamp)).equal(expected);

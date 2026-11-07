@@ -1,4 +1,4 @@
-import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '@ferretry/protocol';
+import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '../../../contract/index.ts';
 
 const terminals = (count: number): string => `${count} terminal${count === 1 ? '' : 's'}`;
 const holder = (entry: TerminalHolder): string => `  ${entry.label} (${entry.status}): ${terminals(entry.count)}`;

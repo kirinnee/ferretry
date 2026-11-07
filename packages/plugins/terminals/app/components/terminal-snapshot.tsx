@@ -25,14 +25,14 @@
 
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLinkBehaviour } from '../features/browser/external-link.tsx';
-import { useLayoutMode } from '../hooks/use-layout-mode.ts';
-import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
+import { useLinkBehaviour } from '../../../browsers/app/features/browser/external-link.tsx';
+import { useLayoutMode } from '../../../layouts/app/hooks/use-layout-mode.ts';
+import { useStickToBottom } from '../../../conversation/app/hooks/use-stick-to-bottom.ts';
+import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { useDaemonFetch } from '@ferretry/app';
 import { splitLinkedRuns } from '../lib/terminal-links.ts';
-import { JumpToLatest } from './jump-to-latest.tsx';
+import { JumpToLatest } from '../../../conversation/app/components/jump-to-latest.tsx';
 import {
   describeSnapshotError,
   fitFontPx,

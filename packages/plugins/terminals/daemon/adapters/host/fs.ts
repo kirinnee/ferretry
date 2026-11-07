@@ -21,3 +21,14 @@ export const hostEnvironment: Readonly<Record<string, string | undefined>> = pro
 export async function readText(path: string): Promise<string> {
   return await Bun.file(path).text();
 }
+
+/** This daemon's own pid and uid (`process.pid`, `process.getuid()`): the limits view proves the daemon is outside the slice it caps. */
+export const hostPid: number = process.pid;
+export const hostUid: number = process.getuid?.() ?? 0;
+/** This account's uid, or nothing where the platform has none (the login shell looks it up only when known). */
+export const hostUserId: number | undefined = process.getuid?.();
+
+/** Sends one signal to one pid (`process.kill`). The caller has already re-proved which process that pid is. */
+export function signalProcess(pid: number, signal: 'SIGTERM'): void {
+  process.kill(pid, signal);
+}

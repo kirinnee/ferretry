@@ -100,17 +100,24 @@ function cellsOf(line: string): Row {
   return { cells, tail: prefix, stripped };
 }
 
-function redactRows(capture: TerminalCapture, mask: (grid: CellGrid) => CellGrid): TerminalCapture {
+function redactRows(capture: TerminalCapture, scope: RedactionScope): TerminalCapture {
   const rows = capture.lines.map(line => ({ line, row: cellsOf(line) }));
   // The cells' characters, row by row, matched as one run by the read's scope (§7.3): a value wrapped across rows
   // is masked in each row. A cell the scope changed is a cell a known value covers (the scope answers WHICH cells,
   // never the value).
   const grid: CellGrid = { columns: capture.cols, rows: rows.map(({ row }) => row.cells.map(cell => cell.char)) };
-  const masked = mask(grid);
+  const masked = scope.cells(grid);
+  // A value that wrapped is split over two rows, so the rows are also matched as ONE run of cells (today's joined
+  // text): a cell is covered if either look covers it. Cell for cell, so a match can never shift a neighbour.
+  const run = scope.cells({ columns: capture.cols, rows: [grid.rows.flat()] }).rows[0] ?? [];
+  const starts = grid.rows.map((_, at) => grid.rows.slice(0, at).reduce((sum, row) => sum + row.length, 0));
+  const covered = (rowIndex: number, cellIndex: number, char: string): boolean =>
+    (masked.rows[rowIndex]?.[cellIndex] ?? char) !== char ||
+    (run[(starts[rowIndex] ?? 0) + cellIndex] ?? char) !== char;
   const lines = rows.map(({ line, row }, rowIndex) => {
     let touched = row.stripped;
     const cells = row.cells.map((cell, cellIndex) => {
-      if ((masked.rows[rowIndex]?.[cellIndex] ?? cell.char) === cell.char)
+      if (!covered(rowIndex, cellIndex, cell.char))
         return { text: cell.prefix + cell.char, blank: cell.char === ' ' && !cell.painted };
       touched = true;
       return { text: cell.prefix + FILL.repeat(cell.width), blank: false };
@@ -138,5 +145,5 @@ function redactRows(capture: TerminalCapture, mask: (grid: CellGrid) => CellGrid
  * does not need them. A redactor that fails fails the capture: nothing unmasked is returned.
  */
 export function redactCapture(capture: TerminalCapture, scope: RedactionScope): TerminalCapture {
-  return redactRows(capture, grid => scope.cells(grid));
+  return redactRows(capture, scope);
 }

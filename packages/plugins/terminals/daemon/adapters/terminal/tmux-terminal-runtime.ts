@@ -1,4 +1,4 @@
-import { type TerminalSize } from '../../../contract/index.ts';
+import type { TerminalSize } from '../../../contract/index.ts';
 import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
 import type { LoginShellPort } from '../../lib/terminal/login-shell.ts';
 import { decodeTerminalOpener, encodeTerminalOpener } from '../../lib/terminal/ownership.ts';
@@ -88,6 +88,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       '#{session_activity}',
       '#{window_width}',
       '#{window_height}',
+      '#{pane_id}',
     ].join(SEPARATOR);
     const result = await this.tmux.execute(['list-sessions', '-F', format]);
     if (result.code !== 0) {
@@ -110,6 +111,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         activity = '',
         cols = '',
         rows = '',
+        paneId = '',
       ] = line.split(SEPARATOR);
       const parsedCreatedAtMs = Date.parse(created);
       // An unreadable or unwritten opener contributes no key at all, so the view
@@ -141,6 +143,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         rows: Math.max(1, Math.trunc(number(rows, 30))),
         ...(opener === undefined ? {} : { openedBy: opener }),
         ...(name === '' ? {} : { name }),
+        ...(/^%(?:0|[1-9][0-9]*)$/u.test(paneId) ? { paneId } : {}),
       };
       if (!tmuxSession.startsWith('fy-webterm-') || !isRecordId(id) || !ownerId || !root.startsWith('/')) continue;
       records.push(record);

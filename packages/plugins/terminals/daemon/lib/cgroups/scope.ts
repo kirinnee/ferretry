@@ -36,7 +36,7 @@
  * Pure: no IO, no clock, no globals.
  */
 
-import { productName } from '../version.ts';
+import { productName } from './product.ts';
 
 /** The aggregate every managed agent shares. */
 export const FLEET_SLICE = `${productName.replaceAll('-', '_')}_fleet.slice`;
