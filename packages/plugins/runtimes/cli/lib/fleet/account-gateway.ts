@@ -13,10 +13,6 @@ import {
   type MachineView,
   MachineViewSchema,
   ProposalApplyRequestSchema,
-  type Recommendation,
-  type RecommendationRequest,
-  RecommendationRequestSchema,
-  RecommendationSchema,
   type RuntimeCatalog,
   RuntimeCatalogSchema,
   type SetupScan,
@@ -33,7 +29,6 @@ export const ROUTES = {
   propose: 'POST /v1/runtimes/proposals',
   apply: 'POST /v1/runtimes/proposals/:proposalId/apply',
   scan: 'GET /v1/runtimes/setup/scan',
-  recommend: 'POST /v1/recommend',
 } as const;
 
 /**
@@ -43,8 +38,7 @@ export const ROUTES = {
  * THIS CLASS HOLDS NO AUTHORITY. A write is not confirmed by anything the command line carries: the
  * daemon governs a caller by how it arrived, and a caller on this machine is ungoverned.
  *
- * GAP(kernel): `PluginClient.call` takes no timeout. Probing every login's quota for a recommendation is
- * slow (several provider round trips) and was given 60 seconds; the client's own patience applies now.
+ * GAP(kernel): `PluginClient.call` takes no timeout; the client's own patience applies.
  */
 export class ClientRuntimesGateway implements IRuntimesGateway {
   constructor(private readonly client: PluginClient) {}
@@ -79,10 +73,5 @@ export class ClientRuntimesGateway implements IRuntimesGateway {
 
   async scan(): Promise<SetupScan> {
     return SetupScanSchema.parse(await this.client.call(ROUTES.scan));
-  }
-
-  async recommend(request: RecommendationRequest): Promise<Recommendation> {
-    const body = RecommendationRequestSchema.parse(request);
-    return RecommendationSchema.parse(await this.client.call(ROUTES.recommend, { body }));
   }
 }
