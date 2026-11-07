@@ -23,7 +23,7 @@ import {
   catalogCanonicalText,
   type SharedCatalogLinkBundle,
   SharedCatalogLinkBundleSchema,
-} from '../../../contract/wire/index.ts';
+} from '../../../../contract/wire/index.ts';
 import {
   bytesEqual,
   concatBytes,
