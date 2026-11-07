@@ -119,9 +119,9 @@ describe('the Vault resolves a secret NAME for the kernel alone', () => {
         }),
         { build: () => ({}) },
       );
-      await expect(
-        testHost({ plugins: [vault, asker], fakes: { asks: new FakeAsks(), gate: new FakeGate() } }),
-      ).rejects.toThrow(/only the kernel may hold/u);
+      await expect(testHost({ plugins: [vault, asker], fakes: { asks: new FakeAsks(), gate: new FakeGate() } })).rejects.toThrow(
+        /only the kernel may hold/u,
+      );
     }
   });
 });
