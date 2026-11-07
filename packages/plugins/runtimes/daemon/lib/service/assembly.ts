@@ -22,7 +22,8 @@ const unavailable = async (): Promise<never> => await Promise.reject(new Error(U
 /** The catalogue's collaborators when no host seam is wired: reading refuses, so every read and change answers `UNAVAILABLE`. */
 export function unavailableCatalogDeps(
   now: () => number,
-  logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list' | 'changes'>,
+  logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>,
+  loginChanges: import('@ferretry/plugin-logins/contract').LoginChangesApi,
 ): FleetCatalogServiceDeps {
   const nowhere = '';
   return {
@@ -35,6 +36,7 @@ export function unavailableCatalogDeps(
     sessionStatuses: async () => [],
     machineName: () => 'this machine',
     credentials: logins,
+    loginChanges,
     configWriter: refusingConfigWriter,
     provisioner: { preview: unavailable, apply: unavailable },
     // Never read: every method reads the configuration first, and that refuses.

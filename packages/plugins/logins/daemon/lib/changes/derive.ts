@@ -56,6 +56,13 @@ export interface LoginChangeFacts {
 const ENVIRONMENT_CONSEQUENCE =
   'Runtimes on it launch with these variables. A secret is put in from the secret store at launch and never written anywhere.';
 
+/** C10: a runtime on a login would have nothing to launch with if it were removed. Today's sentence, word for word. */
+export const inUseSentence = (users: readonly string[]): string =>
+  `${String(users.length)} runtime${users.length === 1 ? '' : 's'} still ${users.length === 1 ? 'uses' : 'use'} this login (${users.join(', ')}). Move ${users.length === 1 ? 'it' : 'them'} to another login first.`;
+
+/** A removal needs to know nothing uses the login; when that cannot be known it does not go ahead. */
+export const USERS_UNKNOWN_SENTENCE = 'Ferretry cannot check what uses this login right now, so it was not removed.';
+
 const listed = (names: readonly string[]): string => names.join(', ');
 const counted = (count: number, noun: string): string => `${String(count)} ${noun}${count === 1 ? '' : 's'}`;
 
@@ -357,11 +364,7 @@ export function deriveLoginChange(
     case 'login.remove': {
       const users = facts.usedBy(change.id);
       // C10: a runtime on it would have nothing to launch with.
-      if (users.length > 0) {
-        refuse(
-          `${counted(users.length, 'runtime')} still ${users.length === 1 ? 'uses' : 'use'} this login (${listed(users)}). Move ${users.length === 1 ? 'it' : 'them'} to another login first.`,
-        );
-      }
+      if (users.length > 0) refuse(inUseSentence(users));
       const consequences: string[] = [];
       const credential = credentialOf(file);
       if (file.store === 'host') {

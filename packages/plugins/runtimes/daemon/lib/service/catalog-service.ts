@@ -22,7 +22,7 @@
  *
  * First-run import and clone are not configuration edits: they run their own executors (the setup and clone ports
  * U15 fills), reviewed and confirmed the same way. A change to ONE login (every `credential.*`) is not Runtimes' to
- * stage: it names the intent to Logins (`credentials.changes`), which stages, previews and applies it. What stays here is
+ * stage: it names the intent to Logins (`loginChanges`), which stages, previews and applies it. What stays here is
  * what Logins cannot see — a login a runtime still uses is refused FIRST, and a removal's runtimes move before it.
  *
  * ## Governed like every fleet change
@@ -50,6 +50,7 @@ import type { ProviderPreset } from '../presets/schema.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
 import {
   type AccountChange,
+  type ApplyOutcome,
   type AutoResumeSummary,
   type AccountChangeOutcome,
   type AccountChangePreview,
@@ -83,8 +84,13 @@ import {
 import type { RuntimeRename, SessionStatus } from './foreign.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
 import type { ModelCatalogSources } from '../models/catalog.ts';
-import { LoginChangeError, type LoginChangeView, type LoginsApi } from '@ferretry/plugin-logins/contract';
-import { loginChangeOf, REFUSAL_CODES } from './login-changes.ts';
+import {
+  LoginChangeError,
+  type LoginChangesApi,
+  type LoginChangeView,
+  type LoginsApi,
+} from '@ferretry/plugin-logins/contract';
+import { loginChangeOf, movedSentence, REFUSAL_CODES } from './login-changes.ts';
 import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
@@ -243,7 +249,9 @@ export interface FleetCatalogServiceDeps {
    * The required Logins contract: safe status and email facts, never credential material — and `changes`, through which
    * every `credential.*` change is staged and applied (Logins owns the login files).
    */
-  readonly credentials: Pick<LoginsApi, 'list' | 'changes'>;
+  readonly credentials: Pick<LoginsApi, 'list'>;
+  /** Writing a login: Logins stages and applies it (`LoginChangesPort`). */
+  readonly loginChanges: LoginChangesApi;
   /** Writes the configuration documents of a change. GAP(kernel): no plugin config write port; see `ports.ts`. */
   readonly configWriter: RuntimeConfigWriter;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
@@ -357,6 +365,8 @@ type ChangePayload =
       /** A change to one login, held by Logins under `loginChangeId`; a removal's runtimes move first, as `before`. */
       readonly kind: 'login';
       readonly loginChangeId: string;
+      /** What Logins called the change at staging, said again when it lands. */
+      readonly summary: string;
       readonly before?: Extract<ChangePayload, { kind: 'apply' }>;
       readonly preview: Extract<AccountChangePreview, { kind: 'apply' | 'sign-out' }>;
       readonly consequences: readonly string[];
@@ -956,23 +966,33 @@ export class FleetCatalogService {
 
   /**
    * One login changed: every `credential.*` goes to Logins, which derives the login file, previews it and holds it
-   * (`credentials.changes.stage`); Runtimes stages nothing of its own for it. Two things stay here because Logins cannot
-   * see runtimes: a login a runtime still uses is refused FIRST (C10, today's sentence, no Logins call), and a removal that
-   * moves or removes runtimes carries that move as `before`, applied ahead of the removal. A Logins refusal is surfaced
-   * word for word.
+   * (`loginChanges.stage`); Runtimes stages nothing of its own for it. Two things stay here because the runtimes
+   * are Runtimes': a login a runtime still uses is refused FIRST (C10, today's sentence, no Logins call; Logins asks
+   * Runtimes the same question itself through `logins.used-by`), and a removal that moves or removes runtimes carries
+   * that move as `before`, applied ahead of the removal, naming those runtimes to Logins so it does not count them. A
+   * Logins refusal is surfaced word for word, or, once the move has landed, with what landed said first.
    */
   async #stageLogin(
     reading: AccountDocumentReading,
     change: LoginAccountChange,
   ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
     const before = change.kind === 'credential.remove' ? await this.#stageRemovalRuntimes(reading, change) : undefined;
-    const view = await this.#withLogins(async () => await this.deps.credentials.changes.stage(loginChangeOf(change)));
+    // The runtimes this removal moves or removes come off the login BEFORE Logins removes it, so Logins must not count them.
+    const usersMovedFirst = before === undefined ? undefined : runtimesUsingCredential(reading.model, change.id);
+    const view = await this.#withLogins(
+      async () =>
+        await this.deps.loginChanges.stage(
+          loginChangeOf(change),
+          usersMovedFirst === undefined ? undefined : { usersMovedFirst },
+        ),
+    );
     const preview = await this.#loginPreview(reading, change, view, before);
     return {
       summary: view.summary,
       payload: {
         kind: 'login',
         loginChangeId: view.id,
+        summary: view.summary,
         ...(before === undefined ? {} : { before: before.payload }),
         preview,
         consequences: [...(before?.payload.consequences ?? []), ...view.consequences],
@@ -1051,16 +1071,38 @@ export class FleetCatalogService {
     record: { readonly mutation: AccountChange | CatalogInstallChange },
     payload: Extract<ChangePayload, { kind: 'login' }>,
   ): Promise<AccountChangeOutcome> {
+    let movedApply: ApplyOutcome | undefined;
     if (payload.before !== undefined) {
       const moved = await this.#execute({ payload: payload.before, mutation: record.mutation });
-      if (moved.outcome === 'applied' && !COMMITTED.has(moved.apply.outcome)) return moved;
+      if (moved.outcome === 'applied') {
+        if (!COMMITTED.has(moved.apply.outcome)) return moved;
+        movedApply = moved.apply;
+      }
     }
-    const result = await this.#withLogins(async () => await this.deps.credentials.changes.apply(payload.loginChangeId));
+    let result: Awaited<ReturnType<LoginChangesApi['apply']>>;
+    try {
+      result = await this.#withLogins(async () => await this.deps.loginChanges.apply(payload.loginChangeId));
+    } catch (error) {
+      // The runtimes' move is committed and is not undone (the safe order: no runtime points at a missing login). Say so,
+      // rather than a bare "review it again" that reads as if nothing happened.
+      if (movedApply !== undefined && record.mutation.kind === 'credential.remove') {
+        const reason = error instanceof FleetCatalogRefusal ? error.message : errorMessage(error);
+        throw new FleetCatalogRefusal(
+          'fleet_change_failed',
+          `${movedSentence(record.mutation)}, but login ${record.mutation.id} was not removed: ${reason.replace(/[.\s]+$/u, '')}. Remove it again.`,
+        );
+      }
+      throw error;
+    }
+    const moved = movedApply === undefined ? {} : { moved: movedApply };
+    const summary = { summary: payload.summary };
     if (result.outcome === 'signed-out') return { outcome: 'signed-out', credential: result.login };
     if (result.outcome === 'sign-out-failed') {
       return { outcome: 'sign-out-failed', reason: result.reason, credential: result.login };
     }
-    if (result.outcome === 'held') return { outcome: 'login-changed', result: 'held', sentences: result.sentences };
+    if (result.outcome === 'held') {
+      return { outcome: 'login-changed', result: 'held', sentences: result.sentences, ...summary, ...moved };
+    }
     try {
       await this.republish();
     } catch (error) {
@@ -1069,7 +1111,7 @@ export class FleetCatalogService {
         `the login changed, but the runtimes could not be republished: ${errorMessage(error)}`,
       );
     }
-    return { outcome: 'login-changed', result: 'applied' };
+    return { outcome: 'login-changed', result: 'applied', ...summary, ...moved };
   }
 
   async #stageExecutor<Change extends SetupChange | CloneChange>(

@@ -72,6 +72,9 @@ route	GET /v1/logins	added	moved to the owning plugin's route prefix /v1/<id>/�
 route	POST /v1/logins/:loginId/check	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/logins/:loginId/test	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/logins/presets	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	POST /v1/logins/changes	added	new in 5.0: Logins owns the login changes that Runtimes' fleet routes staged and applied today (credential.* on the fleet proposal routes); the route has no counterpart in the 4.x descriptor table
+route	GET /v1/logins/changes/:changeId	added	new in 5.0: Logins owns the login changes that Runtimes' fleet routes staged and applied today (credential.* on the fleet proposal routes); the route has no counterpart in the 4.x descriptor table
+route	POST /v1/logins/changes/:changeId/apply	added	new in 5.0: Logins owns the login changes that Runtimes' fleet routes staged and applied today (credential.* on the fleet proposal routes); the route has no counterpart in the 4.x descriptor table
 route	GET /v1/ferrets/:ferretId/mcp/servers	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/mcp/auth	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/mcp/auth/:component	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged

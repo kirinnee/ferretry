@@ -7,7 +7,7 @@
  */
 import { LoginChangeError } from '@ferretry/plugin-logins/contract';
 import { instantFromEpochMs } from '@ferretry/std';
-import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
@@ -21,8 +21,9 @@ import {
   type FleetCatalogService,
   type FleetCatalogServiceDeps,
 } from '../../../daemon/lib/service/catalog-service.ts';
-import { loginChangeOf } from '../../../daemon/lib/service/login-changes.ts';
-import type { AccountChange } from '../../../contract/index.ts';
+import { loginUsers } from '../../../daemon/lib/service/login-users.ts';
+import { loginChangeOf, movedSentence } from '../../../daemon/lib/service/login-changes.ts';
+import type { AccountChange, RuntimeFile } from '../../../contract/index.ts';
 
 const MODEL = parseAccountModel({
   version: 1,
@@ -58,7 +59,8 @@ const OWNER = { governed: false, decide: () => ({ allowed: true, refusal: 'grant
 function world(options: { readonly failPlan?: boolean } = {}) {
   const order: string[] = [];
   const logins = fakeLogins([sampleLogin('claude-you')]);
-  const base = unavailableCatalogDeps(() => 1_794_052_800_000, logins);
+  const changes = fakeLoginChanges();
+  const base = unavailableCatalogDeps(() => 1_794_052_800_000, logins, changes);
   const deps: FleetCatalogServiceDeps = {
     ...base,
     document: async () => ({
@@ -73,14 +75,12 @@ function world(options: { readonly failPlan?: boolean } = {}) {
     documentRevision: async () => 'absent',
     ids: async () => undefined,
     locate: () => '/usr/bin/claude',
-    credentials: {
-      list: () => logins.list(),
-      changes: {
-        stage: change => logins.changes.stage(change),
-        apply: async id => {
-          order.push('logins');
-          return await logins.changes.apply(id);
-        },
+    credentials: logins,
+    loginChanges: {
+      stage: (change, options) => changes.stage(change, options),
+      apply: async id => {
+        order.push('logins');
+        return await changes.apply(id);
       },
     },
     configWriter: {
@@ -107,7 +107,7 @@ function world(options: { readonly failPlan?: boolean } = {}) {
     },
   };
   const { catalog } = assembleServices(deps, unavailableSetupDeps);
-  return { catalog: catalog as FleetCatalogService, logins, order };
+  return { catalog: catalog as FleetCatalogService, logins: changes, order };
 }
 
 const rejection = async (work: Promise<unknown>): Promise<unknown> =>
@@ -182,7 +182,7 @@ describe('credential changes go to Logins', () => {
       should(outcome).match(
         change.kind === 'credential.signout'
           ? { outcome: 'signed-out' }
-          : { outcome: 'login-changed', result: 'applied' },
+          : { outcome: 'login-changed', result: 'applied', summary: view.summary },
       );
     });
   }
@@ -240,6 +240,7 @@ describe('credential changes go to Logins', () => {
       outcome: 'login-changed',
       result: 'held',
       sentences: ['login "spare"\'s daily hard limit in dollars is removed (was 5)'],
+      summary: 'fake login.remove spare',
     });
   });
 });
@@ -286,6 +287,84 @@ describe('removing a login', () => {
     should(w.order).deepEqual(['documents', 'plan', 'logins']);
     should(outcome).match({ outcome: 'login-changed', result: 'applied' });
     should(view.consequences.join(' ')).match(/claude-default moves to login second/u);
+  });
+
+  it('should tell Logins which runtimes it moves first, so its own in-use check does not refuse them', async () => {
+    const w = world();
+
+    await w.catalog.propose({
+      kind: 'credential.remove',
+      id: 'claude-you',
+      switchRuntimes: { 'claude-default': 'second' },
+    });
+
+    should(w.logins.movedFirst).deepEqual([['claude-default']]);
+  });
+
+  it('should name no runtimes as moved first for an unused login', async () => {
+    const w = world();
+
+    await w.catalog.propose({ kind: 'credential.remove', id: 'spare' });
+
+    should(w.logins.movedFirst).deepEqual([[]]);
+  });
+
+  it("should say what landed when Logins refuses the removal after the runtimes' move, and not ask to review it again", async () => {
+    // Arrange: the move lands, then Logins finds its logins changed since the review.
+    const w = world();
+    const view = await w.catalog.propose({
+      kind: 'credential.remove',
+      id: 'claude-you',
+      switchRuntimes: { 'claude-default': 'second' },
+    });
+    w.logins.refuseApply(
+      new LoginChangeError(
+        'login_change_stale',
+        'the logins on this machine changed after this change was previewed; review it again',
+      ),
+    );
+
+    // Act
+    const failure = await rejection(w.catalog.apply(view.id, OWNER));
+
+    // Assert: the move is committed (and stays: no runtime points at a missing login), and the sentence says so.
+    should(w.order).deepEqual(['documents', 'plan', 'logins']);
+    should(failure).be.instanceOf(FleetCatalogRefusal);
+    should((failure as FleetCatalogRefusal).code).equal('fleet_change_failed');
+    should((failure as FleetCatalogRefusal).message).equal(
+      'claude-default moved to login second, but login claude-you was not removed: the logins on this machine changed after this change was previewed; review it again. Remove it again.',
+    );
+  });
+
+  it('should report the move in the outcome of a removal that moved runtimes, with what the change was', async () => {
+    const w = world();
+    const view = await w.catalog.propose({
+      kind: 'credential.remove',
+      id: 'claude-you',
+      switchRuntimes: { 'claude-default': 'second' },
+    });
+
+    const outcome = await w.catalog.apply(view.id, OWNER);
+
+    should(outcome).match({
+      outcome: 'login-changed',
+      result: 'applied',
+      summary: 'fake login.remove claude-you',
+      moved: { outcome: 'committed' },
+    });
+  });
+
+  it('should still ask for a fresh review when Logins refuses and no runtime had moved', async () => {
+    const w = world();
+    const view = await w.catalog.propose({ kind: 'credential.remove', id: 'spare' });
+    w.logins.refuseApply(new LoginChangeError('login_change_stale', 'review it again'));
+
+    const failure = await rejection(w.catalog.apply(view.id, OWNER));
+    w.logins.refuseApply(undefined);
+    const again = await w.catalog.apply(view.id, OWNER);
+
+    should((failure as FleetCatalogRefusal).message).equal('review it again');
+    should(again).match({ outcome: 'login-changed', result: 'applied' });
   });
 
   it("should leave the login alone when the runtimes' move did not land", async () => {
@@ -337,5 +416,37 @@ describe('a Logins refusal reaches the caller unchanged', () => {
     should((failure as FleetCatalogRefusal).message).equal(sentence);
     should((failure as FleetCatalogRefusal).code).equal('fleet_change_stale');
     should(again).match({ outcome: 'login-changed', result: 'applied' });
+  });
+});
+
+describe('the runtimes on a login, as Logins asks for them', () => {
+  const runtimes = new Map([
+    ['zeta', { login: 'work' }],
+    ['alpha', { login: 'work' }],
+    ['beta', { login: 'other' }],
+  ] as unknown as [string, RuntimeFile][]);
+
+  it('should name the runtimes that launch on a login, sorted, and none for a login nothing uses', async () => {
+    const users = loginUsers(() => new Map(runtimes));
+
+    should(await users.of('work')).deepEqual(['alpha', 'zeta']);
+    should(await users.of('unused')).deepEqual([]);
+  });
+
+  it('should read the runtimes as they are when asked, not as they were', async () => {
+    let current = new Map(runtimes);
+    const users = loginUsers(() => current);
+    current = new Map([...current].filter(([name]) => name !== 'alpha'));
+
+    should(await users.of('work')).deepEqual(['zeta']);
+  });
+
+  it('should say what a removal did to the runtimes in one sentence', () => {
+    should(movedSentence({ kind: 'credential.remove', id: 'a', switchRuntimes: { x: 'b', y: 'b', z: 'c' } })).equal(
+      'x and y moved to login b; z moved to login c',
+    );
+    should(
+      movedSentence({ kind: 'credential.remove', id: 'a', removeRuntimes: ['x', 'y'], defaultRuntime: 'k' }),
+    ).equal('x and y were removed; the default runtime is now k');
   });
 });

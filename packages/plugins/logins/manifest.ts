@@ -14,7 +14,9 @@ import {
   LOGINS_WORDS,
   LoginChanged,
   LoginSignedIn,
+  LoginChangesPort,
   LoginsPort,
+  LoginsUsedBy,
   MODELS_CONFIG,
   ModelsChanged,
 } from './contract/index.ts';
@@ -40,7 +42,7 @@ export default definePlugin({
 
   needs: { vault: VaultPort },
   uses: { browsers: BrowsersPort },
-  provides: { logins: LoginsPort },
+  provides: { logins: LoginsPort, loginChanges: LoginChangesPort },
 
   actions: {
     routes: [
@@ -213,6 +215,8 @@ export default definePlugin({
 
   hooks: {
     takes: LOGIN_KINDS.map(kind => ({ hook: Logins, key: kind })),
+    // Which runtimes use a login: Runtimes answers, so a removal can be refused while one still does (`LoginsUsedBy`).
+    offers: [{ hook: LoginsUsedBy }],
   },
 
   onboarding: [{ id: 'login', title: 'Sign in', order: 30 }],

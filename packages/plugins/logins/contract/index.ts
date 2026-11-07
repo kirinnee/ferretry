@@ -6,6 +6,7 @@
 import {
   defineConfig,
   defineEvent,
+  defineHook,
   definePort,
   defineState,
   type Loosens,
@@ -56,7 +57,7 @@ export const LOGINS_WORDS: readonly Word[] = [
 /**
  * What others read about logins: Runtimes (which login a runtime spends), Usage (budgets and quota per login),
  * Onboarding (is anything signed in), the app. Writing a login is a config file (the kernel's config layer), a route
- * here, or `changes` below. No method returns an access token, a refresh token or a digest of one.
+ * here, or {@link LoginChangesApi}. No method returns an access token, a refresh token or a digest of one.
  */
 export interface LoginsApi {
   /** Every login on this machine, with status, usage, budget and what signing out would do. */
@@ -68,18 +69,47 @@ export interface LoginsApi {
   presets(): Promise<ProviderPresetCatalog>;
   /** The model catalogs in effect and the state of the published catalog. */
   models(): Promise<ModelCatalogsView>;
-  /**
-   * One login changed, by the same service the `/v1/logins/changes` routes use: the same refusals (a
-   * {@link LoginChangeError}), the same held review, the same events. `stage` holds a change and says what applying it
-   * does; `apply` runs exactly that. A caller that must refuse something first (Runtimes: a login a runtime still uses)
-   * does so BEFORE it stages here, because Logins cannot see runtime use.
-   */
-  readonly changes: {
-    stage(change: LoginChange): Promise<LoginChangeView>;
-    apply(id: string): Promise<LoginChangeOutcome>;
-  };
 }
 export const LoginsPort = definePort<LoginsApi>('logins');
+
+/**
+ * Writing logins: the reviewed change path (`stage` then `apply`) that the `/v1/logins/changes` routes also use. It is
+ * a port of its own, needed only by Runtimes (which stages a login change for a person who asked through its fleet
+ * routes), so a plugin that merely READS logins (Usage, Onboarding, the app) holds no way to write one. The port carries
+ * no caller; the routes stay the admitted door for a person.
+ *
+ * The same service sits behind both doors: the same refusals (a {@link LoginChangeError}), the same held review, the
+ * same events. A removal is refused while a runtime still uses the login, whichever door asked (`logins.used-by`).
+ */
+export interface LoginChangesApi {
+  /**
+   * Hold a change and say what applying it does. `usersMovedFirst` names runtimes the caller will move off the login
+   * (or remove) BEFORE it applies this removal: they are not counted as users here. It exists only on this in-process
+   * port, never on the wire, so the route cannot be asked to skip the check.
+   */
+  stage(change: LoginChange, options?: { readonly usersMovedFirst?: readonly string[] }): Promise<LoginChangeView>;
+  /** Run exactly what was held. */
+  apply(id: string): Promise<LoginChangeOutcome>;
+}
+export const LoginChangesPort = definePort<LoginChangesApi>('logins.changes');
+
+/** What Logins asks the plugin that owns runtimes: which runtimes use a login. Names only. */
+export interface LoginUsers {
+  /** The runtimes that launch on this login, by name. Throws when the answer is not known. */
+  of(loginId: string): Promise<readonly string[]> | readonly string[];
+}
+
+/**
+ * `logins.used-by:<key>`: offered by Logins, provided by Runtimes (which knows what launches on a login). Logins
+ * cannot see runtimes, so a removal asks here. With no provider, or one that throws, a removal FAILS CLOSED: Ferretry
+ * does not remove what it cannot prove nothing uses.
+ */
+export const LoginsUsedBy = defineHook('logins.used-by', {
+  mode: 'provide',
+  key: z.literal('runtimes'),
+  value: z.custom<LoginUsers>(),
+  takers: ['runtimes'],
+});
 
 /** A change refused, in the transport's taxonomy: a code a client branches on and a sentence for the person. */
 export class LoginChangeError extends Error {

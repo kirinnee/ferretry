@@ -37,6 +37,7 @@ import {
 import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
+import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import type { FleetSetupService } from './lib/service/setup-service.ts';
 import { ferretRuntimeRoutes } from './routes/ferret-runtime.ts';
@@ -75,7 +76,7 @@ export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => Runtime
 
 /** The assembly of a daemon whose host seams are not wired: every read and change answers in a sentence. */
 export const unavailableAssembly: RuntimesAssembler = ctx => {
-  const catalogDeps = unavailableCatalogDeps(() => ctx.kernel.clock.nowMs(), ctx.needs.logins);
+  const catalogDeps = unavailableCatalogDeps(() => ctx.kernel.clock.nowMs(), ctx.needs.logins, ctx.needs.loginChanges);
   const services = assembleServices(catalogDeps, unavailableSetupDeps);
   return services;
 };
@@ -150,6 +151,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
           ...ferretRuntimeRoutes(assembly.runtime),
         },
         provides: { runtimes: api },
+        // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
+        hooks: { 'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)) },
       };
     },
   });
