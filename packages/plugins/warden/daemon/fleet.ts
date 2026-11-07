@@ -56,7 +56,7 @@ const statusOf = (ferret: FerretSummary): WardenSessionStatus => {
 /**
  * One ferret as the sweep reads it. Ferrets knows who it is and which of four states it is in; the finer facts today's
  * detector measures (pane frames, token counters, tool processes) are not in the Ferrets contract, so they are absent
- * here and the classifiers that need them stay quiet (declared GAP, `docs/rebuild-ports/warden.md`).
+ * here and the classifiers that need them stay quiet (declared GAP, listed on `daemon/index.ts`).
  */
 export function wardenFleetSession(
   ferret: FerretSummary,
@@ -85,10 +85,16 @@ export function wardenFleetSession(
       status: questionSince !== undefined && ferret.state !== 'stopped' ? 'awaiting_question' : statusOf(ferret),
       startedAt: ferret.createdAt,
       ...(stoppedAt === undefined ? { lastActivityAt: questionSince ?? ferret.stateAt } : { finishedAt: stoppedAt }),
-      ...(questionSince !== undefined && ferret.state !== 'stopped' ? { turnState: 'needs-input' as const, turnStateAt: questionSince } : {}),
+      ...(questionSince !== undefined && ferret.state !== 'stopped'
+        ? { turnState: 'needs-input' as const, turnStateAt: questionSince }
+        : {}),
       turn,
-      ...(questionSince === undefined && ferret.state === 'working' ? { turnState: 'working' as const, turnStateAt: ferret.stateAt } : {}),
-      ...(questionSince === undefined && ferret.state === 'idle' ? { turnState: 'your-turn' as const, turnStateAt: turnEndedAt ?? ferret.stateAt } : {}),
+      ...(questionSince === undefined && ferret.state === 'working'
+        ? { turnState: 'working' as const, turnStateAt: ferret.stateAt }
+        : {}),
+      ...(questionSince === undefined && ferret.state === 'idle'
+        ? { turnState: 'your-turn' as const, turnStateAt: turnEndedAt ?? ferret.stateAt }
+        : {}),
     },
     directory,
     cwd: ferret.folder,
@@ -110,9 +116,16 @@ export async function readFleet(
   const questions = await openQuestions(asks);
   return await Promise.all(
     all.map(async ferret => {
-      const current = ferret.state === 'stopped' ? undefined : await conversation.currentTurn(ferret.id).catch(() => undefined);
+      const current =
+        ferret.state === 'stopped' ? undefined : await conversation.currentTurn(ferret.id).catch(() => undefined);
       const ordinal = turns.see(ferret.id, current);
-      return wardenFleetSession(ferret, ordinal, turns.endedAt(ferret.id), directoryOf(ferret.id), questions.get(ferret.id));
+      return wardenFleetSession(
+        ferret,
+        ordinal,
+        turns.endedAt(ferret.id),
+        directoryOf(ferret.id),
+        questions.get(ferret.id),
+      );
     }),
   );
 }
@@ -122,7 +135,12 @@ async function openQuestions(asks: AsksApi): Promise<ReadonlyMap<string, string>
   const since = new Map<string, string>();
   try {
     for (const ask of await asks.open({ source: 'ferret' as never, state: 'open' }))
-      if (ask.ferret !== undefined && ask.kind !== 'notice' && ask.kind !== 'task' && (since.get(ask.ferret) ?? '\uffff') > ask.raisedAt)
+      if (
+        ask.ferret !== undefined &&
+        ask.kind !== 'notice' &&
+        ask.kind !== 'task' &&
+        (since.get(ask.ferret) ?? '\uffff') > ask.raisedAt
+      )
         since.set(ask.ferret, ask.raisedAt);
   } catch {
     // Asks unreadable: no ferret is thought to be waiting, which is the quiet reading.

@@ -8,13 +8,20 @@ import { createWardenSubsystem } from './subsystem.ts';
 /**
  * Warden (§2.3): the sweep that watches ferrets, flags trouble and applies the remedies the owner allowed.
  *
- * DECLARED GAPS (the unit's note is `docs/rebuild-ports/warden.md`):
+ * DECLARED GAPS. The sweep sees only what Ferrets, Conversation and Asks tell it, so:
  * - Pane-level liveness (frozen frames, token counters, tool processes) and leftover browsers need a Terminals/Browsers
- *   read the manifest does not take. The liveness monitor is not built; the classifiers that need those facts stay quiet.
+ *   read the manifest does not take. The liveness monitor is not built and the classifiers that need those facts stay
+ *   quiet; what the sweep can flag from the contracts is a question nobody answered (an open ask of the ferret's own).
  * - Investigator wardens, failover, auto-move and revive need a folder Ferrets can start a warden in and the daemon can
  *   read reports back from, a "move to another login" in the Ferrets contract, and death causes. They are off, so
- *   nothing is spent. The Jev guard is the real one over a Vault that is not bound, so it answers `not_set`.
- * - The board, send-ledger and stuck-input ports are absent, so their flags do not occur.
+ *   nothing is spent and nothing is moved. The sweep, the nudge, resume, restart and stop remedies, blessings, reports
+ *   and the agenda are on.
+ * - The Jev guard is the real one over a Vault Warden does not need, so it answers `not_set` and no request leaves the
+ *   machine (NO UNATTENDED SPEND BY SURPRISE holds trivially; the caps, pacing and per-day rules still run in the sweep).
+ * - A nudge is sent as the owner (Conversation names no daemon sender); a standing notice cannot be refreshed in place
+ *   (Asks has no update); a helper or pack member is "unattended" work, a lead is a person at a terminal.
+ * - The board, send-ledger and stuck-input ports are absent, so their flags do not occur; the machine lists and the
+ *   declared-wait watcher of today are not part of this port.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
