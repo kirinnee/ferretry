@@ -93,6 +93,16 @@ export function renderChangeOutcome(outcome: AccountChangeOutcome): RenderedOutc
   if (outcome.outcome === 'sign-out-failed') {
     return { ok: false, text: `Could not sign out ${outcome.credential.id}: ${outcome.reason}` };
   }
+  if (outcome.outcome === 'login-changed') {
+    if (outcome.result === 'applied') return { ok: true, text: 'Done.' };
+    return {
+      ok: true,
+      text: [
+        'Saved, but this loosens something, so the owner has to confirm it before it takes effect. The tighter version stays in effect until then:',
+        ...(outcome.sentences ?? []).map(sentence => `  • ${sentence}`),
+      ].join('\n'),
+    };
+  }
   return { ok: true, text: outcome.summary };
 }
 

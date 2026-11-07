@@ -17,7 +17,10 @@ import type {
   SettingsProps,
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
+import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ConversationClientProvider } from './client.ts';
+import { ComposerAttachPanel } from './composer/composer-attach.tsx';
+import { ConversationSettings } from './composer/conversation-settings.tsx';
 
 const TITLE = 'Conversation';
 
@@ -43,6 +46,7 @@ export interface ConversationSurfaces {
     readonly attachments: AppComponent<PanelProps>;
     readonly queue: AppComponent<PanelProps>;
     readonly 'compact-at': AppComponent<PanelProps>;
+    readonly 'chat-width': AppComponent<PanelProps>;
   };
   readonly settings: { readonly conversation: AppComponent<SettingsProps> };
   readonly renderers: { readonly 'ask:question': AppComponent<RendererProps> };
@@ -54,10 +58,11 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     links: scoped<ScreenProps>(client, Pending),
   },
   panels: {
-    attachments: scoped<PanelProps>(client, Pending),
+    attachments: scoped<PanelProps>(client, ComposerAttachPanel),
     queue: scoped<PanelProps>(client, Pending),
     'compact-at': scoped<PanelProps>(client, Pending),
+    'chat-width': scoped<PanelProps>(client, ChatWidthPanel),
   },
-  settings: { conversation: scoped<SettingsProps>(client, Pending) },
+  settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
   renderers: { 'ask:question': scoped<RendererProps>(client, Pending) },
 });

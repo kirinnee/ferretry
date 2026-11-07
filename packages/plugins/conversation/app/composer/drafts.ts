@@ -1,0 +1,202 @@
+import { localKey, RECORD_FORMAT } from '@ferretry/app';
+import { type DaemonFerretScope, type DaemonId, daemonFerretKey } from './seam.ts';
+
+/** The sole browser-storage key for composer drafts. */
+export const DRAFTS_KEY = localKey('conversation', 'drafts');
+/**
+ * Words a composer could not merge into the shared draft, kept until the person restores or dismisses
+ * them. Apart from the draft on purpose: the composer overwrites its draft with the shared one at once,
+ * and a reload or a ferret change must not take the only copy of the person's words with it.
+ */
+const DRAFT_RESTORE_KEY = localKey('conversation', 'draft-restore');
+export const MAX_DRAFTS = 50;
+export const MAX_DRAFT_LEN = 16_000;
+
+interface DraftEntry {
+  readonly text: string;
+  readonly at: number;
+}
+
+export interface DraftStore {
+  readonly format: typeof RECORD_FORMAT;
+  readonly drafts: Record<string, DraftEntry>;
+}
+
+export interface DraftStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export const emptyDraftStore = (): DraftStore => ({ format: RECORD_FORMAT, drafts: {} });
+
+/** Invalid, another format, or corrupted browser data is deliberately discarded. */
+export const parseDraftStore = (raw: string | null): DraftStore => {
+  if (!raw) return emptyDraftStore();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return emptyDraftStore();
+  }
+  if (!parsed || typeof parsed !== 'object') return emptyDraftStore();
+  const value = parsed as Record<string, unknown>;
+  if (value.format !== RECORD_FORMAT || !value.drafts || typeof value.drafts !== 'object') return emptyDraftStore();
+
+  const drafts: Record<string, DraftEntry> = {};
+  for (const [key, entry] of Object.entries(value.drafts as Record<string, unknown>)) {
+    if (!key || !entry || typeof entry !== 'object') continue;
+    const candidate = entry as Record<string, unknown>;
+    if (
+      typeof candidate.text !== 'string' ||
+      candidate.text.trim() === '' ||
+      typeof candidate.at !== 'number' ||
+      !Number.isFinite(candidate.at)
+    )
+      continue;
+    drafts[key] = { text: candidate.text, at: candidate.at };
+  }
+  return { format: RECORD_FORMAT, drafts };
+};
+
+export const evictDraftLru = (store: DraftStore, max = MAX_DRAFTS): DraftStore => {
+  const keys = Object.keys(store.drafts);
+  if (keys.length <= max) return store;
+  const drafts: Record<string, DraftEntry> = {};
+  for (const key of keys.sort((a, b) => (store.drafts[b]?.at ?? 0) - (store.drafts[a]?.at ?? 0)).slice(0, max)) {
+    const entry = store.drafts[key];
+    if (entry) drafts[key] = entry;
+  }
+  return { format: RECORD_FORMAT, drafts };
+};
+
+/** Upserts a daemon-scoped draft; blank or oversized input removes it. */
+export const upsertDraft = (store: DraftStore, scope: DaemonFerretScope, text: string, at: number): DraftStore => {
+  const key = daemonFerretKey(scope);
+  const drafts = { ...store.drafts };
+  if (text.trim() === '' || text.length > MAX_DRAFT_LEN) {
+    delete drafts[key];
+    return { format: RECORD_FORMAT, drafts };
+  }
+  drafts[key] = { text, at };
+  return evictDraftLru({ format: RECORD_FORMAT, drafts });
+};
+
+export const removeDraft = (store: DraftStore, scope: DaemonFerretScope): DraftStore => {
+  const key = daemonFerretKey(scope);
+  if (!(key in store.drafts)) return store;
+  const drafts = { ...store.drafts };
+  delete drafts[key];
+  return { format: RECORD_FORMAT, drafts };
+};
+
+/** Removes every persisted draft owned by one unpaired daemon. */
+export const removeDaemonDrafts = (store: DraftStore, daemonId: DaemonId): DraftStore => {
+  const drafts = { ...store.drafts };
+  let changed = false;
+  for (const key of Object.keys(drafts)) {
+    try {
+      const scope = JSON.parse(key) as unknown;
+      if (!Array.isArray(scope) || (scope.length !== 2 && scope.length !== 3) || scope[0] !== daemonId) continue;
+      delete drafts[key];
+      changed = true;
+    } catch {
+      // A malformed unknown key is ignored; normal parsing never creates one.
+    }
+  }
+  return changed ? { format: RECORD_FORMAT, drafts } : store;
+};
+
+/** Browser privacy settings may make even reading `localStorage` throw. */
+const browserStorage = (): DraftStorage | undefined => {
+  try {
+    return typeof localStorage === 'undefined' ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Browser draft persistence. Its public methods require a full daemon/ferret
+ * scope so the same ferret ID cannot recover a draft from another daemon.
+ */
+export class DaemonDraftStore {
+  readonly #storage: DraftStorage | undefined;
+  readonly #key: string;
+
+  constructor(storage: DraftStorage | undefined = browserStorage(), key: string = DRAFTS_KEY) {
+    this.#storage = storage;
+    this.#key = key;
+  }
+
+  load(scope: DaemonFerretScope): string {
+    return this.#read().drafts[daemonFerretKey(scope)]?.text ?? '';
+  }
+
+  save(scope: DaemonFerretScope, text: string, at = Date.now()): void {
+    this.#write(upsertDraft(this.#read(), scope, text, at));
+  }
+
+  clear(scope: DaemonFerretScope): void {
+    const store = this.#read();
+    const next = removeDraft(store, scope);
+    if (next !== store) this.#write(next);
+  }
+
+  clearDaemon(daemonId: DaemonId): void {
+    const store = this.#read();
+    const next = removeDaemonDrafts(store, daemonId);
+    if (next !== store) this.#write(next);
+  }
+
+  #read(): DraftStore {
+    if (!this.#storage) return emptyDraftStore();
+    try {
+      return parseDraftStore(this.#storage.getItem(this.#key));
+    } catch {
+      return emptyDraftStore();
+    }
+  }
+
+  #write(store: DraftStore): void {
+    if (!this.#storage) return;
+    try {
+      this.#storage.setItem(this.#key, JSON.stringify(store));
+      return;
+    } catch {
+      // Quota failures are deterministic for an unchanged document. Retain
+      // the newest drafts and progressively shrink the retry until it fits;
+      // never make the same oversized write twice.
+    }
+    // Quota is monotonic as entries are removed. Probe for the largest
+    // newest-first subset that fits, so a one-entry overflow loses only the
+    // oldest entry rather than collapsing immediately to a small fixed cap.
+    // The empty document (retained = 0) is deliberately excluded: if even
+    // the single newest draft overflows, every candidate fails and we leave
+    // the previously persisted store intact instead of erasing it.
+    let lower = 1;
+    let upper = Object.keys(store.drafts).length - 1;
+    while (lower <= upper) {
+      const retained = Math.floor((lower + upper) / 2);
+      try {
+        this.#storage.setItem(this.#key, JSON.stringify(evictDraftLru(store, retained)));
+        lower = retained + 1;
+      } catch {
+        upper = retained - 1;
+      }
+    }
+  }
+}
+
+/**
+ * The document-lifetime draft store. A daemon that is unpaired must have its drafts cleared
+ * (`clearDaemon`): a later pairing that mints the same daemon id — a re-pair — would read them back.
+ * GAP(app-shell): the shell's unpair does not reach this store yet; Conversation has no unpair signal.
+ *
+ * It is a module value because the composer needs a value for its `draftStore` default at module load,
+ * before any React context exists. A component may still be handed its own store — that is what the
+ * tests do — but this is the one the reader's browser uses.
+ */
+export const documentDraftStore = new DaemonDraftStore();
+
+/** The document-lifetime store of words waiting to be restored (`DRAFT_RESTORE_KEY`), invalidated with its daemon. */
+export const documentRestoreStore = new DaemonDraftStore(browserStorage(), DRAFT_RESTORE_KEY);

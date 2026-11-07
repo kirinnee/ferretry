@@ -179,3 +179,103 @@ describe('deriveLoginChange', () => {
     );
   });
 });
+
+describe("deriveLoginChange: login.env (today's credential.env, owned here)", () => {
+  const GLM = {
+    ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+    ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash',
+  };
+  const ENV_FILES = new Map<string, LoginFile>([
+    ['glm', { harness: 'claude-code', store: 'environment', preset: 'zai-glm', env: GLM }],
+    ['work', { harness: 'claude-code', store: 'ferretry' }],
+    [
+      'foundry',
+      {
+        harness: 'claude-code',
+        store: 'environment',
+        env: { CLAUDE_CODE_USE_FOUNDRY: '1' },
+        cloudCredential: 'azure-cli',
+      },
+    ],
+  ]);
+  const writeOf = (edit: ReturnType<typeof deriveLoginChange>) =>
+    (edit.writes[0] as { id: string; patch: Record<string, unknown> }).patch;
+
+  it('should change the variables, keep a hidden one, and say who starts with them', () => {
+    const edit = deriveLoginChange(
+      ENV_FILES,
+      {
+        kind: 'login.env',
+        id: 'glm',
+        env: { ...GLM, ANTHROPIC_AUTH_TOKEN: { keep: true }, API_TIMEOUT_MS: '600000' },
+      },
+      facts({ glm: ['alpha'] }),
+    );
+
+    should(writeOf(edit)).containDeep({
+      env: { ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}', API_TIMEOUT_MS: '600000' },
+    });
+    should(edit.summary).equal('Change the variables of login glm');
+    should(edit.consequences).deepEqual([
+      'alpha starts with the new variables next launch. Running sessions keep the old ones until restarted.',
+    ]);
+  });
+
+  it('should say the secret is put in at launch when no runtime is known to use it', () => {
+    const edit = deriveLoginChange(
+      ENV_FILES,
+      { kind: 'login.env', id: 'foundry', env: { CLAUDE_CODE_USE_FOUNDRY: '1' } },
+      facts(),
+    );
+
+    should(edit.consequences).matchAny(/never written anywhere/u);
+    should(writeOf(edit).cloudCredential).equal('azure-cli');
+  });
+
+  it('should remove a cloud credential reference and empty a login of its variables', () => {
+    const unset = deriveLoginChange(
+      ENV_FILES,
+      { kind: 'login.env', id: 'foundry', env: { CLAUDE_CODE_USE_FOUNDRY: '1' }, cloudCredential: null },
+      facts(),
+    );
+    const emptied = deriveLoginChange(ENV_FILES, { kind: 'login.env', id: 'foundry', env: {} }, facts());
+
+    should(writeOf(unset)).have.property('cloudCredential', undefined);
+    should(writeOf(emptied)).have.property('env', undefined);
+  });
+
+  it('should refuse a login that signs in, an unknown login, and a hidden value with nothing to keep', () => {
+    should(
+      refusal(() => deriveLoginChange(ENV_FILES, { kind: 'login.env', id: 'work', env: { A: '1' } }, facts())),
+    ).match(/is signed in, not made from environment variables/u);
+    should(refusal(() => deriveLoginChange(ENV_FILES, { kind: 'login.env', id: 'nobody', env: {} }, facts()))).equal(
+      'no login nobody exists on this machine',
+    );
+    should(
+      refusal(() =>
+        deriveLoginChange(ENV_FILES, { kind: 'login.env', id: 'foundry', env: { NEW: { keep: true } } }, facts()),
+      ),
+    ).equal('login foundry has no value for NEW to keep; type one');
+  });
+
+  it('should refuse a raw secret without repeating its value, and a preset login left without what it needs', () => {
+    const rawKey = 'sk-ant-api03-abcdefghijklmnopq';
+    const raw = refusal(() =>
+      deriveLoginChange(ENV_FILES, { kind: 'login.env', id: 'glm', env: { ...GLM, EXTRA: rawKey } }, facts()),
+    );
+    should(raw).match(/looks like a secret/u);
+    should(raw).not.containEql(rawKey);
+    should(
+      refusal(() =>
+        deriveLoginChange(
+          ENV_FILES,
+          { kind: 'login.env', id: 'glm', env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic' } },
+          facts(),
+        ),
+      ),
+    ).match(/ANTHROPIC_AUTH_TOKEN is needed/u);
+  });
+});

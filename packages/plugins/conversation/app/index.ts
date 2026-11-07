@@ -39,11 +39,16 @@ export default implementApp(manifest, {
     };
     const screen = (id: 'chat' | 'links') =>
       lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
-    const panel = (id: 'attachments' | 'queue' | 'compact-at') =>
+    const panel = (id: 'attachments' | 'queue' | 'compact-at' | 'chat-width') =>
       lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
     return {
       screens: { chat: screen('chat'), links: screen('links') },
-      panels: { attachments: panel('attachments'), queue: panel('queue'), 'compact-at': panel('compact-at') },
+      panels: {
+        attachments: panel('attachments'),
+        queue: panel('queue'),
+        'compact-at': panel('compact-at'),
+        'chat-width': panel('chat-width'),
+      },
       settings: {
         conversation: lazyComponent<SettingsProps>(
           async () => (await surfacesOf()).settings.conversation as AppComponent<SettingsProps>,

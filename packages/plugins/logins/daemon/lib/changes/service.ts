@@ -10,29 +10,22 @@
  */
 import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import type {
-  LoginChange,
-  LoginChangeOutcome,
-  LoginChangeRefusalCode,
-  LoginChangeView,
-  LoginFile,
-  LoginView,
+import {
+  type LoginChange,
+  LoginChangeError,
+  type LoginChangeOutcome,
+  type LoginChangeRefusalCode,
+  type LoginChangeView,
+  type LoginFile,
+  type LoginView,
 } from '../../../contract/index.ts';
 import type { LoginSignOutOutcome } from '../credentials/credentials-service.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import { deriveLoginChange, type LoginEdit, LoginChangeRefusal } from './derive.ts';
 import { type HeldChange, LoginChangeHoldRefusal, LoginChangeStore } from './store.ts';
 
-/** A refusal in the transport's taxonomy: a code a client branches on, and a sentence for the person. */
-export class LoginChangeError extends Error {
-  constructor(
-    readonly code: LoginChangeRefusalCode,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'LoginChangeError';
-  }
-}
+/** The refusal class lives in the contract, so a plugin that stages through the port can tell it apart. */
+export { LoginChangeError };
 
 const HOLD_CODES: Readonly<Record<LoginChangeHoldRefusal['problem'], LoginChangeRefusalCode>> = {
   unknown: 'login_change_unknown',
@@ -146,7 +139,7 @@ export class LoginChangeService {
     }
     const edit = deriveLoginChange(files, change, {
       machineName: this.deps.machineName(),
-      presets: change.kind === 'login.add' ? await this.deps.presets() : [],
+      presets: change.kind === 'login.add' || change.kind === 'login.env' ? await this.deps.presets() : [],
       usedBy: id => this.deps.usedBy?.(id) ?? [],
     });
     return {
@@ -222,6 +215,7 @@ function changeKind(change: Exclude<LoginChange, { kind: 'login.signout' }>) {
     case 'login.disable':
       return 'disabled' as const;
     case 'login.label':
+    case 'login.env':
       return 'edited' as const;
   }
 }

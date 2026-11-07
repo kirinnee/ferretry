@@ -2,8 +2,12 @@
  * @ferretry/plugin-logins/contract/testing — the fake and the conformance suite (§7.8). The real implementation and
  * the fake pass the same suite.
  */
-import { err, ok, type Result } from '@ferretry/std';
+import { err, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import {
+  type LoginChange,
+  LoginChangeError,
+  type LoginChangeOutcome,
+  type LoginChangeView,
   type LoginId,
   type LoginList,
   LoginListSchema,
@@ -42,12 +46,58 @@ export function sampleLogin(id: string, overrides: Partial<LoginView> = {}): Log
 
 export interface FakeLogins extends LoginsApi {
   setLogins(logins: readonly LoginView[]): void;
+  /** Every change staged through `changes.stage`, in order. */
+  readonly staged: readonly LoginChange[];
+  /** Every id applied through `changes.apply`, in order. */
+  readonly applied: readonly string[];
+  /** What the next `apply` answers (default: applied). */
+  setOutcome(outcome: LoginChangeOutcome): void;
+  /** Refuse the next `stage` (or every one, until cleared with `undefined`) the way the real service does. */
+  refuseStage(error: LoginChangeError | undefined): void;
+  refuseApply(error: LoginChangeError | undefined): void;
 }
+
+const FAKE_EXPIRY = instantFromEpochMs(4_070_908_800_000);
 
 export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   let logins = [...initial];
   const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
+  const staged: LoginChange[] = [];
+  const applied: string[] = [];
+  let outcome: LoginChangeOutcome = { outcome: 'applied' };
+  let stageRefusal: LoginChangeError | undefined;
+  let applyRefusal: LoginChangeError | undefined;
   return {
+    staged,
+    applied,
+    setOutcome: next => {
+      outcome = next;
+    },
+    refuseStage: error => {
+      stageRefusal = error;
+    },
+    refuseApply: error => {
+      applyRefusal = error;
+    },
+    changes: {
+      stage: async change => {
+        if (stageRefusal !== undefined) throw stageRefusal;
+        staged.push(change);
+        return {
+          id: `change-${String(staged.length)}`,
+          change,
+          summary: `fake ${change.kind} ${change.id}`,
+          consequences: [],
+          expiresAt: FAKE_EXPIRY,
+          state: 'pending',
+        } satisfies LoginChangeView;
+      },
+      apply: async id => {
+        if (applyRefusal !== undefined) throw applyRefusal;
+        applied.push(id);
+        return outcome;
+      },
+    },
     list: async () => list(),
     get: async id => logins.find(login => login.id === id),
     quota: async id => logins.find(login => login.id === id)?.usage,
