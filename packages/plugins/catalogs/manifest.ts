@@ -7,6 +7,7 @@ import {
   CATALOGS_WORDS,
   CatalogsChanged,
   CatalogsPort,
+  CatalogItems,
   CONFIGURE,
   GUARD_NONE,
   NARROW,
@@ -540,6 +541,7 @@ export default definePlugin({
   },
 
   hooks: {
+    offers: [CatalogItems],
     takes: [
       { hook: Credentials, key: 'member' },
       { hook: StepUp, key: 'member' },
