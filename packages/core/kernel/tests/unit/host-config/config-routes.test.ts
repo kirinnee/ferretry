@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import type { Admission, ConfigAccessJudgement, ConfigAccessVerdict } from '../../../contract/bound.ts';
 import { ApiError, type ApiRequest, errorResponse, headersFrom, queryFrom } from '../../../contract/http.ts';
@@ -12,9 +13,10 @@ const UPDATES = `${HOME}/config/updates.yaml`;
 const RAW_SECRET =
   'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
-/** Counts one proof spent: what a verdict's `spend` does in these tests. */
-function spend(spent: { count: number }, by: number): void {
-  spent.count += by;
+/** Counts one proof claimed: what a verdict's `claimLoosening` does in these tests. */
+function claim(claims: { count: number }, taken: boolean): boolean {
+  claims.count += 1;
+  return taken;
 }
 
 interface World {
@@ -28,7 +30,9 @@ interface World {
 /** The three routes over the real config writer, with Gate's answer a function of the question. */
 function world(
   answer: (input: ConfigAccessJudgement, spent: { count: number }) => ConfigAccessVerdict = (input, spent) =>
-    input.act === 'write' ? { allowed: true, mayLoosen: false } : { allowed: true, spend: () => spend(spent, 1) },
+    input.act === 'write'
+      ? { allowed: true, mayLoosen: false, claimLoosening: () => claim(spent, false) }
+      : { allowed: true },
   admission: 'given' | 'absent' | 'throws' = 'given',
 ): World {
   const fs = createMemoryHostFs();
@@ -218,13 +222,15 @@ describe('PUT /v1/config/file', () => {
     });
     expect(w.files.port('updates').file(updatesDef)).toMatchObject({ limit: 5 });
     expect(String(w.fs.snapshot().get(UPDATES))).toBe('limit: 50\n');
+    // Gate was asked to claim a proof exactly once, because this text really loosens; it said no
+    expect(w.spent.count).toBe(1);
   });
 
-  test('R-0419 a loosening Gate lets this call put into effect is applied, and the proof it needed is spent once', async () => {
-    const w = world((input, spent) => ({
+  test('R-0419 G126 a loosening Gate lets this call claim a proof for is applied, and the proof is taken once', async () => {
+    const w = world((_input, spent) => ({
       allowed: true,
-      mayLoosen: true,
-      spend: () => spend(spent, input.act === 'write' ? 1 : 0),
+      mayLoosen: false,
+      claimLoosening: () => claim(spent, true),
     }));
     await w.files.reload();
     await w.files.write('updates', updatesDef, undefined, 'limit: 5\n');
@@ -352,7 +358,7 @@ describe('POST /v1/config/confirm', () => {
     return { etag: held.etag };
   }
 
-  test('R-0274 confirming the reviewed edit puts it into effect and spends the proof the act needed', async () => {
+  test('R-0274 confirming the reviewed edit puts it into effect (Gate took the proof when it judged the act)', async () => {
     const w = world();
     const { etag } = await heldRaise(w);
     const response = await w.handlers['POST /v1/config/confirm'](
@@ -361,7 +367,30 @@ describe('POST /v1/config/confirm', () => {
     expect(json(response)).toEqual({ path: 'updates.yaml', confirmed: true });
     expect(w.files.port('updates').file(updatesDef)).toMatchObject({ limit: 50 });
     expect(w.asked.at(-1)).toMatchObject({ plugin: 'updates', path: 'updates.yaml', act: 'confirm' });
-    expect(w.spent.count).toBe(1);
+  });
+
+  test('R-0274 an edit that moved on disk after the review, with the SAME 12-character etag prefix, is never confirmed', async () => {
+    // Two texts whose sha256 agree on the first 12 hex characters (found by a birthday search on 48 bits).
+    const reviewed = 'limit: 6\nnote: a2641039\n';
+    const unseen = 'limit: 999999\nnote: b896126\n';
+    const etagOf = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+    expect(etagOf(unseen).slice(0, 12)).toBe(etagOf(reviewed).slice(0, 12));
+    expect(etagOf(unseen)).not.toBe(etagOf(reviewed));
+    const w = world();
+    await w.files.reload();
+    await w.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    w.fs.seed(UPDATES, reviewed);
+    await w.files.reload();
+    expect(w.files.held()).toHaveLength(1);
+    // the file is swapped and NOT reloaded: the held list still shows the reviewed edit
+    w.fs.seed(UPDATES, unseen);
+    const response = await w.handlers['POST /v1/config/confirm'](
+      call(request('POST', [], { path: 'updates.yaml', etag: etagOf(reviewed) })),
+    );
+    expect(json(response)).toEqual({ path: 'updates.yaml', confirmed: false });
+    expect(w.files.port('updates').file(updatesDef)).toMatchObject({ limit: 5 });
+    // the edit nobody saw waits, held, for its own review
+    expect(w.files.held().map(item => item.etag)).toEqual([etagOf(unseen)]);
   });
 
   test('R-0274 an etag nobody reviewed confirms nothing: `confirmed: false`, still held, no proof spent', async () => {
@@ -373,7 +402,6 @@ describe('POST /v1/config/confirm', () => {
     expect(json(response)).toEqual({ path: 'updates.yaml', confirmed: false });
     expect(w.files.port('updates').file(updatesDef)).toMatchObject({ limit: 5 });
     expect(w.files.held()).toHaveLength(1);
-    expect(w.spent.count).toBe(0);
   });
 
   test('R-0274 Gate’s refusal (a passkey for this act, or an agent) is its answer and the edit stays held', async () => {

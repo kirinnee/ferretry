@@ -150,14 +150,15 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
       const verdict = judge(target, 'write');
       if (!verdict.allowed) return verdict.response;
       const ifMatch = headerValue(call.request, IF_MATCH) ?? request.etag;
+      const claim = verdict.claimLoosening;
       const outcome = await writerOrFail().write(target, request.text, {
         confirmedLoosening: verdict.mayLoosen === true,
+        // A passkey proof is taken only by an edit that really loosens, atomically (one proof, one loosening).
+        ...(claim === undefined ? {} : { judge: () => claim() }),
         ...(ifMatch === undefined ? {} : { ifMatch }),
       });
       switch (outcome.kind) {
         case 'written':
-          // The passkey proved for a loosening is spent by the loosening it admitted (one proof, one loosening).
-          if (outcome.loosened.length > 0) verdict.spend?.();
           return jsonResponse({ path: request.path, etag: outcome.etag, outcome: 'applied' });
         case 'held':
           return jsonResponse({
@@ -194,10 +195,10 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
       const verdict = judge(target, 'confirm');
       if (!verdict.allowed) return verdict.response;
       const writer = writerOrFail();
-      // Named by its path AND the etag that was reviewed: an edit nobody saw is never put into effect.
+      // Named by its path AND the etag that was reviewed. The id carries that FULL etag and the writer matches it
+      // against the disk inside its write queue, so an edit nobody saw is never put into effect.
       const held = writer.held().find(item => item.path === request.path && item.etag === request.etag);
       const confirmed = held !== undefined && (await writer.confirm(held.id));
-      if (confirmed) verdict.spend?.();
       return jsonResponse({ path: request.path, confirmed });
     },
   };

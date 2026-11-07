@@ -26,6 +26,12 @@ const ask = (
   path = 'machine.yaml',
 ): ConfigAccessJudgement => ({ plugin: 'runtimes', path, act, actor, ...(standing === undefined ? {} : { standing }) });
 
+const claimOf = (verdict: ReturnType<typeof judgeConfigAccess>): (() => boolean) => {
+  if (!verdict.allowed || verdict.claimLoosening === undefined)
+    throw new Error('expected a claim for a governed caller');
+  return verdict.claimLoosening;
+};
+
 const refusedWith = (
   verdict: ReturnType<typeof judgeConfigAccess>,
 ): { status: number; body: Record<string, unknown> } => {
@@ -66,25 +72,43 @@ describe('R-0419 writing a file asks `configure`, then the fleet’s `use`, and 
     expect(verdict).toEqual({ allowed: true, mayLoosen: true });
   });
 
-  test('a device with the grant but no passkey proved for the act may write, and may not loosen', () => {
+  test('a device with the grant but no passkey proved for the act may write, and its claim to loosen is refused', () => {
     const w = world();
     w.enrol('phone');
     const verdict = judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' })));
-    expect(verdict.allowed).toBe(true);
-    if (verdict.allowed) expect(verdict.mayLoosen).toBe(false);
+    expect(verdict.allowed && verdict.mayLoosen).toBe(false);
+    expect(claimOf(verdict)()).toBe(false);
   });
 
-  test('a device with a fresh passkey may loosen, and the proof it carries is spent by `spend` (one proof, one loosening)', () => {
+  test('R-0419 G126 a device with a fresh passkey loosens by CLAIMING the proof, once (one proof, one loosening)', () => {
     const w = world();
     w.enrol('phone');
     w.stepUps.grant(subjectOf('phone'));
     const standing = standingOf(w, { device: 'phone' });
     const verdict = judgeConfigAccess(ask('write', 'owner-viewer', standing));
-    expect(verdict.allowed && verdict.mayLoosen).toBe(true);
-    if (!verdict.allowed || verdict.spend === undefined) throw new Error('expected a spend for a governed caller');
-    verdict.spend();
-    const next = judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' })));
-    expect(next.allowed && next.mayLoosen).toBe(false);
+    // the admission snapshot is not what admits a loosening: the claim is
+    expect(verdict.allowed && verdict.mayLoosen).toBe(false);
+    const claim = claimOf(verdict);
+    expect(claim()).toBe(true);
+    expect(claim()).toBe(false);
+    expect(claimOf(judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' }))))()).toBe(false);
+  });
+
+  test('R-0419 G126 two writes admitted on ONE proof: exactly one of them loosens', () => {
+    const w = world();
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    const first = claimOf(judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' }))));
+    const second = claimOf(judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' }))));
+    expect([first(), second()].filter(Boolean)).toHaveLength(1);
+  });
+
+  test('R-0419 G126 a write that does not loosen never asks, so it leaves the proof for a later act', () => {
+    const w = world();
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    claimOf(judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' }))));
+    expect(judgeConfigAccess(ask('confirm', 'owner-viewer', standingOf(w, { device: 'phone' }))).allowed).toBe(true);
   });
 
   test('a device without the file’s `configure` is refused, for warden.yaml by the warden capability', () => {
@@ -140,7 +164,7 @@ describe('R-0274 confirming a held edit is the owner’s act, with today’s ste
     expect(judgeConfigAccess(ask('confirm', 'owner-tools', standingOf(w, atMachine)))).toEqual({ allowed: true });
   });
 
-  test('a governed device needs a passkey proved for THIS act (`loosen-config`): asked for it, then spent', () => {
+  test('a governed device needs a passkey proved for THIS act (`loosen-config`): asked for it, then claimed', () => {
     const w = world();
     w.enrol('phone');
     const without = refusedWith(judgeConfigAccess(ask('confirm', 'owner-viewer', standingOf(w, { device: 'phone' }))));
@@ -148,11 +172,19 @@ describe('R-0274 confirming a held edit is the owner’s act, with today’s ste
     expect(without.body.code).toBe('grant_step_up_required');
     expect(without.body.demand).toEqual({ capability: 'fleet', axis: 'configure', act: STEP_UP_ACTS.loosenConfig });
     w.stepUps.grant(subjectOf('phone'));
-    const verdict = judgeConfigAccess(ask('confirm', 'owner-viewer', standingOf(w, { device: 'phone' })));
-    if (!verdict.allowed || verdict.spend === undefined)
-      throw new Error('expected an allowed confirm with a proof to spend');
-    verdict.spend();
+    expect(judgeConfigAccess(ask('confirm', 'owner-viewer', standingOf(w, { device: 'phone' }))).allowed).toBe(true);
+    // the judge TOOK the proof: nothing is left for a second confirm
     expect(judgeConfigAccess(ask('confirm', 'owner-viewer', standingOf(w, { device: 'phone' }))).allowed).toBe(false);
+  });
+
+  test('R-0274 G126 a confirm and a loosening write admitted on ONE proof: exactly one takes it', () => {
+    const w = world();
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    const write = judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' })));
+    const confirm = judgeConfigAccess(ask('confirm', 'owner-viewer', standingOf(w, { device: 'phone' })));
+    expect(confirm.allowed).toBe(true);
+    expect(claimOf(write)()).toBe(false);
   });
 
   test('a ferret never confirms, and a device without `configure` for the file may not', () => {

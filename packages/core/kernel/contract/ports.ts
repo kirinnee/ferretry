@@ -341,16 +341,25 @@ export interface ConfigFilesWriter {
   write(
     target: ConfigTarget,
     edit: ConfigEdit,
-    options?: { readonly confirmedLoosening?: boolean; readonly ifMatch?: string },
+    options?: {
+      readonly confirmedLoosening?: boolean;
+      readonly ifMatch?: string;
+      /** Asked only when the edit loosens and `confirmedLoosening` is not set: true puts it into effect (Gate's claim). */
+      readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
+    },
   ): Promise<ConfigWriteOutcome>;
   remove(
     target: ConfigTarget,
     options?: { readonly confirmedLoosening?: boolean; readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
   held(): readonly HeldConfig[];
-  /** Confirms ONE held edit by id; `false` when there is no such edit any more. */
+  /**
+   * Confirms ONE held edit by id; `false` when there is no such edit any more. The id carries the FULL etag of the
+   * edit that was reviewed and is matched against the disk inside the write queue, after a fresh reload: a file that
+   * moved since is never confirmed.
+   */
   confirm(id: string): Promise<boolean>;
-  /** Drops ONE held edit: the file goes back to the version in effect. */
+  /** Drops ONE held edit: the file goes back to the version in effect. Matched like {@link ConfigFilesWriter.confirm}. */
   discard(id: string): Promise<boolean>;
 }
 

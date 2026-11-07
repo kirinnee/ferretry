@@ -15,6 +15,7 @@ import {
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
 } from '../../../contract/index.ts';
+import { claimLooseningProof } from './config-judge.ts';
 
 /** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
 const WARDEN_FILE = 'warden.yaml';
@@ -45,10 +46,12 @@ const refuse = (response: ApiResponse): ConfigAccessVerdict => ({ allowed: false
  *
  * - `read`: the file's capability on `use`.
  * - `write`: its `configure`, then the fleet's `use` (a device the owner kept off the fleet may change no file); the
- *   verdict says whether this call may put a loosening into effect (`mayLoosen`) and carries the proof to spend if it
- *   did (`spend`, present only for a governed caller).
- * - `confirm`: the same asks, and — from a governed device — a passkey proved for THIS act (`loosen-config`), spent
- *   once the edit is in effect.
+ *   verdict says whether this call may put a loosening into effect (`mayLoosen`: somebody at this machine). A governed
+ *   caller gets `claimLoosening` instead, which the writer asks ONLY when the text really loosens and which takes the
+ *   one passkey proof atomically (G126: of two requests admitted on one proof exactly one loosens).
+ * - `confirm`: the same asks, and — from a governed device — a passkey proved for THIS act (`loosen-config`), which
+ *   is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
+ *   its proof — stricter than the snapshot-and-spend it replaces).
  *
  * Anything undetermined (no standing, no grant standing) refuses.
  */
@@ -104,13 +107,13 @@ export function judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVer
         grantRefusalCode(fleet.refusal),
       ),
     );
-  const fresh = standing.presentation?.freshStepUp === true;
-  const spend = governance.governed && standing.spendFreshStepUp !== undefined ? standing.spendFreshStepUp : undefined;
   if (act === 'write')
-    return { allowed: true, mayLoosen: !governance.governed || fresh, ...(spend === undefined ? {} : { spend }) };
-  if (governance.governed && !fresh)
+    return governance.governed
+      ? { allowed: true, mayLoosen: false, claimLoosening: () => claimLooseningProof(standing) }
+      : { allowed: true, mayLoosen: true };
+  if (governance.governed && !claimLooseningProof(standing))
     return refuse(
       stepUpRefusal(`putting this change to ${path} into effect needs a passkey confirmation for it`, capability, true),
     );
-  return { allowed: true, ...(spend === undefined ? {} : { spend }) };
+  return { allowed: true };
 }

@@ -99,12 +99,13 @@ export interface ConfigAccessJudgement {
 }
 
 /**
- * Gate's answer: the call may go on (`mayLoosen`: a write may put a loosening into effect in this same act; `spend`:
- * told once the act succeeded, to use up the passkey proof the act needed), or it is refused with Gate's own answer
- * (a grant refusal, a step-up demand, an owner-only refusal).
+ * Gate's answer: the call may go on, or it is refused with Gate's own answer (a grant refusal, a step-up demand, an
+ * owner-only refusal). On a write, `mayLoosen` says this call may put a loosening into effect in this same act
+ * (somebody at this machine), and `claimLoosening` is how a call that holds a passkey proof earns that: asked ONLY when
+ * the text really loosens, it takes the one proof atomically (`true`: put it into effect). One proof, one loosening.
  */
 export type ConfigAccessVerdict =
-  | { readonly allowed: true; readonly mayLoosen?: boolean; readonly spend?: () => void }
+  | { readonly allowed: true; readonly mayLoosen?: boolean; readonly claimLoosening?: () => boolean }
   | { readonly allowed: false; readonly response: ApiResponse };
 
 /** What Gate's judge is asked about one loosening config edit. */

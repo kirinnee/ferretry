@@ -81,7 +81,7 @@ const PRIVATE_FILE_MODE = 0o600;
 
 /** An edit held for the owner. The tighter version stays in effect until it is confirmed or discarded. */
 export interface HeldConfigEdit {
-  /** `<path>@<etag prefix>`: names ONE reviewed edit, so a confirmation can never put into effect one nobody saw. */
+  /** `<path>@<full etag>`: names ONE reviewed edit; confirm and discard compare it inside the write queue, so an edit nobody saw (even one whose etag shares a prefix) is never put into effect or dropped. */
   readonly id: string;
   readonly plugin: string;
   /** The file, relative to `config/`. */
@@ -276,7 +276,7 @@ interface Settled {
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
-const idOf = (path: string, etag: string): string => `${path}@${etag.slice(0, 12)}`;
+const idOf = (path: string, etag: string): string => `${path}@${etag}`;
 
 const issueKey = (issue: ConfigIssue): string =>
   `${issue.path}\u0000${String(issue.line)}\u0000${String(issue.column)}\u0000${issue.message}`;
