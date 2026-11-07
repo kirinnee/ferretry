@@ -188,10 +188,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
     instructions: () => kernel.snapshot.current().instructions,
-    home: ferret => {
-      const home = kernel.roots.root('agent-homes', { ferret }).resolve('.');
-      return home.ok ? home.value : ('' as FencedPath);
-    },
     folder: path => {
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);

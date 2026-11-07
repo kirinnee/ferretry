@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
@@ -76,8 +77,6 @@ export interface FerretsPorts {
   launchParts(): readonly LaunchPartSource[];
   sitrepSources(): readonly SitrepLineSource[];
   instructions(): readonly InstructionEntry[];
-  /** The ferret's home under the `agent-homes` root. */
-  home(ferret: FerretId): FencedPath;
   /** The folder fenced by the kernel's `work` root, or why not. */
   folder(path: string): Result<FencedPath, string>;
   changed(payload: FerretChangedPayload): void;
@@ -108,6 +107,18 @@ export interface FerretsPorts {
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
+
+/**
+ * A home answer Ferrets can judge by spelling: an absolute path that `posix.normalize` leaves unchanged (no `.` or
+ * `..` segment, no doubled `/`), with no trailing `/`, no NUL, and not `/` itself. Checked, never normalized.
+ */
+const canonicalHome = (home: unknown): home is FencedPath =>
+  typeof home === 'string' &&
+  home.startsWith('/') &&
+  home !== '/' &&
+  !home.endsWith('/') &&
+  !home.includes('\0') &&
+  posix.normalize(home) === home;
 
 class ResumeRefusal extends Error {
   constructor(readonly failure: StartFailure) {
@@ -529,6 +540,8 @@ export class FerretsService implements FerretsApi {
       return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
     const harness = this.ports.harness(record.harness);
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
+    const home = await this.home(record, harness);
+    if (!home.ok) return home;
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
@@ -543,7 +556,7 @@ export class FerretsService implements FerretsApi {
       ...(record.login === undefined ? {} : { login: record.login }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
       folder: record.folder as FencedPath,
-      home: this.ports.home(record.id),
+      home: home.value,
       instructions: this.ports
         .instructions()
         .filter(
@@ -560,6 +573,15 @@ export class FerretsService implements FerretsApi {
       )
     ).flat();
     const spec: LaunchSpec = { ...base, parts };
+    // Today's order: the home is written (and made private) before the environment is resolved and the runner asked.
+    try {
+      await harness.prepareHome(spec);
+    } catch {
+      return failed(
+        'failed',
+        `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
+      );
+    }
     const env = await this.environment(record.id, issued.token, parts);
     if (!env.ok) return failed('login_unavailable', env.error);
     const started =
@@ -581,6 +603,40 @@ export class FerretsService implements FerretsApi {
     };
     await this.write(working, record.state, 'state');
     return ok(record.id);
+  }
+
+  /**
+   * The ferret's home, as its harness names it (`Harness.homeFor`): Ferrets never builds a home path. Refused, before
+   * any token is issued or file written, when the harness throws, answers a path that is not canonical and absolute
+   * (relative, NUL, `/` itself, a trailing or doubled `/`, a `.` or `..` segment), or answers a home another harness
+   * names for this ferret or this harness names for another ferret (equal, or one inside the other) — a shared home
+   * would let one ferret read or rewrite another's sign-in and transcript. The overlap test compares spellings, so
+   * only a canonical answer can be judged by it; anything else is refused rather than normalized (no path building).
+   */
+  private async home(record: FerretRecord, harness: Harness): Promise<Result<FencedPath, StartFailure>> {
+    const unnamed = `the ${record.harness} harness did not name a home of its own for this ferret, so it was not started`;
+    const home = await harness.homeFor(record.id).catch(() => undefined);
+    if (!canonicalHome(home)) return failed('harness_unavailable', unnamed);
+    const overlaps = (other: string | undefined): boolean =>
+      other !== undefined && (other === home || other.startsWith(`${home}/`) || home.startsWith(`${other}/`));
+    const answer = async (key: HarnessKey, ferret: FerretId): Promise<string | undefined> => {
+      const other = this.ports.harness(key);
+      if (other === undefined) return undefined;
+      return await other.homeFor(ferret).catch(() => undefined);
+    };
+    for (const key of this.ports.harnessKeys())
+      if (key !== record.harness && overlaps(await answer(key, record.id)))
+        return failed(
+          'refused',
+          `the ${record.harness} harness named a home that the ${key} harness also names for this ferret, so it was not started`,
+        );
+    for (const other of this.registry.list())
+      if (other.id !== record.id && overlaps(await answer(other.harness, other.id)))
+        return failed(
+          'refused',
+          `the ${record.harness} harness named a home that ferret ${other.id} also has, so it was not started`,
+        );
+    return ok(home);
   }
 
   private async environment(

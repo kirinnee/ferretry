@@ -42,7 +42,6 @@ function service(records: readonly FerretRecord[], texts: ReadonlyMap<string, st
     launchParts: () => [],
     sitrepSources: () => [],
     instructions: () => [],
-    home: id => fenced(`/homes/${id}`),
     folder: path => ok(fenced(path)),
     changed: () => {},
     summaryText: async ferret => {

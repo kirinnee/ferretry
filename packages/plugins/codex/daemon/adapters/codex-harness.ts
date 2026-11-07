@@ -45,6 +45,9 @@ export interface CodexHarnessOptions {
   readonly update: HarnessUpdateSubsystem & { settled(): Promise<void> };
 }
 
+/** A ferret id is one plain name before it names a folder (the S45 grammar Claude Code's home uses too). */
+const PLAIN_FERRET = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+
 /** Codex's `AGENTS.md`: the instructions every launch writes into the ferret's home. */
 function agentsDocument(spec: LaunchSpec): string {
   const sections = [
@@ -98,6 +101,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   ): Promise<Result<Started, StartRefusal>> => {
     const argv = await command(spec, harnessConversation);
     if (!argv.ok) return argv;
+    await ensureHome(spec);
     await rollouts.launched(spec, harnessConversation);
     const running =
       harnessConversation === undefined
@@ -109,6 +113,31 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   };
 
   const refused = (id: string, reason: string): Delivery => ({ status: 'refused', id, reason });
+
+  /** The ferret's own home handle: `state/codex/agent-homes/<ferret>` through this plugin's own root. */
+  const homeRoot = (ferret: FerretId) => {
+    if (!PLAIN_FERRET.test(ferret)) throw new Error('the ferret id must be one plain name');
+    return kernel.roots.root('agent-homes', { ferret, subfolder: ferret });
+  };
+  const homeOf = (ferret: FerretId): FencedPath => {
+    const home = homeRoot(ferret).resolve('');
+    if (!home.ok) throw new Error(`the ferret's Codex home could not be placed: ${home.error}`);
+    return home.value;
+  };
+  /**
+   * The ferret's home, made before anything is written through it or Codex is launched in it (as Claude Code does):
+   * refused unless `spec.home` is exactly this plugin's home for the ferret, then created or narrowed to 0700 by the
+   * kernel through the checked `agent-homes` folder, refused when a link or a file is at its name (S42).
+   */
+  const ensureHome = async (spec: LaunchSpec) => {
+    const home = homeRoot(spec.ferret);
+    if (homeOf(spec.ferret) !== spec.home) throw new Error("the launch home is not this ferret's Codex home");
+    const homes = kernel.roots.root('agent-homes');
+    const folder = homes.resolve(spec.ferret);
+    if (!folder.ok) throw new Error(`the ferret's Codex home could not be placed: ${folder.error}`);
+    await homes.ensurePrivateDirectory(folder.value);
+    return home;
+  };
 
   return {
     key: 'codex',
@@ -144,15 +173,20 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     // The ChatGPT sign-in, a plain API key, and the gateways Codex can be pointed at.
     accepts: ['openai', 'api-key', 'proxy', 'endpoint'],
 
+    /** `state/codex/agent-homes/<ferret>`, resolved through this plugin's own `agent-homes` root (S42). */
+    async homeFor(ferret: FerretId): Promise<FencedPath> {
+      return homeOf(ferret);
+    },
+
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
-      const root = kernel.roots.root('agent-homes', { ferret: spec.ferret });
+      const root = await ensureHome(spec);
       const files: FencedPath[] = [];
       for (const [name, text] of [
         ['AGENTS.md', agentsDocument(spec)],
         ['config.toml', configDocument(spec)],
       ] as const) {
         if (text === '') continue;
-        const target = root.resolve(`${spec.home}/${name}`);
+        const target = root.resolve(name);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
         await root.writeText(target.value, text);
         files.push(target.value);
