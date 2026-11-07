@@ -1,9 +1,13 @@
 import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { type GitByteSpawn, KernelGitRunner } from '../../../daemon/adapters/git/runner.ts';
-import { GitProcessError } from '../../../daemon/lib/worktrees/git-invocation.ts';
+import {
+  DEFAULT_GIT_STDERR_LIMIT,
+  DEFAULT_GIT_STDOUT_LIMIT,
+  DEFAULT_GIT_TIMEOUT_MS,
+  GitProcessError,
+} from '../../../daemon/lib/worktrees/git-invocation.ts';
 import type {
   GitExecution,
-  GitWorkingDirectory,
   PinnedWorkingDirectory,
   WorktreeFileSystem,
   WorktreeFileType,
@@ -88,17 +92,11 @@ export class BunGitByteSpawn implements GitByteSpawn {
   async runBytes(
     program: 'git',
     args: readonly string[],
-    options: {
-      readonly cwd: GitWorkingDirectory;
-      readonly env: Readonly<Record<string, string>>;
-      readonly stdin?: Uint8Array;
-      readonly timeoutMs: number;
-      readonly maxStdoutBytes: number;
-      readonly maxStderrBytes: number;
-    },
+    options: Parameters<GitByteSpawn['runBytes']>[2],
   ): Promise<GitExecution> {
-    const named: string | undefined = typeof options.cwd === 'string' ? options.cwd : undefined;
-    const pinned: PinnedWorkingDirectory | undefined = typeof options.cwd === 'string' ? undefined : options.cwd;
+    const cwd = options.cwd ?? '.';
+    const named: string | undefined = typeof cwd === 'string' ? cwd : undefined;
+    const pinned: PinnedWorkingDirectory | undefined = typeof cwd === 'string' ? undefined : cwd;
     if (named !== undefined) await checkWorkingDirectory(named);
     const inherited: Record<string, string> = {};
     for (const [key, value] of Object.entries(this.inheritedEnvironment()))
@@ -126,13 +124,13 @@ export class BunGitByteSpawn implements GitByteSpawn {
       timedOut = true;
       child.kill('SIGKILL');
       abandoned.resolve(ABANDONED);
-    }, options.timeoutMs);
+    }, options.timeout ?? DEFAULT_GIT_TIMEOUT_MS);
 
     try {
       const [exitResult, stdout, stderr] = await Promise.all([
         Promise.race([child.exited, abandoned.promise]),
-        readCapped(child.stdout, options.maxStdoutBytes, abandoned.promise),
-        readCapped(child.stderr, options.maxStderrBytes, abandoned.promise),
+        readCapped(child.stdout, options.maxStdoutBytes ?? DEFAULT_GIT_STDOUT_LIMIT, abandoned.promise),
+        readCapped(child.stderr, options.maxStderrBytes ?? DEFAULT_GIT_STDERR_LIMIT, abandoned.promise),
       ]);
       return {
         exitCode: exitResult === ABANDONED ? -1 : exitResult,

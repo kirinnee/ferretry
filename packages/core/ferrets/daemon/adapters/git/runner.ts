@@ -1,3 +1,4 @@
+import { type Duration, milliseconds } from '@ferretry/std';
 import type { GitExecution, GitInvocation, GitRunner, GitWorkingDirectory } from '../../lib/worktrees/ports.ts';
 import {
   checkedLimit,
@@ -17,24 +18,27 @@ export {
 } from '../../lib/worktrees/git-invocation.ts';
 
 /**
- * The byte-level spawn Git needs: byte stdout capped at `maxStdoutBytes`, stderr capped, a kill at the timeout that
- * also stops reading (a grandchild holding the pipe must not hang the daemon), and a cwd that is either a name or a
- * directory held open (a pin). These are the `kernel.spawn` additions being made on `rebuild/port-kernel` (byte
- * stdout + maxStdoutBytes + pinned cwd); the host binds this to them when they land. Until then it is unwired, and
- * the reading/killing code that today lived here (`readCapped`, the timeout, the pin bracket) belongs to the kernel's
- * adapter, which is the only place allowed to spawn (`banned-globals`).
+ * The byte-level spawn Git needs, named exactly as the kernel's `SpawnPort.runBytes` (kernel item O,
+ * `rebuild/port-kernel` bdb8148f7): byte stdout capped at `maxStdoutBytes`, stderr capped, a `SIGKILL` at the
+ * timeout that also stops reading, and a cwd that is a folder or a directory held open (`PinnedWorkingDirectory`).
+ * The result is today's `GitExecution`, field for field the kernel's `SpawnBytesResult`.
+ *
+ * The one difference is the named cwd: the domain names a folder as a string, and the host maps it to the kernel's
+ * `FencedPath` through `RootHandle.realPath` (kernel item N) when it binds this. The reading and killing code that
+ * today lived here (`readCapped`, the timeout, the pin bracket) is the kernel adapter's, the only place allowed to
+ * spawn (`banned-globals`).
  */
 export interface GitByteSpawn {
   runBytes(
     program: 'git',
     args: readonly string[],
     options: {
-      readonly cwd: GitWorkingDirectory;
-      readonly env: Readonly<Record<string, string>>;
-      readonly stdin?: Uint8Array;
-      readonly timeoutMs: number;
-      readonly maxStdoutBytes: number;
-      readonly maxStderrBytes: number;
+      readonly cwd?: GitWorkingDirectory;
+      readonly env?: Readonly<Record<string, string>>;
+      readonly stdin?: string | Uint8Array;
+      readonly timeout?: Duration;
+      readonly maxStdoutBytes?: number;
+      readonly maxStderrBytes?: number;
     },
   ): Promise<GitExecution>;
 }
@@ -52,7 +56,7 @@ export class KernelGitRunner implements GitRunner {
         // The kernel's spawn starts from its own scrubbed base; nothing of the daemon's environment is inherited here.
         env: gitEnvironment({}, invocation.literalPathspecs ?? true),
         ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
-        timeoutMs,
+        timeout: milliseconds(timeoutMs),
         maxStdoutBytes,
         maxStderrBytes: DEFAULT_GIT_STDERR_LIMIT,
       });
