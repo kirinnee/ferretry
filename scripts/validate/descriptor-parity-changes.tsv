@@ -317,3 +317,9 @@ route	GET /v1/ferrets/:id/runtime-models	added	moved from GET /v1/sessions/:sess
 route	POST /v1/ferrets/:id/runtime	added	moved from POST /v1/sessions/:sessionId/runtime; Runtimes owns runtime controls; descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/subtree	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/subtree	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/result	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/result	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/subtree	removed	session routes renamed to /v1/ferrets/:ferretId/… (design §1.4) and the word subtree is the lead's pack (design §1.2): GET /v1/ferrets/:ferretId/pack; descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/pack	added	session routes renamed to /v1/ferrets/:ferretId/… (design §1.4) and the word subtree is the lead's pack (design §1.2); descriptor fields unchanged
+route	PATCH /v1/sessions/:sessionId/pack	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/ferrets/:ferretId/pack	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
