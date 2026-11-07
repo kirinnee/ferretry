@@ -4,7 +4,7 @@ import {
   TYPED_IDENTITY_TTL_MS,
   TypedIdentities,
   usernameOf,
-} from '../../../src/lib/input-requests/typed-identities.ts';
+} from '../../../../daemon/lib/inputs/typed-identities.ts';
 
 const SESSION = 'mvv6b4qw-49d0158d';
 const GOOGLE = 'accounts.google.com';

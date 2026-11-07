@@ -5,7 +5,7 @@ import {
   parseEcho,
   SttyTerminalModes,
   sttyArguments,
-} from '../../../src/lib/input-requests/terminal-modes.ts';
+} from '../../../../daemon/lib/inputs/terminal-modes.ts';
 
 const STTY_ECHO_ON = 'speed 38400 baud; line = 0;\nisig icanon iexten echo echoe echok -echonl\n';
 const STTY_ECHO_OFF = 'speed 38400 baud; line = 0;\nisig icanon iexten -echo echoe echok -echonl\n';

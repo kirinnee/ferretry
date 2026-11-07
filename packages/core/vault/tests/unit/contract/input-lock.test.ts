@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  INPUT_HOLD_REASONS,
-  INPUT_LOCK_WORDS,
-  INPUT_QUARANTINE_SECONDS,
-  INPUT_SHORT_LOCK_SECONDS,
-  InputAgentViewSchema,
-  InputHoldSchema,
-  lockWords,
-} from '../../src/lib/input-request.ts';
+import { INPUT_HOLD_REASONS, INPUT_QUARANTINE_SECONDS, INPUT_SHORT_LOCK_SECONDS, InputHoldSchema } from '../../../contract/index.ts';
+import { INPUT_LOCK_WORDS, InputAgentViewSchema, lockWords } from '../../../daemon/lib/inputs/wire.ts';
 
 describe('the lock a card shows', () => {
   it('should be a number of seconds within the full window, and one of the fixed reasons', () => {

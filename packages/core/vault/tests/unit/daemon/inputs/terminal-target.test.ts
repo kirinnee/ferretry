@@ -1,16 +1,16 @@
 import { describe, it } from 'bun:test';
 import type { InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
-import { digestFacts, digestLine } from '../../../src/lib/input-requests/digest.ts';
-import type { ProgramProofPort, ProvenProgram } from '../../../src/lib/input-requests/ports.ts';
-import type { TerminalModes } from '../../../src/lib/input-requests/terminal-modes.ts';
+import { digestFacts, digestLine } from '../../../../daemon/lib/inputs/digest.ts';
+import type { ProgramProofPort, ProvenProgram } from '../../../../daemon/lib/inputs/ports.ts';
+import type { TerminalModes } from '../../../../daemon/lib/inputs/terminal-modes.ts';
 import {
   foregroundPids,
   parseForeground,
   type TerminalLocator,
   TmuxInputTarget,
-} from '../../../src/lib/input-requests/terminal-target.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
+} from '../../../../daemon/lib/inputs/terminal-target.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/inputs/target-seams.ts';
 
 const SESSION = 'fy-webterm-Hadi-0a1b2c3d-abc123abc123';
 const PANE = `${SESSION}:0.0`;
@@ -256,7 +256,7 @@ describe('observing a terminal an input request aims at', () => {
 
     for (const w of [missing, noTmux, dead, badProof, noTty, noCursor, noPs, noForeground, noCapture])
       should(await target(w).observe('s1', dev)).deepEqual(gone);
-    should(await target(world()).observe('s1', { kind: 'browser', key: 'app' })).deepEqual({
+    should(await target(world()).observe('s1', { kind: 'page', key: 'app' })).deepEqual({
       ok: false,
       reason: 'unsupported',
     });
@@ -473,9 +473,9 @@ describe('typing into a terminal an input request aims at', () => {
   it('should refuse a browser target and browser facts', async () => {
     const w = world();
     const expected = await observed(w);
-    const browserFacts = { ...expected, kind: 'browser' } as unknown as InputTargetFacts;
+    const browserFacts = { ...expected, kind: 'page' } as unknown as InputTargetFacts;
 
-    should(await target(w).type('s1', { kind: 'browser', key: 'a' }, SECRET, true, expected)).equal('target_gone');
+    should(await target(w).type('s1', { kind: 'page', key: 'a' }, SECRET, true, expected)).equal('target_gone');
     should(await target(w).type('s1', dev, SECRET, true, browserFacts)).equal('target_gone');
   });
 

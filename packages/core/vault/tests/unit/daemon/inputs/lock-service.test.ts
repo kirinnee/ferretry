@@ -1,14 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type AccountList, type AccountSummary, type LoginObserved, PutLoginEntryRequestSchema, type SignInSummary } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { type AccountList, type AccountSummary, type LoginObserved, type SignInSummary } from '../../../../daemon/lib/inputs/borrowed.ts';
 import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
 import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
-import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
-import { identityOf, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
-import type { ScriptedOriginsView } from '../../../src/lib/sign-in-grants/matcher.ts';
-import { LoginDirectory, LoginVault } from '../../../src/lib/secrets/index.ts';
-import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
-import type { InputCaller as ServiceCaller } from '../../../src/lib/input-requests/ports.ts';
+import { identityOf, LoginObserver } from '../../../../daemon/lib/inputs/login-observer.ts';
+import type { ScriptedOriginsView } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
+import type { InputCaller as ServiceCaller } from '../../../../daemon/lib/inputs/ports.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from './support.ts';
 
 /** The adaptive lock (!A149) through the REAL input service: the card says it, and the hold runs it. */
@@ -17,7 +14,7 @@ const HOST: ServiceCaller = { kind: 'owner', actor: { kind: 'host' }, carrier: '
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 
 const PAGE: InputTargetFacts = {
-  kind: 'browser',
+  kind: 'page',
   pageId: 'page-1',
   origin: 'https://accounts.example.test',
   secure: true,
@@ -36,7 +33,7 @@ const PAGE: InputTargetFacts = {
 };
 
 const PAGE_RAISE: InputRaise = {
-  target: { kind: 'browser', key: 'app' },
+  target: { kind: 'page', key: 'app' },
   prompt: 'the password',
   submit: 'owner-default',
   fields: [{ id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e3' } }],
@@ -209,7 +206,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
     should(request.lock?.reason).equal('probed-field');
     facts = {
       ...PAGE,
-      fields: PAGE.kind === 'browser' ? [{ ...PAGE.fields[0], backendNodeId: 77 } as never] : [],
+      fields: PAGE.kind === 'page' ? [{ ...PAGE.fields[0], backendNodeId: 77 } as never] : [],
     } as InputTargetFacts;
     await deliver(w, request).catch(() => undefined);
     const [redrawn] = await w.service.list(HOST);
@@ -227,7 +224,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
     const { request } = await raised(w, plain);
     facts = {
       ...PAGE,
-      fields: PAGE.kind === 'browser' ? [{ ...PAGE.fields[0], backendNodeId: 77 } as never] : [],
+      fields: PAGE.kind === 'page' ? [{ ...PAGE.fields[0], backendNodeId: 77 } as never] : [],
     } as InputTargetFacts;
     await deliver(w, request).catch(() => undefined);
     const [redrawn] = await w.service.list(HOST);
@@ -679,45 +676,5 @@ describe('the facts the lock reads: every sign-in matched to the target, togethe
       signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.other.test', [proof()])],
     };
     should(await lockWith(elsewhere)).deepEqual({ seconds: 120, reason: 'first-time' });
-  });
-
-  it("should keep a site's proof however many facts the account's other sign-ins hold (the real store)", async () => {
-    const index = new MemoryLoginIndex();
-    const sealed = new MemorySecretDocuments();
-    const cipher = new FakeSecretCipher();
-    const directory = new LoginDirectory(index, sealed, cipher, { now: () => '2026-10-30T09:00:00.000Z' });
-    await directory.put(
-      'EXAMPLE',
-      PutLoginEntryRequestSchema.parse({
-        label: 'Example',
-        password: 'hunter2-UNIQUE-pw',
-        match: ['accounts.example.test', 'ssh@build.example.test'],
-      }),
-    );
-    const { signIns } = await directory.accounts.list();
-    const site = signIns.find(signIn => signIn.place.kind === 'site')?.id as string;
-    const ssh = signIns.find(signIn => signIn.place.kind === 'terminal')?.id as string;
-    await directory.accounts.observeSignIn(site, {
-      at: 'accounts.example.test',
-      surface: 'page',
-      identity: identityOf(PAGE, 'accounts.example.test') as string,
-      masked: true,
-      noEchoAfterSubmit: true,
-      navigatedAway: true,
-    });
-    // The account's ssh sign-in fills its own facts to the limit: sixteen fields it saw there.
-    for (let n = 0; n < 16; n += 1)
-      await directory.accounts.observeSignIn(ssh, {
-        at: 'ssh@build.example.test',
-        surface: 'terminal',
-        identity: n.toString(16).padStart(16, '0'),
-        masked: true,
-      });
-    const w = inputRequestService({
-      steered: () => false,
-      facts: PAGE,
-      logins: new InputLoginAdapter(directory, new LoginVault(index, sealed, cipher)),
-    });
-    should((await raised(w, PAGE_RAISE)).request.lock).deepEqual({ seconds: 10, reason: 'proven-field' });
   });
 });

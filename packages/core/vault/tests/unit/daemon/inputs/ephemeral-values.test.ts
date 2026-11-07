@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { COPY_AFTER_MASK_SECONDS, COPY_MAX_LIFETIME_SECONDS } from '../../../../daemon/lib/inputs/borrowed.ts';
 import { INPUT_MAX_REDACTION_SECONDS } from '../../../../contract/index.ts';
 import should from 'should';
-import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
 
 const clock = { ms: 1_000_000 };
 const build = () => new EphemeralValues({ now: () => clock.ms });

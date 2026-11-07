@@ -1,6 +1,6 @@
 import { AskSources, AsksPort } from '@ferretry/core-asks/contract';
-import { GatePort } from '@ferretry/core-gate/contract';
-import { definePlugin } from '@ferretry/kernel/manifest';
+import { CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
+import { definePlugin, route } from '@ferretry/kernel/manifest';
 import {
   ChildEnvironmentPort,
   HoldsChanged,
@@ -16,6 +16,16 @@ import {
   VaultKeyFile,
   VaultPort,
 } from './contract/index.ts';
+
+// ─── inputs (vault-b): today's `runtime/mounts/input-requests.ts` descriptors, field for field ───────────────────
+const INPUT_USE_TERMINAL = { capability: CAPABILITIES.terminal, axis: 'use' } as const;
+const INPUT_USE_BROWSER = { capability: CAPABILITIES.browser, axis: 'use' } as const;
+const INPUT_READ = { skip: 'a read: it changes nothing' } as const;
+const INPUT_BY_SERVICE = { skip: 'the input service records input.* itself, with the request id and its outcome' } as const;
+const INPUT_GUARD = {
+  none: 'requests, facts and states only: no value, length or digest, and the prompt line is replaced during a hold',
+} as const;
+const INPUT_PERSON = { minimum: 'operator', caller: 'person', noStore: true, guard: INPUT_GUARD } as const;
 
 /**
  * Vault (§2.2): keeps secrets ferrets use but never see; types values the owner gives into a terminal or page; hides
@@ -40,6 +50,41 @@ export default definePlugin({
     { word: 'mask', means: 'hiding a secret in text', insteadOf: ['redact', 'scrub'] },
   ],
   needs: { gate: GatePort, asks: AsksPort },
+  actions: {
+    routes: [
+      route('GET /v1/input-requests', { ...INPUT_PERSON, capability: INPUT_USE_TERMINAL, audit: INPUT_READ }),
+      route('GET /v1/ferrets/:ferretId/input-requests', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_TERMINAL,
+        audit: INPUT_READ,
+      }),
+      route('GET /v1/ferrets/:ferretId/input-requests/:requestId/shot', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_BROWSER,
+        audit: INPUT_READ,
+      }),
+      route('POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_TERMINAL,
+        audit: INPUT_BY_SERVICE,
+      }),
+      route('GET /v1/ferrets/:ferretId/input-quarantines', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_TERMINAL,
+        audit: INPUT_READ,
+      }),
+      route('POST /v1/ferrets/:ferretId/input-quarantines/:key/end', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_TERMINAL,
+        audit: INPUT_BY_SERVICE,
+      }),
+      route('POST /v1/ferrets/:ferretId/input-requests/:requestId/cancel', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_TERMINAL,
+        audit: INPUT_BY_SERVICE,
+      }),
+    ],
+  },
   provides: {
     vault: VaultPort,
     outputGuard: OutputGuardPort,

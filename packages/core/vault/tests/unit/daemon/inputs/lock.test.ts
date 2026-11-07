@@ -17,13 +17,13 @@ import {
   provenByFacts,
   steeredLock,
   terminalHides,
-} from '../../../src/lib/input-requests/lock.ts';
-import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
+} from '../../../../daemon/lib/inputs/lock.ts';
+import { identityOf } from '../../../../daemon/lib/inputs/login-observer.ts';
 
 /** How long the target is kept from the ferret after the write (!A149): only what the daemon saw decides. */
 
 const ORIGIN = 'https://accounts.example.test';
-type PageField = Extract<InputTargetFacts, { kind: 'browser' }>['fields'][number];
+type PageField = Extract<InputTargetFacts, { kind: 'page' }>['fields'][number];
 
 const pageField = (extra: Partial<PageField> = {}, attributes: Partial<PageField['field']> = {}): PageField => ({
   fieldId: 'password',
@@ -38,7 +38,7 @@ const pageField = (extra: Partial<PageField> = {}, attributes: Partial<PageField
 
 const page = (fields: PageField[] = [pageField()], extra: Partial<InputTargetFacts> = {}): InputTargetFacts =>
   ({
-    kind: 'browser',
+    kind: 'page',
     pageId: 'p',
     origin: ORIGIN,
     secure: true,

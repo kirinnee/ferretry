@@ -4,7 +4,7 @@ import type { FerretId, KernelPorts } from '@ferretry/kernel/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import { type InputTargetAdapter, InputRequestFiles, InputTargets } from '../contract/index.ts';
-import { InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
+import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
 import { PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
@@ -23,7 +23,7 @@ import { InputRequestService } from './lib/inputs/service.ts';
 import { INPUT_REQUEST_SWEEP_MS } from './lib/inputs/sweep.ts';
 import { InputTargetRouter } from './lib/inputs/target-router.ts';
 import { TypedIdentities } from './lib/inputs/typed-identities.ts';
-import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
+import { inputRequestRoutes } from './lib/runtime/mounts/inputs.ts';
 
 /**
  * THE INPUT BRIDGE (today's `bin/modules/input-requests.ts`): a ferret stuck at a password prompt, a code or a
@@ -69,6 +69,8 @@ export interface Inputs {
   readonly service: InputRequestService;
   readonly identities: TypedIdentities;
   readonly observer?: LoginObserver;
+  /** The owner's input routes, by the keys `manifest.ts` declares: Vault's build spreads them into its `routes`. */
+  readonly routes: ReturnType<typeof inputRequestRoutes>;
 }
 
 /** The part of `build(ctx)` the input bridge reads. */
@@ -130,7 +132,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     after: ['inputs-restore'],
     run: async () => await service.sweep(),
   });
-  return { service, identities };
+  return { service, identities, routes: inputRequestRoutes(service) };
 }
 
 async function ferretsWithRequests(state: InputsContext['kernel']['state']): Promise<readonly string[]> {

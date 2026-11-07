@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionLock } from '../../../src/lib/input-requests/session-lock.ts';
+import { SessionLock } from '../../../../daemon/lib/inputs/session-lock.ts';
 
 describe('SessionLock', () => {
   it('should run one key’s work strictly in turn, even when an earlier one throws', async () => {

@@ -11,14 +11,14 @@ import {
   maskedAt,
   placeOf,
   siteOf,
-} from '../../../src/lib/input-requests/login-observer.ts';
+} from '../../../../daemon/lib/inputs/login-observer.ts';
 
 const PASSWORD = 'hunter2-UNIQUE-pw';
 /** The sign-in the Google account was typed at: where its facts go. */
 const SI_GOOGLE = 'si_00000000000000d1';
 
 const page = (type = 'password', navigationId = 'doc-1'): InputTargetFacts => ({
-  kind: 'browser',
+  kind: 'page',
   pageId: 'p',
   origin: 'https://accounts.google.com',
   secure: true,
@@ -81,7 +81,7 @@ const delivery = (extra: Partial<LoginDelivery> = {}): LoginDelivery => ({
   login: 'GOOGLE',
   signIn: SI_GOOGLE,
   domains: ['accounts.google.com'],
-  target: { kind: 'browser', key: 'app' },
+  target: { kind: 'page', key: 'app' },
   facts: page(),
   fields: [field('secret')],
   secrets: [PASSWORD],
@@ -275,7 +275,7 @@ describe("the daemon's own look for the value", () => {
       { where: async () => undefined, text: async () => `Welcome ${PASSWORD}` },
       { screen: async () => 'Password: \n$ ' },
     );
-    should(await probe.shows('s', { kind: 'browser', key: 'app' }, ['page-1'], [PASSWORD])).be.true();
+    should(await probe.shows('s', { kind: 'page', key: 'app' }, ['page-1'], [PASSWORD])).be.true();
     should(await probe.shows('s', { kind: 'terminal', key: 'dev' }, ['t1'], [PASSWORD])).be.false();
     should(await probe.shows('s', { kind: 'terminal', key: 'dev' }, ['t1'], [])).be.undefined();
   });
@@ -301,7 +301,7 @@ describe('where a delivery’s facts belong', () => {
       undefined,
     );
     should(await probe.where('s', 'app', ['page-1'])).deepEqual({ navigationId: 'n', host: 'h' });
-    should(await probe.shows('s', { kind: 'browser', key: 'app' }, ['page-1'], [PASSWORD])).be.undefined();
+    should(await probe.shows('s', { kind: 'page', key: 'app' }, ['page-1'], [PASSWORD])).be.undefined();
     should(await probe.shows('s', { kind: 'terminal', key: 'dev' }, ['t1'], [PASSWORD])).be.undefined();
     should(await probe.shows('s', { kind: 'secret', key: 'X' }, [], [PASSWORD])).be.undefined();
   });
@@ -611,7 +611,7 @@ describe('checked by use: did a code Ferretry made go through?', () => {
     surfaces: ['app', 'page-1'],
     deliveredAt: DELIVERED,
   });
-  const onPage = code(page('text'), { kind: 'browser', key: 'app' });
+  const onPage = code(page('text'), { kind: 'page', key: 'app' });
   const prompt = { ...terminal(), promptLine: 'Verification code:' } as InputTargetFacts;
   const atPrompt = code(prompt, { kind: 'terminal', key: 'dev' });
 

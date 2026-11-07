@@ -4,8 +4,8 @@ import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputDeliverBody, type InputEvent, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputRaise, type InputTarget, type InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
-import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
-import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
+import { InputRequestError } from '../../../../daemon/lib/inputs/errors.ts';
 import type {
   InputCaller,
   InputCard,
@@ -13,10 +13,10 @@ import type {
   InputLoginPort,
   InputTargetField,
   ObserveResult,
-} from '../../../src/lib/input-requests/ports.ts';
-import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
-import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
-import { InputTargetRouter } from '../../../src/lib/input-requests/target-router.ts';
+} from '../../../../daemon/lib/inputs/ports.ts';
+import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
+import { InputRequestService } from '../../../../daemon/lib/inputs/service.ts';
+import { InputTargetRouter } from '../../../../daemon/lib/inputs/target-router.ts';
 import { FACTS } from './support.ts';
 
 /**
@@ -29,7 +29,7 @@ const HOST: InputCaller = { kind: 'owner', actor: { kind: 'host' }, carrier: 'lo
 const EMAIL = 'kirin@example.com';
 const PASSWORD = 'hunter2-UNIQUE-pw';
 
-type PageFacts = Extract<InputTargetFacts, { readonly kind: 'browser' }>;
+type PageFacts = Extract<InputTargetFacts, { readonly kind: 'page' }>;
 type PageField = PageFacts['fields'][number];
 
 const pageField = (fieldId: string, over: Partial<PageField> = {}): PageField => ({
@@ -47,7 +47,7 @@ const pageField = (fieldId: string, over: Partial<PageField> = {}): PageField =>
 });
 
 const PAGE: PageFacts = {
-  kind: 'browser',
+  kind: 'page',
   pageId: 'page-1',
   origin: 'https://accounts.google.com',
   secure: true,
@@ -56,7 +56,7 @@ const PAGE: PageFacts = {
 };
 
 const LOGIN: InputRaise = {
-  target: { kind: 'browser', key: 'app' },
+  target: { kind: 'page', key: 'app' },
   prompt: 'Google login for the deploy console',
   fields: [
     { id: 'email', label: 'Email', sensitivity: 'plain', element: { kind: 'selector', selector: '#identifierId' } },
@@ -306,7 +306,7 @@ describe('a card of several fields', () => {
     should(result.state).equal('delivered');
     should(writes).eql([
       {
-        target: { kind: 'browser', key: 'app' },
+        target: { kind: 'page', key: 'app' },
         values: [
           { field: 'email', text: EMAIL },
           { field: 'password', text: PASSWORD },
@@ -514,13 +514,13 @@ describe('a card of several fields', () => {
     await service.raise(SESSION, LOGIN);
     await service.raise(SESSION, {
       ...LOGIN,
-      target: { kind: 'browser', key: 'two' },
+      target: { kind: 'page', key: 'two' },
       fields: [{ id: 'code', sensitivity: 'private', element: { kind: 'ref', ref: 'e3' } }],
       chain: 'A1' as AgendaId,
     });
     await service.raise(SESSION, {
       ...LOGIN,
-      target: { kind: 'browser', key: 'three' },
+      target: { kind: 'page', key: 'three' },
       chain: 'A2' as AgendaId,
     });
     const requests = await service.list(HOST);
@@ -587,7 +587,7 @@ describe('a card of several fields', () => {
         requestId: 'f'.repeat(32),
         agendaItemId: 'A4' as AgendaId,
         sessionId: SESSION,
-        target: { kind: 'browser', key: 'app' },
+        target: { kind: 'page', key: 'app' },
         sensitivity: 'secret',
         submit: 'offer-owner',
         state: 'pending',
@@ -619,12 +619,12 @@ describe('InputTargetRouter', () => {
   it('should say a page cannot take a request when no browser adapter is wired', async () => {
     const router = new InputTargetRouter(terminal);
 
-    should(await router.observe(SESSION, { kind: 'browser', key: 'app' }, [{ id: 'value' }])).eql({
+    should(await router.observe(SESSION, { kind: 'page', key: 'app' }, [{ id: 'value' }])).eql({
       ok: false,
       reason: 'unsupported',
     });
-    should(await router.type(SESSION, { kind: 'browser', key: 'app' }, [], false, PAGE)).equal('target_gone');
-    should(await router.refind(SESSION, { kind: 'browser', key: 'app' }, [{ id: 'value' }], PAGE)).eql({
+    should(await router.type(SESSION, { kind: 'page', key: 'app' }, [], false, PAGE)).equal('target_gone');
+    should(await router.refind(SESSION, { kind: 'page', key: 'app' }, [{ id: 'value' }], PAGE)).eql({
       ok: false,
       reason: 'unsupported',
     });
@@ -643,7 +643,7 @@ describe('InputTargetRouter', () => {
         return { ok: true, facts: PAGE } as ObserveResult;
       },
     };
-    const app = { kind: 'browser', key: 'app' } as const;
+    const app = { kind: 'page', key: 'app' } as const;
 
     should(await new InputTargetRouter(terminal, page).refind(SESSION, app, [{ id: 'value' }], PAGE)).eql({
       ok: false,
@@ -881,11 +881,11 @@ describe('when the page changes under the card (#B100)', () => {
     should(card?.observed).eql(RERENDERED);
     should(card?.pictured).equal(true);
     should(card?.risk?.level).equal('red');
-    should(shots.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([12, 99]);
+    should(shots.map(seen => (seen.kind === 'page' ? seen.fields[1]?.backendNodeId : 0))).eql([12, 99]);
     should(picture.pngBase64).equal('c2hvdA2');
     should(done.state).equal('delivered');
     should(writes.length).equal(1);
-    should(typedInto.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([99]);
+    should(typedInto.map(seen => (seen.kind === 'page' ? seen.fields[1]?.backendNodeId : 0))).eql([99]);
     should(told.at(-1)).containEql('was answered and typed');
   });
 

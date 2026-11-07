@@ -3,18 +3,18 @@ import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { INPUT_MAX_REBINDS, type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
 import { type InputDeliverBody, type InputEvent, type InputQuarantineEvent, type InputRequest, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
-import { digestFacts } from '../../../src/lib/input-requests/digest.ts';
-import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
-import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
+import { digestFacts } from '../../../../daemon/lib/inputs/digest.ts';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
+import { InputRequestError } from '../../../../daemon/lib/inputs/errors.ts';
 import type {
   InputAuditEntry,
   InputCaller,
   InputCard,
   ObserveResult,
   TypeResult,
-} from '../../../src/lib/input-requests/ports.ts';
-import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
-import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+} from '../../../../daemon/lib/inputs/ports.ts';
+import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
+import { InputRequestService } from '../../../../daemon/lib/inputs/service.ts';
 
 const SESSION = 'mvv6b4qw-49d0158d';
 const VALUE = 'hunter2-UNIQUE';
@@ -330,7 +330,7 @@ describe('InputRequestService.raise', () => {
 
   it('should refuse a page field that names no element', async () => {
     const { service } = build();
-    const error = await refused(service.raise(SESSION, { ...RAISE, target: { kind: 'browser', key: 'app' } }));
+    const error = await refused(service.raise(SESSION, { ...RAISE, target: { kind: 'page', key: 'app' } }));
 
     should(error.code).equal('bad_request');
   });
@@ -1000,7 +1000,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     const ended = build({ history: [requested, { ...requested, type: 'surface.input_delivered' }] });
     const late = build({ history: [{ ...requested, expiresAt: '2026-10-30T11:00:00.000Z' }] });
     const promptless = build({ history: [requested], prompt: undefined });
-    const browser = build({ history: [{ ...requested, target: { kind: 'browser', key: 'app' } }] });
+    const browser = build({ history: [{ ...requested, target: { kind: 'page', key: 'app' } }] });
     const foreign = build({ history: [{ ...requested, sessionId: 'x-1' }] });
     for (const world of [ended, late, promptless, browser, foreign]) {
       await world.service.restore();
@@ -1122,7 +1122,7 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
     await second.service.restore();
     const promptless = build({ history: [requested, delivering], prompt: undefined });
     await promptless.service.restore();
-    const browser = build({ history: [requested, { ...delivering, target: { kind: 'browser', key: 'app' } }] });
+    const browser = build({ history: [requested, { ...delivering, target: { kind: 'page', key: 'app' } }] });
     await browser.service.restore();
     const again = build({ history: [delivering] });
     await again.service.restore();

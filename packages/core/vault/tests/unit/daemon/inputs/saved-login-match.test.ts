@@ -13,7 +13,7 @@ import {
   signInFor,
   shortHost,
   targetMatchKey,
-} from '../../../src/lib/input-requests/saved-logins.ts';
+} from '../../../../daemon/lib/inputs/saved-logins.ts';
 const terminal = (comm: string, argv: string): InputTargetFacts => ({
   kind: 'terminal',
   paneProof: { paneId: '%3', pid: 1 },
@@ -28,7 +28,7 @@ const terminal = (comm: string, argv: string): InputTargetFacts => ({
 });
 
 const browser = (origin: string): InputTargetFacts => ({
-  kind: 'browser',
+  kind: 'page',
   pageId: 'p',
   origin,
   secure: true,
@@ -408,7 +408,7 @@ describe('where the daemon may type a code it made', () => {
   });
   const onPage = (over: Record<string, unknown> = {}, secure = true) =>
     ({
-      kind: 'browser',
+      kind: 'page',
       pageId: 'p',
       origin: 'https://github.com',
       secure,

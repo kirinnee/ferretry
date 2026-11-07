@@ -6,13 +6,13 @@ import type {
   BrowserInputFieldsPort,
   BrowserInputObservation,
   BrowserInputOutcome,
-} from '../../../src/lib/browser/transport/input-contracts.ts';
-import { type PageInputHost, PageInputTarget, throwawayValue } from '../../../src/lib/input-requests/page-target.ts';
-import { InputTargetRouter } from '../../../src/lib/input-requests/target-router.ts';
+} from '../../../../daemon/lib/inputs/target-seams.ts';
+import { type PageInputHost, PageInputTarget, throwawayValue } from '../../../../daemon/lib/inputs/page-target.ts';
+import { InputTargetRouter } from '../../../../daemon/lib/inputs/target-router.ts';
 import { FACTS } from './support.ts';
 
 const FACTS_PAGE: BrowserInputFacts = {
-  kind: 'browser',
+  kind: 'page',
   pageId: 'page-1',
   origin: 'https://example.test',
   secure: true,
@@ -29,7 +29,7 @@ const FACTS_PAGE: BrowserInputFacts = {
     },
   ],
 };
-const APP = { kind: 'browser', key: 'app' } as const;
+const APP = { kind: 'page', key: 'app' } as const;
 const FIELDS = [{ id: 'password', element: { kind: 'ref', ref: 'e3' } }] as const;
 
 /** The browser host and its page, faked: what it was asked and what it answers. */

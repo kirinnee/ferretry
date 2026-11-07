@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemeral-redactor.ts';
-import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
-import { coverageOf } from '../../../src/lib/secrets/policy.ts';
-import { NO_REDACTION, type TextRedactor } from '../../../src/lib/secrets/redaction.ts';
+import { EphemeralAwareRedactor } from '../../../../daemon/lib/inputs/ephemeral-redactor.ts';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
+import { coverageOf } from '../../../../daemon/lib/secrets/policy.ts';
+import { NO_REDACTION, type TextRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
 
 const values = new EphemeralValues({ now: () => 1 });
 values.hold('s1', 'JUST-TYPED', 'A1');

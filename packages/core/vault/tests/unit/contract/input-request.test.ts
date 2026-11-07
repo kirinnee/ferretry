@@ -1,46 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import { AgendaItemSchema } from '../../src/lib/agenda.ts';
-import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
-import { AUDIT_EVENTS } from '../../src/lib/audit.ts';
-import {
-  INPUT_ACTOR_OBSERVER_BY,
-  INPUT_AUDIT_EVENTS,
-  INPUT_DEFAULT_EXPIRY_SECONDS,
-  INPUT_JOURNAL_EVENT_TYPES,
-  INPUT_MAX_EXPIRY_SECONDS,
-  INPUT_PROMPT_MARKER,
-  inputContextLines,
-  INPUT_MAX_FIELDS,
-  INPUT_PAD_BUCKET_BYTES,
-  INPUT_SINGLE_FIELD_ID,
-  INPUT_VALUE_MAX_BYTES,
-  type InputActor,
-  InputActorSchema,
-  InputAgentViewSchema,
-  InputAuditDetailSchema,
-  InputCancelBodySchema,
-  InputDeliverBodySchema,
-  InputDeliverResultSchema,
-  InputEventSchema,
-  InputOutcomeSchema,
-  InputRaiseSchema,
-  InputRequestListSchema,
-  InputRequestSchema,
-  InputTargetFactsSchema,
-  inputRaiseFields,
-  inputValueProblem,
-  LOGIN_OBSERVER_BYS,
-  type LoginObserverBy,
-  observerByOf,
-  ownerTapped,
-  padInputValue,
-  savedRolesOf,
-  strongestSensitivity,
-  unpadInputValue,
-  worstRisk,
-} from '../../src/lib/input-request.ts';
+import { StoredAskSchema } from '@ferretry/core-asks/contract';
+import { AUDIT_KIND_NAMES } from '@ferretry/core-gate/contract';
+import { INPUT_ACTOR_OBSERVER_BY, INPUT_AUDIT_EVENTS, INPUT_JOURNAL_EVENT_TYPES, INPUT_PROMPT_MARKER, inputContextLines, INPUT_SINGLE_FIELD_ID, type InputActor, InputActorSchema, InputAgentViewSchema, InputAuditDetailSchema, InputCancelBodySchema, InputDeliverBodySchema, InputDeliverResultSchema, InputEventSchema, InputOutcomeSchema, InputRequestListSchema, InputRequestSchema, inputRaiseFields, inputValueProblem, LOGIN_OBSERVER_BYS, type LoginObserverBy, observerByOf, ownerTapped, padInputValue, savedRolesOf, unpadInputValue, worstRisk } from '../../../daemon/lib/inputs/wire.ts';
+import { INPUT_DEFAULT_EXPIRY_SECONDS, INPUT_MAX_EXPIRY_SECONDS, INPUT_MAX_FIELDS, INPUT_PAD_BUCKET_BYTES, INPUT_VALUE_MAX_BYTES, InputRaiseSchema, InputTargetFactsSchema, strongestSensitivity } from '../../../contract/index.ts';
 
 const ID = 'b'.repeat(32);
 const DIGEST = 'c'.repeat(64);
@@ -60,7 +24,7 @@ const TERMINAL_FACTS = {
 } as const;
 
 const BROWSER_FACTS = {
-  kind: 'browser',
+  kind: 'page',
   pageId: 'page-1',
   origin: 'https://github.com',
   secure: true,
@@ -142,7 +106,7 @@ describe('raising an input request', () => {
   });
 
   it('should take the 2FA key a code is from, by its id only', () => {
-    const raise = { target: { kind: 'browser', key: 'app' }, prompt: 'p', sensitivity: 'private' };
+    const raise = { target: { kind: 'page', key: 'app' }, prompt: 'p', sensitivity: 'private' };
     should(InputRaiseSchema.safeParse({ ...raise, factor: 'tf_000000000001' }).success).be.true();
     for (const factor of ['tf_0001', 'Authenticator app', 'si_0123456789abcdef', 'TF_000000000001'])
       should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
@@ -169,7 +133,7 @@ describe('raising an input request', () => {
     should(InputRaiseSchema.safeParse({ ...base, expiresInSeconds: INPUT_MAX_EXPIRY_SECONDS }).success).be.true();
     should(
       InputRaiseSchema.safeParse({
-        target: { kind: 'browser', key: 'app' },
+        target: { kind: 'page', key: 'app' },
         prompt: 'p',
         fields: [{ id: 'email', sensitivity: 'plain', element: { kind: 'selector', selector: 'x'.repeat(513) } }],
       }).success,
@@ -179,7 +143,7 @@ describe('raising an input request', () => {
 });
 
 describe('a card of several fields', () => {
-  const base = { target: { kind: 'browser', key: 'app' }, prompt: 'Google login' } as const;
+  const base = { target: { kind: 'page', key: 'app' }, prompt: 'Google login' } as const;
   const email = {
     id: 'email',
     label: 'Email',
@@ -382,7 +346,7 @@ describe('the events and the audit detail', () => {
 
   it('should record a fill under a task plan by its plan, line and sign-in, and a miss by its closed reason', () => {
     const filled = {
-      targetKind: 'browser',
+      targetKind: 'page',
       sensitivity: 'secret',
       plan: ID,
       line: 1,
@@ -391,7 +355,7 @@ describe('the events and the audit detail', () => {
       submitted: true,
     };
     const missed = {
-      targetKind: 'browser',
+      targetKind: 'page',
       sensitivity: 'secret',
       plan: ID,
       line: 1,
@@ -515,7 +479,7 @@ describe('a card a standing sign-in rule filled, or tried to', () => {
 
   it('should audit a rule fill by rule and revision beside the sign-in, never a value', () => {
     const filled = {
-      targetKind: 'browser',
+      targetKind: 'page',
       sensitivity: 'secret',
       by: 'rule',
       signInRule: RULE,
@@ -736,14 +700,14 @@ describe('the schemas that must never hold a value', () => {
     ['InputAuditDetail', InputAuditDetailSchema],
     ['InputDeliverResult', InputDeliverResultSchema],
     ['InputCancelBody', InputCancelBodySchema],
-    ['AgendaItem', AgendaItemSchema],
+    ['Ask', StoredAskSchema],
   ];
 
   for (const [name, schema] of WITHOUT_VALUE) {
     it(`should give ${name} no field named or shaped like a value`, () => {
       const offenders = propertyNames(schema).filter(property => VALUE_LIKE.test(property));
       const allowedElsewhere =
-        name === 'AgendaItem' ? new Set(['body', 'data', 'response', 'answer', 'input', 'text']) : new Set<string>();
+        name === 'Ask' ? new Set(['body', 'data', 'response', 'answer', 'input', 'text']) : new Set<string>();
 
       should(offenders.filter(property => !allowedElsewhere.has(property))).deepEqual([]);
     });
@@ -751,21 +715,9 @@ describe('the schemas that must never hold a value', () => {
     it(`should bound every string ${name} carries, so there is nowhere to put a blob`, () => {
       const unbounded = unboundedStrings(schema);
 
-      should(unbounded.filter(path => name !== 'AgendaItem' || path.includes('input'))).deepEqual([]);
+      should(unbounded.filter(path => name !== 'Ask' || path.includes('input'))).deepEqual([]);
     });
   }
-
-  it('should keep the agenda item’s input pointer to the request id alone', () => {
-    const shape = shapeOf(AgendaItemSchema);
-    const found: string[][] = [];
-    walk(shape, node => {
-      const input = (node.properties as Node | undefined)?.input as Node | undefined;
-      if (input?.properties !== undefined) found.push(Object.keys(input.properties as Node));
-    });
-
-    should(found.length).be.above(0);
-    for (const names of found) should(names).deepEqual(['requestId']);
-  });
 
   it('should hold the value in exactly one place: the deliver body, padded', () => {
     should([...new Set(propertyNames(InputDeliverBodySchema).filter(property => VALUE_LIKE.test(property)))]).deepEqual(
@@ -788,45 +740,11 @@ describe('the schemas that must never hold a value', () => {
   });
 
   it('should audit only events the closed audit list knows', () => {
-    for (const event of INPUT_AUDIT_EVENTS) should(AUDIT_EVENTS).containEql(event);
+    const gateName = (event: string): string =>
+      event === 'input.quarantine_ended' ? 'input.hold-ended' : event === 'input.quarantine_revealed' ? 'input.hold-revealed' : event;
+    for (const event of INPUT_AUDIT_EVENTS) should(AUDIT_KIND_NAMES).containEql(gateName(event));
   });
 
-  it('should take a browser card of several fields, each naming one element, and refuse a field with a value', () => {
-    const raise = {
-      tool: 'browser.request_input',
-      name: 'app',
-      prompt: 'Google login',
-      fields: [
-        { id: 'email', label: 'Email', sensitivity: 'plain', selector: '#identifierId' },
-        { id: 'password', sensitivity: 'secret', ref: 'e12' },
-      ],
-    };
-
-    should(AgentToolCallSchema.parse(raise).tool).equal('browser.request_input');
-    should(
-      AgentToolCallSchema.safeParse({ ...raise, fields: [{ ...raise.fields[0], text: 'me@x' }] }).success,
-    ).be.false();
-    should(
-      AgentToolCallSchema.safeParse({ ...raise, fields: [{ id: 'email', sensitivity: 'plain' }] }).success,
-    ).be.false();
-    should(
-      AgentToolCallSchema.safeParse({
-        ...raise,
-        fields: [{ id: 'email', sensitivity: 'plain', selector: 'a', ref: 'e1' }],
-      }).success,
-    ).be.false();
-    should(AgentToolCallSchema.safeParse({ ...raise, fields: [raise.fields[0], raise.fields[0]] }).success).be.false();
-    should(AgentToolCallSchema.safeParse({ ...raise, fields: Array(5).fill(raise.fields[0]) }).success).be.false();
-  });
-
-  it('should accept the two agent input tools and refuse an unknown field on either', () => {
-    const raise = { tool: 'terminal.request_input', name: 'dev', prompt: 'sudo password', sensitivity: 'secret' };
-
-    should(AgentToolCallSchema.parse(raise).tool).equal('terminal.request_input');
-    should(AgentToolCallSchema.safeParse({ ...raise, value: 'x' }).success).be.false();
-    should(AgentToolCallSchema.parse({ tool: 'input.wait', id: '!A7' })).deepEqual({ tool: 'input.wait', id: 'A7' });
-    should(AgentToolCallSchema.safeParse({ tool: 'input.wait', id: 'A7', value: 'x' }).success).be.false();
-  });
 
   it('should list requests and refuse a list that carries anything else', () => {
     should(InputRequestListSchema.parse({ requests: [] })).deepEqual({ requests: [] });

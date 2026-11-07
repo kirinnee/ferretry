@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
+import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
 
 const SESSION = 'mvv6b4qw-49d0158d';
 

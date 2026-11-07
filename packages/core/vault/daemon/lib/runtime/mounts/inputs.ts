@@ -1,34 +1,48 @@
-import { type InputActor, InputCancelBodySchema, InputDeliverBodySchema, type InputQuarantineList, type InputRequest, type InputRequestList } from '../../inputs/wire.ts';
-import { type InputShot } from '../../../../contract/index.ts';
-import { DAEMON_FEATURES, type PhoneApproval, PhoneApprovalIdSchema, type PhoneApprovalList } from '@ferretry/protocol';
-import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import type { ApiResponse, PlainApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { InputRequestError } from '../../input-requests/errors.ts';
-import type { PhoneApprovalService } from '../../input-requests/phone-approval.ts';
-import type { InputCaller } from '../../input-requests/ports.ts';
-import type { InputRequestService } from '../../input-requests/service.ts';
-import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
-import type { ModuleContribution } from '../modules.ts';
+import {
+  CAPABILITIES,
+  grantRefusalCode,
+  isFerretCall,
+  OWNER_ONLY_CODE,
+  ownerOnlyWords,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
+} from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  type CapabilityAxis,
+  jsonResponse,
+  type PlainApiResponse,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import type { z } from 'zod';
+import type { InputShot } from '../../../../contract/index.ts';
+import { InputRequestError } from '../../inputs/errors.ts';
+import type { InputCaller } from '../../inputs/ports.ts';
+import type { InputRequestService } from '../../inputs/service.ts';
+import {
+  type InputActor,
+  InputCancelBodySchema,
+  InputDeliverBodySchema,
+  type InputQuarantineList,
+  type InputRequest,
+  type InputRequestList,
+} from '../../inputs/wire.ts';
 
 /**
- * THE OWNER'S ROUTES FOR INPUT REQUESTS (docs/input-requests.md).
+ * THE OWNER'S ROUTES FOR INPUT REQUESTS (today's `runtime/mounts/input-requests.ts`; the phone-approval routes are
+ * Accounts'). Paths keep today's words except `/v1/sessions/:sessionId/…`, which is `/v1/ferrets/:ferretId/…` (§1.4).
  *
  * ## OWNER ONLY, TWICE
  *
- * A caller that identifies as an agent (`peer:` or `warden:`) is refused BEFORE the body is read, so
- * a value an agent tried to send is never parsed. The service refuses again unless the caller is a
- * person at the machine or a paired device. As everywhere else this is the honest-client boundary: an
- * agent that reads the admin token from the state home can call these as the host, which is the same
- * limit every other peer route declares (`callerIsAgent`, `api/agent-caller.ts`).
+ * A caller that is a ferret (or the warden) is refused BEFORE the body is read, so a value a ferret tried to send is
+ * never parsed. The service refuses again unless the caller is a person at the machine or a paired device.
  *
  * ## NO ROUTE RETURNS A VALUE
  *
- * Every body here is an `InputRequest`, an `InputDeliverResult` or an error whose message never carries
- * the value. The deliver body is parsed once, handed to the service and dropped.
+ * Every body here is an `InputRequest`, an `InputDeliverResult` or an error whose message never carries the value.
+ * The deliver body is parsed once, handed to the service and dropped.
  */
 
 const STATUS: Readonly<Record<InputRequestError['code'], number>> = {
@@ -48,53 +62,111 @@ export function answered(error: unknown): never {
 }
 
 /**
- * The owner a route was called by: the person at the machine or a paired device. Refuses an agent before any body is
+ * The owner a route was called by: the person at the machine or a paired device. Refuses a ferret before any body is
  * read, in the one owner-only sentence and code, naming the route's own act (`act`: "answers an input request").
  */
 export function ownerActorOf(
-  context: RouteContext,
+  call: CallContext,
   act = 'answers an input request',
 ): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
-  const credential = context.credential;
-  if (isAgentCaller(context)) throw new ApiError(403, ownerOnlyWords(act), OWNER_ONLY_CODE);
-  return credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
+  if (isFerretCall(call)) throw new ApiError(403, ownerOnlyWords(act), OWNER_ONLY_CODE);
+  const credential = call.credential;
+  return credential?.kind === 'authenticated' && credential.tokenClass === 'device'
+    ? { kind: 'device', deviceId: credential.principal.holder }
+    : { kind: 'host' };
 }
 
-export function ownerOf(context: RouteContext): InputCaller {
-  const actor = ownerActorOf(context);
+export function ownerOf(call: CallContext): InputCaller {
+  const actor = ownerActorOf(call);
   return { kind: 'owner', actor, carrier: actor.kind === 'device' ? 'direct' : 'loopback' };
 }
 
-function sessionOf(context: RouteContext): string {
-  const id = context.params.get('sessionId') ?? '';
+function ferretOf(call: CallContext): string {
+  const id = call.params.get('ferretId') ?? '';
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(id))
-    throw new ApiError(400, 'the session id in the path is not usable', 'bad_request');
+    throw new ApiError(400, 'the ferret id in the path is not usable', 'bad_request');
   return id;
 }
 
-function requestOf(context: RouteContext): string {
-  const id = context.params.get('requestId') ?? '';
+function requestOf(call: CallContext): string {
+  const id = call.params.get('requestId') ?? '';
   if (!/^[0-9a-f]{32}$/u.test(id)) throw new ApiError(400, 'the request id in the path is not usable', 'bad_request');
   return id;
 }
 
+/** Today's `parseBody`: JSON, then the strict schema; a refusal names no value. */
+async function parseBody<S extends z.ZodType>(call: CallContext, schema: S): Promise<z.infer<S>> {
+  let raw: unknown;
+  try {
+    const text = await call.request.text();
+    raw = text.trim() === '' ? {} : JSON.parse(text);
+  } catch {
+    throw new ApiError(400, 'the request body is not JSON', 'bad_request');
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new ApiError(400, 'the request body is not valid', 'bad_request');
+  return parsed.data;
+}
+
+// ─── another capability behind a terminal route (today's `secret-write-grant.ts`, the part these routes use) ─────
+
+/** One more demand behind a route that already passed its own: the refusal, or `undefined` when allowed. */
+function refusedExtra(
+  call: CallContext,
+  demand: { readonly capability: 'secrets' | 'browser'; readonly axis: CapabilityAxis },
+  act: string,
+  consequence: string,
+): ApiResponse | undefined {
+  const governance = call.governance;
+  if (governance === undefined)
+    return jsonResponse(
+      { error: `this daemon cannot say whether this caller may ${act}, so it is refusing`, code: 'forbidden' },
+      403,
+    );
+  const decision = governance.decide({ capability: CAPABILITIES[demand.capability], axis: demand.axis });
+  if (decision.allowed) return undefined;
+  if (decision.refusal === 'step-up-required')
+    return jsonResponse(
+      {
+        error: `${act} from this device needs a passkey confirmation`,
+        code: STEP_UP_REQUIRED_CODE,
+        demand,
+      } satisfies StepUpRequiredBody,
+      403,
+    );
+  return jsonResponse(
+    { error: `this device may not ${act}: ${consequence}`, code: grantRefusalCode(decision.refusal) },
+    403,
+  );
+}
+
+const refusedSecretWrite = (call: CallContext, act: string): ApiResponse | undefined =>
+  refusedExtra(call, { capability: 'secrets', axis: 'configure' }, act, 'that changes the secret store');
+const refusedPageInput = (call: CallContext, act = 'allow a value into a page'): ApiResponse | undefined =>
+  refusedExtra(call, { capability: 'browser', axis: 'use' }, act, 'that needs the browser permission');
+const refusedAccountNames = (call: CallContext, act: string): ApiResponse | undefined =>
+  refusedExtra(call, { capability: 'secrets', axis: 'use' }, act, 'that needs the secrets permission');
+
+/** After an allowed secret write: a governed caller's single-use step-up is spent, as for `POST /v1/secrets`. */
+function spentSecretWrite(call: CallContext): void {
+  if (call.governance?.governed === true) call.spendFreshStepUp?.();
+}
+
+// ─── the routes ───────────────────────────────────────────────────────────────────────────────────────────────────
+
 /**
- * A request as a caller that may not read ACCOUNT NAMES sees it (no `secrets.use`, the demand `GET /v1/accounts`
- * makes): no `saved` at all. Every part of it names an account or a person — offers' labels and usernames, the account
- * Update would write, the new account's name and CLI name, who the page is signing in — so there is no name-free half
- * worth keeping. The card is still answered by typing; a saved account is neither offered nor kept from it.
+ * A request as a caller that may not read ACCOUNT NAMES sees it (no `secrets.use`): no `saved` at all (G89, I43).
  */
 function nameless(request: InputRequest): InputRequest {
   const { saved: _names, ...rest } = request;
   return rest;
 }
 
-async function list(service: InputRequestService, context: RouteContext, all: boolean): Promise<ApiResponse> {
-  const caller = ownerOf(context);
-  const requests = await service.list(caller, all ? undefined : sessionOf(context)).catch(answered);
-  const names = refusedAccountNames(context, 'read the accounts a card names') === undefined;
-  // A hold taken since the service answered still wins, now and again as the dispatcher sends it, under any of the
-  // terminal's names (its key, the pane's name and its id), as the agent-tools path checks them.
+async function list(service: InputRequestService, call: CallContext, all: boolean): Promise<ApiResponse> {
+  const caller = ownerOf(call);
+  const requests = await service.list(caller, all ? undefined : ferretOf(call)).catch(answered);
+  const names = refusedAccountNames(call, 'read the accounts a card names') === undefined;
+  // A hold taken since the service answered still wins, now and again as the dispatcher sends it.
   const spell = (): PlainApiResponse => {
     const body: InputRequestList = {
       requests: requests.map(request => service.resealed(names ? request : nameless(request))),
@@ -104,211 +176,58 @@ async function list(service: InputRequestService, context: RouteContext, all: bo
   return { ...spell(), late: spell };
 }
 
-export function inputRequestRoutes(service: InputRequestService): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/input-requests',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await list(service, context, true),
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/input-requests',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => await list(service, context, false),
-    },
-    {
-      // The picture of a page request's fields, taken before anything was typed: the owner's card draws the
-      // boxes on it. Owner only, like everything about a request but the raise.
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/input-requests/:requestId/shot',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'browser', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const caller = ownerOf(context);
-        const shot: InputShot = (() => {
-          try {
-            return service.shot(caller, sessionOf(context), requestOf(context));
-          } catch (error) {
-            return answered(error);
-          }
-        })();
-        return jsonResponse(shot);
-      },
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/input-requests/:requestId/deliver',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const caller = ownerOf(context);
-        // A paste into the secret store changes it, so it needs what `POST /v1/secrets` needs as well.
-        const target = service.targetOf(sessionOf(context), requestOf(context))?.kind;
-        const intoStore = target === 'secret';
-        const refused = intoStore
-          ? refusedSecretWrite(context, 'allow a paste into the secret store')
-          : target === 'browser'
-            ? refusedPageInput(context)
-            : undefined;
-        if (refused !== undefined) return refused;
-        const body = await parseBody(context.request, InputDeliverBodySchema);
-        // Typing a saved account uses what `GET /v1/accounts` lists (`secrets.use`); keeping a typed value in one
-        // changes the account store (`secrets.configure`, as every other account write), so each asks for it too.
-        const accounts =
-          (body.entry === undefined ? undefined : refusedAccountNames(context, 'type a saved account')) ??
-          (body.save === undefined ? undefined : refusedSecretWrite(context, 'save a value to Accounts'));
-        if (accounts !== undefined) return accounts;
-        const result = await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered);
-        if (intoStore || body.save !== undefined) spentSecretWrite(context);
-        return jsonResponse(result);
-      },
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/input-quarantines',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: context => {
-        const body: InputQuarantineList = {
-          quarantines: [...service.quarantines(ownerOf(context), sessionOf(context))],
-        };
-        return Promise.resolve(jsonResponse(body));
-      },
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/input-quarantines/:key/end',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const caller = ownerOf(context);
-        const key = context.params.get('key') ?? '';
-        await service.endQuarantine(caller, sessionOf(context), key).catch(answered);
-        return jsonResponse({ ended: true });
-      },
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/input-requests/:requestId/cancel',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const caller = ownerOf(context);
-        await parseBody(context.request, InputCancelBodySchema);
-        return jsonResponse(await service.cancel(sessionOf(context), requestOf(context), caller).catch(answered));
-      },
-    },
-  ];
-}
-
-/**
- * An approval as a caller that may not read ACCOUNT NAMES sees it (no `secrets.use`, as for a card's `saved`):
- * without the account, its username and the account it signs in via. Where and how it is approved stay: the page's
- * origin, the factor and its number are what the owner checks against the phone.
- */
-function accountless(approval: PhoneApproval): PhoneApproval {
-  const { account: _account, username: _username, via: _via, ...rest } = approval;
-  return rest;
-}
-
-function approvalOf(context: RouteContext): string {
-  const parsed = PhoneApprovalIdSchema.safeParse(context.params.get('approvalId') ?? '');
-  if (!parsed.success) throw new ApiError(400, 'the approval id in the path is not usable', 'bad_request');
-  return parsed.data;
-}
-
-/**
- * THE OWNER'S ROUTES FOR APPROVING A SIGN-IN ON THE PHONE (docs/input-requests.md, "Approve on your phone"): read the
- * approvals the cards are drawn from, and "Not me — stop". Owner only, as every input route. THERE IS NO ROUTE THAT
- * SETS `moved-on`: only the daemon's own look at the page or terminal does, so neither the ferret nor the owner can
- * claim a sign-in went through.
- */
-export function phoneApprovalRoutes(service: PhoneApprovalService): readonly ApiRoute[] {
-  const run = <T>(work: () => T): T => {
-    try {
-      return work();
-    } catch (error) {
-      return answered(error);
-    }
-  };
-  return [
-    {
-      method: 'GET',
-      path: '/v1/phone-approvals',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: context => {
-        const approvals = run(() => service.list(ownerOf(context)));
-        const names = refusedAccountNames(context, 'read the accounts an approval names') === undefined;
-        const body: PhoneApprovalList = { approvals: approvals.map(each => (names ? each : accountless(each))) };
-        return Promise.resolve(jsonResponse(body));
-      },
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/phone-approvals/:approvalId',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: context => {
-        const approval = run(() => service.get(ownerOf(context), sessionOf(context), approvalOf(context)));
-        const names = refusedAccountNames(context, 'read the accounts an approval names') === undefined;
-        return Promise.resolve(jsonResponse(names ? approval : accountless(approval)));
-      },
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/phone-approvals/:approvalId/refuse',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
-      handle: async context => {
-        const caller = ownerOf(context);
-        const refused = await service.refuse(caller, sessionOf(context), approvalOf(context)).catch(answered);
-        const names = refusedAccountNames(context, 'read the accounts an approval names') === undefined;
-        return jsonResponse(names ? refused : accountless(refused));
-      },
-    },
-  ];
-}
-
-/**
- * What the input-requests module adds to the daemon: the owner's answers to an agent's request for a password, a code
- * or an answer, and the phone approvals, with the protocol feature that says this daemon draws the approval card.
- *
- * Every path is a literal no other subsystem uses (`/v1/input-requests`, `/v1/phone-approvals`) or sits under
- * `/v1/sessions/:sessionId` ending in `input-requests` or `phone-approvals`, so none can shadow or be shadowed. The
- * security log is written by the services themselves (`input.delivered`, `input.cancelled`, `phone-approval.refused`),
- * so the module has no audit rule of its own.
- */
-export function inputRequestsContribution(
-  service: InputRequestService,
-  approvals: PhoneApprovalService,
-): ModuleContribution {
+/** The handlers, by the route keys `manifest.ts` declares (descriptors are today's, field for field). */
+export function inputRequestRoutes(service: InputRequestService) {
   return {
-    routes: [...inputRequestRoutes(service), ...phoneApprovalRoutes(approvals)],
-    features: [DAEMON_FEATURES.phoneApproval],
-  };
+    'GET /v1/input-requests': async call => await list(service, call, true),
+    'GET /v1/ferrets/:ferretId/input-requests': async call => await list(service, call, false),
+    // The picture of a page request's fields, taken before anything was typed. Owner only.
+    'GET /v1/ferrets/:ferretId/input-requests/:requestId/shot': async call => {
+      const caller = ownerOf(call);
+      const shot: InputShot = (() => {
+        try {
+          return service.shot(caller, ferretOf(call), requestOf(call));
+        } catch (error) {
+          return answered(error);
+        }
+      })();
+      return jsonResponse(shot);
+    },
+    'POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver': async call => {
+      const caller = ownerOf(call);
+      // A paste into the secret store changes it, so it needs what `POST /v1/secrets` needs as well.
+      const target = service.targetOf(ferretOf(call), requestOf(call))?.kind;
+      const intoStore = target === 'secret';
+      const refused = intoStore
+        ? refusedSecretWrite(call, 'allow a paste into the secret store')
+        : target === 'page'
+          ? refusedPageInput(call)
+          : undefined;
+      if (refused !== undefined) return refused;
+      const body = await parseBody(call, InputDeliverBodySchema);
+      // Typing a saved account needs `secrets.use`; keeping a typed value in one needs `secrets.configure` (I43).
+      const accounts =
+        (body.entry === undefined ? undefined : refusedAccountNames(call, 'type a saved account')) ??
+        (body.save === undefined ? undefined : refusedSecretWrite(call, 'save a value to Accounts'));
+      if (accounts !== undefined) return accounts;
+      const result = await service.deliver(ferretOf(call), requestOf(call), body, caller).catch(answered);
+      if (intoStore || body.save !== undefined) spentSecretWrite(call);
+      return jsonResponse(result);
+    },
+    'GET /v1/ferrets/:ferretId/input-quarantines': async call => {
+      const body: InputQuarantineList = { quarantines: [...service.quarantines(ownerOf(call), ferretOf(call))] };
+      return jsonResponse(body);
+    },
+    'POST /v1/ferrets/:ferretId/input-quarantines/:key/end': async call => {
+      const caller = ownerOf(call);
+      const key = call.params.get('key') ?? '';
+      await service.endQuarantine(caller, ferretOf(call), key).catch(answered);
+      return jsonResponse({ ended: true });
+    },
+    'POST /v1/ferrets/:ferretId/input-requests/:requestId/cancel': async call => {
+      const caller = ownerOf(call);
+      await parseBody(call, InputCancelBodySchema);
+      return jsonResponse(await service.cancel(ferretOf(call), requestOf(call), caller).catch(answered));
+    },
+  } satisfies Readonly<Record<string, RouteHandler>>;
 }

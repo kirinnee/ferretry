@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { recognisedConsumer } from '../../../src/lib/input-requests/recognised.ts';
+import { recognisedConsumer } from '../../../../daemon/lib/inputs/recognised.ts';
 
 describe('recognising a program that asks for a secret', () => {
   it('should recognise the programs that prompt for a password', () => {

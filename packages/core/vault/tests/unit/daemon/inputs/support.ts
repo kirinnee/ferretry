@@ -1,12 +1,12 @@
 import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputEvent } from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputRaise, InputShot, InputTargetFacts } from '../../../../contract/index.ts';
-import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
-import type { InputAgendaPort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
-import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
-import { InputRequestService, type InputRequestServiceDependencies } from '../../../src/lib/input-requests/service.ts';
-import type { ScriptedOriginsView } from '../../../src/lib/sign-in-grants/matcher.ts';
-import type { SignInGrantSource } from '../../../src/lib/sign-in-grants/plans.ts';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
+import type { InputAgendaPort, InputLoginPort } from '../../../../daemon/lib/inputs/ports.ts';
+import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
+import { InputRequestService, type InputRequestServiceDependencies } from '../../../../daemon/lib/inputs/service.ts';
+import type { ScriptedOriginsView } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
+import type { SignInGrantSource } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
 
 export const SESSION = 'mvv6b4qw-49d0158d';
 

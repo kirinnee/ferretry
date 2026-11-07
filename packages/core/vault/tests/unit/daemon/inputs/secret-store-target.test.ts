@@ -6,7 +6,7 @@ import {
   type SecretStoreDirectory,
   SecretStoreTarget,
   type TerminalInputTargetPort,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/inputs/index.ts';
 import { SESSION } from './support.ts';
 
 const NAME = 'VERCEL_TOKEN' as SecretName;
@@ -112,7 +112,7 @@ describe('the secret store as an input target', () => {
     should(await target.type(SESSION, INTO, [], false, NEW)).equal('target_changed');
     should(await target.type(SESSION, INTO, [...one, ...one], false, NEW)).equal('target_changed');
     should(await target.type(SESSION, { kind: 'terminal', key: 'dev' }, one, false, NEW)).equal('target_changed');
-    should(await target.type(SESSION, INTO, one, false, { kind: 'browser' } as unknown as InputTargetFacts)).equal(
+    should(await target.type(SESSION, INTO, one, false, { kind: 'page' } as unknown as InputTargetFacts)).equal(
       'target_changed',
     );
     should(store.puts).eql([]);
