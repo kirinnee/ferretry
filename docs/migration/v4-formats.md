@@ -84,7 +84,8 @@ one-time converter at `migration/v4-to-v5/` and of the runbook [`v4-to-v5-prompt
 - **M5 owners:** `pins.json` and `agent-pins.json` → Conversation; `state/learning/sessions.json` → Lessons;
   `catalog-install-prefs.json` → Catalogs; `mcp-oauth.json` → MCP (its sealed half stays a Vault document by name);
   `audit-kept*.jsonl`, `grant-audit.jsonl`, `security-audit.jsonl` → Gate `audit.jsonl`; `ids.json` `formerNames`
-  → Ferrets `names.json`.
+  → Ferrets `names.json` (open: Ferrets says `formerNames` are runtime ids owned by Runtimes/Logins; the converter
+  carries them in the runtimes step unless the lead says otherwise).
 - **M6 changed:** the converter **renumbers** asks to v5 global ids, and rewrites every card and agenda link through
   one old→new map.
 - **M7 yes.** **M8 yes** (the kernel's carry-over prompt constant points at `v4-to-v5-prompt.md`).
