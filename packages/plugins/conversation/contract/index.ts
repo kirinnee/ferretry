@@ -22,3 +22,4 @@ export * from './turn-handoff.ts';
 export * from './fy-render-caps.ts';
 export * from './fy-render.ts';
 export * from './reference-catalog.ts';
+export * from './slots.ts';

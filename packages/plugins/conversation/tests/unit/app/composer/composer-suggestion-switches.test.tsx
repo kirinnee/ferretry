@@ -15,7 +15,8 @@ import { Composer } from '../../../../app/composer/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../../../app/composer/composer-autocomplete.ts';
 import { daemonConnection } from '../../../../app/composer/seam.ts';
 import type { ReferenceCatalogEntry, ReferenceCatalogPrefix } from '../../../../contract/index.ts';
-import { fakeClient, withClient } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/composer-host.tsx';
 import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import { writeMdComposePref } from '@ferretry/app';
 
@@ -48,8 +49,8 @@ const catalogsOf = (
 /** A client that refuses every read and remembers which catalogs were asked for. */
 const recordingClient = () => {
   const calls: { route: string; prefix?: string }[] = [];
-  const client = fakeClient(async (route, init) => {
-    calls.push({ route, prefix: init?.query?.prefix });
+  const client = fakeClient(async call => {
+    calls.push({ route: call.route, prefix: call.query.prefix });
     throw new Error('not in this suite');
   });
   return { client, calls };

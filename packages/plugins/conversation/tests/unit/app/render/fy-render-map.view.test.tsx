@@ -4,7 +4,7 @@ import should from 'should';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import { FyRenderMap, type FyRenderMapModules } from '../../../../app/render/fy-render-map.tsx';
 import type { MapHandle } from '../../../../app/render/fy-render-map-engine.ts';
-import { readMap } from '../../../../app/render/fy-render-map.ts';
+import { readMap } from '../../../../app/render/fy-render-map-model.ts';
 
 /**
  * The map component, mounted in a real document with the engine replaced by a recorder, so what is

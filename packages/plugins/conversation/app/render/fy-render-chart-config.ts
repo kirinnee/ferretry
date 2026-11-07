@@ -13,7 +13,7 @@
 
 import type { ChartConfiguration, ChartDataset, ChartType, TooltipItem } from 'chart.js';
 import type {} from 'chartjs-plugin-zoom';
-import type { ChartAxis, ChartFrame, ChartSpec } from './fy-render-chart.ts';
+import type { ChartAxis, ChartFrame, ChartSpec } from './fy-render-chart-model.ts';
 import { formatChartValue } from './fy-render-chart-format.ts';
 import { paletteColors, type ResolvedTheme, toneColor } from './fy-render-palette.ts';
 

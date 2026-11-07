@@ -7,7 +7,7 @@ import {
 } from '../../../../app/composer/attachments.ts';
 import { DaemonCallError, daemonConnection, daemonFerretScope } from '../../../../app/composer/seam.ts';
 import { noteClientDaemon } from '@ferretry/app/testing';
-import { fakeClient, refusal } from './fake-client.ts';
+import { fakeClient, refusal } from '../../../support/app/fake-client.ts';
 
 const daemon = daemonConnection('up');
 const scope = daemonFerretScope(daemon, 'ferret one');
@@ -24,22 +24,22 @@ const attachment = {
 
 describe('uploadAttachment', () => {
   test('posts the bytes as base64 JSON to the ferret’s own route and returns the parsed view', async () => {
-    const { client, calls } = fakeClient(() => attachment);
+    const client = fakeClient(() => attachment);
     const view = await uploadAttachment(client, scope, file);
     expect(view as unknown).toEqual(attachment);
-    expect(calls[0]?.route).toBe('POST /v1/ferrets/:ferretId/attachments');
-    expect(calls[0]?.params).toEqual({ ferretId: 'ferret one' });
-    expect(calls[0]?.body).toEqual({ filename: 'hi.txt', mime: 'text/plain', base64: 'aGk=' });
+    expect(client.calls[0]?.route).toBe('POST /v1/ferrets/:ferretId/attachments');
+    expect(client.calls[0]?.params).toEqual({ ferretId: 'ferret one' });
+    expect(client.calls[0]?.body).toEqual({ filename: 'hi.txt', mime: 'text/plain', base64: 'aGk=' });
   });
 
   test('declares an untyped file as octet-stream and lets the daemon sniff it', async () => {
-    const { client, calls } = fakeClient(() => attachment);
+    const client = fakeClient(() => attachment);
     await uploadAttachment(client, scope, new File([new Uint8Array([1])], 'blob'));
-    expect((calls[0]?.body as { mime: string } | undefined)?.mime).toBe('application/octet-stream');
+    expect((client.calls[0]?.body as { mime: string } | undefined)?.mime).toBe('application/octet-stream');
   });
 
   test('passes a refusal on with the daemon’s code and sentence', async () => {
-    const { client } = fakeClient(() => {
+    const client = fakeClient(() => {
       throw refusal(413, 'attachment_too_large', 'too big');
     });
     await expect(uploadAttachment(client, scope, file)).rejects.toMatchObject({
@@ -50,16 +50,16 @@ describe('uploadAttachment', () => {
   });
 
   test('refuses a scope from another daemon', async () => {
-    const { client, calls } = fakeClient(() => attachment);
+    const client = fakeClient(() => attachment);
     noteClientDaemon(client, 'up');
     const other = daemonFerretScope(daemonConnection('other'), 's');
     await expect(uploadAttachment(client, other, file)).rejects.toThrow('attachment scope must belong');
-    expect(calls).toEqual([]);
+    expect(client.calls).toEqual([]);
     await expect(uploadAttachment(client, scope, file)).resolves.toBeDefined();
   });
 
   test('refuses an answer that names no attachment', async () => {
-    const { client } = fakeClient(() => ({ id: '' }));
+    const client = fakeClient(() => ({ id: '' }));
     await expect(uploadAttachment(client, scope, file)).rejects.toBeInstanceOf(DaemonCallError);
   });
 

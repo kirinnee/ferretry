@@ -28,7 +28,7 @@ import {
   splitFileReferenceQuery,
 } from '../../../../app/composer/composer-autocomplete-providers.ts';
 import { daemonConnection, daemonFerretScope } from '../../../../app/composer/seam.ts';
-import { type FakeCall, fakeClient } from './fake-client.ts';
+import { type RecordedCall, fakeClient } from '../../../support/app/fake-client.ts';
 
 const daemonA = daemonConnection('daemon-a');
 const daemonB = daemonConnection('daemon-b');
@@ -64,7 +64,7 @@ type Catalogs = Partial<Record<ReferenceCatalogPrefix, readonly ReferenceCatalog
 
 /** A daemon whose providers answer `catalogs`; a prefix not listed is one nobody provides. */
 const catalogClient = (catalogs: Catalogs) =>
-  fakeClient((call: FakeCall) => {
+  fakeClient((call: RecordedCall) => {
     const prefix = call.query.prefix as ReferenceCatalogPrefix;
     const supplied = catalogs[prefix];
     const entries = typeof supplied === 'function' ? supplied(call.query.q) : supplied;
@@ -74,9 +74,9 @@ const catalogClient = (catalogs: Catalogs) =>
 const optionsOf = (
   catalogs: Catalogs,
   extra: Partial<ComposerAutocompleteProvidersOptions> = {},
-): ComposerAutocompleteProvidersOptions & { readonly calls: FakeCall[] } => {
-  const { client, calls } = catalogClient(catalogs);
-  return { daemon: daemonA, scope: scopeA, client, calls, ...extra };
+): ComposerAutocompleteProvidersOptions & { readonly calls: RecordedCall[] } => {
+  const client = catalogClient(catalogs);
+  return { daemon: daemonA, scope: scopeA, client, calls: client.calls, ...extra };
 };
 
 const NO_CARDS: readonly ReferenceCatalogEntry[] = [];
@@ -166,8 +166,8 @@ describe('composer files provider', () => {
   it('does not collide when two daemons reuse the same ferret id and path', async () => {
     const a = catalogClient({ '@': [entry('same.ts')] });
     const b = catalogClient({ '@': [entry('same.ts')] });
-    const providerA = createFilesProvider({ daemon: daemonA, scope: scopeA, client: a.client });
-    const providerB = createFilesProvider({ daemon: daemonB, scope: scopeB, client: b.client });
+    const providerA = createFilesProvider({ daemon: daemonA, scope: scopeA, client: a });
+    const providerB = createFilesProvider({ daemon: daemonB, scope: scopeB, client: b });
     const [resultA, resultB] = await Promise.all([
       providerA.candidates(context('@', 'same')),
       providerB.candidates(context('@', 'same')),
@@ -346,7 +346,7 @@ describe('composer skills: / and $', () => {
   });
 
   it('keeps built-ins and says why when the catalog cannot be read', async () => {
-    const { client } = fakeClient(() => {
+    const client = fakeClient(() => {
       throw new Error('skills offline');
     });
     const slash = await createSkillsProvider({ daemon: daemonA, scope: scopeA, client }).candidates(context('/', ''));
@@ -435,7 +435,7 @@ describe('composer reference families', () => {
   });
 
   it('says a family it could not read is not read, and the reference can still be typed', async () => {
-    const { client } = fakeClient(() => {
+    const client = fakeClient(() => {
       throw new Error('board offline');
     });
     const result = await createReferencesProvider({ daemon: daemonA, scope: scopeA, client }).candidates(
@@ -565,7 +565,7 @@ describe('composer ferret surfaces', () => {
   });
 
   it('surfaces a failure to the caller when no surface could be read', async () => {
-    const { client } = fakeClient(() => {
+    const client = fakeClient(() => {
       throw new Error('terminals offline');
     });
     await expect(

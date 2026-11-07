@@ -1,7 +1,7 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import { FY_RENDER_LIMITS } from '../../../../app/render/fy-render-bounds.ts';
-import { MAP_LISTING_LINES, type MapSpec, mapListing, readMap } from '../../../../app/render/fy-render-map.ts';
+import { MAP_LISTING_LINES, type MapSpec, mapListing, readMap } from '../../../../app/render/fy-render-map-model.ts';
 import { MAP_ATTRIBUTION, MAP_TILE_ORIGIN, MAP_TILE_URL } from '../../../../app/render/fy-render-map-tiles.ts';
 
 /**

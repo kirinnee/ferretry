@@ -32,7 +32,8 @@ import { composerSuggestionSwitches } from '../../../../app/composer/composer-au
 import { daemonConnection } from '../../../../app/composer/seam.ts';
 import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import type { ReferenceCatalogEntry, ReferenceCatalogPrefix } from '../../../../contract/index.ts';
-import { fakeClient, withClient } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/composer-host.tsx';
 import { writeMdComposePref } from '@ferretry/app';
 
 ensureDom();
@@ -59,8 +60,8 @@ const TASKS: readonly ReferenceCatalogEntry[] = [{ token: 'F12', label: 'Ship th
 
 /** Every read a family makes of its own is recorded and refused: the host is the only source here. */
 const reads: { readonly prefix: string | undefined }[] = [];
-const CLIENT = fakeClient(async (_route, init) => {
-  reads.push({ prefix: init?.query?.prefix });
+const CLIENT = fakeClient(async call => {
+  reads.push({ prefix: call.query.prefix });
   throw new Error('not in this suite');
 });
 beforeEach(() => {

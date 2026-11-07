@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AttachmentView, DraftItem as SharedDraftItem } from '../../../../contract/index.ts';
 import { DaemonCallError } from '@ferretry/app';
-import { type FakeCall, fakeClient } from '../../../support/app/composer-host.tsx';
+import { type CallHandler, fakeClient } from '../../../support/app/fake-client.ts';
 import type { Instant } from '@ferretry/std';
 import { useState } from 'react';
 import {
@@ -59,7 +59,7 @@ const mount = (
     readonly entries?: readonly PendingAttachment[];
     readonly items?: readonly SharedDraftItem[];
     readonly uploads?: readonly SharedDraftRemoteUpload[];
-    readonly call?: FakeCall;
+    readonly call?: CallHandler;
   } = {},
 ) => {
   const client = fakeClient(options.call);
@@ -147,8 +147,8 @@ describe('useSharedComposerItems', () => {
     const { items, root, urls, world } = mount({
       entries: [entry('l1', 'ready', view('mine'))],
       items: [photo('mine'), photo('theirs', 'screenshot.png'), photo('doc', 'notes.pdf', 'application/pdf')],
-      call: async (route, init) => {
-        asked.push(`${route} ${init?.params?.attachmentId}`);
+      call: async call => {
+        asked.push(`${call.route} ${call.params.attachmentId}`);
         return download('theirs');
       },
     });

@@ -25,7 +25,7 @@
 
 import { ChevronLeft, ChevronRight, ZoomOut } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import type { ChartSpec, readChart as ReadChart } from './fy-render-chart.ts';
+import type { ChartSpec, readChart as ReadChart } from './fy-render-chart-model.ts';
 import { ZOOMABLE_KINDS } from './fy-render-chart-config.ts';
 import { formatChartValue } from './fy-render-chart-format.ts';
 import { paletteColors, paletteKey, type ResolvedTheme, toneColor } from './fy-render-palette.ts';
@@ -38,7 +38,10 @@ export interface FyRenderChartModules {
 }
 
 const loadModules = async (): Promise<FyRenderChartModules> => {
-  const [lib, engine] = await Promise.all([import('./fy-render-chart.ts'), import('./fy-render-chart-engine.ts')]);
+  const [lib, engine] = await Promise.all([
+    import('./fy-render-chart-model.ts'),
+    import('./fy-render-chart-engine.ts'),
+  ]);
   return { mountChart: engine.mountChart, readChart: lib.readChart };
 };
 
