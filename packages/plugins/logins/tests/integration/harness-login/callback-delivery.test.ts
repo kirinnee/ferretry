@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { deliverCodexCallback } from '../../../daemon/adapters/harness-login/callback-delivery.ts';
+import { deliverCallback as deliverCodexCallback } from '../../support/real-ports.ts';
 
 const servers: { stop(force?: boolean): unknown }[] = [];
 

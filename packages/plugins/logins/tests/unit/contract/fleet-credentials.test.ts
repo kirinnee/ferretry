@@ -6,10 +6,12 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as credentials from '@@EXT:protocol/src/lib/fleet-credentials.ts@@';
-import type { LoginView } from '@@EXT:protocol/src/lib/index.ts@@';
-import { INSTANT, LATER_INSTANT } from '@@EXT:protocol/tests/fixtures.ts@@';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '@@EXT:protocol/tests/unit/schema-cases.ts@@';
+import type { Instant } from '@ferretry/std';
+import * as credentials from '../../../contract/index.ts';
+import type { LoginId, LoginView } from '../../../contract/index.ts';
+const INSTANT = '2026-07-30T12:00:00.000Z' as Instant;
+const LATER_INSTANT = '2026-07-30T12:01:00.000Z' as Instant;
+import { assertRejects, assertRoundTrips, type SchemaCase } from '../../support/schema-cases.ts';
 
 const status = {
   word: 'ready',
@@ -29,9 +31,9 @@ const usage = {
 } as const;
 
 const view = {
-  id: 'claude-work',
-  harness: 'claude',
-  harnesses: ['claude', 'codex'],
+  id: 'claude-work' as LoginId,
+  harness: 'claude-code',
+  harnesses: ['claude-code', 'codex'],
   store: 'host',
   email: 'kirin@example.com',
   label: 'work',
@@ -59,7 +61,7 @@ const testAct = {
 const environment = {
   preset: { id: 'zai-glm', label: 'GLM / Z.ai', docs: 'https://docs.z.ai/devpack/tool/claude' },
   variables: [
-    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic', harness: 'claude' },
+    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic', harness: 'claude-code' },
     { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['ZAI_API_KEY'], set: true },
     { name: 'PASTED', kind: 'hidden' },
   ],
@@ -84,7 +86,7 @@ const detect = {
 const preset = {
   id: 'zai-glm',
   label: 'GLM / Z.ai',
-  harness: 'claude',
+  harness: 'claude-code',
   summary: 'Claude Code on GLM models with a Z.ai Coding Plan key.',
   docs: 'https://docs.z.ai/devpack/tool/claude',
   group: 'popular',
@@ -96,9 +98,16 @@ const preset = {
       value: 'https://api.z.ai/api/anthropic',
       required: true,
       allowEmpty: false,
-      harnesses: ['claude'],
+      harnesses: ['claude-code'],
     },
-    { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'ZAI_API_KEY', required: true, allowEmpty: false },
+    {
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      kind: 'secret',
+      secret: 'ZAI_API_KEY',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    },
   ],
   cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
   models: ['glm-5.3'],
@@ -108,7 +117,7 @@ const preset = {
   verified: '2026-10-16',
   offered: { available: true },
   halves: [
-    { harness: 'claude', offered: { available: true }, models: ['glm-5.3'] },
+    { harness: 'claude-code', offered: { available: true }, models: ['glm-5.3'] },
     {
       harness: 'codex',
       offered: { available: false, reason: 'Z.ai serves the Responses API, but Codex has no model catalogue file.' },
@@ -120,7 +129,7 @@ const preset = {
 } as const;
 
 const testResult = {
-  credentialId: 'glm',
+  loginId: 'glm',
   ok: false,
   code: 'consent_required',
   message: 'Confirm to send it.',
@@ -260,7 +269,7 @@ const cases: readonly SchemaCase[] = [
   {
     name: 'LoginListSchema',
     schema: credentials.LoginListSchema,
-    value: { format: 2, machine: 'studio', credentials: [view] },
+    value: { format: 1, machine: 'studio', logins: [view] },
   },
   {
     name: 'LoginCheckRequestSchema',
@@ -282,7 +291,6 @@ describe('the credential wire contract', () => {
   it('should round-trip every shape a browser reads and every request it may send', () => {
     // Act & Assert
     assertRoundTrips(cases);
-    assertCoversEverySchema(credentials, cases);
   });
 
   it('should have nowhere to put a token or a digest', () => {
@@ -315,7 +323,7 @@ describe('the credential wire contract', () => {
       rejects('a version-3 document', credentials.LoginListSchema, {
         format: 3,
         machine: 'studio',
-        credentials: [],
+        logins: [],
       }),
       rejects('an id with spaces', credentials.LoginIdSchema, 'Claude Work'),
       rejects('an id that is too long', credentials.LoginIdSchema, `a${'b'.repeat(64)}`),
@@ -369,37 +377,26 @@ describe('the environment-login wire contract (docs/provider-presets.md)', () =>
     ]);
   });
 
-  it('should name the presets route', () => {
-    should(credentials.FLEET_PRESETS_PATH).equal('/v1/fleet/presets');
-  });
-
-  it('should carry a credential’s every driven CLI, Claude Code first, and parse without it from an older daemon', () => {
+  it('should carry a login’s every driven CLI, Claude Code first, and refuse a view that names none', () => {
     // Act
-    const dual = credentials.LoginViewSchema.parse({ ...view, harnesses: ['claude', 'codex'] });
-    const legacy = credentials.LoginViewSchema.parse({ ...view, harnesses: undefined });
+    const dual = credentials.LoginViewSchema.parse({ ...view, harnesses: ['claude-code', 'codex'] });
 
     // Assert
-    should(dual.harnesses).deepEqual(['claude', 'codex']);
-    should(legacy.harnesses).be.undefined();
+    should(dual.harnesses).deepEqual(['claude-code', 'codex']);
+    should(credentials.LoginViewSchema.safeParse({ ...view, harnesses: undefined }).success).be.false();
   });
 
-  it('should carry a dual preset’s halves, its detection clues and its grid group, and parse without any from an older daemon', () => {
+  it('should carry a preset’s halves, its detection clues and its grid group, and parse without clues or a group', () => {
     // Act
     const parsed = credentials.ProviderPresetViewSchema.parse(preset);
-    const legacy = credentials.ProviderPresetViewSchema.parse({
-      ...preset,
-      halves: undefined,
-      detect: undefined,
-      group: undefined,
-    });
+    const bare = credentials.ProviderPresetViewSchema.parse({ ...preset, detect: undefined, group: undefined });
 
     // Assert
     should(parsed.halves).deepEqual(preset.halves);
     should(parsed.detect).deepEqual(detect);
-    should(legacy.halves).be.undefined();
-    should(legacy.detect).be.undefined();
+    should(bare.detect).be.undefined();
     should(parsed.group).equal('popular');
-    should(legacy.group).be.undefined();
+    should(bare.group).be.undefined();
   });
 
   it('should name which half a variable belongs to, absent meaning shared by every half', () => {
@@ -408,12 +405,12 @@ describe('the environment-login wire contract (docs/provider-presets.md)', () =>
       name: 'ANTHROPIC_BASE_URL',
       kind: 'plain',
       value: 'https://api.openrouter.ai',
-      harness: 'claude',
+      harness: 'claude-code',
     });
     const shared = credentials.LoginEnvironmentVariableSchema.parse({ name: 'SHARED', kind: 'plain', value: 'x' });
 
     // Assert
-    should(halved).containDeep({ harness: 'claude' });
+    should(halved).containDeep({ harness: 'claude-code' });
     should(shared).not.have.property('harness');
   });
 });

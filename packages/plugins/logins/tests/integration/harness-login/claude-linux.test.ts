@@ -4,7 +4,7 @@
  *
  * On Linux Claude Code keeps its login in `<config dir>/.credentials.json` (no keychain), and a host
  * login has no config directory of its own, so the file is `$HOME/.claude/.credentials.json`. The
- * "harness" is `scripts/test/fake-claude-tui.sh`, which prints what claude-code 2.1.281 prints on Linux
+ * "harness" is `tests/support/fake-claude-tui.sh`, which prints what claude-code 2.1.281 prints on Linux
  * for `auth login --claudeai` and writes a fake login where the real one would. HOME is a temporary
  * directory: no real harness home is read or written, and nothing reaches a network.
  *
@@ -15,17 +15,17 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { AccountModel } from '@ferretry/fleet';
-import { PlatformFleetCredentialStore } from '@ferretry/fleet/adapters';
 import type { HarnessLoginFlow } from '../../../contract/index.ts';
 import should from 'should';
-import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../daemon/adapters/harness-login/login-child.ts';
-import type { CallerGovernance } from '@@EXT:daemon/src/lib/api/capability.ts@@';
+import { spawnChild, timer } from '../../support/real-ports.ts';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { fileStoreInspection } from '../../support/file-inspection.ts';
+import type { LoginFile, LoginId } from '../../../contract/index.ts';
 import { FleetCredentialCatalog } from '../../../daemon/lib/credentials/credentials-service.ts';
 import { HarnessLoginService } from '../../../daemon/lib/harness-login/service.ts';
-import { waitForValue } from '@@EXT:daemon/tests/integration/support/wait-for.ts@@';
+import { waitForValue } from '../../support/real-ports.ts';
 
-const FAKE_CLAUDE = resolve(import.meta.dir, '../../../../../scripts/test/fake-claude-tui.sh');
+const FAKE_CLAUDE = resolve(import.meta.dir, '../../support/fake-claude-tui.sh');
 
 const temporaryDirectories: string[] = [];
 const services: HarnessLoginService[] = [];
@@ -38,10 +38,8 @@ afterEach(async () => {
 /** A paired phone the boundary let through. */
 const PHONE: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) };
 
-const HOST_LOGIN = 'claude-you';
+const HOST_LOGIN = 'claude-you' as LoginId;
 
-/** The account model, reduced to the one table a sign-in reads: one host Claude login. */
-const MODEL = { version: 2, credentials: { [HOST_LOGIN]: { harness: 'claude', store: 'host' } }, runtimes: {} };
 
 interface Machine {
   readonly service: HarnessLoginService;
@@ -53,27 +51,20 @@ async function linuxMachine(binary: string = FAKE_CLAUDE): Promise<Machine> {
   const root = await mkdtemp(join(tmpdir(), 'fy-claude-linux-'));
   temporaryDirectories.push(root);
   const home = join(root, 'home');
-  const store = new PlatformFleetCredentialStore({
-    platform: 'linux',
-    command: { run: async () => ({ code: 1, stdout: '' }) },
-    now: () => Date.now(),
-    keychainAccount: 'nobody',
-    defaultClaudeHome: join(home, '.claude'),
-  });
   const catalog = new FleetCredentialCatalog({
-    document: async () => MODEL as unknown as AccountModel,
+    logins: () => new Map([[HOST_LOGIN, { harness: 'claude-code', store: 'host' } as LoginFile]]),
     paths: { fleetRoot: join(root, 'fy', 'fleet'), userHome: home },
-    inspect: async resolution => await store.inspectStored(resolution),
+    inspect: fileStoreInspection,
     ensureDirectory: async () => undefined,
   });
   const service = new HarnessLoginService({
     clock: { now: () => Date.now() },
     mintId: () => crypto.randomUUID().replaceAll('-', ''),
-    spawn: spawnHarnessLoginChild,
+    spawn: spawnChild,
     deliverCallback: async () => 'delivered',
     // What a systemd user service hands the daemon: a PATH and a HOME, and no terminal.
     environment: { PATH: '/usr/bin:/bin', HOME: home },
-    timer: harnessLoginTimer,
+    timer,
     clientName: 'fy',
     credentialTargets: { target: async id => catalog.signInTarget(await catalog.entry(id)) },
     locate: () => binary,
@@ -97,7 +88,7 @@ describe('signing the host Claude Code login in on Linux', () => {
     const { service, home } = await linuxMachine();
 
     // Act
-    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    const started = await service.start({ loginId: HOST_LOGIN }, PHONE);
     const linked = await pollPast(service, started.flowId, 'starting');
     const submitted = await service.submit(started.flowId, { code: 'fake-code#fake-state' });
     const finished = await pollPast(service, started.flowId, 'awaiting-code');
@@ -115,7 +106,7 @@ describe('signing the host Claude Code login in on Linux', () => {
   it('should keep waiting, link still on screen, after a code Claude refuses', async () => {
     // Arrange
     const { service } = await linuxMachine();
-    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    const started = await service.start({ loginId: HOST_LOGIN }, PHONE);
     await pollPast(service, started.flowId, 'starting');
 
     // Act — a code with no `#state`, which the real CLI refuses and keeps prompting after.
@@ -140,7 +131,7 @@ describe('signing the host Claude Code login in on Linux', () => {
     const { service } = await linuxMachine(silent);
 
     // Act
-    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    const started = await service.start({ loginId: HOST_LOGIN }, PHONE);
     const waiting = await service.status(started.flowId);
     const cancelled = await service.cancel(started.flowId);
 
@@ -170,7 +161,7 @@ describe('signing the host Claude Code login in on Linux', () => {
     await chmod(late, 0o700);
     const { service, home } = await linuxMachine(late);
     const file = join(home, '.claude', '.credentials.json');
-    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    const started = await service.start({ loginId: HOST_LOGIN }, PHONE);
     await pollPast(service, started.flowId, 'starting');
     await service.submit(started.flowId, { code: 'fake-code#fake-state' });
 
@@ -205,7 +196,7 @@ describe('signing the host Claude Code login in on Linux', () => {
     const { service } = await linuxMachine(failing);
 
     // Act
-    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    const started = await service.start({ loginId: HOST_LOGIN }, PHONE);
     const ended = await pollPast(service, started.flowId, 'starting');
 
     // Assert
@@ -215,6 +206,6 @@ describe('signing the host Claude Code login in on Linux', () => {
       .match(/did not offer a sign-in/u);
     should(ended)
       .have.property('remedy')
-      .match(/fy credential signin claude-you/u);
+      .match(/fy login signin claude-you/u);
   });
 });

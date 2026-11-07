@@ -4,12 +4,16 @@
  * test owns. CI never touches the network or a real Ollama.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { builtInModelCatalogs, builtInPresets, loginModelCatalog, runtimeModels } from '@ferretry/fleet';
+import { builtInModelCatalogs, loginModelCatalog } from '../../../daemon/lib/catalog/catalog.ts';
+import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { runtimeModels } from '../../../daemon/lib/catalog/runtime.ts';
 import should from 'should';
+import type { Instant } from '@ferretry/std';
 import { AuthorizedProviderProbe } from '../../../daemon/adapters/provider-probe/authorized-provider-probe.ts';
-import { FetchEnhancementTransport } from '@@EXT:daemon/src/adapters/stt/fetch-enhancement-transport.ts@@';
-import { LocalModelsService } from '@@EXT:daemon/src/lib/index.ts@@';
-import { ScriptedAuthorizer } from '@@EXT:daemon/tests/unit/speedups/fakes.ts@@';
+import { BoundedTransport } from '../../../daemon/adapters/provider-probe/bounded-transport.ts';
+import { realClock, realFetch } from '../../support/real-ports.ts';
+import { LocalModelsService } from '../../../daemon/lib/local-models/service.ts';
+import { ScriptedAuthorizer } from '../../support/fakes.ts';
 
 interface Seen {
   readonly method: string;
@@ -45,11 +49,11 @@ function fakeOllama(answer: () => Response) {
 
 const read = (address: string | undefined, enabled = true) => {
   const service: LocalModelsService = new LocalModelsService({
-    probe: new AuthorizedProviderProbe(new ScriptedAuthorizer({ kind: 'refused' }), new FetchEnhancementTransport()),
+    probe: new AuthorizedProviderProbe(new ScriptedAuthorizer({ kind: 'refused' }), new BoundedTransport(realFetch, realClock)),
     address,
     enabled,
     suggested: async () => 'gpt-oss:20b',
-    now: () => '2026-10-19T00:00:00.000Z',
+    now: () => '2026-10-19T00:00:00.000Z' as Instant,
   });
   return { service };
 };

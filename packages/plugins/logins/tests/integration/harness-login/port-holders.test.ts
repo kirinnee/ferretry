@@ -11,9 +11,9 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { systemPortHolders } from '../../../daemon/adapters/harness-login/port-holders.ts';
+import { realPortHolders } from '../../support/real-ports.ts';
 import { isLeftoverCodexLogin } from '../../../daemon/lib/harness-login/port-holders.ts';
-import { waitFor } from '@@EXT:daemon/tests/integration/support/wait-for.ts@@';
+import { waitFor } from '../../support/real-ports.ts';
 
 const temporaryDirectories: string[] = [];
 const running: Bun.Subprocess[] = [];
@@ -86,7 +86,7 @@ const exited = async (pid: number): Promise<boolean> => {
 describe('systemPortHolders', () => {
   it('should find a leftover Codex sign-in on its port, prove it, and stop it', async () => {
     // Arrange
-    const holders = systemPortHolders();
+    const holders = realPortHolders();
     const leftover = await listener('codex');
 
     // Act
@@ -108,7 +108,7 @@ describe('systemPortHolders', () => {
     await probe.stop(true);
 
     // Act
-    const actual = await systemPortHolders().holders([port]);
+    const actual = await realPortHolders().holders([port]);
 
     // Assert
     should(actual).deepEqual([]);
@@ -119,7 +119,7 @@ describe('systemPortHolders', () => {
     const stubborn = await listener('codex', { stubborn: true });
 
     // Act
-    const stopped = await systemPortHolders({ graceMs: 200 }).stop(stubborn.pid);
+    const stopped = await realPortHolders({ graceMs: 200 }).stop(stubborn.pid);
 
     // Assert
     should(stopped).be.true();
@@ -132,7 +132,7 @@ describe('systemPortHolders', () => {
     await gone.exited;
 
     // Act
-    const actual = await systemPortHolders().stop(gone.pid);
+    const actual = await realPortHolders().stop(gone.pid);
 
     // Assert
     should(actual).be.false();
@@ -147,7 +147,7 @@ describe('systemPortHolders', () => {
     const ps = await tool('ps', "echo '  0 nginx: master process'\n");
 
     // Act
-    const actual = await systemPortHolders({ lsof: '/nonexistent/lsof', ss, ps }).holders([1455]);
+    const actual = await realPortHolders({ lsof: '/nonexistent/lsof', ss, ps }).holders([1455]);
 
     // Assert
     should(actual).deepEqual([
@@ -162,8 +162,8 @@ describe('systemPortHolders', () => {
     const ss = await tool('ss', "echo 'LISTEN 0 128 [::1]:1455 [::]:*'\n");
 
     // Act
-    const fromLsof = await systemPortHolders({ lsof, ps }).holders([1455]);
-    const fromSs = await systemPortHolders({ lsof: '/nonexistent/lsof', ss, ps }).holders([1455]);
+    const fromLsof = await realPortHolders({ lsof, ps }).holders([1455]);
+    const fromSs = await realPortHolders({ lsof: '/nonexistent/lsof', ss, ps }).holders([1455]);
 
     // Assert
     should(fromLsof).deepEqual([
@@ -180,8 +180,8 @@ describe('systemPortHolders', () => {
     const failing = await tool('ss', 'exit 1\n');
 
     // Act
-    const missing = await systemPortHolders({ lsof: '/nonexistent/lsof', ss: '/nonexistent/ss' }).holders([1455]);
-    const broken = await systemPortHolders({ lsof: '/nonexistent/lsof', ss: failing }).holders([1455]);
+    const missing = await realPortHolders({ lsof: '/nonexistent/lsof', ss: '/nonexistent/ss' }).holders([1455]);
+    const broken = await realPortHolders({ lsof: '/nonexistent/lsof', ss: failing }).holders([1455]);
 
     // Assert
     should(missing).be.undefined();

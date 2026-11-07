@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
-import { builtInModelCatalogs, builtInPresets, type ModelCatalog } from '@ferretry/fleet';
+import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
+import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { type ModelCatalog } from '../../../daemon/lib/catalog/schema.ts';
 import should from 'should';
+import type { Instant } from '@ferretry/std';
 import { ModelCatalogService } from '../../../daemon/lib/models/service.ts';
 
 const BUILT_IN = builtInModelCatalogs();
@@ -26,7 +29,7 @@ describe('ModelCatalogService', () => {
       baseUrl: 'http://127.0.0.1:11434',
       state: 'none-pulled' as const,
       models: [],
-      checkedAt: '2026-10-19T00:00:00.000Z',
+      checkedAt: '2026-10-19T00:00:00.000Z' as Instant,
       message: 'Ollama is running, but no model is installed yet. Run: ollama pull gpt-oss:20b',
       pullCommand: 'ollama pull gpt-oss:20b',
     };

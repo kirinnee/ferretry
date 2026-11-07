@@ -12,7 +12,8 @@ import {
   hostCodexHome,
   resolveCredentialStore,
 } from '../../../daemon/lib/credentials/credentials.ts';
-import { type Credential, CredentialSchema } from '@@EXT:fleet/src/lib/account/schema.ts@@';
+import { type Credential } from '../../../daemon/lib/shared/credential.ts';
+import { CredentialSchema } from '../../support/credential.ts';
 
 const FLEET = '/fy/fleet';
 const USER = '/people/placeholder';

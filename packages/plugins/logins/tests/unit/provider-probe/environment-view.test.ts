@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { builtInPresets, CredentialSchema } from '@ferretry/fleet';
+import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { CredentialSchema } from '../../support/credential.ts';
 import { LoginEnvironmentSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { credentialEnvironmentView } from '../../../daemon/lib/provider-probe/environment-view.ts';
@@ -159,8 +160,8 @@ describe('credentialEnvironmentView of a login that drives both CLIs', () => {
     // Assert
     should(actual.variables).deepEqual([
       { name: 'API_TIMEOUT_MS', kind: 'plain', value: '600000' },
-      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: false, harness: 'claude' },
-      { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.deepseek.com/anthropic', harness: 'claude' },
+      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: false, harness: 'claude-code' },
+      { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.deepseek.com/anthropic', harness: 'claude-code' },
       { name: 'DEEPSEEK_API_KEY', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: false, harness: 'codex' },
     ]);
     should(actual.missingSecrets).deepEqual(['DEEPSEEK_API_KEY']);
@@ -179,13 +180,13 @@ describe('credentialEnvironmentView of a login that drives both CLIs', () => {
         harness: 'claude',
         store: 'environment',
         claude: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-ant-api03-abcdefghijklmnopqrstu' } },
-        codex: { codexProvider: { id: 'ollama' } },
+        codex: { env: {}, codexProvider: { id: 'ollama' } },
       },
       PRESETS,
       new Set(),
     );
 
     // Assert
-    should(actual.variables).deepEqual([{ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'hidden', harness: 'claude' }]);
+    should(actual.variables).deepEqual([{ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'hidden', harness: 'claude-code' }]);
   });
 });

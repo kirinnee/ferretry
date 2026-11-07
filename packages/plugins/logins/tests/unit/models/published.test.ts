@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { builtInModelCatalogs, publishedModelCatalogFiles } from '@ferretry/fleet';
+import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
+import { publishedModelCatalogFiles } from '../../../daemon/lib/catalog/published.ts';
 import should from 'should';
 import {
   type Bytes,

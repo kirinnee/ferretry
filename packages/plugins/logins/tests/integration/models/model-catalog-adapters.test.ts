@@ -1,33 +1,48 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { StateRead } from '@ferretry/kernel/contract';
+import { ok } from '@ferretry/std';
 import should from 'should';
-import { FileModelCatalogCache, HostedModelCatalog, type ModelCatalogCacheFiles } from '@@EXT:daemon/src/adapters/index.ts@@';
+import { HostedModelCatalog } from '../../../daemon/adapters/models/hosted-model-catalog.ts';
+import { StateModelCatalogCache } from '../../../daemon/adapters/models/state-model-catalog-cache.ts';
+import { realClock, realFetch } from '../../support/real-ports.ts';
 
-const files: ModelCatalogCacheFiles = {
-  readText: async path => await readFile(path, 'utf8').catch(() => undefined),
-  writeTextAtomic: async (path, text) => await writeFile(path, text),
-};
+/** The one declared file, in memory: enough of the kernel's state port for the cache to be read and written. */
+function memoryState() {
+  let held: unknown;
+  return {
+    read: async () => ok(held) as StateRead<never>,
+    update: async (_file: unknown, fn: (current: unknown) => unknown) => {
+      held = fn(held);
+      return ok(held);
+    },
+    get held() {
+      return held;
+    },
+  };
+}
 
-describe('the file model catalog cache', () => {
-  it('should keep what it is given, and read a missing, empty or damaged file as nothing held', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'fy-model-catalog-'));
-    try {
-      // Arrange
-      const cache = new FileModelCatalogCache(files, join(directory, 'model-catalog.json'));
+describe('the state model catalog cache', () => {
+  it('should keep what it is given, and read a missing or half-written document as nothing held', async () => {
+    // Arrange
+    const state = memoryState();
+    const cache = new StateModelCatalogCache(state as never);
 
-      // Act / Assert
-      should(await cache.read()).be.undefined();
-      await cache.write({ version: 3 });
-      should(await cache.read()).deepEqual({ version: 3 });
-      await writeFile(join(directory, 'model-catalog.json'), '   ');
-      should(await cache.read()).be.undefined();
-      await writeFile(join(directory, 'model-catalog.json'), '{nope');
-      should(await cache.read()).be.undefined();
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    // Act / Assert
+    should(await cache.read()).be.undefined();
+    await cache.write({ version: 3 });
+    should(await cache.read()).be.undefined();
+    await cache.write({
+      version: 3,
+      document: { catalogs: {} },
+      fetchedAt: '2026-10-19T00:00:00.000Z',
+      checkedAt: '2026-10-19T00:00:00.000Z',
+    });
+    should(await cache.read()).deepEqual({
+      version: 3,
+      document: { catalogs: {} },
+      fetchedAt: '2026-10-19T00:00:00.000Z',
+      checkedAt: '2026-10-19T00:00:00.000Z',
+    });
   });
 });
 
@@ -45,7 +60,9 @@ describe('the hosted model catalog read', () => {
     });
     try {
       // Act
-      const answer = await new HostedModelCatalog(`http://127.0.0.1:${server.port}/`).get('catalog/version.json');
+      const answer = await new HostedModelCatalog(`http://127.0.0.1:${server.port}/`, realFetch, realClock).get(
+        'catalog/version.json',
+      );
 
       // Assert
       should(answer?.status).equal(200);
@@ -58,9 +75,15 @@ describe('the hosted model catalog read', () => {
 
   it('should answer nothing, never throw, when the origin cannot be reached', async () => {
     // Arrange
-    const down = new HostedModelCatalog('https://hosted.invalid', async () => {
-      throw new TypeError('fetch failed');
-    });
+    const down = new HostedModelCatalog(
+      'https://hosted.invalid',
+      {
+        request: async () => {
+          throw new TypeError('fetch failed');
+        },
+      },
+      realClock,
+    );
 
     // Act / Assert
     should(await down.get('catalog/version.json')).be.undefined();

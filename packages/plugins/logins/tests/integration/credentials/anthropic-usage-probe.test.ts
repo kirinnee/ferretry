@@ -7,22 +7,20 @@
  * stored usage is covered in `tests/unit/quota.test.ts`.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import should from 'should';
 import {
   ANTHROPIC_USAGE_URL,
   AnthropicUsageProbe,
-  FilePassiveUsageStore,
-  fetchQuota,
+  quotaFetch,
   MAX_RESPONSE_BODY_BYTES,
   type QuotaFetch,
   type QuotaRequest,
   type QuotaResponse,
 } from '../../../daemon/adapters/credentials/anthropic-usage-probe.ts';
 import type { CredentialMaterial } from '../../../daemon/lib/shared/identity.ts';
-import type { PassiveUsageRecord } from '../../../daemon/lib/credentials/usage.ts';
+import { realClock, realFetch } from '../../support/real-ports.ts';
+
+const fetchQuota = quotaFetch(realFetch, realClock);
 
 const TOKEN = 'placeholder-access-token';
 
@@ -803,7 +801,7 @@ describe('fetchQuota', () => {
       // Assert
       should(actual.body.truncated).be.true();
       should(actual.body.bytes.byteLength).equal(MAX_RESPONSE_BODY_BYTES);
-      should(actual.body.bytes.every(byte => byte === 0x61)).be.true();
+      should(actual.body.bytes.every((byte: number) => byte === 0x61)).be.true();
       should(cancelled).equal('response body exceeded the diagnostic limit');
     } finally {
       globalThis.fetch = original;
@@ -999,71 +997,3 @@ describe('AnthropicUsageProbe reading an account-model credential', () => {
   });
 });
 
-describe('FilePassiveUsageStore', () => {
-  const directories: string[] = [];
-  const fleet = async (): Promise<string> => {
-    const directory = await mkdtemp(join(tmpdir(), 'fy-passive-usage-'));
-    directories.push(directory);
-    return directory;
-  };
-  afterEach(async () => {
-    await Promise.all(directories.splice(0).map(each => rm(each, { recursive: true, force: true })));
-  });
-  const record: PassiveUsageRecord = {
-    version: 1,
-    source: 'claude-statusline',
-    at: 1_800_000_000_000,
-    fiveHour: { usedPercent: 12, resetAt: 1_800_000_100_000 },
-    weekly: { usedPercent: 3 },
-  };
-
-  it('should write the reading atomically under the fleet, owner-only, and read it back', async () => {
-    // Arrange
-    const root = await fleet();
-    const store = new FilePassiveUsageStore(root);
-
-    // Act
-    await store.write('work', record);
-    const actual = await store.read('work');
-
-    // Assert
-    should(store.path('work')).equal(join(root, 'credentials', 'work', 'usage.json'));
-    should(actual).deepEqual(record);
-    should((await stat(store.path('work'))).mode & 0o777).equal(0o600);
-    should((await stat(join(root, 'credentials', 'work'))).mode & 0o777).equal(0o700);
-    should((await readdir(join(root, 'credentials', 'work'))).filter(name => name.endsWith('.tmp'))).be.empty();
-  });
-
-  it('should read nothing from a missing, unparseable or foreign document', async () => {
-    // Arrange
-    const root = await fleet();
-    const store = new FilePassiveUsageStore(root);
-    await mkdir(join(root, 'credentials', 'bad'), { recursive: true });
-    await mkdir(join(root, 'credentials', 'foreign'), { recursive: true });
-    await writeFile(store.path('bad'), 'not json');
-    await writeFile(store.path('foreign'), JSON.stringify({ version: 2 }));
-
-    // Act
-    const actual = await Promise.all([store.read('missing'), store.read('bad'), store.read('foreign')]);
-
-    // Assert
-    should(actual).deepEqual([undefined, undefined, undefined]);
-  });
-
-  it('should leave no temporary file behind when the write cannot land', async () => {
-    // Arrange — a directory where the file belongs makes the rename fail.
-    const root = await fleet();
-    const store = new FilePassiveUsageStore(root);
-    await mkdir(store.path('work'), { recursive: true });
-
-    // Act
-    const failure = await store.write('work', record).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    // Assert
-    should(failure).be.instanceOf(Error);
-    should((await readdir(join(root, 'credentials', 'work'))).filter(name => name.endsWith('.tmp'))).be.empty();
-  });
-});

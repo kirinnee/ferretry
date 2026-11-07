@@ -7,6 +7,8 @@
  * be evidence about the shape rather than about either login.
  */
 import { describe, it } from 'bun:test';
+import type { Instant } from '@ferretry/std';
+import type { LoginId } from '../../../contract/index.ts';
 import should from 'should';
 import {
   CLAUDE_LOGIN_ARGV,
@@ -33,10 +35,10 @@ const URL_LINE = `If the browser didn't open, visit: ${ESC}]8;;${CLAUDE_URL}${BE
 
 const BASE = {
   flowId: 'flow-one',
-  credentialId: 'claude-kirin',
+  loginId: 'claude-kirin' as LoginId,
   identity: 'claude:kirin',
-  startedAt: '2026-08-19T10:00:00.000Z',
-  expiresAt: '2026-08-19T10:10:00.000Z',
+  startedAt: '2026-08-19T10:00:00.000Z' as Instant,
+  expiresAt: '2026-08-19T10:10:00.000Z' as Instant,
 } satisfies HarnessLoginFlowBase;
 
 const awaiting: ClaudeLoginStage = { stage: 'awaiting-code', verificationUrl: CLAUDE_URL };
@@ -44,7 +46,7 @@ const complete: ClaudeLoginStage = { stage: 'complete' };
 const failed: ClaudeLoginStage = {
   stage: 'failed',
   reason: 'the child exited',
-  remedy: 'run `fy credential signin claude-kirin`',
+  remedy: 'run `fy login signin claude-kirin`',
 };
 
 describe('Claude’s own login argv', () => {
@@ -213,7 +215,7 @@ describe('claudeProjection', () => {
     const actual = claudeProjection(BASE, awaiting);
 
     // Assert
-    should(actual).deepEqual({ harness: 'claude', ...BASE, state: 'awaiting-code', verificationUrl: CLAUDE_URL });
+    should(actual).deepEqual({ harness: 'claude-code', ...BASE, state: 'awaiting-code', verificationUrl: CLAUDE_URL });
   });
 
   it('should carry no verification URL before one is recognised', () => {
@@ -221,7 +223,7 @@ describe('claudeProjection', () => {
     const actual = claudeProjection(BASE, CLAUDE_LOGIN_START);
 
     // Assert
-    should(actual).deepEqual({ harness: 'claude', ...BASE, state: 'starting' });
+    should(actual).deepEqual({ harness: 'claude-code', ...BASE, state: 'starting' });
   });
 
   it('should say it finished and carry no per-account outcomes', () => {
@@ -230,7 +232,7 @@ describe('claudeProjection', () => {
 
     // Assert
     should(actual).deepEqual({
-      harness: 'claude',
+      harness: 'claude-code',
       ...BASE,
       state: 'complete',
     });
@@ -242,11 +244,11 @@ describe('claudeProjection', () => {
 
     // Assert
     should(actual).deepEqual({
-      harness: 'claude',
+      harness: 'claude-code',
       ...BASE,
       state: 'failed',
       reason: 'the child exited',
-      remedy: 'run `fy credential signin claude-kirin`',
+      remedy: 'run `fy login signin claude-kirin`',
     });
   });
 
@@ -326,7 +328,7 @@ describe('a code Claude refuses', () => {
 
     // Assert
     should(actual).deepEqual({
-      harness: 'claude',
+      harness: 'claude-code',
       ...BASE,
       state: 'awaiting-code',
       verificationUrl: CLAUDE_URL,

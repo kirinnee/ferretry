@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
-import { builtInModelCatalogs } from '@ferretry/fleet';
+import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
 import should from 'should';
+import type { Instant } from '@ferretry/std';
 import {
   DEFAULT_OLLAMA_URL,
   describeOllama,
@@ -23,8 +24,7 @@ const TAGS = {
     { name: 'llama3.2:latest', size: 2_019_393_189 },
   ],
 };
-
-const AT = '2026-10-19T00:00:00.000Z';
+const AT = '2026-10-19T00:00:00.000Z' as Instant;
 const OK: OllamaAddress = { ok: true, baseUrl: DEFAULT_OLLAMA_URL };
 
 describe('ollamaAddress', () => {

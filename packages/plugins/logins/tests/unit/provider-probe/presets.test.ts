@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
-import { builtInModelCatalogs, builtInPresets, type ProviderPreset } from '@ferretry/fleet';
+import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
+import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { type ProviderPreset } from '../../../daemon/lib/presets/schema.ts';
 import { ProviderPresetCatalogSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { ProviderPresetService, presetTestAct, presetView } from '../../../daemon/lib/provider-probe/presets.ts';
@@ -56,13 +58,13 @@ describe('presetView', () => {
     const actual = presetView(preset('deepseek'));
 
     // Assert
-    should(actual.harness).equal('claude');
+    should(actual.harness).equal('claude-code');
     should(actual.halves?.map(half => [half.harness, half.offered.available, half.docs ?? null])).deepEqual([
-      ['claude', true, null],
+      ['claude-code', true, null],
       ['codex', true, 'https://api-docs.deepseek.com/quick_start/agent_integrations/codex'],
     ]);
     should(actual.variables).containDeep([
-      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['claude'] },
+      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['claude-code'] },
       { name: 'DEEPSEEK_API_KEY', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['codex'] },
     ]);
     should(actual.detect).deepEqual({ hosts: ['api.deepseek.com'], variables: ['DEEPSEEK_*'], keyPrefixes: [] });
@@ -76,7 +78,7 @@ describe('presetView', () => {
     should(actual.offered).deepEqual({ available: true });
     should(actual.halves?.[1]?.offered.available).be.false();
     should(JSON.stringify(actual.halves?.[1]?.offered)).match(/model catalogue file/u);
-    should(actual.variables.some(variable => variable.harnesses !== undefined)).be.false();
+    should(actual.variables.every(variable => variable.harnesses.length === 1)).be.true();
     should(actual.variables.some(variable => variable.name === 'ZAI_API_KEY')).be.false();
   });
 

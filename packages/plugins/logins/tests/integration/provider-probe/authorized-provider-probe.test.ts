@@ -6,8 +6,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { AuthorizedProviderProbe } from '../../../daemon/adapters/provider-probe/authorized-provider-probe.ts';
-import type { ProviderProbePlan } from '@@EXT:daemon/src/lib/index.ts@@';
-import { RecordingTransport, ScriptedAuthorizer } from '@@EXT:daemon/tests/unit/speedups/fakes.ts@@';
+import type { ProviderProbePlan } from '../../../daemon/lib/provider-probe/plan.ts';
+import { RecordingTransport, ScriptedAuthorizer } from '../../support/fakes.ts';
 
 const REQUEST = {
   method: 'GET' as const,

@@ -1,11 +1,15 @@
 import { describe, it } from 'bun:test';
-import { builtInPresets, type Credential, CredentialSchema, type ProviderPreset } from '@ferretry/fleet';
+import type { Instant } from '@ferretry/std';
+import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { type Credential } from '../../../daemon/lib/shared/credential.ts';
+import { CredentialSchema } from '../../support/credential.ts';
+import { type ProviderPreset } from '../../../daemon/lib/presets/schema.ts';
 import { LoginTestResultSchema } from '../../../contract/index.ts';
 import should from 'should';
 import type { ProviderProbePlan } from '../../../daemon/lib/provider-probe/plan.ts';
 import type { ProviderProbePort } from '../../../daemon/lib/provider-probe/ports.ts';
 import { ProviderProbeService, probeCode } from '../../../daemon/lib/provider-probe/service.ts';
-import type { AuthorizedOutcome } from '@@EXT:daemon/src/lib/speedups/ports.ts@@';
+import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 
 const PRESETS = builtInPresets();
 const preset = (id: string): ProviderPreset => PRESETS.find(entry => entry.id === id) as ProviderPreset;
@@ -26,7 +30,7 @@ const serviceWith = (probe: ScriptedProbe) => {
   let tick = 100;
   return new ProviderProbeService({
     probe,
-    clock: { monotonicMs: () => (tick += 25), now: () => '2026-10-16T09:00:00.000Z' },
+    clock: { monotonicMs: () => (tick += 25), now: () => '2026-10-16T09:00:00.000Z' as Instant },
   });
 };
 
@@ -47,7 +51,7 @@ describe('ProviderProbeService', () => {
 
     // Assert
     should(actual).deepEqual({
-      credentialId: 'kimi',
+      loginId: 'kimi',
       ok: true,
       code: 'ok',
       message: 'The provider accepted this login.',

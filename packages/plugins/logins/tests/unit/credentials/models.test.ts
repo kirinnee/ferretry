@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import type { LocalModels } from '../../../contract/index.ts';
 import should from 'should';
-import { findRawSecrets } from '@@EXT:fleet/src/lib/config-files/secrets.ts@@';
+import type { Instant } from '@ferretry/std';
+import { findRawSecrets } from '../../../daemon/lib/shared/secret-shape.ts';
 import { readConfigText } from '../../../daemon/lib/shared/yaml-text.ts';
 import {
   BUILT_IN_MODEL_CATALOG_TEXTS,
@@ -320,7 +321,7 @@ describe('runtimeModels', () => {
       baseUrl: 'http://127.0.0.1:11434',
       state,
       models: ids.map(id => ({ id, label: id })),
-      checkedAt: '2026-10-19T00:00:00.000Z',
+      checkedAt: '2026-10-19T00:00:00.000Z' as Instant,
       message: 'Ollama says so.',
       pullCommand: 'ollama pull gpt-oss:20b',
     });

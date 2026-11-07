@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { builtInModelCatalogs } from '@ferretry/fleet';
+import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
 import { ModelCatalogsViewSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { modelCatalogsView } from '../../../daemon/lib/models/view.ts';

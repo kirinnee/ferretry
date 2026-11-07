@@ -3,11 +3,11 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AccountModel } from '@ferretry/fleet';
-import { PlatformFleetCredentialStore } from '@ferretry/fleet/adapters';
 import should from 'should';
-import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../daemon/adapters/harness-login/login-child.ts';
-import type { CallerGovernance } from '@@EXT:daemon/src/lib/api/capability.ts@@';
+import { spawnChild, timer } from '../../support/real-ports.ts';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { fileStoreInspection } from '../../support/file-inspection.ts';
+import type { LoginFile, LoginId } from '../../../contract/index.ts';
 import { FleetCredentialCatalog } from '../../../daemon/lib/credentials/credentials-service.ts';
 import { HarnessLoginService } from '../../../daemon/lib/harness-login/service.ts';
 
@@ -20,34 +20,26 @@ afterEach(async () => {
 });
 
 const PHONE: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) };
-const HOST_LOGIN = 'claude-you';
-const MODEL = { version: 2, credentials: { [HOST_LOGIN]: { harness: 'claude', store: 'host' } }, runtimes: {} };
+const HOST_LOGIN = 'claude-you' as LoginId;
 
 /** A Linux machine whose `claude` is `binary`, with HOME and the fleet under one temporary root. */
 async function linuxMachine(binary: string): Promise<HarnessLoginService> {
   const root = await mkdtemp(join(tmpdir(), 'fy-claude-linux-'));
   temporaryDirectories.push(root);
   const home = join(root, 'home');
-  const store = new PlatformFleetCredentialStore({
-    platform: 'linux',
-    command: { run: async () => ({ code: 1, stdout: '' }) },
-    now: () => Date.now(),
-    keychainAccount: 'nobody',
-    defaultClaudeHome: join(home, '.claude'),
-  });
   const catalog = new FleetCredentialCatalog({
-    document: async () => MODEL as unknown as AccountModel,
+    logins: () => new Map([[HOST_LOGIN, { harness: 'claude-code', store: 'host' } as LoginFile]]),
     paths: { fleetRoot: join(root, 'fy', 'fleet'), userHome: home },
-    inspect: async resolution => await store.inspectStored(resolution),
+    inspect: fileStoreInspection,
     ensureDirectory: async () => undefined,
   });
   const service = new HarnessLoginService({
     clock: { now: () => Date.now() },
     mintId: () => crypto.randomUUID().replaceAll('-', ''),
-    spawn: spawnHarnessLoginChild,
+    spawn: spawnChild,
     deliverCallback: async () => 'delivered',
     environment: { PATH: '/usr/bin:/bin', HOME: home },
-    timer: harnessLoginTimer,
+    timer,
     clientName: 'fy',
     credentialTargets: { target: async id => catalog.signInTarget(await catalog.entry(id)) },
     locate: () => binary,
@@ -69,7 +61,7 @@ describe('signing the host Claude Code login in on Linux', () => {
 
     // Act
     const before = performance.now();
-    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    const started = await service.start({ loginId: HOST_LOGIN }, PHONE);
     const answeredIn = performance.now() - before;
     await service.cancel(started.flowId);
 

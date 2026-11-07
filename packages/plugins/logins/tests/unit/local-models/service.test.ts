@@ -1,9 +1,10 @@
 import { describe, it } from 'bun:test';
 import type { LocalModels } from '../../../contract/index.ts';
 import should from 'should';
+import type { Instant } from '@ferretry/std';
 import { LocalModelsService } from '../../../daemon/lib/local-models/service.ts';
 import type { ProviderProbePlan } from '../../../daemon/lib/provider-probe/plan.ts';
-import type { AuthorizedOutcome } from '@@EXT:daemon/src/lib/speedups/ports.ts@@';
+import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 
 const tags = (...names: string[]): AuthorizedOutcome => ({
   kind: 'completion',
@@ -28,7 +29,7 @@ function world(
     address: options.address,
     enabled: options.enabled ?? true,
     suggested: async () => 'gpt-oss:20b',
-    now: () => `2026-10-19T00:00:0${clock++}.000Z`,
+    now: () => `2026-10-19T00:00:0${clock++}.000Z` as Instant,
     onChanged: async () => {
       changed.push(service.snapshot() as LocalModels);
     },

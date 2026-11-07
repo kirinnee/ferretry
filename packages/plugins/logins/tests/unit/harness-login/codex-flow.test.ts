@@ -7,6 +7,8 @@
  * to express both as options on one shape.
  */
 import { describe, it } from 'bun:test';
+import type { Instant } from '@ferretry/std';
+import type { LoginId } from '../../../contract/index.ts';
 import should from 'should';
 import {
   CODEX_LINK_LOGIN_ARGV,
@@ -39,10 +41,10 @@ const USER_CODE = '0IER-FFQW6';
 
 const BASE = {
   flowId: 'flow-two',
-  credentialId: 'codex-kirin',
+  loginId: 'codex-kirin' as LoginId,
   identity: 'codex:kirin',
-  startedAt: '2026-08-19T10:00:00.000Z',
-  expiresAt: '2026-08-19T10:10:00.000Z',
+  startedAt: '2026-08-19T10:00:00.000Z' as Instant,
+  expiresAt: '2026-08-19T10:10:00.000Z' as Instant,
 } satisfies HarnessLoginFlowBase;
 
 const awaiting: CodexLoginStage = { stage: 'awaiting-approval', verificationUrl: CODEX_URL, userCode: USER_CODE };
@@ -51,7 +53,7 @@ const PASTE = { code: 'pasted-TESTONLY' } as const;
 const failed: CodexLoginStage = {
   stage: 'failed',
   reason: 'this host’s codex did not offer a sign-in that can be driven from a browser',
-  remedy: 'run `fy credential signin codex-kirin`',
+  remedy: 'run `fy login signin codex-kirin`',
 };
 
 describe('Codex’s own login argv', () => {
@@ -299,7 +301,7 @@ describe('codexProjection', () => {
     const actual = codexProjection(BASE, failed);
 
     // Assert
-    should(actual).have.property('remedy', 'run `fy credential signin codex-kirin`');
+    should(actual).have.property('remedy', 'run `fy login signin codex-kirin`');
   });
 
   it('should have no state in which it awaits a pasted code', () => {

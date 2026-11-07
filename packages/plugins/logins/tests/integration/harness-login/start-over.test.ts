@@ -13,12 +13,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessLoginFlow } from '../../../contract/index.ts';
 import should from 'should';
-import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../daemon/adapters/harness-login/login-child.ts';
-import { systemPortHolders } from '../../../daemon/adapters/harness-login/port-holders.ts';
-import type { CallerGovernance } from '@@EXT:daemon/src/lib/api/capability.ts@@';
+import type { LoginId } from '../../../contract/index.ts';
+import { spawnChild, timer } from '../../support/real-ports.ts';
+import { realPortHolders } from '../../support/real-ports.ts';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { HarnessLoginTimer } from '../../../daemon/lib/harness-login/ports.ts';
 import { HarnessLoginService } from '../../../daemon/lib/harness-login/service.ts';
-import { waitFor, waitForValue } from '@@EXT:daemon/tests/integration/support/wait-for.ts@@';
+import { waitFor, waitForValue } from '../../support/real-ports.ts';
 
 const temporaryDirectories: string[] = [];
 const leftovers: Bun.Subprocess[] = [];
@@ -78,7 +79,7 @@ function drivenTimer() {
     timer: {
       after: (milliseconds: number, run: () => void) => {
         armed.push({ milliseconds, run });
-        return harnessLoginTimer.after(milliseconds, run);
+        return timer.after(milliseconds, run);
       },
     },
     fire: (milliseconds: number): void => {
@@ -93,20 +94,20 @@ function service(
   binary: string,
   port: number,
   windowMinutes?: number,
-  timer: HarnessLoginTimer = harnessLoginTimer,
+  loginTimer: HarnessLoginTimer = timer,
 ): HarnessLoginService {
   const created = new HarnessLoginService({
     clock: { now: () => Date.now() },
     mintId: () => crypto.randomUUID().replaceAll('-', ''),
-    spawn: spawnHarnessLoginChild,
+    spawn: spawnChild,
     deliverCallback: async () => 'delivered',
     environment: { PATH: '/usr/bin:/bin' },
-    timer,
+    timer: loginTimer,
     clientName: 'fy',
     credentialTargets: {
-      target: async credentialId => ({
-        kind: 'store',
-        credentialId,
+      target: async loginId => ({
+        kind: 'store' as const,
+        loginId: loginId as LoginId,
         harness: 'codex',
         environment: { FAKE_CALLBACK_PORT: String(port) },
         arguments: [],
@@ -115,7 +116,7 @@ function service(
       }),
     },
     locate: () => binary,
-    portHolders: systemPortHolders(),
+    portHolders: realPortHolders(),
     callbackPorts: [port],
     ...(windowMinutes === undefined ? {} : { windowMinutes }),
   });
@@ -150,12 +151,12 @@ describe('starting a Codex sign-in over, for real', () => {
     const port = await freePort();
     const { binary } = await fakeCodex();
     const subject = service(binary, port);
-    const first = await subject.start({ credentialId: 'team', method: 'link' }, BROWSER);
+    const first = await subject.start({ loginId: 'team' as LoginId, method: 'link' }, BROWSER);
     should(await settledOnto(subject, first.flowId)).have.property('state', 'awaiting-callback');
 
     // Act
-    const picked = await subject.start({ credentialId: 'team' }, BROWSER);
-    const fresh = await subject.start({ credentialId: 'team', method: 'link', restart: true }, BROWSER);
+    const picked = await subject.start({ loginId: 'team' as LoginId }, BROWSER);
+    const fresh = await subject.start({ loginId: 'team' as LoginId, method: 'link', restart: true }, BROWSER);
 
     // Assert — the fresh child could bind the port, so the old one had let it go.
     should(picked).match({ flowId: first.flowId, resumed: true, state: 'awaiting-callback' });
@@ -176,7 +177,7 @@ describe('starting a Codex sign-in over, for real', () => {
     const subject = service(binary, port);
 
     // Act
-    const fresh = await subject.start({ credentialId: 'team', method: 'link', restart: true }, BROWSER);
+    const fresh = await subject.start({ loginId: 'team' as LoginId, method: 'link', restart: true }, BROWSER);
 
     // Assert
     should(await settledOnto(subject, fresh.flowId)).have.property('state', 'awaiting-callback');
@@ -192,7 +193,7 @@ describe('starting a Codex sign-in over, for real', () => {
       const subject = service(binary, port);
 
       // Act
-      const fresh = await subject.start({ credentialId: 'team', method: 'link', restart: true }, BROWSER);
+      const fresh = await subject.start({ loginId: 'team' as LoginId, method: 'link', restart: true }, BROWSER);
       const flow = await settledOnto(subject, fresh.flowId);
 
       // Assert — this test's own runner is the holder, and it is still serving.
@@ -215,7 +216,7 @@ describe('starting a Codex sign-in over, for real', () => {
     const { binary } = await fakeCodex();
     const driven = drivenTimer();
     const subject = service(binary, port, 0.01, driven.timer);
-    const started = await subject.start({ credentialId: 'team', method: 'link' }, BROWSER);
+    const started = await subject.start({ loginId: 'team' as LoginId, method: 'link' }, BROWSER);
     await settledOnto(subject, started.flowId);
 
     // Act

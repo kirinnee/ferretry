@@ -9,12 +9,10 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { HarnessKind } from '@ferretry/fleet';
-import type { HarnessLoginSubmission } from '../../../contract/index.ts';
+import type { HarnessKind } from '../../../daemon/lib/shared/harness.ts';
+import type { HarnessLoginSubmission, LoginId } from '../../../contract/index.ts';
 import should from 'should';
-import type { CallerGovernance } from '@@EXT:daemon/src/lib/api/capability.ts@@';
-import { ApiDispatcher } from '@@EXT:daemon/src/lib/api/dispatcher.ts@@';
-import { ApiRouter } from '@@EXT:daemon/src/lib/api/router.ts@@';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import {
   type CredentialSignInTarget,
   FleetCredentialRefusal,
@@ -37,9 +35,6 @@ import {
   NO_USABLE_LOGIN,
 } from '../../../daemon/lib/harness-login/service.ts';
 import { codexSharedHostEnding } from '../../../daemon/lib/harness-login/codex-flow.ts';
-import { harnessLoginRoutes } from '@@EXT:daemon/src/lib/runtime/mounts/fleet-login.ts@@';
-import { jsonBody, request } from '@@EXT:daemon/tests/unit/api/support.ts@@';
-import { CREDENTIALS, GRANTED, human, NARROWED } from '@@EXT:daemon/tests/unit/runtime/mounts/support.ts@@';
 
 const ESC = '\u001b';
 const BEL = '\u0007';
@@ -68,9 +63,9 @@ const CREDENTIAL_SHAPED_LINE = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-TE
 const PASTED_CODE = 'pasted-authorization-code-TESTONLY';
 
 /** The one Claude credential, the one Codex credential, and one whose login lives in its environment. */
-const CLAUDE_CREDENTIAL = 'work';
-const CODEX_CREDENTIAL = 'team';
-const ENVIRONMENT_CREDENTIAL = 'envkey';
+const CLAUDE_CREDENTIAL = 'work' as LoginId;
+const CODEX_CREDENTIAL = 'team' as LoginId;
+const ENVIRONMENT_CREDENTIAL = 'envkey' as LoginId;
 
 const ENVIRONMENT_REASON = '"envkey" is authenticated by its environment variables, so there is nothing to sign in to';
 
@@ -92,7 +87,7 @@ const checkOf = (signedIn: boolean): SignInCheck =>
 function storeTarget(overrides: Partial<Omit<StoreTarget, 'kind'>> = {}): StoreTarget {
   return {
     kind: 'store',
-    credentialId: overrides.credentialId ?? CLAUDE_CREDENTIAL,
+    loginId: overrides.loginId ?? CLAUDE_CREDENTIAL,
     harness: overrides.harness ?? 'claude',
     environment: overrides.environment ?? {
       CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/fleet/credentials/work',
@@ -172,7 +167,7 @@ interface FixtureOptions {
   readonly windowMinutes?: number;
   readonly now?: () => number;
   /** Replaces the default resolution, so a test can hold or break one target. */
-  readonly target?: (credentialId: string, fallback: (id: string) => CredentialSignInTarget) => CredentialSignInTarget;
+  readonly target?: (loginId: string, fallback: (id: string) => CredentialSignInTarget) => CredentialSignInTarget;
   readonly locate?: (harness: HarnessKind) => string | undefined;
   /** What Codex's listener answers a delivery with. Delivered, by default. */
   readonly deliver?: HarnessLoginCallbackDeliver;
@@ -212,7 +207,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     }
     if (id === CODEX_CREDENTIAL) {
       return storeTarget({
-        credentialId: id,
+        loginId: id as LoginId,
         harness: 'codex',
         environment: { CODEX_HOME: '/fy/fleet/credentials/team' },
         arguments: ['-c', 'cli_auth_credentials_store="file"'],
@@ -222,7 +217,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
         check: async () => checkOf(logins.has(id)),
       });
     }
-    if (id === ENVIRONMENT_CREDENTIAL) return { kind: 'refused', credentialId: id, reason: ENVIRONMENT_REASON };
+    if (id === ENVIRONMENT_CREDENTIAL) return { kind: 'refused', loginId: id as LoginId, reason: ENVIRONMENT_REASON };
     throw new FleetCredentialRefusal('fleet_credential_unknown', `no login "${id}" exists on this machine`);
   };
 
@@ -275,8 +270,8 @@ function fixture(options: FixtureOptions = {}): Fixture {
         return options.stops ?? true;
       },
     },
-    onSignedIn: credentialId => {
-      signedIn.push(credentialId);
+    onSignedIn: loginId => {
+      signedIn.push(loginId);
     },
     ...(options.sharedHost === undefined ? {} : { sharedHost: async () => options.sharedHost === true }),
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
@@ -324,7 +319,7 @@ function held<T>(value: T): { readonly promise: Promise<T>; release(): void } {
  * `governance` answers for ONE request, so a presentation is required rather than defaulted — which is
  * the point: there is no such thing as "where does this caller stand" without a caller.
  */
-const HOST = GRANTED.governance({ loopback: true, adminToken: true, actor: 'admin-cli', stepUp: false });
+const HOST: CallerGovernance = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) };
 
 /** A paired browser the boundary let through (its step-up held): governed, and brings nothing else. */
 const BROWSER: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) };
@@ -347,7 +342,7 @@ describe('starting a harness login', () => {
     const subject = fixture();
 
     // Act
-    const actual = await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, undefined));
+    const actual = await refusalOf(async () => subject.service.start({ loginId: CLAUDE_CREDENTIAL }, undefined));
     await subject.settle();
 
     // Assert
@@ -359,7 +354,7 @@ describe('starting a harness login', () => {
 
   it('should carry a credential refusal through as the sign-in refusal', async () => {
     // Act
-    const actual = await refusalOf(async () => fixture().service.start({ credentialId: 'ghost' }, HOST));
+    const actual = await refusalOf(async () => fixture().service.start({ loginId: 'ghost' as LoginId }, HOST));
 
     // Assert
     should(actual.code).equal('fleet_login_unavailable');
@@ -375,7 +370,7 @@ describe('starting a harness login', () => {
     });
 
     // Act / Assert
-    await should(subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST)).be.rejectedWith(
+    await should(subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST)).be.rejectedWith(
       'the configuration could not be read',
     );
   });
@@ -385,7 +380,7 @@ describe('starting a harness login', () => {
     const subject = fixture();
 
     // Act
-    const actual = await refusalOf(async () => subject.service.start({ credentialId: ENVIRONMENT_CREDENTIAL }, HOST));
+    const actual = await refusalOf(async () => subject.service.start({ loginId: ENVIRONMENT_CREDENTIAL }, HOST));
     await subject.settle();
 
     // Assert
@@ -400,7 +395,7 @@ describe('starting a harness login', () => {
 
     // Act
     const actual = await refusalOf(async () =>
-      subject.service.start({ credentialId: ENVIRONMENT_CREDENTIAL }, BROWSER),
+      subject.service.start({ loginId: ENVIRONMENT_CREDENTIAL }, BROWSER),
     );
 
     // Assert
@@ -411,11 +406,11 @@ describe('starting a harness login', () => {
   it('should pick up the sign-in already running for a credential instead of launching a second', async () => {
     // Arrange — a page that reloaded mid sign-in: the link is already on its way to the person.
     const subject = fixture();
-    const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const first = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     (await subject.child()).emit(CLAUDE_URL_LINE);
 
     // Act
-    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const actual = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Assert — the same flow, its link intact, said to be picked up; and still one child.
@@ -427,11 +422,11 @@ describe('starting a harness login', () => {
   it('should pick up a running sign-in for a governed caller too, whichever method it asks for', async () => {
     // Arrange — a Codex device code started from setup, then "Sign in" again from Credentials.
     const subject = fixture();
-    const first = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, BROWSER);
+    const first = await subject.service.start({ loginId: CODEX_CREDENTIAL }, BROWSER);
     (await subject.child()).emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, BROWSER);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link' }, BROWSER);
 
     // Assert
     should(actual).match({ flowId: first.flowId, state: 'awaiting-approval', userCode: '0IER-FFQW6', resumed: true });
@@ -441,12 +436,12 @@ describe('starting a harness login', () => {
   it('should start over on request: end the running flow, wait for its child, then launch a fresh one', async () => {
     // Arrange — a Codex link sign-in, whose child holds this machine's callback port until it exits.
     const subject = fixture();
-    const first = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    const first = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link' }, HOST);
     const old = await subject.child();
     old.stubborn = true;
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, restart: true }, HOST);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL, restart: true }, HOST);
     await subject.settle();
     const launchedBeforeExit = subject.children.length;
     const grace = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_SHUTDOWN_GRACE_MS);
@@ -473,7 +468,7 @@ describe('starting a harness login', () => {
     const subject = fixture();
 
     // Act
-    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, restart: true }, HOST);
+    const actual = await subject.service.start({ loginId: CLAUDE_CREDENTIAL, restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -484,9 +479,9 @@ describe('starting a harness login', () => {
   it('should spawn nothing for a fresh start that is cancelled while the old child is still exiting', async () => {
     // Arrange
     const subject = fixture();
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     (await subject.child()).stubborn = true;
-    const fresh = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, restart: true }, HOST);
+    const fresh = await subject.service.start({ loginId: CLAUDE_CREDENTIAL, restart: true }, HOST);
 
     // Act
     await subject.service.cancel(fresh.flowId);
@@ -502,12 +497,12 @@ describe('starting a harness login', () => {
     // Arrange
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const first = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.child();
 
     // Act
     now = NOW + HARNESS_LOGIN_WINDOW_MINUTES * 60_000;
-    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const actual = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(actual.flowId).not.equal(first.flowId);
@@ -517,10 +512,10 @@ describe('starting a harness login', () => {
   it('should allow a sign-in for a DIFFERENT credential while one is running', async () => {
     // Arrange
     const subject = fixture();
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
 
     // Assert
     should(actual).have.property('harness', 'codex');
@@ -528,13 +523,13 @@ describe('starting a harness login', () => {
 
   it('should name the credential on the flow, as its identity too, and no account', async () => {
     // Act
-    const actual = await fixture().service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const actual = await fixture().service.start({ loginId: CODEX_CREDENTIAL }, HOST);
 
     // Assert
     should(actual).deepEqual({
       harness: 'codex',
       flowId: 'flow01',
-      credentialId: CODEX_CREDENTIAL,
+      loginId: CODEX_CREDENTIAL,
       identity: CODEX_CREDENTIAL,
       startedAt: '2026-08-19T10:00:00.000Z',
       expiresAt: '2026-08-19T10:10:00.000Z',
@@ -552,7 +547,7 @@ describe('a governed caller', () => {
     const subject = fixture();
 
     // Act
-    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    const actual = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, BROWSER);
     await subject.child();
 
     // Assert
@@ -568,7 +563,7 @@ describe('the Claude leg', () => {
     const subject = fixture();
 
     // Act
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Assert
@@ -581,7 +576,7 @@ describe('the Claude leg', () => {
     const subject = fixture();
 
     // Act
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Assert — the caller's CLAUDE_CONFIG_DIR is replaced, never kept: a sign-in started from inside an
@@ -597,7 +592,7 @@ describe('the Claude leg', () => {
   it('should publish the URL Claude prints and nothing else', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -606,9 +601,9 @@ describe('the Claude leg', () => {
 
     // Assert
     should(actual).deepEqual({
-      harness: 'claude',
+      harness: 'claude-code',
       flowId: 'flow01',
-      credentialId: CLAUDE_CREDENTIAL,
+      loginId: CLAUDE_CREDENTIAL,
       identity: CLAUDE_CREDENTIAL,
       startedAt: '2026-08-19T10:00:00.000Z',
       expiresAt: '2026-08-19T10:10:00.000Z',
@@ -620,7 +615,7 @@ describe('the Claude leg', () => {
   it('should end a Claude sign-in that printed no link in time, and say so', async () => {
     // Arrange — a child that started and never printed its link, as one waiting on a terminal does.
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, BROWSER);
     const child = await subject.child();
     const deadline = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_LINK_SECONDS * 1_000);
     if (deadline === undefined) throw new Error('no link deadline was armed');
@@ -641,7 +636,7 @@ describe('the Claude leg', () => {
   it('should leave a Claude sign-in that printed its link alone when the link deadline passes', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, BROWSER);
     (await subject.child()).emit(CLAUDE_URL_LINE);
     const deadline = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_LINK_SECONDS * 1_000);
 
@@ -656,7 +651,7 @@ describe('the Claude leg', () => {
   it('should disarm the link deadline once a Claude sign-in has ended', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, BROWSER);
     await subject.child();
 
     // Act
@@ -670,7 +665,7 @@ describe('the Claude leg', () => {
   it('should write the pasted value to the child’s stdin, exactly once and with a newline', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -685,7 +680,7 @@ describe('the Claude leg', () => {
   it('should refuse a submission before a link has been published', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -699,7 +694,7 @@ describe('the Claude leg', () => {
   it('should report `unconfirmed` when the harness had already stopped reading', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     child.reading = false;
@@ -725,7 +720,7 @@ describe('the Claude leg', () => {
         return { ...target, check: () => proving.promise };
       },
     });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     child.exit(0);
@@ -744,7 +739,7 @@ describe('the Claude leg', () => {
   it('should complete once the store holds a usable login, and carry no per-account outcomes', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, { code: PASTED_CODE });
@@ -757,9 +752,9 @@ describe('the Claude leg', () => {
 
     // Assert
     should(actual).deepEqual({
-      harness: 'claude',
+      harness: 'claude-code',
       flowId: 'flow01',
-      credentialId: CLAUDE_CREDENTIAL,
+      loginId: CLAUDE_CREDENTIAL,
       identity: CLAUDE_CREDENTIAL,
       startedAt: '2026-08-19T10:00:00.000Z',
       expiresAt: '2026-08-19T10:10:00.000Z',
@@ -778,7 +773,7 @@ describe('the Codex leg', () => {
     const subject = fixture();
 
     // Act
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Assert
@@ -800,7 +795,7 @@ describe('the Codex leg', () => {
   it('should publish nothing until BOTH the link and the code have arrived', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -820,7 +815,7 @@ describe('the Codex leg', () => {
   it('should refuse every submission, because a device grant has no return trip', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -838,7 +833,7 @@ describe('the Codex leg', () => {
   it('should complete when the child finishes its own polling', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -849,7 +844,7 @@ describe('the Codex leg', () => {
     const actual = await subject.service.status(started.flowId);
 
     // Assert
-    should(actual).match({ harness: 'codex', state: 'complete', credentialId: CODEX_CREDENTIAL });
+    should(actual).match({ harness: 'codex', state: 'complete', loginId: CODEX_CREDENTIAL });
     should(actual).not.have.property('accounts');
     // An open app is told the login moved, though no request of its own changed it.
     should(subject.signedIn).deepEqual([CODEX_CREDENTIAL]);
@@ -864,7 +859,7 @@ describe('a login that cannot run', () => {
     const subject = fixture({ locate: () => undefined });
 
     // Act
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Assert
@@ -880,7 +875,7 @@ describe('a login that cannot run', () => {
     // Arrange — the outcome §4.5 rule 2 demands when a third party changes its output, or when an
     // undocumented flag such as `codex login --device-auth` disappears.
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -893,14 +888,14 @@ describe('a login that cannot run', () => {
     should(actual).match({
       state: 'failed',
       reason: "this host's codex did not offer a sign-in that can be driven from a browser",
-      remedy: `sign this login in on the host with \`fy credential signin ${CODEX_CREDENTIAL}\``,
+      remedy: `sign this login in on the host with \`fy login signin ${CODEX_CREDENTIAL}\``,
     });
   });
 
   it('should say so even when the child exits cleanly having offered nothing', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -917,7 +912,7 @@ describe('a login that cannot run', () => {
   it('should fail with the exit code when the child exits badly after publishing', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -929,14 +924,14 @@ describe('a login that cannot run', () => {
     should(await subject.service.status(started.flowId)).match({
       state: 'failed',
       reason: 'the sign-in exited with code 2',
-      remedy: `sign this login in on the host with \`fy credential signin ${CLAUDE_CREDENTIAL}\``,
+      remedy: `sign this login in on the host with \`fy login signin ${CLAUDE_CREDENTIAL}\``,
     });
   });
 
   it('should report a login that exits zero but leaves the store without a usable login as a failure', async () => {
     // Arrange — the provider approval was abandoned half way.
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -955,7 +950,7 @@ describe('a login that cannot run', () => {
   describe('looking for the login again', () => {
     /** A Claude flow whose harness exited 0 with nothing in the store. */
     async function missingLogin(subject: Fixture): Promise<string> {
-      const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+      const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
       const child = await subject.child();
       child.emit(CLAUDE_URL_LINE);
       child.exit(0);
@@ -997,7 +992,7 @@ describe('a login that cannot run', () => {
       should(await subject.service.status(flowId)).match({
         state: 'failed',
         reason: `${NO_USABLE_LOGIN} ${finding}`,
-        remedy: `sign this login in on the host with \`fy credential signin ${CLAUDE_CREDENTIAL}\``,
+        remedy: `sign this login in on the host with \`fy login signin ${CLAUDE_CREDENTIAL}\``,
         recheck: true,
       });
       should(subject.signedIn).be.empty();
@@ -1031,7 +1026,7 @@ describe('a login that cannot run', () => {
     it('should refuse a recheck on a flow that is still running', async () => {
       // Arrange
       const subject = fixture();
-      const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+      const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
 
       // Act
       const actual = await subject.service.submit(started.flowId, { method: 'recheck' });
@@ -1046,7 +1041,7 @@ describe('a login that cannot run', () => {
     it('should refuse a recheck on a flow that failed for another reason, and offer none', async () => {
       // Arrange
       const subject = fixture();
-      const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+      const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
       const child = await subject.child();
       child.emit(CLAUDE_URL_LINE);
       child.exit(2);
@@ -1069,12 +1064,12 @@ describe('a login that cannot run', () => {
       const subject = fixture({
         target: () =>
           storeTarget({
-            credentialId: CODEX_CREDENTIAL,
+            loginId: CODEX_CREDENTIAL,
             harness: 'codex',
             check: async () => ({ signedIn: false, finding }),
           }),
       });
-      const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+      const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
       const child = await subject.child();
       child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
       child.exit(0);
@@ -1096,7 +1091,7 @@ describe('a login that cannot run', () => {
     it('should look again for a Codex sign-in too', async () => {
       // Arrange
       const subject = fixture();
-      const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+      const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
       const child = await subject.child();
       child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
       child.exit(0);
@@ -1123,7 +1118,7 @@ describe('a login that cannot run', () => {
     });
 
     // Act
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Assert
@@ -1146,7 +1141,7 @@ describe('a login that cannot run', () => {
     });
 
     // Act
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Assert
@@ -1162,7 +1157,7 @@ describe('a login’s lifetime', () => {
     const subject = fixture({ windowMinutes: 3 });
 
     // Act
-    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const actual = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(actual.expiresAt).equal('2026-08-19T10:03:00.000Z');
@@ -1171,7 +1166,7 @@ describe('a login’s lifetime', () => {
 
   it('should bound a flow to the declared default window when a caller names none', async () => {
     // Act
-    const actual = await fixture().service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const actual = await fixture().service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(Date.parse(actual.expiresAt) - Date.parse(actual.startedAt)).equal(HARNESS_LOGIN_WINDOW_MINUTES * 60_000);
@@ -1180,7 +1175,7 @@ describe('a login’s lifetime', () => {
   it('should end a flow nobody polled, and kill its child', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act — the deadline fires with nobody reading.
@@ -1198,7 +1193,7 @@ describe('a login’s lifetime', () => {
     // Arrange — a lazy check as well as a timer, because a suspended host wakes up with both.
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.child();
 
     // Act
@@ -1214,7 +1209,7 @@ describe('a login’s lifetime', () => {
     // Arrange
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.child();
     await subject.service.cancel(started.flowId);
 
@@ -1229,7 +1224,7 @@ describe('a login’s lifetime', () => {
   it('should cancel on request, kill the child, and disarm the deadline', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1246,7 +1241,7 @@ describe('a login’s lifetime', () => {
   it('should keep a cancelled ending when the killed child exits afterwards', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -1267,7 +1262,7 @@ describe('a login’s lifetime', () => {
     // "has this ended" check and the spawn.
     const preparing = held(undefined);
     const subject = fixture({ target: () => storeTarget({ prepare: () => preparing.promise }) });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Act
@@ -1285,7 +1280,7 @@ describe('a login’s lifetime', () => {
     // Arrange
     const preparing = held(undefined);
     const subject = fixture({ target: () => storeTarget({ prepare: () => preparing.promise }) });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
     // Act
@@ -1303,7 +1298,7 @@ describe('a login’s lifetime', () => {
     // login turning up afterwards must not overwrite the ending they chose.
     const proving = held<SignInCheck>({ signedIn: true });
     const subject = fixture({ target: () => storeTarget({ check: () => proving.promise }) });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     child.exit(0);
@@ -1325,7 +1320,7 @@ describe('a login’s lifetime', () => {
     // Arrange — the same race, with a store that turns out empty: the ending is still the cancel.
     const proving = held<SignInCheck>({ signedIn: false, finding: MISSING_FINDING });
     const subject = fixture({ target: () => storeTarget({ check: () => proving.promise }) });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     child.exit(0);
@@ -1345,12 +1340,12 @@ describe('a login’s lifetime', () => {
   it('should let a new sign-in start once the previous one is cancelled', async () => {
     // Arrange
     const subject = fixture();
-    const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const first = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.service.cancel(first.flowId);
     await subject.settle();
 
     // Act
-    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const actual = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
 
     // Assert
     should(actual).have.property('flowId', 'flow02');
@@ -1359,7 +1354,7 @@ describe('a login’s lifetime', () => {
   it('should conflict rather than refuse when a cancelled flow is submitted to', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.cancel(started.flowId);
@@ -1396,7 +1391,7 @@ describe('a login’s lifetime', () => {
   it('should end a flow waiting for a code that nobody has read for the idle time', async () => {
     // Arrange — the link was shown, then the page went away.
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -1413,7 +1408,7 @@ describe('a login’s lifetime', () => {
   it('should keep a Codex device code running with nobody reading, because the provider can still approve it', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -1435,7 +1430,7 @@ describe('a login’s lifetime', () => {
     // Arrange
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     (await subject.child()).emit(CLAUDE_URL_LINE);
     const idle = HARNESS_LOGIN_IDLE_MINUTES * 60_000;
 
@@ -1453,7 +1448,7 @@ describe('a login’s lifetime', () => {
   it('should leave the idle deadline alone once a flow has settled', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     await subject.child();
     const idle = idleTimer(subject);
     await subject.service.cancel(started.flowId);
@@ -1468,7 +1463,7 @@ describe('a login’s lifetime', () => {
   /** Run one whole sign-in to a settled flow, the way a person would. */
   const settledFlow = async (subject: Fixture): Promise<string> => {
     const index = subject.children.length;
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child(index);
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, { code: PASTED_CODE });
@@ -1511,7 +1506,7 @@ describe('what the daemon holds', () => {
   it('should hold no token after a successful sign-in — asserted on what is answered, not on a log line', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act — the child prints something shaped exactly like the credential it writes, and the person
@@ -1540,7 +1535,7 @@ describe('what the daemon holds', () => {
     const before = await tree(root);
 
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1557,7 +1552,7 @@ describe('what the daemon holds', () => {
   it('should publish no unrecognised output, even a line that looks like an answer', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -1584,222 +1579,6 @@ async function tree(root: string): Promise<readonly string[]> {
 
 // ─── the routes ───────────────────────────────────────────────────────────────────────────────────
 
-describe('the harness login routes', () => {
-  const dispatcherFor = (subject: Fixture, guard = GRANTED) =>
-    new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), CREDENTIALS, guard);
-
-  const startRequest = (
-    body: Record<string, unknown>,
-    headers: Record<string, string> = human,
-    device?: { readonly deviceId: string; readonly appSession: string },
-  ) =>
-    request({
-      method: 'POST',
-      path: '/v1/fleet/login',
-      headers: { ...headers, 'content-type': 'application/json' },
-      ...(device === undefined ? {} : { device }),
-      body: JSON.stringify(body),
-    });
-
-  it('should answer 409 with the domain’s own code for a credential that is not a login', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    const actual = await dispatcherFor(subject).dispatch(startRequest({ credentialId: ENVIRONMENT_CREDENTIAL }));
-
-    // Assert
-    should(actual.status).equal(409);
-    should(jsonBody(actual)).match({ code: 'fleet_login_unavailable', error: ENVIRONMENT_REASON });
-  });
-
-  it('should let a failure that is not a login refusal through as a server error', async () => {
-    // Arrange
-    const subject = fixture({
-      target: () => {
-        throw new Error('the configuration could not be read');
-      },
-    });
-
-    // Act
-    const actual = await dispatcherFor(subject).dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }));
-
-    // Assert
-    should(actual.status).equal(500);
-  });
-
-  it('should read one flow, forward one value, and end one flow', async () => {
-    // Arrange
-    const subject = fixture();
-    const dispatcher = dispatcherFor(subject);
-    const started = jsonBody(await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL })));
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-
-    // Act
-    const read = await dispatcher.dispatch(request({ path: `/v1/fleet/login/${started.flowId}`, headers: human }));
-    const submitted = await dispatcher.dispatch(
-      request({
-        method: 'POST',
-        path: `/v1/fleet/login/${started.flowId}`,
-        headers: { ...human, 'content-type': 'application/json' },
-        body: JSON.stringify({ code: PASTED_CODE }),
-      }),
-    );
-    const cancelled = await dispatcher.dispatch(
-      request({ method: 'DELETE', path: `/v1/fleet/login/${started.flowId}`, headers: human }),
-    );
-
-    // Assert
-    should(jsonBody(read)).have.property('state', 'awaiting-code');
-    should(jsonBody(submitted)).have.property('outcome', 'accepted');
-    should(jsonBody(cancelled)).have.property('state', 'failed');
-    should(child.written).deepEqual([`${PASTED_CODE}\n`]);
-  });
-
-  /**
-   * The caller this whole feature exists for: a PAIRED BROWSER, which holds a device credential and
-   * never the admin token.
-   *
-   * `minimum: 'operator'` is what admits a device — an `admin-token` minimum would 403 the browser on
-   * every one of these paths, and a browser is always a paired device.
-   */
-  const paired = CREDENTIALS;
-  /** The device a session proved, and the headers the browser sends — none of them a credential. */
-  const pairedDevice = { deviceId: 'device-1', appSession: 'app-one' } as const;
-  const browser = { 'x-ferretry-client': 'ui' } as const;
-  const wardenCaller = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
-  const pairedDispatcher = (subject: Fixture, guard = GRANTED) =>
-    new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), paired, guard);
-
-  it('should let a paired browser reach every one of the four login paths', async () => {
-    // Arrange
-    const subject = fixture();
-    const dispatcher = pairedDispatcher(subject);
-    const start = await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }, browser, pairedDevice));
-    const started = jsonBody(start);
-    const child = await subject.child();
-    child.emit(CLAUDE_URL_LINE);
-
-    // Act
-    const statuses = [
-      start,
-      await dispatcher.dispatch(
-        request({ path: `/v1/fleet/login/${started.flowId}`, headers: browser, device: pairedDevice }),
-      ),
-      await dispatcher.dispatch(
-        request({
-          method: 'POST',
-          path: `/v1/fleet/login/${started.flowId}`,
-          headers: { ...browser, 'content-type': 'application/json' },
-          device: pairedDevice,
-          body: JSON.stringify({ code: PASTED_CODE }),
-        }),
-      ),
-      await dispatcher.dispatch(
-        request({
-          method: 'DELETE',
-          path: `/v1/fleet/login/${started.flowId}`,
-          headers: browser,
-          device: pairedDevice,
-        }),
-      ),
-    ].map(response => response.status);
-
-    // Assert
-    should(started).have.property('state', 'starting');
-    should(statuses).deepEqual([200, 200, 200, 200]);
-  });
-
-  it('should refuse a warden token on every login path, because a login is not a remedy', async () => {
-    // A warden credential is scoped to what an assignment allows, and re-pointing a credential at
-    // another provider account is not one of those things.
-    // Arrange
-    const subject = fixture();
-    const dispatcher = pairedDispatcher(subject);
-
-    // Act
-    const statuses = [
-      await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL }, wardenCaller)),
-      await dispatcher.dispatch(request({ path: '/v1/fleet/login/flow01', headers: wardenCaller })),
-      await dispatcher.dispatch(
-        request({
-          method: 'POST',
-          path: '/v1/fleet/login/flow01',
-          headers: { ...wardenCaller, 'content-type': 'application/json' },
-          body: JSON.stringify({ code: PASTED_CODE }),
-        }),
-      ),
-      await dispatcher.dispatch(request({ method: 'DELETE', path: '/v1/fleet/login/flow01', headers: wardenCaller })),
-    ].map(response => response.status);
-
-    // Assert
-    should(statuses).deepEqual([403, 403, 403, 403]);
-    should(subject.children).be.empty();
-  });
-
-  it('should refuse an unauthenticated caller before it decides anything else', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    const actual = await pairedDispatcher(subject).dispatch(request({ path: '/v1/fleet/login/flow01' }));
-
-    // Assert — 401, not 403: nothing presented a credential, so there is no caller to refuse.
-    should(actual.status).equal(401);
-  });
-
-  it('should refuse a start from a caller whose configure axis the operator switched off', async () => {
-    // Arrange
-    const subject = fixture();
-
-    // Act
-    const actual = await pairedDispatcher(subject, NARROWED).dispatch(
-      startRequest({ credentialId: CLAUDE_CREDENTIAL }, browser, pairedDevice),
-    );
-
-    // Assert
-    should(actual.status).equal(403);
-    should(jsonBody(actual)).have.property('code', 'grant_not_granted');
-    should(subject.resolved).be.empty();
-    should(subject.children).be.empty();
-  });
-
-  it('should refuse a flow id the path cannot carry', async () => {
-    // Act
-    const actual = await dispatcherFor(fixture()).dispatch(request({ path: '/v1/fleet/login/%2F', headers: human }));
-
-    // Assert — 400 rather than 404: the route matched and the id in it is unusable as written.
-    should(actual.status).equal(400);
-  });
-
-  it('should answer 409 with the domain’s own code for a flow nobody minted', async () => {
-    // Act
-    const actual = await dispatcherFor(fixture()).dispatch(request({ path: '/v1/fleet/login/flow99', headers: human }));
-
-    // Assert
-    should(actual.status).equal(409);
-    should(jsonBody(actual)).have.property('code', 'fleet_login_unknown');
-  });
-
-  it('should refuse a start body that names anything but a credential', async () => {
-    // Arrange
-    const subject = fixture();
-    const dispatcher = dispatcherFor(subject);
-
-    // Act
-    const statuses = [
-      await dispatcher.dispatch(startRequest({ credentialId: CLAUDE_CREDENTIAL, wrapper: '/usr/local/bin/anything' })),
-      // The retired account-scoped shape: there is no account to name any more.
-      await dispatcher.dispatch(startRequest({ accountId: '00000000-0000-4000-8000-000000000001' })),
-    ].map(response => response.status);
-
-    // Assert
-    should(statuses).deepEqual([400, 400]);
-    should(subject.resolved).be.empty();
-  });
-});
-
 // ─── a code the harness refuses, or that nobody approved ─────────────────────────────────────────
 
 /** Claude's own refusal, quoted from `auth login` in claude-code 2.1.281 (and §6's 2.1.220 capture). */
@@ -1813,7 +1592,7 @@ describe('a code the harness does not take', () => {
     // Arrange — the defect `docs/design/harness-login.md` §6 records: the write lands, Claude refuses the
     // code on its own output and keeps reading, and the flow used to look exactly as it did before.
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     const submitted = await subject.service.submit(started.flowId, { code: PASTED_CODE });
@@ -1832,7 +1611,7 @@ describe('a code the harness does not take', () => {
   it('should clear the refusal when the next code is sent, and take that code', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, { code: 'first-TESTONLY' });
@@ -1850,7 +1629,7 @@ describe('a code the harness does not take', () => {
   it('should publish no child text and no code with the refusal', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, { code: PASTED_CODE });
@@ -1867,7 +1646,7 @@ describe('a code the harness does not take', () => {
   it('should end as a rejected code, offering a fresh one, when Claude exits after taking a code', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
     await subject.service.submit(started.flowId, { code: PASTED_CODE });
@@ -1889,7 +1668,7 @@ describe('a code the harness does not take', () => {
   it('should say the link expired when the window closes while a person holds it', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
 
@@ -1906,7 +1685,7 @@ describe('a code the harness does not take', () => {
   it('should say a Codex code expired — never that it was rejected — when Codex stops waiting', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -1929,7 +1708,7 @@ describe('a code the harness does not take', () => {
     // Arrange — the lazy path, because a suspended host wakes up with no timer having fired.
     let now = NOW;
     const subject = fixture({ now: () => now });
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -1963,7 +1742,7 @@ const DEVICE_DISABLED_LINE =
 /** A Codex link sign-in that has printed its link. */
 async function linkAwaiting(options: FixtureOptions = {}) {
   const subject = fixture(options);
-  const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+  const started = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link' }, HOST);
   const child = await subject.child();
   child.emit(...LINK_LINES);
   return { subject, started, child };
@@ -1985,7 +1764,7 @@ describe('the Codex link sign-in', () => {
   it('should move to the link sign-in by itself when Codex says device codes are turned off', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const device = await subject.child();
 
     // Act
@@ -2005,7 +1784,7 @@ describe('the Codex link sign-in', () => {
   it('should not move to the link by itself on a host that shares its loopback ports', async () => {
     // Arrange
     const subject = fixture({ sharedHost: true });
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const device = await subject.child();
 
     // Act
@@ -2024,7 +1803,7 @@ describe('the Codex link sign-in', () => {
   it('should still move to the link when the person asks for it on a host that shares its loopback ports', async () => {
     // Arrange
     const subject = fixture({ sharedHost: true });
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const device = await subject.child();
     device.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -2041,7 +1820,7 @@ describe('the Codex link sign-in', () => {
   it('should move to a link when the person says the device code did not work, in the same flow', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const device = await subject.child();
     device.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
 
@@ -2066,7 +1845,7 @@ describe('the Codex link sign-in', () => {
         return { ...target, prepare: async () => await gate.promise };
       },
     });
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
 
     // Act
     await subject.service.submit(started.flowId, { method: 'link' });
@@ -2153,7 +1932,7 @@ describe('the Codex link sign-in', () => {
         return 'refused';
       },
     });
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link' }, HOST);
     flowId = started.flowId;
     (await subject.child()).emit(...LINK_LINES);
 
@@ -2194,7 +1973,7 @@ describe('the Codex link sign-in', () => {
   it('should name the busy ports, not a missing sign-in, when Codex cannot listen', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link' }, HOST);
     const child = await subject.child();
 
     // Act
@@ -2224,8 +2003,8 @@ describe('the Codex link sign-in', () => {
     const subject = fixture();
 
     // Act
-    const atStart = subject.service.start({ credentialId: CLAUDE_CREDENTIAL, method: 'link' }, HOST);
-    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const atStart = subject.service.start({ loginId: CLAUDE_CREDENTIAL, method: 'link' }, HOST);
+    const started = await subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST);
     const running = await subject.service.submit(started.flowId, { method: 'link' });
 
     // Assert
@@ -2236,7 +2015,7 @@ describe('the Codex link sign-in', () => {
   it('should refuse a switch once the flow already uses a link, and an address before the link shows', async () => {
     // Arrange
     const subject = fixture();
-    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    const started = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link' }, HOST);
     await subject.child();
 
     // Act
@@ -2253,7 +2032,7 @@ describe('a daemon that stops', () => {
   it('should end every running sign-in and wait for its child, without escalating one that exits', async () => {
     // Arrange — a pending Codex sign-in, the one that holds localhost:1455.
     const subject = fixture();
-    const flow = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const flow = await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
 
     // Act
@@ -2274,7 +2053,7 @@ describe('a daemon that stops', () => {
   it('should kill a child outright when it has not exited by the end of the grace', async () => {
     // Arrange — a child whose exit never settles on SIGTERM: a launcher whose binary keeps the pipes.
     const subject = fixture();
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.stubborn = true;
 
@@ -2297,7 +2076,7 @@ describe('a daemon that stops', () => {
 
     // Act
     await subject.service.shutdown();
-    const refusal = await refusalOf(() => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST));
+    const refusal = await refusalOf(() => subject.service.start({ loginId: CLAUDE_CREDENTIAL }, HOST));
 
     // Assert
     should(refusal.code).equal('fleet_login_unavailable');
@@ -2328,7 +2107,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: [leftover(1455, 777)] });
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -2343,7 +2122,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: [proxy(1455), proxy(1457)] });
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
     await subject.settle();
     const flow = await subject.service.status(actual.flowId);
 
@@ -2368,7 +2147,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     });
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -2381,7 +2160,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: [leftover(1455, 780), proxy(1457)], stops: false });
 
     // Act
-    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    const actual = await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -2397,7 +2176,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: [proxy(1455)] });
 
     // Act
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -2409,7 +2188,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: [proxy(1455), proxy(1457), leftover(1455, 781)] });
 
     // Act
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL, restart: true }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL, restart: true }, HOST);
     await subject.settle();
 
     // Assert — the leftover is still cleared; the proxy is still left alone.
@@ -2422,7 +2201,7 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: undefined });
 
     // Act
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -2434,8 +2213,8 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
     const subject = fixture({ holders: [leftover(1455, 782)] });
 
     // Act
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, restart: true }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CLAUDE_CREDENTIAL, restart: true }, HOST);
     await subject.settle();
 
     // Assert
@@ -2446,9 +2225,9 @@ describe('starting a Codex sign-in over with its callback port taken', () => {
   it('should clear nothing for a fresh start cancelled while its predecessor exits', async () => {
     // Arrange
     const subject = fixture({ holders: [leftover(1455, 783)] });
-    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    await subject.service.start({ loginId: CODEX_CREDENTIAL }, HOST);
     (await subject.child()).stubborn = true;
-    const fresh = await subject.service.start({ credentialId: CODEX_CREDENTIAL, restart: true }, HOST);
+    const fresh = await subject.service.start({ loginId: CODEX_CREDENTIAL, restart: true }, HOST);
 
     // Act
     await subject.service.cancel(fresh.flowId);
