@@ -484,7 +484,7 @@ async function build(): Promise<void> {
       mode: 'auto',
       cwd: projectDir,
     });
-    await fyOk(['stop', '--reason', 'fixture: ended on purpose', 'orphan', ended.id]);
+    await fyOk(['stop', '--reason', 'fixture: ended on purpose', 'orphan', '--yes', ended.id]);
     ended.state = 'ended';
   });
   cannot(
