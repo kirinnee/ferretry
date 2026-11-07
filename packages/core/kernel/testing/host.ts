@@ -59,6 +59,8 @@ import {
 import { scratchPort } from '../host/scratch.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import { matchingHook } from '../host/hooks.ts';
+import { CORE_IDS } from '../contract/ids.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
@@ -269,6 +271,22 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 
 async function start(world: World): Promise<TestHost> {
   const { options, clock, identity, identitySigner } = world;
+  const manifests: readonly Manifest[] = options.plugins.map(plugin => plugin.manifest);
+  const hookOffers = new Map(
+    manifests.flatMap(manifest => (manifest.hooks?.offers ?? []).map(offer => [offer.hook.name, offer.hook] as const)),
+  );
+  const validTake = (id: string, take: HookTake): boolean => {
+    const hook = hookOffers.get(take.hook.name);
+    if (hook === undefined) return true;
+    if (!matchingHook(hook, take.hook)) return false;
+    if (hook.mode === 'provide')
+      return (hook.takers === undefined || hook.takers.includes(id)) && hook.key.safeParse(take.key).success;
+    return hook.mode !== 'decide' || !hook.securityPath || (CORE_IDS as readonly string[]).includes(id);
+  };
+  for (const plugin of options.plugins)
+    for (const take of plugin.manifest.hooks?.takes ?? [])
+      if (!validTake(plugin.manifest.id, take))
+        throw new Error(`testHost: ${plugin.manifest.id} takes a refused hook definition`);
   const acts: ActRecord[] = [];
   const published: { event: string; payload: unknown }[] = [];
   const logs: { level: string; scope: string; message: string; fields?: LogFields }[] = [];
@@ -326,10 +344,10 @@ async function start(world: World): Promise<TestHost> {
     built
       .flatMap((b, index) =>
         (b.manifest.hooks?.takes ?? [])
-          .filter(take => take.hook.name === hookName)
+          .filter(take => take.hook.name === hookName && validTake(b.manifest.id, take))
           .map(take => {
-            const implKey =
-              take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name;
+            const hook = hookOffers.get(hookName) ?? take.hook;
+            const implKey = hook.mode === 'provide' && take.key !== undefined ? `${hook.name}:${take.key}` : hook.name;
             return {
               id: b.manifest.id,
               ...(take.key === undefined ? {} : { key: take.key }),

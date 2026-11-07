@@ -37,6 +37,19 @@ interface Taker {
 
 const isCore = (id: string): boolean => (CORE_IDS as readonly string[]).includes(id);
 
+/** Match a copied declaration to the offerer's shape; schemas keep their contract identity. */
+export function matchingHook(offered: HookDef, requested: HookDef): boolean {
+  const left = offered as unknown as Record<string, unknown>;
+  const right = requested as unknown as Record<string, unknown>;
+  const fields = ['kind', 'name', 'mode', 'key', 'value', 'payload', 'input', 'item', 'timeoutMs', 'securityPath'];
+  if (!fields.every(field => left[field] === right[field])) return false;
+  const a = offered.mode === 'provide' ? offered.takers : undefined;
+  const b = requested.mode === 'provide' ? requested.takers : undefined;
+  return a === undefined
+    ? b === undefined
+    : b !== undefined && a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
 const takeKey = (take: HookTake): string =>
   take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name;
 
@@ -103,6 +116,7 @@ export class HookEngine {
       for (const take of manifest.hooks?.takes ?? []) {
         const hook = engine.offers.get(take.hook.name)?.offer.hook;
         if (hook?.mode !== 'provide' || take.key === undefined || !hook.key.safeParse(take.key).success) continue;
+        if (!matchingHook(hook, take.hook)) continue;
         if (hook.takers !== undefined && !hook.takers.includes(manifest.id)) continue;
         const key = `${hook.name}:${take.key}`;
         const ids = engine.declaredProviders.get(key) ?? new Set<string>();
@@ -113,10 +127,17 @@ export class HookEngine {
     const providedKeys = new Map<string, string>();
     manifests.forEach((manifest, rank) => {
       for (const take of manifest.hooks?.takes ?? []) {
-        const hook = take.hook;
+        const requested = take.hook;
+        const hook = engine.offers.get(requested.name)?.offer.hook;
+        // A take of an absent offer is inert; only an offerer's definition can grant a live take.
+        if (hook === undefined) continue;
         const refuse = (sentence: string, plugins: readonly string[] = [manifest.id]): void => {
           refusals.push({ hook: hook.name, plugins, sentence });
         };
+        if (!matchingHook(hook, requested)) {
+          refuse(`${manifest.id} takes ${hook.name} with a definition different from its offerer's.`);
+          continue;
+        }
         if (hook.mode === 'decide' && hook.securityPath && !isCore(manifest.id)) {
           refuse(`${manifest.id} takes the security-path hook ${hook.name}, which only core may take.`);
           continue;
@@ -147,7 +168,7 @@ export class HookEngine {
         }
         const taker: Taker = {
           plugin: manifest.id,
-          take,
+          take: { ...take, hook },
           rank,
           priority: take.priority ?? manifest.priority ?? 50,
           state: 'skeleton',

@@ -63,3 +63,23 @@ test('testHost declaredProvider preserves a skeleton declaration while provider 
   expect(hooks?.provider(Hook, 'one')).toBe('unavailable');
   await host.stop();
 });
+
+test('testHost refuses a taker’s cloned same-name definition before building it', async () => {
+  const fake = { ...Hook, key: z.string() };
+  let built = false;
+  const rogue = definePlugin({ ...taker, hooks: { takes: [{ hook: fake, key: 'one' }] } });
+  await expect(
+    testHost({
+      plugins: [
+        implementDaemon(offerer, { build: () => ({}) }),
+        implementDaemon(rogue, {
+          build: () => {
+            built = true;
+            return { hooks: { 'test.provided:one': {} } };
+          },
+        }),
+      ],
+    }),
+  ).rejects.toThrow('refused hook definition');
+  expect(built).toBe(false);
+});
