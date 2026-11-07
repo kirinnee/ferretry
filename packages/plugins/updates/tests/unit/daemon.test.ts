@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
-import { device, ferret, testHost } from '@ferretry/kernel/testing';
+import { device, ferret, owner, testHost } from '@ferretry/kernel/testing';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import { DAEMON_UPDATE_CODES, DaemonUpdateViewSchema, UPDATE_HOST_CODES } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import type { ConfigDoor, DoorResult } from '../../daemon/lib/config-door.ts';
+import { fakeHost } from './host.ts';
 import { updateRoutes } from '../../daemon/lib/routes.ts';
 import { DaemonUpdateService } from '../../daemon/lib/service.ts';
 
@@ -60,6 +61,18 @@ describe('updates on the test host', () => {
     const host = await testHost({ plugins: [daemon], fakes: { ferrets: { list: async () => [] } } });
     const read = await host.request('GET', '/v1/daemon/update', { as: device('phone') });
     expect([read.status, read.json<{ code: string }>().code]).toEqual([503, UPDATE_HOST_CODES.hostUnavailable]);
+    await host.stop();
+  });
+
+  test('with the kernel update host the view is built from its release, and the install facts come from its executable (a start is refused as not self-updatable, not as an unavailable host)', async () => {
+    const { port } = fakeHost({ release: '4.28.0' });
+    const host = await testHost({ plugins: [daemon], updateHost: port, fakes: { ferrets: { list: async () => [] } } });
+    const read = await host.request('GET', '/v1/daemon/update', { as: device('phone') });
+    expect(read.status).toBe(200);
+    expect(read.json<{ current: string }>().current).toBe('4.28.0');
+    const body = { target: '4.29.0', when: 'now' };
+    const start = await host.request('POST', '/v1/daemon/update', { body, as: owner() });
+    expect([start.status, start.json<{ code: string }>().code]).toEqual([409, DAEMON_UPDATE_CODES.notSelfUpdatable]);
     await host.stop();
   });
 
