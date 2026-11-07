@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { AskAnswerSchema, AskDraftSchema, AskIdSchema, AskSourceSchema } from '../../contract/index.ts';
+import {
+  AskAnswerSchema,
+  AskDraftSchema,
+  AskIdSchema,
+  AsksConfigFile,
+  AskSourceSchema,
+} from '../../contract/index.ts';
 import { askSourceConformance, asksConformance, FakeAsks } from '../../contract/testing/index.ts';
 
 asksConformance('FakeAsks', () => {
@@ -72,5 +78,21 @@ describe('the envelope', () => {
     };
     expect(AskAnswerSchema.safeParse({ ...answer, by: { kind: 'host' } }).success).toBe(true);
     expect(AskAnswerSchema.safeParse({ ...answer, by: { kind: 'ferret', ferret: 'f1' } }).success).toBe(false);
+  });
+});
+
+describe('the asks configuration file (today: attention.resurfaceAfterMinutes)', () => {
+  const parse = (value: unknown) => AsksConfigFile.schema.safeParse(value);
+  test('is config/asks.yaml, off by default, and takes 1 to 10080 whole minutes', () => {
+    expect(AsksConfigFile.file).toBe('asks.yaml');
+    expect(parse({})).toMatchObject({ success: true, data: {} });
+    expect(parse({ resurfaceAfterMinutes: 45 }).success).toBe(true);
+    expect(parse({ resurfaceAfterMinutes: 1 }).success).toBe(true);
+    expect(parse({ resurfaceAfterMinutes: 10_080 }).success).toBe(true);
+    for (const bad of [0, 10_081, 1.5, '30']) expect(parse({ resurfaceAfterMinutes: bad }).success).toBe(false);
+    expect(parse({ resurfaceAfterMinutes: 30, other: 1 }).success).toBe(false);
+  });
+  test('never loosens: resurfacing is a reminder, not spend or authority', () => {
+    expect(AsksConfigFile.loosens(undefined, { resurfaceAfterMinutes: 5 })).toEqual([]);
   });
 });
