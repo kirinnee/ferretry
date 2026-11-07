@@ -152,6 +152,22 @@ describe('changing the warden configuration', () => {
     should((subject.storedConfig() as WardenConfig).intervalMinutes).equal(10);
   });
 
+  it('should answer each change with the sentences the store held for THAT change', async () => {
+    // Arrange
+    const subject = harness({
+      config: defaultWardenConfig,
+      held: patch => ('blessMinutes' in (patch as object) ? ['a longer blessing waits for you'] : []),
+    });
+
+    // Act
+    const loosened = await subject.service.updateConfig({ blessMinutes: 600 });
+    const applied = await subject.service.updateConfig({ enabled: true });
+
+    // Assert
+    should(loosened.held).eql(['a longer blessing waits for you']);
+    should(applied).not.have.property('held');
+  });
+
   it('should compose two successive single-field patches', async () => {
     // Arrange
     const subject = harness({ config: defaultWardenConfig });

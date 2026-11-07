@@ -98,9 +98,8 @@ export function wardenRoutes(subsystem: WardenSubsystem) {
     }),
     'GET /v1/warden/config': guarded(async () => jsonResponse(await subsystem.config())),
     'PATCH /v1/warden/config': guarded(async call => {
-      const view = await subsystem.updateConfig(await parseBody(call.request, WardenConfigPatchSchema));
-      const held = subsystem.heldSentences();
-      return jsonResponse(held.length === 0 ? view : { ...view, held });
+      // The held sentences come back with THIS change's view, so two changes in flight never answer each other's.
+      return jsonResponse(await subsystem.updateConfig(await parseBody(call.request, WardenConfigPatchSchema)));
     }),
   };
 }

@@ -231,6 +231,7 @@ export const WardenConfigViewSchema = z.object({
   accounts: z.array(WardenAccountSchema),
   warnings: z.array(z.string()),
   login: WardenLoginSchema.optional(),
+  held: z.array(z.string()).optional(),
 });
 export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;
 export const WardenVerdictSpawnSchema = z.object({

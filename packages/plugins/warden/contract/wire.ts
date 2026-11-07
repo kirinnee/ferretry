@@ -479,5 +479,7 @@ export const WardenConfigViewSchema = z.strictObject({
   accounts: z.array(WardenAccountSchema),
   warnings: z.array(z.string()),
   login: WardenLoginViewSchema.optional(),
+  /** On a settings change only: the sentences of the edit the daemon held for the owner (a loosening waits for them). */
+  held: z.array(z.string()).optional(),
 });
 export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;

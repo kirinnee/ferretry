@@ -379,8 +379,11 @@ export interface WardenConfigStore {
    * Persist `config` — the settings in effect with the owner's `patch` applied. The patch travels too:
    * an edit the owner has not confirmed yet is held in the file, and the store must make the owner's
    * change to that held edit as well rather than overwrite it with what is in effect.
+   *
+   * Answers the sentences of THIS edit when it was held for the owner (empty when it is in effect): the answer belongs
+   * to this write, never to whichever write finished last.
    */
-  write(config: WardenConfig, patch: WardenConfigPatch): Promise<void>;
+  write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]>;
 }
 
 /** Accounts actually installed on this host, by the NAME an operator types (`claude-default`), never by the
@@ -856,7 +859,7 @@ export class WardenSweepService {
   async updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView> {
     const stored = await this.storedConfig();
     const next = applyWardenConfigPatch(stored.config, patch);
-    await this.ports.config.write(next, patch);
+    const held = await this.ports.config.write(next, patch);
     this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
     const resolved = await this.resolveLogin(next);
     return {
@@ -864,6 +867,7 @@ export class WardenSweepService {
       accounts: [...resolved.accounts],
       warnings: [...wardenConfigWarnings(next, resolved)],
       login: resolved.login,
+      ...(held.length === 0 ? {} : { held: [...held] }),
     };
   }
 

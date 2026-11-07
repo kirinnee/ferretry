@@ -58,7 +58,8 @@ describe('the sweep memory and the move ledger', () => {
 });
 
 describe('Jev checks by day', () => {
-  const check = (at: string, sessionId = 's1') => ({ at, sessionId, anomalyKind: 'sus_thinking', verdict: 'healthy', confidence: 0.9, costUsd: 0 }) as never;
+  const check = (at: string, sessionId = 's1') =>
+    ({ at, sessionId, anomalyKind: 'sus_thinking', verdict: 'healthy', confidence: 0.9, costUsd: 0 }) as never;
 
   it('should hand back the newest checks first across days', async () => {
     // Arrange
@@ -87,7 +88,9 @@ describe('Jev checks by day', () => {
     );
 
     // Assert
-    should([...state.folder.files.keys()].filter(path => path.startsWith('jev-checks/'))).eql(['jev-checks/2026-11-06.json']);
+    should([...state.folder.files.keys()].filter(path => path.startsWith('jev-checks/'))).eql([
+      'jev-checks/2026-11-06.json',
+    ]);
   });
 });
 
@@ -154,14 +157,16 @@ describe('warden.yaml through the config door', () => {
   it('should merge a nested patch into the file section it changes and say what was held', async () => {
     // Arrange
     const applied: unknown[] = [];
-    const store = new ConfigWardenConfigStore(door(applied, { kind: 'held', sentences: ['a bigger cap waits for you'] }));
+    const store = new ConfigWardenConfigStore(
+      door(applied, { kind: 'held', sentences: ['a bigger cap waits for you'] }),
+    );
 
     // Act
-    await store.write({} as never, { caps: { llmDaily: 3 } } as never);
+    const held = await store.write({} as never, { caps: { llmDaily: 3 } } as never);
 
     // Assert
     should(applied[0]).eql({ patch: { caps: { jevDaily: 5, llmDaily: 3 } } });
-    should(store.heldSentences()).eql(['a bigger cap waits for you']);
+    should(held).eql(['a bigger cap waits for you']);
   });
 
   it('should say so when the host gives no door to write through', async () => {
@@ -180,7 +185,9 @@ describe('warden.yaml through the config door', () => {
 
   it('should carry a refusal with the reasons the kernel gave', async () => {
     // Arrange
-    const store = new ConfigWardenConfigStore(door([], { kind: 'refused', reason: 'bad', issues: [{ message: 'caps.jevDaily must be positive' }] }));
+    const store = new ConfigWardenConfigStore(
+      door([], { kind: 'refused', reason: 'bad', issues: [{ message: 'caps.jevDaily must be positive' }] }),
+    );
 
     // Act
     const writing = store.write({} as never, { caps: { jevDaily: -1 } } as never);

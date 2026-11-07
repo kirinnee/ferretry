@@ -62,8 +62,6 @@ export interface WardenSubsystem {
   leave(ferret: string, duration: '1h' | '4h' | 'until_change'): ReturnType<WardenSweepService['leaveAlone']>;
   /** An event that may bring the next sweep forward (a turn ended, a ferret stopped). */
   nudgeSweep(trigger: 'turnEnd' | 'question' | 'paneDied'): void;
-  /** The held edit sentences of the last config change, for the route to say out loud. */
-  heldSentences(): readonly string[];
   arm(): () => void;
 }
 
@@ -118,7 +116,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       await act(ferret, 'resume', async () => {
         const resumed = await ferrets.resume(ferret as FerretId);
         if (!resumed.ok) throw new Error(`resume refused: ${resumed.error.reason}`);
-        if (message !== undefined) await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
+        if (message !== undefined)
+          await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
       }),
     // A restart replaces a process that only looks alive: stop it for real, then resume the conversation.
     restart: async (ferret, message) =>
@@ -126,9 +125,11 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         await ferrets.stop(ferret as FerretId, 'now');
         const resumed = await ferrets.resume(ferret as FerretId);
         if (!resumed.ok) throw new Error(`restart refused: ${resumed.error.reason}`);
-        if (message !== undefined) await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
+        if (message !== undefined)
+          await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
       }),
-    stop: async (ferret, _reason) => await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite')),
+    stop: async (ferret, _reason) =>
+      await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite')),
     // Moving a ferret to another login belongs to Ferrets/Runtimes and is not in the Ferrets contract yet (GAP).
     failover: async () => refuse('Moving a ferret to another account'),
     // Browsers belong to the Browsers plugin, which Warden does not need (GAP).
@@ -244,7 +245,6 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         })
         .catch(() => undefined);
     },
-    heldSentences: () => configStore.heldSentences(),
     arm: () => {
       let disarm: (() => void) | undefined;
       let stopped = false;
@@ -266,7 +266,9 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
 function scalars(data: Readonly<Record<string, unknown>>): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(data))
-    out[key] = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? value : JSON.stringify(value);
+    out[key] =
+      typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        ? value
+        : JSON.stringify(value);
   return out;
 }
-

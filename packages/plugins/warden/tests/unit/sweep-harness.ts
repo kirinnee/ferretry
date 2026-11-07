@@ -168,6 +168,8 @@ export function harness(
     readonly fleet?: readonly WardenFleetSession[];
     readonly settings?: Partial<WardenSweepSettings>;
     readonly installed?: () => Promise<readonly string[]>;
+    /** What the settings store answers a write with: the sentences of an edit held for the owner. */
+    readonly held?: (patch: unknown) => readonly string[];
     readonly currentName?: (reference: string) => Promise<string | undefined>;
     /** The machine's default runtime; `claude-default`, which is installed, unless a test says otherwise. */
     readonly defaultRuntime?: () => Promise<string | undefined>;
@@ -342,8 +344,9 @@ export function harness(
     },
     config: {
       read: async () => configDocument,
-      write: async value => {
+      write: async (value, patch) => {
         configDocument = JSON.parse(JSON.stringify(value));
+        return options.held?.(patch) ?? [];
       },
     },
     agents: {

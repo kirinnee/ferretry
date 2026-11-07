@@ -31,7 +31,6 @@ function recordingSubsystem(): { readonly subsystem: WardenSubsystem; readonly r
     investigate: unreached,
     leave: unreached,
     nudgeSweep: unreached,
-    heldSentences: unreached,
     arm: unreached,
   };
   return { subsystem, runs };

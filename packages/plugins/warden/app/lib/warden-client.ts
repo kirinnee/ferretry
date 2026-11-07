@@ -5,6 +5,7 @@
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { WardenConfigViewSchema } from '../../contract/index.ts';
 import type {
   WardenAgendaView,
   WardenConfigPatch,
@@ -18,11 +19,6 @@ import type {
   WardenVerdict,
 } from '../wire.ts';
 
-/** The answer to `PATCH /v1/warden/config`: the effective settings, and the sentences of any edit held for the owner. */
-export interface WardenConfigSaved extends WardenConfigView {
-  readonly held?: readonly string[];
-}
-
 export interface WardenClient {
   status(): Promise<WardenStatusView>;
   verdicts(): Promise<readonly WardenVerdict[]>;
@@ -34,7 +30,8 @@ export interface WardenClient {
   investigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
   leave(request: WardenLeaveRequest): Promise<WardenLeaveView>;
   config(): Promise<WardenConfigView>;
-  updateConfig(patch: WardenConfigPatch): Promise<WardenConfigSaved>;
+  /** The effective settings, and the sentences of any edit held for the owner (`held`). */
+  updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
 }
 
 /** The Warden client of one daemon, over that daemon's plugin client. */
@@ -47,5 +44,6 @@ export const wardenClientOf = (client: PluginClient): WardenClient => ({
   investigate: request => client.call<WardenInvestigateView>('POST /v1/warden/investigate', { body: request }),
   leave: request => client.call<WardenLeaveView>('POST /v1/warden/leave', { body: request }),
   config: () => client.call<WardenConfigView>('GET /v1/warden/config'),
-  updateConfig: patch => client.call<WardenConfigSaved>('PATCH /v1/warden/config', { body: patch }),
+  updateConfig: async patch =>
+    WardenConfigViewSchema.parse(await client.call<unknown>('PATCH /v1/warden/config', { body: patch })),
 });

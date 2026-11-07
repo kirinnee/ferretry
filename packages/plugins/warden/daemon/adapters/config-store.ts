@@ -34,22 +34,16 @@ const SECTIONS = [
  */
 export class ConfigWardenConfigStore implements WardenConfigStore {
   private readonly door: ConfigDoor | undefined;
-  private held: readonly string[] = [];
 
   constructor(private readonly config: ConfigPort) {
     this.door = configDoorOf(config);
-  }
-
-  /** The sentences of the last edit the kernel held for the owner; empty once an edit is put into effect. */
-  heldSentences(): readonly string[] {
-    return this.held;
   }
 
   async read(): Promise<unknown> {
     return effectiveWardenConfig(this.config.file(WARDEN_CONFIG) ?? {});
   }
 
-  async write(_config: WardenConfig, patch: WardenConfigPatch): Promise<void> {
+  async write(_config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
     if (this.door === undefined)
       throw new WardenConfigRefused('unavailable', 'This host does not let the warden change warden.yaml yet.');
     const file = (this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile;
@@ -62,6 +56,6 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     const result = await this.door.write(WARDEN_CONFIG, undefined, { patch: keys });
     if (result.kind === 'refused')
       throw new WardenConfigRefused('refused', result.issues.map(issue => issue.message).join('; ') || result.reason);
-    this.held = result.kind === 'held' ? result.sentences : [];
+    return result.kind === 'held' ? result.sentences : [];
   }
 }
