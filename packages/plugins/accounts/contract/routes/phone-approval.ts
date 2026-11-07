@@ -7,7 +7,7 @@ import { InstantSchema } from './foreign.ts';
 import { InputFieldElementSchema } from './foreign.ts';
 import { LOGIN_USERNAME_MAX_LENGTH, LoginEntryIdSchema, oneLine } from './login-entries.ts';
 import { AgentNameSchema } from './foreign.ts';
-import { AppOriginSchema } from '@ferretry/plugin-access/contract';
+import { AppOriginSchema } from '@ferretry/core-gate/contract';
 import { SurfaceKeySchema } from '@ferretry/core-vault/contract';
 
 /**

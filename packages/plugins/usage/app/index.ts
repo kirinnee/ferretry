@@ -34,7 +34,8 @@ export default implementApp(manifest, {
         'insights-query': () => createElement(InsightsScreen, { client, view: 'query' }),
       },
       panels: {
-        quota: ({ subject }) => createElement(QuotaPanel, { store: usage, ...(subject === undefined ? {} : { subject }) }),
+        quota: ({ subject }) =>
+          createElement(QuotaPanel, { store: usage, ...(subject === undefined ? {} : { subject }) }),
         insights: ({ subject }) =>
           createElement(FerretInsightsPanel, { client, ...(subject === undefined ? {} : { subject }) }),
       },

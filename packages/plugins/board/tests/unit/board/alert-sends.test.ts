@@ -165,7 +165,7 @@ describe('board alerts to an interactive session', () => {
         lastTouchedAt: null,
       },
       suggestedLane: null,
-      
+
       openAsks: [],
       blockedBy: [],
       blocks: [],

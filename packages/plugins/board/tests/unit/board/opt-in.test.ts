@@ -8,7 +8,6 @@ import {
   TRACK_QUESTION,
 } from '../../../daemon/lib/board/index.ts';
 
-
 const FERRET = 'mvysjsw0-7071db05';
 
 /** The owner's answered "Track this on the board?" on the ferret's own ledger, with whatever a case changes. */

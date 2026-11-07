@@ -18,7 +18,8 @@ import {
 } from './adapters/state.ts';
 import { itemProviders } from './adapters/items.ts';
 import { APP_ORIGIN, DIRECTORY_ORIGIN, connectionFacts, type CatalogKernel } from './adapters/host-facts.ts';
-import { WebCryptoSessionCrypto, toBase64Url } from './adapters/relay.ts';
+import { toBase64Url } from './lib/relay-wire/index.ts';
+import { WebCryptoSessionCrypto } from './adapters/web-crypto.ts';
 import { StatePasskeyStore } from './adapters/member-passkey-store.ts';
 import { StateUnlockLedger } from './adapters/member-unlocks.ts';
 import { memberVerifier } from './adapters/access.ts';

@@ -49,7 +49,11 @@ const RULE_VIEW = {
   approvedWith: { deviceId: `fy_device_id_${'1'.repeat(22)}` },
 };
 
-type Init = { readonly params?: Record<string, string>; readonly query?: Record<string, string>; readonly body?: unknown };
+type Init = {
+  readonly params?: Record<string, string>;
+  readonly query?: Record<string, string>;
+  readonly body?: unknown;
+};
 
 function rig(reply: unknown) {
   const calls: { route: string; init: Init | undefined }[] = [];

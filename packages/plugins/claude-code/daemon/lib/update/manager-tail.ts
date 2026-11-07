@@ -40,7 +40,10 @@ function lastLine(tail: readonly string[]): string | undefined {
 }
 
 /** Whether the manager needed admin rights it was not given, and the last thing it said. */
-export function readManagerTail(tail: readonly string[]): { readonly needsAdmin: boolean; readonly said: string | undefined } {
+export function readManagerTail(tail: readonly string[]): {
+  readonly needsAdmin: boolean;
+  readonly said: string | undefined;
+} {
   const lines = tail.map(stripTerminalEscapes);
   return { needsAdmin: lines.some(line => NEEDS_ADMIN.some(pattern => pattern.test(line))), said: lastLine(tail) };
 }

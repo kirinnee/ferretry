@@ -2,9 +2,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import {
-  GitWorktreeGateway,
-  } from '../../../../daemon/adapters/worktrees/index.ts';
+import { GitWorktreeGateway } from '../../../../daemon/adapters/worktrees/index.ts';
 import { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
 import type { GitExecution, GitInvocation, GitRunner } from '../../../../daemon/lib/worktrees/ports.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRemote, tempRepository } from '../support/repository.ts';

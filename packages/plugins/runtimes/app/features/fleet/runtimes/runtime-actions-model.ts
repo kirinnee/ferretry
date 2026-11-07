@@ -7,6 +7,7 @@
  * answers, and what the browser already holds, into the words and choices on screen.
  */
 
+import type { MoveConversation } from '@ferretry/core-ferrets/contract';
 import type { AccountChangeView, MachineView, RunningSession, RuntimeView } from '../../../../contract/index.ts';
 import {
   type FleetApplyAuthority,
@@ -15,9 +16,7 @@ import {
   runtimeNameProblem,
 } from '../../../lib/shell-ports.ts';
 
-/** How a moved ferret keeps its conversation: resumed on the same CLI, converted across to the other. */
-// GAP(ferrets): the move wire (`MoveConversation`) is not in Ferrets' contract yet.
-export type MoveConversation = 'resume' | 'convert';
+export type { MoveConversation };
 
 /** The sentence every rename shows: what it does NOT do. */
 export const RENAME_KEEPS_RUNNING = 'Running ferrets keep working — nothing restarts.';
@@ -64,6 +63,7 @@ export const moveTargets = (runtime: RuntimeView, runtimes: readonly RuntimeView
   ];
 };
 
+/** How a moved ferret keeps its conversation: resumed on the same CLI, converted across to the other. */
 export const moveConversation = (session: RunningSession, target: RuntimeView): MoveConversation =>
   session.harness === target.harness ? 'resume' : 'convert';
 

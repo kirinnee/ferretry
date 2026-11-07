@@ -6,10 +6,12 @@
  * and nothing else, so `ferretOf(call)` and Apply's grant check read the caller as they do in the daemon.
  */
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
-import type { CallContext } from '@ferretry/kernel/contract';
+import type { CallContext, Log } from '@ferretry/kernel/contract';
+import { config as hostConfig, state as hostState } from '@ferretry/kernel/host';
 import type { DaemonImplementation, Manifest } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
+import { LESSONS_CONFIG } from '../../../contract/index.ts';
 import lessons from '../../../daemon/index.ts';
 
 type Built = {
@@ -27,10 +29,45 @@ const withCredential = (call: CallContext): CallContext => {
   return call;
 };
 
-const credentialed = {
+const HOME = '/home/fy';
+const quiet: Log = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, child: () => quiet };
+
+/**
+ * The kernel's REAL config writer (`createConfigFiles`, the one the daemon hands every plugin) over an in-memory home
+ * that declares `lessons.yaml`: a write edits only the changed keys, refuses a raw secret, keeps the last good version
+ * and holds what the owner must confirm. `handEdit` is the owner editing the file outside Ferretry, then the watcher's
+ * reload.
+ */
+export function realLessonsConfig() {
+  const fs = hostState.createMemoryHostFs();
+  const path = `${HOME}/config/${LESSONS_CONFIG.file}`;
+  const files = hostConfig.createConfigFiles({
+    home: HOME,
+    fs,
+    clock: { nowMs: () => Date.parse('2026-11-07T12:00:00.000Z'), after: () => () => {}, every: () => () => {} },
+    log: quiet,
+    binary: 'fy',
+    defs: [{ plugin: 'lessons', def: LESSONS_CONFIG }],
+  });
+  return {
+    files,
+    port: files.port('lessons'),
+    text: async (): Promise<string | undefined> => await fs.readText(path).catch(() => undefined),
+    handEdit: async (text: string): Promise<void> => {
+      fs.seed(path, text);
+      await files.reload();
+    },
+  };
+}
+
+export type RealLessonsConfig = ReturnType<typeof realLessonsConfig>;
+
+const credentialedOver = (real: RealLessonsConfig | undefined) => ({
   ...lessons,
-  build: (ctx: Parameters<NonNullable<typeof lessons.build>>[0]) => {
-    const built = lessons.build?.(ctx) as unknown as Built;
+  build: (given: Parameters<NonNullable<typeof lessons.build>>[0]) => {
+    // On the real writer the half's `kernel.config` is the kernel's own port; nothing else of the kernel changes.
+    const ctx = real === undefined ? given : { ...given, kernel: { ...given.kernel, config: real.port } };
+    const built = lessons.build?.(ctx as typeof given) as unknown as Built;
     return {
       ...built,
       routes: Object.fromEntries(
@@ -47,13 +84,21 @@ const credentialed = {
       ),
     } as never;
   },
-} as unknown as DaemonImplementation<Manifest>;
+});
 
-export async function lessonsHost(options: { readonly config?: Readonly<Record<string, unknown>> } = {}) {
+const credentialed = credentialedOver(undefined) as unknown as DaemonImplementation<Manifest>;
+
+export async function lessonsHost(
+  options: { readonly config?: Readonly<Record<string, unknown>>; readonly realConfig?: RealLessonsConfig } = {},
+) {
   const ferrets = new FakeFerrets();
   const conversation = fakeConversation();
   const host = await testHost({
-    plugins: [credentialed],
+    plugins: [
+      options.realConfig === undefined
+        ? credentialed
+        : (credentialedOver(options.realConfig) as unknown as DaemonImplementation<Manifest>),
+    ],
     fakes: { ferrets, conversation },
     ...(options.config === undefined ? {} : { config: options.config }),
   });

@@ -228,7 +228,6 @@ describe('create', () => {
   });
 });
 
-
 describe('lane verbs', () => {
   it('proposes a template and confirms it at once, because the owner chose it', async () => {
     const { actions, lanesSent } = harness();

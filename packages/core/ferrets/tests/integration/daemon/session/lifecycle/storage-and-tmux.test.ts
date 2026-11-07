@@ -1,6 +1,17 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { type FileHandle, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  type FileHandle,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -29,7 +40,10 @@ import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.
 import { createSessionRecord, transitionSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { SessionLifecycleService } from '../../../../../daemon/lib/session/lifecycle/service.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
-import type { SessionEnvironmentStore, SessionLifecycleRecord } from '../../../../../daemon/lib/session/lifecycle/types.ts';
+import type {
+  SessionEnvironmentStore,
+  SessionLifecycleRecord,
+} from '../../../../../daemon/lib/session/lifecycle/types.ts';
 import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
 import type { TmuxLaunch } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
@@ -426,7 +440,9 @@ describe('TmuxSessionLifecycleLauncher', () => {
 
     // Assert — the delivery owns the wait and the write; the launcher names the pane and passes the hook through.
     should(order).deepEqual(['before-write']);
-    should(delivery.delivered).deepEqual([{ session: 'fy-deliver-session', text: 'Read the file /turns/turn-001.md now' }]);
+    should(delivery.delivered).deepEqual([
+      { session: 'fy-deliver-session', text: 'Read the file /turns/turn-001.md now' },
+    ]);
   });
 
   it('should surface a tmux failure rather than reporting a launch or stop that did not happen', async () => {
@@ -1021,7 +1037,6 @@ describe('lifecycle directory durability', () => {
   }
 });
 
-
 /**
  * The launch path and an account a profile authenticates.
  *
@@ -1233,7 +1248,11 @@ describe('TmuxSessionLifecycleLauncher and a credential that can renew itself', 
  * environment turns into is the runtimes plugin's `launchInstructions`, injected here as `describe`.
  */
 describe('TmuxSessionLifecycleLauncher launch instructions', () => {
-  const TOLD: SessionLaunchInstructions = { sections: [{ id: 'tools', chars: 12 }], mode: 'interactive', questions: true };
+  const TOLD: SessionLaunchInstructions = {
+    sections: [{ id: 'tools', chars: 12 }],
+    mode: 'interactive',
+    questions: true,
+  };
 
   const named = (tmux: FakeTmux, stored: Readonly<Record<string, string>>) => {
     const asked: { readonly fy: string; readonly env: Readonly<Record<string, string>> }[] = [];

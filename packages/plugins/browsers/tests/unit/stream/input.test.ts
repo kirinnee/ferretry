@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type BrowserKeyInput, keyIdentity, keyReleaseSequence, normalizeBrowserInput } from '../../../daemon/stream/input.ts';
+import {
+  type BrowserKeyInput,
+  keyIdentity,
+  keyReleaseSequence,
+  normalizeBrowserInput,
+} from '../../../daemon/stream/input.ts';
 
 function accepted(value: unknown): Record<string, unknown> {
   const result = normalizeBrowserInput(value);

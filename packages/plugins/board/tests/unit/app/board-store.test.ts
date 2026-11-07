@@ -543,7 +543,9 @@ describe('DaemonBoardStore one card and projects', () => {
     const port = fakePort({
       projects: async daemon => {
         port.calls.push(`projects:${daemon.daemonId}`);
-        return daemon.daemonId === laptop.daemonId ? [{ id: PROJECT, name: 'ferretry', path: null, laneSet: lanes }] : [];
+        return daemon.daemonId === laptop.daemonId
+          ? [{ id: PROJECT, name: 'ferretry', path: null, laneSet: lanes }]
+          : [];
       },
     });
     const { store } = open(port);
@@ -714,7 +716,6 @@ describe('DaemonBoardStore card ids', () => {
     expect(store.idsState(workstation.daemonId).ids).toBeNull();
   });
 
-
   it('adds the ids a board.changed names, and tells the page once', async () => {
     const { store } = open(fakePort({ ids: async () => ['F1'] }));
     store.watchIds(laptop);
@@ -729,7 +730,6 @@ describe('DaemonBoardStore card ids', () => {
     expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F2']);
     expect(told).toBe(1);
   });
-
 
   it('says a failed read, and reads again on the next ask', async () => {
     let answers = 0;

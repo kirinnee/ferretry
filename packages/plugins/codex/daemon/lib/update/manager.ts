@@ -57,7 +57,11 @@ const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f]/gu;
 
 /** One output line with every terminal escape and stray control character removed. */
 const stripTerminalEscapes = (raw: string): string =>
-  raw.replaceAll(OSC_SEQUENCE, '').replaceAll(CSI_SEQUENCE, '').replaceAll(SHORT_ESCAPE, '').replaceAll(CONTROL_CHARACTERS, '');
+  raw
+    .replaceAll(OSC_SEQUENCE, '')
+    .replaceAll(CSI_SEQUENCE, '')
+    .replaceAll(SHORT_ESCAPE, '')
+    .replaceAll(CONTROL_CHARACTERS, '');
 
 function lastLine(tail: readonly string[]): string | undefined {
   const line = tail

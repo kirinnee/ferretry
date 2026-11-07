@@ -83,7 +83,9 @@ export class SpendMeter {
     else if (sinceMs > this.#sinceMs) this.#prune(sinceMs);
     this.#sinceMs = sinceMs;
 
-    const wanted = (await this.ports.ferrets(sinceMs)).filter(ferret => ferret.login !== null && logins.has(ferret.login));
+    const wanted = (await this.ports.ferrets(sinceMs)).filter(
+      ferret => ferret.login !== null && logins.has(ferret.login),
+    );
     const price = await this.ports.pricing();
     for (const ferret of wanted) {
       const login = ferret.login as string;

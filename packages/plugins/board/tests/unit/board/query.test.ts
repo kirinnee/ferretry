@@ -1,5 +1,13 @@
 import { describe, it } from 'bun:test';
-import { type BoardPrStateFilter, type BoardQueryInput, BoardQuerySchema, type Card, type CardView, type LaneCategory, type PrLink } from '../../../contract/index.ts';
+import {
+  type BoardPrStateFilter,
+  type BoardQueryInput,
+  BoardQuerySchema,
+  type Card,
+  type CardView,
+  type LaneCategory,
+  type PrLink,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   BoardError,
@@ -29,7 +37,7 @@ const view = (overrides: Partial<CardView> = {}, stored: Partial<Card> = {}): Ca
     lastTouchedAt: null,
   },
   suggestedLane: null,
-  
+
   openAsks: [],
   blockedBy: [],
   blocks: [],

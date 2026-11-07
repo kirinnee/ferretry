@@ -32,7 +32,7 @@ import {
   memberNameKey,
   SharedCatalogIdSchema,
 } from '../boundary.ts';
-import { MemberBoxKeySchema, MemberKeySchema as WireMemberKeySchema } from '../../adapters/relay.ts';
+import { MemberBoxKeySchema, MemberKeySchema as WireMemberKeySchema } from '../relay-wire/index.ts';
 import { z } from 'zod';
 
 export const CATALOG_MEMBERS_SCHEMA_VERSION = 1;

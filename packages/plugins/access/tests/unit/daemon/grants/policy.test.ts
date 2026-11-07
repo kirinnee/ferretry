@@ -147,10 +147,7 @@ describe('who the grants govern', () => {
     should(loopback).be.false();
     should(governed).be.true();
     should(
-      decideCapability(
-        demandOf('fleet', 'configure'),
-        evaluation({ governed, hostLocal: loopback, stepUp: false }),
-      ),
+      decideCapability(demandOf('fleet', 'configure'), evaluation({ governed, hostLocal: loopback, stepUp: false })),
     ).deepEqual({ allowed: false, refusal: 'step-up-required' });
   });
 

@@ -9,7 +9,15 @@ import {
 import { NO_BOARD_FILTERS, toServerQuery } from '../../../app/lib/board-model.ts';
 import { boardAnswer, card, fakePort, laneSetFor, laptop, PROJECT } from './board-support.ts';
 
-type Call = { route: string; init: { params?: Record<string, string>; query?: Record<string, string>; body?: unknown; headers?: Record<string, string> } };
+type Call = {
+  route: string;
+  init: {
+    params?: Record<string, string>;
+    query?: Record<string, string>;
+    body?: unknown;
+    headers?: Record<string, string>;
+  };
+};
 
 const query = toServerQuery(NO_BOARD_FILTERS);
 const refusal = (status: number, message: string, code?: string): Error =>
@@ -79,7 +87,10 @@ describe('the board read', () => {
 
   it('reads the projects with their lane sets', async () => {
     const client = clientOf({
-      'GET /v1/board/projects': { projects: [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }], current: null },
+      'GET /v1/board/projects': {
+        projects: [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
+        current: null,
+      },
     });
     const projects = await clientBoardPort(client).projects(laptop);
     expect(projects.map(project => project.id)).toEqual([PROJECT]);

@@ -48,8 +48,7 @@ export const answerPermissionRequest = async (
       body: PermissionAnswerRequestSchema.parse(answer),
     });
   } catch (error) {
-    if (refusedWith(error, 409, PERMISSION_PROMPT_GONE))
-      throw new PermissionPromptGone(error.message);
+    if (refusedWith(error, 409, PERMISSION_PROMPT_GONE)) throw new PermissionPromptGone(error.message);
     throw error;
   }
   const result = PermissionAnswerResultSchema.parse(raw);

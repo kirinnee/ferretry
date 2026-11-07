@@ -85,7 +85,11 @@ export class SecuritySettingsService {
 
   constructor(private readonly deps: SecuritySettingsDeps) {}
 
-  #read(): { readonly settings: SecuritySettings; readonly source: SecuritySettingsSource; readonly updatedAt?: string } {
+  #read(): {
+    readonly settings: SecuritySettings;
+    readonly source: SecuritySettingsSource;
+    readonly updatedAt?: string;
+  } {
     let document: SecurityDocument;
     try {
       document = this.deps.document.read();
@@ -118,7 +122,9 @@ export class SecuritySettingsService {
       source: read.source,
       mayWiden: caller.hostLocal,
       widenCommand: this.deps.widenCommand,
-      ...(read.updatedAt === undefined ? {} : { updatedAt: read.updatedAt as SecuritySettingsView['updatedAt'] & string }),
+      ...(read.updatedAt === undefined
+        ? {}
+        : { updatedAt: read.updatedAt as SecuritySettingsView['updatedAt'] & string }),
     };
   }
 
