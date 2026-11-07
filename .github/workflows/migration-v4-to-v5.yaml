@@ -2,7 +2,7 @@ name: Migration v4 to v5
 
 # Proves the one-time v4 -> v5 converter (`migration/v4-to-v5/`) against REAL v4 output: it builds a v4 home with the
 # released 4.291.5 binaries (fixtures/build-v4-home.ts), runs the converter's unit tests, then runs the converter on
-# that home, dry then for real.
+# that home, dry then for real, and boots v5 from this repository on the result (fixtures/boot-v5.ts).
 #
 # CI-ONLY. The fixture builder starts a v4 daemon and a tmux server, which a shared developer box must not carry. It
 # does no network access beyond fetch-v4.sh's one download of the v4 release, and it runs only in a disposable temp dir.
@@ -80,8 +80,8 @@ jobs:
       - name: Convert the fixture home (dry run, then for real)
         run: |
           cd migration/v4-to-v5
-          # Exit 0 = complete. Exit 3 = ran, but a step is pending: EXPECTED in Phase A, no v5 schema has landed.
-          # Anything else (2 refused, 64 usage, a crash) is a failure.
+          # Every step converts now, so only exit 0 (complete) passes; 3 (a step pending or failed), 2 (refused),
+          # 64 (usage) or a crash fails. Both runs are attempted, so both reports are uploaded either way.
           set +e
           ../../scripts/ci/in-devshell.sh bun src/main.ts --from "${FIXTURE_OUT}/home" --to "${FIXTURE_OUT}/v5-dry" --report "${FIXTURE_OUT}/report-dry.json" --dry-run
           dry=$?
@@ -90,8 +90,9 @@ jobs:
           set -e
           echo "dry run exit ${dry}, real run exit ${real}"
           for code in "${dry}" "${real}"; do
-            if [ "${code}" != 0 ] && [ "${code}" != 3 ]; then
-              echo "::error::the converter exited ${code}; only 0 (complete) or 3 (pending steps, expected in Phase A) pass"
+            if [ "${code}" != 0 ]; then
+              echo "::error::the converter exited ${code}; only 0 (complete) passes"
+              jq -r '.steps[] | select(.status == "pending" or .status == "failed") | "::error title=step \(.id)::\(.status): \(.note // "")"' "${FIXTURE_OUT}/report.json" 2>/dev/null || true
               exit 1
             fi
           done
@@ -104,14 +105,14 @@ jobs:
               exit 1
             }
           done
-          # The dry run writes nothing; the real run wrote home.json only if it finished (exit 0).
+          # The dry run writes nothing; the real run finished and wrote home.json.
           test ! -e "${FIXTURE_OUT}/v5-dry"
-          if [ "${real}" = 0 ]; then test -f "${FIXTURE_OUT}/v5/home.json"; else test ! -e "${FIXTURE_OUT}/v5/home.json"; fi
+          jq -e '.complete == true' "${FIXTURE_OUT}/report.json" >/dev/null
+          test -f "${FIXTURE_OUT}/v5/home.json"
 
-      # Starts this repository's v5 daemon on the converted home and proves every plugin came up and the fixture's
-      # ferrets, project, cards and agenda items are served by v5's own routes. While a step is pending (no home.json)
-      # it boots a labelled COPY with a home.json of its own, and only the pending steps' plugins may be down; once the
-      # conversion is complete it boots the real output. See fixtures/boot-v5.ts.
+      # Starts this repository's v5 daemon on the converter's real output and proves every plugin came up (any plugin
+      # down is a converter bug) and the fixture's ferrets, project, cards and agenda items are served by v5's own
+      # routes. See fixtures/boot-v5.ts.
       - name: Boot v5 on the converted home
         run: ./scripts/ci/in-devshell.sh env TMPDIR=/tmp bun migration/v4-to-v5/fixtures/boot-v5.ts --fixture "${FIXTURE_OUT}"
 
