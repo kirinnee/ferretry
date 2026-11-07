@@ -267,7 +267,7 @@ describe('boot (§7.6)', () => {
     expect(glossary.words.map(word => word.word)).toContain('home');
   });
 
-  test('jobs start after listen, events reach subscribers, doctor runs contributed checks', async () => {
+  test('G158 jobs start after listen, events reach subscribers, doctor runs contributed checks first', async () => {
     const events: string[] = [];
     const host = await boot(await freshHome(), recordingAdmission(), events);
     for (let i = 0; i < 20 && events.length < 2; i += 1) await new Promise(resolve => setTimeout(resolve, 5));
@@ -281,6 +281,12 @@ describe('boot (§7.6)', () => {
       detail: 'two cards are stale',
       fix: 'Run fy board tidy.',
     });
+    // G158: contributed checks (reachability) come before the declared ones
+    const lines = await host.doctor();
+    const contributed = lines.findIndex(line => line.plugin === 'board-ok');
+    const declared = lines.findIndex(line => line.check === 'board-ok');
+    expect(contributed).toBeGreaterThanOrEqual(0);
+    expect(contributed).toBeLessThan(declared);
   });
 
   test('a plugin turned off is not mounted, and what needs it is not started', async () => {

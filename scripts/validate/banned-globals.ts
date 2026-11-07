@@ -107,8 +107,25 @@ export function bannedIn(file: string, where = file): Finding[] {
   return findings;
 }
 
+/**
+ * Code that runs OUTSIDE the kernel, so it has no kernel ports to reach the world through (lead decision 17). Each
+ * entry is a package-relative folder, matched by prefix, with its reason; nothing else is exempt.
+ */
+export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folder: string; readonly reason: string }[] =
+  [
+    { pkg: 'connections', folder: 'worker/', reason: 'the standalone Cloudflare relay Worker, deployed on its own' },
+    { pkg: 'catalogs', folder: 'worker/', reason: 'the standalone Cloudflare catalog Worker, deployed on its own' },
+    {
+      pkg: 'connections',
+      folder: 'adapters/webrtc/',
+      reason: 'the WebRTC native adapter (node-datachannel), loaded below the carrier rather than through a port',
+    },
+  ];
+
 export function bannedScope(pkg: WorkspacePackage, file: string): boolean {
   if (pkg.kind !== 'core' && pkg.kind !== 'plugin') return false;
+  const rel = relative(pkg.dir, file).split(sep).join('/');
+  if (OUTSIDE_THE_KERNEL.some(exempt => exempt.pkg === pkg.id && rel.startsWith(exempt.folder))) return false;
   const area = areaOf(pkg, file);
   return area !== 'tests' && area !== 'kernel-host' && area !== 'kernel-testing' && area !== 'generated';
 }

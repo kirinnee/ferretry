@@ -93,6 +93,8 @@ export interface TestHostOptions {
   readonly websocket?: (url: URL) => WebSocketClient;
   /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
   readonly pinner?: SessionRootPinner;
+  /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
+  readonly ownerHome?: string;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -561,6 +563,17 @@ async function start(world: World): Promise<TestHost> {
           if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
           world.roots.set(path, text);
         },
+        writeBytes: async (path, bytes, writeOptions) => {
+          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+          world.roots.set(path, new TextDecoder().decode(bytes));
+        },
+        copyTree: async (_source, from, to, copyOptions) => {
+          // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
+          for (const [key, text] of [...world.roots])
+            if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
+          void copyOptions;
+        },
+        ensurePrivateDirectory: async () => {},
         lstat: async path => {
           if (world.roots.has(path))
             return { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() };
@@ -707,6 +720,7 @@ async function start(world: World): Promise<TestHost> {
         },
       },
       identity,
+      paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,

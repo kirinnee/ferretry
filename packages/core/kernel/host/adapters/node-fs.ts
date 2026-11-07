@@ -1,16 +1,24 @@
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 /** The kernel's filesystem seam: the only place `node:fs` is used by the host (§7.7 `banned-globals`). */
 export interface HostFs {
   realpath(path: string): Promise<string>;
-  lstat(
-    path: string,
-  ): Promise<
-    | { readonly kind: 'file' | 'directory' | 'link' | 'other'; readonly size: number; readonly mtimeMs: number }
+  lstat(path: string): Promise<
+    | {
+        readonly kind: 'file' | 'directory' | 'link' | 'other';
+        readonly size: number;
+        readonly mtimeMs: number;
+        /** Hard links to the object; a file with more than one may be a file from anywhere and is never copied. */
+        readonly links?: number;
+        /** POSIX permission bits. */
+        readonly mode?: number;
+      }
     | undefined
   >;
+  /** A link at `path` whose text is `target`; refused when anything is already there. */
+  symlink(target: string, path: string): Promise<void>;
   readText(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
   /** Atomic: a temp file in the same folder, fsync, rename. */
@@ -39,7 +47,7 @@ export function nodeFs(randomSuffix: () => string): HostFs {
             : info.isFile()
               ? 'file'
               : 'other';
-        return { kind, size: info.size, mtimeMs: info.mtimeMs };
+        return { kind, size: info.size, mtimeMs: info.mtimeMs, links: info.nlink, mode: info.mode & 0o7777 };
       } catch (error) {
         if (isMissing(error)) return undefined;
         throw error;
@@ -58,6 +66,9 @@ export function nodeFs(randomSuffix: () => string): HostFs {
         await handle.close();
       }
       await rename(temp, path);
+    },
+    symlink: async (target, path) => {
+      await symlink(target, path);
     },
     writeExclusive: async (path, data, mode) => {
       const handle = await open(

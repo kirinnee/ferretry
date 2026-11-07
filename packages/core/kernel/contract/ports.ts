@@ -28,6 +28,8 @@ export interface KernelPorts {
   readonly websocket: WebSocketPort;
   /** Who this daemon is, read-only: its id and name, never its key. */
   readonly identity: IdentityPort;
+  /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
+  readonly paths: PathsPort;
   /**
    * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
    * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
@@ -282,7 +284,23 @@ export interface ConfigFilesWriter {
 // roots ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The declared roots (§7.7). */
-export type RootName = 'agent-homes' | 'harness-history' | 'worktrees' | 'work' | 'imports' | 'downloads';
+export type RootName =
+  | 'agent-homes'
+  | 'harness-history'
+  | 'worktrees'
+  | 'work'
+  | 'imports'
+  | 'downloads'
+  /** Logins' own sign-in material (`state/logins/credentials`): Logins alone, even if another plugin declares it. */
+  | 'credentials';
+
+/** `RootHandle.copyTree`: what to bring, and how. */
+export interface TreeCopyOptions {
+  /** Link the destination name to the source folder (today's skill link into a runtime home) instead of copying. */
+  readonly link?: boolean;
+  /** The most entries a copy walks (folders count); past it the copy stops and throws. Default 10 000. */
+  readonly maxEntries?: number;
+}
 
 export interface RootStat {
   readonly kind: 'file' | 'directory';
@@ -315,6 +333,16 @@ export interface RootHandle {
   readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
   /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
+  /** The same, for bytes. */
+  writeBytes(path: FencedPath, bytes: Uint8Array, options?: RootWriteOptions): Promise<void>;
+  /**
+   * Brings a folder from one of THIS plugin's root handles (`source`, maybe this one) to `to` in this root: a copy
+   * (each file read off the disk, never through a link: a link inside is skipped, a file with a second hard link is
+   * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced.
+   */
+  copyTree(source: RootHandle, from: FencedPath, to: FencedPath, options?: TreeCopyOptions): Promise<void>;
+  /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
+  ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
   /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */
@@ -505,6 +533,15 @@ export interface WebSocketPort {
 }
 
 // identity ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where the owner's files are, read-only (today's `homedir()`). A name, never a capability: nothing here opens,
+ * resolves or reaches a path; reaching one goes through a declared root.
+ */
+export interface PathsPort {
+  /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
+  home(): string;
+}
 
 /**
  * The daemon's identity as any plugin may read it (§2.2): the id the pairing QR and the rendezvous path carry, and

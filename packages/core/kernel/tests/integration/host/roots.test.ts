@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -136,5 +136,97 @@ describe('RootHandle: makeDirectory, realPath, lstat and exclusive writes (workt
     await symlink(`${home}/state/vault/elsewhere`, `${work}/planted.json`);
     await expect(root.writeText(at('planted.json'), 'x', { exclusive: true })).rejects.toThrow();
     expect(await Bun.file(`${home}/state/vault/elsewhere`).exists()).toBe(false);
+  });
+});
+
+describe('HH writeBytes, a fenced tree copy or link, and the credentials root', () => {
+  async function homes() {
+    const { home, parent } = await layout();
+    const roots = rootsPortFor(
+      fs,
+      { home, plugin: 'skills', worktrees: `${home}-worktrees` },
+      ['agent-homes', 'downloads'],
+      () => undefined,
+    );
+    const homesRoot = roots.root('agent-homes', { subfolder: 'f1' });
+    const downloads = roots.root('downloads');
+    const at = (root: typeof homesRoot, relative: string): FencedPath => {
+      const resolved = root.resolve(relative);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    return { home, parent, homesRoot, downloads, at };
+  }
+
+  test('writeBytes keeps bytes and the mode', async () => {
+    const { home, homesRoot, at } = await homes();
+    await homesRoot.makeDirectory(at(homesRoot, ''));
+    await homesRoot.writeBytes(at(homesRoot, 'blob.bin'), new Uint8Array([0, 255, 7]), { mode: 0o640 });
+    const path = `${home}/state/skills/agent-homes/f1/blob.bin`;
+    expect([...new Uint8Array(await Bun.file(path).arrayBuffer())]).toEqual([0, 255, 7]);
+    expect((await Bun.file(path).stat()).mode & 0o777).toBe(0o640);
+  });
+
+  test('copyTree copies files with their modes, skips a link and a hard-linked file, and refuses an existing target', async () => {
+    const { home, homesRoot, downloads, at } = await homes();
+    const src = `${home}/state/skills/downloads/skill`;
+    await mkdir(`${src}/bin`, { recursive: true });
+    await writeFile(`${src}/SKILL.md`, '# skill');
+    await writeFile(`${src}/bin/run`, '#!/bin/sh', { mode: 0o755 });
+    await symlink(`${home}/state/vault/vault.key`, `${src}/key`);
+    await link(`${home}/state/vault/vault.key`, `${src}/hard`);
+    await homesRoot.makeDirectory(at(homesRoot, ''));
+    await homesRoot.copyTree(downloads, at(downloads, 'skill'), at(homesRoot, 'skill'));
+    const dest = `${home}/state/skills/agent-homes/f1/skill`;
+    expect(await Bun.file(`${dest}/SKILL.md`).text()).toBe('# skill');
+    expect((await Bun.file(`${dest}/bin/run`).stat()).mode & 0o777).toBe(0o755);
+    expect(await Bun.file(`${dest}/key`).exists()).toBe(false);
+    expect(await Bun.file(`${dest}/hard`).exists()).toBe(false);
+    await expect(homesRoot.copyTree(downloads, at(downloads, 'skill'), at(homesRoot, 'skill'))).rejects.toThrow(
+      RootError,
+    );
+  });
+
+  test('copyTree with link makes one link to the source folder; a handle of another plugin is refused', async () => {
+    const { home, homesRoot, downloads, at } = await homes();
+    await mkdir(`${home}/state/skills/downloads/skill`, { recursive: true });
+    await homesRoot.makeDirectory(at(homesRoot, ''));
+    await homesRoot.copyTree(downloads, at(downloads, 'skill'), at(homesRoot, 'linked'), { link: true });
+    expect(await readlink(`${home}/state/skills/agent-homes/f1/linked`)).toBe(
+      await realpath(`${home}/state/skills/downloads/skill`),
+    );
+    const other = rootsPortFor(
+      fs,
+      { home, plugin: 'mcp', worktrees: `${home}-worktrees` },
+      ['downloads'],
+      () => undefined,
+    ).root('downloads');
+    await expect(homesRoot.copyTree(other, at(other, 'x'), at(homesRoot, 'y'))).rejects.toThrow(RootError);
+  });
+
+  test('the credentials root is Logins’ alone, and ensurePrivateDirectory makes or narrows a folder to 0700', async () => {
+    const { home } = await layout();
+    const declaredByOther = rootsPortFor(
+      fs,
+      { home, plugin: 'accounts', worktrees: `${home}-worktrees` },
+      ['credentials'],
+      () => undefined,
+    );
+    expect(() => declaredByOther.root('credentials')).toThrow(RootError);
+    const logins = rootsPortFor(
+      fs,
+      { home, plugin: 'logins', worktrees: `${home}-worktrees` },
+      ['credentials'],
+      () => undefined,
+    ).root('credentials');
+    const resolved = logins.resolve('claude');
+    if (!resolved.ok) throw new Error(resolved.error);
+    await mkdir(`${home}/state/logins/credentials`, { recursive: true, mode: 0o755 });
+    await logins.ensurePrivateDirectory(resolved.value);
+    expect((await Bun.file(`${home}/state/logins/credentials/claude`).stat()).mode & 0o777).toBe(0o700);
+    await writeFile(`${home}/state/logins/credentials/file`, 'x');
+    const file = logins.resolve('file');
+    if (!file.ok) throw new Error(file.error);
+    await expect(logins.ensurePrivateDirectory(file.value)).rejects.toThrow(RootError);
   });
 });

@@ -238,7 +238,12 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     async list(file) {
       guard(file);
       const [prefix, suffix] = file.path.split('*') as [string, string | undefined];
-      const stored = isBytes(file) ? folder.bytes : folder.files;
+      // as the real port lists what is on disk for the file's store: bytes, a database, or text
+      const stored: ReadonlyMap<string, unknown> = isBytes(file)
+        ? folder.bytes
+        : file.store === 'sqlite' || file.store === 'sqlite-cache'
+          ? folder.databases
+          : folder.files;
       if (suffix === undefined) return stored.has(file.path) ? [file.path] : [];
       return [...stored.keys()]
         .filter(path => path.startsWith(prefix) && path.endsWith(suffix) && path.length > prefix.length + suffix.length)
@@ -250,6 +255,8 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       guard(file);
       folder.files.delete(pathOf(file, name));
       folder.bytes.delete(pathOf(file, name));
+      folder.databases.get(pathOf(file, name))?.close();
+      folder.databases.delete(pathOf(file, name));
       folder.landed();
     },
     sqlite(file, name): SqliteHandle {

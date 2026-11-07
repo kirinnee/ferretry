@@ -103,3 +103,20 @@ describe('the test host state port: lines() skips, update() declines, version()'
     expect((await port.version(Doc))?.etag).not.toBe(v1?.etag);
   });
 });
+
+describe('LL the test host state port: opaque bytes and sqlite collections, as the real port', () => {
+  const Db = defineState({ name: 'db', path: 'versions/*.sqlite', store: 'sqlite', format: 1 });
+  test('an opaque file keeps its bytes (no JSON stamp); sqlite collection members are listed and removed', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Blob, Db]);
+    const bytes = new Uint8Array([123, 34, 0, 255]);
+    await port.write(Blob, bytes as never, 'x');
+    expect(folder.rawBytes(Blob, 'x')).toEqual(bytes);
+    expect(folder.raw(Blob, 'x')).toBeUndefined();
+    port.sqlite(Db, 'a').run('CREATE TABLE t (n INTEGER)');
+    port.sqlite(Db, 'b').run('CREATE TABLE t (n INTEGER)');
+    expect(await port.list(Db)).toEqual(['a', 'b']);
+    await port.remove(Db, 'a');
+    expect(await port.list(Db)).toEqual(['b']);
+  });
+});
