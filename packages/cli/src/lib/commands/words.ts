@@ -72,9 +72,14 @@ export const wordsVerb: ShellVerb = async ctx => {
     world.io.err(
       `${world.identity.binary}: showing the words compiled into this ${world.identity.binary}; the daemon's glossary is not available\n`,
     );
-  const found = findWords(fromDaemon ?? compiledWords(world.registry), ctx.invocation.args[0]);
+  const query = ctx.invocation.args[0];
+  const found = findWords(fromDaemon ?? compiledWords(world.registry), query);
+  if (found.length === 0 && query === undefined) {
+    world.io.out('the glossary is empty\n');
+    return EXIT.ok;
+  }
   if (found.length === 0) {
-    world.io.err(`no word "${ctx.invocation.args[0] ?? ''}" in the glossary\n`);
+    world.io.err(`no word "${query}" in the glossary\n`);
     return EXIT.failure;
   }
   world.io.out(`${renderWords(found, ctx.surfaces.titles)}\n`);
