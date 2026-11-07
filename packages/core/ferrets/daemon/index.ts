@@ -80,6 +80,7 @@ import {
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
+import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
@@ -436,10 +437,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ),
     }),
   );
-  // A move relaunches the ferret it names, so — like resume and stop — a ferret may move only itself and its helpers.
+  // These routes fork, hand over, move or read the conversation of the ferret they name, so — like resume and stop — a
+  // ferret may reach only itself and its helpers.
   const MOVE_ACTING_ROUTES: readonly string[] = [
     'POST /v1/ferrets/:ferretId/move',
     'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs',
+    'POST /v1/ferrets/:ferretId/fork',
+    'POST /v1/ferrets/:ferretId/handover',
+    'GET /v1/ferrets/:ferretId/handover',
+    'POST /v1/ferrets/:ferretId/handover/cancel',
+    'GET /v1/ferrets/:ferretId/relaunch-settings',
+    'POST /v1/ferrets/:ferretId/conversion-preview',
   ];
   const moveRoutes = Object.fromEntries(
     MOVE_ROUTE_KEYS.map(key => [
@@ -610,7 +618,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   return {
-    provides: { ferrets: service, workFolders },
+    provides: { ferrets: ferretsPort(service), workFolders },
     hooks: {
       'bearers:ferret': {
         ferretFor: (digest: BearerDigest) => {

@@ -11,7 +11,7 @@ import {
   type HarnessKey,
   type PackId,
 } from './ids.ts';
-import type { DeliveryOutcome, RunnerDelivery, RunnerHandle, SitrepLine, TranscriptReader } from './kinds.ts';
+import type { DeliveryOutcome, RunnerDelivery, RunnerHandle, SitrepLine, BoundTranscriptReader } from './kinds.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
 /**
@@ -163,8 +163,11 @@ export interface FerretHarness {
   deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>>;
   /** The harness's interrupt (the runner's `signal(handle, 'interrupt')`), as the same kind of act. */
   interrupt(): Promise<Result<true, HarnessRefusal>>;
-  /** The ferret's transcript through its harness, already masked (rejects with 503 while the harness is off). */
-  readonly transcript: TranscriptReader;
+  /**
+   * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
+   * It is bound to that ferret and names no other.
+   */
+  readonly transcript: BoundTranscriptReader;
 }
 
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */

@@ -1,15 +1,21 @@
 import { expect, test } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import { FakeHarness, ferretId } from '../../../../contract/testing/index.ts';
-import { ferretsMoveResume } from '../../../../daemon/lib/ferrets/move-resume.ts';
+import { err } from '@ferretry/std';
+import { ferretsMoveResume, movedTarget } from '../../../../daemon/lib/ferrets/move-resume.ts';
 import { SessionMoveError } from '../../../../daemon/lib/runtime/mounts/session-move.ts';
 import { additivesFixture } from './additives-fixture.ts';
 
 const policy = { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true } as const;
 /** Where a move onto another runtime of the same harness relaunches (what the moves module recorded). */
-const target = async () => ({ runtime: 'claude-two', harness: 'claude-code' as const, login: 'second' });
-/** Where a move onto a codex runtime relaunches. */
-const codexTarget = async () => ({ runtime: 'codex-two', harness: 'codex' as const, login: 'second' });
+const target = async () => ({ runtime: 'claude-two', harness: 'claude-code' as const, conversation: 'conv-fern' });
+/** Where a move onto a codex runtime relaunches: its own converted conversation and the model the move planned. */
+const codexTarget = async () => ({
+  runtime: 'codex-two',
+  harness: 'codex' as const,
+  conversation: 'codex-conv',
+  model: 'gpt-9',
+});
 
 test('S42 a move relaunches through the ordinary launch: the harness names the home, prepareHome runs, a new token is issued', async () => {
   const f = additivesFixture();
@@ -101,18 +107,21 @@ function onOldRuntime() {
   return { ...f, codex, asked };
 }
 
-test('a move relaunches on the TARGET runtime, login and harness, not the record’s old ones', async () => {
+test('a move relaunches on the TARGET runtime and harness, not the record’s old ones; the old login does not carry', async () => {
   const f = onOldRuntime();
   await f.service.resume(f.id);
   expect(f.harness.launched.at(-1)).toMatchObject({ runtime: 'claude-one', login: 'first', harness: 'claude-code' });
+  const first = f.harness.launched.length;
   const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
   await resume.resume({ id: f.id as never, policy });
   // The launch spec the harness got is the move's target, through the ordinary launch.
   expect(f.codex.launched).toHaveLength(1);
-  expect(f.codex.launched[0]).toMatchObject({ runtime: 'codex-two', login: 'second', harness: 'codex' });
-  expect(f.harness.launched).toHaveLength(1);
+  expect(f.codex.launched[0]).toMatchObject({ runtime: 'codex-two', harness: 'codex' });
+  expect(f.codex.launched[0]?.login).toBeUndefined();
+  expect(f.harness.launched).toHaveLength(first);
   // Ferrets' record is the one owner of it, and it is what the summary now says.
-  expect(f.registry.get(f.id)).toMatchObject({ runtime: 'codex-two', login: 'second', harness: 'codex', state: 'working' });
+  expect(f.registry.get(f.id)).toMatchObject({ runtime: 'codex-two', harness: 'codex', state: 'working' });
+  expect(f.registry.get(f.id)?.login).toBeUndefined();
 });
 
 test('a move asks the start gate about the TARGET, not the old runtime', async () => {
@@ -121,10 +130,10 @@ test('a move asks the start gate about the TARGET, not the old runtime', async (
   f.asked.length = 0;
   const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
   await resume.resume({ id: f.id as never, policy });
-  expect(f.asked).toEqual([{ harness: 'codex', runtime: 'codex-two', login: 'second' }]);
+  expect(f.asked).toEqual([{ harness: 'codex', runtime: 'codex-two' }]);
 });
 
-test('a move onto a target with no login does not keep the previous login', async () => {
+test('a move never carries the previous login: the moves module records none, so the target has none', async () => {
   const f = onOldRuntime();
   await f.service.resume(f.id);
   const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
@@ -134,6 +143,100 @@ test('a move onto a target with no login does not keep the previous login', asyn
   await resume.resume({ id: f.id as never, policy });
   expect(f.registry.get(f.id)?.login).toBeUndefined();
   expect(f.codex.launched[0]?.login).toBeUndefined();
+});
+
+/** The keys `session-move.ts` restamps onto the session's `config.json` (a stand-in for what it writes). */
+const restamp = (extra: Record<string, unknown> = {}) => ({
+  agent: 'codex-two',
+  harness: 'codex',
+  model: 'gpt-9',
+  modelHint: 'gpt',
+  command: ['codex'],
+  incarnation: 'fern-2',
+  runtimeGeneration: 2,
+  move: { from: 'claude-one', to: 'codex-two', at: '2026-11-07T00:00:00.000Z' },
+  moves: [],
+  updatedAt: '2026-11-07T00:00:00.000Z',
+  ...extra,
+});
+
+test('movedTarget reads what the moves module restamps: runtime, harness, model and the recorded conversation', async () => {
+  const resumed = await movedTarget(async () =>
+    restamp({ transcript: { harness: 'codex', harnessSessionId: 'codex-conv', file: '/x/rollout.jsonl' } }),
+  );
+  expect(resumed).toEqual({ runtime: 'codex-two', harness: 'codex', model: 'gpt-9', conversation: 'codex-conv' });
+  // A fresh conversation drops the transcript record: there is no conversation to resume.
+  expect(await movedTarget(async () => restamp())).toEqual({ runtime: 'codex-two', harness: 'codex', model: 'gpt-9' });
+  // No login is written by the moves module, and none is read even if a document names one.
+  expect(await movedTarget(async () => restamp({ login: 'second' }))).not.toHaveProperty('login');
+});
+
+test('a cross-harness move resumes the TARGET’s conversation, not the old harness’s', async () => {
+  const f = onOldRuntime();
+  await f.service.resume(f.id);
+  expect(f.registry.get(f.id)?.harnessConversation).toBe(`conv-${f.id}`);
+  const resumed: string[] = [];
+  const original = f.codex.resume.bind(f.codex);
+  f.codex.resume = async (spec, runner, env, conversation) => {
+    resumed.push(conversation);
+    return await original(spec, runner, env, conversation);
+  };
+  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
+  await resume.resume({ id: f.id as never, policy });
+  expect(resumed).toEqual(['codex-conv']);
+  expect(f.codex.launched[0]?.harnessConversation).toBe('codex-conv');
+  expect(f.registry.get(f.id)?.harnessConversation).toBe('codex-conv');
+});
+
+test('a fresh move starts the target with no conversation and drops the old one from the record', async () => {
+  const f = onOldRuntime();
+  await f.service.resume(f.id);
+  const resumed: string[] = [];
+  const original = f.codex.resume.bind(f.codex);
+  f.codex.resume = async (spec, runner, env, conversation) => {
+    resumed.push(conversation);
+    return await original(spec, runner, env, conversation);
+  };
+  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
+    runtime: 'codex-two',
+    harness: 'codex' as const,
+  }));
+  await resume.resume({ id: f.id as never, policy });
+  expect(resumed).toEqual([]);
+  expect(f.codex.launched).toHaveLength(1);
+  expect(f.codex.launched[0]?.harnessConversation).toBeUndefined();
+  // The new harness's start named its own conversation; it is never the old harness's one.
+  expect(f.registry.get(f.id)?.harnessConversation).toBe(`conv-${f.id}`);
+});
+
+test('the move’s model is the launch spec’s model, and the start options keep it', async () => {
+  const f = onOldRuntime();
+  f.registry.putDetails(f.id, { options: { model: 'old-model', effort: 'high' } });
+  await f.service.resume(f.id);
+  expect(f.harness.launched.at(-1)).toMatchObject({ model: 'old-model' });
+  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
+  await resume.resume({ id: f.id as never, policy });
+  expect(f.codex.launched[0]).toMatchObject({ model: 'gpt-9', effort: 'high' });
+  expect(f.registry.detailsOf(f.id)?.options).toEqual({ model: 'gpt-9', effort: 'high' });
+});
+
+test('a failed move relaunch puts the ferret record back as the move found it, as the moves module does its document', async () => {
+  const f = onOldRuntime();
+  f.registry.putDetails(f.id, { options: { model: 'old-model' } });
+  await f.service.resume(f.id);
+  f.codex.start = async () => err('failed' as never);
+  f.codex.resume = async () => err('failed' as never);
+  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
+  await expect(resume.resume({ id: f.id as never, policy })).rejects.toThrow();
+  const after = f.registry.get(f.id)!;
+  expect(after).toMatchObject({
+    state: 'stopped',
+    harness: 'claude-code',
+    runtime: 'claude-one',
+    login: 'first',
+    harnessConversation: `conv-${f.id}`,
+  });
+  expect(f.registry.detailsOf(f.id)?.options?.model).toBe('old-model');
 });
 
 test('a move whose recorded target cannot be read back refuses before anything is stopped', async () => {

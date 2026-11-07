@@ -97,8 +97,41 @@ test('decision 18: the transcript is read through the ferret’s harness', async
     follow: async function* () {},
     find: async () => entry,
   };
-  expect(await f.seam.transcript.read(f.id)).toEqual([entry]);
-  expect(await f.seam.transcript.find(f.id, 'e1')).toEqual(entry);
+  expect(await f.seam.transcript.read()).toEqual([entry]);
+  expect(await f.seam.transcript.find('e1')).toEqual(entry);
+});
+
+test('decision 18: a ferret’s own seam reads only ITS OWN transcript, never another ferret’s', async () => {
+  const f = additivesFixture();
+  const stranger = ferretId('stranger');
+  f.registry.put({ ...f.registry.get(f.id)!, id: stranger, name: 'stranger' });
+  const asked: string[] = [];
+  (f.harness as { transcript: unknown }).transcript = {
+    read: async (ferret: string) => {
+      asked.push(ferret);
+      return [{ id: ferret, at: '2026-11-07T00:00:00.000Z' as never, role: 'assistant' as const, text: `secret of ${ferret}` }];
+    },
+    follow: async function* (ferret: string) {
+      asked.push(ferret);
+    },
+    find: async (ferret: string) => {
+      asked.push(ferret);
+      return undefined;
+    },
+  };
+  // The direct way is refused: a ferret opening a stranger's seam.
+  await expect(f.service.harness(stranger, f.id)).rejects.toMatchObject({ status: 403, code: 'forbidden' });
+  const own = (await f.service.harness(f.id, f.id))!;
+  // The reader has no ferret argument. A stranger's id passed anyway lands in `after`, and the harness reader is still
+  // asked about the seam's own ferret only.
+  const read = own.transcript.read as unknown as (...args: unknown[]) => Promise<{ text: string }[]>;
+  const entries = await read(stranger);
+  expect(entries.map(entry => entry.text)).toEqual([`secret of ${f.id}`]);
+  await own.transcript.find('e1');
+  for await (const _entry of own.transcript.follow(new AbortController().signal)) void _entry;
+  expect(asked).toEqual([f.id, f.id, f.id]);
+  expect(asked).not.toContain(stranger);
+  expect(own.transcript.read.length).toBeLessThanOrEqual(2);
 });
 
 test('decision 18: a ferret caller reaches its own and its helpers’ harness, nobody else’s', async () => {

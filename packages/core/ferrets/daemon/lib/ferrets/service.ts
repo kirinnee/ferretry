@@ -41,7 +41,7 @@ import type {
 } from '../../../contract/index.ts';
 import { FerretRecordSchema, HARNESS_KEYS } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
-import type { FerretDetails } from '../state.ts';
+import { FerretDetailsSchema, type FerretDetails } from '../state.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
 import {
@@ -162,12 +162,21 @@ const canonicalFolder = (path: string): boolean =>
 /** A valid ferret id that is never minted (minted ids are `<base36>-<8 hex>`): the harness is asked for its home. */
 const PROBE_FERRET = 'home-probe' as FerretId;
 
-/** Where a move relaunches a ferret: the runtime it moved onto and the harness and login that runtime is. */
+/**
+ * Where a move relaunches a ferret: everything the move restamps — the runtime it moved onto, the harness that runtime
+ * is, the conversation it resumes and the model it runs. The previous login never carries over (a runtime is one
+ * credential, and the moves module records none).
+ */
 export interface ResumeTarget {
   readonly runtime: string;
   readonly harness: HarnessKey;
-  /** The target's login; none when the move's target names none (the previous login never carries over). */
-  readonly login?: string;
+  /**
+   * The harness conversation the relaunch resumes. Absent means a fresh start: the previous conversation belongs to the
+   * runtime moved off and is never resumed by the target.
+   */
+  readonly conversation?: string;
+  /** The model the relaunch runs; absent leaves the start options' model as it is. */
+  readonly model?: string;
 }
 
 /**
@@ -470,8 +479,18 @@ export class FerretsService implements FerretsApi {
     const record = target === undefined ? settled : (this.retarget(settled, target) as FerretRecord);
     const { cause: _ended, ...revived } = record;
     const starting: FerretRecord = { ...revived, state: 'starting', stateAt: this.ports.now() };
+    // The move's model is a start option, so details own it; what it replaces is kept to put back if the launch fails.
+    const detailsBefore = this.registry.detailsOf(ferret);
+    if (target?.model !== undefined && target.model !== detailsBefore?.options?.model)
+      await this.saveDetails(ferret, {
+        ...detailsBefore,
+        options: { ...detailsBefore?.options, model: target.model },
+      });
     await this.write(starting, settled.state, 'state');
     const resumed = await this.launch(starting, undefined, record.harnessConversation);
+    // A launch that failed on a move leaves the ferret as the move found it: the moves module rolls its own document
+    // back, so the record (runtime, harness, login, conversation) and the model go back with it, never half moved.
+    if (!resumed.ok && target !== undefined) await this.restoreMoved(settled, detailsBefore);
     if (resumed.ok) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
@@ -565,19 +584,48 @@ export class FerretsService implements FerretsApi {
     });
   }
 
-  /** The record on the move's target: its runtime, harness and login (the previous login never carries over), or why not. */
+  /**
+   * The record on the move's target: its runtime, harness and conversation (a fresh start has none), with the previous
+   * login and conversation gone, or why the target cannot be recorded.
+   */
   private retarget(record: FerretRecord, target: ResumeTarget): FerretRecord | string {
     const runtime = FerretRecordSchema.shape.runtime.safeParse(target.runtime);
-    const login = FerretRecordSchema.shape.login.safeParse(target.login);
-    if (!runtime.success || !login.success || !(HARNESS_KEYS as readonly string[]).includes(target.harness))
+    const conversation = FerretRecordSchema.shape.harnessConversation.safeParse(target.conversation);
+    const model = FerretDetailsSchema.shape.options.unwrap().shape.model.safeParse(target.model);
+    if (
+      !runtime.success ||
+      !conversation.success ||
+      !model.success ||
+      !(HARNESS_KEYS as readonly string[]).includes(target.harness)
+    )
       return 'the runtime this ferret is moving onto is not one Ferrets can record';
-    const { login: _previous, ...rest } = record;
+    const { login: _previous, harnessConversation: _before, ...rest } = record;
     return {
       ...rest,
       harness: target.harness,
       ...(runtime.data === undefined ? {} : { runtime: runtime.data }),
-      ...(login.data === undefined ? {} : { login: login.data }),
+      ...(conversation.data === undefined ? {} : { harnessConversation: conversation.data }),
     };
+  }
+
+  /** Puts a stopped ferret's pre-move runtime, harness, login, conversation and model back after a failed relaunch. */
+  private async restoreMoved(before: FerretRecord, details: FerretDetails | undefined): Promise<void> {
+    const now = this.registry.get(before.id);
+    if (now === undefined) return;
+    const { runtime: _r, login: _l, harnessConversation: _c, ...kept } = now;
+    await this.write(
+      {
+        ...kept,
+        harness: before.harness,
+        ...(before.runtime === undefined ? {} : { runtime: before.runtime }),
+        ...(before.login === undefined ? {} : { login: before.login }),
+        ...(before.harnessConversation === undefined ? {} : { harnessConversation: before.harnessConversation }),
+      },
+      now.state,
+      'state',
+    );
+    if (this.registry.detailsOf(before.id)?.options?.model !== details?.options?.model)
+      await this.saveDetails(before.id, details ?? {});
   }
 
   /**
@@ -672,10 +720,11 @@ export class FerretsService implements FerretsApi {
         const interrupted = await act((handle, runner) => runner.signal(handle, 'interrupt'));
         return interrupted.ok ? ok(true as const) : interrupted;
       },
+      // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
       transcript: {
-        read: async (target, after, limit) => await reader().read(target, after, limit),
-        follow: (target, signal) => reader().follow(target, signal),
-        find: async (target, entry) => await reader().find(target, entry),
+        read: async (after, limit) => await reader().read(ferret, after, limit),
+        follow: signal => reader().follow(ferret, signal),
+        find: async entry => await reader().find(ferret, entry),
       },
     };
   }

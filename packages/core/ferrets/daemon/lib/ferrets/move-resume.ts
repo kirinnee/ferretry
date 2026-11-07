@@ -16,12 +16,16 @@ const MovedConfigSchema = z.object({
   agent: z.string().min(1),
   /** The harness family of that runtime, in the session record's spelling. */
   harness: z.enum(['claude', 'codex']),
-  login: z.string().min(1).optional(),
+  /** The model the move planned on the target. */
+  model: z.string().min(1).optional(),
+  /** The conversation the relaunch resumes: gone for a fresh start, the converted or earlier one otherwise. */
+  transcript: z.looseObject({ harnessSessionId: z.string().min(1).optional() }).optional(),
 });
 
 /**
- * Reads the target a move just recorded: the runtime, harness and login its relaunch is on (a harness is spelled as
- * Ferrets keys it). `read` is the moves module's config document.
+ * Reads the target a move just recorded: the runtime, harness, model and conversation its relaunch is on (a harness is
+ * spelled as Ferrets keys it; no conversation means a fresh start). It reads exactly the keys the moves module restamps
+ * and no others — it records no login, so none is read. `read` is the moves module's config document.
  */
 export async function movedTarget(read: () => Promise<unknown>): Promise<ResumeTarget> {
   const config = MovedConfigSchema.safeParse(await read().catch(() => undefined));
@@ -29,7 +33,10 @@ export async function movedTarget(read: () => Promise<unknown>): Promise<ResumeT
   return {
     runtime: config.data.agent,
     harness: config.data.harness === 'codex' ? 'codex' : 'claude-code',
-    ...(config.data.login === undefined ? {} : { login: config.data.login }),
+    ...(config.data.model === undefined ? {} : { model: config.data.model }),
+    ...(config.data.transcript?.harnessSessionId === undefined
+      ? {}
+      : { conversation: config.data.transcript.harnessSessionId }),
   };
 }
 
