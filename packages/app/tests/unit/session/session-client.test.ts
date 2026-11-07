@@ -193,7 +193,7 @@ describe('a relay session that is not serving', () => {
     should(other.socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
   });
 
-  it('R88 the browser’s heartbeat is hop text outside the sealed channel: a ping sends no frame, a pong ends nothing', async () => {
+  it('the browser’s heartbeat is hop text outside the sealed channel: a ping sends no frame, a pong ends nothing', async () => {
     const { session, socket } = await opened();
     const framesBefore = socket.sent.length;
     session.heartbeat();

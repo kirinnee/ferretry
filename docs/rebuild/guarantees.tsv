@@ -832,8 +832,8 @@ R84	kept	kernel	-	behaviour as written	relay-protocol	R84
 R85	kept	kernel	-	behaviour as written	relay-protocol	R85
 R86	kept	connections	kernel	behaviour as written	relay-protocol	R86
 R87	kept	connections	worker:relay	Cloudflare WebSocket auto-responder	relay-protocol	R87
-R88	kept	app-shell	kernel	behaviour as written	relay-protocol	R88
-R89	kept	app-shell	kernel	behaviour as written	relay-protocol	R89
+R88	kept	connections	kernel	behaviour as written	relay-protocol	R88
+R89	kept	connections	kernel	behaviour as written	relay-protocol	R89
 R90	kept	connections	-	behaviour as written	relay-protocol	R90
 R91	kept	connections	-	behaviour as written	relay-protocol	R91
 R92	kept	connections	worker:relay	behaviour as written	relay-protocol	R92

@@ -147,20 +147,69 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   R244: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   R245: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   R247: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
-  R518: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R520: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R521: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R522: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R523: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R524: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R525: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R36: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R37: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R38: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R39: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R86: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R88: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
-  R89: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
+  R518: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R520: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R521: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R522: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R523: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R524: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R525: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R36: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R37: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R38: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R39: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R86: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R88: {
+    owner: 'connections',
+    reason: 'enforced by the Connections browser carrier socket keepalive (app/carriers/carrier-socket.ts)',
+  },
+  R89: {
+    owner: 'connections',
+    reason: 'enforced by the Connections browser carrier socket keepalive (app/carriers/carrier-socket.ts)',
+  },
   R506: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R507: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R519: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
