@@ -190,6 +190,8 @@ export interface HostOptions {
   readonly worktrees?: string;
   /** `FYD_TEST_TIMINGS` as `fyd` parsed it (R247); absent is the shipped numbers exactly. */
   readonly timings?: DaemonTimings;
+  /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
+  readonly backgroundDelayMs?: number;
 }
 
 export type PluginStatus = 'serving' | 'skeleton' | 'failed' | 'damaged' | 'off' | 'refused';
@@ -383,7 +385,11 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
 
   // Shared kernel machinery.
   const events = new EventBus(log);
-  const jobs = new JobRunner(clock, log);
+  const jobs = new JobRunner(
+    clock,
+    log,
+    options.backgroundDelayMs === undefined ? {} : { backgroundDelayMs: options.backgroundDelayMs },
+  );
   const ids = new MintedIdRegistry(adapters.random);
   const bound: {
     admission?: Admission;

@@ -449,6 +449,11 @@ export interface JobSpec {
   readonly schedule: JobSchedule;
   /** Waits for each named job's first run. */
   readonly after?: readonly string[];
+  /**
+   * `worker`: housekeeping (today's BackgroundLane). It waits until the lane opens (`FYD_BACKGROUND_DELAY_SECONDS`
+   * after the daemon serves, two minutes by default), then runs ONE lane job at a time, handing the loop back between
+   * jobs; a fire while the job already waits queues no second copy. `main` (the default) runs when it fires.
+   */
   readonly lane?: 'main' | 'worker';
   run(signal: AbortSignal): Promise<void>;
 }

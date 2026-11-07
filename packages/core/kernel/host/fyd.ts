@@ -7,6 +7,7 @@ import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { bootHost } from './host.ts';
+import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
 import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
@@ -52,6 +53,13 @@ async function main(): Promise<number> {
     process.stderr.write(`${timings.sentence}\n`);
     return 78;
   }
+  let backgroundDelayMs: number;
+  try {
+    backgroundDelayMs = parseBackgroundDelay(process.env.FYD_BACKGROUND_DELAY_SECONDS);
+  } catch (error) {
+    process.stderr.write(`fyd: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 78;
+  }
   const registry = (await import(REGISTRY)) as GeneratedRegistry;
   const outcome = await bootHost({
     home,
@@ -64,6 +72,7 @@ async function main(): Promise<number> {
     }),
     contractHash: id => registry.contractHashes?.[id]?.effective ?? 'unhashed',
     timings: timings.timings,
+    backgroundDelayMs,
     pid: process.pid,
     listen: async host =>
       await listenLocal(host, {

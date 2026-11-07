@@ -28,21 +28,61 @@ interface Job {
 
 const BACKOFF_MS = [1_000, 5_000, 30_000, 120_000, 600_000] as const;
 
+/** The variable that sets how long after serving the background lane opens (today's). */
+export const BACKGROUND_DELAY_VARIABLE = 'FYD_BACKGROUND_DELAY_SECONDS';
+
+/**
+ * Two minutes: long enough that a browser reconnecting to a restarted daemon, and the person behind it, are served
+ * before any housekeeping reads a transcript; short enough that usage and analytics are current again soon after.
+ */
+export const DEFAULT_BACKGROUND_DELAY_MS = 120_000;
+
+/**
+ * The lane's delay for this `FYD_BACKGROUND_DELAY_SECONDS` value (today's `parseBackgroundDelay`): absent or empty is
+ * the default, `0` opens it as soon as the daemon serves, anything but whole seconds throws naming the variable.
+ */
+export function parseBackgroundDelay(raw: string | undefined): number {
+  const text = raw?.trim() ?? '';
+  if (text === '') return DEFAULT_BACKGROUND_DELAY_MS;
+  if (!/^\d+$/u.test(text)) throw new Error(`${BACKGROUND_DELAY_VARIABLE} must be a whole number of seconds: ${text}`);
+  return Number(text) * 1_000;
+}
+
+export interface JobRunnerOptions {
+  /** How long after `start` the background (`worker`) lane opens. Default {@link DEFAULT_BACKGROUND_DELAY_MS}. */
+  readonly backgroundDelayMs?: number;
+  /** Hands the event loop back between lane jobs, so whatever waits on it runs first. Default: one `setImmediate`. */
+  readonly yieldToLoop?: () => Promise<void>;
+}
+
 /**
  * Jobs (§7.4, §7.6 step 8): interval, cron or once-after-start; started after listen in start order; `after` waits
  * for each named job's first run; a throwing job restarts with backoff and is named in `fy doctor`; `kick` runs one
- * now, coalesced with a running one. The `worker` lane runs on the main loop until the worker host lands (declared).
+ * now, coalesced with a running one. A `worker`-lane job is housekeeping (today's BackgroundLane): it waits for the
+ * lane to open, then lane jobs run one at a time with the loop handed back between them, never queued twice.
  */
 export class JobRunner {
   private readonly jobs = new Map<string, Job>();
   private readonly startOrder: string[] = [];
   private started = false;
   private readonly controller = new AbortController();
+  private readonly waiting: Job[] = [];
+  private laneOpen = false;
+  private draining = false;
+  private readonly yieldToLoop: () => Promise<void>;
 
   constructor(
     private readonly clock: Clock,
     private readonly log: Log,
-  ) {}
+    private readonly options: JobRunnerOptions = {},
+  ) {
+    this.yieldToLoop = options.yieldToLoop ?? (() => new Promise<void>(resolve => setImmediate(resolve)));
+  }
+
+  /** The lane jobs waiting their turn, oldest first. */
+  laneWaiting(): readonly string[] {
+    return this.waiting.map(job => job.key);
+  }
 
   portFor(plugin: string): JobsPort {
     return {
@@ -68,6 +108,10 @@ export class JobRunner {
   start(): void {
     if (this.started) return;
     this.started = true;
+    this.clock.after(milliseconds(this.options.backgroundDelayMs ?? DEFAULT_BACKGROUND_DELAY_MS), () => {
+      this.laneOpen = true;
+      void this.drain();
+    });
     for (const key of this.startOrder) {
       const job = this.jobs.get(key);
       if (job !== undefined) this.arm(job);
@@ -113,6 +157,31 @@ export class JobRunner {
       job.again = true;
       return;
     }
+    if (job.spec.lane === 'worker') {
+      // A fire while the job already waits does not queue a second copy: the waiting one sees the newer state.
+      if (!this.waiting.includes(job)) this.waiting.push(job);
+      void this.drain();
+      return;
+    }
+    this.run(job);
+  }
+
+  private async drain(): Promise<void> {
+    if (!this.laneOpen || this.draining) return;
+    this.draining = true;
+    try {
+      for (let job = this.waiting.shift(); job !== undefined; job = this.waiting.shift()) {
+        if (this.controller.signal.aborted) break;
+        this.run(job);
+        await job.running?.catch(() => undefined);
+        await this.yieldToLoop();
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  private run(job: Job): void {
     job.running = (async () => {
       try {
         await job.spec.run(this.controller.signal);
@@ -139,6 +208,7 @@ export class JobRunner {
   /** Stops jobs in reverse start order and waits for running ones (§7.6 step 9). */
   async stop(): Promise<void> {
     this.controller.abort();
+    this.waiting.length = 0;
     for (const key of [...this.startOrder].reverse()) {
       const job = this.jobs.get(key);
       job?.cancel?.();
