@@ -17,10 +17,10 @@ import {
   FerretTokensFile,
   Harnesses,
   Runners,
+  FerretDetailsFile,
 } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
-import { FerretDetailsFiles } from '../../../../daemon/lib/state.ts';
 
 /** Who calls: the `x-test-caller` header names a ferret (`ferret:<id>`), else the owner at the machine. */
 const callerHeader = 'x-test-caller';
@@ -416,7 +416,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
     const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<Record<string, unknown>>();
     expect(view).toMatchObject({ model: 'opus', card: 'F21', title: 'Fix the login' });
     expect(view.label).toBe('mine');
-    const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFiles, id) as string);
+    const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFile, id) as string);
     expect(details).toEqual({
       format: 1,
       options: {
@@ -443,7 +443,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
   test('a start with no options writes no details.json', async () => {
     const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
     const id = await started(h, {});
-    expect(h.state('ferrets').raw(FerretDetailsFiles, id)).toBeUndefined();
+    expect(h.state('ferrets').raw(FerretDetailsFile, id)).toBeUndefined();
   });
 
   test('a title rename shows in the summary and the fleet list, keeping the start options', async () => {

@@ -3,8 +3,8 @@ import type { SessionProvenance } from '../../../../../daemon/lib/protocol/sessi
 import should from 'should';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { StorageSessionProvenanceStore } from '../../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
-import { SessionConfigFiles } from '../../../../../daemon/lib/state.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { FerretConfigFile } from '../../../../../contract/index.ts';
 
 /**
  * The spawn stamp's durable round trip, over a real state home.
@@ -167,7 +167,7 @@ describe('spawn provenance storage', () => {
     const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-torn');
     await storage.writeConfig(id, sessionConfig(id));
-    folder.plant(SessionConfigFiles, '{"id": "20260806-torn"', id);
+    folder.plant(FerretConfigFile, '{"id": "20260806-torn"', id);
 
     // Act + Assert: a torn document is no stamp, so a fresh resolution runs. Raising here would fail
     // a revive over a record the next relaunch would rewrite anyway.

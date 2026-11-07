@@ -424,8 +424,8 @@ describe('SessionLifecycleService', () => {
     const actual = await subject.create(input());
 
     // Assert
-    should(actual.config.sessionCapabilityHash).equal(HASH);
-    should(repository.current().config.sessionCapabilityHash).equal(HASH);
+    should(actual.config.capabilityHash).equal(HASH);
+    should(repository.current().config.capabilityHash).equal(HASH);
     // The record is what every reader of the session document gets, so the SECRET must not be
     // anywhere in it — only the hash the task-board domain keys its grants on.
     should(JSON.stringify(repository.current())).not.containEql(CAPABILITY);
@@ -448,7 +448,7 @@ describe('SessionLifecycleService', () => {
     // The failed attempt left no record for a retry to mistake for a completed create.
     environment.writeFailure = undefined;
     const retried = await subject.create(input());
-    should(retried.config.sessionCapabilityHash).equal(HASH);
+    should(retried.config.capabilityHash).equal(HASH);
     should(credentials.issues).equal(2);
     should(repository.reservations).deepEqual([ID, ID]);
     should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
@@ -472,8 +472,8 @@ describe('SessionLifecycleService', () => {
 
     repository.writeFailure = undefined;
     const retried = await subject.create(input());
-    should(retried.config.sessionCapabilityHash).equal(HASH);
-    should(repository.current().config.sessionCapabilityHash).equal(HASH);
+    should(retried.config.capabilityHash).equal(HASH);
+    should(repository.current().config.capabilityHash).equal(HASH);
     should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
     should(credentials.issues).equal(2);
     should(repository.reservations).deepEqual([ID, ID]);
@@ -493,7 +493,7 @@ describe('SessionLifecycleService', () => {
 
     // Assert — any reader that can already see the hash can also read its exact plaintext. A retry
     // refuses the existing record without minting or overwriting that credential.
-    should(repository.current().config.sessionCapabilityHash).equal(HASH);
+    should(repository.current().config.capabilityHash).equal(HASH);
     should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
     await should(subject.create(input())).be.rejectedWith(`session already exists: ${ID}`);
     should(credentials.issues).equal(1);
@@ -516,7 +516,7 @@ describe('SessionLifecycleService', () => {
     const { repository, subject } = harness();
 
     // Act + Assert
-    await should(subject.create(input({ sessionCapabilityHash: HASH }))).be.rejectedWith(
+    await should(subject.create(input({ capabilityHash: HASH }))).be.rejectedWith(
       /requires a lifecycle-issued credential/u,
     );
     should(repository.reservations).deepEqual([]);
@@ -545,7 +545,7 @@ describe('SessionLifecycleService', () => {
     await subject.create(input());
 
     // Assert
-    should(repository.current().config.sessionCapabilityHash).be.undefined();
+    should(repository.current().config.capabilityHash).be.undefined();
     should(environment.written.get(ID)).deepEqual({ FY_SESSION_MODE: 'auto' });
   });
 
@@ -1481,14 +1481,14 @@ class RepositoryHashStore implements SessionCapabilityHashStore {
     const current = this.repository.current(id);
     this.repository.documents.set(
       id,
-      JSON.stringify({ ...current, config: { ...current.config, sessionCapabilityHash: hash } }),
+      JSON.stringify({ ...current, config: { ...current.config, capabilityHash: hash } }),
     );
   }
 
   async erase(id: SessionId): Promise<void> {
     this.order.push('erase');
     const current = this.repository.current(id);
-    const { sessionCapabilityHash: _revoked, ...config } = current.config;
+    const { capabilityHash: _revoked, ...config } = current.config;
     this.repository.documents.set(id, JSON.stringify({ ...current, config }));
   }
 
@@ -1517,14 +1517,14 @@ class RepositoryHashStore implements SessionCapabilityHashStore {
  */
 function credentialResolver(
   session: () => Promise<
-    { readonly id: string; readonly active: boolean; readonly sessionCapabilityHash: string } | undefined
+    { readonly id: string; readonly active: boolean; readonly capabilityHash: string } | undefined
   >,
   hash: (capability: string) => string,
 ): { resolve(capability: string): Promise<{ readonly sessionId: string } | undefined> } {
   return {
     resolve: async capability => {
       const current = await session();
-      return current !== undefined && current.active && current.sessionCapabilityHash === hash(capability)
+      return current !== undefined && current.active && current.capabilityHash === hash(capability)
         ? { sessionId: current.id }
         : undefined;
     },
@@ -1569,10 +1569,8 @@ describe('SessionLifecycleService credential per launch', () => {
     hashes = new RepositoryHashStore(built.repository, built.order);
     const session = async () => {
       const record = built.repository.current();
-      const hash = record.config.sessionCapabilityHash;
-      return hash === undefined
-        ? undefined
-        : { id: record.config.id, name: null, active: true, sessionCapabilityHash: hash };
+      const hash = record.config.capabilityHash;
+      return hash === undefined ? undefined : { id: record.config.id, name: null, active: true, capabilityHash: hash };
     };
     const identities = credentialResolver(session, capability => credential(capability).hash);
     return {
@@ -1596,8 +1594,8 @@ describe('SessionLifecycleService credential per launch', () => {
     const actual = await built.subject.start(ID);
 
     // Assert
-    should(actual.config.sessionCapabilityHash).equal(credential('first-pane-capability').hash);
-    should(built.repository.current().config.sessionCapabilityHash).equal(credential('first-pane-capability').hash);
+    should(actual.config.capabilityHash).equal(credential('first-pane-capability').hash);
+    should(built.repository.current().config.capabilityHash).equal(credential('first-pane-capability').hash);
     should(built.environment.written.get(ID)).deepEqual({
       FY_SESSION_BOARD_CAPABILITY: 'first-pane-capability',
       FY_SESSION_MODE: 'auto',
@@ -1641,8 +1639,8 @@ describe('SessionLifecycleService credential per launch', () => {
 
     // Assert
     should(stopped.state.status).equal('stopped');
-    should(stopped.config.sessionCapabilityHash).be.undefined();
-    should(built.repository.current().config.sessionCapabilityHash).be.undefined();
+    should(stopped.config.capabilityHash).be.undefined();
+    should(built.repository.current().config.capabilityHash).be.undefined();
     should(await built.resolve('first-pane-capability')).be.undefined();
     // After the stop is durable: a crash in between leaves a stopped session, which the lookup refuses.
     should(built.order.lastIndexOf('erase')).be.above(built.order.lastIndexOf('hash'));
@@ -1657,10 +1655,10 @@ describe('SessionLifecycleService credential per launch', () => {
       await built.subject.start(ID);
       const session = async () => {
         const record = built.repository.current();
-        const hash = record.config.sessionCapabilityHash;
+        const hash = record.config.capabilityHash;
         return hash === undefined
           ? undefined
-          : { id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash };
+          : { id: ID, name: null, active: !isTerminalStatus(record.state.status), capabilityHash: hash };
       };
       const live = credentialResolver(session, capability => credential(capability).hash);
       const current = built.repository.current();
@@ -1692,8 +1690,8 @@ describe('SessionLifecycleService credential per launch', () => {
 
     // Assert — the value the pane holds names nobody, the session runs on, and no new value exists to be read.
     should(await built.resolve('first-pane-capability')).be.undefined();
-    should(revoked.config.sessionCapabilityHash).be.undefined();
-    should(built.repository.current().config.sessionCapabilityHash).be.undefined();
+    should(revoked.config.capabilityHash).be.undefined();
+    should(built.repository.current().config.capabilityHash).be.undefined();
     should(built.repository.current().state.status).equal('running');
     should(built.credentials.issues).equal(issued);
     should(built.serial.keys.at(-1)).equal(ID);
@@ -1767,7 +1765,7 @@ describe('SessionLifecycleService credential per launch', () => {
 
     // Assert
     should(child.config.parent).equal(parent);
-    should(child.config.sessionCapabilityHash).equal(credential('first-pane-capability').hash);
+    should(child.config.capabilityHash).equal(credential('first-pane-capability').hash);
     should(pane).containDeep({ FY_SESSION_TOKEN: 'first-pane-capability', FY_SESSION_ID: ID });
     should(JSON.stringify(pane)).not.containEql('parent-capability');
     should(await built.resolve('parent-capability')).not.equal(ID);
@@ -1821,7 +1819,7 @@ describe('SessionLifecycleService credential per launch', () => {
     // Act + Assert — nothing was launched holding the unrecorded credential.
     await should(built.subject.start(ID)).be.rejectedWith('the daemon died before the hash was written');
     should(built.repository.current().state.status).equal('failed');
-    should(built.repository.current().config.sessionCapabilityHash).equal(credential('created-capability').hash);
+    should(built.repository.current().config.capabilityHash).equal(credential('created-capability').hash);
     should(built.environment.written.get(ID)?.FY_SESSION_BOARD_CAPABILITY).equal('first-pane-capability');
     should(built.launcher.launches()).equal(0);
 
