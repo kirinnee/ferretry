@@ -129,7 +129,14 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   // ── the remedies: every one goes through Ferrets or Conversation, never around them (`remedies.ts`) ──────────────
   const terminals = (): TerminalsApi | undefined => host.terminals?.();
   const browsers = (): BrowsersApi | undefined => host.browsers?.();
-  const { remedies, resume: automaticResume } = createWardenRemedies({ ferrets, conversation, asks, acted, browsers });
+  const { remedies, resume: automaticResume } = createWardenRemedies({
+    ferrets,
+    conversation,
+    asks,
+    acted,
+    browsers,
+    noticeUndelivered: (ferret, reason) => kernel.log.info('warden.notice_undelivered', { ferret, reason }),
+  });
   const fleetNow = async () => await readFleet(ferrets, conversation, asks, turns, ferret => `ferrets/${ferret}`);
 
   // ── the liveness monitor: what the Warden SEES of each working ferret between sweeps (today's) ────────────────────
@@ -280,12 +287,6 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       clientName: BINARY,
       wardenCwd: '',
       supervisesMonitors: true,
-      // Today's act: nudge an overdue sub-ferret, then tell its parent, skipping one that declared a wait or said
-      // `signal done` (`FerretSummary.waiting` / `finishedAt`, read in `fleet.ts`).
-      nudgesOverdue: true,
-      // Today's reflex: a quiet ferret is nudged once, never one that declared a wait, and each is timed by its own
-      // `--nudge-after` / `--kill-after` (`FerretSummary.nudgeAfterSeconds` / `killAfterSeconds`).
-      reflexNudges: true,
       mayAct: false,
       machineName: () => undefined,
     },

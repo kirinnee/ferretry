@@ -23,7 +23,15 @@ export interface WardenRemedyHost {
   ) => void;
   /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
   readonly browsers?: () => BrowsersApi | undefined;
+  /**
+   * Told when a resume that DID start the ferret could not type its notice (Conversation refuses until its terminal
+   * seam lands). The resume stands; the notice's failure is journalled apart from it.
+   */
+  readonly noticeUndelivered?: (ferret: string, reason: string) => void;
 }
+
+/** Ferrets ANSWERED that it would not start the ferret: nothing was started. */
+class ResumeRefused extends Error {}
 
 /** The reason the Warden's restart gives Ferrets for the stop half of it (today's restart recorded the Warden). */
 export const RESTART_STOP_REASON = 'restarted by the Warden: the process looked alive but was stuck';
@@ -64,11 +72,27 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     authorizeWardenResume(target, await ferrets.list(), await hasOpenQuestion(asks, target.id));
   };
 
-  const resumeOrThrow = async (ferret: string, message: string | undefined, what: string): Promise<void> => {
+  /** Resumes, and answers why its notice was not typed (nothing when it was, or there was none). */
+  const resumeOrThrow = async (
+    ferret: string,
+    message: string | undefined,
+    what: string,
+  ): Promise<string | undefined> => {
     // Every resume the Warden makes is automated recovery, not a person asking: Ferrets records it as such.
     const resumed = await ferrets.resume(ferret as FerretId, message, { automatic: true });
-    if (!resumed.ok) throw new Error(`${what} refused: ${resumed.error.reason}`);
-    if (message !== undefined) await say(ferret, message);
+    if (!resumed.ok) throw new ResumeRefused(`${what} refused: ${resumed.error.reason}`);
+    if (message === undefined) return undefined;
+    // The ferret is running again: the resume is DONE whatever happens to its notice. A notice that cannot be typed
+    // (Ferrets already keeps the message in the resume's history) is journalled apart, never turned into a refusal:
+    // a refused revive is not recorded, so the limits that count revives would never see this one.
+    try {
+      await say(ferret, message);
+      return undefined;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      host.noticeUndelivered?.(ferret, reason);
+      return reason;
+    }
   };
 
   const remedies: WardenRemedyPort = {
@@ -91,12 +115,13 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     stop: async (ferret, reason) =>
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
     // Today's failover: the same ferret relaunched on another login with its conversation, through Ferrets' move (the
-    // moves module's flow and its refusals, by the Warden's own actor so the turn is drawn as the Warden's). A move
-    // Ferrets refuses throws with its reason, which the sweep records as a failed act.
+    // moves module's flow and its refusals). Today's failover moved with `movedBy: 'warden'` only; `actor: 'warden'`
+    // was only on the auto-move path, which is not built. A move Ferrets refuses throws with its reason, which the
+    // sweep records as a failed act.
     failover: async (ferret, agent) =>
       await act(ferret, 'failover', async () => {
         if (ferrets.move === undefined) throw new Error('Moving a ferret to another account is not available here.');
-        const moved = await ferrets.move(ferret as FerretId, agent, { actor: 'warden', movedBy: 'warden' });
+        const moved = await ferrets.move(ferret as FerretId, agent, { movedBy: 'warden' });
         if (!moved.ok) throw new Error(`the move was refused: ${moved.error.reason}`);
       }),
     // Today's remedy, through Browsers: the pane's tree is read again at this moment (through Terminals), nothing is
@@ -128,12 +153,20 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     remedies,
     // Total, as the auto-revive wants it: a refusal is `{ ok: false }`, never a throw.
     resume: async (ferret, message) => {
+      // Fail closed: once Ferrets was asked to start the ferret, anything but its own refusal counts as a revive, so
+      // the cooldown, `crash_repeat` and the breaker apply to it. Only the guard (before the call) or a refusal
+      // Ferrets answered leaves nothing started.
+      let asked = false;
       try {
         await authorize(ferret);
-        await resumeOrThrow(ferret, message, 'revive');
-        return { ok: true };
+        asked = true;
+        const unsent = await resumeOrThrow(ferret, message, 'revive');
+        return unsent === undefined ? { ok: true } : { ok: true, caveat: `It could not be told why: ${unsent}.` };
       } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+        const reason = error instanceof Error ? error.message : String(error);
+        if (asked && !(error instanceof ResumeRefused))
+          return { ok: true, caveat: `Whether it started is not known (${reason}), so this counts as a revive.` };
+        return { ok: false, reason };
       }
     },
   };

@@ -105,25 +105,58 @@ describe('a sub-ferret that has not answered its parent', () => {
     should(answered.remedies).be.empty();
   });
 
-  it('should remember nothing when the message could not be typed, so the next sweep tries again', async () => {
-    // Arrange
+  it('should try a refused nudge once and its parent once, then stop, instead of retrying on every sweep', async () => {
+    // Arrange: every typed message is refused (Conversation's send refuses on 5.0 until its terminal seam lands)
+    let now = NOW;
     const subject = harness({
       config: enabled(),
       fleet: [leadWithName, reviewer()],
       exchanges: ledgers({ reviewer: [asked] }),
       remedyFails: 'nudge',
+      now: () => now,
     });
 
-    // Act
+    // Act — the nudge refused; the parent tried at once and refused; then four more sweeps, which try nothing
+    for (const minutes of [0, 1, 2, 30, 90]) {
+      now = NOW + minutes * MINUTE;
+      await subject.service.run({ force: false });
+    }
+
+    // Assert
+    const failed = subject.journal.filter(entry => entry.type === 'fleet.warden_overdue_failed');
+    should(failed.map(entry => entry.data)).eql([
+      { sessionId: 'reviewer', via: 'nudge', to: 'reviewer' },
+      { sessionId: 'reviewer', via: 'parent', to: 'lead' },
+    ]);
+    should(subject.state().overdue).eql({
+      reviewer: { asked: asked.acceptedAt, nudgeFailedAt: iso(NOW), parentFailedAt: iso(NOW + 1 * MINUTE) },
+    });
+    should(journalTypes(subject)).not.containEql('fleet.warden_overdue_told');
+  });
+
+  it('should try again for the next unanswered message (a new episode)', async () => {
+    // Arrange
+    let now = NOW;
+    let sends: readonly ExchangeSend[] = [asked];
+    const subject = harness({
+      config: enabled(),
+      fleet: [leadWithName, reviewer()],
+      exchanges: { sends: async id => (id === 'reviewer' ? sends : []) },
+      remedyFails: 'nudge',
+      now: () => now,
+    });
+    for (const minutes of [0, 1, 2]) {
+      now = NOW + minutes * MINUTE;
+      await subject.service.run({ force: false });
+    }
+
+    // Act — the lead asks again and the turn has been over long enough
+    now = NOW + 60 * MINUTE;
+    sends = [{ ...asked, acceptedAt: iso(NOW + 5 * MINUTE) }];
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.state().overdue).be.undefined();
-    should(subject.journal.find(entry => entry.type === 'fleet.warden_overdue_failed')?.data).eql({
-      sessionId: 'reviewer',
-      via: 'nudge',
-      to: 'reviewer',
-    });
+    should(subject.journal.filter(entry => entry.type === 'fleet.warden_overdue_failed')).have.length(3);
   });
 
   it('should flag nobody whose ledgers could not be read', async () => {
@@ -156,24 +189,5 @@ describe('a sub-ferret that has not answered its parent', () => {
     // Assert
     should(run.anomalies.map(anomaly => anomaly.kind)).eql(['report_overdue']);
     should(subject.remedies).be.empty();
-  });
-
-  it('should be flagged but tell nobody, even forced, when the daemon does not nudge overdue reports', async () => {
-    // Arrange: the Warden on and allowed to nudge alone, but no wait or done fact to tell a waiting helper apart
-    const subject = harness({
-      config: enabled(),
-      fleet: [leadWithName, reviewer()],
-      exchanges: ledgers({ reviewer: [asked] }),
-      settings: { nudgesOverdue: false },
-    });
-
-    // Act
-    const run = await subject.service.run({ force: true });
-
-    // Assert
-    should(run.anomalies.map(anomaly => [anomaly.kind, anomaly.sessionId])).eql([['report_overdue', 'reviewer']]);
-    should(subject.remedies).be.empty();
-    should(subject.state().overdue).be.undefined();
-    should(journalTypes(subject)).not.containEql('fleet.warden_overdue_told');
   });
 });

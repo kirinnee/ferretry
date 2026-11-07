@@ -14,10 +14,14 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   `liveness` look at each ferret's own pane and Conversation's transcript tail every 30 s while Terminals (an
  *   optional use) is on; off, `dead_monitor`, `sus_*` and `agent_frozen` do not run. A browser left under a pane is
  *   closed through Browsers' `closeLeftoverBrowsers` (an optional use) behind today's `mayActAlone.closeLeftovers`;
- *   off, that check does not run. A quiet ferret is nudged once by the reflex, never one that declared a wait, each
- *   timed by its own nudge and frozen times (`FerretSummary.waiting`, `nudgeAfterSeconds`, `killAfterSeconds`).
- * - A sub-ferret overdue on a report is nudged and its parent told, skipping one that declared a wait or said
- *   `signal done` (`FerretSummary.waiting` / `finishedAt`).
+ *   off, that check does not run. A quiet ferret is chosen for a reflex nudge once, never one that declared a wait,
+ *   each timed by its own nudge and frozen times (`FerretSummary.waiting`, `nudgeAfterSeconds`, `killAfterSeconds`).
+ * - A sub-ferret overdue on a report is chosen for a nudge and its parent for a tell, skipping one that declared a
+ *   wait or said `signal done` (`FerretSummary.waiting` / `finishedAt`). BUT NO NUDGE IS TYPED YET: both go
+ *   through `ConversationApi.send`, which refuses until Conversation's terminal seam lands, so every reflex nudge
+ *   is recorded as a failed act, and an overdue nudge or tell is tried once per unanswered message (not on every
+ *   sweep) and recorded as failed. The revive notice is the same send: it is journalled apart, and the resume it
+ *   follows stands (`daemon/remedies.ts`), so the revive limits count it.
  * - Auto-revive resumes a ferret Ferrets reports as having died (`FerretSummary.cause`) through `FerretsApi.resume`
  *   (automatic). A failover act is a move through `FerretsApi.move`, but nothing reaches it yet: the sweep routes every
  *   failover through the auto-move service, which is not built (it needs fleet facts, the owner hold and the ferret's
@@ -26,7 +30,7 @@ import { createWardenSubsystem } from './subsystem.ts';
  * - The Jev guard is the real one, but its key waits on the kernel's `secrets.resolve`: it answers `not_set` and no
  *   request leaves the machine (NO UNATTENDED SPEND BY SURPRISE holds trivially; the caps, pacing and per-day rules
  *   still run in the sweep).
- * - A nudge is sent as the owner until Conversation has a `warden` caller; a standing notice cannot be refreshed in
+ * - A nudge, once Conversation can type, is sent as the owner until it has a `warden` caller; a standing notice cannot be refreshed in
  *   place (Asks has no update); unattended is the ferret's own start mode, as today.
  * - Board is an optional use: on, a card Board calls orphaned is flagged `orphaned_card` (read through Board's
  *   contract, every page of them, with each lane named from Board's lane sets); off, that flag does not run. A

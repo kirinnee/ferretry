@@ -618,24 +618,6 @@ export interface WardenSweepSettings extends WardenPromptSettings {
    * not to suppress the evidence.
    */
   readonly supervisesMonitors: boolean;
-  /**
-   * Whether a sub-ferret overdue on a report is nudged, then its parent told (`escalateOverdue`), or only flagged.
-   *
-   * The act is safe only when the fleet says which ferrets declared a wait or signalled done
-   * (`overdueCandidates` skips those): without those facts a helper legitimately waiting on CI, a review or a
-   * person is nudged and its lead told, two unattended turns per ask. False: `report_overdue` is still flagged,
-   * and nothing is typed to anyone.
-   */
-  readonly nudgesOverdue: boolean;
-  /**
-   * Whether the liveness reflex nudges a quiet ferret (`reflex`), or only detects.
-   *
-   * The act is safe only when the fleet says which ferrets declared a wait (they are never nudged) and each
-   * ferret's own nudge and frozen times (`reflexSettingsFor`): without those, a ferret waiting on CI by
-   * declaration, or started with a longer nudge time, is typed to after the default five minutes. False:
-   * `agent_frozen`, `sus_*` and `dead_monitor` still fire, and nothing is typed to anyone.
-   */
-  readonly reflexNudges: boolean;
   /** This machine's name, read when a notification is written, so one among every machine's says which. */
   readonly machineName?: () => string | undefined;
 }
@@ -1382,7 +1364,7 @@ export class WardenSweepService {
         });
         continue;
       }
-      if (!this.settings.reflexNudges || !config.enabled || !config.mayActAlone.nudge) continue;
+      if (!config.enabled || !config.mayActAlone.nudge) continue;
       const base = {
         at,
         sessionId: event.sessionId,
@@ -3045,7 +3027,8 @@ export class WardenSweepService {
 
   /**
    * Nudge each overdue sub-ferret once, then tell its parent (`report-overdue.ts`). A message that could not
-   * be typed is journalled and not remembered, so the next sweep tries again.
+   * be typed is journalled and remembered as tried, so it is not tried again this episode: where typing is refused
+   * every time, a retry per sweep would fail the same way for every overdue sub-ferret, forever.
    */
   private async escalateOverdue(input: {
     readonly anomalies: readonly WardenAnomaly[];
@@ -3056,7 +3039,6 @@ export class WardenSweepService {
     readonly at: string;
     readonly force: boolean;
   }): Promise<WardenRuntimeState> {
-    if (!this.settings.nudgesOverdue) return input.state;
     const plan = planOverdueReports({
       overdue: input.anomalies,
       exchanges: input.exchanges,
@@ -3074,7 +3056,12 @@ export class WardenSweepService {
         () => false,
       );
       const child = tell.kind === 'nudge' ? tell.sessionId : tell.child;
+      const previous = memory[child]?.asked === tell.asked ? memory[child] : undefined;
       if (!typed) {
+        memory[child] =
+          tell.kind === 'nudge'
+            ? { ...previous, asked: tell.asked, nudgeFailedAt: input.at }
+            : { ...previous, asked: tell.asked, parentFailedAt: input.at };
         this.ports.journal.record('fleet.warden_overdue_failed', {
           sessionId: child,
           via: tell.kind,
@@ -3082,7 +3069,6 @@ export class WardenSweepService {
         });
         continue;
       }
-      const previous = memory[child]?.asked === tell.asked ? memory[child] : undefined;
       memory[child] =
         tell.kind === 'nudge'
           ? { ...previous, asked: tell.asked, nudgedAt: input.at }
