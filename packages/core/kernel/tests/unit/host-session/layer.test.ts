@@ -22,7 +22,7 @@ import {
   utf8Bytes,
 } from '../../../host/session/index.ts';
 import { fixture, pairedDevice, serving, settle, TestClient } from './harness.ts';
-import { relayCrypto } from './identities.ts';
+import { relayCrypto, stubbedCrypto } from './identities.ts';
 
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -312,6 +312,71 @@ describe('the session layer: flow control', () => {
     }
     await client.pump();
     expect(client.end?.code).toBe(4430);
+  });
+
+  test('R555 two sessions on one connection share one seal queue and keep independent credit', async () => {
+    let active = 0;
+    let peak = 0;
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const started = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    const fx = await fixture({
+      crypto: stubbedCrypto({
+        seal: async (key, nonce, aad, plaintext) => {
+          if (JSON.parse(new TextDecoder().decode(plaintext)).t !== 'res')
+            return relayCrypto.seal(key, nonce, aad, plaintext);
+          active += 1;
+          peak = Math.max(peak, active);
+          entered();
+          try {
+            await held;
+            return await relayCrypto.seal(key, nonce, aad, plaintext);
+          } finally {
+            active -= 1;
+          }
+        },
+      }),
+    });
+    const connection = fx.layer.connection('relay' as CarrierKey);
+    const clients: TestClient[] = [];
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const client = TestClient.on(connection);
+        await client.handshake(fx.daemonId);
+        await client.auth(await pairedDevice(fx.device, `device-${index}`));
+        clients.push(client);
+      }
+      const [first, second] = clients as [TestClient, TestClient];
+      await first.send(req(1));
+      await started;
+      await second.send(req(1));
+      await wait(60);
+      expect(peak).toBe(1);
+      release();
+      await first.pump();
+      await second.pump();
+      expect(first.last('res')?.['id']).toBe(1);
+      expect(second.last('res')?.['id']).toBe(1);
+      // Exhaust only the first session. Its waiting payload must not block the second session's seal.
+      for (let id = 2; id <= CREDIT_WINDOW_FRAMES; id += 1) await first.send(req(id));
+      await first.pump();
+      expect(first.records.filter(record => record['t'] === 'res')).toHaveLength(CREDIT_WINDOW_FRAMES - 2);
+      await second.send(req(2));
+      await second.pump();
+      expect(second.last('res')?.['id']).toBe(2);
+      first.credit(16);
+      await first.pump();
+      expect(first.last('res')?.['id']).toBe(CREDIT_WINDOW_FRAMES);
+      expect(peak).toBe(1);
+    } finally {
+      release();
+      fx.layer.close();
+    }
   });
 
   test('R555 the daemon seals only what the peer credited: a full window waits for credit', async () => {
