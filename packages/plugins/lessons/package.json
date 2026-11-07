@@ -19,7 +19,10 @@
   "dependencies": {
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/plugin-conversation": "workspace:*"
   },
   "sideEffects": false
 }
