@@ -7,6 +7,7 @@
  * store the rotation and the pairing exchange use (`lib/device-keys.ts`).
  */
 import type { ConnectPorts, DeviceClaims, PairingKey } from '@ferretry/app';
+import { PairingResponseSchema } from '../contract/index.ts';
 import {
   DeviceKeyUnreadableError,
   type DeviceKeyStore,
@@ -49,12 +50,21 @@ export function accessClaims(ports: ClaimPorts, options: AccessClaimsOptions = {
     },
     pairingKey: async (daemonId): Promise<PairingKey> => {
       const minted = await mintDeviceKey(ports.crypto);
-      // PENDING until the daemon answers: a refused code leaves nothing behind (`lib/pair-exchange.ts`).
-      await store.savePending(daemonId, minted.privateKey);
+      // MEMORY-ONLY until the shell has the sealed `paired` answer and calls `save` (P28): a refused or unreachable
+      // attempt never calls it, so a refused code leaves nothing in IndexedDB and a re-pair of a known daemon keeps the
+      // key that still works until the daemon has accepted the new one.
       return {
         deviceName: deviceName(),
         publicKey: minted.publicKey,
         key: ports.crypto.deviceKeyHandle(minted.privateKey),
+        save: async response => {
+          const parsed = PairingResponseSchema.parse(response);
+          if (parsed.daemonId !== daemonId) {
+            throw new Error('pairing response daemon ID does not match the daemon this key was minted for');
+          }
+          // One put: the previous key is replaced in a single write, never absent in between.
+          await store.save(daemonId, minted.privateKey);
+        },
       };
     },
     forget: async daemonId => {

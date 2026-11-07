@@ -4,7 +4,7 @@ import should from 'should';
 import { accessClaims } from '../../../app/connect.ts';
 import { exchangePairing, type PairingPorts } from '../../../app/lib/pair-exchange.ts';
 import type { PairingSeed } from '../../../app/lib/pairing.ts';
-import { MemoryDeviceKeyStore, testDeviceKeyCrypto } from '../../support/app/device-keys.ts';
+import { MemoryDeviceKeyStore, testDeviceKeyCrypto, type TestKeyHandle } from '../../support/app/device-keys.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const deviceId = `fy_device_id_${'b'.repeat(22)}`;
@@ -22,6 +22,12 @@ const response = (over: Record<string, unknown> = {}) => ({
   ],
   ...over,
 });
+
+/** What the shell does on a sealed `paired` answer (P28): hand Access the response to validate and persist. */
+const sealedPaired = async (input: PairDirectInput, answer: unknown) => {
+  await input.key.save(answer as never);
+  return answer;
+};
 
 const harness = () => {
   const store = new MemoryDeviceKeyStore();
@@ -56,10 +62,10 @@ describe('the pairing exchange', () => {
         calls.push('pair');
         inputs.push(input);
         should(store.keys.has(daemonId)).be.false();
-        should(store.pending.has(daemonId)).be.true();
+        should(store.pending.has(daemonId)).be.false();
         return {
           kind: 'paired',
-          response: response(),
+          response: await sealedPaired(input, response()),
           via: { kind: 'relay', address: 'wss://relay.example.test' },
         } as PairedOver;
       },
@@ -90,7 +96,7 @@ describe('the pairing exchange', () => {
       ...base,
       pairDirect: async input => {
         inputs.push(input);
-        return { kind: 'paired', response: response() };
+        return { kind: 'paired', response: await sealedPaired(input, response()) } as never;
       },
     };
 
@@ -121,11 +127,15 @@ describe('the pairing exchange', () => {
     const { store, claims, added, base } = harness();
     const ports: PairingPorts = {
       ...base,
-      pairDirect: async () => ({ kind: 'paired', response: response({ daemonId: `fy_daemon_${'z'.repeat(43)}` }) }),
+      pairDirect: async input =>
+        ({
+          kind: 'paired',
+          response: await sealedPaired(input, response({ daemonId: `fy_daemon_${'z'.repeat(43)}` })),
+        }) as never,
     };
 
     await exchangePairing({ ports, claims, store }, seed, 'My phone').should.be.rejectedWith(
-      /does not match its fingerprint/u,
+      /does not match the daemon this key was minted for/u,
     );
 
     should(store.keys.has(daemonId)).be.false();
@@ -134,7 +144,10 @@ describe('the pairing exchange', () => {
 
   it('keeps nothing when the answer is not a pairing response', async () => {
     const { store, claims, added, base } = harness();
-    const ports: PairingPorts = { ...base, pairDirect: async () => ({ kind: 'paired', response: { nope: true } }) };
+    const ports: PairingPorts = {
+      ...base,
+      pairDirect: async input => ({ kind: 'paired', response: await sealedPaired(input, { nope: true }) }) as never,
+    };
 
     await exchangePairing({ ports, claims, store }, seed, 'My phone').should.be.rejected();
 
@@ -149,10 +162,10 @@ describe('the pairing exchange', () => {
       pairDirect: async () => {
         throw new Error('unused');
       },
-      pair: async () =>
+      pair: async input =>
         ({
           kind: 'paired',
-          response: response(),
+          response: await sealedPaired(input, response()),
           via: { kind: 'relay', address: 'wss://other-relay.example.test' },
         }) as PairedOver,
     };
@@ -171,11 +184,80 @@ describe('the pairing exchange', () => {
           throw new Error('list full');
         },
       } as never,
-      pairDirect: async () => ({ kind: 'paired', response: response() }),
+      pairDirect: async input => ({ kind: 'paired', response: await sealedPaired(input, response()) }) as never,
     };
 
     await exchangePairing({ ports, claims, store }, seed, 'My phone').should.be.rejectedWith(/list full/u);
 
     should(store.keys.has(daemonId)).be.false();
+  });
+
+  describe('re-pairing a daemon this device already holds a key for', () => {
+    const withOldKey = async () => {
+      const h = harness();
+      const { privateKey } = await testDeviceKeyCrypto.generateDeviceKey();
+      await h.store.save(daemonId, privateKey);
+      return { ...h, old: privateKey };
+    };
+
+    it('P28 keeps the old working key when the code is refused, and writes nothing', async () => {
+      const { store, claims, base, old } = await withOldKey();
+      const saves = store.saved.length;
+      const ports: PairingPorts = {
+        ...base,
+        pairDirect: async () => {
+          throw new RelayPairingRefusedError();
+        },
+      };
+
+      await exchangePairing({ ports, claims, store }, seed, 'My phone').should.be.rejectedWith(
+        RelayPairingRefusedError,
+      );
+
+      should(store.keys.get(daemonId)).equal(old);
+      should(store.saved).have.length(saves);
+    });
+
+    it('P28 replaces the old key only once the sealed answer was saved, and claim() then finds the new one', async () => {
+      const { store, claims, base, old } = await withOldKey();
+      let during: CryptoKey | undefined;
+      const ports: PairingPorts = {
+        ...base,
+        pairDirect: async input => {
+          during = store.keys.get(daemonId);
+          return { kind: 'paired', response: await sealedPaired(input, response()) } as never;
+        },
+      };
+
+      await exchangePairing({ ports, claims, store }, seed, 'My phone');
+
+      should(during).equal(old);
+      const now = store.keys.get(daemonId);
+      should(now).not.equal(old);
+      const claim = await claims.claim({ daemon: daemonId, deviceId } as PairedDaemon);
+      should((claim as unknown as { key: TestKeyHandle }).key.key).equal(now);
+      should(store.pending.has(daemonId)).be.false();
+    });
+
+    it('puts the old key back when the exchange refuses the pairing after the key was saved', async () => {
+      const { store, claims, added, base, old } = await withOldKey();
+      const ports: PairingPorts = {
+        ...base,
+        pairDirect: async () => {
+          throw new Error('unused');
+        },
+        pair: async input =>
+          ({
+            kind: 'paired',
+            response: await sealedPaired(input, response()),
+            via: { kind: 'relay', address: 'wss://other-relay.example.test' },
+          }) as PairedOver,
+      };
+
+      await exchangePairing({ ports, claims, store }, seed, 'My phone').should.be.rejectedWith(/does not publish/u);
+
+      should(store.keys.get(daemonId)).equal(old);
+      should(added).be.empty();
+    });
   });
 });

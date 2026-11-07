@@ -17,6 +17,15 @@ const paired = (daemon: string, deviceId = 'fy_device_id_one'): PairedDaemon => 
   lastSelectedAt: 1,
 });
 
+const answer = (daemonId: string) => ({
+  deviceId: `fy_device_id_${'b'.repeat(22)}`,
+  daemonId,
+  daemonName: 'workstation',
+  capabilities: ['daemon-api'],
+  carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
+  idleExpiryDays: 30,
+});
+
 const claimsOver = (store: MemoryDeviceKeyStore) =>
   accessClaims(
     { crypto: testDeviceKeyCrypto as never, indexedDB: null },
@@ -52,22 +61,46 @@ describe('the device claims Access provides the app shell', () => {
     await claimsOver(store).claim(paired(DAEMON)).should.be.rejectedWith(DeviceKeyUnreadableError);
   });
 
-  it('mints a pairing key that stays PENDING until the daemon answers, offered under the browser’s own name', async () => {
+  it('P28 mints a memory-only pairing key, offered under the browser’s own name, that writes nothing before save', async () => {
     const store = new MemoryDeviceKeyStore();
 
     const key = await claimsOver(store).pairingKey(DAEMON);
 
     should(key.deviceName).equal('Chrome on Linux · K7Q2');
     should(key.publicKey).match(/^[A-Za-z0-9_-]+$/u);
-    should((key.key as TestKeyHandle).key).equal(store.pending.get(DAEMON));
-    should(store.keys.has(DAEMON)).be.false();
+    should(store.keys.size).equal(0);
+    should(store.pending.size).equal(0);
+    should(store.saved).be.empty();
   });
 
-  it('forgets the key and any pending replacement when the pairing is removed', async () => {
+  it('P28 saves the key when the paired answer names the daemon it was minted for, and claim() then finds it', async () => {
     const store = new MemoryDeviceKeyStore();
     const claims = claimsOver(store);
-    await claims.pairingKey(DAEMON);
-    store.keys.set(DAEMON, store.pending.get(DAEMON) as CryptoKey);
+    const key = await claims.pairingKey(DAEMON);
+
+    await key.save(answer(DAEMON));
+
+    should(store.pending.size).equal(0);
+    const claim = await claims.claim(paired(DAEMON, 'fy_device_id_two'));
+    should((claim as unknown as { key: TestKeyHandle }).key.key).equal((key.key as TestKeyHandle).key);
+  });
+
+  it('P28 refuses to save on an answer that is not a pairing response or names another daemon, leaving nothing behind', async () => {
+    const store = new MemoryDeviceKeyStore();
+    const claims = claimsOver(store);
+    const key = await claims.pairingKey(DAEMON);
+
+    await key.save({ nope: true }).should.be.rejected();
+    await key.save(answer(`fy_daemon_${'z'.repeat(43)}`)).should.be.rejectedWith(/minted for/u);
+
+    should(store.keys.size).equal(0);
+    should(store.saved).be.empty();
+  });
+
+  it('forgets the key when the pairing is removed', async () => {
+    const store = new MemoryDeviceKeyStore();
+    const claims = claimsOver(store);
+    await (await claims.pairingKey(DAEMON)).save(answer(DAEMON));
 
     await claims.forget(DAEMON);
 

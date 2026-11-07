@@ -11,10 +11,12 @@
  * has no `pair` at all falls back to `pairDirect` over the pairing's address. Pairing is never relayed by the shell's
  * own carrier, so that fallback is always direct.
  *
- * THE KEY IS KEPT ONLY AFTER THE DAEMON ANSWERED. `claims.pairingKey` leaves the new key PENDING; it becomes THE key
- * when the answer parses and names the daemon the link pinned, and is discarded on any failure, so a refused code
- * leaves nothing behind and a re-pair of a known daemon never loses the key that still works until the new one is
- * accepted.
+ * THE KEY IS KEPT ONLY AFTER THE DAEMON ANSWERED, AND ONLY ONE PLACE KEEPS IT. `claims.pairingKey` is memory-only; the
+ * shell calls its `save` after the sealed `paired` answer (P28), on the walk and on the direct fallback alike, and
+ * `save` checks the answer parses and names the daemon the link pinned before it writes. This exchange persists
+ * nothing itself: a refused code never reaches `save`, so it leaves nothing behind. The checks only this side can make
+ * (the §14 rendezvous rule, the daemon list) come after `save`, so on failing them the key the person had before
+ * this attempt is put back, and a re-pair of a known daemon never loses the key that still works.
  */
 import type { ConnectPorts, DeviceClaims, PairDirectInput, PairedDaemon, PairedOver } from '@ferretry/app';
 import { PairingResponseSchema } from '../../contract/index.ts';
@@ -28,7 +30,7 @@ export type PairingPorts = Pick<ConnectPorts, 'daemons' | 'pairDirect'> & Partia
 export interface PairingExchangeDependencies {
   readonly ports: PairingPorts;
   readonly claims: DeviceClaims;
-  readonly store: Pick<DeviceKeyStore, 'promotePending' | 'discardPending'>;
+  readonly store: Pick<DeviceKeyStore, 'load' | 'save'>;
 }
 
 /** Opens a `pair` session for this input: the shell's walk when it has one, else one direct attempt. */
@@ -58,7 +60,13 @@ export async function exchangePairing(
   deviceName: string,
 ): Promise<PairedDaemon> {
   const { ports, claims, store } = dependencies;
+  // Read before the attempt: `save` replaces it, and a failure after `save` must not cost the person a working key.
+  const previous = await store.load(seed.daemonId);
   const pairingKey = await claims.pairingKey(seed.daemonId);
+  const undo = async (): Promise<void> => {
+    if (previous === undefined) await claims.forget(seed.daemonId);
+    else await store.save(seed.daemonId, previous);
+  };
   try {
     const outcome = await pairOver(ports, {
       address: seed.daemonUrl,
@@ -68,21 +76,16 @@ export async function exchangePairing(
     });
     const response = PairingResponseSchema.parse(outcome.response);
     const connection = pairedDaemonConnection(seed, response, undefined, crossing(outcome.via));
-    await store.promotePending(seed.daemonId);
-    try {
-      return ports.daemons.add({
-        daemon: connection.daemonId,
-        machine: response.daemonName,
-        deviceId: response.deviceId,
-        address: connection.baseUrl,
-        carriers: response.carriers,
-      });
-    } catch (reason) {
-      await claims.forget(seed.daemonId);
-      throw reason;
-    }
+    return ports.daemons.add({
+      daemon: connection.daemonId,
+      machine: response.daemonName,
+      deviceId: response.deviceId,
+      address: connection.baseUrl,
+      carriers: response.carriers,
+    });
   } catch (reason) {
-    await store.discardPending(seed.daemonId);
+    // Only a key `save` wrote can differ from `previous`; before `save` there is nothing to undo.
+    if ((await store.load(seed.daemonId)) !== previous) await undo();
     throw reason;
   }
 }
