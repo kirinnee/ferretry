@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type McpInventoryServer, mcpProjectSubject } from '@ferretry/protocol';
+import { type McpInventoryServer, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
   McpCheckService,
@@ -10,7 +10,7 @@ import {
   McpProbeFailure,
   type McpProbeSpec,
   mcpCheckBaseEnvironment,
-} from '../../../src/lib/mcp-inventory/index.ts';
+} from '../../../daemon/lib/inventory/index.ts';
 import { inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';
@@ -51,7 +51,7 @@ function checker(probe: FakeProbe, launch: Record<string, string> = {}) {
 }
 
 const idOf = async (inventory: McpInventoryService, name: string, scope: McpInventoryServer['scope']) => {
-  const found = (await inventory.session('s1')).servers.find(server => server.name === name && server.scope === scope);
+  const found = (await inventory.ferret('s1')).servers.find(server => server.name === name && server.scope === scope);
   if (found === undefined) throw new Error(`no ${name}`);
   return found.id;
 };
@@ -167,7 +167,7 @@ describe('McpCheckService', () => {
       const world = inventoryWorld();
       const inventory = new McpInventoryService({
         ...world.deps,
-        sessions: { get: async id => (id === 'c1' ? session(PROJECT, '/fy/fleet/bin/codex-work') : undefined) },
+        ferrets: { get: async id => (id === 'c1' ? session(PROJECT, '/fy/fleet/bin/codex-work') : undefined) },
       });
       const service = new McpCheckService({
         inventory,
@@ -179,7 +179,7 @@ describe('McpCheckService', () => {
         now: () => 0,
       });
       const idOfLinear = async () => {
-        const found = (await inventory.session('c1')).servers.find(server => server.name === 'linear');
+        const found = (await inventory.ferret('c1')).servers.find(server => server.name === 'linear');
         if (found === undefined) throw new Error('no linear');
         return found.id;
       };

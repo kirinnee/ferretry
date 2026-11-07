@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type CallbackCheck, checkCallback, pwaRedirectUri } from '../../../src/lib/mcp-oauth/index.ts';
+import { type CallbackCheck, checkCallback, pwaRedirectUri } from '../../../daemon/lib/oauth/index.ts';
 
 const EXPECTED = {
   redirectUri: 'https://ferretry.example.test/oauth/mcp-callback',

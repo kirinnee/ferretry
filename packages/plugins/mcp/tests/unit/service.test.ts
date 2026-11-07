@@ -1,28 +1,19 @@
 import { describe, it } from 'bun:test';
-import type {
-  FleetAccountChange,
-  FleetAccountChangeView,
-  FleetComponentCatalog,
-  FleetLayeredProfileCatalog,
-  FleetRuntimeCatalog,
-  SessionMcpServer,
-  SessionView,
-} from '@ferretry/protocol';
 import should from 'should';
-import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import type { FreshStepUpContext } from '../../../src/lib/fleet/catalog-service.ts';
-import { McpProjectFileError } from '../../../src/lib/session-mcp/project-file.ts';
+import type { McpItem, SessionMcpServer } from '../../contract/index.ts';
+import type { McpFerretView } from '../../daemon/lib/inventory/service.ts';
+import { McpProjectFileError } from '../../daemon/lib/session/project-file.ts';
 import {
-  knownProjectRoots,
+  type McpLoginProfile,
+  type McpLoginRuntime,
+  type McpLoginTarget,
   McpProjectFileChanged,
   type McpProjectFileReading,
   type McpProjectFiles,
   projectRootFor,
   SessionMcpRefusal,
   SessionMcpService,
-  type SessionMcpServiceDeps,
-} from '../../../src/lib/session-mcp/service.ts';
-import { sessionView } from '../runtime/mounts/support.ts';
+} from '../../daemon/lib/session/service.ts';
 
 /** `${secret:NAME}`, spelled without a string the linter reads as a mistaken template. */
 const secretRef = (name: string): string => `\${secret:${name}}`;
@@ -30,95 +21,79 @@ const ETAG = 'e'.repeat(64);
 const NEW_ETAG = 'f'.repeat(64);
 const COMMAND: SessionMcpServer = { transport: 'command', command: 'npx', args: ['acme'], env: {} };
 const URL_SERVER: SessionMcpServer = { transport: 'url', url: 'https://mcp.example.com', oauth: true };
-const GOVERNANCE = { governed: false } as unknown as CallerGovernance;
-const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined, agent: false };
+
+const ferret = (id: string, extra: Partial<McpFerretView> = {}): McpFerretView => ({
+  id,
+  harness: 'claude-code',
+  folder: '/work/repo/packages/cli',
+  runtime: 'claude-work',
+  ...extra,
+});
 
 class FakeFiles implements McpProjectFiles {
   readonly reads: string[] = [];
-  readonly writes: { path: string; text: string; expected: string | null }[] = [];
+  readonly writes: { ferret: string; path: string; text: string; expected: string | null }[] = [];
   constructor(
     private reading: McpProjectFileReading | Error = { text: null, etag: null },
     private readonly writeFailure?: Error,
   ) {}
 
-  async read(path: string): Promise<McpProjectFileReading> {
+  async read(_ferret: string, path: string): Promise<McpProjectFileReading> {
     this.reads.push(path);
     if (this.reading instanceof Error) throw this.reading;
     return this.reading;
   }
 
-  async replace(path: string, text: string, expected: string | null): Promise<string> {
+  async replace(ferretId: string, path: string, text: string, expected: string | null): Promise<string> {
     if (this.writeFailure !== undefined) throw this.writeFailure;
-    this.writes.push({ path, text, expected });
+    this.writes.push({ ferret: ferretId, path, text, expected });
     this.reading = { text, etag: NEW_ETAG };
     return NEW_ETAG;
   }
 }
 
-interface FleetCalls {
-  proposed: FleetAccountChange[];
-  applied: { id: string; governance: CallerGovernance | undefined; stepUp: FreshStepUpContext | undefined }[];
+interface LoginCalls {
+  puts: { name: string; item: McpItem; create: boolean }[];
+  layered: { profile: string; layers: readonly string[] }[];
 }
 
-const runtime = (name: string, wrapper: string, profile: string) =>
-  ({ id: `id-${name}`, name, wrapper, profile }) as unknown as FleetRuntimeCatalog['runtimes'][number];
-
-function fleet(
-  options: { profiles?: { name: string; layers: string[] }[]; mcp?: string[]; noMcpGroup?: boolean } = {},
-): { fleet: SessionMcpServiceDeps['fleet']; calls: FleetCalls } {
-  const calls: FleetCalls = { proposed: [], applied: [] };
+function login(
+  options: { profiles?: McpLoginProfile[]; items?: string[]; runtimes?: McpLoginRuntime[] } = {},
+): { login: McpLoginTarget; calls: LoginCalls } {
+  const calls: LoginCalls = { puts: [], layered: [] };
+  const runtimes = options.runtimes ?? [
+    { name: 'claude-work', profile: 'work' },
+    { name: 'orphan', profile: 'gone' },
+  ];
+  const profiles = options.profiles ?? [{ name: 'work', layers: ['instructions/base'] }];
   return {
     calls,
-    fleet: {
-      runtimes: async () =>
-        ({
-          format: 'version-2',
-          runtimes: [runtime('claude-work', 'claude-work-w', 'work'), runtime('orphan', 'orphan', 'gone')],
-        }) as FleetRuntimeCatalog,
-      profiles: async () =>
-        ({
-          format: 'version-2',
-          profiles: options.profiles ?? [{ name: 'work', layers: ['instructions/base'] }],
-        }) as unknown as FleetLayeredProfileCatalog,
-      components: async () =>
-        ({
-          format: 'version-2',
-          kinds: options.noMcpGroup
-            ? []
-            : [
-                { kind: 'skills', components: [{ name: 'acme' }] },
-                { kind: 'mcp', components: (options.mcp ?? []).map(name => ({ name })) },
-              ],
-        }) as unknown as FleetComponentCatalog,
-      propose: async change => {
-        calls.proposed.push(change);
-        return { id: `proposal-${calls.proposed.length}` } as FleetAccountChangeView;
+    login: {
+      runtime: async name => runtimes.find(candidate => candidate.name === name),
+      profile: async name => profiles.find(candidate => candidate.name === name),
+      hasItem: async name => (options.items ?? []).includes(name),
+      putItem: async (name, item, create) => {
+        calls.puts.push({ name, item, create });
       },
-      apply: async (id, governance, stepUp) => {
-        calls.applied.push({ id, governance, stepUp });
-        return { outcome: 'executed', executor: 'setup', summary: 'done' };
+      layerProfile: async (profile, layers) => {
+        calls.layered.push({ profile, layers });
       },
     },
   };
 }
 
 function service(
-  options: {
-    views?: SessionView[];
-    roots?: string[];
-    files?: McpProjectFiles;
-    fleet?: SessionMcpServiceDeps['fleet'];
-  } = {},
+  options: { views?: McpFerretView[]; roots?: string[]; files?: McpProjectFiles; login?: McpLoginTarget } = {},
 ): SessionMcpService {
-  const views = options.views ?? [sessionView('s1', { cwd: '/work/repo/packages/cli' })];
+  const views = options.views ?? [ferret('s1')];
   return new SessionMcpService({
-    sessions: {
-      get: async id => views.find(view => view.config.id === id),
+    ferrets: {
+      get: async id => views.find(view => view.id === id),
       list: async () => views,
     },
     projectRoots: async () => options.roots ?? ['/work', '/work/repo/'],
     files: options.files ?? new FakeFiles(),
-    fleet: options.fleet ?? fleet().fleet,
+    login: options.login ?? login().login,
   });
 }
 
@@ -132,23 +107,7 @@ async function refusal(work: Promise<unknown>): Promise<SessionMcpRefusal> {
 }
 
 describe('the known roots a project write may use', () => {
-  it('should be the registered projects and the live managed worktrees', async () => {
-    // Arrange
-    const roots = knownProjectRoots(
-      { projects: async () => [{ path: '/work/repo' }] },
-      {
-        list: async () => ({
-          worktrees: [{ path: '/wt/live' }, { path: '/wt/gone', removedAt: '2026-10-01T00:00:00.000Z' }],
-        }),
-      },
-    );
-
-    // Act + Assert
-    should(await roots()).deepEqual(['/work/repo', '/wt/live']);
-  });
-
   it('should pick the longest root that holds the folder, and none for a neighbour', () => {
-    // Act + Assert
     should(projectRootFor('/work/repo/packages/cli', ['/work', '/work/repo/', '/work/repository'])).equal('/work/repo');
     should(projectRootFor('/work/repo', ['/work/repo'])).equal('/work/repo');
     should(projectRootFor('/work/repo-two', ['/work/repo'])).be.undefined();
@@ -158,13 +117,10 @@ describe('the known roots a project write may use', () => {
 
 describe('listing a ferret project servers', () => {
   it('should list the file it would write, its etag and its servers', async () => {
-    // Arrange
     const files = new FakeFiles({ text: '{"mcpServers":{"b":{"url":"https://b"},"a":{"command":"a"}}}', etag: ETAG });
 
-    // Act
     const listing = await service({ files }).list('s1');
 
-    // Assert
     should(files.reads).deepEqual(['/work/repo/.mcp.json']);
     should(listing).deepEqual({
       project: {
@@ -179,16 +135,13 @@ describe('listing a ferret project servers', () => {
   });
 
   it('should say why there is no project scope: Codex, an unknown folder, a file it will not read', async () => {
-    // Arrange
-    const codex = service({ views: [sessionView('s1', { harness: 'codex', cwd: '/work/repo' })] });
-    const outside = service({ views: [sessionView('s1', { cwd: '/tmp/scratch' })] });
+    const codex = service({ views: [ferret('s1', { harness: 'codex', folder: '/work/repo' })] });
+    const outside = service({ views: [ferret('s1', { folder: '/tmp/scratch' })] });
     const broken = service({ files: new FakeFiles({ text: '{', etag: ETAG }) });
     const linked = service({ files: new FakeFiles(new McpProjectFileError('a link')) });
 
-    // Act
     const listings = await Promise.all([codex, outside, broken, linked].map(async subject => await subject.list('s1')));
 
-    // Assert
     should(listings.map(listing => listing.project)).deepEqual([null, null, null, null]);
     should(listings[0]?.projectUnavailable).match(/^Codex does not read \.mcp\.json/u);
     should(listings[1]?.projectUnavailable).equal(
@@ -198,38 +151,30 @@ describe('listing a ferret project servers', () => {
     should(listings[3]?.projectUnavailable).equal('a link');
   });
 
-  it('should refuse an unknown session and let any other read failure through', async () => {
-    // Arrange
+  it('should refuse an unknown ferret and let any other read failure through', async () => {
     const failing = service({ files: new FakeFiles(new Error('disk on fire')) });
 
-    // Act
     const missing = await refusal(service().list('nobody'));
     const thrown = await failing.list('s1').catch((error: unknown) => error);
 
-    // Assert
-    should([missing.status, missing.code, missing.message]).deepEqual([404, 'not-found', 'no session nobody']);
+    should([missing.status, missing.code, missing.message]).deepEqual([404, 'not-found', 'no ferret nobody']);
     should((thrown as Error).message).equal('disk on fire');
   });
 });
 
 describe('adding to the project file', () => {
   it('should preview a new file as the lines it would add, with no etag', async () => {
-    // Act
     const preview = await service().previewProject('s1', { name: 'acme', server: COMMAND });
 
-    // Assert
     should(preview).containDeep({ scope: 'project', path: '/work/repo/.mcp.json', etag: null, replaces: false });
     should(preview.scope === 'project' && preview.diff.every(line => line.kind === 'add')).be.true();
   });
 
   it('should preview a name already there as a replacement', async () => {
-    // Arrange
     const files = new FakeFiles({ text: '{"mcpServers":{"acme":{"command":"old"}}}\n', etag: ETAG });
 
-    // Act
     const preview = await service({ files }).previewProject('s1', { name: 'acme', server: COMMAND });
 
-    // Assert
     should(preview).containDeep({
       etag: ETAG,
       replaces: true,
@@ -238,16 +183,14 @@ describe('adding to the project file', () => {
   });
 
   it('should write exactly the previewed change against the previewed etag', async () => {
-    // Arrange
     const files = new FakeFiles({ text: '{"keep":1}', etag: ETAG });
 
-    // Act
     const added = await service({ files }).addProject('s1', { name: 'acme', server: COMMAND, etag: ETAG });
 
-    // Assert
     should(added).deepEqual({ scope: 'project', name: 'acme', path: '/work/repo/.mcp.json', etag: NEW_ETAG });
     should(files.writes).deepEqual([
       {
+        ferret: 's1',
         path: '/work/repo/.mcp.json',
         text: '{\n  "keep": 1,\n  "mcpServers": {\n    "acme": {\n      "command": "npx",\n      "args": [\n        "acme"\n      ]\n    }\n  }\n}\n',
         expected: ETAG,
@@ -256,18 +199,15 @@ describe('adding to the project file', () => {
   });
 
   it('should refuse an add with no etag, a stale etag, or a file that moved during the write', async () => {
-    // Arrange
     const files = new FakeFiles({ text: '{}', etag: ETAG });
     const racing = new FakeFiles({ text: null, etag: null }, new McpProjectFileChanged());
 
-    // Act
     const noEtag = await refusal(service({ files }).addProject('s1', { name: 'acme', server: COMMAND }));
     const stale = await refusal(service({ files }).addProject('s1', { name: 'acme', server: COMMAND, etag: null }));
     const raced = await refusal(
       service({ files: racing }).addProject('s1', { name: 'acme', server: COMMAND, etag: null }),
     );
 
-    // Assert
     should([noEtag.status, noEtag.code]).deepEqual([400, 'mcp_etag_required']);
     should([stale.status, stale.code, stale.message]).deepEqual([
       409,
@@ -279,27 +219,23 @@ describe('adding to the project file', () => {
   });
 
   it('should let a write failure that is not a refusal through', async () => {
-    // Arrange
     const files = new FakeFiles({ text: null, etag: null }, new Error('read-only file system'));
 
-    // Act
     const thrown = await service({ files })
       .addProject('s1', { name: 'acme', server: COMMAND, etag: null })
       .catch((error: unknown) => error);
 
-    // Assert
     should(thrown).not.be.instanceOf(SessionMcpRefusal);
     should((thrown as Error).message).equal('read-only file system');
   });
 
   it('should refuse a server the project scope cannot hold, a folder it cannot reach and a file it will not rewrite', async () => {
-    // Act
     const signIn = await refusal(service().previewProject('s1', { name: 'acme', server: URL_SERVER }));
     const secret = await refusal(
       service().addProject('s1', { name: 'acme', server: { ...COMMAND, env: { KEY: secretRef('K') } }, etag: null }),
     );
     const codex = await refusal(
-      service({ views: [sessionView('s1', { harness: 'codex', cwd: '/work/repo' })] }).previewProject('s1', {
+      service({ views: [ferret('s1', { harness: 'codex', folder: '/work/repo' })] }).previewProject('s1', {
         name: 'acme',
         server: COMMAND,
       }),
@@ -311,7 +247,6 @@ describe('adding to the project file', () => {
       }),
     );
 
-    // Assert
     should([signIn.status, signIn.code]).deepEqual([400, 'mcp_server_refused']);
     should([secret.status, secret.code]).deepEqual([400, 'mcp_server_refused']);
     should([codex.status, codex.code]).deepEqual([409, 'mcp_project_unavailable']);
@@ -321,108 +256,58 @@ describe('adding to the project file', () => {
 
 describe('adding to the login', () => {
   it('should preview the runtime, its profile, a replacement and every ferret that runs as it', async () => {
-    // Arrange
-    const views = [
-      sessionView('s1', { agent: 'claude-work-w' }),
-      sessionView('s2', { agent: 'claude-work' }),
-      sessionView('s3', { agent: 'someone-else' }),
-    ];
-    const subject = service({ views, fleet: fleet({ mcp: ['acme'] }).fleet });
+    const views = [ferret('s1'), ferret('s2'), ferret('s3', { runtime: 'someone-else' })];
+    const subject = service({ views, login: login({ items: ['acme'] }).login });
 
-    // Act
     const preview = await subject.previewLogin('s1', { name: 'acme', server: URL_SERVER });
 
-    // Assert
     should(preview).deepEqual({ scope: 'login', runtime: 'claude-work', profile: 'work', replaces: true, ferrets: 2 });
   });
 
-  it('should add the component, then append it to the profile, each under the caller governance', async () => {
-    // Arrange
-    const { fleet: catalog, calls } = fleet();
-    const subject = service({ views: [sessionView('s1', { agent: 'claude-work-w' })], fleet: catalog });
+  it('should write the item, then append it to the profile', async () => {
+    const { login: target, calls } = login();
+    const subject = service({ login: target });
 
-    // Act
-    const added = await subject.addLogin(
-      's1',
-      { name: 'acme', server: { ...COMMAND, env: { TOKEN: secretRef('ACME') } } },
-      GOVERNANCE,
-      STEP_UP,
-    );
+    const added = await subject.addLogin('s1', {
+      name: 'acme',
+      server: { ...COMMAND, env: { TOKEN: secretRef('ACME') } },
+    });
 
-    // Assert
     should(added).deepEqual({ scope: 'login', name: 'acme', runtime: 'claude-work', profile: 'work' });
-    should(calls.proposed).deepEqual([
-      {
-        kind: 'component.put',
-        name: 'acme',
-        component: { kind: 'mcp', command: 'npx', args: ['acme'], env: { TOKEN: secretRef('ACME') } },
-        create: true,
-      },
-      { kind: 'profile.put', name: 'work', layers: ['instructions/base', 'mcp/acme'], create: false },
+    should(calls.puts).deepEqual([
+      { name: 'acme', item: { command: 'npx', args: ['acme'], env: { TOKEN: secretRef('ACME') } }, create: true },
     ]);
-    should(calls.applied).deepEqual([
-      { id: 'proposal-1', governance: GOVERNANCE, stepUp: STEP_UP },
-      { id: 'proposal-2', governance: GOVERNANCE, stepUp: STEP_UP },
-    ]);
+    should(calls.layered).deepEqual([{ profile: 'work', layers: ['instructions/base', 'mcp/acme'] }]);
   });
 
-  it('should replace a component the profile already names without touching the profile', async () => {
-    // Arrange
-    const { fleet: catalog, calls } = fleet({
-      mcp: ['acme'],
-      profiles: [{ name: 'work', layers: ['mcp/acme'] }],
-    });
-    const subject = service({ views: [sessionView('s1', { agent: 'claude-work' })], fleet: catalog });
+  it('should replace an item the profile already names without touching the profile', async () => {
+    const { login: target, calls } = login({ items: ['acme'], profiles: [{ name: 'work', layers: ['mcp/acme'] }] });
+    const subject = service({ login: target });
 
-    // Act
-    await subject.addLogin('s1', { name: 'acme', server: URL_SERVER }, GOVERNANCE, STEP_UP);
-    await subject.addLogin('s1', { name: 'acme', server: { ...URL_SERVER, oauth: false } }, GOVERNANCE, STEP_UP);
+    await subject.addLogin('s1', { name: 'acme', server: URL_SERVER });
+    await subject.addLogin('s1', { name: 'acme', server: { ...URL_SERVER, oauth: false } });
 
-    // Assert
-    should(calls.proposed).deepEqual([
-      {
-        kind: 'component.put',
-        name: 'acme',
-        component: { kind: 'mcp', url: 'https://mcp.example.com', auth: 'oauth' },
-        create: false,
-      },
-      {
-        kind: 'component.put',
-        name: 'acme',
-        component: { kind: 'mcp', url: 'https://mcp.example.com' },
-        create: false,
-      },
+    should(calls.puts).deepEqual([
+      { name: 'acme', item: { url: 'https://mcp.example.com', auth: 'oauth' }, create: false },
+      { name: 'acme', item: { url: 'https://mcp.example.com' }, create: false },
     ]);
+    should(calls.layered).be.empty();
   });
 
-  it('should treat a catalogue with no MCP group as having no such component', async () => {
-    // Arrange
-    const subject = service({
-      views: [sessionView('s1', { agent: 'claude-work' })],
-      fleet: fleet({ noMcpGroup: true }).fleet,
-    });
+  it('should refuse a runtime the machine does not have, a missing profile and a raw secret', async () => {
+    const stranger = service({ views: [ferret('s1', { runtime: 'claude-auto' })] });
+    const orphan = service({ views: [ferret('s1', { runtime: 'orphan' })] });
 
-    // Act + Assert
-    should(await subject.previewLogin('s1', { name: 'acme', server: COMMAND })).containDeep({ replaces: false });
-  });
-
-  it('should refuse a runtime the fleet does not have, a missing profile and a raw secret', async () => {
-    // Arrange
-    const stranger = service({ views: [sessionView('s1', { agent: 'claude-auto' })] });
-    const orphan = service({ views: [sessionView('s1', { agent: 'orphan' })] });
-
-    // Act
     const unknown = await refusal(stranger.previewLogin('s1', { name: 'acme', server: COMMAND }));
-    const noProfile = await refusal(orphan.addLogin('s1', { name: 'acme', server: COMMAND }, GOVERNANCE, STEP_UP));
+    const noProfile = await refusal(orphan.addLogin('s1', { name: 'acme', server: COMMAND }));
     const raw = await refusal(
-      stranger.addLogin('s1', { name: 'acme', server: { ...COMMAND, env: { KEY: 'sk-live-1' } } }, GOVERNANCE, STEP_UP),
+      stranger.addLogin('s1', { name: 'acme', server: { ...COMMAND, env: { KEY: 'sk-live-1' } } }),
     );
 
-    // Assert
     should([unknown.status, unknown.code, unknown.message]).deepEqual([
       409,
       'mcp_runtime_unknown',
-      "claude-auto is not a runtime in this machine's fleet setup, so there is no login to add the server to. Add it to This project instead.",
+      'claude-auto is not a runtime on this machine, so there is no login to add the server to. Add it to This project instead.',
     ]);
     should([noProfile.status, noProfile.code, noProfile.message]).deepEqual([
       409,

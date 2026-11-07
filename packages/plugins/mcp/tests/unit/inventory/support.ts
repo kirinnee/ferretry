@@ -2,18 +2,18 @@
  * A machine with two runtimes, one project and one worktree of it, whose harness documents declare an
  * MCP server in every scope — held in memory, so the inventory reads exactly these and nothing else.
  */
-import type { McpOAuthConnection, SessionView } from '@ferretry/protocol';
+import type { McpOAuthConnection } from '../../../contract/index.ts';
 import {
   KnownAndFerretFolders,
   McpDocumentUnreadable,
+  type McpFerretView,
   type McpHarnessDocuments,
   type McpInventoryAccount,
   type McpInventoryComponent,
   type McpInventoryDeps,
   type McpInventoryFolder,
   mcpProjectKey,
-} from '../../../src/lib/mcp-inventory/index.ts';
-import { sessionView } from '../runtime/mounts/support.ts';
+} from '../../../daemon/lib/inventory/index.ts';
 
 export const CLAUDE_HOME = '/fy/fleet/homes/claude-work-id';
 export const CODEX_HOME = '/fy/fleet/homes/codex-work-id';
@@ -25,7 +25,7 @@ export const PROJECT_KEY = mcpProjectKey(PROJECT);
 export const variable = (name: string): string => `\${${name}}`;
 
 export const ACCOUNTS: readonly McpInventoryAccount[] = [
-  { runtime: 'claude-work', harness: 'claude', home: CLAUDE_HOME, wrapper: '/fy/fleet/bin/claude-work' },
+  { runtime: 'claude-work', harness: 'claude-code', home: CLAUDE_HOME, wrapper: '/fy/fleet/bin/claude-work' },
   { runtime: 'codex-work', harness: 'codex', home: CODEX_HOME, wrapper: '/fy/fleet/bin/codex-work' },
 ];
 
@@ -128,8 +128,12 @@ export class MemoryDocuments implements McpHarnessDocuments {
   }
 }
 
-export const session = (cwd = `${PROJECT}/src`, agent = '/fy/fleet/bin/claude-work'): SessionView =>
-  sessionView('s1', { cwd, agent, harness: agent.includes('codex') ? 'codex' : 'claude' });
+export const session = (folder = `${PROJECT}/src`, agent = '/fy/fleet/bin/claude-work'): McpFerretView => ({
+  id: 's1',
+  harness: agent.includes('codex') ? 'codex' : 'claude-code',
+  folder,
+  runtime: agent.slice(agent.lastIndexOf('/') + 1),
+});
 
 export interface InventoryWorld {
   readonly documents: MemoryDocuments;
@@ -147,7 +151,7 @@ export function inventoryWorld(files?: Map<string, unknown>): InventoryWorld {
       folders: knownFolders(FOLDERS),
       connections: async () => built.connections,
       documents,
-      sessions: {
+      ferrets: {
         get: async (id: string) => (id === 's1' ? session() : id === 's2' ? session(`${WORKTREE}`) : undefined),
       },
     } satisfies McpInventoryDeps,

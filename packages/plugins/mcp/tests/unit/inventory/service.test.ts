@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import { type McpInventoryServer, mcpProjectSubject } from '@ferretry/protocol';
+import { type McpInventoryServer, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
-import { McpInventoryRefusal, McpInventoryService, mcpInventoryFolders } from '../../../src/lib/mcp-inventory/index.ts';
+import { McpInventoryRefusal, McpInventoryService, mcpInventoryFolders } from '../../../daemon/lib/inventory/index.ts';
 import {
   BROKEN,
   CLAUDE_HOME,
@@ -27,7 +27,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(w.deps);
 
       // Act
-      const { servers, problems } = await service.session('s1');
+      const { servers, problems } = await service.ferret('s1');
 
       // Assert
       should(problems).deepEqual([]);
@@ -58,7 +58,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld(files).deps);
 
       // Act
-      const { servers } = await service.session('s1');
+      const { servers } = await service.ferret('s1');
 
       // Assert — Claude prefers the project's declaration over the user scope's.
       should(byName(servers, 'linear', 'component').shadowedBy).equal('project');
@@ -70,7 +70,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld().deps);
 
       // Act
-      const { servers } = await service.session('s1');
+      const { servers } = await service.ferret('s1');
 
       // Assert
       should(byName(servers, 'linear', 'project').runtimes).deepEqual([
@@ -84,7 +84,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld().deps);
 
       // Act
-      const { servers } = await service.session('s1');
+      const { servers } = await service.ferret('s1');
 
       // Assert
       should(servers.filter(server => server.name === 'docs').map(server => server.scope)).deepEqual(['project']);
@@ -105,7 +105,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(w.deps);
 
       // Act
-      const { servers } = await service.session('s1');
+      const { servers } = await service.ferret('s1');
 
       // Assert
       should(byName(servers, 'docs').signIn).deepEqual({
@@ -125,7 +125,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld(files).deps);
 
       // Act
-      const [project, worktree] = await Promise.all([service.session('s1'), service.session('s2')]);
+      const [project, worktree] = await Promise.all([service.ferret('s1'), service.ferret('s2')]);
 
       // Assert
       should(byName(worktree.servers, 'docs').signIn?.subject).equal(byName(project.servers, 'docs').signIn?.subject);
@@ -137,13 +137,13 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld().deps);
 
       // Act
-      const text = JSON.stringify(await service.session('s1'));
+      const text = JSON.stringify(await service.ferret('s1'));
 
       // Assert
       should(text).not.containEql('sk-live');
       should(text).not.containEql('team=1');
       should(text).not.containEql('FY_MCP_');
-      should(byName((await service.session('s1')).servers, 'scratch').target).equal('uvx');
+      should(byName((await service.ferret('s1')).servers, 'scratch').target).equal('uvx');
     });
 
     it('should say which file it could not read, and list the rest', async () => {
@@ -153,7 +153,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld(files).deps);
 
       // Act
-      const { servers, problems } = await service.session('s1');
+      const { servers, problems } = await service.ferret('s1');
 
       // Assert
       should(problems).deepEqual([
@@ -171,7 +171,7 @@ describe('McpInventoryService', () => {
       const service = new McpInventoryService(inventoryWorld().deps);
 
       // Act
-      const refusal = await service.session('nope').catch((error: unknown) => error);
+      const refusal = await service.ferret('nope').catch((error: unknown) => error);
 
       // Assert
       should(refusal).be.instanceOf(McpInventoryRefusal);
@@ -185,13 +185,13 @@ describe('McpInventoryService', () => {
       const w = inventoryWorld();
       const service = new McpInventoryService({
         ...w.deps,
-        sessions: {
+        ferrets: {
           get: async () => (await import('./support.ts')).session(`${PROJECT}`, '/fy/fleet/bin/codex-work'),
         },
       });
 
       // Act
-      const { servers } = await service.session('s1');
+      const { servers } = await service.ferret('s1');
 
       // Assert
       should(servers.map(server => `${server.scope}:${server.name}:${server.transport}`)).deepEqual([
@@ -212,13 +212,13 @@ describe('McpInventoryService', () => {
       const w = inventoryWorld(files);
       const service = new McpInventoryService({
         ...w.deps,
-        sessions: {
+        ferrets: {
           get: async () => (await import('./support.ts')).session(`${PROJECT}`, '/fy/fleet/bin/codex-work'),
         },
       });
 
       // Act
-      const { servers } = await service.session('s1');
+      const { servers } = await service.ferret('s1');
 
       // Assert
       should(byName(servers, 'search').runtimes).deepEqual([{ runtime: 'codex-work', approval: 'pending' }]);
@@ -235,7 +235,7 @@ describe('McpInventoryService', () => {
 
       // Assert — the component is one row however many homes it was written into.
       const linear = servers.filter(server => server.name === 'linear' && server.scope === 'component');
-      should(linear.map(server => server.harness)).deepEqual(['claude', 'codex']);
+      should(linear.map(server => server.harness)).deepEqual(['claude-code', 'codex']);
       should(servers.filter(server => server.scope === 'ferretry').map(server => server.runtimes)).deepEqual([
         [{ runtime: 'claude-work' }],
         [{ runtime: 'codex-work' }],
@@ -264,7 +264,7 @@ describe('McpInventoryService', () => {
         ...world.deps,
         accounts: async () => [
           ...(await world.deps.accounts()),
-          { runtime: 'claude-spare', harness: 'claude', home: spareHome, wrapper: '/fy/fleet/bin/claude-spare' },
+          { runtime: 'claude-spare', harness: 'claude-code', home: spareHome, wrapper: '/fy/fleet/bin/claude-spare' },
         ],
         components: async () => [
           { name: 'linear', runtimes: ['claude-work', 'claude-spare', 'codex-work'], auth: 'oauth' },
@@ -276,7 +276,7 @@ describe('McpInventoryService', () => {
 
       // Assert — one row per declaration, carrying every runtime that sees it, and no duplicate runtime.
       const linear = servers.filter(
-        server => server.name === 'linear' && server.scope === 'component' && server.harness === 'claude',
+        server => server.name === 'linear' && server.scope === 'component' && server.harness === 'claude-code',
       );
       should(linear).have.length(1);
       should(linear[0]?.runtimes.map(use => use.runtime)).deepEqual(['claude-work', 'claude-spare']);

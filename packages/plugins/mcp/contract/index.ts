@@ -7,6 +7,7 @@ import type { Word } from '@ferretry/kernel/contract';
 import { defineConfig, defineEvent, definePort, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
+import { McpOAuthStateFileSchema } from './oauth-state.ts';
 import {
   type McpCheckResult,
   type McpInventory,
@@ -15,6 +16,7 @@ import {
   McpItemSchema,
 } from './wire.ts';
 
+export * from './oauth-state.ts';
 export * from './rules.ts';
 export * from './wire.ts';
 
@@ -60,6 +62,15 @@ export const MCP_INVENTORY_STATE = defineState({
   store: 'json',
   format: 1,
   schema: McpInventoryFileSchema,
+});
+
+/** Sign-in facts that are not secret: issuer, endpoints, client id, expiry (never a token). */
+export const MCP_OAUTH_STATE = defineState({
+  name: 'oauth',
+  path: 'oauth.json',
+  store: 'json',
+  format: 1,
+  schema: McpOAuthStateFileSchema,
 });
 
 /** Pinned payloads (§4.9): a package with its integrity hash, fetched once and run from here. Opaque to the kernel. */

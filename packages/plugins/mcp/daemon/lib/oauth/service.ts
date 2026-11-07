@@ -947,4 +947,4 @@ export class McpOAuthService {
 }
 
 /** The state document for a daemon that has never signed in to anything. */
-export const EMPTY_MCP_OAUTH_STATE: McpOAuthStateDocument = { v: 1, registrations: {}, connections: {} };
+export const EMPTY_MCP_OAUTH_STATE: McpOAuthStateDocument = { format: 1, registrations: {}, connections: {} };

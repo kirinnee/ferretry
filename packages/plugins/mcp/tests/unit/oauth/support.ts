@@ -1,5 +1,6 @@
+import { instantFromEpochMs } from '@ferretry/std';
 /** In-memory seams for the MCP sign-in service, and a world that wires them to a fake provider. */
-import type { SecretName, SecretSummary } from '@ferretry/protocol';
+import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
 import type {
   McpOAuthCrypto,
   McpOAuthHttp,
@@ -10,8 +11,8 @@ import type {
   McpOAuthServer,
   McpOAuthStateDocument,
   McpOAuthStateStore,
-} from '../../../src/lib/mcp-oauth/index.ts';
-import { EMPTY_MCP_OAUTH_STATE, McpOAuthService, McpOAuthUnreachable } from '../../../src/lib/mcp-oauth/index.ts';
+} from '../../../daemon/lib/oauth/index.ts';
+import { EMPTY_MCP_OAUTH_STATE, McpOAuthService, McpOAuthUnreachable } from '../../../daemon/lib/oauth/index.ts';
 import { FakeProvider, type FakeProviderOptions } from './fake-provider.ts';
 
 const ORIGIN = 'http://127.0.0.1:4100';
@@ -61,16 +62,18 @@ class MemoryState implements McpOAuthStateStore {
 }
 
 /** Both halves of the store over one map, so a test can see what was filed. */
+const AT = instantFromEpochMs(0);
+
 class MemorySecrets implements McpOAuthSecretWriter, McpOAuthSecretValues {
   readonly entries = new Map<SecretName, string>();
 
   async list(): Promise<readonly SecretSummary[]> {
-    return [...this.entries.keys()].map(name => ({ name, createdAt: 'x', updatedAt: 'x' }));
+    return [...this.entries.keys()].map(name => ({ name, createdAt: AT, updatedAt: AT }));
   }
 
   async put(name: SecretName, value: string): Promise<SecretSummary> {
     this.entries.set(name, value);
-    return { name, createdAt: 'x', updatedAt: 'x' };
+    return { name, createdAt: AT, updatedAt: AT };
   }
 
   async remove(name: SecretName): Promise<boolean> {

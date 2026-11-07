@@ -25,9 +25,9 @@ import {
   type McpRuntimeUse,
   type McpScope,
   type McpSignInTarget,
-  type SessionView,
   sha256Hex,
 } from '../../../contract/index.ts';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import {
   type ClaudeApprovalKeys,
   claudeApproval,
@@ -45,14 +45,22 @@ import { type McpInventoryFolder, type McpProjectFolders, mcpFolderSubject } fro
 
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
-export type McpHarness = 'claude' | 'codex';
+export type McpHarness = HarnessKey;
+
+/** What the inventory needs of one ferret: where it works, which harness, which runtime it spends. */
+export interface McpFerretView {
+  readonly id: string;
+  readonly harness: McpHarness;
+  readonly folder: string;
+  readonly runtime?: string;
+}
 
 /** One published runtime: its name, its harness, and the config directory it runs with. */
 export interface McpInventoryAccount {
   readonly runtime: string;
   readonly harness: McpHarness;
   readonly home: string;
-  /** The published executable a session's `config.agent` names. */
+  /** The published executable of the runtime. */
   readonly wrapper: string;
 }
 
@@ -83,7 +91,7 @@ export interface McpInventoryDeps {
   readonly folders: McpProjectFolders;
   connections(): Promise<readonly McpOAuthConnection[]>;
   readonly documents: McpHarnessDocuments;
-  readonly sessions: { get(sessionId: string): Promise<SessionView | undefined> };
+  readonly ferrets: { get(ferretId: string): Promise<McpFerretView | undefined> };
 }
 
 export class McpInventoryRefusal extends Error {
@@ -124,7 +132,7 @@ const serverId = (scope: McpScope, harness: McpHarness, source: string | undefin
   sha256Hex(`${scope}\n${harness}\n${source ?? ''}\n${name}`).slice(0, 24);
 
 const harnessPaths = (harness: McpHarness, home: string) =>
-  harness === 'claude'
+  harness === 'claude-code'
     ? { config: posix.join(home, '.claude.json'), settings: posix.join(home, 'settings.json') }
     : { config: posix.join(home, 'config.toml'), settings: undefined };
 
@@ -224,8 +232,8 @@ export class McpInventoryService {
     return (await this.#machine())[0];
   }
 
-  /** `GET /v1/sessions/:id/mcp/servers`: exactly what one ferret sees. */
-  async session(sessionId: string): Promise<McpInventory> {
+  /** `GET /v1/ferrets/:id/mcp/servers`: exactly what one ferret sees. */
+  async ferret(sessionId: string): Promise<McpInventory> {
     const [servers, connections, problems] = await this.#session(sessionId);
     return { servers: servers.map(server => toWire(server, connections)), problems };
   }
@@ -246,23 +254,23 @@ export class McpInventoryService {
   async #session(
     sessionId: string,
   ): Promise<readonly [ResolvedMcpServer[], readonly McpOAuthConnection[], McpInventoryProblem[]]> {
-    const session = await this.deps.sessions.get(sessionId);
-    if (session === undefined) throw new McpInventoryRefusal(404, 'not-found', `no session ${sessionId}`);
+    const ferret = await this.deps.ferrets.get(sessionId);
+    if (ferret === undefined) throw new McpInventoryRefusal(404, 'not-found', `no ferret ${sessionId}`);
     const [accounts, components, folder, connections] = await Promise.all([
       this.deps.accounts(),
       this.deps.components(),
-      this.deps.folders.forCwd(session.config.cwd),
+      this.deps.folders.forCwd(ferret.folder),
       this.deps.connections(),
     ]);
     const account = accounts.find(
-      candidate => candidate.wrapper === session.config.agent || candidate.runtime === session.config.agent,
+      candidate => candidate.runtime === ferret.runtime,
     );
-    const harness: McpHarness = account?.harness ?? (session.config.harness === 'codex' ? 'codex' : 'claude');
+    const harness: McpHarness = account?.harness ?? ferret.harness;
     const files = reading(this.deps.documents);
     const servers: ResolvedMcpServer[] = [this.#ferretry(harness, account === undefined ? [] : [account])];
     if (account !== undefined) servers.push(...(await this.#home(account, components, files)));
     servers.push(...(await this.#project(folder, harness, account === undefined ? [] : [account], files)));
-    if (account !== undefined && harness === 'claude') servers.push(...(await this.#local(account, folder, files)));
+    if (account !== undefined && harness === 'claude-code') servers.push(...(await this.#local(account, folder, files)));
     return [withShadows(servers), connections, files.problems];
   }
 
@@ -275,14 +283,14 @@ export class McpInventoryService {
     ]);
     const files = reading(this.deps.documents);
     const servers: ResolvedMcpServer[] = [];
-    for (const harness of ['claude', 'codex'] as const) {
+    for (const harness of ['claude-code', 'codex'] as const) {
       const runtimes = accounts.filter(account => account.harness === harness);
       if (runtimes.length === 0) continue;
       servers.push(this.#ferretry(harness, runtimes));
       for (const account of runtimes) servers.push(...(await this.#home(account, components, files)));
       for (const folder of folders) {
         servers.push(...(await this.#project(folder, harness, runtimes, files)));
-        if (harness === 'claude')
+        if (harness === 'claude-code')
           for (const account of runtimes) servers.push(...(await this.#local(account, folder, files)));
       }
     }
@@ -307,8 +315,8 @@ export class McpInventoryService {
     files: Reading,
   ): Promise<ResolvedMcpServer[]> {
     const source = harnessPaths(account.harness, account.home).config;
-    const read = (account.harness === 'claude' ? claudeServers : codexServers)(
-      await files.read(source, account.harness === 'claude' ? 'json' : 'toml'),
+    const read = (account.harness === 'claude-code' ? claudeServers : codexServers)(
+      await files.read(source, account.harness === 'claude-code' ? 'json' : 'toml'),
     );
     noteProblems(files.problems, source, read);
     return read.servers
@@ -344,14 +352,14 @@ export class McpInventoryService {
     files: Reading,
   ): Promise<ResolvedMcpServer[]> {
     const source =
-      harness === 'claude' ? posix.join(folder.root, '.mcp.json') : posix.join(folder.root, '.codex', 'config.toml');
-    const read = (harness === 'claude' ? claudeServers : codexServers)(
-      await files.read(source, harness === 'claude' ? 'json' : 'toml'),
+      harness === 'claude-code' ? posix.join(folder.root, '.mcp.json') : posix.join(folder.root, '.codex', 'config.toml');
+    const read = (harness === 'claude-code' ? claudeServers : codexServers)(
+      await files.read(source, harness === 'claude-code' ? 'json' : 'toml'),
     );
     noteProblems(files.problems, source, read);
     if (read.servers.length === 0) return [];
     const projectSettings =
-      harness === 'claude'
+      harness === 'claude-code'
         ? await Promise.all(
             projectSettingsPaths(folder.root).map(async path => claudeApprovalKeys(await files.read(path, 'json'))),
           )
@@ -409,16 +417,16 @@ export class McpInventoryService {
 
   /** Claude's local scope: `projects[<root>].mcpServers` in the runtime's own `.claude.json`. */
   async #local(account: McpInventoryAccount, folder: McpInventoryFolder, files: Reading): Promise<ResolvedMcpServer[]> {
-    const source = harnessPaths('claude', account.home).config;
+    const source = harnessPaths('claude-code', account.home).config;
     const read = claudeServers(claudeProjectEntry(await files.read(source, 'json'), folder.root));
     noteProblems(files.problems, `${source} (projects › ${folder.root})`, read);
     // Ferretry's own entries are how a PROJECT server's sign-in reaches Claude: they are that server, not another.
     return read.servers
       .filter(declaration => !isFerretryLocalEntry(declaration))
       .map(declaration => ({
-        id: serverId('local', 'claude', `${source}\n${folder.root}`, declaration.name),
+        id: serverId('local', 'claude-code', `${source}\n${folder.root}`, declaration.name),
         scope: 'local' as const,
-        harness: 'claude' as const,
+        harness: 'claude-code' as const,
         declaration,
         source,
         project: { root: folder.root, ...(folder.name === undefined ? {} : { name: folder.name }) },

@@ -144,7 +144,7 @@ export class ProjectMcpLaunch {
     const account = (await this.deps.accounts()).find(
       candidate => candidate.wrapper === agent || candidate.runtime === agent,
     );
-    if (account === undefined || account.harness !== 'claude') return {};
+    if (account === undefined || account.harness !== 'claude-code') return {};
     const folder = await this.deps.folders.forCwd(cwd);
     const root = folder.root.replace(/\/+$/u, '');
     const claudeJson = `${account.home.replace(/\/+$/u, '')}/.claude.json`;

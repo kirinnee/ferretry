@@ -5,7 +5,8 @@
  * under its own folder's key (`phoebe..048c658abfb9`) while the sign-in knew only registered folders.
  */
 import { describe, it } from 'bun:test';
-import { mcpOAuthSecretNames, mcpProjectSubject, type SecretName } from '@ferretry/protocol';
+import type { SecretName } from '@ferretry/core-vault/contract';
+import { mcpOAuthSecretNames, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type ClaudeLocalScope,
@@ -17,11 +18,10 @@ import {
   mcpProjectKey,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
-} from '../../../src/lib/mcp-inventory/index.ts';
-import { McpOAuthRefusal, McpOAuthService } from '../../../src/lib/mcp-oauth/index.ts';
-import { PWA_REDIRECT, testCrypto, world } from '../mcp-oauth/support.ts';
-import { sessionView } from '../runtime/mounts/support.ts';
-import { ACCOUNTS, FOLDERS, knownFolders, MemoryDocuments, PROJECT, WORKTREE } from './support.ts';
+} from '../../../daemon/lib/inventory/index.ts';
+import { McpOAuthRefusal, McpOAuthService } from '../../../daemon/lib/oauth/index.ts';
+import { PWA_REDIRECT, testCrypto, world } from '../oauth/support.ts';
+import { ACCOUNTS, FOLDERS, knownFolders, MemoryDocuments, PROJECT, session, WORKTREE } from './support.ts';
 
 const LONE = '/Users/someone/Workspace/work/PE';
 const NESTED = `${LONE}/tools/inner`;
@@ -96,7 +96,7 @@ describe('one derivation of a project server’s subject', () => {
         folders,
         connections: async () => [],
         documents,
-        sessions: { get: async () => sessionView('s1', { cwd, agent: '/fy/fleet/bin/claude-work' }) },
+        ferrets: { get: async () => session(cwd) },
       });
       const renewed: SecretName[] = [];
       const launch = new ProjectMcpLaunch({
@@ -109,7 +109,7 @@ describe('one derivation of a project server’s subject', () => {
       });
 
       // Act
-      const offered = (await inventory.session('s1')).servers.flatMap(server =>
+      const offered = (await inventory.ferret('s1')).servers.flatMap(server =>
         server.signIn === undefined ? [] : [server.signIn.subject],
       );
       const machine = (await inventory.machine()).servers.flatMap(server =>

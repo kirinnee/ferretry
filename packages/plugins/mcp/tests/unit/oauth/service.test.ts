@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import { mcpOAuthRedirectPath, mcpOAuthSecretNames } from '@ferretry/protocol';
+import { mcpOAuthRedirectPath, mcpOAuthSecretNames } from '../../../contract/index.ts';
 import should from 'should';
 import {
   MAX_REGISTRATIONS_PER_COMPONENT,
   MCP_OAUTH_FLOW_TTL_MS,
   McpOAuthRefusal,
   type McpOAuthRefusalCode,
-} from '../../../src/lib/mcp-oauth/index.ts';
+} from '../../../daemon/lib/oauth/index.ts';
 import { leaks, PWA_REDIRECT, world } from './support.ts';
 
 const SERVER = 'http://127.0.0.1:4100/mcp';
@@ -580,7 +580,7 @@ describe('McpOAuthService', () => {
       should(answer).deepEqual({ component: 'linear', removed: true, revoked: true });
       should(w.provider.revoked).deepEqual([w.provider.issued[2]]);
       should(w.secrets.entries.size).equal(0);
-      should(w.state.document).deepEqual({ v: 1, registrations: {}, connections: {} });
+      should(w.state.document).deepEqual({ format: 1, registrations: {}, connections: {} });
     });
 
     it('should revoke the access token when there is no refresh token, and still delete when revocation fails', async () => {

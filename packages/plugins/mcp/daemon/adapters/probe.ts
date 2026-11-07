@@ -7,6 +7,7 @@
  * never a body the server sent (which the check service redacts anyway).
  */
 
+import type { ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
 import {
   type McpProbe,
   type McpProbeAnswer,
@@ -27,6 +28,9 @@ import {
 } from '../lib/inventory/json-rpc.ts';
 
 type RemoteSpec = Extract<McpProbeSpec, { readonly url: string }>;
+
+/** What a check reaches the world with: the kernel's spawn, fetch and clock, nothing else. */
+export type ProbePorts = Pick<KernelPorts, 'spawn' | 'fetch' | 'clock'>;
 
 /** The most a check reads of one response body. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -66,15 +70,12 @@ async function exchange(
 
 // ── stdio ────────────────────────────────────────────────────────────────────────────────────────
 
-async function probeStdio(spec: Extract<McpProbeSpec, { transport: 'stdio' }>, signal: AbortSignal) {
-  let child: ReturnType<typeof Bun.spawn<'pipe', 'pipe', 'pipe'>>;
+async function probeStdio(ports: ProbePorts, spec: Extract<McpProbeSpec, { transport: 'stdio' }>, signal: AbortSignal) {
+  let child: ChildHandle;
   try {
-    child = Bun.spawn([spec.command, ...spec.args], {
-      cwd: spec.cwd,
+    child = ports.spawn.start(spec.command, spec.args, {
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd as never }),
       env: { ...spec.env },
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
     });
   } catch {
     throw new McpProbeFailure(
@@ -124,8 +125,7 @@ async function probeStdio(spec: Extract<McpProbeSpec, { transport: 'stdio' }>, s
   };
   try {
     return await exchange(async (message, id) => {
-      child.stdin.write(`${message}\n`);
-      await child.stdin.flush();
+      child.write(`${message}\n`);
       if (id === undefined) return undefined;
       for (;;) {
         const found = responseFor(messages, id);
@@ -133,7 +133,7 @@ async function probeStdio(spec: Extract<McpProbeSpec, { transport: 'stdio' }>, s
         if (!(await next())) {
           const failure = timedOut(signal);
           if (failure !== undefined) throw failure;
-          const code = await Promise.race([exited, Bun.sleep(200).then(() => undefined)]);
+          const code = await Promise.race([exited, ports.clock.sleep(200 as never).then(() => undefined)]);
           throw new McpProbeFailure(
             'unreachable',
             `The command stopped${code === undefined ? '' : ` (exit code ${code})`} before it answered.${lastStderr()}`,
@@ -160,9 +160,9 @@ const statusFailure = (status: number): McpProbeFailure =>
         `It answered HTTP ${status}${status === 404 || status === 405 ? ' — is this the MCP endpoint, and the right transport?' : '.'}`,
       );
 
-async function send(url: string, init: RequestInit): Promise<Response> {
+async function send(ports: ProbePorts, url: string, init: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, { ...init, redirect: 'manual' });
+    return await ports.fetch.request(url, { ...init, redirect: 'manual' });
   } catch (error) {
     if (init.signal?.aborted === true) throw new McpProbeFailure('timeout', '');
     const reason =
@@ -207,11 +207,11 @@ async function messagesOf(response: Response, id: number | undefined): Promise<u
   return messages;
 }
 
-async function probeHttp(spec: RemoteSpec, signal: AbortSignal) {
+async function probeHttp(ports: ProbePorts, spec: RemoteSpec, signal: AbortSignal) {
   let session: string | undefined;
   let protocol: string | undefined;
   const answer = await exchange(async (message, id) => {
-    const response = await send(spec.url, {
+    const response = await send(ports, spec.url, {
       method: 'POST',
       signal,
       headers: {
@@ -239,7 +239,7 @@ async function probeHttp(spec: RemoteSpec, signal: AbortSignal) {
     return found;
   });
   if (session !== undefined)
-    await fetch(spec.url, {
+    await ports.fetch.request(spec.url, {
       method: 'DELETE',
       headers: { ...spec.headers, 'mcp-session-id': session },
       signal: AbortSignal.timeout(2000),
@@ -249,8 +249,8 @@ async function probeHttp(spec: RemoteSpec, signal: AbortSignal) {
 
 // ── Legacy SSE ───────────────────────────────────────────────────────────────────────────────────
 
-async function probeSse(spec: RemoteSpec, signal: AbortSignal) {
-  const stream = await send(spec.url, {
+async function probeSse(ports: ProbePorts, spec: RemoteSpec, signal: AbortSignal) {
+  const stream = await send(ports, spec.url, {
     method: 'GET',
     signal,
     headers: { ...spec.headers, accept: 'text/event-stream' },
@@ -289,7 +289,7 @@ async function probeSse(spec: RemoteSpec, signal: AbortSignal) {
         'It named an endpoint on another host; a check does not send headers there.',
       );
     return await exchange(async (message, id) => {
-      const response = await send(target, {
+      const response = await send(ports, target, {
         method: 'POST',
         signal,
         headers: { ...spec.headers, 'content-type': 'application/json' },
@@ -312,10 +312,12 @@ async function probeSse(spec: RemoteSpec, signal: AbortSignal) {
 }
 
 export class TransportMcpProbe implements McpProbe {
+  constructor(private readonly ports: ProbePorts) {}
+
   async probe(spec: McpProbeSpec, signal: AbortSignal): Promise<McpProbeAnswer> {
-    if (spec.transport === 'stdio') return await probeStdio(spec, signal);
+    if (spec.transport === 'stdio') return await probeStdio(this.ports, spec, signal);
     try {
-      return spec.transport === 'sse' ? await probeSse(spec, signal) : await probeHttp(spec, signal);
+      return spec.transport === 'sse' ? await probeSse(this.ports, spec, signal) : await probeHttp(this.ports, spec, signal);
     } catch (error) {
       throw timedOut(signal) ?? error;
     }

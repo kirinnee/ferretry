@@ -1,5 +1,5 @@
 /**
- * Adding an MCP server for one ferret, in either of its two scopes (`@ferretry/protocol` session-mcp).
+ * Adding an MCP server for one ferret, in either of its two scopes (the `session-mcp` wire in the contract).
  *
  * PROJECT: the repo's `.mcp.json`, at the root of the checkout the ferret runs in. A root is only ever a
  * folder this daemon already KNOWS — a registered project or a managed worktree — and the longest one
@@ -7,18 +7,15 @@
  * its own file rather than the project's. A folder outside every known root has no project scope, because
  * a write into a person's files is only ever made at a root the operator registered or Ferretry made.
  *
- * LOGIN: the fleet. The server becomes an MCP component and is appended to the profile the ferret's
- * runtime launches with — two reviewed changes staged and applied through the same
- * {@link FleetCatalogService} the Settings catalogue uses, under the caller's own governance, so
- * nothing here is a second way to change the fleet.
+ * LOGIN: the runtime. The server becomes an MCP item (`config/mcp/<name>.yaml`) and is appended to the profile the
+ * ferret's runtime launches with — two reviewed changes written through {@link McpLoginTarget}, which is Gate's config
+ * route under the caller's own standing, so nothing here is a second way to change the setup.
  *
  * Both scopes run {@link mcpServerRefusal} first, the same rule the form runs as a person types.
  */
 import { posix } from 'node:path';
 import {
-  type FleetComponentInput,
-  type FleetLayeredProfileView,
-  type FleetRuntimeView,
+  type McpItem,
   mcpServerRefusal,
   SESSION_MCP_PROJECT_FILE,
   type SessionMcpAdded,
@@ -29,10 +26,8 @@ import {
   type SessionMcpPreviewRequest,
   type SessionMcpScope,
   type SessionMcpServer,
-  type SessionView,
 } from '../../../contract/index.ts';
-import type { CallerGovernance } from '../api/capability.ts';
-import type { FleetCatalogService, FreshStepUpContext } from '../fleet/catalog-service.ts';
+import type { McpFerretView } from '../inventory/service.ts';
 import {
   hasProjectServer,
   lineDiff,
@@ -66,23 +61,47 @@ export class McpProjectFileChanged extends Error {
  * land wherever it pointed.
  */
 export interface McpProjectFiles {
-  read(path: string): Promise<McpProjectFileReading>;
+  read(ferret: string, path: string): Promise<McpProjectFileReading>;
   /**
    * Replace the file with `text` only while it still reads as `expected` (null: still absent), keeping
    * its mode. Throws {@link McpProjectFileChanged} otherwise. Answers the new etag.
    */
-  replace(path: string, text: string, expected: string | null): Promise<string>;
+  replace(ferret: string, path: string, text: string, expected: string | null): Promise<string>;
+}
+
+/** A runtime as a login add needs it: its name and the profile it launches with. */
+export interface McpLoginRuntime {
+  readonly name: string;
+  readonly profile: string;
+}
+
+/** A profile as a login add needs it: its name and the layers it names (`mcp/<name>` references among them). */
+export interface McpLoginProfile {
+  readonly name: string;
+  readonly layers: readonly string[];
+}
+
+/**
+ * The runtime half of a login add: the two reviewed changes go through Gate's config route, which is not a port this
+ * plugin may import. Reads come from the setup; `putItem` and `layerProfile` are the writes.
+ */
+export interface McpLoginTarget {
+  runtime(name: string): Promise<McpLoginRuntime | undefined>;
+  profile(name: string): Promise<McpLoginProfile | undefined>;
+  hasItem(name: string): Promise<boolean>;
+  putItem(name: string, item: McpItem, create: boolean): Promise<void>;
+  layerProfile(profile: string, layers: readonly string[]): Promise<void>;
 }
 
 export interface SessionMcpServiceDeps {
-  readonly sessions: {
-    get(sessionId: string): Promise<SessionView | undefined>;
-    list(): Promise<readonly SessionView[]>;
+  readonly ferrets: {
+    get(ferretId: string): Promise<McpFerretView | undefined>;
+    list(): Promise<readonly McpFerretView[]>;
   };
   /** Every folder a project write may land in: registered projects and live managed worktrees. */
   projectRoots(): Promise<readonly string[]>;
   readonly files: McpProjectFiles;
-  readonly fleet: Pick<FleetCatalogService, 'runtimes' | 'profiles' | 'components' | 'propose' | 'apply'>;
+  readonly login: McpLoginTarget;
 }
 
 /** Every refusal, with the HTTP status and code the mount answers it with. */
@@ -96,22 +115,6 @@ export class SessionMcpRefusal extends Error {
     this.name = 'SessionMcpRefusal';
   }
 }
-
-/** The roots a project write may use, read fresh per request so a project registered a moment ago counts. */
-export const knownProjectRoots =
-  (
-    catalogs: { projects(): Promise<readonly { readonly path: string }[]> },
-    worktrees: {
-      list(): Promise<{ readonly worktrees: readonly { readonly path: string; readonly removedAt?: string }[] }>;
-    },
-  ) =>
-  async (): Promise<readonly string[]> => {
-    const [projects, managed] = await Promise.all([catalogs.projects(), worktrees.list()]);
-    return [
-      ...projects.map(project => project.path),
-      ...managed.worktrees.filter(worktree => worktree.removedAt === undefined).map(worktree => worktree.path),
-    ];
-  };
 
 const CODEX_PROJECT =
   'Codex does not read .mcp.json, so a project server would never reach this ferret. Add it to This login instead.';
@@ -136,24 +139,21 @@ interface ProjectState {
 }
 
 interface LoginTarget {
-  readonly runtime: FleetRuntimeView;
-  readonly profile: FleetLayeredProfileView;
+  readonly runtime: McpLoginRuntime;
+  readonly profile: McpLoginProfile;
   readonly replaces: boolean;
 }
-
-/** Whether a session's `config.agent` names this runtime, by any of the three names it is known by. */
-const runsAs = (runtime: FleetRuntimeView, agent: string): boolean =>
-  runtime.wrapper === agent || runtime.name === agent || runtime.id === agent;
 
 export class SessionMcpService {
   constructor(private readonly deps: SessionMcpServiceDeps) {}
 
-  /** `GET /v1/sessions/:id/mcp`: the project file's servers, or why there is no project scope here. */
+  /** `GET /v1/ferrets/:id/mcp`: the project file's servers, or why there is no project scope here. */
   async list(sessionId: string): Promise<SessionMcpListing> {
-    const target = await this.#projectTarget(await this.#session(sessionId));
+    const session = await this.#session(sessionId);
+    const target = await this.#projectTarget(session);
     if ('unavailable' in target) return { project: null, projectUnavailable: target.unavailable };
     try {
-      const reading = await this.deps.files.read(target.path);
+      const reading = await this.deps.files.read(session.id, target.path);
       const servers = projectServers(parseMcpProjectFile(reading.text));
       return { project: { path: target.path, etag: reading.etag, servers } };
     } catch (error) {
@@ -192,7 +192,7 @@ export class SessionMcpService {
       throw new SessionMcpRefusal(409, 'mcp_file_changed', new McpProjectFileChanged().message);
     const text = renderMcpProjectFile(withProjectServer(state.document, request.name, request.server));
     try {
-      const etag = await this.deps.files.replace(state.path, text, expected);
+      const etag = await this.deps.files.replace(session.id, state.path, text, expected);
       return { scope: 'project', name: request.name, path: state.path, etag };
     } catch (error) {
       throw projectRefusal(error);
@@ -208,13 +208,13 @@ export class SessionMcpService {
     const session = await this.#session(sessionId);
     refuseServer('login', request.server);
     const target = await this.#loginTarget(session, request.name);
-    const sessions = await this.deps.sessions.list();
+    const ferrets = await this.deps.ferrets.list();
     return {
       scope: 'login',
       runtime: target.runtime.name,
       profile: target.profile.name,
       replaces: target.replaces,
-      ferrets: sessions.filter(view => runsAs(target.runtime, view.config.agent)).length,
+      ferrets: ferrets.filter(view => view.runtime === target.runtime.name).length,
     };
   }
 
@@ -226,77 +226,62 @@ export class SessionMcpService {
   async addLogin(
     sessionId: string,
     request: SessionMcpPreviewRequest,
-    governance: CallerGovernance | undefined,
-    freshStepUp: FreshStepUpContext,
   ): Promise<SessionMcpAdded> {
     const session = await this.#session(sessionId);
     refuseServer('login', request.server);
     const { runtime, profile, replaces } = await this.#loginTarget(session, request.name);
-    const component = await this.deps.fleet.propose({
-      kind: 'component.put',
-      name: request.name,
-      component: componentInput(request.server),
-      create: !replaces,
-    });
-    await this.deps.fleet.apply(component.id, governance, freshStepUp);
+    await this.deps.login.putItem(request.name, itemInput(request.server), !replaces);
     const reference = `mcp/${request.name}`;
     if (!profile.layers.includes(reference)) {
-      const layered = await this.deps.fleet.propose({
-        kind: 'profile.put',
-        name: profile.name,
-        layers: [...profile.layers, reference],
-        create: false,
-      });
-      await this.deps.fleet.apply(layered.id, governance, freshStepUp);
+      await this.deps.login.layerProfile(profile.name, [...profile.layers, reference]);
     }
     return { scope: 'login', name: request.name, runtime: runtime.name, profile: profile.name };
   }
 
-  async #session(sessionId: string): Promise<SessionView> {
-    const session = await this.deps.sessions.get(sessionId);
-    if (session === undefined) throw new SessionMcpRefusal(404, 'not-found', `no session ${sessionId}`);
-    return session;
+  async #session(sessionId: string): Promise<McpFerretView> {
+    const ferret = await this.deps.ferrets.get(sessionId);
+    if (ferret === undefined) throw new SessionMcpRefusal(404, 'not-found', `no ferret ${sessionId}`);
+    return ferret;
   }
 
-  async #projectTarget(session: SessionView): Promise<ProjectTarget> {
-    if (session.config.harness === 'codex') return { unavailable: CODEX_PROJECT };
-    const root = projectRootFor(session.config.cwd, await this.deps.projectRoots());
+  async #projectTarget(session: McpFerretView): Promise<ProjectTarget> {
+    if (session.harness === 'codex') return { unavailable: CODEX_PROJECT };
+    const root = projectRootFor(session.folder, await this.deps.projectRoots());
     if (root === undefined)
       return {
-        unavailable: `This ferret's folder, ${session.config.cwd}, is not inside a registered project or a Ferretry worktree, so there is no project file to write. Register the project, or add the server to This login.`,
+        unavailable: `This ferret's folder, ${session.folder}, is not inside a registered project or a Ferretry worktree, so there is no project file to write. Register the project, or add the server to This login.`,
       };
     return { path: posix.join(root, SESSION_MCP_PROJECT_FILE) };
   }
 
-  async #projectState(session: SessionView): Promise<ProjectState> {
+  async #projectState(session: McpFerretView): Promise<ProjectState> {
     const target = await this.#projectTarget(session);
     if ('unavailable' in target) throw new SessionMcpRefusal(409, 'mcp_project_unavailable', target.unavailable);
     try {
-      const reading = await this.deps.files.read(target.path);
+      const reading = await this.deps.files.read(session.id, target.path);
       return { path: target.path, reading, document: parseMcpProjectFile(reading.text) };
     } catch (error) {
       throw projectRefusal(error);
     }
   }
 
-  async #loginTarget(session: SessionView, name: string): Promise<LoginTarget> {
-    const agent = session.config.agent;
-    const runtime = (await this.deps.fleet.runtimes()).runtimes.find(candidate => runsAs(candidate, agent));
+  async #loginTarget(session: McpFerretView, name: string): Promise<LoginTarget> {
+    const agent = session.runtime ?? '';
+    const runtime = agent === '' ? undefined : await this.deps.login.runtime(agent);
     if (runtime === undefined)
       throw new SessionMcpRefusal(
         409,
         'mcp_runtime_unknown',
-        `${agent} is not a runtime in this machine's fleet setup, so there is no login to add the server to. Add it to This project instead.`,
+        `${agent} is not a runtime on this machine, so there is no login to add the server to. Add it to This project instead.`,
       );
-    const profile = (await this.deps.fleet.profiles()).profiles.find(candidate => candidate.name === runtime.profile);
+    const profile = await this.deps.login.profile(runtime.profile);
     if (profile === undefined)
       throw new SessionMcpRefusal(
         409,
         'mcp_runtime_unknown',
         `${runtime.name} launches with the profile ${runtime.profile}, which this machine does not have.`,
       );
-    const mcp = (await this.deps.fleet.components()).kinds.find(group => group.kind === 'mcp');
-    const replaces = (mcp?.components ?? []).some(component => component.name === name);
+    const replaces = await this.deps.login.hasItem(name);
     return { runtime, profile, replaces };
   }
 }
@@ -318,12 +303,10 @@ function lineDiffOf(state: ProjectState, request: SessionMcpPreviewRequest): Ses
   return lineDiff(state.reading.text ?? '', after);
 }
 
-/** One server as a fleet MCP component spells it. */
-function componentInput(server: SessionMcpServer): FleetComponentInput {
-  if (server.transport === 'url')
-    return { kind: 'mcp', url: server.url, ...(server.oauth ? { auth: 'oauth' as const } : {}) };
+/** One server as an MCP item spells it. */
+function itemInput(server: SessionMcpServer): McpItem {
+  if (server.transport === 'url') return { url: server.url, ...(server.oauth ? { auth: 'oauth' as const } : {}) };
   return {
-    kind: 'mcp',
     command: server.command,
     args: [...server.args],
     ...(Object.keys(server.env).length === 0 ? {} : { env: { ...server.env } }),

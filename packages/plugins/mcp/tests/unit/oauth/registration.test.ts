@@ -10,7 +10,7 @@ import {
   registrationMetadata,
   registrationRefusal,
   unreachableSentence,
-} from '../../../src/lib/mcp-oauth/index.ts';
+} from '../../../daemon/lib/oauth/index.ts';
 
 type Rejected = Extract<RegistrationAnswer, { readonly kind: 'rejected' }>;
 

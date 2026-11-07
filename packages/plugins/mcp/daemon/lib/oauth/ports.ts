@@ -161,7 +161,7 @@ export interface McpOAuthRecord extends McpOAuthClientAuth {
 
 /** The whole document at `<FY_HOME>/state/mcp-oauth.json`. It never holds a value from the store. */
 export interface McpOAuthStateDocument {
-  readonly v: 1;
+  readonly format: 1;
   readonly registrations: Readonly<Record<string, readonly McpOAuthRegistration[]>>;
   readonly connections: Readonly<Record<string, McpOAuthRecord>>;
 }

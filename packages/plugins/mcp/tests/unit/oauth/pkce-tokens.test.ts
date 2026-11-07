@@ -9,7 +9,7 @@ import {
   tokenAnswer,
   tokenRefusal,
   VERIFIER_SHAPE,
-} from '../../../src/lib/mcp-oauth/index.ts';
+} from '../../../daemon/lib/oauth/index.ts';
 import { testCrypto } from './support.ts';
 
 /** Bytes that are all the same value, so the encoding is checkable by hand. */

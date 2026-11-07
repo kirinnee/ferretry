@@ -9,8 +9,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { TransportMcpProbe } from '../../../src/adapters/mcp-inventory/index.ts';
-import { McpProbeFailure } from '../../../src/lib/mcp-inventory/index.ts';
+import { type ProbePorts, TransportMcpProbe } from '../../daemon/adapters/probe.ts';
+import { McpProbeFailure } from '../../daemon/lib/inventory/check.ts';
 
 const cleanups: (() => Promise<void> | void)[] = [];
 
@@ -18,7 +18,38 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-const probe = new TransportMcpProbe();
+/** The kernel ports, over this machine: tests drive the adapter against real local servers and commands. */
+const realPorts = {
+  spawn: {
+    run: async () => {
+      throw new Error('not used by a check');
+    },
+    start: (program: string, args: readonly string[], options?: { cwd?: string; env?: Record<string, string> }) => {
+      const child = Bun.spawn([program, ...args], {
+        ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+        env: { ...options?.env },
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      return {
+        pid: child.pid,
+        stdout: child.stdout,
+        stderr: child.stderr,
+        write: (chunk: string | Uint8Array) => {
+          child.stdin.write(chunk);
+          void child.stdin.flush();
+        },
+        kill: () => child.kill(),
+        exited: child.exited,
+      };
+    },
+  },
+  fetch: { request: async (url: URL | string, init?: RequestInit) => await fetch(url, init) },
+  clock: { sleep: async (ms: number) => await Bun.sleep(ms) },
+} as unknown as ProbePorts;
+
+const probe = new TransportMcpProbe(realPorts);
 const deadline = (ms = 5_000) => AbortSignal.timeout(ms);
 
 async function failureOf(work: Promise<unknown>): Promise<McpProbeFailure> {

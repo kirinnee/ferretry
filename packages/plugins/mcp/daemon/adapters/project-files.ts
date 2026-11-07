@@ -1,26 +1,12 @@
 /**
- * A project's `.mcp.json` on disk: the one file outside this daemon's state home it writes, and only
- * ever at the root of a project or worktree the daemon already knows (`lib/session-mcp/service.ts`
- * decides the path; this decides nothing about it).
+ * A project's `.mcp.json`: the one file outside this plugin's state it writes, and only ever at the root of a project
+ * or worktree the daemon already knows (`lib/session/service.ts` decides the path; this decides nothing about it).
  *
- * NEVER THROUGH A LINK. Every open is `O_NOFOLLOW`, so a `.mcp.json` that is a symbolic link is refused
- * rather than followed out of the project, and the temporary file is created `O_EXCL` beside the target
- * so a planted name cannot redirect it either. `O_NONBLOCK` keeps a FIFO planted at the path from
- * hanging the read; anything that is not a regular file is refused.
- *
- * COMPARE, THEN SWAP. A write re-reads the file and refuses unless it still hashes to the etag the
- * person's preview showed. A file that did not exist is created with `link`, which fails if one appeared
- * in the meantime, so two first adds cannot both win; an existing file is replaced with `rename`, which
- * is atomic but leaves the short gap between the re-read and the rename unguarded — an editor saving in
- * that instant is overwritten, which the etag check narrows to that instant and cannot close.
- *
- * THE MODE IS KEPT. The replacement carries the old file's permission bits exactly; a new file gets
- * 0644, what a checkout's own files have.
+ * Through the ferret's `work` root: the handle resolves links before every read and write and refuses one that leaves
+ * the folder, a device file, and anything inside the fence. COMPARE, THEN SWAP: a write re-reads the file and refuses
+ * unless it still hashes to the etag the person's preview showed. The write is the root's atomic temp-and-rename.
  */
-import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { link, open, rename, rm } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import type { RootHandle } from '@ferretry/kernel/contract';
 import { McpProjectFileError } from '../lib/session/project-file.ts';
 import {
   McpProjectFileChanged,
@@ -31,86 +17,64 @@ import {
 /** The largest project file this reads. A real one is a few hundred bytes. */
 const MAX_PROJECT_FILE_BYTES = 1024 * 1024;
 
-/** A new file's permission bits: readable by everyone, writable by its owner. */
-const NEW_FILE_MODE = 0o644;
+const hex = (bytes: Uint8Array): string => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
-const codeOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
-
-const digest = (bytes: Uint8Array): string => new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
-
-interface FileBytes {
-  readonly bytes: Uint8Array;
-  readonly mode: number;
+async function digest(text: string): Promise<string> {
+  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
 }
 
-/** The file's bytes and mode, `null` when there is none. Refuses a link and anything but a regular file. */
-async function readFileBytes(path: string): Promise<FileBytes | null> {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    if (codeOf(error) === 'ENOENT') return null;
-    // Linux and macOS answer ELOOP for a link under O_NOFOLLOW; the BSDs answer EMLINK.
-    if (codeOf(error) === 'ELOOP' || codeOf(error) === 'EMLINK')
-      throw new McpProjectFileError(
-        `${path} is a symbolic link, and Ferretry will not follow it out of the project. Replace it with the file itself.`,
-      );
-    throw error;
+/** A ferret's `work` root and the absolute folder it is rooted at: paths in and out are absolute, the handle gets relative ones. */
+export interface FerretRoot {
+  readonly root: RootHandle;
+  readonly base: string;
+}
+
+function fenced(held: FerretRoot, path: string) {
+  const base = held.base.replace(/\/+$/u, '');
+  if (path !== base && !path.startsWith(`${base}/`)) return undefined;
+  const resolved = held.root.resolve(path.slice(base.length).replace(/^\//u, ''));
+  return resolved.ok ? resolved.value : undefined;
+}
+
+export class RootMcpProjectFiles implements McpProjectFiles {
+  constructor(
+    private readonly workRoot: (ferret: string) => Promise<FerretRoot>,
+    private readonly sha256: (text: string) => Promise<string> = digest,
+  ) {}
+
+  async read(ferret: string, path: string): Promise<McpProjectFileReading> {
+    const text = await this.#text(ferret, path);
+    return text === null ? { text: null, etag: null } : { text, etag: await this.sha256(text) };
   }
-  try {
-    const info = await handle.stat();
-    if (!info.isFile())
+
+  async replace(ferret: string, path: string, text: string, expected: string | null): Promise<string> {
+    const current = await this.#text(ferret, path);
+    if ((current === null ? null : await this.sha256(current)) !== expected) throw new McpProjectFileChanged();
+    const held = await this.workRoot(ferret);
+    const resolved = fenced(held, path);
+    if (resolved === undefined)
+      throw new McpProjectFileError(`${path} is outside the ferret's folder, so Ferretry will not write it.`);
+    await held.root.writeText(resolved, text);
+    return await this.sha256(text);
+  }
+
+  async #text(ferret: string, path: string): Promise<string | null> {
+    const held = await this.workRoot(ferret);
+    const root = held.root;
+    const resolved = fenced(held, path);
+    if (resolved === undefined)
+      throw new McpProjectFileError(`${path} is outside the ferret's folder, so Ferretry will not read or replace it.`);
+    let info: Awaited<ReturnType<RootHandle['stat']>>;
+    try {
+      info = await root.stat(resolved);
+    } catch {
+      throw new McpProjectFileError(`${path} is not a regular file, so Ferretry will not read or replace it.`);
+    }
+    if (info === undefined) return null;
+    if (info.kind !== 'file')
       throw new McpProjectFileError(`${path} is not a regular file, so Ferretry will not read or replace it.`);
     if (info.size > MAX_PROJECT_FILE_BYTES)
       throw new McpProjectFileError(`${path} is larger than 1 MiB, so Ferretry will not read or replace it.`);
-    return { bytes: new Uint8Array(await handle.readFile()), mode: info.mode & 0o7777 };
-  } finally {
-    await handle.close();
-  }
-}
-
-export class FileMcpProjectFiles implements McpProjectFiles {
-  /** `uniqueId` names the temporary file; a test may also use it to act between the check and the swap. */
-  constructor(private readonly uniqueId: () => string = randomUUID) {}
-
-  async read(path: string): Promise<McpProjectFileReading> {
-    const file = await readFileBytes(path);
-    if (file === null) return { text: null, etag: null };
-    return { text: new TextDecoder().decode(file.bytes), etag: digest(file.bytes) };
-  }
-
-  async replace(path: string, text: string, expected: string | null): Promise<string> {
-    const current = await readFileBytes(path);
-    if ((current === null ? null : digest(current.bytes)) !== expected) throw new McpProjectFileChanged();
-    const mode = current?.mode ?? NEW_FILE_MODE;
-    const bytes = new TextEncoder().encode(text);
-    const temporary = join(dirname(path), `.${basename(path)}.${this.uniqueId()}.tmp`);
-    const handle = await open(
-      temporary,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      mode,
-    );
-    let placed = false;
-    try {
-      try {
-        // Exactly the old bits: the mode `open` was given is filtered by the umask.
-        await handle.chmod(mode);
-        await handle.writeFile(bytes);
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      if (current === null)
-        await link(temporary, path).catch((error: unknown) => {
-          throw codeOf(error) === 'EEXIST' ? new McpProjectFileChanged() : error;
-        });
-      else {
-        await rename(temporary, path);
-        placed = true;
-      }
-    } finally {
-      if (!placed) await rm(temporary, { force: true });
-    }
-    return digest(bytes);
+    return await root.readText(resolved, MAX_PROJECT_FILE_BYTES);
   }
 }

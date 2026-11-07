@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { mcpOAuthSecretNames, mcpProjectSubject, type SecretName } from '@ferretry/protocol';
+import type { SecretName } from '@ferretry/core-vault/contract';
+import { mcpOAuthSecretNames, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type ClaudeLocalScope,
@@ -7,7 +8,7 @@ import {
   type LocalScopeServer,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
-} from '../../../src/lib/mcp-inventory/index.ts';
+} from '../../../daemon/lib/inventory/index.ts';
 import {
   ACCOUNTS,
   BROKEN,

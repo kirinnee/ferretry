@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionMcpServer } from '@ferretry/protocol';
+import type { SessionMcpServer } from '../../contract/index.ts';
 import should from 'should';
 import {
   hasProjectServer,
@@ -10,7 +10,7 @@ import {
   projectServers,
   renderMcpProjectFile,
   withProjectServer,
-} from '../../../src/lib/session-mcp/project-file.ts';
+} from '../../daemon/lib/session/project-file.ts';
 
 const COMMAND: SessionMcpServer = { transport: 'command', command: 'npx', args: ['-y', 'acme'], env: {} };
 

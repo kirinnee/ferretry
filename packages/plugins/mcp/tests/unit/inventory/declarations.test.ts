@@ -18,7 +18,7 @@ import {
   sseEvents,
   toolsListRequest,
   toolsPage,
-} from '../../../src/lib/mcp-inventory/index.ts';
+} from '../../../daemon/lib/inventory/index.ts';
 import { variable } from './support.ts';
 
 describe('MCP declarations', () => {
