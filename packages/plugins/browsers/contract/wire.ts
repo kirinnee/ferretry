@@ -72,7 +72,7 @@ export function browserProxyUrlProblem(value: string): string | undefined {
   return undefined;
 }
 
-const BROWSER_PROXY_BYPASS_ENTRY = /^[A-Za-z0-9*._:/<>\[\]-]{1,253}$/u;
+const BROWSER_PROXY_BYPASS_ENTRY = /^[A-Za-z0-9*._:/<>[\]-]{1,253}$/u;
 
 const BrowserProxySecretReferenceSchema = z
   .string()

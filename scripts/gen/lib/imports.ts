@@ -1,11 +1,20 @@
 /**
- * A real module-record pass (oxc-parser), never a grep: every static import, re-export and literal dynamic import of
- * a file, each resolved to the package and AREA it lands in. The import checks (`context-imports`, `contract-graph`,
- * `contract-consumes`) are set operations over these edges.
+ * Two passes over the same question, "what does this file import":
+ *
+ *   importsOf        a real module-record pass (oxc-parser), never a grep: every static import, re-export and literal
+ *                    dynamic import of a file, each resolved to the package and AREA it lands in, with line numbers
+ *                    and the type-only flag. The import checks (`context-imports`, `contract-graph`,
+ *                    `contract-consumes`) are set operations over these edges. oxc-parser is a devDependency, so it
+ *                    is loaded on the first call, never when this module loads: the Nix build installs production
+ *                    dependencies only and only generates (it never checks).
+ *   scannedImportsOf the generator's pass: Bun's own import scanner, which needs no dependency. It carries just what
+ *                    contract hashing reads (which package and area a file imports, test files excluded), so its
+ *                    edges have no line number and no type-only flag.
  */
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, relative, resolve, sep } from 'node:path';
-import { parseSync } from 'oxc-parser';
+import type { parseSync as ParseSync } from 'oxc-parser';
 import type { Workspace, WorkspacePackage } from './workspace.ts';
 
 /**
@@ -130,12 +139,63 @@ export function resolveSpecifier(
   return { external: externalName(specifier) };
 }
 
+let oxcParseSync: typeof ParseSync | undefined;
+
+/** oxc-parser, loaded on first use (see the module comment). */
+function parser(): typeof ParseSync {
+  oxcParseSync ??= (createRequire(import.meta.url)('oxc-parser') as { parseSync: typeof ParseSync }).parseSync;
+  return oxcParseSync;
+}
+
+const transpilers = new Map<string, Bun.Transpiler>();
+
+/**
+ * Bun's scanner erases type-only imports, but a type-only import of a contract is still consumption (§9.6), so the
+ * `type` markers are removed first: `import type`, `export type {`/`export type *` and inline `{ type X }`.
+ */
+function withTypeMarkersRemoved(source: string): string {
+  return source
+    .replace(/^#!.*/, '')
+    .replace(/^(\s*)import\s+type\s+/gm, '$1import ')
+    .replace(/^(\s*)export\s+type\s*([{*])/gm, '$1export $2')
+    .replace(/([{,]\s*)type\s+(?=[A-Za-z_$][\w$]*\s*(?:as\s+[\w$]+\s*)?[,}])/g, '$1');
+}
+
+/** Every import edge of one file, from Bun's scanner. Throws with the file name on a parse error. */
+export function scannedImportsOf(ws: Workspace, file: string): ImportEdge[] {
+  const fromPkg = ws.ownerOf(file);
+  if (fromPkg === undefined) return [];
+  const loader = file.endsWith('.tsx') ? 'tsx' : 'ts';
+  let transpiler = transpilers.get(loader);
+  if (transpiler === undefined) {
+    transpiler = new Bun.Transpiler({ loader });
+    transpilers.set(loader, transpiler);
+  }
+  let found: ReturnType<Bun.Transpiler['scanImports']>;
+  try {
+    found = transpiler.scanImports(withTypeMarkersRemoved(readFileSync(file, 'utf8')));
+  } catch (error) {
+    throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const fromArea = areaOf(fromPkg, file);
+  return found.map(entry => ({
+    from: file,
+    fromPkg,
+    fromArea,
+    specifier: entry.path,
+    line: 0,
+    typeOnly: false,
+    kind: entry.kind === 'dynamic-import' ? ('dynamic' as const) : ('import' as const),
+    ...resolveSpecifier(ws, file, entry.path),
+  }));
+}
+
 /** Every import edge of one file. Throws with the file name on a parse error. */
 export function importsOf(ws: Workspace, file: string): ImportEdge[] {
   const fromPkg = ws.ownerOf(file);
   if (fromPkg === undefined) return [];
   const source = readFileSync(file, 'utf8');
-  const parsed = parseSync(file, source, { sourceType: 'module' });
+  const parsed = parser()(file, source, { sourceType: 'module' });
   if (parsed.errors.length > 0) {
     throw new Error(`${file}: ${parsed.errors.map(error => error.message).join('; ')}`);
   }

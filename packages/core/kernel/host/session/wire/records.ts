@@ -459,7 +459,12 @@ export function sessionStreamRequest(
   origin: CarriedOrigin,
   transcriptHash?: Uint8Array,
 ): ApiRequest {
-  return sessionApiRequest({ method: 'GET', path: stream.path, query: stream.query }, principal, origin, transcriptHash);
+  return sessionApiRequest(
+    { method: 'GET', path: stream.path, query: stream.query },
+    principal,
+    origin,
+    transcriptHash,
+  );
 }
 
 /**

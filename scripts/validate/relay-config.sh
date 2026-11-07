@@ -16,47 +16,64 @@ set -euo pipefail
 # document fails here, at pre-commit, instead of at 3am against production.
 
 root_dir="$(git rev-parse --show-toplevel)"
+#
+# FERRETRY 5.0. The relay Worker is the Connections plugin's (`packages/plugins/connections/worker/`) and the
+# link store the Catalogs plugin's (`packages/plugins/catalogs/worker/`), each a copy of today's
+# `packages/relay` Worker files at the same relative paths. Until a port has landed its Worker, the checks
+# that read that Worker's own files are reported as PENDING by name, and every check on the workflows, the
+# build scripts and the operator projections still runs: those files exist now, and they are what deploys.
+
+root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
-hosted_config="packages/relay/wrangler.hosted.json"
-byo_config="packages/relay/wrangler.jsonc"
+relay_dir="packages/plugins/connections/worker"
+link_store_dir="packages/plugins/catalogs/worker"
+hosted_config="${relay_dir}/wrangler.hosted.json"
+byo_config="${relay_dir}/wrangler.jsonc"
 workflow=".github/workflows/relay-hosted.yaml"
 ci_workflow=".github/workflows/ci.yaml"
 ci_build="scripts/ci/build-checks.sh"
-worker="packages/relay/src/adapters/worker.ts"
-control="packages/relay/src/adapters/hosted-control.ts"
+worker="${relay_dir}/src/adapters/worker.ts"
+control="${relay_dir}/src/adapters/hosted-control.ts"
+
+relay_ported=0
+[[ -f ${hosted_config} ]] && relay_ported=1
+link_store_ported=0
+[[ -f ${link_store_dir}/wrangler.link-store.hosted.json ]] && link_store_ported=1
+pending=()
 
 fail() {
   echo "❌ $*" >&2
   exit 1
 }
 
-# ─── the Worker configuration ─────────────────────────────────────────────────────────────────
+if ((relay_ported)); then
+  # ─── the Worker configuration ─────────────────────────────────────────────────────────────────
 
-assert_hosted() {
-  jq -e "$1" "${hosted_config}" >/dev/null 2>&1 || fail "${hosted_config}: $2"
-}
+  assert_hosted() {
+    jq -e "$1" "${hosted_config}" >/dev/null 2>&1 || fail "${hosted_config}: $2"
+  }
 
-# `RELAY_MODE` is the whole hosted/self-hosted switch. Lose it and `relayMode()` reads the
-# deployment as self-hosted, which serves the fingerprints in `RELAY_DAEMON_IDS` — an unset list,
-# so the hosted relay would answer 404 for everybody while looking perfectly healthy.
-assert_hosted '.vars.RELAY_MODE == "hosted"' 'vars.RELAY_MODE must be "hosted"'
-# An allowlist here is a contradiction the code cannot report: hosted mode never consults it, so a
-# fingerprint list would read as access control while enforcing nothing.
-assert_hosted '.vars | has("RELAY_DAEMON_IDS") | not' 'a hosted deployment must not carry RELAY_DAEMON_IDS'
-assert_hosted '.main == "src/adapters/worker.ts"' 'main must stay the Worker entry that exports both Durable Objects'
-# The deploy job derives this deployment's public origin from the Worker name plus the account's
-# workers.dev subdomain. A rename would leave the workflow probing a hostname that does not exist,
-# and the failure would be an opaque curl error rather than anything naming the cause.
-assert_hosted '.name == "ferretry-hosted-relay"' 'name is the origin the deploy workflow derives; it cannot drift alone'
-assert_hosted '.workers_dev == true' 'workers.dev must stay enabled; it is the origin discovery falls back to'
-assert_hosted '.observability.enabled == true' 'observability is how an operator sees a failing deployment at all'
+  # `RELAY_MODE` is the whole hosted/self-hosted switch. Lose it and `relayMode()` reads the
+  # deployment as self-hosted, which serves the fingerprints in `RELAY_DAEMON_IDS` — an unset list,
+  # so the hosted relay would answer 404 for everybody while looking perfectly healthy.
+  assert_hosted '.vars.RELAY_MODE == "hosted"' 'vars.RELAY_MODE must be "hosted"'
+  # An allowlist here is a contradiction the code cannot report: hosted mode never consults it, so a
+  # fingerprint list would read as access control while enforcing nothing.
+  assert_hosted '.vars | has("RELAY_DAEMON_IDS") | not' 'a hosted deployment must not carry RELAY_DAEMON_IDS'
+  assert_hosted '.main == "src/adapters/worker.ts"' 'main must stay the Worker entry that exports both Durable Objects'
+  # The deploy job derives this deployment's public origin from the Worker name plus the account's
+  # workers.dev subdomain. A rename would leave the workflow probing a hostname that does not exist,
+  # and the failure would be an opaque curl error rather than anything naming the cause.
+  assert_hosted '.name == "ferretry-hosted-relay"' 'name is the origin the deploy workflow derives; it cannot drift alone'
+  assert_hosted '.workers_dev == true' 'workers.dev must stay enabled; it is the origin discovery falls back to'
+  assert_hosted '.observability.enabled == true' 'observability is how an operator sees a failing deployment at all'
 
-# Three bindings, exactly. `RENDEZVOUS` carries sessions; `RELAY_CONTROL` is the single global meter,
-# kill switch and admission controller. Without it every hosted request refuses with "hosted relay
-# accounting is unavailable" — fail-closed, but completely dead. `TUNNEL_CONTROL` is the tunnel
-# provisioner (relay-protocol.md §15); without it the tunnel service advertises `available: false`.
-assert_hosted '
+  # Three bindings, exactly. `RENDEZVOUS` carries sessions; `RELAY_CONTROL` is the single global meter,
+  # kill switch and admission controller. Without it every hosted request refuses with "hosted relay
+  # accounting is unavailable" — fail-closed, but completely dead. `TUNNEL_CONTROL` is the tunnel
+  # provisioner (relay-protocol.md §15); without it the tunnel service advertises `available: false`.
+  assert_hosted '
   [.durable_objects.bindings[] | {name, class_name}] | sort_by(.name) == [
     {name: "RELAY_CONTROL", class_name: "HostedRelayControlDurableObject"},
     {name: "RENDEZVOUS", class_name: "RendezvousDurableObject"},
@@ -64,54 +81,60 @@ assert_hosted '
   ]
 ' 'durable_objects.bindings must bind exactly RENDEZVOUS, RELAY_CONTROL and TUNNEL_CONTROL to their classes'
 
-# The link store (relay-protocol.md §17) is a SEPARATE Worker reached through one service binding. The
-# binding names the store Worker by its deployed name, so that name is read from the store's own
-# configuration rather than typed twice. Two failure shapes are worth a gate: a renamed store leaves this
-# binding pointing at nothing, so the relay would either fail to publish or serve every store path as
-# unavailable; and the dispatch silently never matching `env.LINK_STORE`.
-link_store_service="$(jq -r '.name' packages/relay/wrangler.link-store.hosted.json)"
-[[ -n ${link_store_service} && ${link_store_service} != null ]] ||
-  fail "packages/relay/wrangler.link-store.hosted.json has no name for the relay's LINK_STORE binding to target"
-jq -e --arg service "${link_store_service}" '
+  # The link store (relay-protocol.md §17) is a SEPARATE Worker reached through one service binding. The
+  # binding names the store Worker by its deployed name, so that name is read from the store's own
+  # configuration rather than typed twice. Two failure shapes are worth a gate: a renamed store leaves this
+  # binding pointing at nothing, so the relay would either fail to publish or serve every store path as
+  # unavailable; and the dispatch silently never matching `env.LINK_STORE`.
+  if ((link_store_ported)); then
+    link_store_service="$(jq -r '.name' ${link_store_dir}/wrangler.link-store.hosted.json)"
+    [[ -n ${link_store_service} && ${link_store_service} != null ]] ||
+      fail "${link_store_dir}/wrangler.link-store.hosted.json has no name for the relay's LINK_STORE binding to target"
+    jq -e --arg service "${link_store_service}" '
   .services == [{binding: "LINK_STORE", service: $service}]
 ' "${hosted_config}" >/dev/null 2>&1 ||
-  fail "${hosted_config}: services must be exactly the LINK_STORE binding to the Worker named ${link_store_service}"
-rg -qF -- 'LINK_STORE?: LinkStoreBinding' "${worker}" ||
-  fail "${worker} must read the LINK_STORE service binding that ${hosted_config} declares"
-# A self-hosted relay must never reach for Ferretry's store: the target Worker does not exist in its account.
-if rg -q 'LINK_STORE|"services"' "${byo_config}"; then
-  fail "${byo_config} must not bind the hosted link store; a self-hosted relay's account has no such Worker"
-fi
+      fail "${hosted_config}: services must be exactly the LINK_STORE binding to the Worker named ${link_store_service}"
+    rg -qF -- 'LINK_STORE?: LinkStoreBinding' "${worker}" ||
+      fail "${worker} must read the LINK_STORE service binding that ${hosted_config} declares"
+  fi
+  # A self-hosted relay must never reach for Ferretry's store: the target Worker does not exist in its account.
+  if rg -q 'LINK_STORE|"services"' "${byo_config}"; then
+    fail "${byo_config} must not bind the hosted link store; a self-hosted relay's account has no such Worker"
+  fi
 
-# SQLite-backed classes are what the Workers Free plan allows, and `new_classes` would silently
-# provision the key-value backend instead — a different storage product under the same code.
-assert_hosted '
+  # SQLite-backed classes are what the Workers Free plan allows, and `new_classes` would silently
+  # provision the key-value backend instead — a different storage product under the same code.
+  assert_hosted '
   ([.migrations[].new_sqlite_classes // []] | flatten | sort)
     == ["HostedRelayControlDurableObject", "HostedTunnelControlDurableObject", "RendezvousDurableObject"]
 ' 'migrations must declare every Durable Object class as new_sqlite_classes'
-# A deployed migration is history Cloudflare has already applied. Editing `v1` instead of adding a tag
-# is refused at deploy time at best, and at worst re-describes classes that hold every live row.
-assert_hosted '
+  # A deployed migration is history Cloudflare has already applied. Editing `v1` instead of adding a tag
+  # is refused at deploy time at best, and at worst re-describes classes that hold every live row.
+  assert_hosted '
   .migrations[0] == {tag: "v1", new_sqlite_classes: ["RendezvousDurableObject", "HostedRelayControlDurableObject"]}
 ' 'migration v1 is applied history and must never change; add a new tag instead'
-assert_hosted '[.migrations[].tag] | length == (unique | length)' 'migration tags must be unique'
-assert_hosted '[.migrations[] | keys[]] | index("new_classes") | not' 'migrations must not use the key-value new_classes backend'
+  assert_hosted '[.migrations[].tag] | length == (unique | length)' 'migration tags must be unique'
+  assert_hosted '[.migrations[] | keys[]] | index("new_classes") | not' 'migrations must not use the key-value new_classes backend'
 
-# A class named in a migration that the entry module does not export is a deploy-time failure in
-# production and nothing at all here, so check the two halves agree.
-for class_name in RendezvousDurableObject HostedRelayControlDurableObject HostedTunnelControlDurableObject; do
-  rg -q "\b${class_name}\b" "${worker}" ||
-    fail "${worker} does not export ${class_name}, which ${hosted_config} deploys"
-done
+  # A class named in a migration that the entry module does not export is a deploy-time failure in
+  # production and nothing at all here, so check the two halves agree.
+  for class_name in RendezvousDurableObject HostedRelayControlDurableObject HostedTunnelControlDurableObject; do
+    rg -q "\b${class_name}\b" "${worker}" ||
+      fail "${worker} does not export ${class_name}, which ${hosted_config} deploys"
+  done
 
-# The opposite drift, and the dangerous one: hosted mode skips the fingerprint allowlist entirely
-# because it serves everybody. Setting it in the bring-your-own config would turn somebody's private
-# relay into an open one, silently, with their account paying for it.
-if rg -q '"RELAY_MODE"' "${byo_config}"; then
-  fail "${byo_config} must never set RELAY_MODE; hosted mode ignores the fingerprint allowlist"
+  # The opposite drift, and the dangerous one: hosted mode skips the fingerprint allowlist entirely
+  # because it serves everybody. Setting it in the bring-your-own config would turn somebody's private
+  # relay into an open one, silently, with their account paying for it.
+  if rg -q '"RELAY_MODE"' "${byo_config}"; then
+    fail "${byo_config} must never set RELAY_MODE; hosted mode ignores the fingerprint allowlist"
+  fi
+  rg -q '"RELAY_DAEMON_IDS"' "${byo_config}" ||
+    fail "${byo_config} must keep RELAY_DAEMON_IDS; it is the whole access control of a self-hosted relay"
+
+else
+  pending+=("the relay Worker configuration and Durable Object classes (${relay_dir})")
 fi
-rg -q '"RELAY_DAEMON_IDS"' "${byo_config}" ||
-  fail "${byo_config} must keep RELAY_DAEMON_IDS; it is the whole access control of a self-hosted relay"
 
 # ─── the deploy and control workflow ──────────────────────────────────────────────────────────
 
@@ -125,9 +148,9 @@ rg -qF -- 'wrangler deploy --dry-run --config wrangler.hosted.json' "${ci_build}
   fail "${ci_build} must compile the hosted relay configuration"
 # A clean Actions checkout has no node_modules. Both the credential-free rehearsal and the real
 # deployment must install from inside the relay package before Wrangler bundles workspace imports;
-# otherwise @ferretry/protocol and zod disappear only in CI/production while a prepared developer
+# otherwise its workspace imports and zod disappear only in CI/production while a prepared developer
 # checkout keeps passing. Keep this package-local, matching the repository's other build scripts.
-rg -U -q 'cd packages/relay[[:space:]]*\n[[:space:]]*bun install --frozen-lockfile' "${workflow}" ||
+rg -U -q "cd ${relay_dir}[[:space:]]*"$'\n'"[[:space:]]*bun install --frozen-lockfile" "${workflow}" ||
   fail "${workflow} must install locked relay workspace dependencies before Wrangler runs"
 # The consolidated quick set installs all workspaces once before any child starts.
 rg -U -q 'scripts/ci/setup.sh\nexport FY_CI_SETUP_DONE=1' scripts/ci/quick.sh ||
@@ -143,20 +166,24 @@ mask_count="$(rg -cF -- '::add-mask::$operator_token' "${workflow}" || true)"
 [[ ${mask_count} -ge 2 ]] ||
   fail "${workflow} must mask the derived operator bearer in both the deploy and control jobs"
 
-# Constants the workflow addresses by hand. Renaming one in the adapter and not the other turns
-# every operator request into a 404 that no test would see.
-pinned_path() {
-  rg -o "$1 = '[^']*'" "${control}" | sed "s/.*'\\(.*\\)'/\\1/" | head -n 1
-}
-for constant in HOSTED_RELAY_OPERATOR_CONFIG_PATH HOSTED_RELAY_OPERATOR_METRICS_PATH HOSTED_RELAY_PUBLIC_PATH; do
-  path="$(pinned_path "${constant}")"
-  [[ -n ${path} ]] || fail "${control} no longer declares ${constant}"
-  rg -qF -- "${path}" "${workflow}" ||
-    fail "${workflow} does not address ${path}, the route ${constant} declares"
-done
+if ((relay_ported)); then
+  # Constants the workflow addresses by hand. Renaming one in the adapter and not the other turns
+  # every operator request into a 404 that no test would see.
+  pinned_path() {
+    rg -o "$1 = '[^']*'" "${control}" | sed "s/.*'\\(.*\\)'/\\1/" | head -n 1
+  }
+  for constant in HOSTED_RELAY_OPERATOR_CONFIG_PATH HOSTED_RELAY_OPERATOR_METRICS_PATH HOSTED_RELAY_PUBLIC_PATH; do
+    path="$(pinned_path "${constant}")"
+    [[ -n ${path} ]] || fail "${control} no longer declares ${constant}"
+    rg -qF -- "${path}" "${workflow}" ||
+      fail "${workflow} does not address ${path}, the route ${constant} declares"
+  done
 
-rg -qF -- "https://$(jq -r '.name' "${hosted_config}").\$worker_subdomain.workers.dev" "${workflow}" ||
-  fail "${workflow} derives an origin that does not match the Worker name in ${hosted_config}"
+  rg -qF -- "https://$(jq -r '.name' "${hosted_config}").\$worker_subdomain.workers.dev" "${workflow}" ||
+    fail "${workflow} derives an origin that does not match the Worker name in ${hosted_config}"
+else
+  pending+=("the operator routes and Worker name the workflow addresses (${control}, ${hosted_config})")
+fi
 
 # ─── the tunnel pool: one secret, two names, never in an argument ─────────────────────────────
 #
@@ -164,10 +191,12 @@ rg -qF -- "https://$(jq -r '.name' "${hosted_config}").\$worker_subdomain.worker
 # HOSTED_TUNNEL_ACCOUNTS and the Worker reads it as TUNNEL_ACCOUNTS (relay-protocol.md §15). A rename on
 # either side leaves the tunnel service advertising `available: false` with nothing failing anywhere,
 # and a value passed as an argument is readable by every process on the runner.
-tunnel_control="packages/relay/src/adapters/hosted-tunnel-control.ts"
-tunnel_contract="packages/relay/src/lib/tunnel.ts"
-rg -qF -- 'readonly TUNNEL_ACCOUNTS?: string;' "${tunnel_control}" ||
-  fail "${tunnel_control} no longer reads the pool from TUNNEL_ACCOUNTS, the secret ${workflow} installs"
+tunnel_control="${relay_dir}/src/adapters/hosted-tunnel-control.ts"
+tunnel_contract="${relay_dir}/src/lib/tunnel.ts"
+if ((relay_ported)); then
+  rg -qF -- 'readonly TUNNEL_ACCOUNTS?: string;' "${tunnel_control}" ||
+    fail "${tunnel_control} no longer reads the pool from TUNNEL_ACCOUNTS, the secret ${workflow} installs"
+fi
 rg -qF -- 'HOSTED_TUNNEL_ACCOUNTS: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}' "${workflow}" ||
   fail "${workflow} must read the pool from the GitHub secret HOSTED_TUNNEL_ACCOUNTS"
 rg -qF -- 'wrangler secret put TUNNEL_ACCOUNTS --config wrangler.hosted.json' "${workflow}" ||
@@ -177,10 +206,14 @@ rg -qF -- "inputs.operation == 'tunnel-accounts'" "${workflow}" ||
 if rg -q -- '(--arg|--argjson|echo|curl)[^|]*\$\{?HOSTED_TUNNEL_ACCOUNTS' "${workflow}"; then
   fail "${workflow} passes the tunnel pool as an argument or prints it; read it from the environment"
 fi
-tunnel_status_path="$(rg -o "TUNNEL_OPERATOR_STATUS_PATH = '[^']*'" "${tunnel_contract}" | sed "s/.*'\\(.*\\)'/\\1/")"
-[[ -n ${tunnel_status_path} ]] || fail "${tunnel_contract} no longer declares TUNNEL_OPERATOR_STATUS_PATH"
-rg -qF -- "${tunnel_status_path}" "${workflow}" ||
-  fail "${workflow} does not address ${tunnel_status_path}, the route TUNNEL_OPERATOR_STATUS_PATH declares"
+if ((relay_ported)); then
+  tunnel_status_path="$(rg -o "TUNNEL_OPERATOR_STATUS_PATH = '[^']*'" "${tunnel_contract}" | sed "s/.*'\\(.*\\)'/\\1/")"
+  [[ -n ${tunnel_status_path} ]] || fail "${tunnel_contract} no longer declares TUNNEL_OPERATOR_STATUS_PATH"
+  rg -qF -- "${tunnel_status_path}" "${workflow}" ||
+    fail "${workflow} does not address ${tunnel_status_path}, the route TUNNEL_OPERATOR_STATUS_PATH declares"
+else
+  pending+=("the tunnel pool's Worker side (${tunnel_control}, ${tunnel_contract})")
+fi
 
 # The deploy's secrets file, proved by running the exact program the workflow runs: a set pool rides
 # along as a string, and an unset one adds nothing, so the Worker keeps the pool it already holds.
@@ -197,40 +230,27 @@ without_pool="$(env -u HOSTED_TUNNEL_ACCOUNTS jq -cn --arg token t "${secrets_pr
 
 # ─── both ends must read the SAME advertisement, from the same path ───────────────────────────
 #
-# A session crosses a relay only if BOTH ends are on it. Three modules now spell the discovery path:
-# the Worker that serves the document, the browser that reads it, and the daemon that reads it to
-# decide whether it dials anything at all. A daemon that discovered nothing while a browser reported
-# the relay as healthy is precisely the shape of failure this product has already shipped, and the
-# path drifting by one character is enough to cause it.
-public_path="$(pinned_path HOSTED_RELAY_PUBLIC_PATH)"
-for reader in \
-  "packages/pwa/src/features/onboarding/hosted-relay.ts" \
-  "packages/daemon/src/lib/relay/discovery.ts"; do
-  rg -qF -- "'${public_path}'" "${reader}" ||
-    fail "${reader} does not read the advertisement from ${public_path}, the path ${control} serves"
-done
+# A session crosses a relay only if BOTH ends are on it: the Worker serves the advertisement, and the
+# browser and the daemon each read it. In 4.x this held `packages/pwa/.../hosted-relay.ts` and
+# `packages/daemon/src/lib/relay/discovery.ts` to the path the Worker serves; in 5.0 both readers are the
+# Connections plugin's (its app and daemon halves), and the check returns with that port.
+pending+=("both ends reading the advertisement from HOSTED_RELAY_PUBLIC_PATH (the Connections app and daemon halves)")
 
 # ─── every build route must carry the same directory to ask ───────────────────────────────────
 #
-# The Nix defect existed because GoReleaser supplied a per-build daemon define while Nix did not.
-# The directory now belongs to @ferretry/relay, imported by both ends and therefore compiled by
-# every route. The runtime variable remains an override; no release-only define may return.
-daemon_environment="packages/daemon/src/adapters/system/runtime-environment.ts"
-daemon_default="packages/relay/src/lib/hosted-directory-default.ts"
-daemon_default_export="./hosted-directory-default.ts"
-pwa_build="packages/pwa/vite.config.ts"
+# The Nix defect existed because GoReleaser supplied a per-build daemon define while Nix did not. The
+# directory is ONE source constant, compiled into both ends by every build route. The runtime variable
+# remains an override; no release-only define may return.
 release_compile="scripts/release/compile.sh"
 origin_script="scripts/ci/relay-directory-origin.sh"
 origin='https://ferretry-hosted-relay.kirinnee97.workers.dev'
 
-rg -qF -- "HOSTED_RELAY_DIRECTORY_ORIGIN = '${origin}'" "${daemon_default}" ||
-  fail "${daemon_default} must own the hosted relay discovery origin"
-for reader in "${daemon_environment}" "${pwa_build}"; do
-  rg -qF -- 'HOSTED_RELAY_DIRECTORY_ORIGIN' "${reader}" ||
-    fail "${reader} must import the shared hosted relay directory default"
-done
-rg -qF -- "${daemon_default_export}" "packages/relay/src/lib/index.ts" ||
-  fail "packages/relay/src/lib/index.ts must export the shared hosted relay directory default"
+if ((relay_ported)); then
+  [[ "$("${origin_script}" 2>/dev/null)" == "${origin}" ]] ||
+    fail "exactly one module must export HOSTED_RELAY_DIRECTORY_ORIGIN = '${origin}' (${origin_script})"
+else
+  pending+=("the one HOSTED_RELAY_DIRECTORY_ORIGIN source constant (the Connections contract)")
+fi
 rg -qF -- 'compiled source default' "${origin_script}" ||
   fail "${origin_script} must report the source default instead of resolving a per-build value"
 if rg -qF -- '__FY_RELAY_DIRECTORY__' "${release_compile}"; then
@@ -318,17 +338,18 @@ fi
 
 # ─── the link store: manual-only deploy, three SQLite classes, one operator route ─────────────
 
-ls_hosted_config="packages/relay/wrangler.link-store.hosted.json"
-ls_byo_config="packages/relay/wrangler.link-store.jsonc"
+ls_hosted_config="${link_store_dir}/wrangler.link-store.hosted.json"
+ls_byo_config="${link_store_dir}/wrangler.link-store.jsonc"
 ls_workflow=".github/workflows/link-store-hosted.yaml"
-ls_worker="packages/relay/src/adapters/link-store-worker.ts"
-ls_contract="packages/relay/src/lib/link-store.ts"
+ls_worker="${link_store_dir}/src/adapters/link-store-worker.ts"
+ls_contract="${link_store_dir}/src/lib/link-store.ts"
 
-jq -e '.vars.LINK_STORE_MODE == "hosted" and (.vars | has("LINK_STORE_DAEMON_IDS") | not)' "${ls_hosted_config}" >/dev/null 2>&1 ||
-  fail "${ls_hosted_config}: must be LINK_STORE_MODE hosted and carry no LINK_STORE_DAEMON_IDS"
-jq -e '.workers_dev == false and .main == "src/adapters/link-store-worker.ts"' "${ls_hosted_config}" >/dev/null 2>&1 ||
-  fail "${ls_hosted_config}: workers_dev must be false and main the link-store Worker entry"
-jq -e '
+if ((link_store_ported)); then
+  jq -e '.vars.LINK_STORE_MODE == "hosted" and (.vars | has("LINK_STORE_DAEMON_IDS") | not)' "${ls_hosted_config}" >/dev/null 2>&1 ||
+    fail "${ls_hosted_config}: must be LINK_STORE_MODE hosted and carry no LINK_STORE_DAEMON_IDS"
+  jq -e '.workers_dev == false and .main == "src/adapters/link-store-worker.ts"' "${ls_hosted_config}" >/dev/null 2>&1 ||
+    fail "${ls_hosted_config}: workers_dev must be false and main the link-store Worker entry"
+  jq -e '
   ([.durable_objects.bindings[] | {name, class_name}] | sort_by(.name)) == [
     {name: "LINK_BUNDLE", class_name: "LinkBundleDurableObject"},
     {name: "LINK_OWNER", class_name: "LinkOwnerDurableObject"},
@@ -338,20 +359,23 @@ jq -e '
     == ["LinkBundleDurableObject", "LinkOwnerDurableObject", "LinkStoreControlDurableObject"] and
   ([.migrations[] | keys[]] | index("new_classes") | not)
 ' "${ls_hosted_config}" >/dev/null 2>&1 ||
-  fail "${ls_hosted_config}: bind exactly the three link-store classes and declare them as new_sqlite_classes"
-if rg -q '"rate_limit|ratelimits|unsafe' "${ls_hosted_config}"; then
-  fail "${ls_hosted_config}: per-IP limits are a control-object bucket so they stay operator-configurable; add no rate-limit binding"
+    fail "${ls_hosted_config}: bind exactly the three link-store classes and declare them as new_sqlite_classes"
+  if rg -q '"rate_limit|ratelimits|unsafe' "${ls_hosted_config}"; then
+    fail "${ls_hosted_config}: per-IP limits are a control-object bucket so they stay operator-configurable; add no rate-limit binding"
+  fi
+  for class_name in LinkBundleDurableObject LinkOwnerDurableObject LinkStoreControlDurableObject; do
+    rg -q "\b${class_name}\b" "${ls_worker}" ||
+      fail "${ls_worker} does not export ${class_name}, which ${ls_hosted_config} deploys"
+    rg -q "\b${class_name}\b" "${ls_byo_config}" ||
+      fail "${ls_byo_config} does not deploy ${class_name}"
+  done
+  rg -q '"LINK_STORE_DAEMON_IDS"' "${ls_byo_config}" ||
+    fail "${ls_byo_config} must keep LINK_STORE_DAEMON_IDS; it is the whole upload access control of a self-hosted store"
+  rg -q '"LINK_STORE_MODE": "self-hosted"' "${ls_byo_config}" ||
+    fail "${ls_byo_config} must say LINK_STORE_MODE self-hosted"
+else
+  pending+=("the link-store Worker configuration and classes (${link_store_dir})")
 fi
-for class_name in LinkBundleDurableObject LinkOwnerDurableObject LinkStoreControlDurableObject; do
-  rg -q "\b${class_name}\b" "${ls_worker}" ||
-    fail "${ls_worker} does not export ${class_name}, which ${ls_hosted_config} deploys"
-  rg -q "\b${class_name}\b" "${ls_byo_config}" ||
-    fail "${ls_byo_config} does not deploy ${class_name}"
-done
-rg -q '"LINK_STORE_DAEMON_IDS"' "${ls_byo_config}" ||
-  fail "${ls_byo_config} must keep LINK_STORE_DAEMON_IDS; it is the whole upload access control of a self-hosted store"
-rg -q '"LINK_STORE_MODE": "self-hosted"' "${ls_byo_config}" ||
-  fail "${ls_byo_config} must say LINK_STORE_MODE self-hosted"
 
 # A deploy restarts the store, so the workflow runs only when an operator starts it: no push, schedule
 # or workflow_run trigger, ever.
@@ -364,23 +388,34 @@ rg -qF -- "inputs.confirm_deploy == true" "${ls_workflow}" ||
 mask_count="$(rg -cF -- '::add-mask::$operator_token' "${ls_workflow}" || true)"
 [[ ${mask_count} -ge 2 ]] ||
   fail "${ls_workflow} must mask the derived operator bearer in both the deploy and control jobs"
-ls_operator_path="$(rg -o "LINK_STORE_OPERATOR_PATH = '[^']*'" "${ls_contract}" | sed "s/.*'\\(.*\\)'/\\1/" | head -n 1)"
-[[ -n ${ls_operator_path} ]] || fail "${ls_contract} no longer declares LINK_STORE_OPERATOR_PATH"
-rg -qF -- "${ls_operator_path}" "${ls_workflow}" ||
-  fail "${ls_workflow} does not address ${ls_operator_path}, the route LINK_STORE_OPERATOR_PATH declares"
+if ((link_store_ported)); then
+  ls_operator_path="$(rg -o "LINK_STORE_OPERATOR_PATH = '[^']*'" "${ls_contract}" | sed "s/.*'\\(.*\\)'/\\1/" | head -n 1)"
+  [[ -n ${ls_operator_path} ]] || fail "${ls_contract} no longer declares LINK_STORE_OPERATOR_PATH"
+  rg -qF -- "${ls_operator_path}" "${ls_workflow}" ||
+    fail "${ls_workflow} does not address ${ls_operator_path}, the route LINK_STORE_OPERATOR_PATH declares"
+else
+  pending+=("the link-store operator route (${ls_contract})")
+fi
 rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.jsonc' "${ci_build}" ||
   fail "${ci_build} must compile the self-hosted link-store configuration"
 rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.hosted.json' "${ci_build}" ||
   fail "${ci_build} must compile the hosted link-store configuration"
 
-# ─── what a protocol merge can do to the hosted Worker ────────────────────────────────────────
+# ─── what a contract merge can do to the hosted Worker ────────────────────────────────────────
+#
+# A DEPLOY DROPS EVERY LIVE SESSION, and the fingerprint skip (scripts/ci/relay-bundle-fingerprint.sh) only
+# helps if unrelated code stays out of the bundle. In 4.x the Worker imported three names from
+# `@ferretry/protocol`, which therefore had to declare "sideEffects": false; in 5.0 every workspace package
+# a Worker can import declares it, so the same rule is held over all of them.
+for manifest in packages/*/package.json packages/core/*/package.json packages/plugins/*/package.json; do
+  [[ -f ${manifest} ]] || continue
+  [[ ${manifest} == packages/cli/package.json || ${manifest} == packages/app/package.json ]] && continue
+  jq -e '.sideEffects == false' "${manifest}" >/dev/null 2>&1 ||
+    fail "${manifest} must declare \"sideEffects\": false, or every change to it can redeploy the hosted relay"
+done
 
-# A DEPLOY DROPS EVERY LIVE SESSION, and the fingerprint skip only helps if unrelated code stays out
-# of the bundle. The relay imports three names from `@ferretry/protocol`'s barrel; without this flag
-# the bundler kept every protocol module, so on 2026-10-19 five protocol-only merges (session,
-# fleet-catalog, daemon-update, models…) changed the fingerprint and redeployed the relay five times
-# in an hour. With it, only the modules those names reach are bundled.
-jq -e '.sideEffects == false' packages/protocol/package.json >/dev/null 2>&1 ||
-  fail 'packages/protocol/package.json must declare "sideEffects": false, or every protocol change redeploys the hosted relay'
-
-echo "✅ Hosted relay configuration, deploy workflow and control-plane projections agree"
+if [[ ${#pending[@]} -gt 0 ]]; then
+  echo "⏳ PENDING until the Worker ports land (not checked):"
+  printf '   - %s\n' "${pending[@]}"
+fi
+echo "✅ Hosted relay deploy workflow, build routes and control-plane projections agree"

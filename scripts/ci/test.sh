@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Tests run offline (packages/daemon/tests/support/offline-environment.ts preloads the same): no booted
-# daemon follows the published model catalog, asks the hosted relay directory or checks for updates.
+# Tests run offline: no booted daemon follows the published model catalog, asks the hosted relay directory
+# or checks for updates.
 export FY_MODEL_CATALOG="${FY_MODEL_CATALOG:-off}"
 export FY_LOCAL_MODELS="${FY_LOCAL_MODELS:-off}"
 export FY_RELAY_DIRECTORY_ORIGIN="${FY_RELAY_DIRECTORY_ORIGIN:-off}"
@@ -18,9 +18,24 @@ cd "${root_dir}"
 
 ./scripts/ci/setup.sh
 ./scripts/validate/pinned-toolchain.sh
+# The hosts and the test host import the git-ignored generated registries: regenerate them first.
+./scripts/local/gen.sh
+
+# How many test files a tier directory holds across every workspace package (any depth).
+tier_file_count() {
+  find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -path "*/tests/$1/*" -print | wc -l | tr -d ' '
+}
+# A whole-tier run (realworld, SIT) with no test file at all says so and passes, out loud in the job summary:
+# Bun fails a run that matches nothing, and a tier nobody has written yet is not a failing tier. The day the
+# first file lands, the tier runs it.
+empty_tier() {
+  echo "⚠️ the $1 tier holds no test file yet (packages/**/tests/$2/): nothing to run" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 0
+}
 if [[ ${mode} == "realworld" ]]; then
   # THE REALWORLD TIER (bunfig.realworld.toml): machine-dependent tests, swept like every other tier but
   # with no ledger, no quarantine and no rerun — a failure here files an issue, it never gates anything.
+  [[ "$(tier_file_count realworld)" -eq 0 ]] && empty_tier realworld realworld
   mkdir -p coverage/realworld
   echo "🧪 Running realworld tests..."
   set +e
@@ -48,6 +63,7 @@ fi
 if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
   [[ -n ${CLI_BIN:-} ]] && chmod +x "${CLI_BIN}"
+  [[ "$(tier_file_count sit)" -eq 0 ]] && empty_tier sit sit
   echo "🧪 Running sit tests..."
   SIT_DRIVER=binary ./scripts/test/swept.sh bun test --config=bunfig.sit.toml "${timeout_flag[@]}"
   echo "✅ sit tests passed"
@@ -94,7 +110,7 @@ if [[ -n ${group} ]]; then
   # config/test-groups.json). The owner's last resort for a group that cannot get under two minutes by
   # faster tests alone: no new job, every test still blocking. See run_processes below for the isolation.
   processes="$(jq -r --arg mode "${mode}" --arg group "${group}" '.[$mode][] | select(.name == $group) | .processes // 1' "${groups}")"
-  # A group that has been cleaned of leaks turns the DOM leak guard from "clean up" into "fail" (packages/pwa/tests/support/dom-leak-guard.ts).
+  # A group that has been cleaned of leaks turns a DOM leak guard from "clean up" into "fail" (the app's test preload reads it).
   [[ "$(jq -r --arg mode "${mode}" --arg group "${group}" '.[$mode][] | select(.name == $group) | .leakGuard // false' "${groups}")" == "true" ]] && export FY_DOM_LEAK_GUARD=enforce
 fi
 

@@ -136,6 +136,20 @@ describe('fy words', () => {
     should(fake.io.stderr()).equal('');
   });
 
+  it('should fall back to the compiled words when the daemon’s glossary cannot be read', async () => {
+    const fake = fakeWorld({ registry });
+    fake.transport.replies.push(new Error('connection dropped'));
+    should(await runFy(['words', 'task'], fake.world)).equal(0);
+    should(fake.io.stdout()).containEql('Board');
+    should(fake.io.stderr()).containEql('compiled into this fy');
+  });
+
+  it('should say the glossary is empty when nothing declares a word', async () => {
+    const { world, io } = fakeWorld({ registry: registryOf(), probe: down });
+    should(await runFy(['words'], world)).equal(0);
+    should(io.stdout()).equal('the glossary is empty\n');
+  });
+
   it('should exit 1 for a word nobody owns', async () => {
     const { world, io } = fakeWorld({ registry, probe: down });
     should(await runFy(['words', 'zzz'], world)).equal(1);
@@ -191,6 +205,14 @@ describe('fy doctor', () => {
     should(titles).containEql('daemon-only plugins');
   });
 
+  it('should warn, not fail, when the daemon answers but its plugin list cannot be read', () => {
+    const findings = diagnose({ ...base, inventory: { unreadable: 'refused' } });
+    should(findings.find(finding => finding.title === 'plugins')).match({
+      state: 'warn',
+      detail: 'the plugin list could not be read: refused',
+    });
+  });
+
   it('S60 should warn about FY_TOKEN in a pane', () => {
     const findings = diagnose({ ...base, environment: { FY_SESSION_ID: 's', FY_TOKEN: 'x' } });
     should(findings.find(finding => finding.title === 'credential')?.state).equal('warn');
@@ -207,6 +229,29 @@ describe('fy doctor', () => {
     should(await runFy(['doctor'], healthy.world)).equal(0);
     const broken = fakeWorld({ registry: registryOf(boardEntry()), probe: down });
     should(await runFy(['doctor'], broken.world)).equal(1);
+  });
+
+  it('should keep going when the plugin list cannot be read or a half will not load', async () => {
+    // Arrange
+    const unloadable = { ...boardEntry(), load: async () => Promise.reject(new Error('cannot load')) };
+    const unreadable = fakeWorld({
+      registry: registryOf(unloadable),
+      readInventory: async () => Promise.reject(new Error('list refused')),
+    });
+    const notAnError = fakeWorld({
+      registry: registryOf(boardEntry()),
+      readInventory: async () => Promise.reject('plain text' as never),
+    });
+
+    // Act
+    const code = await runFy(['doctor'], unreadable.world);
+    await runFy(['doctor'], notAnError.world);
+
+    // Assert
+    should(code).equal(1);
+    should(unreadable.io.stdout()).containEql('list refused');
+    should(unreadable.io.stdout()).containEql('cannot load');
+    should(notAnError.io.stdout()).containEql('plain text');
   });
 });
 
@@ -228,6 +273,15 @@ describe('fy daemon', () => {
     });
     await runFy(['daemon', 'status'], world);
     should(io.stdout()).containEql('board differ or are missing: restart the daemon with `fy daemon restart`');
+  });
+
+  it('should still report the daemon when its plugin list cannot be read', async () => {
+    const error = fakeWorld({ readInventory: async () => Promise.reject(new Error('list refused')) });
+    should(await runFy(['daemon', 'status'], error.world)).equal(0);
+    should(error.io.stdout()).containEql('plugins  not read: list refused');
+    const text = fakeWorld({ readInventory: async () => Promise.reject('plain text' as never) });
+    await runFy(['daemon', 'status'], text.world);
+    should(text.io.stdout()).containEql('plugins  not read: plain text');
   });
 
   it('should exit 1 when the daemon is not running, naming the start command', async () => {

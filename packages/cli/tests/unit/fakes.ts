@@ -64,17 +64,6 @@ export const boardManifest = definePlugin({
   },
 });
 
-export const wiringManifest = definePlugin({
-  id: 'wiring',
-  title: 'Wiring',
-  version: '5.0.0',
-  api: 5,
-  core: false,
-  kinds: ['command'],
-  needs: {},
-  actions: { cli: [verb('wiring show')] },
-});
-
 export function entry(
   manifest: Manifest,
   contract: string,
@@ -154,6 +143,8 @@ export interface FakeWorldOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly launch?: LaunchResult;
   readonly transport?: RecordingTransport;
+  /** Reads the inventory through the connection, instead of answering `inventory`. */
+  readonly readInventory?: () => Promise<PluginInventory>;
 }
 
 export function fakeWorld(options: FakeWorldOptions = {}): {
@@ -180,7 +171,11 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     launch: async () => options.launch ?? { started: true, baseUrl: probe.baseUrl },
     connect: async ({ asOwner }): Promise<Connection> => {
       connects.push({ asOwner });
-      return { baseUrl: probe.baseUrl, transport, inventory: new InventoryCache(async () => inventory) };
+      return {
+        baseUrl: probe.baseUrl,
+        transport,
+        inventory: new InventoryCache(options.readInventory ?? (async () => inventory)),
+      };
     },
   };
   return { world, io, transport, connects };

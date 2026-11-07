@@ -36,6 +36,9 @@ gates)
   ./scripts/ci/pre-commit.sh "${part}"
   ;;
 build) ./scripts/ci/build-checks.sh ;;
+# The repository tooling's own tests: the registry generator and the 5.0 checks' planted-violation tests
+# (scripts/gen/tests, scripts/gen/today). They live outside packages/, so no unit group collects them.
+scripts) ./scripts/test/swept.sh bun test ./scripts/ ;;
 unit-*) ./scripts/ci/test.sh unit "${part#unit-}" ;;
 *) echo "❌ Unknown quick part: ${part}" >&2 && exit 2 ;;
 esac

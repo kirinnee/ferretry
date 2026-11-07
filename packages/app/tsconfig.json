@@ -3,8 +3,10 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["bun"]
+    // `vite/client` types what the bundler resolves: the stylesheet import in `src/main.tsx`, asset URLs and
+    // `import.meta.env`.
+    "types": ["bun", "vite/client"]
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "scripts", "vite.config.ts"],
   "exclude": []
 }

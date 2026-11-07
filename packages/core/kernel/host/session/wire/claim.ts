@@ -76,10 +76,7 @@ export function claimContextForChallenge(
   return { daemonId, relayHost: configuredRelayHost, challenge };
 }
 
-export async function signRendezvousClaim(
-  identity: DaemonSigningKey,
-  context: ClaimContext,
-): Promise<RendezvousClaim> {
+export async function signRendezvousClaim(identity: DaemonSigningKey, context: ClaimContext): Promise<RendezvousClaim> {
   const signature = await identity.sign(claimTranscript(context));
   return { publicKeySpki: identity.publicKeySpki, signature };
 }
