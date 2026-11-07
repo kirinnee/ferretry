@@ -18,7 +18,7 @@ import { type FerretDetails } from '../../../contract/index.ts';
  */
 
 /** Deepest lineage the ancestor walk follows; a longer chain is treated as not an ancestor (today's value). */
-export const MAX_LINEAGE_DEPTH = 16;
+const MAX_LINEAGE_DEPTH = 16;
 
 export interface FerretFilter {
   readonly state?: FerretState;

@@ -4,14 +4,14 @@ import type { FerretId, FerretRecord, SitrepLine } from '../../../../../contract
 import { FerretRegistry } from '../../../../../daemon/lib/registry/registry.ts';
 import {
   EXCERPT_WITHHELD,
-  mapBounded,
   oneLine,
   SUBTREE_ENDED_WINDOW_MS,
   SUBTREE_LAST_LINE_MAX,
   type SubtreePorts,
   SubtreeService,
   subtreeMembers,
-} from '../../../../../daemon/lib/session/pack/index.ts';
+} from '../../../../../daemon/lib/session/pack/subtree.ts';
+import { mapBounded } from '../../../../../daemon/lib/session/pack/bounded.ts';
 
 const NOW = epochMs('2026-11-07T12:00:00.000Z' as Instant);
 const at = (minutesAgo: number): Instant => instantFromEpochMs(NOW - minutesAgo * 60_000);

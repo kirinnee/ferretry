@@ -29,7 +29,7 @@ import {
  * different context window, and was told nothing. Making the refusal a VALUE the compiler forces
  * every caller to answer is what stops a future call site quietly reintroducing the substitution.
  */
-export type ResolvedModel =
+type ResolvedModel =
   | { readonly kind: 'resolved'; readonly model: string; readonly source: DisplayModelSource }
   | {
       readonly kind: 'unservable';
@@ -80,11 +80,7 @@ const unservableReason = (account: CoreAccount, requested: string): string => {
  * refused: it is what the harness says it is running, and a report about a live session is ground
  * truth rather than something this daemon is entitled to argue with.
  */
-export function resolveDisplayModel(
-  account: CoreAccount,
-  requestedModel?: string,
-  observedModel?: string,
-): ResolvedModel {
+function resolveDisplayModel(account: CoreAccount, requestedModel?: string, observedModel?: string): ResolvedModel {
   const observed = trimmed(observedModel);
   if (observed !== undefined) return { kind: 'resolved', model: observed, source: 'harness' };
   const requested = trimmed(requestedModel);
@@ -121,15 +117,15 @@ export const defaultStartWaitPolicy: StartWaitPolicy = {
   slowAccountIds: [],
 };
 
-export function startWaitMs(policy: StartWaitPolicy, accountId: string): number {
+function startWaitMs(policy: StartWaitPolicy, accountId: string): number {
   const slow = policy.slowAccountIds.includes(accountId);
   const wanted = slow ? Math.max(policy.baseMs, policy.slowMs) : policy.baseMs;
   return Math.max(0, Math.min(policy.ceilingMs, wanted));
 }
 /** Context accounting for a session, from whatever evidence about its model exists. */
 
-export const DEFAULT_CONTEXT_WINDOW = 200_000;
-export const EXTENDED_CONTEXT_WINDOW = 1_000_000;
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+const EXTENDED_CONTEXT_WINDOW = 1_000_000;
 
 /** The marker an extended-context model carries in a configured id but never in a reported one. */
 const EXTENDED_MARKER = '[1m]';
@@ -153,7 +149,7 @@ function overrideFor(model: string | undefined, overrides: Readonly<Record<strin
   return undefined;
 }
 
-export interface ContextWindowEvidence {
+interface ContextWindowEvidence {
   /** The model the session was configured with — the only string carrying the extended marker. */
   readonly configuredModel?: string;
   /** The model the harness reports it is actually serving; the marker is always stripped from it. */
@@ -163,30 +159,6 @@ export interface ContextWindowEvidence {
   /** Real windows for models whose id says nothing about their size, matched by substring. */
   readonly overrides?: Readonly<Record<string, number>>;
   /** The window the account's model catalog declares for this model. Below the selector, above the default. */
-  readonly declaredWindow?: number;
-}
-
-/**
- * The context evidence recorded by one live session.
- *
- * The configured model and the harness observation must stay separate.  In
- * particular, a wrapper's configured alias can say `opus` while the harness
- * reports the served `glm-5.2`; model-window overrides apply to the latter.
- * Conversely, the `[1m]` selector is retained only in configuration, not in
- * the harness report.  Keeping this projection here prevents callers that
- * compare live and target windows (notably move) from dropping either
- * half of that evidence.
- */
-export interface SessionContextWindowEvidence {
-  /** The model selected in the session's configuration. */
-  readonly configuredModel?: string;
-  /** The configured fallback when the selected model was not recorded. */
-  readonly modelHint?: string;
-  /** The model the harness says it is actually serving. */
-  readonly observedModel?: string;
-  /** A context window the harness reports about the running session. */
-  readonly reportedWindow?: number;
-  readonly overrides?: Readonly<Record<string, number>>;
   readonly declaredWindow?: number;
 }
 
@@ -202,7 +174,7 @@ export interface SessionContextWindowEvidence {
  * the served model alone gives every extended session the default window and inflates its context
  * percentage roughly fivefold. Both strings are checked.
  */
-export function contextWindowFor(evidence: ContextWindowEvidence): number {
+function contextWindowFor(evidence: ContextWindowEvidence): number {
   return knownContextWindow(evidence) ?? DEFAULT_CONTEXT_WINDOW;
 }
 
@@ -213,7 +185,7 @@ export function contextWindowFor(evidence: ContextWindowEvidence): number {
  * must not. A session whose model states no size is not a 200k session — it is one whose size is
  * unknown, and a percentage computed against the default would be a guess presented as a measurement.
  */
-export function knownContextWindow(evidence: ContextWindowEvidence): number | undefined {
+function knownContextWindow(evidence: ContextWindowEvidence): number | undefined {
   const reported = positive(evidence.reportedWindow);
   if (reported !== undefined) return reported;
 
@@ -230,36 +202,8 @@ export function knownContextWindow(evidence: ContextWindowEvidence): number | un
   return positive(evidence.declaredWindow);
 }
 
-/**
- * Resolves the context window of an existing session from its persisted
- * configuration and live harness evidence.
- *
- * This is intentionally a small semantic wrapper over {@link contextWindowFor}
- * rather than making every consumer remember which model string is configured
- * and which one is observed.  A move is destructive, so getting this
- * distinction wrong can incorrectly permit a smaller target window.
- */
-export function contextWindowForSession(evidence: SessionContextWindowEvidence): number {
-  return contextWindowFor(sessionWindowEvidence(evidence));
-}
-
-function sessionWindowEvidence(evidence: SessionContextWindowEvidence): ContextWindowEvidence {
-  return {
-    configuredModel: evidence.configuredModel ?? evidence.modelHint,
-    servedModel: evidence.observedModel,
-    ...(evidence.reportedWindow === undefined ? {} : { reportedWindow: evidence.reportedWindow }),
-    ...(evidence.overrides === undefined ? {} : { overrides: evidence.overrides }),
-    ...(evidence.declaredWindow === undefined ? {} : { declaredWindow: evidence.declaredWindow }),
-  };
-}
-
-/** {@link contextWindowForSession} without the default: the window this session's evidence states, or `undefined`. */
-export function knownContextWindowForSession(evidence: SessionContextWindowEvidence): number | undefined {
-  return knownContextWindow(sessionWindowEvidence(evidence));
-}
-
 /** How much of the window a transcript has consumed, as a percentage that never exceeds 100. */
-export function contextPercent(usedTokens: number, window: number): number {
+function contextPercent(usedTokens: number, window: number): number {
   if (!Number.isFinite(usedTokens) || usedTokens <= 0 || window <= 0) return 0;
   return Math.min(100, Math.round((usedTokens / window) * 1000) / 10);
 }
@@ -285,7 +229,7 @@ function titleCaseCallsign(callsign: string): string {
  * `[Team] [Team] …`. With no task title the bracketed callsign alone is the name, and with neither
  * the answer is nothing — passing an empty `--name` is worse than passing none.
  */
-export function harnessDisplayName(config: { readonly teammate?: string; readonly name?: string }): string | undefined {
+function harnessDisplayName(config: { readonly teammate?: string; readonly name?: string }): string | undefined {
   const task = config.name?.trim();
   const teammate = config.teammate?.trim();
   const prefix = teammate === undefined || teammate.length === 0 ? undefined : `[${titleCaseCallsign(teammate)}]`;
@@ -302,7 +246,7 @@ export function harnessDisplayName(config: { readonly teammate?: string; readonl
  * interactive session does not inherit: it is the human's own terminal, and an agent merely typed
  * the command — parenting the human under whichever agent invoked it renders the tree backwards.
  */
-export function resolveParent(request: {
+function resolveParent(request: {
   readonly explicit?: string;
   readonly environmentSessionId?: string;
   readonly mode: 'auto' | 'interactive';
@@ -323,7 +267,7 @@ const MAX_TMUX_NAME_LENGTH = 80;
  * truncated to make room for it rather than the whole name being cut at the end — the source cut
  * last, which could remove the suffix entirely and collide two different windows of one session.
  */
-export function shellSafeSessionName(prefix: string, id: string, suffix: string): string {
+function shellSafeSessionName(prefix: string, id: string, suffix: string): string {
   const safe = (value: string): string => value.replace(/[^a-zA-Z0-9_-]/g, '-');
   const tail = `-${safe(suffix)}`;
   const head = `${safe(prefix)}-`;
@@ -338,7 +282,7 @@ export function shellSafeSessionName(prefix: string, id: string, suffix: string)
  * surface labels the session with the teammate it belongs to while the harness still guarantees
  * uniqueness — a fixed name would collide across relaunches of one session.
  */
-export function remoteControlArgs(
+function remoteControlArgs(
   config: { readonly harness: HarnessKind; readonly teammate?: string; readonly id: string },
   prefix: string,
 ): readonly string[] {

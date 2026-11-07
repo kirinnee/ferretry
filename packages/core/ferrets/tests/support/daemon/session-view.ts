@@ -4,7 +4,7 @@ import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../..
  * TEST FIXTURE: today's `sessionView` from `packages/daemon/tests/unit/runtime/mounts/support.ts` (placed kernel), cut
  * verbatim so the Ferrets session tests that only need one view do not depend on the kernel's mount support file.
  */
-export const AT = '2024-05-01T10:00:00.000Z';
+const AT = '2024-05-01T10:00:00.000Z';
 
 /**
  * One session view, with only the fields a case cares about spelled out.

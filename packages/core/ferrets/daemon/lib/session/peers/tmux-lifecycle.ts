@@ -10,7 +10,7 @@
 // --- lib/tmux/address.ts ----------------------------------------------------------------------------------------
 
 /** Input errors are values at the boundary rather than unsafe tmux target strings. */
-export class TmuxAddressError extends Error {
+class TmuxAddressError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'TmuxAddressError';
@@ -56,7 +56,7 @@ export interface TmuxCommandPort {
   execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult>;
 }
 
-export interface PaneMetadata {
+interface PaneMetadata {
   readonly dead: boolean;
   readonly exitCode?: number;
   readonly cursorX?: number;

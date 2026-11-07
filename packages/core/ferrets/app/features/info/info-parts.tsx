@@ -84,28 +84,6 @@ export function InfoChip({
   );
 }
 
-/** A percentage as a bar, its value said as a meter. */
-export function InfoMeter({ label, percent }: { readonly label: string; readonly percent: number }) {
-  const value = Math.max(0, Math.min(100, Math.round(percent)));
-  return (
-    <span className="fy-info-meter-row">
-      {/* biome-ignore lint/a11y/useSemanticElements: a native <meter> cannot be drawn from the theme tokens on every engine */}
-      <span
-        aria-label={label}
-        aria-valuemax={100}
-        aria-valuemin={0}
-        aria-valuenow={value}
-        className="fy-info-meter"
-        data-high={value >= 85 ? '' : undefined}
-        role="meter"
-      >
-        <span style={{ width: `${value}%` }} />
-      </span>
-      <strong>{value}%</strong>
-    </span>
-  );
-}
-
 /** A note where a tab has nothing yet, or cannot know. */
 export function InfoNote({ children }: { readonly children: ReactNode }) {
   return <p className="fy-info-note">{children}</p>;

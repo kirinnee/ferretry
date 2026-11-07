@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { SYSTEM_CALLSIGN_MAX_SEQUENCE } from '../../../../daemon/lib/protocol/system-callsigns.ts';
-import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/index.ts';
+import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/file-system-callsign-counters.ts';
 import type { FileSystemPort } from '../../../../daemon/lib/ports.ts';
 import { issuerOver, MemoryCounters } from './system-callsigns-support.ts';
 

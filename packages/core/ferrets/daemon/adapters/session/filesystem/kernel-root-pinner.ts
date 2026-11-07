@@ -49,7 +49,7 @@ function refusalError(refusal: string, cwd: string): FsError {
 }
 
 /** The viewer's refusal for a root folder the kernel refused or could not reach; an unknown failure is returned as is. */
-export function pinRefusal(error: unknown, cwd: string): unknown {
+function pinRefusal(error: unknown, cwd: string): unknown {
   if (error instanceof FsError) return error;
   const refusal = refusalOf(error);
   if (refusal !== undefined) return refusalError(refusal, cwd);

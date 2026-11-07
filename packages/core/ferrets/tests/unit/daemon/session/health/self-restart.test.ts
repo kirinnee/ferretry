@@ -2,15 +2,17 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   decideSelfRestart,
-  defaultSessionHealthSettings,
   selfRestartMessage,
   SelfRestartCoordinator,
   unhealablePreview,
-  type SelfRestartHandler,
   type SelfRestartInput,
+} from '../../../../../daemon/lib/session/health/self-restart.ts';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import {
+  type SelfRestartHandler,
   type SelfRestartStamp,
   type SelfRestartStampStore,
-} from '../../../../../daemon/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/types.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const NOW = '2026-07-31T10:00:00.000Z';

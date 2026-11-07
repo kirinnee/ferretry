@@ -23,7 +23,7 @@ const SECTIONS = [
 ] as const;
 
 /** One per-ferret section, in the order the wrapper appends them. */
-export interface InstructionSection {
+interface InstructionSection {
   readonly id: 'hypermedia' | 'pack' | 'agenda' | 'lessons';
   readonly label: string;
   readonly on: boolean;

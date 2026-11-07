@@ -38,7 +38,7 @@ export interface ActionsPanelProps {
   readonly client: LiveFerretsClient;
   /** The ferret the panel sits beside. */
   readonly subject: string | undefined;
-  /** What this connection may change. The default is yes: the daemon refuses an act this device may not do. */
+  /** What this connection may change. Always yes today, as in today's PWA, which never computed it: the daemon refuses an act this device may not do. */
   readonly canControl?: boolean;
   /** More actions, from features that add them (same shape as the core ones). */
   readonly contributions?: readonly FerretActionContribution<CoreActionContext>[];

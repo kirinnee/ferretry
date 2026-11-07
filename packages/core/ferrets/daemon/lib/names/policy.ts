@@ -1,7 +1,7 @@
 import { type AgentAddressCandidate, resolveAgentAddress } from '../protocol/agent-address.ts';
 import { MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
 
-/** A callsign in its one stored spelling, or `null` (the contract owns the rule: names.json stores it). */
+/** A callsign in its one stored spelling, or `null` (the contract owns the rule). */
 export { normalizeCallsign } from '../../../contract/state.ts';
 
 export function formatSessionTitle(raw: string): string {

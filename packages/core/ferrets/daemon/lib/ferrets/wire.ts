@@ -37,7 +37,7 @@ const StartIdentitySchema = z.strictObject({
   prompt: z.string().max(200_000).optional(),
 });
 
-export const StartBodySchema = z
+const StartBodySchema = z
   .strictObject({ ...StartIdentitySchema.shape, ...StartOptionsSchema.shape })
   .superRefine((value, context) => {
     // Today's start was a union on `mode`: `auto` carries a prompt, `interactive` may start bare.
@@ -48,7 +48,7 @@ export const StartBodySchema = z
       context.addIssue({ code: 'custom', message: '--auto picks the runtime; do not name one', path: ['runtime'] });
   });
 
-export const RenameBodySchema = z
+const RenameBodySchema = z
   .strictObject({ name: FerretNameSchema.optional(), title: FerretTitleSchema.optional() })
   .superRefine((value, context) => {
     if (value.name === undefined && value.title === undefined)
@@ -56,10 +56,10 @@ export const RenameBodySchema = z
   });
 
 /** Today's `StopSessionRequestSchema`. */
-export const StopBodySchema = z.strictObject({ reason: z.string().min(1).optional() });
+const StopBodySchema = z.strictObject({ reason: z.string().min(1).optional() });
 
 /** Today's `ResumeSessionRequestSchema`. */
-export const ResumeBodySchema = z.strictObject({ message: z.string().min(1).optional() });
+const ResumeBodySchema = z.strictObject({ message: z.string().min(1).optional() });
 
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);

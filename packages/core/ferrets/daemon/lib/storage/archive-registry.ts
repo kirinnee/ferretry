@@ -12,7 +12,7 @@ import type { ArchivedSession } from '../session/archive/registry.ts';
 import { type SessionId, tryParseSessionId } from '../session-id.ts';
 
 /** The registry body; the contract owns it as `ArchiveFile`'s schema. */
-export const ArchiveRegistryValueSchema = ArchiveDocumentSchema;
+const ArchiveRegistryValueSchema = ArchiveDocumentSchema;
 export type ArchiveRegistryValue = z.infer<typeof ArchiveRegistryValueSchema>;
 
 /** Parses the stored value; `undefined` for one that is damaged. An absent document is an empty registry. */

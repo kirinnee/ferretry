@@ -13,7 +13,7 @@ export type { HarnessKind } from './fleet.ts';
 // --- packages/fleet/src/lib/manifest.ts (the published row, as a type) ------------------------------------------
 
 /** The lane an account runs in. Declared, never derived from a name. */
-export type AccountMode = 'interactive' | 'auto';
+type AccountMode = 'interactive' | 'auto';
 
 /** What a model catalog says about a model, carried so a picker reads one record. */
 interface CatalogModelFacts {
@@ -28,7 +28,7 @@ interface CatalogModelFacts {
  * One model an account may be asked to serve. `available` is mandatory and explicit — there is no
  * "probably fine" default — and an unavailable entry must say why.
  */
-export type FleetManifestModel =
+type FleetManifestModel =
   | (CatalogModelFacts & { readonly id: string; readonly displayName?: string; readonly available: true })
   | (CatalogModelFacts & {
       readonly id: string;
@@ -38,7 +38,7 @@ export type FleetManifestModel =
     });
 
 /** The catalog a runtime's models came from (docs/model-catalog.md). */
-export interface FleetManifestModelCatalog {
+interface FleetManifestModelCatalog {
   readonly id: string;
   readonly label: string;
   /** Whether the provider serves ids beyond the list, so a picker offers "Custom id…". */
@@ -46,7 +46,7 @@ export interface FleetManifestModelCatalog {
 }
 
 /** One published account row, as the fleet's manifest declares it. */
-export interface FleetManifestAccount {
+interface FleetManifestAccount {
   readonly id: string;
   readonly kind: HarnessKind;
   readonly mode: AccountMode;

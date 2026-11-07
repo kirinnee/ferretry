@@ -34,7 +34,7 @@ export interface DaemonHealthSnapshot {
   readonly supervisesWarden: boolean;
 }
 
-export interface SessionHealthInventory {
+interface SessionHealthInventory {
   observe(): Promise<DaemonHealthSnapshot>;
 }
 
@@ -45,7 +45,7 @@ export interface SessionHealthInventory {
  * consistency pass and the exit observer each used to walk the whole state home for themselves, on
  * every tick, which on a large fleet behind endpoint security is most of what a tick costs.
  */
-export interface SessionSurveyPort {
+interface SessionSurveyPort {
   survey(): Promise<readonly SurveyedSession[]>;
 }
 
@@ -59,7 +59,7 @@ export interface ConsistencyPassPort {
 }
 
 /** The two repairs a self-check is allowed to perform. Both must be safe to run on a healthy fleet. */
-export interface SessionHealthRepairPort {
+interface SessionHealthRepairPort {
   startMonitor(id: string): Promise<void>;
   rearmWarden(): Promise<void>;
 }
@@ -83,7 +83,7 @@ export interface SessionExitPort {
   settle(observation: SessionExitObservation, transition: ExitedSessionTransition): Promise<boolean>;
 }
 
-export interface SessionHealthEventSink {
+interface SessionHealthEventSink {
   emit(event: SessionHealthEvent): Promise<void>;
 }
 

@@ -43,7 +43,7 @@ export interface LivenessSample {
 // ── today's warden/liveness-monitor.ts ──────────────────────────────────────────────────────────
 
 /** Today's `WardenSessionStatus` (`warden/types.ts`): the session status itself. */
-export type WardenSessionStatus = SessionStatus;
+type WardenSessionStatus = SessionStatus;
 
 export interface LivenessTarget {
   readonly id: string;
@@ -76,7 +76,7 @@ export interface PaneProcess {
 }
 
 /** What the liveness look keeps of a pane's processes: whether work runs, which, and a leftover browser. */
-export interface PaneWorkSummary {
+interface PaneWorkSummary {
   /** A tool command is running under the pane. */
   readonly toolCommand: boolean;
   /** Identity of the youngest running tool command — a different one starts a new episode. */
