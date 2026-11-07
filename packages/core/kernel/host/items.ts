@@ -47,14 +47,22 @@ export async function installedItemReach(
 ): Promise<ItemReachOf> {
   const byKind = new Map<string, { programs: Set<string>; hosts: Set<string> }>();
   for (const plugin of installed) {
+    if (!isPlainRelative(plugin.id) || plugin.id.includes('/')) continue;
     for (const item of plugin.items ?? []) {
       if (!isPlainRelative(item.file)) continue;
       const path = `${home}/state/kernel/plugins/${plugin.id}/${item.file}`;
       let value: unknown;
       try {
+        // Resolve every parent before reading permission-bearing data. A lexical child (including a plugin
+        // folder itself) may be a link to another install or somewhere outside the installed-plugin root.
+        const plugins = await fs.realpath(`${home}/state/kernel/plugins`);
+        const root = await fs.realpath(`${home}/state/kernel/plugins/${plugin.id}`);
+        if (root !== `${plugins}/${plugin.id}`) continue;
+        const resolved = await fs.realpath(path);
+        if (!resolved.startsWith(`${root}/`)) continue;
         const info = await fs.lstat(path);
         if (info?.kind !== 'file' || info.size > ITEM_FILE_MAX_BYTES) continue;
-        value = parseYaml(await fs.readText(path));
+        value = parseYaml(await fs.readText(resolved));
       } catch {
         continue;
       }
