@@ -296,14 +296,35 @@ describe('G22 G25 G131 one proof cannot carry a second act', () => {
     expect(taken()).toBe(0);
   });
 
-  test('G131 the relayed admin token is governed: it needs a proof, and a claimed one is taken once', () => {
+  test('G131 the relayed admin token is governed: with no device behind it nothing can be claimed, so it holds and is refused', () => {
     const w = world();
     const taken = countTaken(w);
-    w.stepUps.grant(subjectOf('admin'));
     const relayed = standingOf(w, { bearer: ADMIN, arrival: carried(), headers: { [CLIENT_HEADER]: 'cli' } });
     expect(judgeLooseningWrite(judgement('owner-tools', relayed))).toBe('hold');
     expect(claimOwnerOnly(callOf(relayed), 'update this machine')?.status).toBe(403);
     expect(taken()).toBe(0);
+  });
+
+  test('G131 one proof buys one loosening whichever object carries it: a { ...standing } copy gets no second apply', () => {
+    const { w, taken, standings } = deviceWithOneProof();
+    const [standing] = standings(1) as [CallStanding];
+    expect(judgeLooseningWrite(judgement('owner-viewer', standing))).toBe('apply');
+    expect(judgeLooseningWrite(judgement('owner-viewer', { ...standing }))).toBe('hold');
+    expect(judgeLooseningWrite(judgement('owner-viewer', { ...standing, request: {} } as CallStanding))).toBe('hold');
+    expect(taken()).toBe(1);
+    // A new proof on a new admission is a new claim function: it is not shut out by the first one's mark.
+    w.stepUps.grant(subjectOf('phone'));
+    expect(judgeLooseningWrite(judgement('owner-viewer', standingOf(w, { device: 'phone' })))).toBe('apply');
+  });
+
+  test('G22 G131 a proof an owner-only act claimed buys one loosening on a { ...standing } copy too, not two', () => {
+    const { taken, standings } = deviceWithOneProof();
+    const [update] = standings(1) as [CallStanding];
+    expect(claimOwnerOnly(callOf(update), 'turn on automatic updates')).toBeUndefined();
+    expect(judgeLooseningWrite(judgement('owner-viewer', { ...update }))).toBe('apply');
+    expect(judgeLooseningWrite(judgement('owner-viewer', update))).toBe('hold');
+    expect(judgeLooseningWrite(judgement('owner-viewer', { ...update }))).toBe('hold');
+    expect(taken()).toBe(1);
   });
 
   test('G131 the marker is Gate-private: no contract export names it', () => {
