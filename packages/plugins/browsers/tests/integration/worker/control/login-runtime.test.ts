@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { bunSpawn } from '@ferretry/kernel/host';
 import should from 'should';
 import {
   type BrowserDisplayPort,
@@ -601,7 +602,9 @@ describe('NodeBrowserLoginRuntime', () => {
   it('should spawn with a narrow environment and drop the variables the host does not set', async () => {
     // `browserEnvironment` deliberately produces a SPARSE record, and an absent variable must be absent
     // in the child rather than the string "undefined".
-    // Arrange
+    // Arrange — the spawn has NO base environment: `loginProcesses()` hands the children this process's whole one
+    // (the real Xvfb and `--version` runs inherit it), so on a host that sets LANG the "absent" variable would come
+    // back from the base, and this test would pass or fail with the machine it ran on.
     const root = await workspace();
     const record = join(root, 'env.txt');
     const executable = await script(
@@ -610,7 +613,7 @@ describe('NodeBrowserLoginRuntime', () => {
       `printf 'HOME=%s\\n' "$HOME" > '${record}'\nprintf 'LANG=[%s]\\n' "$LANG" >> '${record}'`,
     );
     const subject = new NodeBrowserLoginRuntime({
-      processes: PROCESSES,
+      processes: { ...PROCESSES, spawn: bunSpawn({}) },
       display: fakeDisplay(),
       secretsDirectory: root,
     });
