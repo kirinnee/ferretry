@@ -10,7 +10,7 @@ import { DevicesChanged } from '@ferretry/plugin-access/contract';
 import { createConfigFiles } from '../../../../../core/kernel/host/config/service.ts';
 import { createMemoryHostFs } from '../../../../../core/kernel/host/state/memory-fs.ts';
 import type { Log } from '@ferretry/kernel/contract';
-import type { MaskSource } from '../../../contract/pending-mask-source.ts';
+import type { MaskSource } from '@ferretry/core-vault/contract';
 import accounts from '../../../daemon/index.ts';
 import type { AccountsConfig } from '../../../contract/index.ts';
 import {
