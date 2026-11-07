@@ -31,11 +31,8 @@ import {
   type AgendaActionRequest,
   type AgendaId,
   type AgendaResponse,
-} from '../../protocol/agenda.ts';
-import { classifyConfigPath, type ConfigPending } from '@ferretry/protocol';
-import { ApiError } from '../../api/error.ts';
-import type { ApiResponse } from '../../api/http.ts';
-import type { RouteContext } from '../../api/route.ts';
+} from '../protocol/agenda.ts';
+import { ApiError, type ApiResponse, type CallContext } from '@ferretry/kernel/contract';
 import {
   type AgendaActor,
   type AgendaService,
@@ -46,12 +43,23 @@ import {
   confirmationPremise,
   confirmsChange,
   type RaiseAgendaRequest,
-} from '../../agenda/index.ts';
-import { type AuditedRoutesSubsystem, recordHandlerAct } from '../../audit/index.ts';
-import type { ConfigFilesService } from '../../config-files/index.ts';
-import { heldEditRefusal, spendHeldEditProof } from './config-files.ts';
+} from '../agenda/index.ts';
 
-/** The held configuration edits, as a confirmation needs them. */
+type RouteContext = CallContext;
+
+/** A configuration edit held for the owner (today's `ConfigPending`): the file, its digest, each loosening in words. */
+export interface ConfigPending {
+  readonly path: string;
+  readonly etag: string;
+  readonly changes: readonly string[];
+}
+
+/**
+ * The held configuration edits, as a confirmation needs them. This is Asks' side of a seam: the owner of the
+ * configuration files implements it, with today's `configFilesConfirmations` over the config files and the security
+ * log, and today's `heldEditRefusal` / `spendHeldEditProof` as `refusal` / `spendProof`. No build wires it yet, so
+ * `--confirms` is refused.
+ */
 export interface AgendaConfigPort {
   /** The edit to `path` waiting for the owner, or `undefined` when none is. */
   held(path: string): Promise<ConfigPending | undefined>;
@@ -61,34 +69,17 @@ export interface AgendaConfigPort {
   discard(path: string, etag: string): Promise<boolean>;
   /** Writes one act on the held edit to `path` to the security log, naming the file's kind. Never throws. */
   record(context: RouteContext, act: HeldEditAct, path: string, outcome: 'succeeded' | 'refused'): Promise<void>;
+  /**
+   * Today's `heldEditRefusal`: the file's capability on `configure`, never an agent's credential, and for Allow from
+   * a governed device a passkey proved for this act. The refusal to answer with, or `undefined` when allowed.
+   */
+  refusal(context: RouteContext, path: string, act: 'confirm' | 'discard'): ApiResponse | undefined;
+  /** Today's `spendHeldEditProof`: an Allow that confirmed spends the passkey proof it was let through on. */
+  spendProof(context: RouteContext): void;
 }
 
 /** What the security log calls an act on a held edit, as the Settings door's rule names it. */
-type HeldEditAct = 'config-confirm' | 'config-discard';
-
-/** The file's KIND for the security log — never its name or path, which a person chose. */
-function kindOf(path: string): { readonly kind: string } | Record<string, never> {
-  const address = classifyConfigPath(path);
-  return address === undefined ? {} : { kind: address.kind };
-}
-
-/** The port over this daemon's configuration files. */
-export function configFilesConfirmations(
-  service: Pick<ConfigFilesService, 'status' | 'confirm' | 'discard'>,
-  audit: AuditedRoutesSubsystem,
-): AgendaConfigPort {
-  return {
-    held: async path => (await service.status()).pending.find(pending => pending.path === path),
-    confirm: async (path, etag) => await service.confirm(path, etag),
-    discard: async (path, etag) => await service.discard(path, etag),
-    record: async (context, act, path, outcome) =>
-      await recordHandlerAct(audit, context, {
-        event: 'fleet.configured',
-        outcome,
-        detail: { action: act, via: 'agenda', ...kindOf(path) },
-      }),
-  };
-}
+export type HeldEditAct = 'config-confirm' | 'config-discard';
 
 type AddRequest = Extract<AgendaActionRequest, { action: 'add' }>;
 
@@ -165,7 +156,7 @@ export async function answerConfirmation(
   if (decision === undefined) return undefined;
   if (decision === 'deny') return { proceed: true, note: confirmationNote(decision, path, answer.note) };
   const act: HeldEditAct = decision === 'allow' ? 'config-confirm' : 'config-discard';
-  const refused = heldEditRefusal(context, path, decision === 'allow' ? 'confirm' : 'discard');
+  const refused = config.refusal(context, path, decision === 'allow' ? 'confirm' : 'discard');
   if (refused !== undefined) {
     await config.record(context, act, path, 'refused');
     return { proceed: false, response: refused };
@@ -174,7 +165,7 @@ export async function answerConfirmation(
   // Recorded as the act's own outcome: a held edit that moved on changed nothing, so it is a refusal.
   await config.record(context, act, path, done ? 'succeeded' : 'refused');
   if (done) {
-    if (decision === 'allow') spendHeldEditProof(context);
+    if (decision === 'allow') config.spendProof(context);
     return { proceed: true, note: confirmationNote(decision, path, answer.note) };
   }
   // The held edit moved on since the card was raised: never act on a change the owner did not see.

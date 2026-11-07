@@ -14,12 +14,22 @@ import { z } from 'zod';
 
 // ─── ids ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** An ask's id, `A12`, as `!A12` references it (today's `AgendaIdSchema`). */
+/**
+ * An ask's id, `A12`, as `!A12` references it (today's `AgendaIdSchema`). Numbered per ferret's board (lead decision
+ * #13): unique only together with its ferret, so every call names an {@link AskRef}.
+ */
 export type AskId = Brand<string, 'AskId'>;
 export const AskIdSchema = z
   .string()
   .regex(/^A[1-9][0-9]*$/u, 'an ask id is A and a number')
   .transform(value => value as AskId);
+
+/** Which ask: its ferret's board and its id there (lead decision #13). */
+export const AskRefSchema = z.strictObject({
+  ferret: z.string().min(1).max(128),
+  id: AskIdSchema,
+});
+export type AskRef = z.infer<typeof AskRefSchema>;
 
 /** An answer's own id: each answer is applied once, by this id (§7.4 rule 4). */
 export type AnswerId = Brand<string, 'AnswerId'>;
@@ -149,6 +159,8 @@ export type Answerer = z.infer<typeof AnswererSchema>;
 /** One answer. Never a secret: an input card's value goes to its target through the Vault, never through here. */
 export const AskAnswerSchema = z.strictObject({
   id: AnswerIdSchema,
+  /** The board the ask is on: `ask` is unique only with it. */
+  ferret: z.string().min(1).max(128),
   ask: AskIdSchema,
   source: SourceKeySchema,
   entry: EntryIdSchema,
@@ -201,16 +213,17 @@ export interface AskFilter {
  * and applies each once BY ANSWER ID.
  */
 export interface AsksApi {
-  raise(ask: AskDraft): Promise<AskId>;
+  /** Raised on the board of the draft's `ferret`, which a raise therefore names. */
+  raise(ask: AskDraft): Promise<AskRef>;
   /** A notice: something the owner should know; no answer. Idempotent by `(source, entry)`. */
-  notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskId>;
+  notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef>;
   answers(
     filter: { readonly source: SourceKey; readonly entry?: EntryId },
     since?: string,
   ): Promise<readonly AskAnswer[]>;
-  close(id: AskId, reason: CloseReason): Promise<void>;
+  close(ask: AskRef, reason: CloseReason): Promise<void>;
   open(filter: AskFilter): Promise<readonly AskSummary[]>;
-  get(id: AskId): Promise<AskSummary | undefined>;
+  get(ask: AskRef): Promise<AskSummary | undefined>;
 }
 
 export const AsksPort = definePort<AsksApi>('asks');
@@ -223,6 +236,12 @@ export interface AskSourceSpec {
   readonly title: string;
   /** Whether an answer carries form values. */
   readonly form: boolean;
+  /**
+   * Applies the owner's answer in the source's own world BEFORE the ask is marked answered (lead decision #13; the
+   * #1552 order: the card moves first). A refusal leaves the ask open and is the sentence the owner is told. Absent,
+   * an answer is owed and the source reconciles on {@link AskAnswered}.
+   */
+  readonly apply?: (answer: AskAnswer) => Promise<'applied' | { readonly refused: string }>;
 }
 
 export const AskSources = defineHook('ask.sources', {
@@ -234,11 +253,20 @@ export const AskSources = defineHook('ask.sources', {
 /** An answer landed. A wake-up: the source reads `answers` and applies each once. */
 export const AskAnswered = defineEvent(
   'asks.answered',
-  z.strictObject({ askId: AskIdSchema, answerId: AnswerIdSchema, source: SourceKeySchema, entry: EntryIdSchema }),
+  z.strictObject({
+    ferret: z.string().min(1).max(128),
+    askId: AskIdSchema,
+    answerId: AnswerIdSchema,
+    source: SourceKeySchema,
+    entry: EntryIdSchema,
+  }),
 );
 
 /** An ask was raised, closed or changed. A wake-up for views (Agenda, sitrep). */
-export const AsksChanged = defineEvent('asks.changed', z.strictObject({ askId: AskIdSchema, state: AskStateSchema }));
+export const AsksChanged = defineEvent(
+  'asks.changed',
+  z.strictObject({ ferret: z.string().min(1).max(128), askId: AskIdSchema, state: AskStateSchema }),
+);
 
 // ─── state ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

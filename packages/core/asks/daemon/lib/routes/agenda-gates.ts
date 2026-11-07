@@ -7,15 +7,65 @@
  * ferret, a lead over its sub-ferret and the daemon are refused here; the state machine records a card ask's answer
  * only from the daemon itself, once this check passed and the card moved.
  */
-import type { AgendaId, AgendaResponse } from '../../protocol/agenda.ts';
-import type { BoardReopenAttachments } from '@ferretry/protocol';
-import { grantRefusalCode } from '../../api/capability.ts';
-import { ApiError } from '../../api/error.ts';
-import type { ApiActor } from '../../api/actor.ts';
-import type { RouteContext } from '../../api/route.ts';
-import type { AgendaActor, AgendaMutation } from '../../agenda/index.ts';
-import type { BoardCaller, GateAnswer, GateAnswerOutcome, GateRefusal } from '../../board/index.ts';
-import { boardCaller } from './board.ts';
+import { type ApiActor, cap, grantRefusalCode, parseActor } from '@ferretry/core-gate/contract';
+import { ApiError, type CallContext } from '@ferretry/kernel/contract';
+import type { AgendaActor, AgendaMutation } from '../agenda/index.ts';
+import type { AgendaId, AgendaResponse } from '../protocol/agenda.ts';
+import type { BoardReopenAttachments } from '../protocol/board-refs.ts';
+
+type RouteContext = CallContext;
+
+/**
+ * Who the board records a card move as (today's `BoardCaller`). This is Asks' side of the card-ask seam: the Board
+ * plugin's `card` source answers through it once the card-ask flow is settled (an `apply(answer)` before an ask is
+ * answered is still a lead decision), and until then no build wires it, so a card ask is answered like any choice.
+ */
+export type BoardCaller =
+  | { readonly kind: 'owner'; readonly via?: 'admin-token' }
+  | { readonly kind: 'ferret'; readonly sessionId: string }
+  | { readonly kind: 'daemon'; readonly sessionId?: string };
+
+/** Why the board refused to move the card (today's `GateRefusal`). */
+export interface GateRefusal {
+  readonly code: 'forbidden' | 'invalid' | 'moved-on' | 'not-moved';
+  readonly message: string;
+}
+
+/** What answering a card ask came to (today's `GateAnswerOutcome`). */
+export type GateAnswerOutcome =
+  | { readonly handled: false }
+  | { readonly handled: true; readonly mutation: AgendaMutation }
+  | { readonly handled: true; readonly refused: GateRefusal };
+
+/** One answer to a card ask, as the agenda route received it (today's `GateAnswer`). */
+export interface GateAnswer {
+  readonly sessionId: string;
+  readonly id: AgendaId;
+  readonly response: AgendaResponse;
+  readonly note?: string | null | undefined;
+  /** Files the owner brings with a Not good, uploaded to THIS agenda's ferret. */
+  readonly attachments?: BoardReopenAttachments | undefined;
+  readonly actor: AgendaActor;
+  readonly caller: BoardCaller;
+  /** The paired device that answered, by its holder id; absent for the owner at the machine. */
+  readonly holder?: string | undefined;
+  readonly cardAsk?: string | undefined;
+  readonly askVersion?: number | undefined;
+  /** Whether this human may move the card at all, asked only once the answer is known to be to a card ask. */
+  readonly permitted?: () => string | undefined;
+}
+
+/** Today's `boardCaller`: a ferret by its own actor, the admin token as itself, a paired device as the owner. */
+const boardCaller = (actor: ApiActor | undefined): BoardCaller => {
+  const parsed = parseActor(actor ?? '');
+  if (parsed.kind === 'ferret' && parsed.id !== undefined && parsed.id !== '')
+    return { kind: 'ferret', sessionId: parsed.id };
+  // The host's admin token with no ferret's credential: the owner at the machine OR a ferret that left its
+  // session out, and the daemon cannot tell which. It keeps the owner's authority and is RECORDED as the token.
+  if (parsed.kind === 'admin-cli' || parsed.kind === 'admin-ui') return { kind: 'owner', via: 'admin-token' };
+  if (parsed.kind === 'device' && parsed.id !== undefined && parsed.id !== '') return { kind: 'owner' };
+  throw new ApiError(403, 'only a ferret in its own pane or the owner may write to the board', 'forbidden');
+};
 
 /** The gate items, as the agenda route needs them. */
 export interface AgendaGatePort {
@@ -23,7 +73,7 @@ export interface AgendaGatePort {
   isGate(sessionId: string, id: AgendaId): Promise<boolean>;
 }
 
-const FLEET_USE = { capability: 'fleet', axis: 'use' } as const;
+const FLEET_USE = cap('fleet', 'use');
 
 const STATUS: Readonly<Record<GateRefusal['code'], readonly [number, string]>> = {
   forbidden: [403, 'forbidden'],
@@ -87,7 +137,6 @@ export async function answerGate(
     readonly response: AgendaResponse;
     readonly note?: string | undefined;
     readonly actor: AgendaActor;
-    readonly gate?: true | undefined;
     readonly cardAsk?: string | undefined;
     readonly askVersion?: number | undefined;
     readonly attachments?: BoardReopenAttachments | undefined;
@@ -96,6 +145,7 @@ export async function answerGate(
   const outcome = await gates.answer({
     ...answer,
     caller: callerOf(answer.actor, context.actor),
+    ...(context.credential?.tokenClass === 'device' ? { holder: String(context.credential.principal.holder) } : {}),
     // Asked only of a gate item, and only before the board is touched.
     permitted: () => (answer.actor.kind === 'human' ? refusedDevice(context)?.message : undefined),
   });

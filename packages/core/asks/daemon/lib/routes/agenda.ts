@@ -4,7 +4,7 @@ import {
   type AgendaSeenResponse,
   AgendaSeenRequestSchema,
   type AgendaVersionList,
-} from '../../protocol/agenda-versions.ts';
+} from '../protocol/agenda-versions.ts';
 import {
   type AgendaActionRequest,
   AgendaActionRequestSchema,
@@ -13,14 +13,19 @@ import {
   type AgendaSnapshot,
   isMachineAgendaId,
   readsAgendaHeaders,
-} from '../../protocol/agenda.ts';
-import { agendaListSnapshot } from '../../protocol/agenda-list.ts';
-import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+} from '../protocol/agenda.ts';
+import { agendaListSnapshot } from '../protocol/agenda-list.ts';
+import { type ApiActor, isHumanAdminActor, parseActor } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  jsonResponse,
+  queryValue,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import { parseBody } from './body.ts';
 import {
   type AgendaActor,
   type AgendaFailure,
@@ -29,7 +34,7 @@ import {
   type EditAgendaPatch,
   isAgendaSessionId,
   lintAgendaWriting,
-} from '../../agenda/index.ts';
+} from '../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
 import { type AgendaGatePort, answerGate, refuseGateDismissal } from './agenda-gates.ts';
 
@@ -80,7 +85,7 @@ const AGENDA_ERROR_STATUS: Readonly<Record<AgendaErrorCode, number>> = {
  */
 export function agendaActor(actor: ApiActor | undefined): AgendaActor {
   const { kind, id } = parseActor(actor ?? '');
-  if (kind === 'peer' && id !== undefined && isAgendaSessionId(id)) {
+  if (kind === 'ferret' && id !== undefined && isAgendaSessionId(id)) {
     return { kind: 'agent', sessionId: id, name: null };
   }
   // Host admin actors and a registry-resolved paired device are the two human
@@ -99,9 +104,9 @@ function refusal(error: AgendaFailure): never {
 
 /** The path's session id, decoded. `decodeParameter` refuses a traversal or a separator, so a
  *  crafted id can never address a ledger outside the session tree. */
-function pathSessionId(context: RouteContext): string {
-  const decoded = decodeParameter(context.params.get('sessionId') ?? '');
-  if (decoded === undefined) throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
+function pathSessionId(context: Call): string {
+  const decoded = decodeParameter(context.params.get('ferretId') ?? '');
+  if (decoded === undefined) throw new ApiError(400, 'the ferret id in the path is not usable', 'invalid_session_id');
   if (isMachineAgendaId(decoded))
     throw new ApiError(404, 'the machine agenda is available only at /v1/machine/agenda', 'not-found');
   return decoded;
@@ -110,7 +115,7 @@ function pathSessionId(context: RouteContext): string {
 type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 
 /** List projection is opt-in: only a reader that names channel 2 gets resolved headers on list reads. */
-export const servedAgendaListSnapshot = (context: RouteContext, snapshot: AgendaSnapshot) =>
+export const servedAgendaListSnapshot = (context: Call, snapshot: AgendaSnapshot) =>
   readsAgendaHeaders(context.request.headers) ? agendaListSnapshot(snapshot) : snapshot;
 
 /**
@@ -130,7 +135,7 @@ async function withReplies(replies: HeldReplies, sessionId: string, snapshot: Ag
   };
 }
 
-async function list(agenda: AgendaService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
+async function list(agenda: AgendaService, replies: HeldReplies, context: Call): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
   return result.ok
@@ -146,7 +151,7 @@ async function list(agenda: AgendaService, replies: HeldReplies, context: RouteC
 async function sendReplies(
   agenda: AgendaService,
   replies: AgendaRepliesSubsystem,
-  context: RouteContext,
+  context: Call,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const before = await agenda.list(sessionId);
@@ -156,18 +161,18 @@ async function sendReplies(
 }
 
 /** The item id in the path, or a 400: the same grammar the board uses. */
-export function pathItemId(context: RouteContext): string {
+export function pathItemId(context: Call): string {
   const parsed = AgendaIdSchema.safeParse(decodeParameter(context.params.get('id') ?? ''));
   if (!parsed.success) throw new ApiError(400, 'the item id in the path is not an agenda id', 'invalid');
   return parsed.data;
 }
 
 /** Which device is asking: a paired device by its id, and the owner at the host by one name for all of its tools. */
-const deviceOf = (context: RouteContext): string =>
-  context.credential?.tokenClass === 'device' ? context.credential.deviceId : 'host';
+const deviceOf = (context: Call): string =>
+  context.credential?.tokenClass === 'device' ? String(context.credential.principal.holder) : 'host';
 
 /** `GET …/agenda/:id/versions`: every version kept of an item, oldest first, and this device's last seen. */
-async function listVersions(agenda: AgendaService, context: RouteContext): Promise<ApiResponse> {
+async function listVersions(agenda: AgendaService, context: Call): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const id = pathItemId(context);
   const result = await agenda.versionsOf(sessionId, id, deviceOf(context));
@@ -184,7 +189,7 @@ async function listVersions(agenda: AgendaService, context: RouteContext): Promi
 }
 
 /** `GET …/agenda/:id/versions/:version`: one version of an item in full. */
-async function getVersion(agenda: AgendaService, context: RouteContext): Promise<ApiResponse> {
+async function getVersion(agenda: AgendaService, context: Call): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const id = pathItemId(context);
   const version = Number(decodeParameter(context.params.get('version') ?? ''));
@@ -196,7 +201,7 @@ async function getVersion(agenda: AgendaService, context: RouteContext): Promise
 }
 
 /** `PUT …/agenda/:id/seen`: this device opened the item at this version. */
-async function markSeen(agenda: AgendaService, context: RouteContext): Promise<ApiResponse> {
+async function markSeen(agenda: AgendaService, context: Call): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const id = pathItemId(context);
   const { version } = await parseBody(context.request, AgendaSeenRequestSchema);
@@ -216,11 +221,11 @@ async function markSeen(agenda: AgendaService, context: RouteContext): Promise<A
  */
 async function apply(
   agenda: AgendaService,
-  notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
+  notifications: DirectNotificationSubsystem | undefined,
   replies: HeldReplies,
   config: AgendaConfigPort | undefined,
   gates: AgendaGatePort | undefined,
-  context: RouteContext,
+  context: Call,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AgendaActionRequestSchema);
@@ -234,7 +239,6 @@ async function apply(
           response: request.response,
           note: request.note,
           actor,
-          gate: request.gate,
           cardAsk: request.cardAsk,
           askVersion: request.askVersion,
           attachments: request.attachments,
@@ -335,10 +339,8 @@ async function apply(
  * Undefined when the push store cannot be read: the item is raised either way, and a count nobody can
  * vouch for is no count at all.
  */
-async function enrolledDevices(
-  notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
-): Promise<number | undefined> {
-  return await notifications.enrolledDevices().catch(() => undefined);
+async function enrolledDevices(notifications: DirectNotificationSubsystem | undefined): Promise<number | undefined> {
+  return await notifications?.enrolledDevices().catch(() => undefined);
 }
 
 /** The fields an edit request names, with the ones it leaves out left out. */
@@ -347,136 +349,69 @@ function editPatch(request: Extract<AgendaActionRequest, { action: 'edit' }>): E
   return patch;
 }
 
+/** One call to an agenda route: the request, its params, and the standing Gate put on it. */
+type Call = CallContext;
+
 /**
- * `admin` scope on both, which is the conservative reading of a surface a warden can currently only
- * reach through the daemon's own trusted reconciliation. A route that says nothing about scope is
- * admin-only by construction, so widening this later is a deliberate edit rather than an oversight.
+ * The ferret agenda's route handlers, keyed as the manifest declares them (descriptors copied from today's
+ * `agendaRoutes`: `operator` minimum, `noStore`, the item reads and the answer open to `any` caller, the seen mark
+ * and Send now to a `person`). `/v1/sessions/:sessionId/agenda…` moved to `/v1/ferrets/:ferretId/agenda…` (§1.4).
  *
- * `noStore` because an agenda board is the thing a human is watching to know whether a session is
- * waiting on them; a cached one shows a question that has already been answered.
+ * `noStore` because an agenda board is the thing a human is watching to know whether a ferret is waiting on them; a
+ * cached one shows a question that has already been answered.
  */
 export function agendaRoutes(
   agenda: AgendaService,
-  notifications: DirectNotificationSubsystem,
   replies: AgendaRepliesSubsystem,
+  /** How many devices a raise's push could reach; absent, a raise says nothing about it. */
+  notifications?: DirectNotificationSubsystem,
   /** The held configuration edits an item may confirm; absent, `--confirms` is refused. */
   config?: AgendaConfigPort,
-  /** The card gates an item may ask about; absent, a gate item is answered like any other choice. */
+  /** The card asks an answer may move a card through; absent, a card ask is answered like any other choice. */
   gates?: AgendaGatePort,
-): readonly ApiRoute[] {
-  const handleList: ApiRoute['handle'] = async context => await list(agenda, replies, context);
-  const handleApply: ApiRoute['handle'] = async context =>
-    await apply(agenda, notifications, replies, config, gates, context);
-  const handleReplies: ApiRoute['handle'] = async context => await sendReplies(agenda, replies, context);
-  const routes: readonly ApiRoute[] = [
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/agenda/:id',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => {
-        const result = await agenda.list(pathSessionId(context));
-        if (!result.ok) return refusal(result.error);
-        const snapshot = result.value;
-        const id = pathItemId(context);
-        const item = snapshot.items.find(item => item.id === id) ?? snapshot.resolved.find(item => item.id === id);
-        if (item === undefined) throw new ApiError(404, 'agenda item not found', 'not-found');
-        return jsonResponse(item);
-      },
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/agenda',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: handleList,
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/agenda',
-      minimum: 'operator',
-      caller: 'any',
-      // No capability: the board is gated by who acts (docs/grants.md). But an answer that confirms a held
-      // configuration change asks that file's grant, so the boundary hands the handler the caller's standing.
-      consultsGrants: true,
-      noStore: true,
-      handle: handleApply,
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/agenda/:id/conversation',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => {
-        const query = AgendaConversationQuerySchema.safeParse({
-          index: queryValue(context.request, 'index'),
-          offset: queryValue(context.request, 'offset'),
-          version: queryValue(context.request, 'version'),
-        });
-        if (!query.success)
-          throw new ApiError(
-            400,
-            'conversation cursor must use nonnegative integers and a positive version',
-            'invalid',
-          );
-        const result = await agenda.conversationOf(
-          pathSessionId(context),
-          pathItemId(context),
-          query.data.index,
-          query.data.offset,
-          query.data.version,
-        );
-        return result.ok ? jsonResponse(AgendaConversationPageSchema.parse(result.value)) : refusal(result.error);
-      },
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/agenda/:id/versions',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await listVersions(agenda, context),
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/agenda/:id/versions/:version',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await getVersion(agenda, context),
-    },
-    {
-      method: 'PUT',
-      path: '/v1/sessions/:sessionId/agenda/:id/seen',
-      minimum: 'operator',
-      caller: 'person',
-      noStore: true,
-      handle: async context => await markSeen(agenda, context),
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/agenda/replies',
-      minimum: 'operator',
-      caller: 'person',
-      noStore: true,
-      handle: handleReplies,
-    },
-  ];
-  // Every session agenda route passes here, including future item reads. Refuse the reserved ledger before
-  // parsing a body or cursor, consulting gates, delivering replies, or touching any service.
-  const guarded = new Map<ApiRoute['handle'], ApiRoute['handle']>();
-  return routes.map(route => {
-    let handle = guarded.get(route.handle);
-    if (handle === undefined) {
-      handle = async context => {
-        pathSessionId(context);
-        return await route.handle(context);
-      };
-      guarded.set(route.handle, handle);
-    }
-    return { ...route, handle };
-  });
+) {
+  // Every ferret agenda route passes here, including future item reads. Refuse the reserved ledger before parsing
+  // a body or cursor, consulting gates, delivering replies, or touching any service.
+  const guarded =
+    (handle: (call: Call) => Promise<ApiResponse>): RouteHandler =>
+    async call => {
+      pathSessionId(call);
+      return await handle(call);
+    };
+  return {
+    'GET /v1/ferrets/:ferretId/agenda/:id': guarded(async call => {
+      const result = await agenda.list(pathSessionId(call));
+      if (!result.ok) return refusal(result.error);
+      const snapshot = result.value;
+      const id = pathItemId(call);
+      const item = snapshot.items.find(item => item.id === id) ?? snapshot.resolved.find(item => item.id === id);
+      if (item === undefined) throw new ApiError(404, 'agenda item not found', 'not-found');
+      return jsonResponse(item);
+    }),
+    'GET /v1/ferrets/:ferretId/agenda': guarded(async call => await list(agenda, replies, call)),
+    'POST /v1/ferrets/:ferretId/agenda': guarded(
+      async call => await apply(agenda, notifications, replies, config, gates, call),
+    ),
+    'GET /v1/ferrets/:ferretId/agenda/:id/conversation': guarded(async call => {
+      const query = AgendaConversationQuerySchema.safeParse({
+        index: queryValue(call.request, 'index'),
+        offset: queryValue(call.request, 'offset'),
+        version: queryValue(call.request, 'version'),
+      });
+      if (!query.success)
+        throw new ApiError(400, 'conversation cursor must use nonnegative integers and a positive version', 'invalid');
+      const result = await agenda.conversationOf(
+        pathSessionId(call),
+        pathItemId(call),
+        query.data.index,
+        query.data.offset,
+        query.data.version,
+      );
+      return result.ok ? jsonResponse(AgendaConversationPageSchema.parse(result.value)) : refusal(result.error);
+    }),
+    'GET /v1/ferrets/:ferretId/agenda/:id/versions': guarded(async call => await listVersions(agenda, call)),
+    'GET /v1/ferrets/:ferretId/agenda/:id/versions/:version': guarded(async call => await getVersion(agenda, call)),
+    'PUT /v1/ferrets/:ferretId/agenda/:id/seen': guarded(async call => await markSeen(agenda, call)),
+    'POST /v1/ferrets/:ferretId/agenda/replies': guarded(async call => await sendReplies(agenda, replies, call)),
+  } as const;
 }
