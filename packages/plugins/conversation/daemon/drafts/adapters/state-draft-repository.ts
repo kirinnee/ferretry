@@ -1,8 +1,5 @@
-import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import { DRAFTS_STATE as DRAFTS_FILE } from '../../../contract/index.ts';
-
-/** The drafts file is opaque bytes to the state port. */
-const DRAFTS_STATE = DRAFTS_FILE as unknown as StateFileDef<string, Uint8Array>;
+import type { StatePort } from '@ferretry/kernel/contract';
+import { DRAFTS_STATE } from '../../../contract/index.ts';
 import {
   type AgendaId,
   AgendaIdSchema,
@@ -61,7 +58,7 @@ export class StateDraftRepository implements SharedDraftRepository {
   }
 
   async #read(ferret: string): Promise<DraftsDocument> {
-    const read = await this.state.read<Uint8Array>(DRAFTS_STATE, ferret);
+    const read = await this.state.read(DRAFTS_STATE, ferret);
     const bytes = read.ok ? read.value : undefined;
     const document: DraftsDocument = { items: {} };
     if (bytes === undefined) return document;
@@ -84,6 +81,6 @@ export class StateDraftRepository implements SharedDraftRepository {
   }
 
   async #write(ferret: string, document: DraftsDocument): Promise<void> {
-    await this.state.write<Uint8Array>(DRAFTS_STATE, new TextEncoder().encode(JSON.stringify(document)), ferret);
+    await this.state.write(DRAFTS_STATE, new TextEncoder().encode(JSON.stringify(document)), ferret);
   }
 }

@@ -28,13 +28,12 @@ export class StateRenderRepository implements RenderRepository {
     this.#checked(id);
     const read = await this.state.read(RENDER_PAYLOAD_STATE, id);
     if (!read.ok || read.value === undefined) return undefined;
-    const stored: unknown = read.value;
-    return typeof stored === 'string' ? stored : new TextDecoder().decode(stored as Uint8Array);
+    return new TextDecoder().decode(read.value);
   }
 
   async write(meta: StoredRenderMeta, payload: string): Promise<void> {
     this.#checked(meta.id);
-    await this.state.write(RENDER_PAYLOAD_STATE, new TextEncoder().encode(payload) as never, meta.id);
+    await this.state.write(RENDER_PAYLOAD_STATE, new TextEncoder().encode(payload), meta.id);
     await this.state.write(RENDER_META_STATE, meta, meta.id);
   }
 

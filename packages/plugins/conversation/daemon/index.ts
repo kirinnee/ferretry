@@ -15,8 +15,8 @@ const unavailable =
 
 /**
  * The `guard: 'secrets'` routes that already build their answer inside their own redaction read (the transcript reads
- * and the work search), or serve bytes no mask may touch (an image, a render's payload). Every other such route is
- * wrapped in {@link maskedBody}.
+ * and the work search), or serve bytes no mask may touch (a transcript image). Every other such route is wrapped in
+ * {@link maskedBody}.
  */
 const SCRUBS_ITS_OWN_BODY: ReadonlySet<string> = new Set([
   'GET /v1/ferrets/:ferretId/logs',
@@ -24,10 +24,16 @@ const SCRUBS_ITS_OWN_BODY: ReadonlySet<string> = new Set([
   'GET /v1/ferrets/:ferretId/log-search',
   'GET /v1/ferrets/:ferretId/messages',
   'GET /v1/ferrets/:ferretId/transcript-images/:handle',
-  'GET /v1/renders/:id',
   'GET /v1/search',
   'POST /v1/search/related',
 ]);
+
+/**
+ * Fields a masked route serves as they are stored, beyond bytes and digests. A render's `payload` is the picture
+ * itself, named by its sha256 (its id and its etag): a mask would change what that id names and break the picture, and
+ * today never masked renders. Its `meta` (the alt text) is masked, exactly as `GET /v1/renders/:id/meta` masks it.
+ */
+const VERBATIM_FIELDS: Readonly<Record<string, readonly string[]>> = { 'GET /v1/renders/:id': ['payload'] };
 
 /** One handler per key the manifest declares: the one a part serves, or the fallback. */
 function declared<K extends string, H>(
@@ -73,7 +79,7 @@ export default implementDaemon(manifest, {
           const handler = served[route.key];
           if (handler === undefined) return [];
           const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
-          return [[route.key, masks ? maskedBody(ctx.kernel.redaction, handler) : handler]];
+          return [[route.key, masks ? maskedBody(ctx.kernel.redaction, handler, VERBATIM_FIELDS[route.key]) : handler]];
         }),
       ),
       () => unavailable('This part of Conversation is not ready yet.'),

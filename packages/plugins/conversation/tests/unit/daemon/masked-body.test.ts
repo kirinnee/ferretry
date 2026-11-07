@@ -54,6 +54,11 @@ describe('maskedBody', () => {
     );
   });
 
+  test('a field the route names verbatim is served as stored; every other string is still masked', async () => {
+    const route = maskedBody(hiding, async () => jsonResponse({ meta: { alt: SECRET }, payload: SECRET }), ['payload']);
+    expect(JSON.parse((await route(call)).body)).toEqual({ meta: { alt: '[redacted]' }, payload: SECRET });
+  });
+
   test('an answer that is not JSON passes as it was built', async () => {
     const response = await maskedBody(hiding, async () => textResponse(`raw ${SECRET}`))(call);
     expect(response.body).toBe(`raw ${SECRET}`);
@@ -61,8 +66,9 @@ describe('maskedBody', () => {
 });
 
 /**
- * The real daemon half on a test host that knows {@link SECRET} as a secret. Every call is stamped as the owner's CLI
- * (`admin-cli`), as Gate would: the test host's admission stamps no actor, and a draft is the owner's only.
+ * The real daemon half on a test host that knows {@link SECRET} as a secret. Every call is stamped as Gate would: the
+ * owner's CLI as its actor (a draft is the owner's only) and ferret f1's credential (only a ferret saves a render) —
+ * the test host's admission stamps neither.
  */
 async function ownersConversation() {
   const ferrets = new FakeFerrets();
@@ -77,7 +83,12 @@ async function ownersConversation() {
       const routes = Object.fromEntries(
         Object.entries(half.routes ?? {}).map(([key, handler]) => [
           key,
-          (call: Parameters<typeof handler>[0]) => handler({ ...call, actor: 'admin-cli' } as typeof call),
+          (call: Parameters<typeof handler>[0]) =>
+            handler({
+              ...call,
+              actor: 'admin-cli',
+              credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: F1 },
+            } as typeof call),
         ]),
       );
       return { ...half, routes } as typeof half;
@@ -120,6 +131,24 @@ describe("the owner's shared draft is served raw, so its positional edits land w
 });
 
 describe('the daemon masks its secrets-guarded answers', () => {
+  test("a render's alt text is masked on its body route as on its meta route; its payload is the picture, served as stored", async () => {
+    const host = await ownersConversation();
+    const payload = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><desc>${SECRET}</desc></svg>`;
+    const saved = await host.request('POST', '/v1/renders', {
+      as: owner(),
+      body: { kind: 'svg', alt: `a chart of ${SECRET}`, payload },
+    });
+    expect(saved.status).toBe(201);
+    const { id } = saved.json<{ id: string }>();
+    const masked = 'a chart of ' + '*'.repeat(SECRET.length);
+    const body = await host.request('GET', `/v1/renders/${id}`, { as: owner() });
+    expect(body.status).toBe(200);
+    expect(body.json<{ meta: { alt: string }; payload: string }>()).toMatchObject({ meta: { alt: masked }, payload });
+    const meta = await host.request('GET', `/v1/renders/${id}/meta`, { as: owner() });
+    expect(meta.json<{ alt: string }>().alt).toBe(masked);
+    await host.stop();
+  });
+
   test('an attachment named with a pasted secret is served masked, its bytes untouched', async () => {
     const ferrets = new FakeFerrets();
     const F1 = ferretId('f1');

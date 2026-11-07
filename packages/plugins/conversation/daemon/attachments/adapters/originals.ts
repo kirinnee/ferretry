@@ -2,9 +2,6 @@ import type { StatePort } from '@ferretry/kernel/contract';
 import type { AttachmentOriginalsPort } from '../lib/ferret-attachments.ts';
 import { ATTACHMENT_MANIFEST_STATE, ATTACHMENT_ORIGINAL_STATE, nameOf, SEPARATOR } from './state.ts';
 
-const bytesOf = (value: unknown): Uint8Array | undefined =>
-  value === undefined ? undefined : typeof value === 'string' ? new TextEncoder().encode(value) : (value as Uint8Array);
-
 /**
  * A ferret's attachment originals in the plugin's state, as the store's {@link AttachmentOriginalsPort}.
  *
@@ -24,23 +21,21 @@ export class StateAttachmentOriginals implements AttachmentOriginalsPort {
   async readManifest(ferretId: string, attachmentId: string): Promise<string | undefined> {
     const read = await this.state.read(ATTACHMENT_MANIFEST_STATE, nameOf(ferretId, attachmentId));
     if (!read.ok) throw new Error(read.error.sentence);
-    const bytes = bytesOf(read.value);
-    return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+    return read.value === undefined ? undefined : new TextDecoder().decode(read.value);
   }
 
   async readOriginal(ferretId: string, attachmentId: string): Promise<Uint8Array> {
     const read = await this.state.read(ATTACHMENT_ORIGINAL_STATE, nameOf(ferretId, attachmentId));
     if (!read.ok) throw new Error(read.error.sentence);
-    const bytes = bytesOf(read.value);
-    if (bytes === undefined) throw new Error('the attachment original is missing');
-    return new Uint8Array(bytes);
+    if (read.value === undefined) throw new Error('the attachment original is missing');
+    return new Uint8Array(read.value);
   }
 
   async publish(ferretId: string, attachmentId: string, original: Uint8Array, manifest: string): Promise<void> {
     const name = nameOf(ferretId, attachmentId);
     try {
-      await this.state.write(ATTACHMENT_ORIGINAL_STATE, original as never, name);
-      await this.state.write(ATTACHMENT_MANIFEST_STATE, new TextEncoder().encode(manifest) as never, name);
+      await this.state.write(ATTACHMENT_ORIGINAL_STATE, original, name);
+      await this.state.write(ATTACHMENT_MANIFEST_STATE, new TextEncoder().encode(manifest), name);
     } catch (error) {
       await this.state.remove(ATTACHMENT_ORIGINAL_STATE, name);
       await this.state.remove(ATTACHMENT_MANIFEST_STATE, name);

@@ -62,12 +62,10 @@ const ledger = (state: StatePort): LinkLedger => ({
 const finder = (state: StatePort): FinderCache => ({
   async read() {
     const read = await state.read(FINDER_STATE);
-    return read.ok && read.value !== undefined
-      ? ((read.value as { files?: Record<string, Record<string, string>> }).files ?? {})
-      : {};
+    return read.ok ? (read.value?.files ?? {}) : {};
   },
   async write(files) {
-    await state.write(FINDER_STATE, { format: 1, files } as never);
+    await state.write(FINDER_STATE, { format: 1, files: { ...files } });
   },
 });
 

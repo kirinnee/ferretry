@@ -145,4 +145,14 @@ export const LinksFileSchema = z.strictObject({
     }),
   ),
 });
+/**
+ * `finder.json`: a cache of where each harness keeps each conversation's file, so a listing does not walk every
+ * folder again. Harness → conversation id → the file's path below the harness's history root.
+ */
+export const FinderFileSchema = z.strictObject({
+  format: z.literal(1),
+  files: z.record(z.string(), z.record(z.string(), z.string())),
+});
+export type FinderFile = z.infer<typeof FinderFileSchema>;
+
 export type LinksFile = z.infer<typeof LinksFileSchema>;

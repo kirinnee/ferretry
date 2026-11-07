@@ -11,9 +11,6 @@ import type { ConversationOutput, SendFiles, SendWaitClock } from './lib/send/po
 // The reading verbs: logs, search, render, link and transcript.
 import { readingVerbs } from './reading/verbs.ts';
 
-/** Exit code a verb that is not ready answers with (the skeleton's), after saying so. */
-const NOT_READY = 69;
-
 /** The string an option holds (its last, when repeated), under any of its spellings. */
 const text = (invocation: VerbInvocation, ...names: readonly string[]): string | undefined => {
   for (const name of names) {
@@ -138,13 +135,7 @@ export default implementCli(manifest, {
       gateway: new ClientQueueGateway(ctx.client),
       out: { report: (message: string) => ctx.io.out(`${message}\n`) },
     };
-    const notReady =
-      (verb: string): VerbHandler =>
-      async () => {
-        ctx.io.err(`fy ${verb} is not ready yet in this version of Conversation.\n`);
-        return NOT_READY;
-      };
-    const mine: Record<string, VerbHandler> = {
+    const mine = {
       send: send(false),
       reply: send(true),
       answer,
@@ -154,9 +145,7 @@ export default implementCli(manifest, {
       'queue edit': queueEditVerb(queuePorts),
       'queue cancel': queueCancelVerb(queuePorts),
     };
-    const theirs = readingVerbs({ client: ctx.client, io: ctx.io });
-    const verbs: Record<string, VerbHandler> = { ...mine, ...theirs };
-    for (const declared of manifest.actions.cli) verbs[declared.verb] ??= notReady(declared.verb);
-    return { verbs } as never;
+    // Typed against the manifest: a declared verb with no handler, or a handler for no declared verb, does not compile.
+    return { verbs: { ...mine, ...readingVerbs({ client: ctx.client, io: ctx.io }) } };
   },
 });

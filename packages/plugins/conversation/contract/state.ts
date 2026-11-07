@@ -1,8 +1,11 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { StoredRenderMetaSchema } from './wire-media.ts';
-import { LinksFileSchema } from './wire-link.ts';
+import { FinderFileSchema, LinksFileSchema } from './wire-link.ts';
 import { QuestionSchema } from './wire-question.ts';
+
+/** An opaque or secret file is bytes the kernel never parses: the schema types the port, it checks nothing. */
+const BYTES = z.instanceof(Uint8Array);
 
 /**
  * The files under `state/conversation/` (§9.2). `*` is the ferret's folder. Every JSON document starts at format 1;
@@ -26,7 +29,13 @@ export const QUESTION_STATE = defineState({
   format: 1,
   schema: QuestionSchema,
 });
-export const DRAFTS_STATE = defineState({ name: 'drafts', path: '*/drafts', store: 'opaque', format: 1 });
+export const DRAFTS_STATE = defineState({
+  name: 'drafts',
+  path: '*/drafts',
+  store: 'opaque',
+  format: 1,
+  schema: BYTES,
+});
 /**
  * An attachment is two byte files, `attachments/<ferret>~<attachment id>.original` and `….manifest`: a collection,
  * which one opaque path per ferret cannot hold. `~` is in neither a ferret id nor an attachment id (`att_<hex>`), so a
@@ -37,12 +46,14 @@ export const ATTACHMENT_ORIGINAL_STATE = defineState({
   path: 'attachments/*.original',
   store: 'opaque',
   format: 1,
+  schema: BYTES,
 });
 export const ATTACHMENT_MANIFEST_STATE = defineState({
   name: 'attachment-manifest',
   path: 'attachments/*.manifest',
   store: 'opaque',
   format: 1,
+  schema: BYTES,
 });
 /** A render is two files: `renders/<id>.json`, its meta, and `renders/<id>.payload`, the payload text exactly as saved. */
 export const RENDER_META_STATE = defineState({
@@ -59,6 +70,7 @@ export const RENDER_PAYLOAD_STATE = defineState({
   path: 'renders/*.payload',
   store: 'opaque',
   format: 1,
+  schema: BYTES,
 });
 export const LINKS_STATE = defineState({
   name: 'links',
@@ -72,6 +84,7 @@ export const FINDER_STATE = defineState({
   path: 'finder.json',
   store: 'json',
   format: 1,
+  schema: FinderFileSchema,
   onDamaged: { narrower: 'a cache of where each ferret keeps its files: dropped and rebuilt, it grants nothing' },
 });
 export const SEARCH_STATE = defineState({
