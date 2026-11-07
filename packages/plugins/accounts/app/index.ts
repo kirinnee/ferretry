@@ -1,20 +1,15 @@
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { accountsTab, signInApprovalRenderer } from './surfaces.tsx';
+import { accountsTab, secureCopyTab, signInApprovalRenderer } from './surfaces.tsx';
 
 /**
- * Accounts' app half (§2.3), built per machine with that machine's client. Half a: the Accounts settings tab and the 2FA
- * seed card. ACCOUNTS-B'S SPOTS: `settings['secure-copy']` (a stand-in sentence until b's view lands), the rule views in
- * `features/accounts/sign-in-rules-slot.tsx`, and the non-seed kinds of the sign-in-approval renderer.
+ * Accounts' app half (§2.3), built per machine with that machine's client: the Accounts settings tab and the 2FA seed
+ * card (half a), the Secure copy settings tab (paste rules, task plans, standing sign-in rules) and the sign-in-approval
+ * cards (half b).
  */
 export default implementApp(manifest, {
   build: ({ client }) => ({
-    settings: { accounts: accountsTab(client), 'secure-copy': SecureCopyNotBuilt },
+    settings: { accounts: accountsTab(client), 'secure-copy': secureCopyTab(client) },
     renderers: { 'ask:sign-in-approval': signInApprovalRenderer(client) },
   }),
 });
-
-/** Half b's tab, not ported yet: says so rather than showing an empty list. */
-function SecureCopyNotBuilt() {
-  return null;
-}
