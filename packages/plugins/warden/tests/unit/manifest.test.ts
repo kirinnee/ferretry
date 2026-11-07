@@ -24,10 +24,10 @@ describe('warden manifest', () => {
       '/v1/warden/verdicts',
     ]);
   });
-  test('it takes ferret.changed and turn.ended and needs ferrets, conversation and asks', () => {
+  test('it takes ferret.changed and turn.ended, needs ferrets, conversation and asks, may use Usage and Board', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ferret.changed', 'turn.ended']);
     expect(Object.keys(manifest.needs).sort()).toEqual(['asks', 'conversation', 'ferrets']);
-    expect(Object.keys(manifest.uses)).toEqual(['usage']);
+    expect(Object.keys(manifest.uses)).toEqual(['usage', 'board']);
   });
   test('state files are format 1 and the blessings file fails narrower, not closed', () => {
     expect(manifest.data.state.every(file => file.format === 1)).toBe(true);
