@@ -8,14 +8,15 @@
  * when the daemon wants it.
  */
 
-import { Button, ChangeApplyPanel, cn } from '@ferretry/app/ui';
+import { Button, type ChangeAuthority, ChangeApplyPanel, cn } from '@ferretry/app/ui';
 import { Lock } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import type { McpOAuthConnection, McpOAuthFlow } from '../../contract/index.ts';
-import { type McpClient, readMcpSignIns, signOutMcp, startMcpSignIn } from '../lib/client.ts';
+import { useState } from 'react';
+import type { McpOAuthFlow } from '../../contract/index.ts';
+import { type McpClient, signOutMcp, startMcpSignIn } from '../lib/client.ts';
 import { changeRefusalSentence } from '../lib/refusal.ts';
 import { issuerHost, type McpSignInTone, mcpRedirectUri, mcpSignInStatus } from '../lib/sign-in-model.ts';
 import { useSignInChanges } from '../lib/use-sign-in-changes.ts';
+import type { McpSignIns } from '../lib/use-sign-ins.ts';
 import { Hint, Note, Section } from './parts.tsx';
 import { type McpSignInChannelFactory, McpSignInSheet } from './sign-in-sheet.tsx';
 
@@ -25,17 +26,16 @@ export interface McpSignInSectionProps {
   readonly machineName: string;
   readonly online: boolean;
   readonly client: McpClient;
+  /** Where every server's sign-in stands, read once by the tab (`useMcpSignIns`); this section finds its own server in it. */
+  readonly signIns: McpSignIns;
+  /** What this browser may change here, read once by the tab (`useChangeAuthority`). */
+  readonly authority: ChangeAuthority | null;
   /** The origin the provider sends the browser back to. This page's own, unless a test says otherwise. */
   readonly origin?: string;
   /** Supplied in tests. */
   readonly channel?: McpSignInChannelFactory;
   readonly now?: () => number;
 }
-
-type Read =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly connection: McpOAuthConnection | undefined }
-  | { readonly kind: 'failed'; readonly reason: string };
 
 const DOT: Readonly<Record<McpSignInTone, string>> = { ok: 'bg-ok', warn: 'bg-warn', pend: 'bg-muted' };
 
@@ -44,31 +44,21 @@ export function McpSignInSection({
   machineName,
   online,
   client,
+  signIns,
+  authority,
   origin = window.location.origin,
   channel,
   now = Date.now,
 }: McpSignInSectionProps) {
   const name = component;
-  const [read, setRead] = useState<Read>({ kind: 'loading' });
+  const read = signIns.read;
+  const reload = signIns.reload;
   const [flow, setFlow] = useState<McpOAuthFlow | null>(null);
   const [starting, setStarting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
-  const changes = useSignInChanges(client);
+  const changes = useSignInChanges(authority);
   const redirectUri = mcpRedirectUri(origin);
-
-  const reload = useCallback(async (): Promise<void> => {
-    try {
-      const list = await readMcpSignIns(client);
-      setRead({ kind: 'ready', connection: list.connections.find(entry => entry.component === name) });
-    } catch (error) {
-      setRead({ kind: 'failed', reason: changeRefusalSentence(error) });
-    }
-  }, [client, name]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   const start = async (): Promise<void> => {
     setStarting(true);
@@ -129,7 +119,7 @@ export function McpSignInSection({
       </Section>
     );
 
-  const signedIn = read.connection;
+  const signedIn = read.list.connections.find(entry => entry.component === name);
   const status = mcpSignInStatus(signedIn, now());
   return (
     <Section title="Sign-in" spot="mcp-sign-in">

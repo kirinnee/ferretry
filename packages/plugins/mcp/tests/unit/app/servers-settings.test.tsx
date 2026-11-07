@@ -2,7 +2,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { Mounted } from '@ferretry/app/testing';
 import { McpSettings } from '../../../app/views/servers-settings.tsx';
-import { type Answers, type Call, MCP, mcpConnection, NOW, scriptedClient, SECRETS } from './mcp-fixtures.ts';
+import {
+  type Answers,
+  type Call,
+  MCP,
+  mcpConnection,
+  mcpServer,
+  NOW,
+  scriptedClient,
+  SECRETS,
+} from './mcp-fixtures.ts';
 import { click, mountSettled, text } from './mcp-view-support.tsx';
 
 const GRANTS_OPEN = { capabilities: [{ capability: 'fleet', configure: true, configureRefusal: 'granted' }] };
@@ -75,6 +84,27 @@ describe('DOM tests — Settings › MCP servers', () => {
     expect(root.querySelector('[data-context-mcp="linear"] [data-mcp-sign-in="linear"]')).toBeNull();
     // A project server signs in from its row, with no section.
     expect(root.querySelector('[data-context-mcp="notion"] [data-mcp-section]')).toBeNull();
+  });
+
+  it('reads the sign-ins and the grants once, however many component servers sign in', async () => {
+    const more = ['asana', 'sentry', 'figma'].map(name =>
+      mcpServer({ name, signIn: { subject: name, required: true } }),
+    );
+    const calls: Call[] = [];
+    const { root } = await settings(
+      {
+        'GET /v1/mcp': { ...MCP, servers: [...MCP.servers, ...more] },
+        'GET /v1/mcp/auth': {
+          connections: ['linear', 'asana', 'sentry', 'figma'].map(c => mcpConnection({ component: c })),
+        },
+      },
+      calls,
+    );
+    expect(root.querySelectorAll('[data-mcp-section="mcp-sign-in"]')).toHaveLength(4);
+    expect(calls.filter(call => call.route === 'GET /v1/mcp/auth')).toHaveLength(1);
+    expect(calls.filter(call => call.route === 'GET /v1/grants')).toHaveLength(1);
+    // Each section finds its own server in the one list.
+    expect(text(root, '[data-context-mcp="figma"] [data-mcp-sign-in-status]')).toContain('Signed in');
   });
 
   it('says a failed read in plain words and reads again on Try again', async () => {

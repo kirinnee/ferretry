@@ -4,9 +4,17 @@
  * it lives under, Sign out). Signing in is the daemon's OAuth client at work (docs/mcp-oauth.md): the app only opens the
  * provider's page and hands the daemon back the address the provider sent the browser to, and no token ever reaches it.
  */
-import { ContextFailure, ContextFilterBar, contextEmptyCopy, ContextNote, useContextRead } from '@ferretry/app/ui';
+import {
+  ContextFailure,
+  ContextFilterBar,
+  contextEmptyCopy,
+  ContextNote,
+  useChangeAuthority,
+  useContextRead,
+} from '@ferretry/app/ui';
 import { useCallback, useState } from 'react';
 import { type McpClient, readMachineMcpServers } from '../lib/client.ts';
+import { useMcpSignIns } from '../lib/use-sign-ins.ts';
 import { type McpChip, MCP_SEARCH_LABEL, mcpChips, sortedMcpServers, visibleMcpServers } from '../lib/mcp-model.ts';
 import './mcp.css';
 import { MACHINE_NAME } from './servers-panel.tsx';
@@ -27,6 +35,9 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
     { client, machineName: MACHINE_NAME, now, ...(origin === undefined ? {} : { origin }) },
     reload,
   );
+  // One read of each answer every server's sign-in section needs, however many servers sign in.
+  const signIns = useMcpSignIns(client);
+  const authority = useChangeAuthority(client);
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<McpChip>('all');
 
@@ -78,6 +89,8 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
                 {section && server.signIn !== undefined ? (
                   <McpSignInSection
                     client={client}
+                    signIns={signIns}
+                    authority={authority}
                     component={server.signIn.subject}
                     machineName={MACHINE_NAME}
                     online

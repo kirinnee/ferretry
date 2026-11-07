@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
 import type { Mounted } from '@ferretry/app/testing';
+import { useChangeAuthority } from '@ferretry/app/ui';
+import { useMcpSignIns } from '../../../app/lib/use-sign-ins.ts';
 import { McpSignInSection, type McpSignInSectionProps } from '../../../app/views/sign-in-section.tsx';
 import {
   type Answers,
@@ -30,13 +32,20 @@ afterEach(async () => {
   mounted = undefined;
 });
 
+/** What the Settings tab does for its sections: the one read of the list and of the authority, handed down. */
+function Section(props: Omit<McpSignInSectionProps, 'signIns' | 'authority'>) {
+  const signIns = useMcpSignIns(props.client);
+  const authority = useChangeAuthority(props.client);
+  return <McpSignInSection {...props} signIns={signIns} authority={authority} />;
+}
+
 const open = async (answers: Answers, props: Partial<McpSignInSectionProps> = {}) => {
   const calls: Call[] = [];
   const channels = fakeChannels();
   // The same object the client reads, so a test can change what the machine answers next.
   answers['GET /v1/grants'] ??= GRANTS_OPEN;
   mounted = await mountSettled(
-    <McpSignInSection
+    <Section
       component="linear"
       machineName="studio-mac"
       online

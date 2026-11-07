@@ -1,11 +1,11 @@
 /**
- * The state behind a sign-in act's apply panel: what this browser may change here (read once through Gate's grants,
- * `useChangeAuthority`), whether an act is in flight, and the last refusal. The passkey itself is asked for by the
- * carrier when the daemon wants it; nothing here holds or sees a credential.
+ * The state behind a sign-in act's apply panel: whether an act is in flight and the last refusal, beside what this browser
+ * may change here (`authority`, read ONCE by the tab through Gate's grants with `useChangeAuthority` and shared by every
+ * server's section). The passkey itself is asked for by the carrier when the daemon wants it; nothing here holds or sees a
+ * credential.
  */
-import { type ChangeAuthority, useChangeAuthority } from '@ferretry/app/ui';
+import type { ChangeAuthority } from '@ferretry/app/ui';
 import { useState } from 'react';
-import type { McpClient } from './client.ts';
 
 export interface SignInChanges {
   /** `null` while it is being read. */
@@ -17,8 +17,7 @@ export interface SignInChanges {
   readonly refuse: (sentence: string) => void;
 }
 
-export function useSignInChanges(client: McpClient): SignInChanges {
-  const authority = useChangeAuthority(client);
+export function useSignInChanges(authority: ChangeAuthority | null): SignInChanges {
   const [refusal, setRefusal] = useState<string | null>(null);
   return { authority, refusal, clear: () => setRefusal(null), refuse: setRefusal };
 }
