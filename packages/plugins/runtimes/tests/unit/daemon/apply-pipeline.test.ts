@@ -8,7 +8,11 @@
 import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FleetCatalogRefusal, type FleetCatalogService } from '../../../daemon/lib/service/catalog-service.ts';
+import {
+  FleetCatalogFreshStepUpRequired,
+  FleetCatalogRefusal,
+  FleetCatalogService,
+} from '../../../daemon/lib/service/catalog-service.ts';
 import {
   assembleServices,
   UNAVAILABLE,
@@ -50,7 +54,10 @@ interface World {
   service: FleetCatalogService;
 }
 
-function world(configWriter: RuntimeConfigWriter | 'fake' = 'fake'): World {
+function world(
+  configWriter: RuntimeConfigWriter | 'fake' = 'fake',
+  executors?: FleetCatalogServiceDeps['executors'],
+): World {
   const order: string[] = [];
   const written: World['written'] = [];
   const plans: World['plans'] = [];
@@ -101,7 +108,10 @@ function world(configWriter: RuntimeConfigWriter | 'fake' = 'fake'): World {
       },
     },
   };
-  const { catalog } = assembleServices(deps, unavailableSetupDeps);
+  const { catalog } =
+    executors === undefined
+      ? assembleServices(deps, unavailableSetupDeps)
+      : { catalog: new FleetCatalogService({ ...deps, executors }) };
   return {
     order,
     written,
@@ -233,5 +243,142 @@ describe('the apply pipeline over a fake config writer', () => {
     // Assert
     should((failure as FleetCatalogRefusal).code).equal('fleet_catalog_unreadable');
     should((failure as FleetCatalogRefusal).message).containEql(UNAVAILABLE);
+  });
+});
+
+/**
+ * ONE PROOF, ONE WIDENING of what agents may control: the proof is CLAIMED in `apply`, before anything is written, never
+ * read off the admission snapshot and spent after. The boundary hands `apply` a `claim` (Gate's `claimFreshStepUp`); of
+ * two requests admitted on ONE proof exactly one takes it.
+ */
+describe('widening what agents may control takes the fresh proof before the write', () => {
+  const REMOTE = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' as const }) };
+  /** What the boundary builds for a call: ONE proof shared by every request admitted on it. */
+  const oneProof = () => {
+    let held = true;
+    let taken = 0;
+    return {
+      claim: () => {
+        if (!held) return false;
+        held = false;
+        taken += 1;
+        return true;
+      },
+      taken: () => taken,
+    };
+  };
+  const on = (proof: ReturnType<typeof oneProof>, agent = false) => ({ claim: proof.claim, agent });
+  /** `ferretrySettings` is off by default, so turning it on is a widening (terminals, browsers and files already are on). */
+  const WIDENING = { ...CHANGE, agentControl: { ...CHANGE.agentControl, ferretrySettings: true } };
+  const NARROWING = {
+    ...CHANGE,
+    agentControl: { terminals: false, browsers: false, files: false, ferretrySettings: false, pageScripts: false },
+  };
+  const refused = (work: Promise<unknown>) =>
+    work.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+  it('should let exactly one of two applies admitted on one fresh proof widen, and write nothing for the other', async () => {
+    // Arrange — two staged widenings, both admitted as fresh before either runs.
+    const w = world();
+    const proof = oneProof();
+    const first = await w.service.propose(WIDENING);
+    const second = await w.service.propose(WIDENING);
+
+    // Act
+    const results = await Promise.all([
+      refused(w.service.apply(first.id, REMOTE, on(proof))),
+      refused(w.service.apply(second.id, REMOTE, on(proof))),
+    ]);
+
+    // Assert
+    const applied = results.filter(result => result === undefined);
+    const asked = results.filter(result => result instanceof FleetCatalogFreshStepUpRequired);
+    should([applied.length, asked.length]).deepEqual([1, 1]);
+    should(w.written).have.length(1);
+    should(w.plans).have.length(1);
+    should(proof.taken()).equal(1);
+  });
+
+  it('should let exactly one act when another act claims the same proof first, and leave the staged change to apply again', async () => {
+    // Arrange — the other act (a config loosening, a pairing mint) takes the proof through the same claim.
+    const w = world();
+    const proof = oneProof();
+    const staged = await w.service.propose(WIDENING);
+    const other = proof.claim();
+
+    // Act
+    const failure = await refused(w.service.apply(staged.id, REMOTE, on(proof)));
+    const later = await w.service.apply(staged.id, REMOTE, on(oneProof()));
+
+    // Assert — claim lost → the step-up refusal and nothing done; the PROPOSAL (not the proof) is put back.
+    should(other).be.true();
+    should(failure).be.instanceOf(FleetCatalogFreshStepUpRequired);
+    should(proof.taken()).equal(1);
+    should(later).match({ outcome: 'applied' });
+    should(w.written).have.length(1);
+  });
+
+  it('should widen on one fresh proof and leave the proof gone', async () => {
+    // Arrange
+    const w = world();
+    const proof = oneProof();
+    const first = await w.service.propose(WIDENING);
+    const next = await w.service.propose(WIDENING);
+
+    // Act
+    const outcome = await w.service.apply(first.id, REMOTE, on(proof));
+    const again = await refused(w.service.apply(next.id, REMOTE, on(proof)));
+
+    // Assert
+    should(outcome).match({ outcome: 'applied' });
+    should(again).be.instanceOf(FleetCatalogFreshStepUpRequired);
+    should(proof.taken()).equal(1);
+    should(w.written).have.length(1);
+  });
+
+  it('should hand a clone executor the boundary’s own claim, so two copies turning controls on take ONE proof between them', async () => {
+    // Arrange — the clone executor claims where it writes (`setup-service`), so `apply` itself must take nothing for it.
+    const proof = oneProof();
+    const claimed: boolean[] = [];
+    const clone = {
+      describe: async () => 'a copy',
+      execute: async (_change: unknown, caller?: { claim(): boolean }) => {
+        claimed.push(caller?.claim() === true);
+        return 'copied';
+      },
+    };
+    const w = world('fake', { clone } as never);
+    const change = { kind: 'clone.import', mode: 'update', bundle: {} } as const;
+    const first = await w.service.propose(change);
+    const second = await w.service.propose(change);
+
+    // Act
+    await Promise.all([w.service.apply(first.id, REMOTE, on(proof)), w.service.apply(second.id, REMOTE, on(proof))]);
+
+    // Assert
+    should(claimed.sort()).deepEqual([false, true]);
+    should(proof.taken()).equal(1);
+  });
+
+  it('should claim nothing for the owner at the machine, a narrowing from a device, or a ferret (refused before any claim)', async () => {
+    // Arrange
+    const w = world();
+    const proof = oneProof();
+    const widening = await w.service.propose(WIDENING);
+    const narrowing = await w.service.propose(NARROWING);
+    const byFerret = await w.service.propose(WIDENING);
+
+    // Act
+    const atMachine = await w.service.apply(widening.id, OWNER, on(proof));
+    const narrowed = await w.service.apply(narrowing.id, REMOTE, on(proof));
+    const ferret = await refused(w.service.apply(byFerret.id, REMOTE, on(proof, true)));
+
+    // Assert
+    should([atMachine, narrowed]).match([{ outcome: 'applied' }, { outcome: 'applied' }]);
+    should(ferret).match({ status: 403, code: 'owner_only' });
+    should(proof.taken()).equal(0);
   });
 });

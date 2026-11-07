@@ -68,7 +68,7 @@ import {
   type RuntimeCatalog,
   CatalogInstallChangeSchema,
 } from '../../../contract/index.ts';
-import { cap, type CallerGovernance, type CapabilityPresentation } from '@ferretry/core-gate/contract';
+import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import {
   type CatalogFacts,
@@ -147,11 +147,12 @@ function agentControlWidened(current: AgentControl, next: Partial<AgentControl>)
   return AGENT_CONTROL_KINDS.some(kind => !current[kind] && next[kind] === true);
 }
 
-/** What `apply` needs to enforce and spend the fresh-passkey rule above. Absent reads as "no proof
- *  and nothing to spend" — never as "trust it", so a boundary that forgot to wire this fails closed. */
+/** What `apply` needs to enforce the fresh-passkey rule above. Absent reads as "no proof to take" — never as
+ *  "trust it", so a boundary that forgot to wire this fails closed. `claim` TAKES the caller's fresh proof in one step
+ *  (Gate's `claimFreshStepUp`) before the widening it allows, never reading the admission snapshot and spending after:
+ *  of two requests admitted on one proof exactly one is answered `true`. No restore. */
 export interface FreshStepUpContext {
-  readonly presentation: CapabilityPresentation | undefined;
-  readonly spend: () => void;
+  readonly claim: () => boolean;
   /** Whether the caller is a ferret (`callerIsAgent`): a ferret never widens what ferrets may do. */
   readonly agent: boolean;
 }
@@ -182,12 +183,13 @@ export interface AccountDocumentReading {
 export interface ExecutorCaller {
   /** The operator's grants for this caller; `governed: false` is somebody at this machine. */
   readonly governance: CallerGovernance | undefined;
-  /** A passkey was proved for THIS act (`FreshStepUpContext`): what lets a remote caller widen agent control. */
-  readonly freshStepUp: boolean;
   /** Whether the caller is a ferret. A ferret never widens what ferrets may do. */
   readonly agent: boolean;
-  /** Spend the proof above once a widening it allowed has landed. */
-  spend(): void;
+  /**
+   * TAKES the caller's fresh passkey proof for THIS act (`FreshStepUpContext.claim`): what lets a remote caller widen
+   * agent control. Asked once, before the widening is written; `false` for a caller with no proof to take.
+   */
+  claim(): boolean;
 }
 
 /** A first-run import or a clone, carried out by its own executor (U15). */
@@ -623,7 +625,9 @@ export class FleetCatalogService {
             'a ferret cannot widen what ferrets may drive on this machine; the owner does',
             'owner_only',
           );
-        if (widensAgentControl && governance.governed && freshStepUp?.presentation?.freshStepUp !== true) {
+        // CLAIMED here, before anything is written: of two requests admitted on one proof exactly one widens. The
+        // refusal restores the PROPOSAL (below), never the proof: a claimed proof is used up even if the act fails.
+        if (widensAgentControl && governance.governed && freshStepUp?.claim() !== true) {
           throw new FleetCatalogFreshStepUpRequired();
         }
       }
@@ -633,9 +637,8 @@ export class FleetCatalogService {
     }
     const caller: ExecutorCaller = {
       governance,
-      freshStepUp: freshStepUp?.presentation?.freshStepUp === true,
       agent: freshStepUp?.agent === true,
-      spend: () => freshStepUp?.spend(),
+      claim: () => freshStepUp?.claim() === true,
     };
     let outcome: AccountChangeOutcome;
     try {
@@ -653,7 +656,6 @@ export class FleetCatalogService {
         this.#changes.restore(record);
       throw error;
     }
-    if (widensAgentControl) freshStepUp?.spend();
     return outcome;
   }
 

@@ -377,8 +377,6 @@ interface Composed {
   readonly fingerprint: string;
   /** Configuration files the copy writes through the owner's door, each against the version it was compared with. */
   readonly configWrites?: readonly ConfigWrite[];
-  /** The copy turns what agents may control back on: the same passkey rule `machine.settings` has applies. */
-  readonly widens?: boolean;
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
@@ -627,7 +625,6 @@ export class FleetSetupService {
     let held = 0;
     for (const write of composed.configWrites ?? []) held += await this.#writeConfigFile(write, mayLoosen);
     await this.#applyModel(composed.model, composed.documents);
-    if (composed.widens === true) caller?.spend();
     return held === 0
       ? composed.summary
       : `${composed.summary} ${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`;
@@ -1158,7 +1155,8 @@ export class FleetSetupService {
             'this daemon cannot say whether this caller may widen what agents may control, so nothing was changed',
           );
         }
-        if (caller.governance.governed && !caller.freshStepUp) throw new FleetCatalogFreshStepUpRequired();
+        // CLAIMED before any file or the model is written, never read off the snapshot and spent after.
+        if (caller.governance.governed && !caller.claim()) throw new FleetCatalogFreshStepUpRequired();
       }
     }
     const configWrites: ConfigWrite[] = [];
@@ -1219,7 +1217,6 @@ export class FleetSetupService {
       }.`,
       fingerprint: this.#fingerprint(documents, [], record === undefined ? [] : [record.path], configWrites),
       configWrites,
-      ...(controls?.widensAgentControl === true ? { widens: true } : {}),
     };
   }
 

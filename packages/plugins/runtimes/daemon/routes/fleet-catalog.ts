@@ -117,9 +117,8 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem) {
       // Staging a clone describes it for THIS caller: a settings document the caller may not write is refused now.
       const caller = {
         governance: call.governance,
-        freshStepUp: false,
         agent: isFerretCall(call),
-        spend: () => undefined,
+        claim: () => false,
       };
       return await answer(AccountChangeViewSchema, () => subsystem.propose(request.change, caller));
     },
@@ -131,8 +130,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem) {
       try {
         return await answer(AccountChangeOutcomeSchema, () =>
           subsystem.apply(proposalId(call.params), call.governance, {
-            presentation: call.presentation,
-            spend: () => call.spendFreshStepUp?.(),
+            claim: () => call.claimFreshStepUp?.() === true,
             agent: isFerretCall(call),
           }),
         );
