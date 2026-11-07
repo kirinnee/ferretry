@@ -29,7 +29,7 @@ import { CardResponseSchema } from '@ferretry/plugin-board/contract';
 import { ProjectListSchema } from '@ferretry/plugin-projects/contract';
 import { spawn, type Subprocess } from 'bun';
 import { appendFileSync, existsSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseYaml } from 'yaml';
@@ -145,7 +145,13 @@ if (report.complete) {
   }
   // A short name: the home's Unix socket path must stay under the platform limit.
   home = join(fixture, 'v5-probe');
-  await cp(converted, home, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  // A socket (a stopped tmux server's stale `tmux.sock`) cannot be copied and holds no data: it is left out.
+  await cp(converted, home, {
+    recursive: true,
+    preserveTimestamps: true,
+    verbatimSymlinks: true,
+    filter: async source => !(await lstat(source)).isSocket(),
+  });
   const document = HomeJsonSchema.parse({
     format: HOME_FORMAT,
     createdBy: 'boot-probe-incomplete-home',
