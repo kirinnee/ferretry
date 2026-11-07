@@ -1,4 +1,7 @@
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PROTOCOL } from '@ferretry/kernel/contract';
 import { defineState } from '@ferretry/kernel/contract';
 import { state } from '@ferretry/kernel/host';
@@ -59,6 +62,7 @@ function worldWithProbe(environment: Record<string, string | undefined> = {}) {
       return text;
     },
     readStdin: async () => 'typed on stdin',
+    cwd: () => '/work',
   });
   const probe = recordingProbe();
   const made = fakeWorld({
@@ -82,6 +86,12 @@ const sessionView = (overrides: { id?: string; name?: string } = {}) => ({
   state: 'working',
   createdAt: '2026-11-06T09:00:00.000Z',
   stateAt: '2026-11-06T09:00:00.000Z',
+});
+
+/** Folders a test made under the real temp directory; every one goes in `afterEach`. */
+const scratch: string[] = [];
+afterEach(async () => {
+  await Promise.all(scratch.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
 });
 
 describe('the context every plugin cli half is handed', () => {
@@ -137,16 +147,40 @@ describe('the context every plugin cli half is handed', () => {
 
   it('should read a real file relative to the working directory by default (today’s readRecipe)', async () => {
     const real = createPluginHost({ home: '/h', fs: state.createMemoryHostFs() });
-    const dir = `${process.env.TMPDIR ?? '/tmp'}/fy-context-${process.pid}`;
+    const dir = await mkdtemp(join(tmpdir(), 'fy-context-'));
+    scratch.push(dir);
     await Bun.write(`${dir}/recipe.txt`, 'a'.repeat(10_000));
     should((await real.readText(`${dir}/recipe.txt`)).length).equal(10_000);
+  });
+
+  it('should hand a half the real working directory as PWD, not a stale inherited one', async () => {
+    const { world, probe } = worldWithProbe({ PWD: '/stale/inherited' });
+    await runFy(['probe'], world);
+    should(probe.context().env?.PWD).equal('/work');
+    should(world.host.cwd()).equal('/work');
+  });
+
+  it('should default the working directory to the process’s own', () => {
+    should(createPluginHost({ home: '/h', fs: state.createMemoryHostFs() }).cwd()).equal(process.cwd());
+  });
+
+  it('should give a default fake host that reads neither the real disk nor the real stdin', async () => {
+    const { world } = fakeWorld();
+    await world.host.readText('/etc/hostname').then(
+      () => should.fail(undefined, undefined, 'the default fake must not read the disk'),
+      (reason: unknown) => should((reason as Error).message).containEql('reads no real file'),
+    );
+    await world.host.readText('-').then(
+      () => should.fail(undefined, undefined, 'the default fake must not read stdin'),
+      (reason: unknown) => should((reason as Error).message).containEql('reads no real standard input'),
+    );
   });
 
   it('should hand a half FY_SESSION_ID and the allowed names, and nothing else of the process environment', async () => {
     const { world, probe } = worldWithProbe({
       FY_SESSION_ID: 'ferret-1',
       FY_HYPERMEDIA: '1',
-      PWD: '/work',
+      PWD: '/stale/inherited',
       FY_TOKEN: 'admin-secret',
       FY_SESSION_TOKEN: 'fys_secret',
       FY_SESSION_BOARD_CAPABILITY: 'fys_secret2',
@@ -193,12 +227,26 @@ describe('the context every plugin cli half is handed', () => {
 
 describe('verbs that failed in the real binary for want of a context field', () => {
   /** The real ferrets half, through the generated registry, over a fake daemon and a fake clock that sleeps instantly. */
-  function ferretsWorld(options: { environment?: Record<string, string>; ferret?: ReturnType<typeof sessionView> }) {
+  function ferretsWorld(options: {
+    environment?: Record<string, string>;
+    ferret?: ReturnType<typeof sessionView>;
+    /** The files that exist; any other path is absent (ENOENT), as on a real disk. */
+    files?: readonly string[];
+  }) {
     let time = 1_000;
+    const probed: string[] = [];
     const host = createPluginHost({
       home: '/h',
       fs: state.createMemoryHostFs(),
-      readFile: async () => '',
+      readFile: async path => {
+        probed.push(path);
+        if (options.files?.includes(path) !== true)
+          throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
+        return '';
+      },
+      readStdin: async () => {
+        throw new Error('a marker poll must never read standard input');
+      },
     });
     const fast = {
       ...host,
@@ -227,7 +275,7 @@ describe('verbs that failed in the real binary for want of a context field', () 
       host: fast as typeof host,
     });
     if (options.ferret !== undefined) made.transport.replies.push({ status: 200, body: options.ferret });
-    return made;
+    return { ...made, probed };
   }
 
   it('V-0496 fy wait needs the clock and the sleep: it ends 124 on its timeout instead of refusing', async () => {
@@ -240,11 +288,36 @@ describe('verbs that failed in the real binary for want of a context field', () 
   });
 
   it('V-0496 fy wait --until-marker needs the text reader: a present marker settles the wait with 0', async () => {
-    const { world, io, transport } = ferretsWorld({ ferret: sessionView({ id: 'lead', name: 'wren' }) });
+    const { world, io, transport, probed } = ferretsWorld({
+      ferret: sessionView({ id: 'lead', name: 'wren' }),
+      files: ['/work/done'],
+    });
     transport.replies.push(...Array.from({ length: 3 }, () => ({ status: 200, body: sessionView({ name: 'wren' }) })));
     const code = await runFy(['wait', 'wren', '--until-marker', '/work/done'], world);
     should(io.stderr()).equal('');
     should(code).equal(0);
+    should(probed).containEql('/work/done');
+  });
+
+  it('V-0496 fy wait --until-marker: an ABSENT marker is not a present one, so the wait keeps going to its timeout', async () => {
+    const { world, io, transport, probed } = ferretsWorld({
+      ferret: sessionView({ id: 'lead', name: 'wren' }),
+      files: [],
+    });
+    transport.replies.push(...Array.from({ length: 20 }, () => ({ status: 200, body: sessionView({ name: 'wren' }) })));
+    const code = await runFy(['wait', 'wren', '--until-marker', '/work/done', '--timeout', '2'], world);
+    should(code).equal(124);
+    should(io.stderr()).containEql('gave up');
+    should(probed).containEql('/work/done');
+  });
+
+  it('V-0496 fy wait --until-marker - is refused as a usage error: standard input is never polled', async () => {
+    const { world, io, transport, probed } = ferretsWorld({ ferret: sessionView({ id: 'lead', name: 'wren' }) });
+    const code = await runFy(['wait', 'wren', '--until-marker', '-'], world);
+    should(code).equal(2);
+    should(io.stderr()).containEql('--until-marker names a file');
+    should(probed).deepEqual([]);
+    should(transport.sent).deepEqual([]);
   });
 
   it('V-0290 fy instructions needs the environment: it reports the ferret and the switches it launched with', async () => {
