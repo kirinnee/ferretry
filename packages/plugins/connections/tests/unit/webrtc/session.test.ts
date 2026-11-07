@@ -53,23 +53,31 @@ function harness() {
     close: (code, reason) => ends.push({ code, reason }),
     bufferedBytes: () => buffer,
   };
-  const session = sealedWebRtcSessions(layer, {
-    after: (_delay, fn) => {
-      timers.push(fn);
-      return {
-        cancel: () => {
-          const index = timers.indexOf(fn);
-          if (index >= 0) timers.splice(index, 1);
-        },
-      };
+  const session = sealedWebRtcSessions(
+    layer,
+    {
+      after: (_delay, fn) => {
+        timers.push(fn);
+        return {
+          cancel: () => {
+            const index = timers.indexOf(fn);
+            if (index >= 0) timers.splice(index, 1);
+          },
+        };
+      },
     },
-  })({ kind: 'carried', carrier: 'webrtc', address: 'webrtc-peer:minted-by-daemon' }, downstream, () => {
+    length => new Uint8Array(length).fill(7),
+  )({ kind: 'carried', carrier: 'webrtc', address: 'webrtc-peer:minted-by-daemon' }, downstream, () => {
     released++;
   })!;
   return {
     session,
     queue,
-    sent,
+    /** What crossed the channel after the carrier's own `ready`. */
+    get sent() {
+      return sent.slice(1);
+    },
+    all: sent,
     received,
     arrivals,
     ends,

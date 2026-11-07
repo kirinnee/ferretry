@@ -60,7 +60,9 @@ export function createConnectionB(deps: {
   });
   const webrtc = new WebRtcCarrier({
     ...deps.webrtc,
-    sessions: sealedWebRtcSessions(deps.sessionLayer, deps.webrtc.scheduler),
+    sessions: sealedWebRtcSessions(deps.sessionLayer, deps.webrtc.scheduler, length =>
+      globalThis.crypto.getRandomValues(new Uint8Array(length)),
+    ),
   });
   deps.onStop(async () => {
     webrtc.close();

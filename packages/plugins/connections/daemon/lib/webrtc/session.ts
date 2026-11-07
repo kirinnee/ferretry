@@ -1,12 +1,37 @@
 import { isSessionEnd, type CarrierKey, type SessionLayer } from '@ferretry/kernel/contract';
-import { decodeFrame, RENDEZVOUS_SESSION_ID } from '../../../worker/src/lib/index.ts';
+import {
+  encodeControlMessage,
+  encodeFrame,
+  FRAME_KINDS,
+  RELAY_LIMITS,
+  RELAY_PROTOCOL_ID,
+  SESSION_ID_BYTES,
+  type SessionId,
+  sessionIdFromBytes,
+} from '../../../worker/src/lib/index.ts';
 import type { RelayLinkScheduler, WebRtcSessionFactory } from './carrier.ts';
 
-/** Adapt the copied channel lifecycle to the kernel's sealed-frame pull. No session is opened here. */
-export function sealedWebRtcSessions(layer: SessionLayer, scheduler: RelayLinkScheduler): WebRtcSessionFactory {
+/** A source of unguessable bytes — WebCrypto in production. */
+export type RandomBytes = (length: number) => Uint8Array;
+
+/**
+ * Adapt the copied channel lifecycle to the kernel's sealed-frame pull. No session is opened here.
+ *
+ * The channel is the carrier, so — as today's direct socket does — it mints the session's identifier and
+ * announces it with `ready` before any kernel traffic: the browser starts its handshake only on `ready`, and
+ * the kernel session waits for that handshake, so a channel that only pumped would deadlock both ends.
+ */
+export function sealedWebRtcSessions(
+  layer: SessionLayer,
+  scheduler: RelayLinkScheduler,
+  randomBytes: RandomBytes,
+): WebRtcSessionFactory {
   return (arrival, downstream, release) => {
+    const minted: SessionId | null = sessionIdFromBytes(randomBytes(SESSION_ID_BYTES));
+    if (minted === null || minted.bytes.every(byte => byte === 0))
+      throw new Error('the session identifier generator produced an unusable identifier');
+    const sessionId: SessionId = minted;
     const link = layer.open('webrtc' as CarrierKey, { address: arrival.address });
-    let sessionId = RENDEZVOUS_SESSION_ID;
     let stopped = false;
     let pumping = false;
     let unsubscribe: (() => void) | undefined;
@@ -39,9 +64,6 @@ export function sealedWebRtcSessions(layer: SessionLayer, scheduler: RelayLinkSc
             close();
             return;
           }
-          // The public frame header supplies the id for the channel's eventual unsealed `closed` control.
-          const header = decodeFrame(frame.bytes);
-          if (header.ok) sessionId = header.frame.sessionId;
           if (downstream.send(frame.bytes) === -1) {
             close();
             return;
@@ -55,7 +77,17 @@ export function sealedWebRtcSessions(layer: SessionLayer, scheduler: RelayLinkSc
       get sessionId() {
         return sessionId;
       },
+      /** Announce the session to the client, then carry the kernel's traffic — the order a rendezvous uses. */
       open: async () => {
+        if (stopped) return;
+        downstream.send(
+          encodeFrame({
+            kind: FRAME_KINDS.control,
+            sessionId,
+            sequence: 0,
+            payload: encodeControlMessage({ t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS }),
+          }),
+        );
         unsubscribe = link.outbound.onReady(pump);
         pump();
       },
