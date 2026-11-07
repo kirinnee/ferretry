@@ -161,7 +161,7 @@ export const restartWithResume = async (
   if (agent === undefined)
     throw new Error('This ferret has no runtime recorded, so there is nothing to restart it on.');
   const again = async (more: RestartConsent): Promise<FerretSummary> =>
-    await restartWithResume(client, ferret, `${requestId}-anyway-${Date.now()}`, { ...consent, ...more });
+    await restartWithResume(client, ferret, `${requestId}-anyway-${globalThis.Date.now()}`, { ...consent, ...more });
   const body: MoveSessionRequestInput = {
     agent,
     allowContextDowngrade: consent.allowContextDowngrade === true,

@@ -55,7 +55,7 @@ export function FerretInfo({
   onRename,
   onOpenFerret,
   runtimeControls,
-  now = Date.now,
+  now = () => globalThis.Date.now(),
 }: FerretInfoProps) {
   const { tab } = placement;
   const ferret = useInfoRead(() => readFerret(client, ferretId), true);

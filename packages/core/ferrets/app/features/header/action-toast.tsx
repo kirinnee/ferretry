@@ -23,8 +23,8 @@ export function ActionToast({
 }) {
   useEffect(() => {
     if (notice === null) return;
-    const timer = setTimeout(onDismiss, dismissMs);
-    return () => clearTimeout(timer);
+    const timer = globalThis.setTimeout(onDismiss, dismissMs);
+    return () => globalThis.clearTimeout(timer);
   }, [notice, onDismiss, dismissMs]);
 
   return (

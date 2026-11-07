@@ -66,21 +66,11 @@
     ]
   },
   "pendingHalves": {
-    "agenda": [
-      "app"
-    ],
-    "browsers": [
-      "app"
-    ],
-    "conversation": [
-      "app"
-    ],
-    "terminals": [
-      "app"
-    ],
-    "warden": [
-      "app"
-    ]
+    "agenda": ["app"],
+    "browsers": ["app"],
+    "conversation": ["app"],
+    "terminals": ["app"],
+    "warden": ["app"]
   },
   "pendingAppPorts": [
     {

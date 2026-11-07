@@ -115,7 +115,7 @@ export const readableReason = (reason: string): string =>
   reason.length > 160 || /^\s*[[{]/u.test(reason) ? 'the daemon answered with something this page cannot read' : reason;
 
 /** How long ago, in the short form a row reads: `now`, `5m ago`, `3h ago`, `2d ago`; `—` when unknown. */
-export const relativeTime = (at: number | string | undefined, now = Date.now()): string => {
+export const relativeTime = (at: number | string | undefined, now = globalThis.Date.now()): string => {
   if (!at) return '—';
   const timestamp = typeof at === 'number' ? at : Date.parse(at);
   if (!Number.isFinite(timestamp)) return '—';
