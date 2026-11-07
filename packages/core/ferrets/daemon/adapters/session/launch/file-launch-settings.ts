@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { FIXED_SETTINGS_FILE, type HarnessKind, RUNTIME_STATE_DIRECTORY } from '@ferretry/fleet';
-import { type HarnessWrapperSource, harnessHomeFromWrapper } from '../../../lib/session/transcript/index.ts';
+import {
+  FIXED_SETTINGS_FILE,
+  type HarnessKind,
+  RUNTIME_STATE_DIRECTORY,
+} from '../../../lib/session/peers/fleet.ts';
+import { type HarnessWrapperSource, harnessHomeFromWrapper } from '../../../lib/session/peers/transcript-launch.ts';
 
 /**
  * A digest of the fleet settings one wrapper launches its harness under.

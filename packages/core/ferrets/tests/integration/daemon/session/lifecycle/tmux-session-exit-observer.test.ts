@@ -3,37 +3,21 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  BunTmuxProcess,
-  DaemonStorageFactory,
-  DurableTerminalPaneRegistrar,
-  DurableTerminalPaneStore,
-  InMemoryLaunchGate,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-  TmuxSessionExitObserver,
-} from '../../../../src/adapters/index.ts';
-import {
-  createSessionPaths,
-  createSessionRecord,
-  defaultSessionHealthSettings,
-  defaultSessionLifecycleSettings,
-  PANE_PROOF_FORMAT,
-  parseSessionId,
-  SelfRestartCoordinator,
-  type SessionExitObservation,
-  SessionHealthService,
-  type SessionId,
-  type TmuxCommandPort,
-  TmuxController,
-  UNNAMED_SELF_CHECK_STAGES,
-} from '../../../../src/lib/index.ts';
+import { BunSqliteIndexFactory, BunTmuxProcess, DaemonStorageFactory, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { DurableTerminalPaneRegistrar, DurableTerminalPaneStore } from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
+import { InMemoryLaunchGate } from '../../../../../daemon/adapters/session/resume/in-memory-launch-gate.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { TmuxSessionExitObserver } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-exit-observer.ts';
+import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
+import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
+import { PANE_PROOF_FORMAT, type TmuxCommandPort, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { SelfRestartCoordinator } from '../../../../../daemon/lib/session/health/self-restart.ts';
+import type { SessionExitObservation } from '../../../../../daemon/lib/session/health/exit.ts';
+import { SessionHealthService } from '../../../../../daemon/lib/session/health/service.ts';
+import { UNNAMED_SELF_CHECK_STAGES } from '../../../../../daemon/lib/session/health/types.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 /**
@@ -581,8 +565,8 @@ describe('tmux session exit observer', () => {
     // Act — once with the registration as written, once as one written before the second was recorded.
     const recorded = await as38.observe();
     const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
-    const { sessionCreated: _created, ...legacy } = registration ?? {};
-    await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
+    const { sessionCreated: _created, ...unstamped } = registration ?? {};
+    await subject.files.writeTextAtomic(path, `${JSON.stringify(unstamped)}\n`);
     const unrecorded = await as38.observe();
 
     // Assert — tmux printed no pid and the stamp proved the pane; a stampless registration is settled on
@@ -600,9 +584,9 @@ describe('tmux session exit observer', () => {
     const subject = await fixture(0);
     const registration = await subject.store.registration(DAEMON, subject.id);
     if (registration === undefined) throw new Error('the pane registration is missing');
-    const { sessionCreated, ...legacy } = registration;
+    const { sessionCreated, ...unstamped } = registration;
     const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
-    await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
+    await subject.files.writeTextAtomic(path, `${JSON.stringify(unstamped)}\n`);
 
     // Act — one look while it runs; then it dies on a tmux that prints no pid for it.
     const whileAlive = await observer(subject).observe();

@@ -1,7 +1,10 @@
-import { launchInstructions } from '@ferretry/fleet';
 import type { SessionLaunchInstructions } from '../../../lib/protocol/session.ts';
-import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
-import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
+import {
+  type AccountLaunchEnvironment,
+  type AccountLaunchRenewal,
+  type LaunchInstructionsPort,
+  launchEnvironment,
+} from '../../../lib/session/peers/fleet.ts';
 import {
   type SessionEnvironmentStore,
   type SessionLifecycleLauncher,
@@ -10,8 +13,7 @@ import {
   sessionPaneEnvironment,
 } from '../../../lib/session/lifecycle/index.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
-import type { TmuxController } from '../../../lib/tmux/index.ts';
-import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
+import type { TmuxController, TmuxPaneDelivery } from '../../../lib/session/peers/tmux-lifecycle.ts';
 
 export interface SessionPaneRegistrar {
   register(record: SessionLifecycleRecord): Promise<void>;
@@ -74,6 +76,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
      * pane was told (`launchInstructions`); without it, it answers nothing and the record keeps what it had.
      */
     private readonly clientName?: string,
+    /**
+     * The runtimes plugin's `launchInstructions`, which reads every instruction text the wrapper renders and so
+     * cannot be imported by Ferrets. INJECTED; without it (or without `clientName`) a launch answers nothing.
+     */
+    private readonly describe?: LaunchInstructionsPort,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -121,7 +128,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     await this.register(record);
     // Read off the environment the pane was just given, never the stored one: a switch flipped after
     // this launch reaches the agent only at its next one.
-    return this.clientName === undefined ? undefined : launchInstructions(this.clientName, env);
+    return this.clientName === undefined || this.describe === undefined ? undefined : this.describe(this.clientName, env);
   }
 
   /**

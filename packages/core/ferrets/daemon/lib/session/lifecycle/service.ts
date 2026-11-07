@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { SESSION_MODE_ENV } from '@ferretry/fleet';
+import { SESSION_MODE_ENV } from '../peers/fleet.ts';
 import type { BoardProjectId } from '../../protocol/board-refs.ts';
 import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
-import type { SessionConversationLeases } from '../conversation-lease.ts';
+import type { SessionConversationLeases } from '../peers/conversation-lease.ts';
 import type {
   SessionEffectAdmission,
   SessionEffectHeldStanding,
@@ -285,7 +285,7 @@ export class SessionLifecycleService {
    * The hash goes, so the value its pane holds names nobody from this moment: its `fy`, its MCP server and its
    * agent tools are refused as an unknown credential, and a running pane keeps running without them. Nothing
    * new is minted. AND IT STICKS: the session is marked cut off, so no launch hands it a credential again — not
-   * a Warden revive after it crashes itself, not a peer's resume, a restart or a migration — until a PERSON
+   * a Warden revive after it crashes itself, not a peer's resume, a restart or a move — until a PERSON
    * resumes it ({@link SessionCredentialRotator.cutOff}).
    *
    * ON THE SESSION'S OWN QUEUE, so a start or a stop of the same session is never interleaved with it, and a

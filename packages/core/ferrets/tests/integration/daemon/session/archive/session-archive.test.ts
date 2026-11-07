@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { createSessionArchive } from '../../../../../daemon/adapters/session/archive/session-archive.ts';
-import { createFoundationPaths } from '../../../../src/lib/paths.ts';
+import { createFoundationPaths } from '../../../../../daemon/lib/paths.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { IndexedSession } from '../../../../src/lib/storage-types.ts';
-import { sessionView } from '../../../unit/runtime/mounts/support.ts';
+import type { IndexedSession } from '../../../../../daemon/lib/storage-types.ts';
+import type { OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const HOUR = 3_600_000;
@@ -43,7 +44,7 @@ function make(afterMs: number | undefined, archived = [row('older-1', ago(90)), 
     passLimit: 200,
     sources: {
       pinned: async () => new Map(),
-      board: async () => ({ cards: [], laneSets: new Map() }),
+      board: async () => [],
       hasOpenAgendaItem: async () => false,
     },
     yieldToLoop: async () => undefined,
@@ -79,8 +80,7 @@ describe('the session archive as the daemon builds it', () => {
 
 describe('a pass of the session archive as the daemon builds it', () => {
   const OLD = ago(72);
-  const card = { owner: 'busy-1', assignee: null, laneId: 'doing', projectId: 'p', dropped: null };
-  const lanes = new Map([['p', { lanes: [{ id: 'doing', category: 'active' }] }]]);
+  const card: OpenCardStanding = { owner: 'busy-1', assignee: null, dropped: null, category: 'active' };
 
   function world(openAgenda: readonly string[] = []) {
     const documents = new Map(
@@ -115,7 +115,7 @@ describe('a pass of the session archive as the daemon builds it', () => {
       passLimit: 200,
       sources: {
         pinned: async () => new Map([['pinned-1', 'x']]),
-        board: async () => ({ cards: [card as never], laneSets: lanes as never }),
+        board: async () => [card],
         hasOpenAgendaItem: async id => openAgenda.includes(id),
       },
       yieldToLoop: async () => undefined,
@@ -167,7 +167,7 @@ describe('a whole pass over a family of sessions', () => {
       passLimit: 200,
       sources: {
         pinned: async () => new Map(),
-        board: async () => ({ cards: [], laneSets: new Map() }),
+        board: async () => [],
         hasOpenAgendaItem: async () => false,
       },
       yieldToLoop: async () => undefined,

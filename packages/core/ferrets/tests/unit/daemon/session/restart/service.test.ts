@@ -348,7 +348,7 @@ describe('RestartService.drain stall budget', () => {
       w.clock.now = Date.parse(AT) + second * 1000;
       await service.drain();
     }
-    // Without the backoff that is 61 migrate preflights; with it: 10 s, 20 s, 40 s, 80 s, then the cap.
+    // Without the backoff that is 61 move preflights; with it: 10 s, 20 s, 40 s, 80 s, then the cap.
     should(w.attempts.slice(0, 5)).eql([0, 10_000, 30_000, 70_000, 150_000]);
     should(w.attempts.length).be.below(10);
     const gaps = w.attempts.slice(1).map((at, n) => at - (w.attempts[n] ?? 0));

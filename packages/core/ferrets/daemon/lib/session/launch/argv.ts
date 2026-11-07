@@ -1,9 +1,9 @@
 /**
  * THE ONE LAUNCH ARGV, built from what is true NOW rather than replayed from what was true once.
  *
- * Every way an agent process comes into being — a start, a Restart CLI, a migration, a revive of a
+ * Every way an agent process comes into being — a start, a Restart CLI, a move, a revive of a
  * dead pane — runs the fleet wrapper with arguments the daemon owns. Those arguments used to be
- * assembled in three places that drifted apart: the start added `--model`, the migration forgot it,
+ * assembled in three places that drifted apart: the start added `--model`, the move forgot it,
  * and the revive did not assemble anything at all — it re-ran the argv recorded at start, so a session
  * started before the handoff `Read(...)` rules existed never got them, and a session switched to
  * another model came back on the one it started with.
@@ -25,13 +25,17 @@
  * Pure: strings in, strings out. Which values go in is the relaunch service's decision.
  */
 
-import type { HarnessKind } from '@ferretry/fleet';
+import type { HarnessKind } from '../peers/fleet.ts';
 import type { CompactAt } from '../../protocol/compact-at.ts';
 import type { TranscriptProvenance } from '../../protocol/session.ts';
-import { handoffReadArguments } from '../send/handoff.ts';
-import { claudeSessionArguments } from '../transcript/claude-path.ts';
-import { codexCorrelationArguments, isCodexCorrelationPair } from '../transcript/codex-rollout.ts';
-import { HARNESS_RESUME_FLAG, HARNESS_SESSION_FLAG } from '../transcript/relaunch.ts';
+import {
+  claudeSessionArguments,
+  codexCorrelationArguments,
+  HARNESS_RESUME_FLAG,
+  HARNESS_SESSION_FLAG,
+  handoffReadArguments,
+  isCodexCorrelationPair,
+} from '../peers/transcript-launch.ts';
 
 /** The daemon-owned parts of one launch. */
 export interface LaunchArgvParts {

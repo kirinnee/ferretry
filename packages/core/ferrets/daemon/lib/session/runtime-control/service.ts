@@ -30,25 +30,26 @@ import type {
   RuntimeModelChoice,
   SessionView,
 } from '../../protocol/session.ts';
+import { runtimeRequestFingerprint } from './ledger.ts';
+import { documentRefusal, needsFastFacts, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
 import {
   type AccountInventoryPort,
   type CoreAccount,
   findAccountByAgent,
   servableModels,
-} from '../../core/inventory.ts';
+} from '../peers/core.ts';
 import { type FrozenJsonValue, jsonObject } from '@ferretry/std';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionEffectAdmission, SessionEffectKey, SessionEffectLedger } from '../effects/types.ts';
-import type { CodexRuntimeCatalogCache } from '../harness/codex-catalog-cache.ts';
-import { fastModeFacts } from '../harness/fast-mode.ts';
-import { claudeRuntimeCatalog, codexRuntimeCatalog, codexSwitchContext } from '../harness/model-catalog.ts';
-import { CodexModelPickerDriver, type PickerSleeper } from '../harness/picker-drive.ts';
-import { failureMessage } from '../harness/quarantine.ts';
-import type { RuntimeSwitchPlan } from '../harness/runtime-switch.ts';
-import type { HarnessQuirkService } from '../harness/service.ts';
-import { runtimeRequestFingerprint } from './ledger.ts';
-import { documentRefusal, needsFastFacts, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
+import {
+  type CodexRuntimeCatalogCache,
+  failureMessage,
+  type HarnessQuirkService,
+  type HarnessRuntimeCatalogs,
+  type PickerSleeper,
+  type RuntimeSwitchPlan,
+} from '../peers/harness.ts';
 import {
   type RuntimeInjector,
   type RuntimePane,
@@ -93,6 +94,11 @@ export interface SessionRuntimeControlPorts {
   readonly picker: RuntimePickerTransport;
   /** The per-harness decision and the recovery for a picker drive that failed part-way. */
   readonly harness: HarnessQuirkService;
+  /**
+   * The harness plugin's catalog projections and picker driver (`claudeRuntimeCatalog`, `codexRuntimeCatalog`,
+   * `codexSwitchContext`, `fastModeFacts`, `new CodexModelPickerDriver`), injected because Ferrets cannot import them.
+   */
+  readonly catalogs: HarnessRuntimeCatalogs;
   readonly accounts: AccountInventoryPort;
   /** One held catalog per account, so opening the model sheet twice does not spawn two probes. */
   readonly catalog: CodexRuntimeCatalogCache;
@@ -174,7 +180,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     const current = await this.#view(id);
     if (current.config.harness !== 'codex') {
       const account = await this.#accountFor(current.config.agent);
-      const claude = claudeRuntimeCatalog(account);
+      const claude = this.ports.catalogs.claudeRuntimeCatalog(account);
       // AN EMPTY CLAUDE CATALOG IS A FAILURE, NOT AN ANSWER. `servableModels` empties for an account
       // the manifest declared down, and the browser's native-picker escape hatch is Codex-only — so a
       // `200` with no choices renders a blank sheet with no explanation, which is the plausible-empty
@@ -192,7 +198,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     const choices = await this.#advertised(id);
     // The catalog only describes what the app-server advertised; an account it cannot find adds nothing.
     const published = await this.ports.accounts.accounts().catch(() => []);
-    return codexRuntimeCatalog(choices, findAccountByAgent(published, current.config.agent));
+    return this.ports.catalogs.codexRuntimeCatalog(choices, findAccountByAgent(published, current.config.agent));
   }
 
   /** What this Codex session's own app-server lists right now, under the names its picker renders. */
@@ -227,7 +233,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     tmuxSession: string,
     plan: Extract<RuntimeSwitchPlan, { kind: 'drive_picker' }>,
   ): Promise<void> {
-    const driver = new CodexModelPickerDriver(this.ports.picker(tmuxSession), this.ports.sleeper);
+    const driver = this.ports.catalogs.pickerDriver(this.ports.picker(tmuxSession), this.ports.sleeper);
     try {
       await driver.drive(plan.target);
     } catch (failure) {
@@ -292,8 +298,8 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
             allowedModels: servableModels(account).map(model => model.id),
             ...(account.modelCatalog?.customIds === true ? { acceptsCustomModels: true } : {}),
           }),
-      ...(needsLiveCatalog(wanted) ? { catalog: codexSwitchContext(await this.#advertised(id)) } : {}),
-      ...(fastCatalog === undefined ? {} : { fast: fastModeFacts(current, fastCatalog) }),
+      ...(needsLiveCatalog(wanted) ? { catalog: this.ports.catalogs.codexSwitchContext(await this.#advertised(id)) } : {}),
+      ...(fastCatalog === undefined ? {} : { fast: this.ports.catalogs.fastModeFacts(current, fastCatalog) }),
     });
 
     if (plan.kind === 'refused') throw new SessionRuntimeError('unsupported', plan.reason);

@@ -14,7 +14,7 @@ import type { SessionId } from '../../session-id.ts';
  * `session not found` about a session `GET /v1/sessions` was listing at that same moment.
  *
  * Those are not obscure states: `stalled` and `rate_limited` are the two an operator revives FROM,
- * and they are also the two a migration onto another account exists for. Reading the document with
+ * and they are also the two a move onto another account exists for. Reading the document with
  * its own schema is what makes the answer honest — a status the resume policy has no special opinion
  * about is simply a non-terminal one, which is what it was.
  */
@@ -51,7 +51,7 @@ export interface ResumePolicy {
    */
   readonly automatic: boolean;
   /**
-   * Whether the legacy label+checkout duplicate-work suppression applies. A label is a batch slug,
+   * Whether the older label+checkout duplicate-work suppression applies. A label is a batch slug,
    * not lineage, so it may only ever gate an automatic reviver.
    */
   readonly dedupeSharedRecoveryScope: boolean;
@@ -70,7 +70,7 @@ export interface ResumePolicy {
    * Whether a LIVE, healthy pane must be replaced rather than typed into.
    *
    * A plain resume takes the send shortcut when the harness is still at a prompt, because the
-   * cheapest way to hand a running agent its next turn is to type it. A MIGRATION cannot: the whole
+   * cheapest way to hand a running agent its next turn is to type it. A MOVE cannot: the whole
    * point is that a different executable answers the next turn, so typing into the pane that is
    * already running would leave the old account serving a session whose own document says it moved.
    *
@@ -167,7 +167,7 @@ export class ResumeAcknowledgementFailed extends Error {
   }
 }
 
-/** The legacy duplicate-work suppression fired. Only ever raised against an automatic reviver. */
+/** The label+checkout duplicate-work suppression fired. Only ever raised against an automatic reviver. */
 export class ReviveDedupeConflict extends ResumeRefused {
   constructor(
     readonly target: ResumeTarget,
@@ -175,7 +175,7 @@ export class ReviveDedupeConflict extends ResumeRefused {
   ) {
     super(
       `automatic revive suppressed for session ${target.id}: live session ${conflict.id} shares ` +
-        `label ${target.label ?? ''} and checkout ${target.cwd}, the legacy automatic-recovery ` +
+        `label ${target.label ?? ''} and checkout ${target.cwd}, the shared automatic-recovery ` +
         `dedupe scope; resume ${target.id} explicitly to recover the original session`,
     );
     this.name = 'ReviveDedupeConflict';

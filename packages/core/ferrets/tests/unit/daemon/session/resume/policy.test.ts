@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId } from '../../../../src/lib/index.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
   authorizeResume,
   defaultSessionResumeSettings,
@@ -233,15 +233,15 @@ describe('resume plan', () => {
   });
 
   it('should replace a live pane when the caller is moving the session to another account', () => {
-    // A MIGRATION cannot take the send shortcut: the point of it is that a different executable
+    // A MOVE cannot take the send shortcut: the point of it is that a different executable
     // answers the next turn, so typing the handoff into the harness that is already running would
     // leave the old account serving a session whose own record says it moved. Everything else about
     // the relaunch is the same, which is why this is a policy field and not a second code path.
     // Arrange
-    const migrating: ResumePolicy = { ...EXPLICIT, replaceLiveTerminal: true };
+    const moving: ResumePolicy = { ...EXPLICIT, replaceLiveTerminal: true };
 
     // Act
-    const actual = planResume(target(), LIVE, 'read the migration report', migrating, SETTINGS);
+    const actual = planResume(target(), LIVE, 'read the move report', moving, SETTINGS);
 
     // Assert
     should(actual.kind).equal('relaunch');
@@ -250,7 +250,7 @@ describe('resume plan', () => {
     // The turn advances, so the replacement agent reads a NEW document rather than the assignment
     // the agent being replaced was already working from.
     should(actual).have.property('turn', 4);
-    should(actual).have.property('prompt', 'read the migration report');
+    should(actual).have.property('prompt', 'read the move report');
   });
 
   it('should refuse a message-less resume of a session that is already running', () => {

@@ -12,7 +12,7 @@
  */
 
 import type { ClockPort } from '../../ports.ts';
-import { WARDEN_LABEL } from '../../warden/types.ts';
+import { WARDEN_LABEL } from '../peers/warden-lifecycle.ts';
 import { resolveSpawnLabel, resolveWardenLineage } from './lineage.ts';
 import type { SessionAncestor, SessionProvenance, SessionSpawnOrigin, SessionSpawnRequest } from './types.ts';
 

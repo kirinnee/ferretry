@@ -16,28 +16,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  FileSessionEffectLedger,
-  FileSessionEnvironmentStore,
-  FileSessionTaskStore,
-  KeyedSerialExecutor,
-  NodeSessionCredentialIssuer,
-  NodeWorkingDirectoryResolver,
-  type PaneDeliveryOptions,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  StorageSessionLifecycleRepository,
-  SystemClock,
-  TimeSessionIdFactory,
-  TmuxPaneDelivery,
-  TmuxSessionLifecycleLauncher,
-  UnusableSessionRecordError,
-} from '../../../../src/adapters/index.ts';
+import { BunSqliteIndexFactory, DaemonStorageFactory, type PaneDeliveryOptions, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { FileSessionEffectLedger } from '../../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
+import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
+import { FileSessionTaskStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { NodeSessionCredentialIssuer } from '../../../../../daemon/adapters/session/lifecycle/node-session-credential-issuer.ts';
+import { NodeWorkingDirectoryResolver } from '../../../../../daemon/adapters/session/lifecycle/node-working-directory-resolver.ts';
+import { StorageSessionLifecycleRepository, UnusableSessionRecordError } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { TimeSessionIdFactory } from '../../../../../daemon/adapters/session/lifecycle/time-session-id-factory.ts';
+import { TmuxPaneDelivery } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import { TmuxSessionLifecycleLauncher } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-lifecycle-launcher.ts';
 // Imported from their own modules rather than the barrel: each lifecycle module keeps its OWN copy
 // of this helper — no shared filesystem abstraction was introduced — so these are three distinct
 // functions, each of which has to be proven on its own. They are named apart rather than sharing one
@@ -46,23 +35,15 @@ import {
 import { fsyncEnvironmentDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { fsyncTaskDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
 import { fsyncReservedDirectory } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import {
-  type AccountLaunchEnvironment,
-  type AccountLaunchRenewal,
-  createSessionPaths,
-  createSessionRecord,
-  defaultSessionLifecycleSettings,
-  type FoundationPaths,
-  type FrozenJsonValue,
-  type JsonValue,
-  parseSessionId,
-  type SessionEnvironmentStore,
-  type SessionLifecycleRecord,
-  SessionLifecycleService,
-  type TmuxCommandPort,
-  TmuxController,
-  transitionSessionRecord,
-} from '../../../../src/lib/index.ts';
+import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
+import { createSessionPaths, type FoundationPaths } from '../../../../../daemon/lib/paths.ts';
+import { createSessionRecord, transitionSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
+import type { FrozenJsonValue, JsonValue } from '@ferretry/std';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { SessionEnvironmentStore, SessionLifecycleRecord } from '../../../../../daemon/lib/session/lifecycle/types.ts';
+import { SessionLifecycleService } from '../../../../../daemon/lib/session/lifecycle/service.ts';
+import { type TmuxCommandPort, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 
 const homes = new Set<string>();

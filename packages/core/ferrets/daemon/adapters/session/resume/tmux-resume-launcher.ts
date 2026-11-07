@@ -1,7 +1,10 @@
-import { launchInstructions } from '@ferretry/fleet';
 import type { SessionLaunchInstructions } from '../../../lib/protocol/session.ts';
-import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
-import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
+import {
+  type AccountLaunchEnvironment,
+  type AccountLaunchRenewal,
+  type LaunchInstructionsPort,
+  launchEnvironment,
+} from '../../../lib/session/peers/fleet.ts';
 import { type SessionPaneFolders, sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
 import type { SessionCredentialRotator } from '../../../lib/session/lifecycle/types.ts';
 import {
@@ -11,8 +14,7 @@ import {
 } from '../../../lib/session/resume/types.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import type { TmuxController } from '../../../lib/tmux/index.ts';
-import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
+import type { TmuxController, TmuxPaneDelivery } from '../../../lib/session/peers/tmux-lifecycle.ts';
 import type { AgentLaunchWrapper } from '../lifecycle/tmux-session-lifecycle-launcher.ts';
 
 /** What a resume needs to know about a session before it can address its terminal. */
@@ -120,6 +122,11 @@ export class TmuxResumeLauncher implements ResumeLauncher {
      * from. Absent means the replacement inherits the credential the session already had.
      */
     private readonly credential?: SessionCredentialRotator,
+    /**
+     * The runtimes plugin's `launchInstructions`, which reads every instruction text the wrapper renders and so
+     * cannot be imported by Ferrets. INJECTED; without it (or without `clientName`) a revive answers nothing.
+     */
+    private readonly describe?: LaunchInstructionsPort,
   ) {}
 
   async observe(id: SessionId): Promise<PaneObservation> {
@@ -172,7 +179,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.
     await this.register(id, spec.tmuxSession);
-    return this.clientName === undefined ? undefined : launchInstructions(this.clientName, env);
+    return this.clientName === undefined || this.describe === undefined ? undefined : this.describe(this.clientName, env);
   }
 
   /**

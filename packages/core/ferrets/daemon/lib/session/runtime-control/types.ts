@@ -13,9 +13,9 @@
  */
 
 import type { RuntimeControlRequest, RuntimeModelCatalog, SessionView } from '../../protocol/session.ts';
-import type { InjectionOutcome } from '../../tmux/delivery.ts';
+import type { InjectionOutcome } from '../peers/tmux-lifecycle.ts';
 import type { SessionId } from '../../session-id.ts';
-import type { CodexPickerDrivePort } from '../harness/picker-drive.ts';
+import type { CodexPickerDrivePort } from '../peers/harness.ts';
 
 /** Why a runtime read or control could not be served. */
 export type SessionRuntimeFailure =

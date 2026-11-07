@@ -30,11 +30,11 @@ describe('currentLaunchModel', () => {
     should(currentLaunchModel(config, state, servesAll)).equal('claude-opus-5[1m]');
   });
 
-  it('should ignore a report older than the last migration, which described the account it left', () => {
+  it('should ignore a report older than the last move, which described the account it left', () => {
     // Arrange
     const config = launchConfig({
       model: 'claude-opus-5',
-      migration: { from: 'claude-auto-old', to: 'claude-auto-boot', at: LATER },
+      move: { from: 'claude-auto-old', to: 'claude-auto-boot', at: LATER },
     });
     const state = launchState({ observedModel: 'claude-sonnet-5', observedModelAt: EARLIER });
 

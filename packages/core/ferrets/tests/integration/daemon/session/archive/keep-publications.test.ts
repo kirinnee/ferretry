@@ -2,23 +2,16 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FileAgendaLedgerRepository } from '../../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaLedgerRepository } from '../../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgentPinRepository } from '../../../../../daemon/adapters/agent-pins/file-agent-pin-repository.ts';
-import { FileBoardStore } from '../../../../src/adapters/board/file-board-store.ts';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
+import { FileBoardStore } from '../../../../../daemon/adapters/board/file-board-store.ts';
+import { BunSqliteIndexFactory, DaemonStorageFactory, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
-import { AgendaService } from '../../../../src/lib/agenda/service.ts';
+import { AgendaService } from '../../../../../daemon/lib/agenda/service.ts';
 import { AgentPinService } from '../../../../../daemon/lib/agent-pins/service.ts';
-import { createSessionPaths, parseSessionId } from '../../../../src/lib/index.ts';
+import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { sessionsOnOpenCards } from '../../../../../daemon/lib/session/archive/open-cards.ts';
 import { card } from '../../../unit/board/support.ts';
 

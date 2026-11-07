@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { type SessionLaunchInstructions, SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
+import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../../daemon/lib/agent-tools/policy.ts';
-import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import type { ClockPort, SerialExecutor } from '../../../../../daemon/lib/ports.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import type {
   SessionEffectAdmission,
   SessionEffectKey,
@@ -37,7 +37,10 @@ import {
   sessionPaneEnvironment,
 } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { SessionCredentialRevokedError } from '../../../../../daemon/lib/session/lifecycle/types.ts';
-import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
+
+/** Warden's terminal statuses (today's `lib/warden/types.ts`, the warden plugin's), restated for the credential case. */
+const WARDEN_TERMINAL_STATUSES: readonly SessionStatus[] = ['completed', 'failed', 'stalled', 'stopped', 'kill_failed'];
+const isTerminalStatus = (status: SessionStatus): boolean => WARDEN_TERMINAL_STATUSES.includes(status);
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 const LAUNCHED: SessionLaunchInstructions = {
@@ -1503,6 +1506,27 @@ class RepositoryHashStore implements SessionCapabilityHashStore {
   }
 }
 
+/**
+ * Stands in for today's `CredentialAgentIdentities` (`lib/agent-tools/policy.ts`, dropped from Ferrets; Gate's bearer
+ * lookup over Ferrets' token directory does this now): a presented capability names the ACTIVE session whose stored
+ * hash is the capability's, and nobody else.
+ */
+function credentialResolver(
+  session: () => Promise<
+    { readonly id: string; readonly active: boolean; readonly sessionCapabilityHash: string } | undefined
+  >,
+  hash: (capability: string) => string,
+): { resolve(capability: string): Promise<{ readonly sessionId: string } | undefined> } {
+  return {
+    resolve: async capability => {
+      const current = await session();
+      return current !== undefined && current.active && current.sessionCapabilityHash === hash(capability)
+        ? { sessionId: current.id }
+        : undefined;
+    },
+  };
+}
+
 describe('SessionLifecycleService credential per launch', () => {
   const capabilities = ['created-capability', 'first-pane-capability', 'second-pane-capability'] as const;
 
@@ -1546,19 +1570,7 @@ describe('SessionLifecycleService credential per launch', () => {
         ? undefined
         : { id: record.config.id, name: null, active: true, sessionCapabilityHash: hash };
     };
-    const identities = new CredentialAgentIdentities(
-      {
-        snapshot: async () => {
-          const current = await session();
-          return current === undefined ? [] : [current];
-        },
-        session,
-      },
-      capability => credential(capability).hash,
-      (left, right) => left === right,
-      new CredentialDigestLocations(),
-      () => '',
-    );
+    const identities = credentialResolver(session, capability => credential(capability).hash);
     return {
       ...built,
       environment,
@@ -1646,19 +1658,7 @@ describe('SessionLifecycleService credential per launch', () => {
           ? undefined
           : { id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash };
       };
-      const live = new CredentialAgentIdentities(
-        {
-          snapshot: async () => {
-            const current = await session();
-            return current === undefined ? [] : [current];
-          },
-          session,
-        },
-        capability => credential(capability).hash,
-        (left, right) => left === right,
-        new CredentialDigestLocations(),
-        () => '',
-      );
+      const live = credentialResolver(session, capability => credential(capability).hash);
       const current = built.repository.current();
       built.repository.documents.set(ID, JSON.stringify({ ...current, state: { ...current.state, status } }));
       built.launcher.livenessFromLaunch = false;
@@ -1715,7 +1715,7 @@ describe('SessionLifecycleService credential per launch', () => {
     const launches = built.launcher.launches();
     const issued = built.credentials.issues;
 
-    // Act — the relaunch a Warden revive, a peer's resume, a restart or a migration would make.
+    // Act — the relaunch a Warden revive, a peer's resume, a restart or a move would make.
     const relaunch = await built.subject.start(ID).catch((error: unknown) => error);
 
     // Assert — refused before anything is minted or launched.

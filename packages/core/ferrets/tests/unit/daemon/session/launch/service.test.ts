@@ -1,14 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  defaultStartWaitPolicy,
-  type LaunchSubject,
-  parseSessionId,
-  type RecordedLaunch,
-  type SessionLaunchPorts,
-  SessionLaunchService,
-  SessionPlanner,
-} from '../../../../src/lib/index.ts';
+import { defaultStartWaitPolicy, SessionPlanner } from './planner-fixture.ts';
+import { type LaunchSubject, type RecordedLaunch, type SessionLaunchPorts, SessionLaunchService } from '../../../../../daemon/lib/session/launch/service.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { launchAccount, launchConfig, launchState } from './support.ts';
 
 const ID = parseSessionId('s1');
@@ -27,7 +21,7 @@ const planner = new SessionPlanner({
 });
 
 /** A session started BEFORE the Read rules existed: its recorded argv has none. */
-const legacySubject = (overrides: Partial<LaunchSubject> = {}): LaunchSubject => ({
+const earlierSubject = (overrides: Partial<LaunchSubject> = {}): LaunchSubject => ({
   config: launchConfig({
     transcript: {
       v: 1,
@@ -43,7 +37,7 @@ const legacySubject = (overrides: Partial<LaunchSubject> = {}): LaunchSubject =>
 });
 
 class Ports implements SessionLaunchPorts {
-  subjectValue: LaunchSubject | undefined = legacySubject();
+  subjectValue: LaunchSubject | undefined = earlierSubject();
   accountValue: ReturnType<typeof launchAccount> | undefined = launchAccount();
   digest: string | undefined = 'settings-now';
   /** The login's fixed `--settings` text: empty is a login with none, undefined is unreadable. */
@@ -69,7 +63,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should rebuild a revive on current settings, record it, and resume the conversation', async () => {
     // Arrange: an old session that has since been switched to Sonnet with /model.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       state: launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER, observedReasoningEffort: 'high' }),
     });
 
@@ -119,7 +113,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should carry the remote-control surface and the owner flags a session asked for', async () => {
     // Arrange: no transcript record, so whether it started is never asked.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       config: launchConfig({ remoteControl: true, harnessFlags: ['--verbose'] }),
       command: [WRAPPER],
     });
@@ -138,7 +132,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should never start the Remote Control surface for a session that did not ask for it', async () => {
     // Arrange
     const ports = new Ports();
-    ports.subjectValue = legacySubject({ config: launchConfig({ remoteControl: false }), command: [WRAPPER] });
+    ports.subjectValue = earlierSubject({ config: launchConfig({ remoteControl: false }), command: [WRAPPER] });
 
     // Act
     const argv = await new SessionLaunchService(ports).relaunch(ID);
@@ -151,8 +145,8 @@ describe('SessionLaunchService.relaunch', () => {
   it('should fall back to the account default when the model it was on is no longer served', async () => {
     // Arrange
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
-      config: launchConfig({ model: 'claude-retired-4', teammate: 'Ada', parent: 'p1' }),
+    ports.subjectValue = earlierSubject({
+      config: launchConfig({ model: 'claude-gone-4', teammate: 'Ada', parent: 'p1' }),
     });
 
     // Act
@@ -160,7 +154,7 @@ describe('SessionLaunchService.relaunch', () => {
 
     // Assert
     should(argv).containEql('claude-opus-5');
-    should(argv).not.containEql('claude-retired-4');
+    should(argv).not.containEql('claude-gone-4');
   });
 
   it('should leave a session it cannot rebuild to its record', async () => {
@@ -184,7 +178,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
   it('should keep fast mode on a Claude session across a restart, carrying the fixed overlay with it', async () => {
     // Arrange: launched fast; nothing reported since.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+    ports.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
 
     // Act
     const argv = await new SessionLaunchService(ports).relaunch(ID);
@@ -199,7 +193,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
   it('should restart on what the harness last reported when that is newer than the launch', async () => {
     // Arrange: launched fast, then turned off with /fast off.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       config: launchConfig({ launchFast: true }),
       state: launchState({ observedFast: false, observedModelAt: LATER }),
     });
@@ -242,7 +236,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     // Arrange
     const ports = new Ports();
     ports.accountValue = launchAccount({ kind: 'codex' });
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       config: launchConfig({ harness: 'codex', launchFast: true }),
       command: [WRAPPER],
     });
@@ -259,10 +253,10 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     // Arrange
     const unreadable = new Ports();
     unreadable.fixed = undefined;
-    unreadable.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+    unreadable.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
     const corrupt = new Ports();
     corrupt.fixed = '{not json';
-    corrupt.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+    corrupt.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
 
     // Act / Assert
     should(await new SessionLaunchService(unreadable).relaunch(ID)).be.undefined();
@@ -275,7 +269,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     // Arrange: only an overlay that cannot be read leaves a session to its record; a port that breaks
     // is a real fault, and swallowing it would restart the pane on a stale argv without saying so.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+    ports.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
     ports.readableFolders = () => {
       throw new Error('the state directory is gone');
     };
@@ -295,7 +289,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
   it('should treat the fast-mode argument as part of the run, so a live /fast is not a stale setting', async () => {
     // Arrange: the process runs with the fast overlay it launched with; the owner then typed /fast off.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       config: launchConfig({ launchFast: true }),
       state: launchState({ observedFast: false, observedModelAt: LATER }),
       command: [
@@ -330,7 +324,7 @@ describe('SessionLaunchService.drift', () => {
   it('should call a session current when only its model, effort or resume flag differ', async () => {
     // Arrange: launched with the rules, then switched model; neither is a stale setting.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       config: launchConfig({ launchSettings: 'settings-now' }),
       state: launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER }),
       command: [WRAPPER, '--resume', HARNESS_SESSION, ...READ_RULES, '--model', 'claude-opus-5', '--effort', 'low'],
@@ -346,7 +340,7 @@ describe('SessionLaunchService.drift', () => {
   it('should call a session stale when the fleet settings it launched under have changed', async () => {
     // Arrange: e.g. the permission mode or the profile changed since, which regenerated the wrapper.
     const ports = new Ports();
-    ports.subjectValue = legacySubject({
+    ports.subjectValue = earlierSubject({
       config: launchConfig({ launchSettings: 'settings-then' }),
       command: [WRAPPER, ...READ_RULES, '--model', 'claude-opus-5'],
     });
@@ -361,10 +355,10 @@ describe('SessionLaunchService.drift', () => {
   it('should claim nothing it cannot show', async () => {
     // Arrange: no recorded digest, an unreadable wrapper now, an unreadable session, a gone account.
     const unrecorded = new Ports();
-    unrecorded.subjectValue = legacySubject({ command: [WRAPPER, ...READ_RULES] });
+    unrecorded.subjectValue = earlierSubject({ command: [WRAPPER, ...READ_RULES] });
     const unreadableNow = new Ports();
     unreadableNow.digest = undefined;
-    unreadableNow.subjectValue = legacySubject({
+    unreadableNow.subjectValue = earlierSubject({
       config: launchConfig({ launchSettings: 'settings-then' }),
       command: [WRAPPER, ...READ_RULES],
     });

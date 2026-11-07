@@ -3,26 +3,23 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import {
-  FileSessionEnvironmentStore,
-  TmuxPaneDelivery,
-  TmuxResumeLauncher,
-  TmuxSessionLifecycleLauncher,
-} from '../../../../src/adapters/index.ts';
-import {
-  createSessionRecord,
-  defaultSessionLifecycleSettings,
-  LaunchEnvironmentStore,
-  parseSessionId,
-  type SessionId,
-  type TmuxCommandPort,
+import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
+import { TmuxResumeLauncher } from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
+import { TmuxSessionLifecycleLauncher } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-lifecycle-launcher.ts';
+import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
+import { LaunchEnvironmentStore } from '../../../../../daemon/lib/session/lifecycle/launch-environment.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import type {
   TmuxController,
-} from '../../../../src/lib/index.ts';
+  TmuxLaunch,
+  TmuxPaneDelivery,
+} from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 
 /**
  * EVERY LAUNCH PATH HANDS A FERRET THE SWITCHES ITS RECORD SAYS. There are exactly two pane launches:
  * the first launch — which a start, a fork, a Pack sub-ferret and an imported or continued conversation
- * all reach through the lifecycle — and the relaunch, which a Restart, a same-harness migration, a
+ * all reach through the lifecycle — and the relaunch, which a Restart, a same-harness move, a
  * revive and a resume all reach through the resume service. Both read the session's mode from its
  * record and its environment through one `LaunchEnvironmentStore`, so these cases pin both halves for
  * an interactive and an unattended ferret, including one started before Pack mode existed.
@@ -37,36 +34,58 @@ afterEach(async () => {
   homes.clear();
 });
 
-/** A tmux server that answers just enough of the vocabulary for a launch and records each `new-session`. */
-class LaunchRecordingTmux implements TmuxCommandPort {
-  readonly launches: Array<readonly string[]> = [];
-  alive = false;
+/**
+ * The terminals plugin's controller as the launchers see it (the injected `TmuxController` port): it records the
+ * environment each launch hands its pane — what today's real controller turned into `new-session -e NAME=VALUE`.
+ */
+class LaunchRecordingTmux implements TmuxController {
+  readonly launches: Array<Readonly<Record<string, string>>> = [];
+  running = false;
 
-  async execute(argv: readonly string[]): Promise<{ stdout: string; stderr: string; code: number }> {
-    const command = argv[0];
-    if (command === 'has-session')
-      return { stdout: '', stderr: this.alive ? '' : 'no such session', code: this.alive ? 0 : 1 };
-    if (command === 'new-session') {
-      this.launches.push(argv);
-      this.alive = true;
-    }
-    if (command === 'kill-session') this.alive = false;
-    if (command === 'display-message') return { stdout: '0||0|1|24|80\n', stderr: '', code: 0 };
-    return { stdout: '', stderr: '', code: 0 };
+  async alive(): Promise<boolean> {
+    return this.running;
   }
+
+  async launch(launch: TmuxLaunch): Promise<void> {
+    this.launches.push(launch.env ?? {});
+    this.running = true;
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+  }
+
+  async state() {
+    return { alive: this.running, dead: false, promptReady: true, history: '', visible: '' };
+  }
+
+  async paneIdentities() {
+    return undefined;
+  }
+
+  async paneIdentity() {
+    return undefined;
+  }
+
+  async paneSighting() {
+    return undefined;
+  }
+
+  async killPaneExact(): Promise<void> {}
 }
 
-/** The `-e NAME=VALUE` pairs one `new-session` handed the pane. */
-function paneEnvironment(argv: readonly string[]): Readonly<Record<string, string>> {
-  const pairs: Array<[string, string]> = [];
-  argv.forEach((value, index) => {
-    const next = argv[index + 1];
-    if (value !== '-e' || next === undefined) return;
-    const at = next.indexOf('=');
-    pairs.push([next.slice(0, at), next.slice(at + 1)]);
-  });
-  return Object.fromEntries(pairs);
-}
+/** Delivery is never reached by a bare launch; any call fails the case loudly. */
+const NO_DELIVERY: TmuxPaneDelivery = {
+  waitReady: async () => {
+    throw new Error('a launch must not wait on the pane here');
+  },
+  deliver: async () => {
+    throw new Error('a launch must not deliver here');
+  },
+  waitStartupSettled: async () => {
+    throw new Error('a launch must not wait on startup here');
+  },
+};
 
 const SWITCHES = ['FY_HYPERMEDIA', 'FY_PACK'] as const;
 const switches = (env: Readonly<Record<string, string>>) => Object.fromEntries(SWITCHES.map(name => [name, env[name]]));
@@ -84,8 +103,8 @@ async function fixture(mode: 'auto' | 'interactive', stored: Readonly<Record<str
     { id, cwd: '/workspace/project', at: NOW, settings: defaultSessionLifecycleSettings },
   ).record;
   const tmux = new LaunchRecordingTmux();
-  const controller = new TmuxController(tmux);
-  const delivery = new TmuxPaneDelivery(controller, async () => undefined);
+  const controller = tmux;
+  const delivery = NO_DELIVERY;
   const first = new TmuxSessionLifecycleLauncher(controller, delivery, environments);
   const relaunch = new TmuxResumeLauncher(
     controller,
@@ -112,11 +131,11 @@ describe('the switches every launch path hands a ferret', () => {
 
     // Act — the first launch, then the pane dies and the session is relaunched into it.
     await subject.first.launch(subject.record);
-    subject.tmux.alive = false;
+    subject.tmux.running = false;
     await subject.relaunch.relaunch(subject.id);
 
     // Assert
-    const [launched, relaunched] = subject.tmux.launches.map(paneEnvironment);
+    const [launched, relaunched] = subject.tmux.launches;
     should(subject.tmux.launches).have.length(2);
     should(switches(launched ?? {})).deepEqual(expected);
     should(switches(relaunched ?? {})).deepEqual(expected);
@@ -130,16 +149,16 @@ describe('the switches every launch path hands a ferret', () => {
 
     // Act
     await off.first.launch(off.record);
-    off.tmux.alive = false;
+    off.tmux.running = false;
     await off.relaunch.relaunch(off.id);
     await on.first.launch(on.record);
-    on.tmux.alive = false;
+    on.tmux.running = false;
     await on.relaunch.relaunch(on.id);
 
     // Assert
-    for (const argv of off.tmux.launches)
-      should(switches(paneEnvironment(argv))).deepEqual({ FY_HYPERMEDIA: '0', FY_PACK: '0' });
-    for (const argv of on.tmux.launches)
-      should(switches(paneEnvironment(argv))).deepEqual({ FY_HYPERMEDIA: '1', FY_PACK: '1' });
+    for (const env of off.tmux.launches)
+      should(switches(env)).deepEqual({ FY_HYPERMEDIA: '0', FY_PACK: '0' });
+    for (const env of on.tmux.launches)
+      should(switches(env)).deepEqual({ FY_HYPERMEDIA: '1', FY_PACK: '1' });
   });
 });

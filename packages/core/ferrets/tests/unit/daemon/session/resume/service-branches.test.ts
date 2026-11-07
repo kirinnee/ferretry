@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { SerialExecutor } from '../../../../../daemon/lib/ports.ts';
 import {
   defaultSessionResumeSettings,
   type PaneObservation,

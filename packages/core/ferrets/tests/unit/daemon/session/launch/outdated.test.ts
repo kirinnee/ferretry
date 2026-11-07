@@ -1,11 +1,36 @@
 import { describe, it } from 'bun:test';
-import { launchInstructions } from '@ferretry/fleet';
-import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
+import type { LaunchInstructionSectionId, SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { launchEnvironment } from '../../../../src/lib/fleet/launch-environment.ts';
+import {
+  HYPERMEDIA_ENV,
+  instructionDigest,
+  type LaunchInstructionsPort,
+  launchEnvironment,
+  SESSION_MODE_ENV,
+} from '../../../../../daemon/lib/session/peers/fleet.ts';
 import { outdatedSections, relaunchInstructionEnvironment } from '../../../../../daemon/lib/session/launch/outdated.ts';
 import { sessionPaneEnvironment } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+
+/**
+ * Stands in for the runtimes plugin's `launchInstructions` (the port the launchers are handed): the always-on
+ * sections, then `hypermedia` exactly when its variable is `1` — the one switch these cases turn.
+ */
+const launchInstructions: LaunchInstructionsPort = (fy, env) => {
+  const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
+  const texts: readonly (readonly [LaunchInstructionSectionId, string])[] = [
+    ['tools', 'tools'],
+    ['settings', `settings for ${fy}`],
+    ['notify', `notify via ${fy}`],
+    ['board', `board via ${fy}`],
+    ...(env[HYPERMEDIA_ENV] === '1' ? [['hypermedia', 'hypermedia'] as const] : []),
+  ];
+  return {
+    sections: texts.map(([id, text]) => ({ id, chars: text.length, digest: instructionDigest(text) })),
+    mode,
+    questions: mode === 'interactive',
+  };
+};
 
 type Section = SessionLaunchInstructions['sections'][number];
 

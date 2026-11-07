@@ -1,13 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { QueueAuthor, SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
-import {
-  firstWriteReleasedAnswerAgenda,
-  parseSessionId,
-  type SerialExecutor,
-  type SessionId,
-} from '../../../../src/lib/index.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { SerialExecutor } from '../../../../../daemon/lib/ports.ts';
 import {
   defaultSessionResumeSettings,
   type LaunchGate,
@@ -38,6 +34,11 @@ const UNCONFIRMED = 'structured-answer-unconfirmed';
  * It is the strongest identity case in the codebase for the queue fixture below: it names only the
  * TOOL, so two different request ids over one tool render this exact same string.
  */
+/** Today's conversation-plugin `firstWriteReleasedAnswerAgenda` (`session/question/projection.ts`), restated. */
+function firstWriteReleasedAnswerAgenda(toolUseId: string): string {
+  return `an answer to ${toolUseId} may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed`;
+}
+
 const FIRST_WRITE_ADVISORY = firstWriteReleasedAnswerAgenda('tool-1');
 
 /** Let every already-resolved continuation run, without inventing a timer to wait on. */
@@ -855,7 +856,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     should(world.launcher.calls).not.containEql('kill:failed resume cleanup');
     should(world.monitors.calls).deepEqual(['stop', 'start']);
     // Nothing cleared: the only transition that carries the clear is the one that was refused, so no
-    // accepted transition in this attempt can have retired the advisory.
+    // accepted transition in this attempt can have cleared the advisory.
     should(world.repository.transitions.filter(change => change.clearNeedsHuman === true)).deepEqual([]);
   });
 

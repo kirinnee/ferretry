@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
-import { runningChildCount } from '../../../../src/lib/pack/admission.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { SerialExecutor } from '../../../../../daemon/lib/ports.ts';
 import { claimsRunningAgent, exitedSessionTransition } from '../../../../../daemon/lib/session/health/exit.ts';
 import type { RegisteredTerminalPane } from '../../../../../daemon/lib/session/reap.ts';
 import {
@@ -18,6 +18,13 @@ import {
   type ResumeTransition,
   SessionResumeService,
 } from '../../../../../daemon/lib/session/resume/index.ts';
+
+/** Today's packs-plugin `runningChildCount` (`lib/pack/admission.ts`), restated: how many of a parent's children are not finished. */
+const PACK_CHILD_FINISHED_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
+const runningChildCount = (
+  parentId: string,
+  sessions: readonly { readonly parent?: string | undefined; readonly status: string }[],
+): number => sessions.filter(child => child.parent === parentId && !PACK_CHILD_FINISHED_STATUSES.has(child.status)).length;
 
 const NOW = '2026-10-30T08:41:01.000Z';
 const STARTING = parseSessionId('mvun2vi2-e9bf27a2');

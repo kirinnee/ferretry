@@ -4,7 +4,7 @@ import {
   type SessionState,
   SessionStateSchema,
 } from '../../../../../daemon/lib/protocol/session.ts';
-import type { CoreAccount } from '../../../../src/lib/index.ts';
+import type { CoreAccount } from '../../../../../daemon/lib/session/peers/core.ts';
 
 /** When every fixture session was created. */
 const CREATED = '2027-01-15T08:00:00.000Z';

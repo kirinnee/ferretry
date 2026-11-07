@@ -19,7 +19,7 @@ import {
   sessionTarget,
   stampToRecord,
   type TmuxCommandPort,
-} from '../../../lib/tmux/index.ts';
+} from '../../../lib/session/peers/tmux-lifecycle.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 import type { DurableTerminalPaneStore } from './durable-terminal-pane-reap.ts';
 

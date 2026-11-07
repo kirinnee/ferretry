@@ -3,36 +3,20 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  FileSelfRestartStampStore,
-  FileSessionHealthEventSink,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  StorageConsistencyPass,
-  StorageSessionHealthInventory,
-  type SupervisionCapabilities,
-  SystemClock,
-  SystemMonotonicClock,
-  UnmountedSupervisionRepair,
-} from '../../../../src/adapters/index.ts';
-import {
-  CURRENT_SESSION_VERSION,
-  createFoundationPaths,
-  createSessionEvent,
-  createSessionPaths,
-  defaultSessionHealthSettings,
-  encodeSessionEvent,
-  type FileSystemFactory,
-  type FileSystemPort,
-  parseSessionId,
-  resolveStateHome,
-} from '../../../../src/lib/index.ts';
+import { BunSqliteIndexFactory, DaemonStorageFactory, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { FileSelfRestartStampStore } from '../../../../../daemon/adapters/session/resume/file-self-restart-stamp-store.ts';
+import { FileSessionHealthEventSink } from '../../../../../daemon/adapters/session/resume/file-health-event-sink.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { StorageConsistencyPass } from '../../../../../daemon/adapters/session/resume/storage-consistency-pass.ts';
+import { StorageSessionHealthInventory, type SupervisionCapabilities } from '../../../../../daemon/adapters/session/resume/storage-health-inventory.ts';
+import { SystemMonotonicClock } from '../../../../../daemon/adapters/session/resume/system-monotonic-clock.ts';
+import { UnmountedSupervisionRepair } from '../../../../../daemon/adapters/session/resume/unmounted-repair.ts';
+import { CURRENT_SESSION_VERSION, resolveStateHome } from 'UNRESOLVED';
+import { createFoundationPaths, createSessionPaths } from '../../../../../daemon/lib/paths.ts';
+import { createSessionEvent, encodeSessionEvent } from '../../../../../daemon/lib/storage/journal.ts';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import type { FileSystemFactory, FileSystemPort } from '../../../../../daemon/lib/ports.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { waitForValue } from '../../support/wait-for.ts';
 
 const homes = new Set<string>();
@@ -448,12 +432,12 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
-  it('should report a legacy session whose only witness is the index as unhealable too', async () => {
-    // Arrange — a version-1 directory the boot sweep deliberately refused to migrate, because
+  it('should report an old session whose only witness is the index as unhealable too', async () => {
+    // Arrange — a version-1 directory the boot sweep deliberately refused to move, because
     // fabricating its journal would have destroyed the index fingerprint that proves the loss.
     const home = await temporaryHome();
     const opened = await openStorage(home);
-    const id = parseSessionId('legacy-witnessed');
+    const id = parseSessionId('old-witnessed');
     await opened.storage.append(id, 'session.started', { durable: true });
     const session = createSessionPaths(paths(home), id);
     await writeFile(session.marker, '1\n', { mode: 0o600 });

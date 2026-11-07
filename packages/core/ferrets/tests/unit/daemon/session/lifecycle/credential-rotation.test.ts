@@ -9,7 +9,7 @@ import {
   presentToken,
   SESSION_CREDENTIAL_PREFIX,
   secretsMatch,
-} from '../../../../src/lib/api/authentication.ts';
+} from '../../../../../daemon/lib/api/authentication.ts';
 import { SessionCredentialRotation } from '../../../../../daemon/lib/session/lifecycle/credential-rotation.ts';
 import type {
   SessionCapabilityHashStore,

@@ -3,7 +3,7 @@ import { reviveRuling } from '../../../../../daemon/lib/protocol/session-revive.
 import { type SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { withRevive } from '../../../../../daemon/lib/session/resume/revive-view.ts';
-import { sessionView } from '../../runtime/mounts/support.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
 
 const view = (id: string, status: SessionView['state']['status']): SessionView => sessionView(id, {}, { status });
 

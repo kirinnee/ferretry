@@ -4,7 +4,7 @@ import { turnFileInstruction } from '../../protocol/turn-handoff.ts';
 import {
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
-} from '../question/answer-ledger.ts';
+} from '../peers/question-lifecycle.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
   type PaneObservation,
@@ -145,7 +145,7 @@ export type ResumeAction =
  * typed there is simply lost. It is killed and replaced by a tracked relaunch, while a genuinely
  * live, non-terminal session takes the plain-send shortcut instead.
  *
- * `replaceLiveTerminal` is what a migration sets to give up that shortcut: see the policy field.
+ * `replaceLiveTerminal` is what a move sets to give up that shortcut: see the policy field.
  */
 export function planResume(
   target: ResumeTarget,

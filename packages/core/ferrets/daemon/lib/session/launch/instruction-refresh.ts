@@ -23,7 +23,7 @@
  * Pure except {@link InstructionRefresh}, which reads and writes through its ports.
  */
 
-import { type AlwaysOnSection, instructionDigest } from '@ferretry/fleet';
+import { type AlwaysOnSection, instructionDigest } from '../peers/fleet.ts';
 import type { LaunchInstructionSection, SessionLaunchInstructions } from '../../protocol/session.ts';
 
 /** The sender chip's feature for the note: the app says "Ferretry · Instructions", never a tag in the text. */

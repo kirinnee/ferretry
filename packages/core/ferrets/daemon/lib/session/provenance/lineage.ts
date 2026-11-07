@@ -10,7 +10,7 @@
  * only for sessions that predate stamping.
  */
 
-import { WARDEN_LABEL } from '../../warden/types.ts';
+import { WARDEN_LABEL } from '../peers/warden-lifecycle.ts';
 import type { SessionAncestor, WardenLineageSource } from './types.ts';
 
 /** What lineage resolution concluded, and on what evidence. */

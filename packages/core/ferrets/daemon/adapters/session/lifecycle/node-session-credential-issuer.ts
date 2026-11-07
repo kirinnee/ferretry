@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { SESSION_CREDENTIAL_PREFIX } from '../../../lib/api/authentication.ts';
+import { FERRET_TOKEN_PREFIX } from '@ferretry/core-gate/contract';
 import type { SessionCredential, SessionCredentialIssuer } from '../../../lib/session/lifecycle/index.ts';
 
 /**
@@ -18,7 +18,7 @@ export class NodeSessionCredentialIssuer implements SessionCredentialIssuer {
   constructor(private readonly random: (size: number) => Buffer = randomBytes) {}
 
   issue(): SessionCredential {
-    const capability = `${SESSION_CREDENTIAL_PREFIX}${this.random(CREDENTIAL_BYTES).toString('base64url')}`;
+    const capability = `${FERRET_TOKEN_PREFIX}${this.random(CREDENTIAL_BYTES).toString('base64url')}`;
     return { capability, hash: createHash('sha256').update(capability, 'utf8').digest('hex') };
   }
 }

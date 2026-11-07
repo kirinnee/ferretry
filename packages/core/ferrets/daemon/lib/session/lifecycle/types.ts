@@ -360,7 +360,7 @@ export interface SessionCredentialRotator {
   revoke?(id: SessionId): Promise<void>;
   /**
    * Cuts a session off for a PERSON: its hash is dropped and the session is marked, so every later rotation —
-   * a Warden revive, a peer's resume, a restart or migration — is refused ({@link SessionCredentialRevokedError})
+   * a Warden revive, a peer's resume, a restart or move — is refused ({@link SessionCredentialRevokedError})
    * until a person resumes it. Absent on a rotator with nothing to revoke.
    */
   cutOff?(id: SessionId): Promise<void>;

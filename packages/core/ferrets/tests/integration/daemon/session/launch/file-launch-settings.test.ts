@@ -1,10 +1,23 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FIXED_SETTINGS_FILE, RUNTIME_STATE_DIRECTORY } from '@ferretry/fleet';
+import type { HarnessWrapperSource } from '../../../../../daemon/lib/session/peers/transcript-launch.ts';
+import { FIXED_SETTINGS_FILE, RUNTIME_STATE_DIRECTORY } from '../../../../../daemon/lib/session/peers/fleet.ts';
 import should from 'should';
-import { FileHarnessWrapperSource, FileLaunchSettingsDigest } from '../../../../src/adapters/index.ts';
+import { FileLaunchSettingsDigest } from '../../../../../daemon/adapters/session/launch/file-launch-settings.ts';
+
+/** Today's conversation-plugin `FileHarnessWrapperSource` (`adapters/session/transcript/`), restated: a wrapper's text, or nothing for a binary. */
+class FileHarnessWrapperSource implements HarnessWrapperSource {
+  constructor(private readonly maxBytes = 128 * 1024) {}
+
+  async read(executable: string): Promise<string | undefined> {
+    const buffer = await readFile(executable).catch(() => undefined);
+    if (buffer === undefined) return undefined;
+    const head = buffer.subarray(0, this.maxBytes);
+    return head.includes(0) ? undefined : head.toString('utf8');
+  }
+}
 
 const directories = new Set<string>();
 

@@ -1,6 +1,5 @@
 import { type SessionView } from '../../../lib/protocol/session.ts';
-import type { BoardTask } from '@ferretry/protocol';
-import type { LaneSets } from '../../../lib/board/graph.ts';
+import type { OpenCardStanding } from '../../../lib/session/peers/board.ts';
 import { createSessionPaths } from '../../../lib/paths.ts';
 import type { FoundationPaths } from '../../../lib/paths.ts';
 import type { SessionArchiveSubsystem } from '../../../lib/runtime/mounts/session-archive.ts';
@@ -18,8 +17,11 @@ import { StorageArchiveSessions } from './storage-archive-sessions.ts';
 export interface SessionArchiveSources {
   /** The ferrets the owner pinned. */
   pinned(): Promise<ReadonlyMap<string, string>>;
-  /** Every card as stored, with its board's lanes. */
-  board(): Promise<{ readonly cards: readonly BoardTask[]; readonly laneSets: LaneSets }>;
+  /**
+   * Every card as stored, each with its lane's category as Board resolved it. INJECTED by the Board plugin; until it
+   * is wired the archive cannot prove a ferret is off every open card, so it keeps every one live.
+   */
+  board?(): Promise<readonly OpenCardStanding[]>;
   /** Whether a session's agenda board holds an item that is still open. */
   hasOpenAgendaItem(sessionId: string): Promise<boolean>;
 }
@@ -78,8 +80,9 @@ export function createSessionArchive(input: {
   const keeps: ArchiveKeepSources = {
     pinned: async () => new Set((await sources.pinned()).keys()),
     onOpenCards: async () => {
-      const { cards, laneSets } = await sources.board();
-      return sessionsOnOpenCards(cards, laneSets);
+      // Unwired, this rejects: `sessionKeeps` reads a rejection as "board unreadable" and keeps every session.
+      if (sources.board === undefined) throw new Error('no board is wired to say which sessions are on an open card');
+      return sessionsOnOpenCards(await sources.board());
     },
     hasOpenAgendaItem: sources.hasOpenAgendaItem,
   };

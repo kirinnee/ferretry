@@ -4,32 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  BunTmuxProcess,
-  DaemonStorageFactory,
-  DurableTerminalPaneRegistrar,
-  DurableTerminalPaneStore,
-  ExactTmuxPaneReaper,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
-import {
-  createSessionPaths,
-  createSessionRecord,
-  defaultSessionLifecycleSettings,
-  PANE_PROOF_FORMAT,
-  parseSessionId,
-  type RegisteredTerminalPane,
-  SessionAttachService,
-  TerminalReapService,
-  TmuxController,
-} from '../../../../src/lib/index.ts';
+import { BunSqliteIndexFactory, BunTmuxProcess, DaemonStorageFactory, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { DurableTerminalPaneRegistrar, DurableTerminalPaneStore, ExactTmuxPaneReaper } from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
+import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
+import { PANE_PROOF_FORMAT, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { RegisteredTerminalPane } from '../../../../../daemon/lib/session/reap.ts';
+import { SessionAttachService } from 'UNRESOLVED';
+import { TerminalReapService } from '../../../../../daemon/lib/session/reap-service.ts';
 
 const DAEMON = 'reap-test-daemon';
 const NOW = '2026-08-01T10:00:00.000Z';
@@ -525,19 +510,19 @@ describe('a registration ledger with one damaged document', () => {
     const id = subject.record.config.id;
     const written = await subject.store.registration(DAEMON, id);
     if (written?.sessionCreated === undefined) throw new Error('the launch did not record the creation second');
-    const { sessionCreated, ...legacy } = written;
+    const { sessionCreated, ...unstamped } = written;
     const path = createSessionPaths(subject.storage.paths, id).terminalPane;
-    await subject.files.writeTextAtomic(path, `${JSON.stringify(legacy)}\n`);
+    await subject.files.writeTextAtomic(path, `${JSON.stringify(unstamped)}\n`);
 
     // Act
-    const replaced = await subject.store.recordSessionCreated(DAEMON, { ...legacy, pid: legacy.pid + 1 }, 7);
-    const first = await subject.store.recordSessionCreated(DAEMON, legacy, sessionCreated);
-    const again = await subject.store.recordSessionCreated(DAEMON, { ...legacy, sessionCreated }, 8);
-    const missing = await subject.store.recordSessionCreated(DAEMON, { ...legacy, sessionId: 'never-registered' }, 9);
+    const replaced = await subject.store.recordSessionCreated(DAEMON, { ...unstamped, pid: unstamped.pid + 1 }, 7);
+    const first = await subject.store.recordSessionCreated(DAEMON, unstamped, sessionCreated);
+    const again = await subject.store.recordSessionCreated(DAEMON, { ...unstamped, sessionCreated }, 8);
+    const missing = await subject.store.recordSessionCreated(DAEMON, { ...unstamped, sessionId: 'never-registered' }, 9);
 
     // Assert
     should([replaced, first, again, missing]).deepEqual([false, true, false, false]);
-    should(await subject.store.registration(DAEMON, id)).deepEqual({ ...legacy, sessionCreated });
+    should(await subject.store.registration(DAEMON, id)).deepEqual({ ...unstamped, sessionCreated });
   });
 
   it('should refuse every shape that is not a complete, safe registration', async () => {

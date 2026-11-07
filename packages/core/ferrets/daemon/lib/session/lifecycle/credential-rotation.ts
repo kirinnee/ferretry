@@ -37,7 +37,7 @@ export class SessionCredentialRotation implements SessionCredentialRotator {
 
   async rotate(id: SessionId): Promise<string> {
     // A session a person cut off is handed no credential by ANY launch until a person resumes it: this is the one
-    // place every launch path passes through, so a Warden revive, a peer's resume, a restart and a migration all
+    // place every launch path passes through, so a Warden revive, a peer's resume, a restart and a move all
     // fail closed here rather than each needing its own check.
     if ((await this.ports.hashes.isCutOff?.(id)) === true) throw new SessionCredentialRevokedError(id);
     const credential = this.ports.credentials.issue();

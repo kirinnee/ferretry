@@ -1,4 +1,4 @@
-import { WAITING_BACKSTOP_MS } from '../../warden/detect.ts';
+import { WAITING_BACKSTOP_MS } from '../peers/warden.ts';
 import { SignalRefused, type DeclaredWait, type SignalTarget } from './types.ts';
 
 /**

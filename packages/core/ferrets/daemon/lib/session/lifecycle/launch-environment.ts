@@ -9,7 +9,7 @@ export type LaunchSwitchDefaults = (id: SessionId) => Promise<Readonly<Record<st
  *
  * A stored switch always wins — it is the owner's own, or the start's decision — and only a switch the
  * store never recorded is derived: Pack mode's `FY_PACK` for a ferret started before Pack mode existed,
- * or whose start could not write it. Without this a restart, migration or revive told such a ferret
+ * or whose start could not write it. Without this a restart, move or revive told such a ferret
  * nothing while its record said it was on. Every launch path reads through one of these, so the first
  * launch and the revive cannot disagree. Defaults that cannot be resolved derive nothing, because a
  * launch must never fail on a switch it was not given.

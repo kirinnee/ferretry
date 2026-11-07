@@ -26,7 +26,7 @@ const settle = async (
   return { detail, rolledBack };
 };
 
-describe('settling a migration whose relaunch did not come up', () => {
+describe('settling a move whose relaunch did not come up', () => {
   it('should put the record back only when the registered pane is the one that served before', async () => {
     const { detail, rolledBack } = await settle('preserved', '%1:10:100', '%1:10:100');
     should(rolledBack).equal(1);
@@ -68,7 +68,7 @@ describe('settling a migration whose relaunch did not come up', () => {
   });
 });
 
-describe('restoring the fields a migration restamped', () => {
+describe('restoring the fields a move restamped', () => {
   it('should put back the restamped fields and keep every write made since', () => {
     const before = { agent: 'claude-a', model: 'm1', name: 'old', sessionCapabilityHash: 'h1', launchFast: true };
     const current = {
@@ -76,7 +76,7 @@ describe('restoring the fields a migration restamped', () => {
       model: 'm2',
       name: 'renamed',
       sessionCapabilityHash: 'h2',
-      migration: { from: 'claude-a' },
+      move: { from: 'claude-a' },
     };
     should(restoreRestamped(before, current)).eql({
       agent: 'claude-a',
@@ -87,13 +87,13 @@ describe('restoring the fields a migration restamped', () => {
     });
   });
 
-  it('should only ever touch the keys the migration restamps', () => {
+  it('should only ever touch the keys the move restamps', () => {
     should(RESTAMPED_RECORD_KEYS).containEql('agent').and.not.containEql('sessionCapabilityHash');
     should(RESTAMPED_RECORD_KEYS).not.containEql('name');
   });
 });
 
-describe('settling a migration whose resume was refused or threw', () => {
+describe('settling a move whose resume was refused or threw', () => {
   const run = async (paneBefore: string | undefined, paneNow: string | undefined) => {
     let rolledBack = 0;
     const note = await settleRejectedRelaunch({

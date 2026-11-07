@@ -1,22 +1,10 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it } from 'bun:test';
 import type { SessionProvenance } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  StorageSessionProvenanceStore,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
-import { createSessionPaths } from '../../../../src/lib/paths.ts';
-import { parseSessionId } from '../../../../src/lib/index.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
+import { StorageSessionProvenanceStore } from '../../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
+import { SessionConfigFiles } from '../../../../../daemon/lib/state.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /**
  * The spawn stamp's durable round trip, over a real state home.
@@ -31,26 +19,10 @@ import { parseSessionId } from '../../../../src/lib/index.ts';
  */
 
 const NOW = '2026-08-06T10:00:00.000Z';
-const directories = new Set<string>();
 
-afterEach(async () => {
-  for (const directory of directories) await rm(directory, { recursive: true, force: true });
-  directories.clear();
-});
-
+/** A storage over the kernel test host's memory state (`tests/support/daemon/storage.ts`), on this file's clock. */
 async function openTemporaryStorage() {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-spawn-provenance-'));
-  directories.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return (await factory.open()).storage;
+  return (await memoryStorage({ clock: { now: () => NOW } })).storage;
 }
 
 /** Everything `SessionConfigSchema` demands, so the read half parses a whole document. */
@@ -192,10 +164,10 @@ describe('spawn provenance storage', () => {
   it('should answer undefined for a session whose configuration document is not readable at all', async () => {
     // Arrange: not a damaged STAMP but a damaged DOCUMENT — the read itself throws rather than
     // answering something a schema could reject.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-torn');
     await storage.writeConfig(id, sessionConfig(id));
-    await writeFile(createSessionPaths(storage.paths, id).config, '{"id": "20260806-torn"', 'utf8');
+    folder.plant(SessionConfigFiles, '{"id": "20260806-torn"', id);
 
     // Act + Assert: a torn document is no stamp, so a fresh resolution runs. Raising here would fail
     // a revive over a record the next relaunch would rewrite anyway.

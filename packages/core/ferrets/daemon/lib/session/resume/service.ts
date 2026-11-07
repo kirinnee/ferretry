@@ -63,7 +63,7 @@ export interface ResumeRequest {
   /**
    * An explicit policy overrides the OPERATIONAL fields the actor would imply — `automatic`,
    * `dedupeSharedRecoveryScope`, `expectedStatus`, `retryAttempt`, `replaceLiveTerminal` — which is
-   * how a scheduled retry pins its guard and a migration gives up the live-send shortcut.
+   * how a scheduled retry pins its guard and a move gives up the live-send shortcut.
    *
    * `humanOperator` is NOT overridable that way. It is derived from the actor, and a supplied policy
    * can only ever NARROW it: see `authorizedPolicy`.
@@ -113,7 +113,7 @@ interface ResumeAttempt {
  * The policy this resume actually runs under: the caller's, except for the one axis it may not name.
  *
  * `ResumeRequest.policy` is a real and needed override — the scheduled retry pins `expectedStatus`
- * and keeps its retry counter, the migration gives up the live-send shortcut — and every one of
+ * and keeps its retry counter, the move gives up the live-send shortcut — and every one of
  * those fields is a caller stating HOW to resume. `humanOperator` is not that kind of field. It is
  * the capability to dismiss a warning a person is supposed to read, and a whole-policy override made
  * it forgeable: `{ actor: 'peer', policy: { …, humanOperator: true } }` took the bare relaunch path,

@@ -1,13 +1,13 @@
 import type { RuntimeModelChoice, SessionView } from '../../../../../daemon/lib/protocol/session.ts';
-import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
+import type { CoreAccount } from '../../../../../daemon/lib/session/peers/core.ts';
 import type {
   SessionEffectAdmission,
   SessionEffectKey,
   SessionEffectLedger,
   SessionEffectStanding,
 } from '../../../../../daemon/lib/session/effects/types.ts';
-import { CodexRuntimeCatalogCache } from '../../../../src/lib/session/harness/codex-catalog-cache.ts';
-import type { CodexPickerDrivePort, CodexPickerFrame } from '../../../../src/lib/session/harness/picker-drive.ts';
+import { CodexRuntimeCatalogCache } from './harness-fixture/codex-catalog-cache.ts';
+import type { CodexPickerDrivePort, CodexPickerFrame } from './harness-fixture/picker-drive.ts';
 import type {
   RuntimeLaunchTarget,
   RuntimePaneObservation,
@@ -16,9 +16,9 @@ import type {
   RuntimeRepository,
 } from '../../../../../daemon/lib/session/runtime-control/types.ts';
 import type { SessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { SerialExecutor } from '../../../../src/lib/ports.ts';
-import type { InjectionOutcome } from '../../../../src/lib/tmux/delivery.ts';
-import { sessionView } from '../../runtime/mounts/support.ts';
+import type { SerialExecutor } from '../../../../../daemon/lib/ports.ts';
+import type { InjectionOutcome } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
 
 /**
  * Fakes for the runtime control service, and nothing from `src/adapters`.

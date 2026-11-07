@@ -1,16 +1,17 @@
 import { describe, it } from 'bun:test';
 import type { RuntimeControlRequest, SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import type { CodexPickerCleanup } from '../../../../src/lib/session/harness/cleanup.ts';
-import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';
-import { HarnessQuirkService } from '../../../../src/lib/session/harness/service.ts';
+import type { CodexPickerCleanup } from './harness-fixture/cleanup.ts';
+import { CODEX_PICKER_QUARANTINE_KIND } from './harness-fixture/quarantine.ts';
+import { HarnessQuirkService } from './harness-fixture/service.ts';
 import {
   runtimeQuarantineState,
   SessionRuntimeControlService,
   type SessionRuntimeControlPorts,
 } from '../../../../../daemon/lib/session/runtime-control/service.ts';
 import { SessionRuntimeError } from '../../../../../daemon/lib/session/runtime-control/types.ts';
-import { sessionView } from '../../runtime/mounts/support.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
+import { harnessCatalogs } from './harness-fixture/catalogs.ts';
 import {
   account,
   CLAUDE_VIEW,
@@ -81,6 +82,7 @@ function subjectWith(overrides: Overrides = {}) {
     serial,
     sleeper: { sleep: async () => undefined },
     clock: overrides.clock ?? { now: () => NOW },
+    catalogs: harnessCatalogs,
     clientName: overrides.clientName ?? 'fy',
   };
   return { effects, ports, repository, pane, injector, serial, subject: new SessionRuntimeControlService(ports) };

@@ -4,32 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  FileResumeTurnStore,
-  InMemoryLaunchGate,
-  KeyedSerialExecutor,
-  NoMonitorSupervision,
-  type PaneDeliveryOptions,
-  type ResumeLaunchSpec,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  StorageResumeRepository,
-  SystemClock,
-  TmuxPaneDelivery,
-  TmuxResumeLauncher,
-} from '../../../../src/adapters/index.ts';
-import {
-  type AccountLaunchEnvironment,
-  type AccountLaunchRenewal,
-  parseSessionId,
-  type SessionCredentialRotator,
-  type TmuxCommandPort,
-  TmuxController,
-} from '../../../../src/lib/index.ts';
+import { BunSqliteIndexFactory, DaemonStorageFactory, type PaneDeliveryOptions, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { FileResumeTurnStore } from '../../../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
+import { InMemoryLaunchGate } from '../../../../../daemon/adapters/session/resume/in-memory-launch-gate.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { NoMonitorSupervision } from '../../../../../daemon/adapters/session/resume/no-monitor-supervision.ts';
+import { type ResumeLaunchSpec, TmuxResumeLauncher } from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
+import { StorageResumeRepository } from '../../../../../daemon/adapters/session/resume/storage-resume-repository.ts';
+import { TmuxPaneDelivery } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { SessionCredentialRotator } from '../../../../../daemon/lib/session/lifecycle/types.ts';
+import { type TmuxCommandPort, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 
 const homes = new Set<string>();

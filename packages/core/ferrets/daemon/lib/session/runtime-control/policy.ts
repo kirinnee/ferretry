@@ -7,9 +7,8 @@
  */
 
 import type { RuntimeControlRequest, SessionStatus, SessionView } from '../../protocol/session.ts';
-import { isPickerQuarantined, pickerInputRefusal } from '../harness/quarantine.ts';
-import type { HarnessRuntimeSwitchRequest } from '../harness/runtime-switch.ts';
-import { TERMINAL_SEND_STATUSES } from '../send/types.ts';
+import { type HarnessRuntimeSwitchRequest, isPickerQuarantined, pickerInputRefusal } from '../peers/harness.ts';
+import { TERMINAL_SEND_STATUSES } from '../peers/send-lifecycle.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
 
 const PUBLIC_REFUSED_STATUSES: ReadonlySet<SessionStatus> = new Set(['starting', 'kill_failed']);

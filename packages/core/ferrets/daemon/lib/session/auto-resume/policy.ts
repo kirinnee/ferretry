@@ -1,6 +1,15 @@
 import type { SessionStatus } from '../../protocol/session.ts';
-import { isBusyStatus } from '../../migrate/inflight-report.ts';
 import type { AutoResumeCandidate, AutoResumeSubject } from './types.ts';
+
+/**
+ * A copy of today's `isBusyStatus` (today's in-flight report of the move code, Ferrets' own, which ferrets-c ports):
+ * the session is working a turn right now.
+ */
+const busyStatuses: ReadonlySet<SessionStatus> = new Set(['starting', 'running', 'thinking', 'tool_running', 'retrying']);
+
+function isBusyStatus(status: SessionStatus): boolean {
+  return busyStatuses.has(status);
+}
 
 /** Why a skipped session is skipped, in the words the app shows. */
 export function couldNotAutoResume(reason: string): string {

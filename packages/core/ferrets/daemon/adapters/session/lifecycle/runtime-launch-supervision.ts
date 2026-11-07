@@ -15,7 +15,7 @@
  * and a session id whose record cannot be read is simply not followed up.
  */
 import type { SessionLaunchInstructions } from '../../../lib/protocol/session.ts';
-import { type CodexAppServerOutcome, codexLaunchFailure } from '../../../lib/fleet/codex-runtime.ts';
+import { type CodexAppServerOutcome, codexLaunchFailure } from '../../../lib/session/peers/fleet.ts';
 import {
   diedParked,
   type SessionLifecycleLauncher,

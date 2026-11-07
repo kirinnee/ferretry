@@ -3,26 +3,21 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import {
-  AccountAutoResumeAvailability,
-  BootExitRecorder,
-  FileAutoResumeLedger,
-  FileAutoResumeSummaryStore,
-  RepositoryAutoResumeRoster,
-  StateFileSystem,
-  StorageAutoResumeJournal,
-} from '../../../../src/adapters/index.ts';
-import {
-  type AutoResumeCandidate,
-  AutoResumeService,
-  createFoundationPaths,
-  type ExitedSessionTransition,
-  parseSessionId,
-  type ResumeTarget,
-  resolveStateHome,
-  type SessionExitObservation,
-  type SessionExitPort,
-} from '../../../../src/lib/index.ts';
+import { AccountAutoResumeAvailability } from '../../../../../daemon/adapters/session/auto-resume/account-auto-resume-availability.ts';
+import { BootExitRecorder } from '../../../../../daemon/adapters/session/auto-resume/boot-exit-recorder.ts';
+import { FileAutoResumeLedger } from '../../../../../daemon/adapters/session/auto-resume/file-auto-resume-ledger.ts';
+import { FileAutoResumeSummaryStore } from '../../../../../daemon/adapters/session/auto-resume/file-auto-resume-summary-store.ts';
+import { RepositoryAutoResumeRoster } from '../../../../../daemon/adapters/session/auto-resume/storage-auto-resume-roster.ts';
+import { StateFileSystem } from 'UNRESOLVED';
+import { StorageAutoResumeJournal } from '../../../../../daemon/adapters/session/auto-resume/storage-auto-resume-journal.ts';
+import type { AutoResumeCandidate } from '../../../../../daemon/lib/session/auto-resume/types.ts';
+import { AutoResumeService } from '../../../../../daemon/lib/session/auto-resume/service.ts';
+import { createFoundationPaths } from '../../../../../daemon/lib/paths.ts';
+import type { ExitedSessionTransition, SessionExitObservation } from '../../../../../daemon/lib/session/health/exit.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import type { ResumeTarget } from '../../../../../daemon/lib/session/resume/types.ts';
+import { resolveStateHome } from 'UNRESOLVED';
+import type { SessionExitPort } from '../../../../../daemon/lib/session/health/service.ts';
 
 const NOW = '2026-10-21T12:00:00.000Z';
 const ID = '2c8f5f2e-5b53-4a53-9a38-8f2b3d2f6a11';

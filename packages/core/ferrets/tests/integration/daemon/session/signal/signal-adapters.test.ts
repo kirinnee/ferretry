@@ -4,19 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
   FileSignalArtifacts,
-  KeyedSerialExecutor,
   LauncherSignalTerminal,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
   StorageSignalRepository,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/index.ts';
+} from '../../../../../daemon/adapters/session/signal/index.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { memoryStorage, sessionConfig } from '../../../../support/daemon/storage.ts';
 
 /**
  * The durable side of a signal: the record it rewrites, the evidence it leaves, and the pane it stops.
@@ -31,23 +24,12 @@ const ID = parseSessionId('session-1');
 const PEER = parseSessionId('session-2');
 
 async function openStorage(instant = NOW) {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-test-'));
-  homes.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(instant)),
-    () => new KeyedSerialExecutor(),
-  );
-  return { home, opened: await factory.open() };
+  const { storage } = await memoryStorage({ clock: { now: () => instant } });
+  return { opened: { storage } };
 }
 
 function config(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'session-1',
+  return sessionConfig('session-1', {
     name: 'Signal for yourself',
     agent: '/opt/fleet/bin/claude-auto-loge',
     command: ['/opt/fleet/bin/claude-auto-loge'],
@@ -58,7 +40,7 @@ function config(overrides: Record<string, unknown> = {}) {
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
-  };
+  });
 }
 
 const clock = { now: () => NOW };

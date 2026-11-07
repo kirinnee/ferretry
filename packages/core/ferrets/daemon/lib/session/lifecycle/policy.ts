@@ -1,5 +1,4 @@
-import { basename } from 'node:path';
-import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '@ferretry/fleet';
+import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '../peers/fleet.ts';
 import { type BoardProjectId } from '../../protocol/board-refs.ts';
 import { INTERACTIVE_PLACEHOLDER_NAME, type SessionLaunchInstructions } from '../../protocol/session.ts';
 import {
@@ -7,10 +6,10 @@ import {
   turnFileInstruction,
 } from '../../protocol/turn-handoff.ts';
 import { taskTitleFor } from '../../protocol/task-title.ts';
-import type { CoreAccount } from '../../core/inventory.ts';
+import type { CoreAccount } from '../peers/core.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
-import { sessionTarget } from '../../tmux/address.ts';
+import { sessionTarget } from '../peers/tmux-lifecycle.ts';
 import type { SessionLifecycleSettings } from './settings.ts';
 import {
   type CreateSessionLifecycleRequest,
@@ -46,8 +45,7 @@ export function sessionTmuxName(id: SessionId, settings: SessionLifecycleSetting
 }
 
 /**
- * Whether `path` is a launcher the fleet generated: a version-1 auto-wrapper name, or a version-2
- * runtime wrapper in a fleet's `bin` directory.
+ * Whether `path` is a launcher the fleet generated: a runtime wrapper in a fleet's `bin` directory.
  *
  * This is the PATH half of the rule, the only half a launch can check: it sees an argv, not the
  * manifest. Whether that launcher is an AGENT runtime is the other half, and it is decided where the
@@ -55,7 +53,7 @@ export function sessionTmuxName(id: SessionId, settings: SessionLifecycleSetting
  * from the manifest's own declaration rather than from anything in a name.
  */
 export function isFleetLauncher(path: string, settings: SessionLifecycleSettings): boolean {
-  return settings.agentWrapperPattern.test(basename(path)) || settings.runtimeLauncherPattern.test(path);
+  return settings.runtimeLauncherPattern.test(path);
 }
 
 /**
@@ -74,8 +72,7 @@ export function authorizeSessionCommand(
 
 /**
  * Whether a published account may run unattended sessions: the manifest declares it an agent
- * (`mode: auto` — a version-2 runtime with "Ferretry launches this as an agent" is published so, and a
- * version-1 auto route always was) AND its wrapper is one {@link authorizeSessionCommand} accepts.
+ * (`mode: auto` — a runtime with "Ferretry launches this as an agent" is published so) AND its wrapper is one {@link authorizeSessionCommand} accepts.
  *
  * Both, so the two halves can never disagree: an account this calls runnable is one the launch
  * accepts, and a launcher the launch accepts is runnable only when the manifest says it is an agent.

@@ -1,18 +1,16 @@
 import type { ProcessIncarnation } from '../../../lib/protocol/process-incarnation.ts';
-import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
+import { createSessionPaths, type FoundationPaths } from '../../../lib/paths.ts';
+import type { FileSystemPort } from '../../../lib/ports.ts';
+import type { SessionLifecycleRecord } from '../../../lib/session/lifecycle/types.ts';
 import {
-  createSessionPaths,
-  type FileSystemPort,
-  type FoundationPaths,
   harnessExitReason,
-  hasSafeTerminalPaneIdentity,
   type PaneIdentity,
-  parseSessionId,
   resolveSessionTarget,
-  type SessionId,
-  type SessionLifecycleRecord,
   type TmuxController,
-} from '../../../lib/index.ts';
+} from '../../../lib/session/peers/tmux-lifecycle.ts';
+import { hasSafeTerminalPaneIdentity } from '../../../lib/session/reap.ts';
+import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
+import { processIncarnationFor } from './process-incarnation.ts';
 import type {
   DurableTerminalSession,
   ObservedTerminalPane,

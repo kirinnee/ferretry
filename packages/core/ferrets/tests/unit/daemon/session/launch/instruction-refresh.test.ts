@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AlwaysOnSection, instructionDigest } from '@ferretry/fleet';
+import { type AlwaysOnSection, instructionDigest } from '../../../../../daemon/lib/session/peers/fleet.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {

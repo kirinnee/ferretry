@@ -2,7 +2,7 @@
  * Restarting ferrets whose instructions are out of date (docs/launch-settings.md, "Restarting ferrets whose
  * instructions are out of date").
  *
- * A restart is the same-login migrate with the conversation resumed — `RestartPorts.restart` — and it is
+ * A restart is the same-login move with the conversation resumed — `RestartPorts.restart` — and it is
  * NEVER forced past the in-flight inventory. So a ferret that is busy is not restarted: it is QUEUED, and
  * restarted by {@link RestartService.drain} at its next idle moment (its turn is yours, or it declared a wait),
  * once the inventory also agrees. The queue is durable, so a daemon restart does not lose it.
@@ -12,7 +12,7 @@
  * THE DRAIN IS CHEAP, because it runs on a short tick for as long as the daemon does. The queue is held in
  * memory once it has been read (every write goes through this service), so an empty queue costs no read at
  * all; a pass looks up only the ferrets that are queued, never the whole fleet; and a ferret the inventory
- * refused is not asked again on every tick — that is a whole migrate preflight, a transcript read included —
+ * refused is not asked again on every tick — that is a whole move preflight, a transcript read included —
  * but after a backoff, or as soon as its turn moves. Before 4.114 one entry stuck behind a long-running
  * child made every tick read, parse and project all ~500 sessions on the box and stalled its loop.
  */
@@ -57,7 +57,7 @@ export interface RestartPorts {
   subject(id: string): Promise<RestartSubject | undefined>;
   /** The sections a launch now would change for this ferret, read fresh — empty when it is current. */
   outdated(id: string): Promise<readonly LaunchInstructionSectionId[]>;
-  /** The same-login resume migrate, without force. Throws {@link RestartBusy} when the inventory refuses. */
+  /** The same-login resume move, without force. Throws {@link RestartBusy} when the inventory refuses. */
   restart(id: string, requestedBy?: string): Promise<void>;
   /** Journals that a queued restart gave up, so the ferret's history says why. */
   gaveUp(id: string, reason: string): Promise<void>;

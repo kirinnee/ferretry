@@ -1,28 +1,13 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it } from 'bun:test';
 import { SessionConfigSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  type SessionProtocolEnvelope,
-  StorageSessionLifecycleRepository,
-  StorageSessionProvenanceStore,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
-import {
-  createSessionRecord,
-  defaultSessionLifecycleSettings,
-  parseSessionId,
-  SessionProvenanceStamper,
-} from '../../../../src/lib/index.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
+import { type SessionProtocolEnvelope, StorageSessionLifecycleRepository } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { StorageSessionProvenanceStore } from '../../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
+import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { SessionProvenanceStamper } from '../../../../../daemon/lib/session/provenance/stamper.ts';
 
 /**
  * The guard for the START path, which nothing else in CI covers.
@@ -47,26 +32,10 @@ import {
  */
 
 const NOW = '2026-08-06T10:00:00.000Z';
-const homes = new Set<string>();
 
-afterEach(async () => {
-  for (const home of homes) await rm(home, { recursive: true, force: true });
-  homes.clear();
-});
-
+/** A storage over the kernel test host's memory state (`tests/support/daemon/storage.ts`), on this file's clock. */
 async function openTemporaryStorage() {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-start-stamp-'));
-  homes.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return (await factory.open()).storage;
+  return (await memoryStorage({ clock: { now: () => NOW } })).storage;
 }
 
 const stamper = new SessionProvenanceStamper({ now: () => NOW });

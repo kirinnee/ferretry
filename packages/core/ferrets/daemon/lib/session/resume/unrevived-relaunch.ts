@@ -1,7 +1,7 @@
 import type { ResumeOutcome } from './service.ts';
 
 /**
- * The record keys a migration restamps onto the target before it relaunches. A rollback puts back
+ * The record keys a move restamps onto the target before it relaunches. A rollback puts back
  * exactly these and nothing else, so a rename, a rotated session credential or any other write made
  * since stays as it is.
  */
@@ -13,8 +13,8 @@ export const RESTAMPED_RECORD_KEYS = [
   'command',
   'incarnation',
   'runtimeGeneration',
-  'migration',
-  'migrations',
+  'move',
+  'moves',
   'transcript',
   'conversion',
   'harnessFlags',
@@ -37,7 +37,7 @@ export function restoreRestamped(
 }
 
 /**
- * What a migration says, and does to its record, when the relaunch onto the new login did not come up.
+ * What a move says, and does to its record, when the relaunch onto the new login did not come up.
  *
  * `preserved` only says a pane is alive. The resume kills the old pane before it launches the target,
  * so that pane is usually the NEW harness, whose first message failed to deliver. The record is put

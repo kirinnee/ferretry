@@ -18,17 +18,17 @@
  * which is exactly what it would have done before, and the stale check claims nothing it cannot show.
  */
 
-import type { HarnessKind } from '@ferretry/fleet';
+import type { HarnessKind } from '../peers/fleet.ts';
 import type {
   SessionConfig,
   SessionRelaunchDrift,
   SessionRelaunchSettings,
   SessionState,
 } from '../../protocol/session.ts';
-import { type CoreAccount, canServeModel } from '../../core/inventory.ts';
-import type { SessionPlanner } from '../../core/session-planner.ts';
+import { type CoreAccount, canServeModel } from '../peers/core.ts';
+import type { SessionPlanner } from '../peers/core.ts';
 import type { SessionId } from '../../session-id.ts';
-import { relaunchCommand } from '../transcript/relaunch.ts';
+import { relaunchCommand } from '../peers/transcript-launch.ts';
 import { buildLaunchArgv, FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
 import { currentLaunchCompactAt, currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
 

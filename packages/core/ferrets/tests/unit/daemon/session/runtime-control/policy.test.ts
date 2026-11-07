@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
+import type { SessionStatus } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';
-import { IDLE_SEND_STATUSES } from '../../../../src/lib/session/send/types.ts';
+import { CODEX_PICKER_QUARANTINE_KIND } from './harness-fixture/quarantine.ts';
 import {
   documentRefusal,
   needsFastFacts,
@@ -10,6 +10,9 @@ import {
   switchRequest,
 } from '../../../../../daemon/lib/session/runtime-control/policy.ts';
 import { CLAUDE_VIEW, CODEX_VIEW } from './support.ts';
+
+/** Today's conversation-plugin `IDLE_SEND_STATUSES` (`session/send/types.ts`), restated: idle by their own account. */
+const IDLE_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set(['waiting', 'awaiting_user', 'rate_limited', 'interrupted']);
 
 /**
  * The decidable half, stated as an ordered list rather than as `if`s between awaits.

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
-import { parseSessionId } from '../../../../src/lib/index.ts';
+import type { CoreAccount } from '../../../../../daemon/lib/session/peers/core.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
   assignedTaskDocument,
   authorizeSessionCommand,

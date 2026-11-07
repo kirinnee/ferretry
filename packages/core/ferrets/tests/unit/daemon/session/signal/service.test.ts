@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId, type ClockPort, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import type { ClockPort, SerialExecutor } from '../../../../../daemon/lib/ports.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
   InvalidDeadlineRefused,
   SessionSignalService,

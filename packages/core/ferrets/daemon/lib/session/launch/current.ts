@@ -3,21 +3,21 @@
  *
  * Two records say it, and neither is enough alone:
  *
- *   * `config.model` is the daemon's DECISION — what the start, the migration or the last relaunch
+ *   * `config.model` is the daemon's DECISION — what the start, the move or the last relaunch
  *     put on the argv. It is the only record of a `[1m]` selector, which a harness strips from what it
  *     reports.
  *   * `state.observedModel` is the harness's own REPORT, folded from its transcript. It is the only
  *     record of a switch the owner made by typing `/model` into the pane, which the daemon never sees.
  *
  * So the observation wins when it is NEWER than the decision and names a different model this
- * account can serve; otherwise the decision stands. "Newer" matters: a migration records a new
+ * account can serve; otherwise the decision stands. "Newer" matters: a move records a new
  * decision while the state still holds the old account's last observation, and that observation must
  * not drag the session back onto the model it just left.
  */
 
 import type { CompactAt } from '../../protocol/compact-at.ts';
 import type { SessionConfig, SessionState } from '../../protocol/session.ts';
-import { resolveCompactAt } from '../compact-at/resolve.ts';
+import { resolveCompactAt } from '../peers/compact-at.ts';
 
 /** A `[1m]`-style selector suffix, which a harness drops from the model it reports. */
 const SELECTOR = /\[[^\]]*\]$/u;
@@ -25,8 +25,8 @@ const SELECTOR = /\[[^\]]*\]$/u;
 /** The same model, give or take the selector a harness does not echo. */
 const sameModel = (left: string, right: string): boolean => left.replace(SELECTOR, '') === right.replace(SELECTOR, '');
 
-/** When the daemon last decided this session's model: its last migration, else its creation. */
-const decidedAt = (config: SessionConfig): string => config.migration?.at ?? config.createdAt;
+/** When the daemon last decided this session's model: its last move, else its creation. */
+const decidedAt = (config: SessionConfig): string => config.move?.at ?? config.createdAt;
 
 /** Whether the harness reported after the daemon last decided. */
 const observedSinceDecision = (config: SessionConfig, state: SessionState): boolean =>
