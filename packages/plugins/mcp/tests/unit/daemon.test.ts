@@ -13,7 +13,10 @@ test('G177 the daemon refuses project preview and add without a registered-proje
   const half = daemon.build?.({
     manifest,
     needs: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
-    uses: {},
+    uses: {
+      claudeCode: { current: () => undefined },
+      projects: { current: () => undefined },
+    },
     hooks: {} as never,
     kernel: {
       config: { collection: () => new Map() },

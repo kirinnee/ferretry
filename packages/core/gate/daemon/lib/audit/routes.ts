@@ -118,7 +118,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   },
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/copy-plans/:planId/approve',
+    path: '/v1/ferrets/:ferretId/copy-plans/:planId/approve',
     event: 'security.changed',
     subject: 'planId',
     detail: { action: 'plan-answered' },

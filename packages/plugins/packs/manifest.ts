@@ -1,3 +1,4 @@
+import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -68,7 +69,7 @@ export default definePlugin({
         caller: 'person',
         capability: packUse,
         noStore: true,
-        audit: { skip: 'not recorded today (docs/audit.md has no pack row); the run is its own record' },
+        audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers a run id and a sentence' },
       }),
       route('GET /v1/pack/routing/jobs/:jobId', {
@@ -84,7 +85,7 @@ export default definePlugin({
         caller: 'person',
         capability: packConfigure,
         noStore: true,
-        audit: { skip: 'not recorded today (docs/audit.md has no pack row); the previous prompt is kept for one undo' },
+        audit: { record: AUDIT_KINDS['fleet.configured'] },
         guard: { none: 'answers a sentence' },
       }),
       route('POST /v1/pack/routing/undo', {
@@ -92,7 +93,7 @@ export default definePlugin({
         caller: 'person',
         capability: packConfigure,
         noStore: true,
-        audit: { skip: 'not recorded today (docs/audit.md has no pack row)' },
+        audit: { record: AUDIT_KINDS['fleet.configured'] },
         guard: { none: 'answers a sentence' },
       }),
       route('POST /v1/pack/recommend', {

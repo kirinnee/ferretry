@@ -246,7 +246,13 @@ export function pairOverCarriers(
   const attempt = pairOnLeg(crypto, after);
   return async input => {
     const carriers = walk();
-    if (carriers !== undefined) return await carriers.pair(input, leg => attempt(input, leg));
+    if (carriers !== undefined) {
+      const paired = await carriers.pair(input, leg => attempt(input, leg));
+      // P28: saved after the walk, on whichever carrier carried it, and deliberately outside it. A save that fails
+      // must reject the pairing, never advance the walk to a second carrier and mint a second grant.
+      await input.key.save(paired.response);
+      return paired;
+    }
     const outcome = await pairOverDirect(crypto, direct)(input);
     return { ...outcome, via: { kind: 'direct', address: input.address } };
   };

@@ -17,7 +17,6 @@ import {
   type StepUpWitness,
 } from '@ferretry/core-gate/contract';
 import {
-  type Cancel,
   errorResponse,
   type HolderId,
   type KernelPorts,
@@ -248,7 +247,9 @@ export class AccessRuntime {
     });
     // Connections owns the host-facing reach (`advertisement()`). Without it, the honest answer is `none`: the code is
     // still minted, the link is refused and the fix is named (P84).
-    const advertised: ConnectionAdvertisement = this.#deps.connections()?.advertisement() ?? {
+    const advertised: Omit<ConnectionAdvertisement, 'appOrigin' | 'allowedOrigins'> = this.#deps
+      .connections()
+      ?.advertisement() ?? {
       advertisement: { kind: 'none', refusal: 'no-port' },
     };
     pairing = new AccessPairingService(
@@ -314,8 +315,11 @@ export class AccessRuntime {
     const write = ledger.write.bind(ledger);
     ledger.write = async unlocks => {
       this.#generation += 1;
-      await write(unlocks);
-      this.#notify();
+      try {
+        await write(unlocks);
+      } finally {
+        this.#notify();
+      }
     };
     return ledger;
   }
@@ -426,7 +430,7 @@ export class AccessRuntime {
   };
 
   /** `credentials:device`: what Gate asks about a device, synchronously, from memory. */
-  readonly credentials: CredentialProvider<DeviceHolderStanding> & { watch(listener: () => void): Cancel } = {
+  readonly credentials: CredentialProvider<DeviceHolderStanding> = {
     standing: (holder, now) => {
       const wired = this.#current;
       if (wired === undefined) return 'unknown';

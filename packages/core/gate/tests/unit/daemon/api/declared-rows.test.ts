@@ -76,7 +76,7 @@ describe('download links', () => {
 describe('narrowing', () => {
   /** The 5.0 spelling of every route G128 names. */
   const NARROWING_ROUTES = [
-    'POST /v1/sessions/:sessionId/task-plans/:planId/revoke', // plan revoke
+    'POST /v1/ferrets/:ferretId/task-plans/:planId/revoke', // plan revoke
     'POST /v1/sign-in-rules/:id/narrow', // sign-in rule narrow
     'DELETE /v1/sign-in-rules/:id', // sign-in rule revoke
     'POST /v1/accounts/:id/sign-in-rules/revoke', // sign-in rules revoked for an account

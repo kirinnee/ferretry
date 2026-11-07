@@ -14,6 +14,12 @@ export const CLAUDE_QUESTION_HOOKS = {
   PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
 };
 
+/**
+ * `.claude.json` keys set ONLY when absent or `null` (today's `SEED_FILTER`): `claudeInChromeDefaultEnabled` is the
+ * gate for Claude's browser prompt, and a home where somebody chose `true` must not be silently turned off.
+ */
+export const CLAUDE_JSON_DEFAULTS = { claudeInChromeDefaultEnabled: false } as const;
+
 /** Fixed settings override item settings; the question hook is ONLY in the separate flag overlay. */
 export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd: string) {
   const skip = permissionMode === 'skip';
@@ -27,6 +33,7 @@ export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd:
     overlay: { ...settings, hooks: CLAUDE_QUESTION_HOOKS },
     claudeJson: {
       hasCompletedOnboarding: true,
+      hasCompletedClaudeInChromeOnboarding: true,
       ...CLAUDE_PROMPTS_SEEN,
       projects: { [cwd]: { hasTrustDialogAccepted: true } },
     },

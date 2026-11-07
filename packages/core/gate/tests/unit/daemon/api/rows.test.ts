@@ -373,7 +373,7 @@ describe('route shapes Gate decides', () => {
     const stage = 'srs_0123456789abcdef01234567' as const;
     w.stepUps.grantBound(subjectOf('phone'), STEP_UP_ACTS.approveSignInRule, stage, {
       evidence: {
-        holder: holder('phone'),
+        deviceId: 'phone',
         credentialId: 'c',
         clientDataJSON: 'd',
         authenticatorData: 'a',
@@ -395,7 +395,7 @@ describe('route shapes Gate decides', () => {
     const stage = 'srs_0123456789abcdef01234567' as const;
     w.stepUps.grantBound(subjectOf('phone'), STEP_UP_ACTS.approveSignInRule, stage, {
       evidence: {
-        holder: holder('phone'),
+        deviceId: 'phone',
         credentialId: 'c',
         clientDataJSON: 'd',
         authenticatorData: 'a',

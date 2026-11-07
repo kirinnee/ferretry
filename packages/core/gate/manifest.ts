@@ -105,9 +105,9 @@ export default definePlugin({
         caller: 'person',
         capability: cap('pairing', 'configure'),
         noStore: true,
-        // The service journals `security.changed` itself, with each field's old and new value and the
-        // `security.loosened-with=passkey` line (G115), which a status-only record could not carry.
-        audit: { skip: 'SecuritySettingsService records security.changed with the change lines itself' },
+        // Recorded for EVERY outcome — a change, a refused widen, a failed read — by the audited-route table
+        // (`daemon/lib/audit/routes.ts`); the service keeps the change lines in the grant journal (G115).
+        audit: { record: AUDIT_KINDS['security.changed'] },
         guard: { none: 'six security settings and their source; no secret' },
       }),
       // The grant surface (lead decision: Gate declares /v1/grants*). The read is not capability-gated: a restricted UI

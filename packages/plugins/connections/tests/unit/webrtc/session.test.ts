@@ -8,6 +8,7 @@ import type {
   SocketDownstream,
 } from '@ferretry/kernel/contract';
 import { encodeFrame, FRAME_KINDS } from '../../../worker/src/lib/index.ts';
+import { noConnection, unusedSigner } from '../../support/session-layer-stubs.ts';
 import { sealedWebRtcSessions } from '../../../daemon/lib/webrtc/session.ts';
 
 function harness() {
@@ -45,10 +46,8 @@ function harness() {
         },
       };
     },
-    connection: () => {
-      throw new Error('the fixture carries no connection');
-    },
-    signer: undefined as never,
+    connection: noConnection,
+    signer: unusedSigner,
   };
   const downstream: SocketDownstream = {
     send: frame => {

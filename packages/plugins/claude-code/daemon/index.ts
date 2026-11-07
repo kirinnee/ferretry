@@ -15,6 +15,8 @@ import { PaneDirectory, TmuxPane } from './adapters/tmux-pane.ts';
 import { factsSource, hostFacts, locationSource, npmLatest, probe, spawnRun } from './adapters/update-ports.ts';
 import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
+import { isConversationId } from './lib/harness/claude-path.ts';
+import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
 import { HarnessUpdateService } from './lib/update/service.ts';
 
@@ -36,6 +38,10 @@ const discoveryOf = (view: HarnessCliView, checkedAt: Discovery['checkedAt']): D
  * Claude Code's daemon half: the harness it provides to Ferrets, the update view others may read, and the three
  * governed answers (the update, the permission prompt, the harness dialog). It needs nothing; it reaches the
  * runner a ferret runs in only through the one Ferrets hands it at a start.
+ *
+ * `approvedProjectServers` is MCP's question "did this ferret's Claude approve, leave pending or DISABLE a project
+ * server?", answered from this plugin's own ferret home through the same root the harness writes it with
+ * (`agent-homes`, scoped to that ferret), so MCP holds no root over a harness home.
  */
 export default implementDaemon(manifest, {
   build: ({ kernel }) => {
@@ -72,6 +78,14 @@ export default implementDaemon(manifest, {
     const panes = new PaneDirectory();
     const pane = new TmuxPane(kernel.spawn, panes);
     const sleep = async (ms: number): Promise<void> => await kernel.clock.sleep(milliseconds(ms));
+    // The harness's own plain-name guard (`ClaudeHarness.home`): a multi-part id would name a folder inside another home.
+    const approvals = new ClaudeProjectApprovals(
+      ferret => {
+        if (!isConversationId(ferret)) throw new Error('the ferret id must be one plain name');
+        return kernel.roots.root('agent-homes', { ferret, subfolder: ferret });
+      },
+      () => kernel.roots.root('agent-homes'),
+    );
     const permission = new PermissionAnswerService(pane, sleep);
     const dialog = new DialogAnswerService(pane, sleep);
 
@@ -112,6 +126,7 @@ export default implementDaemon(manifest, {
             const read = await kernel.state.read(CLAUDE_CODE_DISCOVERY);
             return read.ok ? read.value : undefined;
           },
+          approvedProjectServers: async query => await approvals.approvedProjectServers(query),
         },
       },
       hooks: { 'harnesses:claude-code': harness },

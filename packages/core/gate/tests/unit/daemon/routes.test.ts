@@ -9,7 +9,7 @@ const routes = gateRoutes({
   audit: { recent: async () => ({ records: [], kept: [], keptTotal: 0, unreadable: 3 }) },
   security: new SecuritySettingsService({
     document: { read: () => ({ kind: 'defaults' }), write: async () => undefined },
-    audit: async () => undefined,
+    history: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
     clock: { now: () => '2026-11-07T12:00:00.000Z' },
     widenCommand: 'fy daemon security set',
   }),

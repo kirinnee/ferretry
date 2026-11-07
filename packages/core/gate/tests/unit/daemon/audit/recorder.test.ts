@@ -92,6 +92,54 @@ describe('Admission.recorded: today’s audited-route rules, after the handler',
     });
   });
 
+  test('G115 PATCH /v1/security is recorded as security.changed for a refused remote widen, naming the device', () => {
+    for (const code of ['security_widen_at_machine', 'grant_step_up_required']) {
+      const draft = recordedCallDraft(
+        told('PATCH', '/v1/security', { status: 403, standing: device('phone'), body: { error: 'x', code } }),
+      );
+      expect(draft).toEqual({
+        event: AUDIT_KINDS['security.changed'],
+        actor: { kind: 'device', deviceId: 'phone' },
+        subject: 'security-settings',
+        outcome: 'refused',
+        detail: { status: 403 },
+      });
+    }
+  });
+
+  test('G115 a PATCH /v1/security that changed the settings is recorded once, with the device and the settings left in place', () => {
+    const body = { view: { settings: { unlockValidityHours: 4, unlockOnOpen: true, note: 'x' } }, devicesExpiring: 0 };
+    const draft = recordedCallDraft(told('PATCH', '/v1/security', { standing: device('phone'), body }));
+    expect(draft).toEqual({
+      event: AUDIT_KINDS['security.changed'],
+      actor: { kind: 'device', deviceId: 'phone' },
+      subject: 'security-settings',
+      outcome: 'succeeded',
+      detail: { unlockValidityHours: 4, unlockOnOpen: true, status: 200 },
+    });
+    expect(AUDITED_ROUTES.filter(rule => rule.method === 'PATCH' && rule.path === '/v1/security')).toHaveLength(1);
+  });
+
+  test('G115 a PATCH /v1/security the daemon could not answer is recorded as failed (503 security_unavailable)', () => {
+    const draft = recordedCallDraft(
+      told('PATCH', '/v1/security', { status: 503, standing: owner, body: { code: 'security_unavailable' } }),
+    );
+    expect(draft).toMatchObject({
+      event: AUDIT_KINDS['security.changed'],
+      actor: { kind: 'host' },
+      outcome: 'failed',
+      detail: { status: 503 },
+    });
+  });
+
+  test('G115 a ferret’s PATCH /v1/security is the host, with the ferret named in the detail', () => {
+    const standing: CallStanding = {
+      credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'F7' as never },
+    };
+    const draft = recordedCallDraft(told('PATCH', '/v1/security', { status: 403, standing }));
+    expect(draft).toMatchObject({ actor: { kind: 'host' }, outcome: 'refused', detail: { by: 'agent', ferret: 'F7' } });
+  });
+
   test('a rule reads NAMES out of the answer, never its other fields (responseNames)', () => {
     const draft = recordedCallDraft(
       told('POST', '/v1/secrets/use', { body: { used: ['GITHUB', 'NPM'], output: 'hunter2' } }),
@@ -127,13 +175,13 @@ describe('Admission.recorded: today’s audited-route rules, after the handler',
   });
 
   test('a setting change keeps the numbers and switches of the answer, never text (responseSettings)', () => {
-    const rule = AUDITED_ROUTES.find(candidate => candidate.responseSettings?.length === 2);
+    const rule = AUDITED_ROUTES.find(
+      candidate => candidate.method === 'PUT' && candidate.path === '/v1/copy-rules/settings',
+    );
     if (rule?.responseSettings === undefined) throw new Error('today records the settings a change left');
-    const [outer, inner] = rule.responseSettings as [string, string];
+    expect(rule.responseSettings).toEqual([]);
     const draft = recordedCallDraft(
-      told(rule.method, rule.path, {
-        body: { [outer]: { [inner]: { idleExpiryDays: 1, unlockOnOpen: true, note: 'x' } } },
-      }),
+      told(rule.method, rule.path, { body: { idleExpiryDays: 1, unlockOnOpen: true, note: 'x' } }),
     );
     expect(draft?.detail).toMatchObject({ idleExpiryDays: 1, unlockOnOpen: true });
     expect(draft?.detail).not.toHaveProperty('note');

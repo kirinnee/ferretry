@@ -325,7 +325,7 @@ describe('the unlock and the step-up', () => {
     const stage = 'srs_0123456789abcdef01234567' as const;
     const challenge = new Uint8Array([9, 9, 9]);
     const evidence = {
-      holder: holder('phone'),
+      deviceId: 'phone',
       credentialId: 'c',
       clientDataJSON: 'd',
       authenticatorData: 'a',

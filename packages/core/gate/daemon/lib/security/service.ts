@@ -1,7 +1,6 @@
 import {
-  type AuditDraft,
-  AUDIT_KINDS,
   DEFAULT_SECURITY_SETTINGS,
+  type GrantAuditEntryView,
   SECURITY_SETTING_FIELDS,
   type SecuritySettingField,
   type SecuritySettings,
@@ -10,6 +9,7 @@ import {
   widensSecurity,
   widensWithPasskey,
 } from '../../../contract/index.ts';
+import type { GrantHistoryPort } from '../grants/service.ts';
 
 /**
  * ONE MACHINE'S SECURITY SETTINGS (today's `lib/security/service.ts`, copied; the document is now `gate.yaml`'s
@@ -69,7 +69,12 @@ export type SecurityPatchOutcome =
 
 export interface SecuritySettingsDeps {
   readonly document: SecurityDocumentPort;
-  readonly audit: (draft: AuditDraft) => Promise<void>;
+  /**
+   * The grant journal (`state/gate/grant-audit.jsonl`), where today's service wrote each change line. `security.changed`
+   * is NOT written here: the descriptor's `audit: { record }` and the audited-route table write it once per call,
+   * for every outcome (`audit/routes.ts`).
+   */
+  readonly history: GrantHistoryPort;
   readonly clock: { readonly now: () => string };
   /** The command a person runs at the machine to loosen a setting. */
   readonly widenCommand: string;
@@ -141,12 +146,11 @@ export class SecuritySettingsService {
     );
     if (remoteWiden) changes.push(PASSKEY_WIDEN_JOURNAL_LINE);
     if (changes.length > 0) await this.deps.document.write(next);
-    await this.deps.audit({
-      event: AUDIT_KINDS['security.changed'],
-      actor: { kind: caller.hostLocal ? 'host' : 'device' },
-      subject: 'security-settings',
-      outcome: 'succeeded',
-      detail: Object.fromEntries(changes.slice(0, 12).map((change, index) => [`change${index}`, change.slice(0, 160)])),
+    // Recorded even when nothing moved, as the grant journal records an empty patch: an attempt is part of the history.
+    await this.deps.history.record({
+      at: this.deps.clock.now() as GrantAuditEntryView['at'],
+      actor: caller.actor,
+      changes,
     });
     return { ok: true, change: { view: this.view(caller), devicesExpiring: 0 }, spentPasskey: remoteWiden };
   }

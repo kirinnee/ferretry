@@ -1,30 +1,5 @@
-import type {
-  StepUpSubject,
-  StepUpWitness,
-  StoredProofStepUpAct,
-  StoredStepUpProof as GateStoredStepUpProof,
-  StepUpSubjectOf,
-} from '@ferretry/core-gate/contract';
-import type { HolderId } from '@ferretry/kernel/contract';
+import type { StepUpSubject, StepUpWitness, StoredProofStepUpAct, StepUpSubjectOf } from '@ferretry/core-gate/contract';
 import type { StepUpService } from './lib/step-up/index.ts';
-import type { StoredStepUpProof } from './lib/wire.ts';
-
-/** Gate's kept proof names its `holder`; Access keeps it as the `deviceId` that proved it. Mapped here, nowhere else. */
-const toGate = (proof: StoredStepUpProof): GateStoredStepUpProof => ({
-  holder: proof.deviceId as HolderId,
-  credentialId: proof.credentialId,
-  clientDataJSON: proof.clientDataJSON,
-  authenticatorData: proof.authenticatorData,
-  signature: proof.signature,
-});
-
-const fromGate = (proof: GateStoredStepUpProof): StoredStepUpProof => ({
-  deviceId: proof.holder,
-  credentialId: proof.credentialId,
-  clientDataJSON: proof.clientDataJSON,
-  authenticatorData: proof.authenticatorData,
-  signature: proof.signature,
-});
 
 /**
  * `step-up:device`, Gate's `StepUpWitness` answered by Access's own step-up service (DECISIONS-1 #3: Access owns the
@@ -55,11 +30,10 @@ export function stepUpProvider(current: () => StepUpService | undefined): StepUp
       stage: StepUpSubjectOf<Act>,
       expectedChallenge: Uint8Array,
     ) => {
-      const kept = current()?.claimStoredProof(subject, act, stage, expectedChallenge);
-      return kept === undefined ? undefined : toGate(kept);
+      return current()?.claimStoredProof(subject, act, stage, expectedChallenge);
     },
     verifyStoredProof: async (proof, expectedChallenge) =>
-      (await current()?.verifyStoredProof(fromGate(proof), expectedChallenge)) ?? false,
+      (await current()?.verifyStoredProof(proof, expectedChallenge)) ?? false,
     spendFresh: (subject: StepUpSubject) => current()?.spendFresh(subject),
     spend: (subject: StepUpSubject) => current()?.spend(subject),
     rotateBy: deviceId => current()?.rotateBy(deviceId),

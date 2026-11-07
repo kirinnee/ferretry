@@ -75,6 +75,12 @@ stepUpWitnessConformance('FakeStepUpWitness', () => {
   };
 });
 
+describe('the testing provider', () => {
+  test('G149 FakeDeviceProvider pushes (watch), so the credentials suite runs its watch checks against it', () => {
+    expect(typeof new FakeDeviceProvider().watch).toBe('function');
+  });
+});
+
 describe('policy vocabulary', () => {
   test('capability refs keep their names and an unknown one is not a core capability', () => {
     expect(String(CAPABILITIES.terminal)).toBe('terminal');
