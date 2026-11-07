@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
+import type { ApiRequest, CallContext, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { device, ferret, testHost } from '@ferretry/kernel/testing';
 import {
   COMPACT_LAYOUT,
@@ -11,7 +11,7 @@ import {
 import daemon from '../../daemon/index.ts';
 import { layoutsRoutes } from '../../daemon/lib/routes.ts';
 import { createLayoutsService } from '../../daemon/lib/service.ts';
-import { configTree } from './support.ts';
+import { configTree, refusing } from './support.ts';
 
 /** A call as a handler sees it: a body and raw path parameters. */
 const call = (body?: unknown, params: Record<string, string> = {}): CallContext =>
@@ -20,9 +20,9 @@ const call = (body?: unknown, params: Record<string, string> = {}): CallContext 
     params: new Map(Object.entries(params)),
   }) as CallContext;
 
-const routes = (refuse?: string) => {
-  const tree = configTree({}, refuse);
-  return { tree, routes: layoutsRoutes(createLayoutsService(tree.port, tree.door)) };
+const routes = (forced?: ConfigWriteOutcome) => {
+  const tree = configTree({}, forced);
+  return { tree, routes: layoutsRoutes(createLayoutsService(tree.port)) };
 };
 
 const json = (response: { body: string }): any => JSON.parse(response.body);
@@ -108,10 +108,25 @@ describe('layouts routes', () => {
     expect((await del(call(undefined, { layoutId: 'A..' }))).status).toBe(404);
   });
 
-  test('a refusing config door is a 422, not a crash', async () => {
-    const { routes: r } = routes('the file did not check');
+  test('a write the kernel refuses is a 422, not a crash', async () => {
+    const { routes: r } = routes(refusing('the file did not check'));
     const response = await r['PUT /v1/layouts/current'](call({ layout: 'compact' }));
     expect([response.status, json(response).code]).toEqual([422, LAYOUT_CODES.invalid]);
+  });
+
+  test('a config write the kernel holds for the owner answers 409 config_held, and a moved file 409 config_conflict', async () => {
+    const held = routes({ kind: 'held', etag: 'e1', id: 'h1', sentences: ['it would widen a thing'] }).routes;
+    const response = await held['PUT /v1/layouts/current'](call({ layout: 'compact' }));
+    expect([response.status, json(response).code]).toEqual([409, 'config_held']);
+    const moved = routes({ kind: 'conflict' }).routes;
+    const conflict = await moved['PUT /v1/layouts/current'](call({ layout: 'compact' }));
+    expect([conflict.status, json(conflict).code]).toEqual([409, 'config_conflict']);
+  });
+
+  test('a refusal carries the kernel’s issues on the 422', async () => {
+    const { routes: r } = routes(refusing('not a mapping'));
+    const response = await r['PUT /v1/layouts/current'](call({ layout: 'compact' }));
+    expect(json(response).issues).toEqual([{ path: 'density', message: 'not a mapping' }]);
   });
 });
 
@@ -127,15 +142,20 @@ describe('layouts on the test host', () => {
     await host.stop();
   });
 
-  test('a write is a person act: a ferret is refused, and without a config door the owner is told why', async () => {
+  test('a write is a person act: a ferret is refused, and the owner’s write goes through the kernel and is read back', async () => {
     const host = await testHost({ plugins: [daemon] });
     const refused = await host.request('PUT', '/v1/layouts/current', { body: { layout: 'compact' }, as: ferret('F1') });
     expect(refused.status).toBe(403);
-    const unavailable = await host.request('PUT', '/v1/layouts/current', { body: { layout: 'compact' } });
-    expect([unavailable.status, unavailable.json<{ code: string }>().code]).toEqual([503, LAYOUT_CODES.noConfigDoor]);
+    expect((await host.request('GET', '/v1/layouts/current')).json<{ layout: { id: string } }>().layout.id).toBe(
+      'default',
+    );
+    const served = await host.request('PUT', '/v1/layouts/current', { body: { layout: 'compact' } });
+    expect(served.status).toBe(200);
+    expect((await host.request('GET', '/v1/layouts/current')).json<{ layout: { id: string } }>().layout.id).toBe(
+      'compact',
+    );
     await host.stop();
   });
-
   test('any change to the layout files, ours or a hand edit, tells every open app once per change', async () => {
     const host = await testHost({ plugins: [daemon] });
     host.setConfig('layout.yaml', { layout: 'compact' });
