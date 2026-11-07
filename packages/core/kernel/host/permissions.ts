@@ -38,6 +38,7 @@ const programName = (program: string): string => program.slice(program.lastIndex
  */
 export function spawnPermitted(declared: readonly PermissionEntry[], items: ItemReachOf, program: string): boolean {
   const named = expand(declared, items, 'programs');
+  if (named.includes(WILDCARD)) return true;
   const exact = new Set(named.filter(entry => entry.includes('/')));
   const allowed = new Set(named.filter(entry => !entry.includes('/')));
   return exact.has(program) || allowed.has(program) || allowed.has(programName(program));
@@ -45,7 +46,16 @@ export function spawnPermitted(declared: readonly PermissionEntry[], items: Item
 
 /** Whether `hostname` is declared, directly or by an installed item of a declared `{ items }` kind. */
 export function hostPermitted(declared: readonly PermissionEntry[], items: ItemReachOf, hostname: string): boolean {
-  return hostAllowed(hostname, expand(declared, items, 'hosts'));
+  const named = expand(declared, items, 'hosts');
+  return named.includes(WILDCARD) || hostAllowed(hostname, named);
+}
+
+/** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone (plugin-graph refuses it). */
+export const WILDCARD = '*';
+
+/** What the host hands the restrict wrappers: a non-core manifest's `'*'` is dropped, so it grants nothing. */
+export function effectivePermissions(core: boolean, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
+  return core ? declared : declared.filter(entry => entry !== WILDCARD);
 }
 
 /** Only programs the manifest declared in `permissions.spawn` (§3.7); refused before anything starts. */

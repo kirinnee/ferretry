@@ -37,7 +37,13 @@ import type {
 import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
-import { hostPermitted, type ItemReachOf, NO_ITEMS, spawnPermitted } from '../host/permissions.ts';
+import {
+  effectivePermissions,
+  hostPermitted,
+  type ItemReachOf,
+  NO_ITEMS,
+  spawnPermitted,
+} from '../host/permissions.ts';
 import { scratchPort } from '../host/scratch.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
@@ -619,7 +625,13 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
-          if (!spawnPermitted(manifest.permissions?.spawn ?? [], options.items ?? NO_ITEMS, program))
+          if (
+            !spawnPermitted(
+              effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
+              options.items ?? NO_ITEMS,
+              program,
+            )
+          )
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           if (options.spawn === undefined) throw new Error(`${manifest.id}: spawn ${program} with no spawn fake`);
           return options.spawn(program, args, spawnOptions);
@@ -646,7 +658,13 @@ async function start(world: World): Promise<TestHost> {
       fetch: {
         async request(url, init) {
           const parsed = new URL(url);
-          if (!hostPermitted(manifest.permissions?.network ?? [], options.items ?? NO_ITEMS, parsed.hostname))
+          if (
+            !hostPermitted(
+              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              options.items ?? NO_ITEMS,
+              parsed.hostname,
+            )
+          )
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
           return options.fetch(parsed, init);
@@ -658,7 +676,13 @@ async function start(world: World): Promise<TestHost> {
           const parsed = new URL(String(url));
           if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
             throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
-          if (!hostPermitted(manifest.permissions?.network ?? [], options.items ?? NO_ITEMS, parsed.hostname))
+          if (
+            !hostPermitted(
+              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              options.items ?? NO_ITEMS,
+              parsed.hostname,
+            )
+          )
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.websocket === undefined)
             throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);

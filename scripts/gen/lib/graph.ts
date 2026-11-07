@@ -152,6 +152,11 @@ export function pluginGraphFindings(graph: StartGraph): Finding[] {
     for (const offer of manifest.hooks?.offers ?? [])
       if (offer.hook.mode === 'decide' && offer.hook.securityPath && !isCore(id))
         findings.push({ check, where: id, message: `offers security-path hook "${offer.hook.name}"; only core may` });
+    // A wildcard reach (Vault's `${secret}` run of an owner command, its authorized fetch) is core's alone.
+    if (manifest.core !== true)
+      for (const field of ['spawn', 'network'] as const)
+        if ((manifest.permissions?.[field] ?? []).some(entry => entry === '*'))
+          findings.push({ check, where: id, message: `declares permissions.${field} '*'; only a core piece may` });
     for (const token of Object.values(manifest.provides ?? {}))
       if (token.boundBy !== undefined && token.boundBy !== id)
         findings.push({

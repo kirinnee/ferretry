@@ -3,6 +3,7 @@ import type { FetchPort, SpawnPort, WebSocketClient, WebSocketPort } from '../..
 import { daemonNameFrom } from '../../../host/identity.ts';
 import { installedItemReach } from '../../../host/items.ts';
 import {
+  effectivePermissions,
   type ItemReach,
   PermissionError,
   restrictFetch,
@@ -138,5 +139,32 @@ describe('installedItemReach: what installed data-plugin items name', () => {
     expect(reach('mcp')).toEqual({ programs: ['npx'], hosts: ['mcp.acme.test'] });
     expect(reach('shell')).toEqual({ programs: ['zsh'], hosts: [] });
     expect(reach('skill')).toEqual({ programs: [], hosts: [] });
+  });
+});
+
+describe('BB wildcard reach: core only', () => {
+  const spawn: SpawnPort = {
+    run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }),
+    runBytes: async () => {
+      throw new Error('not run here');
+    },
+    start: () => {
+      throw new Error('not started here');
+    },
+  };
+  const fetchPort: FetchPort = { request: async () => new Response('') };
+
+  test("a core piece's '*' runs any program and reaches any host", async () => {
+    await restrictSpawn('vault', effectivePermissions(true, ['*']), spawn).run('/opt/owner/tool', []);
+    await restrictFetch('vault', effectivePermissions(true, ['*']), fetchPort).request('https://anything.example/');
+  });
+
+  test("a plugin's '*' grants nothing (and plugin-graph refuses it)", async () => {
+    await expect(restrictSpawn('mcp', effectivePermissions(false, ['*']), spawn).run('ls', [])).rejects.toThrow(
+      PermissionError,
+    );
+    await expect(
+      restrictFetch('mcp', effectivePermissions(false, ['*']), fetchPort).request('https://anything.example/'),
+    ).rejects.toThrow(PermissionError);
   });
 });

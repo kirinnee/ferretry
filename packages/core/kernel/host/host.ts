@@ -63,7 +63,14 @@ import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
-import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket, workersFor } from './permissions.ts';
+import {
+  effectivePermissions,
+  openChildEnvironments,
+  restrictFetch,
+  restrictSpawn,
+  restrictWebSocket,
+  workersFor,
+} from './permissions.ts';
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
@@ -405,14 +412,24 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     }),
     spawn: restrictSpawn(
       manifest.id,
-      manifest.permissions?.spawn ?? [],
+      effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
       items,
       pins,
     ),
     scratch: adapters.scratch ?? NO_SCRATCH,
-    fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch, items),
-    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets, items),
+    fetch: restrictFetch(
+      manifest.id,
+      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      adapters.fetch,
+      items,
+    ),
+    websocket: restrictWebSocket(
+      manifest.id,
+      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      websockets,
+      items,
+    ),
     identity: identityPort,
     signer: signerFor(manifest.id, sessionSigner),
     ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
