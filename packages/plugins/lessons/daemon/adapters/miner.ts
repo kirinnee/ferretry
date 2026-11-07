@@ -1,5 +1,5 @@
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import type { FerretId, FerretSummary, FerretsApi, HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretSummary, FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { RootsPort } from '@ferretry/kernel/contract';
 import { LESSONS_MINER_GAP, type LessonsConfig, type RunManifest } from '../../contract/index.ts';
 import {
@@ -21,13 +21,6 @@ const RECORD_CAP = 1_200;
 /** Where a miner writes its answer: a dotfile in its own folder, read and removed by the ingest. */
 function minerOutputPath(folder: string, run: string): string {
   return `${folder.replace(/\/+$/u, '')}/.fy-lessons-${run}.json`;
-}
-
-/** The harness a configured agent names; any other name is a login on the Claude harness. */
-function startFor(agent: string): { readonly harness: HarnessKey; readonly login?: string } {
-  if (agent === 'claude' || agent === 'claude-code') return { harness: 'claude-code' };
-  if (agent === 'codex') return { harness: 'codex' };
-  return { harness: 'claude-code', login: agent };
 }
 
 export interface MinerDependencies {
@@ -187,7 +180,14 @@ export class LessonsMiner implements ScanMinerPort {
 
   /**
    * Starts one miner ferret over `digests`, writing its brief; answers the miner's id. It runs in Lessons' own folder,
-   * never an owner's project (today: the daemon's home), on the model the scan names (today's `--model`).
+   * never an owner's project (today: the daemon's home), on the model the scan names (today's `--model`). `agent` is a
+   * RUNTIME name, as today (`packages/daemon/src/adapters/learning/miner.ts:134` starts the session with it as its
+   * `agent`), and nothing here reads a harness or a login out of the name.
+   *
+   * DECLARED GAP: Ferrets on 5.0 does NOT resolve `runtime` to a harness or a login, nor refuse an unknown one (today
+   * refuses it `unknown_agent`): its start copies the name onto the record and launches on the first registered
+   * harness with that harness's default sign-in. No miner starts on 5.0 (`folderFor` refuses first), so nothing is spent
+   * yet; it becomes live when Ferrets' start work folder (D2 #19) lands, and must not before Ferrets resolves runtimes.
    */
   private async launch(
     run: string,
@@ -200,7 +200,7 @@ export class LessonsMiner implements ScanMinerPort {
     await store.writeDigests(run, digests);
     const started = await ferrets.start({
       name: LESSONS_MINER_NAME,
-      ...startFor(agent),
+      runtime: agent,
       role: 'lead',
       folder,
       prompt: this.prompt(digests, minerOutputPath(folder, run)),

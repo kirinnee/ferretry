@@ -379,9 +379,9 @@ export interface WardenStateStore {
 export interface WardenConfigStore {
   read(): Promise<unknown>;
   /**
-   * Persist `config` — the settings in effect with the owner's `patch` applied. The patch travels too:
-   * an edit the owner has not confirmed yet is held in the file, and the store must make the owner's
-   * change to that held edit as well rather than overwrite it with what is in effect.
+   * Persist `config` — the settings in effect with the owner's `patch` applied. The patch travels too, so only
+   * the changed keys are written. While the file holds an edit the owner has not confirmed yet, the store REFUSES
+   * (throws) and writes nothing, rather than hold this save behind it or overwrite it with what is in effect.
    *
    * Answers the sentences of THIS edit when it was held for the owner (empty when it is in effect): the answer belongs
    * to this write, never to whichever write finished last.
@@ -885,15 +885,11 @@ export class WardenSweepService {
     const stored = await this.storedConfig();
     const next = applyWardenConfigPatch(stored.config, patch);
     const held = await this.ports.config.write(next, patch);
+    // A write the kernel held is NOT in effect: answer the settings that are, say what waits, and journal no change.
+    if (held.length > 0) return { ...(await this.view()), held: [...held] };
     this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
-    const resolved = await this.resolveLogin(next);
-    return {
-      config: next,
-      accounts: [...resolved.accounts],
-      warnings: [...wardenConfigWarnings(next, resolved)],
-      login: resolved.login,
-      ...(held.length === 0 ? {} : { held: [...held] }),
-    };
+    // Answered from a re-read of the settings in effect, never from `next`, so the answer cannot disagree with them.
+    return await this.view();
   }
 
   /**
