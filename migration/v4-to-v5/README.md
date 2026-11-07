@@ -43,8 +43,9 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, board and asks/agenda have real conversions; conversation is partial (below). The other steps remain `pending`, so the default conversion
-still exits 3. Each step names what it waits for. Fixture homes built from the real 4.291.5 release are in
+terminals, harness-homes, board, asks/agenda, projects, warden and logins have real conversions; conversation is partial
+(below). The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
 Ferret records keep ids, parent edges, spawn provenance, transfer edges, project ids, names, runtime, work folder,
@@ -87,7 +88,16 @@ Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`
 runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
 opaque files are preserved. Links are omitted, never followed or re-made: the contracts do not yet declare a link
 policy or a runtime-to-ferret home mapping. Those are explicit gaps; these copies alone do not make resume ready.
-Sign-in files and `fleet/credentials/` belong to the pending Logins step.
+Sign-in files and `fleet/credentials/` belong to the Logins step.
+
+Projects keep every id exactly; v4's bare array gains the `{format: 1, projects}` envelope. Warden carries its sweep
+memory under `format: 1` (v5's schema is still the condensed `looseObject`, so the sections keep v4's names), moves
+blessings to `remembered.json`, rewrites each `reportPath` into the new home, copies reports unopened and turns each
+`jev-checks/<day>.jsonl` into `{format: 1, day, checks}`; the per-assignment stop capability is a secret and is
+dropped. Logins moves each `fleet/credentials/<login>/` whole with `moveSealedTree` (lstat and folder listings only;
+a file this program may not open gets a second name with `link(2)`; a link is made again, never followed) and turns
+`state/model-catalog.json` into `models.json` `published`. A v4 login id with capitals fails the step: v5 login ids
+are lowercase. `config/warden.yaml` and `config/logins/*.yaml` belong to the pending Layouts and settings step.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
