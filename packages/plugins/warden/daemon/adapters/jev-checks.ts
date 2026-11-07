@@ -1,64 +1,60 @@
-import { appendFile, mkdir, readdir, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { WardenJevCheck } from '../lib/protocol.ts';
+import type { StatePort } from '@ferretry/kernel/contract';
+import { WARDEN_JEV_CHECKS } from '../../contract/index.ts';
+import { type WardenJevCheck, WardenJevCheckSchema } from '../lib/protocol.ts';
 import {
   expiredJevCheckFiles,
+  jevCheckDay,
+  jevCheckFileDay,
   jevCheckFileName,
   jevCheckFilesNewestFirst,
-  jevCheckDay,
-  jevCheckLine,
-  parseJevCheckLines,
   type WardenJevCheckLog,
 } from '../lib/index.ts';
 
-const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+interface DayDocument {
+  readonly format: 1;
+  readonly checks?: readonly unknown[];
+}
 
-/**
- * Jev's checks on disk, beside the Warden's reports: `warden/jev-checks/<UTC day>.jsonl`, one JSON line per
- * check, appended (`lib/warden/jev-checks.ts` owns what a line says and how long a day is kept).
- *
- * Owner-only, like everything in the Warden's directory. Every append drops the days past the keep window,
- * so the record is bounded without a timer of its own; a directory of at most a month of files is cheap
- * to list. A line is small and written by one `appendFile`, so a torn line is at worst one check lost —
- * which the reader skips.
- */
-export class FileWardenJevCheckLog implements WardenJevCheckLog {
+/** Jev's checks, one `jev-checks/<day>.json` per UTC day, the oldest days dropped as new ones are written. */
+export class StateWardenJevCheckLog implements WardenJevCheckLog {
   constructor(
-    private readonly directory: string,
+    private readonly state: StatePort,
     private readonly nowMs: () => number,
   ) {}
 
   async append(check: WardenJevCheck): Promise<void> {
     const day = jevCheckDay(check) ?? new Date(this.nowMs()).toISOString().slice(0, 10);
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await appendFile(join(this.directory, jevCheckFileName(day)), jevCheckLine(check), {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    const expired = expiredJevCheckFiles(await this.names(), this.nowMs());
-    await Promise.all(expired.map(name => rm(join(this.directory, name), { force: true })));
+    const written = await this.state.update(WARDEN_JEV_CHECKS, current => ({
+      format: 1 as const,
+      checks: [...((current as DayDocument | undefined)?.checks ?? []), check],
+    }), day);
+    if (!written.ok) throw new Error(written.error.sentence);
+    const expired = expiredJevCheckFiles((await this.days()).map(jevCheckFileName), this.nowMs());
+    for (const name of expired) {
+      const expiredDay = jevCheckFileDay(name);
+      if (expiredDay !== undefined) await this.state.remove(WARDEN_JEV_CHECKS, expiredDay);
+    }
   }
 
   async recent(limit: number): Promise<readonly WardenJevCheck[]> {
     const checks: WardenJevCheck[] = [];
-    for (const name of jevCheckFilesNewestFirst(await this.names())) {
+    for (const name of jevCheckFilesNewestFirst((await this.days()).map(jevCheckFileName))) {
       if (checks.length >= limit) break;
-      const text = await readFile(join(this.directory, name), 'utf8').catch((error: unknown) => {
-        // Rotated away between the listing and the read: that day simply has nothing left to show.
-        if (isMissing(error)) return '';
-        throw error;
+      const day = jevCheckFileDay(name);
+      if (day === undefined) continue;
+      const read = await this.state.read(WARDEN_JEV_CHECKS, day);
+      if (!read.ok) throw new Error(read.error.sentence);
+      const parsed = ((read.value as DayDocument | undefined)?.checks ?? []).flatMap(entry => {
+        const check = WardenJevCheckSchema.safeParse(entry);
+        return check.success ? [check.data] : [];
       });
-      checks.push(...parseJevCheckLines(text));
+      // A day file holds its checks oldest first; the newest are wanted first.
+      checks.push(...parsed.toReversed());
     }
     return checks.slice(0, limit);
   }
 
-  private async names(): Promise<readonly string[]> {
-    try {
-      return await readdir(this.directory);
-    } catch (error) {
-      if (isMissing(error)) return [];
-      throw error;
-    }
+  private async days(): Promise<readonly string[]> {
+    return await this.state.list(WARDEN_JEV_CHECKS);
   }
 }

@@ -467,3 +467,17 @@ export const JevChecksFileSchema = z.looseObject({ format: z.literal(1) });
 export type WardenInvestigateRequest = z.infer<typeof WardenInvestigateRequestSchema>;
 export type WardenLeaveRequest = z.infer<typeof WardenLeaveRequestSchema>;
 export type WardenRunView = z.infer<typeof WardenRunViewSchema>;
+
+/** `GET /v1/warden/config` and the answer to `PATCH`: the effective settings and what an owner should know about them. */
+export const WardenLoginViewSchema = z.strictObject({
+  source: z.enum(['configured', 'machine_default', 'not_set']),
+  unknown: z.array(z.string().min(1)),
+  available: z.array(z.string().min(1)),
+});
+export const WardenConfigViewSchema = z.strictObject({
+  config: WardenConfigSchema,
+  accounts: z.array(WardenAccountSchema),
+  warnings: z.array(z.string()),
+  login: WardenLoginViewSchema.optional(),
+});
+export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;

@@ -1,61 +1,23 @@
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
-import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { UsagePort } from './contract/others.ts';
 import {
   cap,
-  JevChecksFileSchema,
-  RememberedFileSchema,
   WARDEN_CONFIGURED_AUDIT,
   WARDEN_INVESTIGATED_AUDIT,
   WARDEN_LEFT_ALONE_AUDIT,
   WARDEN_RAN_AUDIT,
   WardenActed,
-  WardenFileSchema,
   WardenFlagged,
   WardenPort,
-  WardenStateFileSchema,
-  wardenLoosens,
+  WARDEN_CONFIG,
+  WARDEN_JEV_CHECKS,
+  WARDEN_REMEMBERED,
+  WARDEN_REPORTS,
+  WARDEN_STATE,
 } from './contract/index.ts';
-
-const STATE = defineState({
-  name: 'state',
-  path: 'state.json',
-  store: 'json',
-  format: 1,
-  schema: WardenStateFileSchema,
-});
-/** Investigation reports, one markdown file each. Read through the guarded `report` route only. */
-const REPORTS = defineState({ name: 'reports', path: 'reports/*', store: 'opaque', format: 1 });
-const JEV_CHECKS = defineState({
-  name: 'jev-checks',
-  path: 'jev-checks/*.json',
-  store: 'json',
-  format: 1,
-  schema: JevChecksFileSchema,
-});
-/**
- * Blessings ("leave it alone"). A blessing only ever makes the warden hold back, so a damaged file reading as none is
- * the narrower reading the contract allows: the warden judges every ferret again. It grants nothing.
- */
-const REMEMBERED = defineState({
-  name: 'remembered',
-  path: 'remembered.json',
-  store: 'json',
-  format: 1,
-  schema: RememberedFileSchema,
-  onDamaged: { narrower: 'reads as no blessings: the warden judges every ferret again' },
-});
-
-/** `config/warden.yaml`: loosening edits (a bigger cap, a new act it may take alone, a layer on) wait for the owner. */
-const WARDEN_CONFIG = defineConfig({
-  file: 'warden.yaml',
-  schema: WardenFileSchema,
-  axis: 'configure',
-  loosens: wardenLoosens,
-}) as ConfigDef;
 
 const warden = cap('use');
 const wardenConfigure = cap('configure');
@@ -173,7 +135,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [STATE, REPORTS, JEV_CHECKS, REMEMBERED],
+    state: [WARDEN_STATE, WARDEN_REPORTS, WARDEN_JEV_CHECKS, WARDEN_REMEMBERED],
     config: [WARDEN_CONFIG],
     readModels: ['flags', 'verdicts', 'agenda', 'config'],
     publishes: [WardenFlagged, WardenActed],

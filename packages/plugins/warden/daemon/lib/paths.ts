@@ -1,14 +1,7 @@
-import { join } from 'node:path';
-
-/** Where warden supervision keeps its artefacts inside the state home. */
+/** Where warden supervision keeps its artefacts, as names inside its own state (`state/warden/`). */
 export interface WardenPaths {
-  readonly root: string;
+  /** The folder reports are listed under; a report's path is `<reports>/<name>`. */
   readonly reports: string;
-  /** Jev's checks, one file per UTC day, beside the reports (`jev-checks.ts`). */
-  readonly jevChecks: string;
 }
 
-export function createWardenPaths(state: string): WardenPaths {
-  const root = join(state, 'warden');
-  return { root, reports: join(root, 'reports'), jevChecks: join(root, 'jev-checks') };
-}
+export const WARDEN_PATHS: WardenPaths = { reports: 'reports' };
