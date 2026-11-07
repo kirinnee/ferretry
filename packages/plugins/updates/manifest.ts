@@ -61,12 +61,7 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
     ],
-    cli: [
-      verb('update', {
-        summary:
-          'update the daemon the way this machine installed it, restart it, and roll back if it does not come up',
-      }),
-    ],
+    cli: [verb('update check', { summary: 'read the daemon’s cached update state' })],
   },
 
   ui: {

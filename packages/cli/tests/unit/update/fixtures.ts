@@ -1,8 +1,8 @@
 import type { Health } from '@ferretry/kernel/contract';
-import { type DaemonUpdateView, DaemonUpdateViewSchema, type InstallFacts } from '../../../contract/index.ts';
-import type { InstalledDaemonBinary } from '../../../cli/lib/machine.ts';
-import type { CommandOutcome } from '../../../cli/lib/machine.ts';
-import type { UpdateActivity, UpdateObserver } from '../../../cli/lib/activity.ts';
+import { type DaemonUpdateView, DaemonUpdateViewSchema, type InstallFacts } from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from '../../../src/lib/update/machine.ts';
+import type { CommandOutcome } from '../../../src/lib/update/machine.ts';
+import type { UpdateActivity, UpdateObserver } from '../../../src/lib/update/activity.ts';
 import type {
   IDaemonUpdateViewPort,
   IInstallFactsPort,
@@ -13,7 +13,7 @@ import type {
   LatestReleaseAnswer,
   StagedRelease,
   StandaloneRefusal,
-} from '../../../cli/lib/ports.ts';
+} from '../../../src/lib/update/ports.ts';
 import { health } from './support.ts';
 
 export const STORE = '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-ferretry-1.2.3';

@@ -17,9 +17,9 @@ export interface UpdateHost {
   readonly daemonName: string;
   /** Whether the daemon is a compiled release binary asking for updates (off for a source run or when the operator says so). */
   readonly checks: boolean;
-  /** `process.argv0`: the path the daemon was launched as. */
+  /** The path the daemon was launched as (the host's argv0). */
   readonly argv0: string;
-  /** `process.execPath`: the executable itself. */
+  /** The executable itself (the host's execPath). */
   readonly execPath: string;
   /** `Bun.main`: `/$bunfs/…` inside a compiled binary, a source file otherwise. */
   readonly main: string;

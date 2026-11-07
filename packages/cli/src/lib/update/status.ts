@@ -5,7 +5,7 @@ import {
   type InstallMethod,
   knownLatestRelease,
   type UpdatePlan,
-} from '../../contract/index.ts';
+} from '@ferretry/plugin-updates/contract';
 import type { InstalledDaemonBinary } from './machine.ts';
 import type { IDaemonUpdateViewPort, IInstallFactsPort } from './ports.ts';
 

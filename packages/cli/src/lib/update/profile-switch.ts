@@ -1,4 +1,4 @@
-import { classifyInstallMethod, planUpdate, releaseFlakeReference } from '../../contract/index.ts';
+import { classifyInstallMethod, planUpdate, releaseFlakeReference } from '@ferretry/plugin-updates/contract';
 import type { InstalledDaemonBinary } from './machine.ts';
 import type { IDaemonOutput, IDaemonPrompt } from './machine.ts';
 import type { IInstallFactsPort, IPackageManagerPort, IUpdateLifecyclePort } from './ports.ts';

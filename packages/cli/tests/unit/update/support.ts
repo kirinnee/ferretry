@@ -1,7 +1,7 @@
 /** Fakes the CLI half's tests share: output, prompt, clock and progress that write down what they were told. */
 import type { Health } from '@ferretry/kernel/contract';
-import type { IClockPort, IDaemonOutput, IDaemonPrompt } from '../../../cli/lib/machine.ts';
-import type { IProgress, ProgressStepOptions } from '../../../cli/lib/progress.ts';
+import type { IClockPort, IDaemonOutput, IDaemonPrompt } from '../../../src/lib/update/machine.ts';
+import type { IProgress, ProgressStepOptions } from '../../../src/lib/update/progress.ts';
 
 export const health = (overrides: Partial<Health> = {}): Health => ({ protocol: 1, version: '1.2.3', ...overrides });
 

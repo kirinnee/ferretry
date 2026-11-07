@@ -1,4 +1,4 @@
-import { DAEMON_RELEASE_SIGNATURE_CONTEXT, RELEASE_OWNER } from '../../contract/index.ts';
+import { DAEMON_RELEASE_SIGNATURE_CONTEXT, RELEASE_OWNER } from '@ferretry/plugin-updates/contract';
 
 /**
  * The files a standalone release is made of, and how each is read. Pure: the adapter fetches, hashes

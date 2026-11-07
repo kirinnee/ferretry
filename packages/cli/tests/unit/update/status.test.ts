@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DaemonUpdateStatusReader, nextStep, renderUpdateStatus } from '../../../cli/lib/status.ts';
+import { DaemonUpdateStatusReader, nextStep, renderUpdateStatus } from '../../../src/lib/update/status.ts';
 import { FakeFacts, FakeUpdateView } from './fixtures.ts';
 
 const daemon = { path: '/opt/homebrew/bin/fyd', source: 'PATH' as const, version: '1.2.3' };

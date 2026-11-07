@@ -1,5 +1,5 @@
 import type { Health } from '@ferretry/kernel/contract';
-import type { DaemonUpdateView, InstallFacts, LatestRelease } from '../../contract/index.ts';
+import type { DaemonUpdateView, InstallFacts, LatestRelease } from '@ferretry/plugin-updates/contract';
 import type { InstalledDaemonBinary } from './machine.ts';
 import type { CommandOutcome } from './machine.ts';
 import type { UpdateObserver } from './activity.ts';

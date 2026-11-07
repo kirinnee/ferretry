@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { describeActivity, type UpdateActivity } from '../../../cli/lib/activity.ts';
-import { NixProgressTracker, parseNixLine } from '../../../cli/lib/nix-progress.ts';
-import { stepObserver } from '../../../cli/lib/step-observer.ts';
+import { describeActivity, type UpdateActivity } from '../../../src/lib/update/activity.ts';
+import { NixProgressTracker, parseNixLine } from '../../../src/lib/update/nix-progress.ts';
+import { stepObserver } from '../../../src/lib/update/step-observer.ts';
 import { RecordingProgress } from './support.ts';
 
 const nix = (event: object): string => `@nix ${JSON.stringify(event)}`;

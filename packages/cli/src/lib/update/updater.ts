@@ -1,5 +1,6 @@
 import { instantFromEpochMs } from '@ferretry/std';
 import {
+  serializeUpdateReport,
   classifyInstallMethod,
   compareVersions,
   describeInstallMethod,
@@ -14,7 +15,7 @@ import {
   type UpdateOutcome,
   type UpdatePlan,
   type UpdateReport,
-} from '../../contract/index.ts';
+} from '@ferretry/plugin-updates/contract';
 import type { InstalledDaemonBinary } from './machine.ts';
 import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from './machine.ts';
 import { formatElapsed, type IProgress, NO_PROGRESS } from './progress.ts';
@@ -512,7 +513,7 @@ export class DaemonUpdater {
     const report: UpdateReport = { ...result, finishedAt: instantFromEpochMs(this.deps.clock.now()) };
     if (options.report !== undefined) {
       try {
-        await this.deps.reports.writePrivate(options.report, `${JSON.stringify(report, null, 2)}\n`);
+        await this.deps.reports.writePrivate(options.report, serializeUpdateReport(report));
       } catch (error: unknown) {
         this.deps.out.warn(`could not write the update report to ${options.report}: ${errorText(error)}`);
       }

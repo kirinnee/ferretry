@@ -5,7 +5,7 @@
  */
 
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   type DaemonUpdateSettingsHeld,
   type DaemonUpdateView,
@@ -13,21 +13,29 @@ import {
   describeInstallMethod,
 } from '../../contract/index.ts';
 import { behindSentence, refusalSentence, updateOffer, updateRequest } from '../lib/behind.ts';
+import { pollUpdateStatus } from '../lib/poll-status.ts';
 
 export const createSettings = (client: PluginClient): AppComponent<SettingsProps> =>
   function UpdatesSettings() {
     const [view, setView] = useState<DaemonUpdateView | null>(null);
     const [note, setNote] = useState<string | null>(null);
-    const read = useCallback(async () => {
-      try {
-        setView(DaemonUpdateViewSchema.parse(await client.call('GET /v1/daemon/update')));
-      } catch (cause) {
-        setNote(cause instanceof Error ? cause.message : 'The update state could not be read.');
-      }
-    }, []);
-    useEffect(() => {
-      void read();
-    }, [read]);
+    const [readError, setReadError] = useState<string | null>(null);
+    useEffect(
+      () =>
+        pollUpdateStatus({
+          read: async () => DaemonUpdateViewSchema.parse(await client.call('GET /v1/daemon/update')),
+          view: next => {
+            setView(next);
+            setReadError(null);
+          },
+          failed: cause => setReadError(cause instanceof Error ? cause.message : 'The update state could not be read.'),
+          later: (work, milliseconds) => {
+            const timer = setTimeout(work, milliseconds);
+            return () => clearTimeout(timer);
+          },
+        }),
+      [],
+    );
 
     const start = async (target: string, when: 'now' | 'when-idle'): Promise<void> => {
       setNote(null);
@@ -58,7 +66,7 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
       }
     };
 
-    if (view === null) return <p>{note ?? 'Reading the update state…'}</p>;
+    if (view === null) return <p>{readError ?? 'Reading the update state…'}</p>;
     const offer = updateOffer(view);
     return (
       <section aria-label="Updates">
@@ -99,6 +107,7 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
         </label>
         {view.job?.state === 'finished' ? <p>{view.job.report.message}</p> : null}
         {note === null ? null : <p role="status">{note}</p>}
+        {readError === null ? null : <p role="status">{readError}</p>}
       </section>
     );
   };

@@ -1,11 +1,12 @@
+import { decodeJson } from '../../../../core/kernel/host/state/format.ts';
 import { describe, it } from 'bun:test';
-import { UpdateReportSchema } from '../../../contract/index.ts';
+import { UPDATES_REPORT } from '@ferretry/plugin-updates/contract';
 import should from 'should';
-import type { IDaemonPrompt } from '../../../cli/lib/machine.ts';
-import type { IProgress } from '../../../cli/lib/progress.ts';
-import { PlainProgress } from '../../../cli/lib/progress.ts';
-import { NixProfileSwitch } from '../../../cli/lib/profile-switch.ts';
-import { type DaemonUpdateOptions, DaemonUpdater, renderPlan } from '../../../cli/lib/updater.ts';
+import type { IDaemonPrompt } from '../../../src/lib/update/machine.ts';
+import type { IProgress } from '../../../src/lib/update/progress.ts';
+import { PlainProgress } from '../../../src/lib/update/progress.ts';
+import { NixProfileSwitch } from '../../../src/lib/update/profile-switch.ts';
+import { type DaemonUpdateOptions, DaemonUpdater, renderPlan } from '../../../src/lib/update/updater.ts';
 import { CapturedOutput, SteppingClock } from './support.ts';
 import { RecordingProgress } from './support.ts';
 import {
@@ -100,11 +101,38 @@ function harness(
     ...(options.progress === undefined ? {} : { progress: options.progress }),
   });
   const run = (flags: DaemonUpdateOptions = { yes: true, report: '/r.json' }) => updater.update(flags);
-  const report = () => UpdateReportSchema.parse(JSON.parse(reports.written.get('/r.json') ?? 'null'));
+  const report = () => {
+    const decoded = decodeJson(
+      UPDATES_REPORT,
+      'state/updates/update/report.json',
+      reports.written.get('/r.json') ?? 'null',
+    );
+    if (!decoded.ok) throw new Error(decoded.error.sentence);
+    return decoded.value;
+  };
   return { host, packages, standalone, lifecycle, out, prompt, reports, view, clock, latest, run, report };
 }
 
 const BREW_REFRESH = 'brew-refresh:kirinnee/ferretry:https://github.com/kirinnee/ferretry';
+
+it('F-0352 transaction reports round-trip through the real kernel decodeJson for success, refusal and rollback', async () => {
+  const success = harness('standalone');
+  await success.run();
+  const failed = harness('standalone');
+  failed.standalone.refusal = 'no trusted key';
+  await failed.run();
+  const rollback = harness('standalone');
+  rollback.host.restartFailures = 1;
+  await rollback.run();
+  for (const [h, outcome] of [
+    [success, 'succeeded'],
+    [failed, 'failed'],
+    [rollback, 'rolled-back'],
+  ] as const) {
+    should(h.reports.written.get('/r.json')?.startsWith('{\n  "format": 1,')).equal(true);
+    should(h.report().outcome).equal(outcome);
+  }
+});
 const RECOVERY =
   'To recover by hand run: brew update && brew upgrade --cask ferretry && fy daemon restart; if the tap is wedged: brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry';
 

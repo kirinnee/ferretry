@@ -6,8 +6,8 @@ import {
   parseReleaseSignature,
   releaseArchiveName,
   signedReleaseMessage,
-} from '../../../cli/lib/release-files.ts';
-import { DAEMON_RELEASE_KEYS } from '../../../contract/index.ts';
+} from '../../../src/lib/update/release-files.ts';
+import { DAEMON_RELEASE_KEYS } from '@ferretry/plugin-updates/contract';
 
 const HASH = 'a'.repeat(64);
 

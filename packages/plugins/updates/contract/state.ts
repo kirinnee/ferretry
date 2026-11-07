@@ -3,7 +3,7 @@
  * and `config/updates.yaml`. The manifest declares them; the daemon half reads and writes them through the kernel.
  */
 import { defineConfig, defineState } from '@ferretry/kernel/contract';
-import { UpdateCheckSchema, UpdateReportSchema } from './view.ts';
+import { type UpdateReport, UpdateCheckSchema, UpdateReportSchema } from './view.ts';
 import { UpdatesConfigSchema, updatesLoosens } from './wire.ts';
 
 /** Today's `state/update/latest.json`: the last answer GitHub gave, so a restart inside the six hours asks nothing. */
@@ -31,3 +31,8 @@ export const UPDATES_CONFIG = defineConfig({
   axis: 'configure',
   loosens: updatesLoosens,
 });
+
+/** The on-disk transaction report consumed by the daemon through UPDATES_REPORT. */
+export function serializeUpdateReport(report: UpdateReport): string {
+  return `${JSON.stringify({ format: UPDATES_REPORT.format, ...UpdateReportSchema.parse(report) }, null, 2)}\n`;
+}

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { isYes, lastLine, NixProfileSwitch } from '../../../cli/lib/profile-switch.ts';
+import { isYes, lastLine, NixProfileSwitch } from '../../../src/lib/update/profile-switch.ts';
 import { CapturedOutput, FakePrompt } from './support.ts';
 import { FakeFacts, FakeHost, FakePackages, PROFILE_DAEMON, STORE, USER_HOME } from './fixtures.ts';
 
