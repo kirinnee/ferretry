@@ -269,6 +269,24 @@ describe('a page field', () => {
     should(pageFieldsQualify(sudo(), SECRET)).be.false();
   });
 
+  it('I95 should ignore a terminal’s saved OBSERVED proof and use only the card’s current facts for its lock', () => {
+    for (const facts of [sudo({ echo: 'on' }), sudo({ trustedProgram: false }), sudo()]) {
+      const observed: LoginObserved = {
+        ...proven(facts),
+        at: 'sudo',
+        surface: 'terminal',
+        masked: flag(),
+        noEchoAfterSubmit: flag(),
+        navigatedAway: flag(),
+      };
+      should(lockFor(facts, SECRET, { ...QUIET, observed: [observed], probed: true })).deepEqual(
+        lockFor(facts, SECRET, QUIET),
+      );
+    }
+    should(lockFor(sudo({ echo: 'on' }), SECRET, QUIET).seconds).equal(120);
+    should(lockFor(sudo(), SECRET, QUIET).seconds).equal(10);
+  });
+
   it('I92 should keep the longer of two locks', () => {
     const short = { seconds: 10, reason: 'probed-field' } as const;
     const long = { seconds: 120, reason: 'not-proven' } as const;
