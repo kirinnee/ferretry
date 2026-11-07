@@ -75,6 +75,14 @@
       "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind; app/NEEDS-APP-SHELL.txt lists every open gap"
+    ],
+    "conversation": [
+      "conversation app half: C1 landed (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app); the composer, chat and transcript, and the queue, questions, search and links bodies are still the one-line Pending surface until C2-C4 land",
+      "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
+      "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
+      "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
+      "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
     ]
   },
   "pendingHalves": {
@@ -87,7 +95,7 @@
     {
       "plugin": "conversation",
       "path": "packages/plugins/conversation/app",
-      "reason": "skeleton app half; the queue, stuck messages and links views port with item M"
+      "reason": "surfaces, client context, fy-render and the prose kit have landed; the composer, chat, transcript, queue, questions, search and links bodies are in flight (C2-C4)"
     },
     {
       "plugin": "browsers",

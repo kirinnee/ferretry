@@ -187,7 +187,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
          * point — a host that has not opted in to being read refuses, and the
          * reader gets the link instead of a workaround.
          */
-        response = await fetch(url, {
+        response = await globalThis.fetch(url, {
           credentials: 'omit',
           mode: 'cors',
           referrerPolicy: 'no-referrer',

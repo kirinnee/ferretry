@@ -33,6 +33,10 @@
     "**/node_modules",
     // Agenda browser fixtures await app-shell-fill; preserve the port's integration-test exclusion.
     "packages/plugins/agenda/tests/integration/app",
+    // Conversation's fy-render browser tests need playwright-core, the Vite harness and the built sandbox shell, which the
+    // test tier has not got; they are never run locally (app/NEEDS-APP-SHELL.txt).
+    "packages/plugins/conversation/tests/integration/app",
+    "packages/plugins/conversation/tests/realworld/app",
     // pending app port: browsers separate app port in flight
     "packages/plugins/browsers/app",
     // pending app port: terminals shell daemon-client, grants and browser-link facilities

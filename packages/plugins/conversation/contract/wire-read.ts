@@ -261,7 +261,6 @@ export const splitTranscriptImageMarkers = (
 /** The route one image is read from. The handle is URL-safe by construction. */
 export const transcriptImagePath = (ferretId: string, handle: TranscriptImageHandle): string =>
   `/v1/ferrets/${encodeURIComponent(ferretId)}/transcript-images/${formatTranscriptImageHandle(handle)}`;
-const IMAGE_HANDLE = /^[A-Za-z0-9_-]{8,128}$/u;
 
 /**
  * The answer for one transcript image: its bytes as padded base64 and the type read from the bytes themselves, never
@@ -269,7 +268,7 @@ const IMAGE_HANDLE = /^[A-Za-z0-9_-]{8,128}$/u;
  */
 export const TranscriptImageDownloadSchema = z.strictObject({
   image: z.strictObject({
-    handle: z.string().regex(IMAGE_HANDLE),
+    handle: z.string().regex(HANDLE),
     mediaType: z.enum(TRANSCRIPT_IMAGE_MEDIA_TYPES),
     byteLength: z.number().int().positive(),
   }),

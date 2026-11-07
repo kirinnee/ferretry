@@ -285,7 +285,7 @@ export function FyRenderSandbox({
          * fetching bytes from somewhere else entirely. `cache: 'no-cache'`
          * revalidates, so a stale bundle cannot be pinned behind a hash change.
          */
-        const response = await fetch(descriptor.url, {
+        const response = await globalThis.fetch(descriptor.url, {
           cache: 'no-cache',
           credentials: 'omit',
           redirect: 'error',
