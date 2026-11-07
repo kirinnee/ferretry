@@ -1,69 +1,35 @@
-import { type BrowserActionResult, BrowserActionSchema } from './wire/browser.ts';
-import { BrowserLoginActionSchema } from '../../contract/index.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import type { ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
 import {
-  BrowserControlError,
-  type BrowserLoginLifecycle,
-  type BrowserLoginStatus,
-} from '../worker/control/index.ts';
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  type KernelPorts,
+  jsonResponse,
+  type RouteHandler,
+  type SocketAccept,
+  type SocketDownstream,
+  type SocketHandler,
+} from '@ferretry/kernel/contract';
+import { BrowserLoginActionSchema } from '../../contract/index.ts';
+import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
+import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
+import { parseBody } from './body.ts';
 import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
+import { type BrowserActionResult, BrowserActionSchema } from './wire/browser.ts';
 
+/**
+ * The per-session browser and the human sign-in window (today's `runtime/mounts/browser-login.ts`).
+ *
+ * The sign-in window: ONE PATH, TWO METHODS. A GET reads the window and a POST carries an explicit human intent
+ * (`start`, `stop`, `confirm`) validated by `BrowserLoginActionSchema`. The daemon is never asked to INFER that a
+ * person signed in. `noStore` is not optional: an open window's status contains the live VNC password.
+ * `BrowserControlError` keeps the domain's two-way split: `bad_request` answers 400, `launch_failed` 503.
+ *
+ * The per-session browser: every action is an act on its page through `kernel.act` (§4.7). A write-only action
+ * answers the status read afterwards, masked (S16); a read answers its masked text; a screenshot its picture.
+ */
 export interface BrowserMountedSubsystem extends BrowserSubsystem {
   stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;
 }
-
-/**
- * The daemon-global human browser-login window: a short-lived virtual desktop, served over a
- * loopback VNC listener, that a person signs Google into by hand so the agent's browser profile is
- * primed.
- *
- * This is the route `fy browser login` and the PWA's login banner have both spoken since they were
- * ported, against a daemon that answered `unknown_route`. `packages/pwa/src/lib/browser-login.ts`
- * says so in its own header — "`/v1/browser/login` is not mounted by any daemon yet, so this module
- * is proved against an injected port rather than end to end" — and this mount is what retires that
- * sentence.
- *
- * ONE PATH, TWO METHODS, because that is the contract the two clients already parse: a GET reads the
- * window and a POST carries an explicit human intent (`start`, `stop`, `confirm`) validated by
- * `BrowserLoginActionSchema`. The daemon is never asked to INFER that a person signed in — closing
- * with `primed: true` is the human saying they did, and `confirm` is the same claim about a window
- * they want left open.
- *
- * WHY `noStore` IS NOT OPTIONAL HERE. An open window's status contains the live VNC password and the
- * port it is listening on. A cached one hands a later reader a credential for a window that has since
- * closed, and hands an intermediary one for a window that has not.
- *
- * WHY `admin`. Same reason: the status IS a credential. Warden-scoped callers read fleet health, and
- * a token that may read fleet health must not be able to open a desktop on the host or read the
- * password to one that is open.
- *
- * WHAT THE ANSWER MEANS WHEN IT FAILS. `BrowserControlError` carries the domain's own two-way split
- * and it is preserved rather than flattened. `bad_request` is a request that is unusable as written —
- * a duration outside one to sixty minutes — and answers 400. `launch_failed` is everything about the
- * WINDOW rather than the request: no Chrome, no Xvfb, no x11vnc, a host that is not Linux, a profile
- * another holder has, or no open window for a `confirm` to be about. That answers 503, which is what
- * it is: this daemon cannot serve a login window right now, and the body says which of those it is.
- * The split is the domain's call and it is passed through rather than re-decided here — a mount that
- * reclassified a refusal would be a second, quieter opinion about the same failure.
- *
- * THE PER-SESSION BROWSER IS SERVED NOW, and the shape of this file still records what it took. The
- * worker program was never the missing half — `packages/daemon/bin/browser-worker.ts` is the browser
- * worker and `bin/fyd.ts` has long wired a transport that can drive one. What was missing was the
- * per-session runtime that turns a session id into a launched worker and a production
- * `BrowserViewerHost`. `BrowserSessionService` is that object, so the one call site in
- * `mounts/index.ts` now hands this function a browser host as well as the login window.
- *
- * THE HOST STAYS OPTIONAL because the refusal it replaces has to remain expressible. A daemon
- * composed without one answers the stated 501 below rather than a 404, for the same reason
- * `/v1/learning/run` does: `fy browser open` is a shipped command, and a 404 is indistinguishable
- * from version skew while a 501 naming the missing piece is actionable. There is no stream ticket
- * counter any more: a paired device opens the viewer's stream inside its own session.
- */
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */
 function refusal(error: BrowserControlError): ApiError {
@@ -72,9 +38,7 @@ function refusal(error: BrowserControlError): ApiError {
     : new ApiError(503, error.message, 'browser_login_unavailable');
 }
 
-/** Runs one lifecycle call, translating the domain's refusals and letting a genuine defect surface as
- *  the 500 it is — the dispatcher replaces an unexpected message with a fixed one, and the messages
- *  here routinely name a profile path. */
+/** Runs one lifecycle call, translating the domain's refusals and letting a genuine defect surface as the 500 it is. */
 async function answer(work: () => Promise<BrowserLoginStatus>): Promise<ApiResponse> {
   try {
     return jsonResponse(await work());
@@ -85,147 +49,94 @@ async function answer(work: () => Promise<BrowserLoginStatus>): Promise<ApiRespo
 }
 
 /** Carries out the one intent the body names. */
-async function act(window: BrowserLoginLifecycle, context: RouteContext): Promise<ApiResponse> {
-  const action = await parseBody(context.request, BrowserLoginActionSchema);
+async function loginAct(window: BrowserLoginLifecycle, call: CallContext): Promise<ApiResponse> {
+  const action = await parseBody(call.request, BrowserLoginActionSchema);
   return await answer(async () => {
-    if (action.action === 'start') {
-      return await window.start(action.minutes === undefined ? {} : { minutes: action.minutes });
-    }
-    if (action.action === 'stop') {
-      return await window.stop(action.primed === undefined ? {} : { primed: action.primed });
-    }
+    if (action.action === 'start') return await window.start(action.minutes === undefined ? {} : { minutes: action.minutes });
+    if (action.action === 'stop') return await window.stop(action.primed === undefined ? {} : { primed: action.primed });
     return await window.confirm();
   });
 }
 
-function browserFailure(error: unknown): never {
+export function browserFailure(error: unknown): never {
   if (!(error instanceof BrowserSessionError)) throw error;
   const status = (
-    {
-      not_found: 404,
-      capacity: 409,
-      conflict: 409,
-      not_running: 409,
-      launch_failed: 503,
-      upstream_failed: 502,
-    } as const
+    { not_found: 404, capacity: 409, conflict: 409, not_running: 409, launch_failed: 503, upstream_failed: 502 } as const
   )[error.code];
   throw new ApiError(status, error.message, error.code);
 }
 
-function sessionId(context: RouteContext): string {
-  const id = context.params.get('sessionId') ?? '';
+export function sessionIdOf(call: CallContext): string {
+  const id = call.params.get('sessionId') ?? '';
   if (id === '' || id.includes('/') || id.includes('\\'))
     throw new ApiError(400, 'the session id in the path is not usable', 'bad_request');
   return id;
 }
 
-async function browserStatus(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
-  return jsonResponse(await browser.status(sessionId(context)).catch(browserFailure));
+/** `GET /v1/sessions/:sessionId/browser`: the status, every page's address and title masked (S16). */
+async function browserStatus(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
+  const status = await browser.status(sessionIdOf(call)).catch(browserFailure);
+  return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
 }
 
-async function browserAction(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const action = await parseBody(context.request, BrowserActionSchema);
-  const result: BrowserActionResult = await browser.act(sessionId(context), action).catch(browserFailure);
-  return jsonResponse(result);
+/** `POST /v1/sessions/:sessionId/browser`: one action on its page, through the act runner. */
+async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
+  const sessionId = sessionIdOf(call);
+  const action = await parseBody(call.request, BrowserActionSchema);
+  const before = await browser.status(sessionId).catch(browserFailure);
+  const target = targetOfAction(sessionId, action, before);
+  const op = opOfAction(action);
+  if (op === 'read') {
+    const content = acted<'read'>(
+      await kernel.act(target, 'read', async () => {
+        const result = await browser.act(sessionId, action).catch(browserFailure);
+        const text = 'result' in result && 'text' in result.result ? result.result.text : '';
+        return await kernel.redaction.read(scope => ({
+          kind: 'content' as const,
+          data: {
+            status: maskedStatus(scope, result.status),
+            ...('result' in result ? { result: { ...maskedSnapshot(scope, result.result), text: scope.text(text) } } : {}),
+          } as never,
+        }));
+      }),
+    );
+    return jsonResponse(content.data as BrowserActionResult);
+  }
+  if (op === 'picture') {
+    let answerBody: BrowserActionResult | undefined;
+    acted(
+      await kernel.act(target, 'picture', async () => {
+        const result = await browser.act(sessionId, action).catch(browserFailure);
+        answerBody = await kernel.redaction.read(scope => ({
+          status: maskedStatus(scope, result.status),
+          ...('result' in result ? { result: maskedSnapshot(scope, result.result) } : {}),
+        }) as BrowserActionResult);
+        const shot = 'result' in result && 'screenshotBase64' in result.result ? result.result.screenshotBase64 : '';
+        return { kind: 'picture' as const, mime: 'image/png' as const, bytes: Buffer.from(shot, 'base64') };
+      }),
+    );
+    return jsonResponse(answerBody);
+  }
+  await writeAct(kernel.act, target, op, async () => await browser.act(sessionId, action).catch(browserFailure));
+  const after = await browser.status(sessionId).catch(browserFailure);
+  return jsonResponse({ status: await kernel.redaction.read(scope => maskedStatus(scope, after)) });
 }
 
-/** The real per-session browser routes. The projection is BrowserStatus, which carries the active tab
- * and its complete tab list from the daemon-owned worker rather than a UI-local guess. */
-
-export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: BrowserSubsystem): readonly ApiRoute[] {
-  const sessionRoutes: readonly ApiRoute[] =
-    browser === undefined
-      ? [
-          {
-            method: 'GET',
-            path: '/v1/sessions/:sessionId/browser',
-            minimum: 'operator',
-            caller: 'any',
-            capability: { capability: 'browser', axis: 'use' },
-            noStore: true,
-            handle: async () => {
-              throw browserAutomationUnmounted();
-            },
-          },
-          {
-            method: 'POST',
-            path: '/v1/sessions/:sessionId/browser',
-            minimum: 'operator',
-            caller: 'any',
-            capability: { capability: 'browser', axis: 'use' },
-            noStore: true,
-            handle: async () => {
-              throw browserAutomationUnmounted();
-            },
-          },
-        ]
-      : [
-          {
-            method: 'GET',
-            path: '/v1/sessions/:sessionId/browser',
-            minimum: 'operator',
-            caller: 'any',
-            capability: { capability: 'browser', axis: 'use' },
-            noStore: true,
-            handle: async (context: RouteContext) => await browserStatus(browser, context),
-          },
-          {
-            method: 'POST',
-            path: '/v1/sessions/:sessionId/browser',
-            minimum: 'operator',
-            caller: 'any',
-            capability: { capability: 'browser', axis: 'use' },
-            noStore: true,
-            handle: async (context: RouteContext) => await browserAction(browser, context),
-          },
-        ];
-  return [
-    {
-      method: 'GET',
-      path: '/v1/browser/login',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'browser', axis: 'use' },
-      noStore: true,
-      handle: async () => await answer(async () => await window.status()),
-    },
-    {
-      method: 'POST',
-      path: '/v1/browser/login',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'browser', axis: 'use' },
-      noStore: true,
-      handle: async context => await act(window, context),
-    },
-    ...sessionRoutes,
-  ];
+/** The routes this file serves, keyed as the manifest declares them. */
+export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, browser: BrowserSubsystem) {
+  return {
+    'GET /v1/browser/login': (async () => await answer(async () => await window.status())) satisfies RouteHandler,
+    'POST /v1/browser/login': (async call => await loginAct(window, call)) satisfies RouteHandler,
+    'GET /v1/sessions/:sessionId/browser': (async call => await browserStatus(kernel, browser, call)) satisfies RouteHandler,
+    'POST /v1/sessions/:sessionId/browser': (async call => await browserAction(kernel, browser, call)) satisfies RouteHandler,
+  } as const;
 }
 
-/** Socket handler creation stays at composition: this route proves the existing ticket/capability
- * boundary before handing its socket to the same browser host HTTP actions address. */
-export function browserSocketRoutes(browser: BrowserMountedSubsystem): readonly SocketRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/browser/stream',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'browser', axis: 'use' },
-      accept: async context => {
-        const id = sessionId(context);
-        await browser.status(id).catch(browserFailure);
-        return async downstream => await browser.stream(id, downstream);
-      },
-    },
-  ];
-}
-
-function browserAutomationUnmounted(): ApiError {
-  return new ApiError(
-    501,
-    'this daemon mounts the human browser-login window but no per-session automation: the browser worker and its transport exist, but nothing composes them into the per-session runtime and viewer host this route would call',
-    'browser_automation_not_mounted',
-  );
+/** `GET /v1/sessions/:sessionId/browser/stream`: proves the session, then hands the socket to the viewer stream. */
+export function streamSocket(browser: BrowserMountedSubsystem): SocketAccept {
+  return async call => {
+    const id = sessionIdOf(call);
+    await browser.status(id).catch(browserFailure);
+    return async downstream => await browser.stream(id, downstream);
+  };
 }

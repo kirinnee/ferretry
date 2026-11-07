@@ -58,6 +58,7 @@ export {
   type BrowserLifecycle,
   BrowserLifecycleSchema,
   type BrowserMode,
+  BrowserModeSchema,
   BrowserPageStateSchema,
   BrowserProfileKindSchema,
   type BrowserProxySetting,
