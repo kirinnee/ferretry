@@ -144,11 +144,11 @@ an instructions document outside `fleet/assets/`, `voice.yaml`, `pack.yaml` and 
 
 Daemon settings (`src/steps/daemon-settings.ts`) splits `config/daemon.json` by owner: `grants` → `gate.yaml` with all eight
 capabilities and both axes written explicitly at v4's effective value (`configure` only where `use` is on), plus
-`state/security.json` → `gate.yaml` `security` (a damaged one as v4's strictest reading); the parsed result is compared
-with what v4 enforced and any widening fails the step. Carriers → `connections.yaml` (`direct`, one `relay`, `tunnel`,
-`webrtc`; an owner's `enabled: false` stays false; two relays switched on fail, since v5 dials one). `harness` paths →
+`state/security.json` → `gate.yaml` `security` (a damaged one as v4's strictest reading), with v4's effective `catalogs.memberUnlockDays` beside it; the parsed result is compared
+with what v4 enforced and any widening fails the step. Carriers → `connections.yaml` (`direct`, the ordered `relay` list, `tunnel`,
+`webrtc`; every relay entry keeps its order and its own on/off, and an owner's `enabled: false` stays false). `harness` paths →
 both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. A catalog link store
-turned off or a shorter member unlock waits for a Catalogs schema (`pending`); `secretEnvironment`, `usage.url`, CORS,
+turned off or the owner's own waits for Catalogs' `catalogs.yaml` (`pending`); `secretEnvironment`, `usage.url`, CORS,
 `publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` belongs to the Packs step.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed

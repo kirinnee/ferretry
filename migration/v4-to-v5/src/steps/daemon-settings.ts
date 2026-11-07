@@ -7,8 +7,9 @@
  * | ---------------------------------------------------- | ----------------------------------------------------------------- |
  * | `daemon.json` `grants`                               | `gate.yaml` `grants`: all eight capabilities, both axes, EXPLICIT |
  * | `state/security.json` `settings`                     | `gate.yaml` `security`, explicit (v4's default or strictest)      |
+| `daemon.json` `catalogs.memberUnlockDays`            | `gate.yaml` `security.memberUnlockDays` (v4's effective value)    |
  * | `daemon.json` `carriers` bind, else `host` + `port`  | `connections.yaml` `direct`                                       |
- * | `daemon.json` `carriers` relays, else `relay`        | `connections.yaml` `relay` (one: v5 dials a single relay)         |
+ * | `daemon.json` `carriers` relays, else `relay`        | `connections.yaml` `relay` (the same ordered list, up to four)    |
  * | `daemon.json` `carriers` tunnel                      | `connections.yaml` `tunnel`                                       |
  * | `daemon.json` `webrtc`                               | `connections.yaml` `webrtc`                                       |
  * | `daemon.json` `harness.paths.claude` / `.codex`      | `harness-claude-code.yaml` / `harness-codex.yaml` `binary`        |
@@ -21,8 +22,8 @@
  * (`configure` only where `use` is on, v4's rule), so no v5 default is ever relied on; the parsed v5 file is then
  * compared axis by axis and setting by setting with what v4 enforced, and any widening fails the step. A capability
  * v5 cannot name fails the step by name. A carrier the owner switched off stays `enabled: false`. A restriction v5
- * has no field for yet (the catalog link store turned off, a shorter member unlock) leaves the step `pending` rather
- * than being dropped. Nothing here is a credential (v4's grants doc keeps the password verifier out of daemon.json, and
+ * has no field for yet (the catalog link store turned off or the owner's own) leaves the step `pending` rather than
+ * being dropped. Nothing here is a credential (v4's grants doc keeps the password verifier out of daemon.json, and
  * 4.291.5 retired the operator password): `secretEnvironment` and `usage.url` are not carried and never echoed, and
  * every value written passes the raw-secret rule. The report names keys, never values.
  *
@@ -126,6 +127,7 @@ interface Plan {
   grants?: Record<string, V4Grant>;
   security?: V4SecuritySettings;
   carriers?: { relay: boolean; tunnel: boolean; webrtc: boolean };
+  memberUnlockDays?: number;
 }
 
 const count = (plan: Plan, what: string, n = 1): void => {
@@ -215,31 +217,16 @@ function planCarriers(plan: Plan, document: V4DaemonDocument): void {
         what: `${from} relay`,
         why: 'superseded in v4 by the carriers relay entries; v4 did not read it',
       });
-    const on = relays.entries.filter(entry => entry.enabled ?? true);
-    if (on.length > 1)
-      throw new V4InputError(
-        `${from} carriers: ${String(on.length)} relays are switched on and v5 dials exactly one; switch all but one off in v4 (or delete them) and run again`,
-      );
-    const chosen = on[0] ?? relays.entries.find(entry => 'source' in entry) ?? relays.entries[0];
-    if (chosen === undefined) throw new V4InputError(`${from} carriers: no relay entry`);
-    const base = {
-      enabled: chosen.enabled ?? true,
-      ...(chosen.reconnectSeconds === undefined ? {} : { reconnectSeconds: chosen.reconnectSeconds }),
-    };
-    add(
-      plan,
-      CONNECTIONS_CONFIG,
-      'relay',
-      'url' in chosen ? { url: chosen.url, ...base } : { source: 'discovery', ...base },
-      from,
-    );
-    count(plan, 'carriers');
-    const others = relays.entries.length - 1;
-    if (others > 0)
-      plan.dropped.push({
-        what: `${from} carriers: ${String(others)} switched-off relay entr${others === 1 ? 'y' : 'ies'}`,
-        why: 'v5 holds one relay entry; the one carried is the one v4 dialled (or a switched-off one, so the relay stays off)',
-      });
+    // v5 holds v4's ordered rendezvous set as it is: every entry, its order, and each one's on/off (`RelayEntriesSchema`).
+    const list = relays.entries.map(entry => {
+      const base = {
+        enabled: entry.enabled ?? true,
+        ...(entry.reconnectSeconds === undefined ? {} : { reconnectSeconds: entry.reconnectSeconds }),
+      };
+      return 'url' in entry ? { url: entry.url, ...base } : { source: 'discovery', ...base };
+    });
+    add(plan, CONNECTIONS_CONFIG, 'relay', list, from);
+    count(plan, 'relay entries', list.length);
   }
 
   const tunnel = carriers.find(entry => entry.kind === 'tunnel');
@@ -300,7 +287,7 @@ function planAgenda(plan: Plan, document: V4DaemonDocument): void {
     });
 }
 
-/** A restriction v5 has no field for yet waits; anything else under `catalogs` is not carried. */
+/** The link store: a restriction v5 has no field for yet waits; discovery (the default) needs no field. */
 function planCatalogs(plan: Plan, document: V4DaemonDocument): void {
   const catalogs = document.catalogs;
   if (catalogs === undefined) return;
@@ -309,15 +296,11 @@ function planCatalogs(plan: Plan, document: V4DaemonDocument): void {
     plan.waiting.push(
       `${V4_DAEMON_JSON} catalogs.linkStore (${'url' in store ? 'the owner’s own link store' : 'download links turned off'}: v5 Catalogs declares no config schema yet)`,
     );
-  const days = catalogs.memberUnlockDays;
-  if (days !== undefined && days < V4_MEMBER_UNLOCK_DAYS_DEFAULT)
-    plan.waiting.push(
-      `${V4_DAEMON_JSON} catalogs.memberUnlockDays (shorter than the default: v5 Catalogs declares no config schema yet)`,
-    );
-  else if (days !== undefined || (store !== undefined && 'source' in store))
+  // memberUnlockDays is Gate's in v5 (`gate.yaml` `security`), written with the security settings.
+  if (store !== undefined && 'source' in store)
     plan.dropped.push({
-      what: `${V4_DAEMON_JSON} catalogs`,
-      why: 'v5 Catalogs declares no config yet; what was written is its default reading',
+      what: `${V4_DAEMON_JSON} catalogs.linkStore`,
+      why: 'the hosted link store found by discovery, which is v5 Catalogs’ own default reading',
     });
 }
 
@@ -359,8 +342,12 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
 
   planGrants(plan, document);
   const security = await v4Security(home, plan);
-  add(plan, GATE_CONFIG, 'security', { ...security }, V4_SECURITY_JSON);
+  // v4's effective member unlock (30 unless written): v5 keeps it beside the security settings.
+  const memberUnlockDays = document.catalogs?.memberUnlockDays ?? V4_MEMBER_UNLOCK_DAYS_DEFAULT;
+  add(plan, GATE_CONFIG, 'security', { ...security, memberUnlockDays }, V4_SECURITY_JSON);
   plan.security = security;
+  plan.memberUnlockDays = memberUnlockDays;
+  if (document.catalogs?.memberUnlockDays !== undefined) count(plan, 'member unlock days (from daemon.json catalogs)');
   count(plan, 'security settings');
   planCarriers(plan, document);
   planHarness(plan, document);
@@ -416,11 +403,17 @@ function widened(plan: Plan, gateText: string | undefined, connectionsText: stri
     }
     for (const field of SECURITY_SETTING_FIELDS)
       if (widensSecurity(field, plan.security[field], gate.security[field])) found.push(`security.${field}`);
+    if (gate.security.memberUnlockDays > (plan.memberUnlockDays ?? V4_MEMBER_UNLOCK_DAYS_DEFAULT))
+      found.push('security.memberUnlockDays');
   }
   if (plan.carriers !== undefined) {
     const connections = ConnectionsConfigSchema.parse(connectionsText === undefined ? {} : readBack(connectionsText));
     // v5's reading of an absent entry: relay and WebRTC on, tunnel off (`connectionsLoosens`).
-    if ((connections.relay?.enabled ?? true) && !plan.carriers.relay) found.push('relay');
+    const relayOn =
+      connections.relay === undefined ||
+      connections.relay.length === 0 ||
+      connections.relay.some(entry => entry.enabled);
+    if (relayOn && !plan.carriers.relay) found.push('relay');
     if ((connections.tunnel?.enabled ?? false) && !plan.carriers.tunnel) found.push('tunnel');
     if ((connections.webrtc?.enabled ?? true) && !plan.carriers.webrtc) found.push('webrtc');
   }

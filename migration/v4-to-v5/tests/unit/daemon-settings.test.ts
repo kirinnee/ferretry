@@ -71,7 +71,7 @@ test('a v4 grant or axis left out is written explicitly with v4’s value, never
   expect(grants.terminal).toEqual({ use: false, configure: false });
   expect(GateConfigSchema.parse({ grants: { terminal: { use: false } } }).grants.terminal.configure).toBe(true);
   // No security.json: v4's defaults, also written out in full.
-  expect(file.security).toEqual({ ...DEFAULT_SECURITY_SETTINGS });
+  expect(file.security).toEqual({ ...DEFAULT_SECURITY_SETTINGS, memberUnlockDays: 30 });
 });
 
 test('a home with no daemon.json still writes every grant explicitly', async () => {
@@ -92,7 +92,8 @@ test('security.json carries as written; a damaged one carries v4’s strictest r
   };
   await f.put('state/security.json', { schemaVersion: 1, settings, updatedAt: '2026-11-01T00:00:00.000Z' });
   await daemonSettingsStep.run(f.ctx());
-  expect((await read('gate.yaml', GateConfigSchema)).security).toEqual(settings);
+  // v4's member unlock (unset: its default, 30) is kept beside the security settings.
+  expect((await read('gate.yaml', GateConfigSchema)).security).toEqual({ ...settings, memberUnlockDays: 30 });
 
   const damaged = await fixture();
   try {
@@ -121,12 +122,12 @@ test('an owner’s carrier enabled: false stays false (relay, tunnel, WebRTC)', 
   });
   expect((await daemonSettingsStep.run(f.ctx())).status).toBe('converted');
   const file = await written('connections.yaml');
-  expect(file.relay).toEqual({ source: 'discovery', enabled: false });
+  expect(file.relay).toEqual([{ source: 'discovery', enabled: false }]);
   expect(file.tunnel).toEqual({ enabled: false });
   expect(file.webrtc).toEqual({ enabled: false });
   expect(file.direct).toEqual({ host: '127.0.0.1', port: 7444 });
   const connections = ConnectionsConfigSchema.parse(file);
-  expect(connections.relay?.enabled).toBe(false);
+  expect(connections.relay?.[0]?.enabled).toBe(false);
 });
 
 test('the legacy spelling carries too: host/port become direct, a switched-off relay block stays off', async () => {
@@ -135,11 +136,11 @@ test('the legacy spelling carries too: host/port become direct, a switched-off r
   expect(report.status).toBe('converted');
   const file = await written('connections.yaml');
   expect(file.direct).toEqual({ host: '127.0.0.1', port: 7455 });
-  expect(file.relay).toEqual({ url: 'wss://relay.example.com', enabled: false, reconnectSeconds: 9 });
+  expect(file.relay).toEqual([{ url: 'wss://relay.example.com', enabled: false, reconnectSeconds: 9 }]);
   expect(file.tunnel).toBeUndefined();
 });
 
-test('a bind supersedes host/port, and relays v5 cannot hold: one on is carried, two on fail by key', async () => {
+test('a bind supersedes host/port, and every relay entry carries in order with its own on/off', async () => {
   await daemon({
     host: '0.0.0.0',
     carriers: [
@@ -152,9 +153,14 @@ test('a bind supersedes host/port, and relays v5 cannot hold: one on is carried,
   expect(report.status).toBe('converted');
   const file = await written('connections.yaml');
   expect(file.direct).toEqual({ host: '127.0.0.1', port: 7444 });
-  expect(file.relay).toEqual({ url: 'wss://own.example.com', enabled: true });
+  expect(file.relay).toEqual([
+    { url: 'wss://own.example.com', enabled: true },
+    { source: 'discovery', enabled: false },
+  ]);
   expect(report.notCarried.map(item => item.what)).toContain('config/daemon.json host');
+  expect(report.kept).toContainEqual({ what: 'relay entries', count: 2 });
 
+  // Two relays switched on: v5 dials the same ordered set, so both carry.
   const two = await fixture();
   try {
     await two.put('config/daemon.json', {
@@ -163,10 +169,12 @@ test('a bind supersedes host/port, and relays v5 cannot hold: one on is carried,
         { kind: 'relay', source: 'discovery' },
       ],
     });
-    const failed = await daemonSettingsStep.run(two.ctx());
-    expect(failed.status).toBe('failed');
-    expect(failed.note).toContain('carriers');
-    expect(await readdir(two.to).catch(() => [])).toEqual([]);
+    expect((await daemonSettingsStep.run(two.ctx())).status).toBe('converted');
+    const relays = parse(await readFile(join(two.to, 'config/connections.yaml'), 'utf8'), { version: '1.2' }).relay;
+    expect(relays).toEqual([
+      { url: 'wss://own.example.com', enabled: true },
+      { source: 'discovery', enabled: true },
+    ]);
   } finally {
     await two.clean();
   }
@@ -246,6 +254,14 @@ test('nothing secret appears in the report: recipes, a collector address and ret
   expect(dropped.some(what => what.includes('corsOrigins') && what.includes('without the hosted app'))).toBe(true);
   for (const file of await readdir(join(f.to, 'config')))
     expect(await readFile(join(f.to, 'config', file), 'utf8')).not.toContain(marker);
+});
+
+test('a shorter member unlock carries into gate.yaml security', async () => {
+  await daemon({ catalogs: { memberUnlockDays: 7 } });
+  const report = await daemonSettingsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect((await read('gate.yaml', GateConfigSchema)).security.memberUnlockDays).toBe(7);
+  expect(report.kept).toContainEqual({ what: 'member unlock days (from daemon.json catalogs)', count: 1 });
 });
 
 test('a restriction v5 cannot express yet (catalog links off) leaves the step pending; the rest is written', async () => {
