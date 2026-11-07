@@ -104,6 +104,11 @@ export function buildBrowsers(
       after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }),
     },
     identities,
+    // A page closed, however it closed (a tool, the toolbar, the session's end, the browser stopping): a wake-up.
+    {
+      closed: (sessionId, pageId) =>
+        kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' }),
+    },
   );
   const viewerHost = heldViewerHost(kernel, pages);
   const stream: BrowserStreamOpener = async (sessionId, downstream) => {

@@ -1,8 +1,29 @@
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import { BROWSER_MAX_MACHINE_PAGES, BROWSER_MAX_PAGES, type BrowserStateView } from '../../contract/index.ts';
-import { type BrowserAction, type BrowserActionResult, type BrowserInputEvent, type BrowserPageActionSnapshot, type BrowserPageSnapshot, type BrowserPageSummary, type BrowserScreencastFrame, type BrowserStatus, type BrowserViewport } from './wire/browser.ts';
-import { type BrowserDialogInfo, BrowserDialogInfoSchema, type BrowserPageLifecycleReply, type BrowserPageLifecycleRequest } from './wire/page-lifecycle.ts';
-import { type BrowserElementTarget, type BrowserTarget, type BrowserTargetFields, browserReadModeOf, browserTargetOf } from './wire/target.ts';
+import {
+  type BrowserAction,
+  type BrowserActionResult,
+  type BrowserInputEvent,
+  type BrowserPageActionSnapshot,
+  type BrowserPageSnapshot,
+  type BrowserPageSummary,
+  type BrowserScreencastFrame,
+  type BrowserStatus,
+  type BrowserViewport,
+} from './wire/browser.ts';
+import {
+  type BrowserDialogInfo,
+  BrowserDialogInfoSchema,
+  type BrowserPageLifecycleReply,
+  type BrowserPageLifecycleRequest,
+} from './wire/page-lifecycle.ts';
+import {
+  type BrowserElementTarget,
+  type BrowserTarget,
+  type BrowserTargetFields,
+  browserReadModeOf,
+  browserTargetOf,
+} from './wire/target.ts';
 import { type SurfaceOpener } from './wire/surface.ts';
 import type { BrowserAutomation, BrowserPageActed } from './automation.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
@@ -60,6 +81,11 @@ export interface BrowserGuardPage {
  * waited, or an owner's value pending on or just typed into the page (the input bridge's holds).
  */
 export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void>;
+
+/** Told when a page of a session closes, whoever closed it (a tool, the toolbar, the session's end, the browser stopping). */
+export interface BrowserPageClosed {
+  closed(sessionId: string, pageId: string): void;
+}
 
 /** The ferrets the browser serves: whether one exists, and the spoken name a page is grouped under (Ferrets' own). */
 export interface BrowserSessionDirectory {
@@ -262,6 +288,8 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly idle?: BrowserIdlePolicy,
     /** Told when an act may have changed who a page signs in, whoever made it (`../target/sign-in/watch.ts`). */
     private readonly signIns?: BrowserSignInWatch,
+    /** Told when a page closes: the daemon half publishes `PageChanged` `closed`. A wake-up, so it never fails a close. */
+    private readonly pageClosed?: BrowserPageClosed,
   ) {}
 
   async status(sessionId: string): Promise<BrowserStatus> {
@@ -663,6 +691,21 @@ export class BrowserSessionService implements BrowserSubsystem {
       else run.viewed.set(sessionId, next.id);
     }
     this.touch(run);
+    this.told(sessionId, pageId);
+  }
+
+  /** Tells whoever watches that a page closed; a watcher that throws does not undo the close. */
+  private told(sessionId: string, pageId: string): void {
+    try {
+      this.pageClosed?.closed(sessionId, pageId);
+    } catch {
+      // A wake-up only: the port is the truth.
+    }
+  }
+
+  /** Every page a session owned closed with the browser. */
+  private toldAll(run: Running): void {
+    for (const [pageId, sessionId] of run.owners) this.told(sessionId, pageId);
   }
 
   /** Points this session's person at another of its pages, and moves its live viewers there. */
@@ -770,6 +813,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     for (const viewer of run.viewers) viewer.terminal({ code: 1000, reason: 'browser stopped' });
     run.viewers.clear();
     await run.driver.close().catch(() => undefined);
+    this.toldAll(run);
   }
 
   private ended(run: Running): void {
@@ -779,6 +823,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     run.idle?.cancel();
     for (const viewer of run.viewers) viewer.terminal({ code: 1011, reason: 'browser worker exited' });
     run.viewers.clear();
+    this.toldAll(run);
   }
 
   /** The session a page belongs to: its own record, or its opener's (a popup is its opener's). */

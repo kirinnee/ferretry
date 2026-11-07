@@ -133,4 +133,31 @@ describe('the browsers daemon half', () => {
       'page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=*************',
     );
   });
+
+  it('should publish PageChanged closed when a ferret closes its page, and for every page its session ends with', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    await host.tool('browser_open', { name: 'docs', url: 'https://example.test/docs' }, as('f1'));
+    const closes = () =>
+      host?.published
+        .filter(entry => entry.event === 'browsers.page-changed')
+        .map(entry => entry.payload as { change: string; page: string; ferret: string })
+        .filter(change => change.change === 'closed');
+
+    // Act
+    const closed = await host.tool('browser_close', { name: 'app' }, as('f1'));
+    const afterClose = closes();
+    const stopped = await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'stop' } });
+
+    // Assert
+    should(closed.isError).not.be.true();
+    should(stopped.status).equal(200);
+    should(afterClose).deepEqual([{ ferret: 'f1', page: 'p1', change: 'closed' }]);
+    should(closes()).deepEqual([
+      { ferret: 'f1', page: 'p1', change: 'closed' },
+      { ferret: 'f1', page: 'p2', change: 'closed' },
+    ]);
+  });
 });
