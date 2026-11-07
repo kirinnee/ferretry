@@ -17,6 +17,13 @@ const textOf = (value: unknown): string => {
   return '';
 };
 
+/**
+ * One settle turn on the real clock. The hook reads again on a real 5ms interval, so a wait for its NEXT read must let
+ * wall time pass; counting bare turns gives up in a few milliseconds on a fast machine.
+ */
+const onTheClock = async (_turn: () => Promise<void>): Promise<void> =>
+  await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 1)));
+
 let seen: PaneReading | 'unset' = 'unset';
 /** The status line the last reading carried, or `null` when there was none (or nothing was read). */
 const line = () => (seen === 'unset' ? 'unset' : seen.activity);
@@ -39,7 +46,7 @@ describe('usePaneActivity', () => {
     await settleUntil(
       () => line() !== null && line() !== 'unset' && (line() as { elapsed?: string }).elapsed === '2s',
       'the second frame',
-      runAsync,
+      onTheClock,
     );
     expect(seen).toMatchObject({ read: true });
     run(() => view.update(<Probe active={false} read={read} />));
@@ -67,7 +74,7 @@ describe('usePaneActivity', () => {
     const view = render(<Probe active read={read} />);
     await settleUntil(() => line() !== null && line() !== 'unset', 'a first reading', runAsync);
     fail = true;
-    await settleUntil(() => seen !== 'unset' && !seen.read, 'the failure to clear the line', runAsync);
+    await settleUntil(() => seen !== 'unset' && !seen.read, 'the failure to clear the line', onTheClock);
     expect(seen).toEqual(UNREAD_PANE);
     run(() => view.unmount());
   });
