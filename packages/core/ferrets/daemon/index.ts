@@ -429,7 +429,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         // A start is IDEMPOTENT on its request id (today's retry contract): the same id and body answer the ferret it
         // already started; the same id with another body is a conflict, never a second ferret.
         const requestId = headerValue(call.request, FY_REQUEST_ID_HEADER)?.trim();
-        if (requestId === undefined || requestId === '') return await start();
+        if (requestId === undefined || requestId === '')
+          throw new ApiError(
+            400,
+            `a start must carry ${FY_REQUEST_ID_HEADER}: without it a retried request starts a second session`,
+            'missing_request_id',
+          );
         const digest = payloadDigest(text);
         return await oneAtATime(requestId, async () => {
           const held = await kernel.state.read(StartRequestsFile);
