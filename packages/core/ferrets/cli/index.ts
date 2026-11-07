@@ -80,7 +80,7 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal, env, clock, sleep }) {
+  build({ client, io: terminal, env, clock, sleep, readText }) {
     const api = new ClientSessionApi(client);
     const environment: SessionEnvironment = { cwd: process.cwd() };
 
@@ -257,16 +257,17 @@ export default implementCli(manifest, {
       const timeout = count(invocation, 'timeout');
       const interval = count(invocation, 'interval');
       const marker = text(invocation, 'until-marker');
-      const nowMs = (): number => clock?.nowMs() ?? Date.now();
+      // A wait needs a clock and a way to sleep, and a deliverable gate a way to read: the shell fills them in.
+      if (clock === undefined || sleep === undefined)
+        throw new SessionCommandError('wait needs the shell’s clock, which this fy does not give a verb yet', 1);
+      if (marker !== undefined && readText === undefined)
+        throw new SessionCommandError('--until-marker needs the shell’s file reader, which this fy does not give a verb yet', 1);
       const controller = new WaitController(
         {
           get: async reference => await api.get(reference),
-          markerExists: async path => await Bun.file(path).exists(),
-          nowMs,
-          sleep: async milliseconds => {
-            if (sleep !== undefined) await sleep(milliseconds as never);
-            else await new Promise<void>(resolve => setTimeout(resolve, milliseconds));
-          },
+          markerExists: async path => await (readText?.(path).then(() => true) ?? Promise.resolve(false)).catch(() => false),
+          nowMs: () => clock.nowMs(),
+          sleep: async milliseconds => await sleep(milliseconds as never),
           transport: transportFailure,
         },
         io,

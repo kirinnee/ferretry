@@ -175,7 +175,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       );
 
   /** A ferret's `waiting.json`, or an empty one: what it declared, the time credited for it, and when it finished. */
-  const waitDocument = async (ferret: FerretId) => {
+  const parkedFile = async (ferret: FerretId) => {
     const read = await kernel.state.read(FerretWaitFiles, ferret);
     return read.ok && read.value !== undefined ? read.value : {};
   };
@@ -236,7 +236,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // A stopped ferret holds no declared wait; the credit it banked stays.
     endWait: async ferret => {
       if (registry.waitingOf(ferret) === undefined) return;
-      const { waiting: _ended, ...kept } = await waitDocument(ferret);
+      const { waiting: _ended, ...kept } = await parkedFile(ferret);
       await kernel.state.write(FerretWaitFiles, kept, ferret);
       registry.putWaiting(ferret, undefined);
     },
@@ -390,9 +390,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     record: ferret => registry.get(ferret),
     resolve: resolveFerret,
     waitingOf: ferret => registry.waitingOf(ferret),
-    creditOf: async ferret => (await waitDocument(ferret)).creditSeconds,
+    creditOf: async ferret => (await parkedFile(ferret)).creditSeconds,
     saveWaiting: async (ferret, waiting, creditSeconds) => {
-      const { waiting: _before, creditSeconds: _credit, ...kept } = await waitDocument(ferret);
+      const { waiting: _before, creditSeconds: _credit, ...kept } = await parkedFile(ferret);
       await kernel.state.write(
         FerretWaitFiles,
         { ...kept, ...(waiting === undefined ? {} : { waiting }), ...(creditSeconds === undefined ? {} : { creditSeconds }) },
@@ -401,7 +401,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       registry.putWaiting(ferret, waiting);
     },
     saveFinished: async (ferret, at) => {
-      await kernel.state.write(FerretWaitFiles, { ...(await waitDocument(ferret)), finishedAt: at as never }, ferret);
+      await kernel.state.write(FerretWaitFiles, { ...(await parkedFile(ferret)), finishedAt: at as never }, ferret);
       registry.putFinished(ferret, at);
     },
     writeSummary: async (ferret, text) => {

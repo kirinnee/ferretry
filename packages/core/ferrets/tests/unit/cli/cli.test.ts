@@ -29,7 +29,16 @@ function run(answers: Readonly<Record<string, unknown>> = {}, fail?: Error) {
     },
     subscribe: () => () => undefined,
   };
-  const half = cli.build?.({ manifest, client, io: { out: t => out.push(t), err: t => err.push(t), isTty: false } });
+  let time = 0;
+  const half = cli.build?.({
+    manifest,
+    client,
+    io: { out: t => out.push(t), err: t => err.push(t), isTty: false },
+    clock: { now: () => '2026-11-06T09:00:00.000Z' as never, nowMs: () => time },
+    sleep: async delay => {
+      time += Number(delay);
+    },
+  });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
   const verb = async (line: string, args: readonly string[] = [], options: VerbInvocation['options'] = {}) => {
