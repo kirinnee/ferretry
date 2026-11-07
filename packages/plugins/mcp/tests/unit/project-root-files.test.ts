@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { RootMcpHarnessDocuments } from '../../daemon/adapters/harness-documents.ts';
 import { mcpFileOnly, projectRootMcpFile } from '../../daemon/adapters/project-root-files.ts';
 import { McpDocumentUnreadable } from '../../daemon/lib/inventory/service.ts';
+import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
+import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 
 /**
  * Lead ruling (B): at a registered project root (or a live managed worktree) MCP reads `.mcp.json` and nothing else —
@@ -232,5 +237,42 @@ describe('projectRootMcpFile: which reads go to a known root', () => {
     await expect(read).rejects.toBeInstanceOf(McpDocumentUnreadable);
     await expect(read).rejects.not.toThrow(/docs\.example/u);
     expect(calls.filter(call => call.startsWith('read:'))).toEqual([]);
+  });
+});
+
+describe('GAP (declared): the imports narrowing is MCP-adapter-enforced, not kernel-enforced', () => {
+  test('on the real kernel a raw imports root reads any name, and MCP’s adapter refuses every name but .mcp.json', async () => {
+    // Arrange — a temp disk: a project with a fake .claude.json beside its .mcp.json (fake JSON, no real home).
+    const disk = await mkdtemp(join(tmpdir(), 'mcp-imports-gap-'));
+    try {
+      const project = join(disk, 'work/repo');
+      await mkdir(project, { recursive: true });
+      await mkdir(join(disk, 'fy-home'), { recursive: true });
+      await writeFile(join(project, '.mcp.json'), FILES['.mcp.json'] ?? '{}');
+      await writeFile(join(project, '.claude.json'), '{"fake":"not-for-mcp"}');
+      const roots = rootsPortFor(
+        nodeFs(() => crypto.randomUUID()),
+        { home: join(disk, 'fy-home'), plugin: 'mcp', worktrees: join(disk, 'worktrees') },
+        ['work', 'imports'],
+        () => undefined,
+      );
+      const raw = roots.root('imports', { subfolder: project });
+      const narrowed = mcpFileOnly(roots.root('imports', { subfolder: project }));
+
+      // Act
+      const rawPath = raw.resolve('.claude.json');
+      const narrowedPath = narrowed.resolve('.claude.json');
+      const allowed = narrowed.resolve('.mcp.json');
+
+      // Assert — the kernel alone hands the other file over (the gap) …
+      expect(rawPath.ok && (await raw.readText(rawPath.value))).toBe('{"fake":"not-for-mcp"}');
+      // … MCP's adapter refuses the name, and a forged path to it, before the kernel is asked …
+      expect(narrowedPath.ok).toBe(false);
+      if (rawPath.ok) await expect(narrowed.readText(rawPath.value)).rejects.toThrow(/reads only \.mcp\.json/u);
+      // … and still reads the one file it is for.
+      expect(allowed.ok && (await narrowed.readText(allowed.value))).toBe(FILES['.mcp.json']);
+    } finally {
+      await rm(disk, { recursive: true, force: true });
+    }
   });
 });

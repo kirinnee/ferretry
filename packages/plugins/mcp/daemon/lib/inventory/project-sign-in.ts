@@ -144,7 +144,7 @@ export interface ProjectMcpLaunchDeps {
   /** The launch folder's own `.mcp.json`; the harness's home is never read through this. */
   readonly documents: McpHarnessDocuments;
   /**
-   * The harness's answer, or `undefined` when the harness is off or does not answer (a skeleton provides nothing).
+   * The harness's answer, or `undefined` when the harness is off or does not answer (a plugin that is off provides nothing).
    * Undefined and `unreadable` both bind nothing: fail closed.
    */
   approvals(request: McpProjectApprovalsRequest): Promise<McpProjectApprovals | undefined>;

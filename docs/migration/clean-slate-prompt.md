@@ -125,13 +125,14 @@ noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `
    - **Sign-ins renew at the next Claude Code launch that uses them, as today.** That covers a global server. It
      also covers a project server, once the project is registered again (main step 4), from the project's root, a
      subfolder of it, a worktree kept inside it, or a managed worktree of it (one Ferretry makes after the move).
+     A project registered through a link (the folder or any parent) is not read: register its real path.
      No ferret needs to work in the project's root: Ferretry reads that root's `.mcp.json` itself, and no other
      file there. The launch spends the carried refresh token for a new access token before the ferret starts. A
      server whose provider refuses the refresh shows "needs sign-in" until the owner signs in to it again; the
      launch still starts. A sign-out during a launch never stops it.
    - A Codex launch renews no project server's sign-in and is handed none, as today.
-   - **Not yet on 5.0:** a project server's token is renewed, but not handed to the ferret until the Claude Code
-     harness is ported, because that harness is what says whether the runtime declined the server.
+   - A project server's token is handed to a Claude Code ferret unless Claude disabled that server in the ferret's
+     home, and that decision lasts across launches.
 4. After the main step 4 (Settings) adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)

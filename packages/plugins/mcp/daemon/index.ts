@@ -54,10 +54,14 @@ const NOT_YET = (what: string): never => {
  *   sent (sign-out revokes with the held refresh token, and answers `revoked: false` when there is none).
  * - Whether a runtime DISABLED a project server is the HARNESS's answer (`approvedProjectServers`, the optional
  *   `uses` of Claude Code), read by the harness plugin from its own home: MCP has no root there. A harness that is
- *   off or does not answer binds nothing (fail closed, `ProjectMcpLaunch`); its sign-ins are still renewed. The
- *   Claude Code daemon half is still a skeleton, which provides nothing, so until it is ported a launch binds no
- *   project server — the read itself is written and tested in the harness plugin. A Codex launch is handed no project
- *   server and renews none (`not-taken`, as today), answered by MCP whatever state Codex's daemon half is in.
+ *   off or does not answer binds nothing (fail closed, `ProjectMcpLaunch`); its sign-ins are still renewed. Claude
+ *   Code's daemon half serves the read from the ferret home its harness writes (`agent-homes`, scoped to that
+ *   ferret), and its launches merge `.claude.json` rather than replace it, so a server the person disabled stays
+ *   disabled. A Codex launch is handed no project server and renews none (`not-taken`, as today), answered by MCP
+ *   whatever Codex's daemon half says.
+ * - GAP (declared): the narrowing of the `imports` grant to `<known root>/.mcp.json` is enforced by MCP's adapter
+ *   (`adapters/project-root-files.ts`), not by the kernel, which would hand MCP's `imports` root any folder outside
+ *   the fence. Closing it needs a kernel root scoped to one file.
  */
 export default implementDaemon(manifest, {
   build(ctx) {

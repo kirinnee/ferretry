@@ -364,7 +364,7 @@ describe('approvals through each harness (MCP never reads the harness home)', ()
   });
 
   test.each<[string, (() => ProjectServerApprovals) | 'off']>([
-    ['off (or still a skeleton)', 'off'],
+    ['off', 'off'],
     ['unable to read its own home', () => ({ state: 'unreadable', reason: 'settings.json is not valid JSON.' })],
     [
       'throwing',

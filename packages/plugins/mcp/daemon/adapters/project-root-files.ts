@@ -13,6 +13,11 @@
  * - a `.mcp.json` that is a LINK (wherever it points, inside the root included) is refused: the kernel's `lstat` names
  *   the leaf itself;
  * - a project root that is a link, or sits under one, is refused: its kernel `realPath` must be the root as named.
+ *   So a project registered through a link (the folder or any parent) reads no `.mcp.json`: register its real path.
+ *
+ * GAP (declared): every narrowing above is THIS adapter's. The kernel's `imports` root takes any absolute folder
+ * outside the fence, so a slip here could read any file there (a harness home's `.claude.json` beside a project
+ * included). Closing it needs a kernel root scoped to one file (a contract change of the kernel's `RootsPort`).
  */
 import type { FencedPath, FolderRefusal, RootHandle } from '@ferretry/kernel/contract';
 import { err, type Result } from '@ferretry/std';

@@ -3,11 +3,11 @@
  * (`approvedProjectServers`, an optional `uses`), never read from the harness's home by MCP (lead ruling: no
  * harness-home root for MCP). The harness plugin reads its own home.
  *
- * FAIL CLOSED: a harness that is off, still a skeleton, without the read, or that throws gives NO answer (`undefined`),
+ * FAIL CLOSED: a harness that is off, without the read, or that throws gives NO answer (`undefined`),
  * and the launch then binds no project server. A harness key with no reader here takes no project server at all, as
  * today (only Claude's runtimes were handed one): it answers `not-taken`, so nothing is renewed for it either. Codex
- * is deliberately given no reader. Its answer never depends on its daemon half, and asking a Codex port that is still
- * a skeleton gave `undefined`, which renewed the project's sign-in for a launch that is never handed it.
+ * is deliberately given no reader. Its answer never depends on its daemon half: a Codex port that answered nothing
+ * (turned off, say) would give `undefined`, which renews the project's sign-in for a launch that is never handed it.
  */
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { McpProjectApprovals, McpProjectApprovalsRequest } from '../lib/inventory/project-sign-in.ts';
