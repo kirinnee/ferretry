@@ -21,11 +21,16 @@ export const AUDIT = {
   agentTool: auditKind('agent.tool'),
   browserOpened: auditKind('browser.opened'),
   browserProxyTested: auditKind('browser.proxy-tested'),
+  linkOpened: auditKind('link.opened'),
   surfaceControl: auditKind('surface.control'),
 } as const;
 
 export const SKIP_READ = { skip: 'a read: it changes nothing' } as const satisfies AuditDeclaration;
 export const SKIP_UNRECORDED = { skip: 'not kept in the audit log today' } as const satisfies AuditDeclaration;
+/** The service records `link.opened` itself, by host only, for every outcome (a refusal included). */
+export const SKIP_BY_SERVICE = {
+  skip: 'the service records link.opened itself, with the host only, for every outcome',
+} as const satisfies AuditDeclaration;
 export const GUARD_NONE = {
   none: 'browser lifecycle, proxy state and surface control only; no page text',
 } as const satisfies GuardDeclaration;
