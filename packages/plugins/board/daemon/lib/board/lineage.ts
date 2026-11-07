@@ -1,4 +1,4 @@
-import type { SessionParents } from './ports.ts';
+import type { FerretParents } from './ports.ts';
 
 /** Deeper than any real Pack tree; a bound so a damaged chain can never walk forever. */
 export const MAX_LINEAGE_DEPTH = 64;
@@ -8,7 +8,7 @@ export const MAX_LINEAGE_DEPTH = 64;
  * daemon's only other lineage walk takes, `session/provenance/lineage.ts`). A parent that resolves
  * nowhere ends the walk: unknown ancestry grants nothing. A loop ends it at the first repeat.
  */
-export const ancestorsOf = async (ferret: string, parents: SessionParents): Promise<readonly string[]> => {
+export const ancestorsOf = async (ferret: string, parents: FerretParents): Promise<readonly string[]> => {
   const seen = new Set<string>([ferret]);
   const ancestors: string[] = [];
   let current = ferret;

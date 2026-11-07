@@ -131,7 +131,7 @@ const requireAssign = (standing: BoardStanding, card: Pick<Card, 'id' | 'owner' 
   if (mayDo('assign', standing)) return;
   const message =
     standing === 'assignee'
-      ? `${refusalMessage('assign', card)}; its assignee may only hand it down to one of its own sub-ferrets`
+      ? `${refusalMessage('assign', card)}; its assignee may only hand it down to one of its own helpers`
       : refusalMessage('assign', card);
   throw new BoardError('forbidden', message, OPERATION_STANDINGS.assign);
 };

@@ -12,7 +12,7 @@ import { BOARD_CHECK_TAIL, lastTurn } from './turn-check.ts';
  * gate lane, and ANOTHER open item on this agenda carries that card's open ask, the ferret gets ONE queued message
  * naming both: add yours to the one that carries the card, and drop your own.
  *
- * - **Only where the board is on**, and never for a sub-ferret (it raises nothing).
+ * - **Only where the board is on**, and never for a helper (it raises nothing).
  * - **Evidence, not inference.** The turn's own tool calls say it raised something; the ferret's own open
  *   items on a gate card, raised since the turn began, say what.
  * - **Once per item.** The send id carries the item, so a turn end observed twice is one send.
@@ -53,7 +53,7 @@ export interface GateCheckItem {
 
 /** What the check reads and how it sends. */
 export interface BoardGateCheckPorts {
-  /** Whether the session has a transcript to read and is a lead (a sub-ferret raises no agenda items). */
+  /** Whether the session has a transcript to read and is a lead (a helper raises no agenda items). */
   readonly readable: (ferret: string) => Promise<boolean>;
   /** Whether the session's board is on; a board that is off is never checked. */
   readonly boardOn: (ferret: string) => Promise<boolean>;

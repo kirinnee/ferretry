@@ -55,7 +55,7 @@ import type {
   GhRunner,
   PrNudgeSender,
   ProjectFolders,
-  SessionFolders,
+  FerretFolders,
   WatchedBoard,
   WatcherClock,
   WorkingCopies,
@@ -69,7 +69,7 @@ export interface GitHubWatcherPorts {
   readonly board: WatchedBoard;
   readonly gh: GhRunner;
   readonly copies: WorkingCopies;
-  readonly sessions: SessionFolders;
+  readonly sessions: FerretFolders;
   readonly projects: ProjectFolders;
   readonly transcripts: FerretTranscriptTail;
   readonly nudges: PrNudgeSender;
@@ -215,11 +215,11 @@ export class GitHubWatcher {
               because: `its head branch ${card.links.branch as string} is the card's branch`,
             }));
       const own = assigned.get(session) === 1;
-      const sessionBranch = own ? await this.sessionBranch(session) : null;
-      if (sessionBranch !== null) {
+      const ferretBranch = own ? await this.ferretBranch(session) : null;
+      if (ferretBranch !== null) {
         branches.push({
-          ...sessionBranch,
-          because: `its head branch ${sessionBranch.branch} is checked out where ${session} works`,
+          ...ferretBranch,
+          because: `its head branch ${ferretBranch.branch} is checked out where ${session} works`,
         });
       }
       const createdUrls = own
@@ -231,7 +231,7 @@ export class GitHubWatcher {
   }
 
   /** The repository and branch a session's folder has checked out, when it is a branch of its own. */
-  private async sessionBranch(ferret: string): Promise<{ readonly repo: string; readonly branch: string } | null> {
+  private async ferretBranch(ferret: string): Promise<{ readonly repo: string; readonly branch: string } | null> {
     const cwd = await this.ports.sessions.cwdOf(ferret).catch(() => null);
     if (cwd === null) return null;
     const [repo, branch] = await Promise.all([this.ports.copies.repositoryOf(cwd), this.ports.copies.branchOf(cwd)]);

@@ -9,7 +9,7 @@
  *
  * It sits BEHIND the sub-card closes ({@link sub-card-close}): a helper's card with no PR still closes as
  * "helper finished" and a sub-card whose PR shipped closes with the parent carrying the test. What is left, a card
- * with a PR open or merged-not-closed, or a top-level card a sub-ferret held, is returned. With no live ancestor
+ * with a PR open or merged-not-closed, or a top-level card a helper held, is returned. With no live ancestor
  * nothing is returned and the card is an orphan, which the Warden reports.
  */
 import { type Card, isSubCard, type LaneCategory } from '../../../contract/index.ts';

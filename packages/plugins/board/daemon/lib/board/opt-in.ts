@@ -16,8 +16,8 @@
  * The owner's words alone are no proof: a keyword test over them passed "track down the bug" and "the card field"
  * (security review of #1341), and the Yes costs the owner one tap.
  *
- * Only a ferret on its own credential is asked. The owner, the daemon (the card `fy new` makes for a sub-ferret, a
- * gate, a PR) and the admin token are not; a sub-ferret is refused every card before this is reached.
+ * Only a ferret on its own credential is asked. The owner, the daemon (the card `fy new` makes for a helper, a
+ * gate, a PR) and the admin token are not; a helper is refused every card before this is reached.
  *
  * Pure and total: the service gathers the facts and throws the refusal.
  */

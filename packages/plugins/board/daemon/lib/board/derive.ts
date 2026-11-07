@@ -7,12 +7,12 @@
  * - `openAsks` comes from the {@link CardAskLinkSource} port (U7).
  * - `askedBy` is the one the card was stored with, else (a card from before it was stored) read from its ask's source (`origin.ts`).
  * - `origin` and `humanParent` come from the card and its ancestors (`origin.ts`), with the lineage of the
- *   sessions a card was recorded from read through the {@link SessionParents} port.
+ *   sessions a card was recorded from read through the {@link FerretParents} port.
  */
 import { type Card, type CardId, type CardView, firstLaneOfCategory, LANE_CATEGORIES, type LaneCategory, type Rollup } from '../../../contract/index.ts';
 import { type BoardIndex, blockedBy, cardCategory, type LaneSets, shippedIn } from './graph.ts';
-import { askSessionOf, cardAskedBy, cardOrigin, humanParentOf, type OriginFacts } from './origin.ts';
-import type { ActivityDeriver, CardAskLinkSource, CardActivityFacts, CardAsks, SessionParents } from './ports.ts';
+import { askFerretOf, cardAskedBy, cardOrigin, humanParentOf, type OriginFacts } from './origin.ts';
+import type { ActivityDeriver, CardAskLinkSource, CardActivityFacts, CardAsks, FerretParents } from './ports.ts';
 import { cardVisibility } from './visibility.ts';
 
 export interface DerivationInputs {
@@ -158,7 +158,7 @@ export const gatherDerivation = async (
   ports: {
     readonly activity: ActivityDeriver;
     readonly asks: CardAskLinkSource;
-    readonly parents?: SessionParents;
+    readonly parents?: FerretParents;
   },
   board: readonly Card[] = cards,
 ): Promise<DerivationInputs> => {
@@ -172,8 +172,8 @@ export const gatherDerivation = async (
  * Which of the sessions the cards were recorded from a ferret started, asked once per session. A session
  * whose lineage cannot be read reads as the owner's, so a card is never hidden on a failed read.
  */
-const originFacts = async (cards: readonly Card[], parents: SessionParents): Promise<OriginFacts> => {
-  const sessions = [...new Set(cards.flatMap(card => askSessionOf(card) ?? []))];
+const originFacts = async (cards: readonly Card[], parents: FerretParents): Promise<OriginFacts> => {
+  const sessions = [...new Set(cards.flatMap(card => askFerretOf(card) ?? []))];
   const parented = await Promise.all(
     sessions.map(async session =>
       (await parents.parentOf(session).catch(() => undefined)) === undefined ? [] : [session],

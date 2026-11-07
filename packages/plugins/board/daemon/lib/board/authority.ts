@@ -19,7 +19,7 @@
  * the new parent: a card never moves onto a tree its caller cannot write).
  *
  * One exception inside re-plan: the card's ASSIGNEE may hand it down to a descendant of its own ({@link mayHandDown}),
- * so a lead given a card can start a sub-ferret on it without making a duplicate. Never sideways or upward.
+ * so a lead given a card can start a helper on it without making a duplicate. Never sideways or upward.
  */
 import { type Card, formatCardRef } from '../../../contract/index.ts';
 
@@ -138,7 +138,7 @@ const INTERNAL_GATE_KEEPERS: readonly BoardStanding[] = ['owner-human', 'owner',
 
 /**
  * Whether a standing passes an owner gate (out of a gated lane, or into a gated closed lane) on a card of this
- * audience. The owner always; the owner ferret or an ancestor only on an internal card; an assignee, a sub-ferret,
+ * audience. The owner always; the owner ferret or an ancestor only on an internal card; an assignee, a helper,
  * a reader and the daemon never (the daemon's own moves are its triggers, which never enter a gated closed lane).
  */
 export const mayPassGate = (standing: BoardStanding, audience: CardAudience): boolean =>

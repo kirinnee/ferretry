@@ -36,7 +36,7 @@ export interface ProjectRemote {
 }
 
 /** The board a session's folder belongs to, registering its repository when it may; `null` for none. */
-export interface SessionBoards {
+export interface FerretBoards {
   boardOf(ferret: string): Promise<BoardProjectId | null>;
 }
 
@@ -51,7 +51,7 @@ interface TargetLanes {
 
 export interface UnfiledRefilerPorts {
   readonly board: Pick<WatchedBoard, 'snapshot' | 'act'>;
-  readonly sessions: SessionBoards;
+  readonly sessions: FerretBoards;
   /** The target's lanes, and the inferred proposal for a project that has none (`InferredLaneProposer`). */
   readonly lanes: TargetLanes;
   /** Read when a run is not handed the remotes (the boot run); the watcher hands its own. */

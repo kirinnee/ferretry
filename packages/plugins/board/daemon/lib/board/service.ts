@@ -63,15 +63,15 @@ import type {
   OwnerWords,
   ProjectAdopter,
   ReopenNotifier,
-  SessionFocus,
-  SessionParents,
+  FerretFocus,
+  FerretParents,
 } from './ports.ts';
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { returnCard, returnLead } from './return-to-lead.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
-import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
-import { defaultVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
+import { helperCloseReason } from './sub-card-close.ts';
+import { defaultVisibility, visibilityVerdict } from './visibility.ts';
 
 /** Runs work one at a time per key; work under different keys runs together (the kernel's keyed serial). */
 export interface BoardSerial {
@@ -81,8 +81,8 @@ export interface BoardSerial {
 export interface BoardServiceDependencies {
   readonly store: BoardStore;
   readonly lanes: LaneSetSource;
-  readonly parents: SessionParents;
-  readonly focus: SessionFocus;
+  readonly parents: FerretParents;
+  readonly focus: FerretFocus;
   readonly reopen: ReopenNotifier;
   /** Tells a card's ferret the owner marked it done. */
   readonly done: DoneNotifier;
@@ -209,7 +209,7 @@ export const actorOf = (caller: BoardCaller): CardActor => {
   return caller.ferret === undefined ? { kind: 'daemon' } : { kind: 'daemon', ferret: caller.ferret };
 };
 
-const sessionOf = (caller: BoardCaller): string | undefined => (caller.kind === 'owner' ? undefined : caller.ferret);
+const ferretOf = (caller: BoardCaller): string | undefined => (caller.kind === 'owner' ? undefined : caller.ferret);
 
 /** Refuses to store a card the protocol would refuse to read back: sizes, counts, coherence. */
 const requireValidCard = (task: Card): Card => {
@@ -224,7 +224,7 @@ const requireValidCard = (task: Card): Card => {
 };
 
 /**
- * What a sub-ferret may still write: a note on its own card, a PR or branch link, so the PR's facts move the
+ * What a helper may still write: a note on its own card, a PR or branch link, so the PR's facts move the
  * card on their own, and an external trigger it saw happen (a deploy) on the card it is doing, so the card
  * moves as a fact would move it. Authority still decides WHICH card; everything else is its lead's to do.
  */
@@ -234,11 +234,11 @@ const subFerretMay = (request: CardActionRequest): boolean =>
   request.action === 'trigger' ||
   (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
 
-/** The fields a sub-ferret may write on a card it holds: where the work stands and how the owner checks it. */
+/** The fields a helper may write on a card it holds: where the work stands and how the owner checks it. */
 const HOLDER_FIELDS: readonly BoardEditableField[] = ['progress', 'howToTest'];
 
 /**
- * An edit that names only the card's status and/or How to test (and at least one of them): the one edit a sub-ferret
+ * An edit that names only the card's status and/or How to test (and at least one of them): the one edit a helper
  * may make, on a card it holds. Any other field, or a visibility, in the same edit makes it the lead's alone.
  */
 const isHolderFieldEdit = (request: CardActionRequest): boolean =>
@@ -248,7 +248,7 @@ const isHolderFieldEdit = (request: CardActionRequest): boolean =>
   HOLDER_FIELDS.some(field => request[field] !== undefined);
 
 /**
- * What a sub-ferret may do on a card it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
+ * What a helper may do on a card it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
  * it, claim or release the files it will touch (docs/design/clash-queue.md), link a commit or doc to it, set its status and How to test (an edit that names ONLY those: any other field is refused whole). Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
  * lead holds is what makes it the holder, so these are also the only refusals that point at `claim`.
  */
@@ -428,108 +428,6 @@ export class BoardService {
     return true;
   }
 
-  /**
-   * Closes every sub-card still waiting where a top-level card waits for the owner to try it (a verify lane): the
-   * ones that sat there before sub-cards closed themselves. Idempotent; a card that cannot be written is reported
-   * and left for the next boot. Answers how many it closed.
-   */
-  async closeStrandedSubCards(): Promise<number> {
-    const caller: BoardCaller = { kind: 'daemon' };
-    const { cards } = await this.snapshot();
-    let closed = 0;
-    for (const { id, parent } of cards) {
-      if (parent === null) continue;
-      try {
-        const task = await this.ports.store.write(id, async current => {
-          if (current === undefined) return { task: null, result: null };
-          const context = await this.context(current, caller);
-          const reason = strandedCloseReason(current, context.laneSet);
-          const next = reason === null ? null : closeAsDaemon(current, reason, context);
-          return { task: next === null ? null : requireValidCard(next), result: next };
-        });
-        if (task === null) continue;
-        await this.afterWrite(caller, task, [task.projectId]);
-        closed += 1;
-      } catch (error) {
-        this.ports.diagnostics.warn(
-          `board: could not close sub-card ${id}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return closed;
-  }
-
-  /**
-   * Decides again who asked for every card not already a person's, by the same rule a new card is decided by,
-   * except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token wrote that too):
-   * a card from before the field, and a card stored `agent` from fewer of the owner's words than are read now.
-   * It only ever ADDS `person`: a stored `person` may rest on a fact this cannot see again (the owner's own app
-   * made it), so it is never taken back. Idempotent, and a card it would not change is not written; writes no
-   * history and does not touch the card's last-touched time. A card that cannot be decided or written is reported
-   * and left for the next boot. Answers how many cards it stored.
-   */
-  async backfillAskedBy(): Promise<number> {
-    const { cards } = await this.ports.store.read();
-    let stored = 0;
-    for (const { id, askedBy } of cards) {
-      if (askedBy === 'person') continue;
-      try {
-        const done = await this.ports.store.write(id, async current => {
-          if (current === undefined || current.askedBy === 'person') return { task: null, result: false };
-          const decided = await this.askedByOf(current, false);
-          if (decided === current.askedBy) return { task: null, result: false };
-          // A default visibility stored while the asker was unsettled follows the answer; none stored is left to
-          // backfillVisibility, and a chosen one is never touched.
-          const asked = { ...current, askedBy: decided };
-          return {
-            task: requireValidCard(current.visibility === undefined ? asked : withDefaultVisibility(asked)),
-            result: true,
-          };
-        });
-        if (done) stored += 1;
-      } catch (error) {
-        this.ports.diagnostics.warn(
-          `board: could not store who asked for ${id}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return stored;
-  }
-
-  /**
-   * Stores the visibility every card still without one reads as ({@link defaultVisibility}), and settles the ones
-   * stored as a default again, from who asked and where the card sits now. A card whose asker is not settled yet
-   * (`backfillAskedBy` could not decide it) is left without one, because a default stored then would be a guess;
-   * it reads by the same rule meanwhile and is settled by a later boot. A chosen visibility is never touched, so it
-   * is idempotent and cannot undo a choice; it writes no history and does not touch the card's last-touched time. A
-   * card that cannot be written is reported and left for the next boot. Answers how many cards it stored.
-   */
-  async backfillVisibility(): Promise<number> {
-    const { cards } = await this.ports.store.read();
-    let stored = 0;
-    for (const card of cards) {
-      const { id } = card;
-      if (visibilityChosen(card) || card.askedBy === undefined) continue;
-      try {
-        const done = await this.ports.store.write(id, async current => {
-          if (current === undefined || visibilityChosen(current) || current.askedBy === undefined) {
-            return { task: null, result: false };
-          }
-          const settled = withDefaultVisibility(current);
-          return settled === current
-            ? { task: null, result: false }
-            : { task: requireValidCard(settled), result: true };
-        });
-        if (done) stored += 1;
-      } catch (error) {
-        this.ports.diagnostics.warn(
-          `board: could not store the visibility of ${id}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return stored;
-  }
-
   /** Every readable card id on this machine, closed and dropped included: one store read, nothing derived. */
   async ids(): Promise<BoardIdsResponse> {
     const { cards } = await this.ports.store.read();
@@ -551,7 +449,7 @@ export class BoardService {
   }
 
   /** One card, in full, with its board's lanes. */
-  async task(id: CardId): Promise<CardResponse> {
+  async card(id: CardId): Promise<CardResponse> {
     return await this.view(await this.ports.store.read(), id);
   }
 
@@ -575,7 +473,7 @@ export class BoardService {
 
   private async createLicensed(request: CardCreateRequest, caller: BoardCaller): Promise<CardResponse> {
     const machineId = this.requireMachine();
-    const owner = sessionOf(caller) ?? request.assignee;
+    const owner = ferretOf(caller) ?? request.assignee;
     if (owner === undefined || owner === null) {
       throw new BoardError('invalid', 'a card needs a ferret to own it: name its assignee, who owns it too');
     }
@@ -651,7 +549,7 @@ export class BoardService {
   }
 
   /**
-   * Whether the lead may hand an EXISTING card to a sub-ferret (`fy new --card`): the card is here, not dropped,
+   * Whether the lead may hand an EXISTING card to a helper (`fy new --card`): the card is here, not dropped,
    * and the lead may reassign it. Throws the refusal otherwise; changes nothing.
    */
   async requireHandOver(id: CardId, lead: string): Promise<Card> {
@@ -662,7 +560,7 @@ export class BoardService {
     if (card.dropped !== null) {
       throw new BoardError(
         'invalid',
-        `${formatCardRef(card)} is dropped; reopen it before you hand it to a sub-ferret`,
+        `${formatCardRef(card)} is dropped; reopen it before you hand it to a helper`,
       );
     }
     // The assignee may hand it down; the child does not exist yet, and `handOver` proves it is the lead's own.
@@ -672,7 +570,7 @@ export class BoardService {
   }
 
   /**
-   * `fy new --card`, once the sub-ferret's session exists: the lead's existing card is assigned to it — its owner
+   * `fy new --card`, once the helper's session exists: the lead's existing card is assigned to it — its owner
    * and parent stay — and becomes the session's focus and delegation anchor. Never makes a second card. The
    * assignment is recorded as the lead's; the lead's own focus is not touched.
    */
@@ -681,7 +579,7 @@ export class BoardService {
       id,
       { kind: 'ferret', ferret: lead },
       session,
-      'hand it to a sub-ferret',
+      'hand it to a helper',
       held,
     );
     await this.afterWrite({ kind: 'daemon', ferret: lead }, outcome, [outcome.projectId]);
@@ -793,8 +691,8 @@ export class BoardService {
     caller: BoardCaller,
     expect?: { readonly laneId: string; readonly entry: number },
   ): Promise<CardResponse> {
-    // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
-    // A drop and an assign are judged inside the write (`decide`): a sub-ferret that leads a subtree may plan it.
+    // An assign is judged inside the write: a helper that is the card's assignee may hand it down (`decide`).
+    // A drop and an assign are judged inside the write (`decide`): a helper that leads a subtree may plan it.
     // A holder-only action is judged in the write against the card's current holder (`decide`).
     if (!subFerretMay(request) && !holderOnly(request) && request.action !== 'assign' && request.action !== 'drop') {
       await this.refuseSubFerret(caller, subFerretDoing(request));
@@ -1080,7 +978,7 @@ export class BoardService {
     caller: BoardCaller,
     hold?: AdoptionHold,
   ): Promise<CardOutcome> {
-    // A sub-ferret reports what it saw on the card it is doing, not on others its standing reaches.
+    // A helper reports what it saw on the card it is doing, not on others its standing reaches.
     if (request.action === 'trigger' && caller.kind === 'ferret' && caller.ferret !== effectiveAssignee(card)) {
       await this.refuseSubFerret(
         caller,
@@ -1089,7 +987,7 @@ export class BoardService {
       );
     }
     // The card's current holder may move it, focus on it and link a commit or doc to it; claiming a card is how a
-    // sub-ferret becomes the holder of one its lead holds, so the refusal says that and nothing else is offered.
+    // helper becomes the holder of one its lead holds, so the refusal says that and nothing else is offered.
     if (holderOnly(request) && caller.kind === 'ferret' && caller.ferret !== effectiveAssignee(card)) {
       await this.refuseSubFerret(caller, subFerretDoing(request), async () => await this.claimCommand(caller, card));
     }
@@ -1489,7 +1387,7 @@ export class BoardService {
 
   /**
    * Whether `ferret` may put a new card under `id`: the card is on this machine, still work, and the session's
-   * standing on it admits a child. `fy new` asks it before it makes a sub-ferret's card under the card a brief names.
+   * standing on it admits a child. `fy new` asks it before it makes a helper's card under the card a brief names.
    */
   async mayAdoptUnder(ferret: string, id: CardId): Promise<boolean> {
     const card = (await this.ports.store.read()).cards.find(each => each.id === id);
@@ -1497,7 +1395,7 @@ export class BoardService {
     return mayDo('adopt', await this.standing({ kind: 'ferret', ferret }, card));
   }
 
-  /** A sub-ferret reports to its lead instead of writing the board: the refusal says whom to tell. */
+  /** A helper reports to its lead instead of writing the board: the refusal says whom to tell. */
   private async refuseSubFerret(
     caller: BoardCaller,
     doing: string,
@@ -1507,7 +1405,7 @@ export class BoardService {
     const directory = this.ports.helpers ?? NO_HELPERS;
     const refusal = await helperRefusal(directory, caller.ferret, doing);
     if (refusal === null) return;
-    // A card its lead holds is the sub-ferret's to claim: say that instead of sending it back to the lead.
+    // A card its lead holds is the helper's to claim: say that instead of sending it back to the lead.
     const command = await claim?.().catch(() => undefined);
     const claimable =
       command === undefined ? null : await helperRefusal(directory, caller.ferret, doing, undefined, command);
@@ -1537,7 +1435,7 @@ export class BoardService {
    * fails leaves the card Unfiled, as it would have been.
    */
   private async projectOf(caller: BoardCaller): Promise<BoardProjectId> {
-    const session = sessionOf(caller);
+    const session = ferretOf(caller);
     if (session === undefined) return UNFILED_PROJECT_ID;
     const projectId = await this.ports.lanes.projectOf(session);
     if (projectId !== UNFILED_PROJECT_ID || this.ports.adoption === undefined) return projectId;
@@ -1598,7 +1496,7 @@ export class BoardService {
         .setFocus(caller.ferret, { id: task.id }, task.title, { anchor })
         .catch((error: unknown) => this.warn(`could not focus ${caller.ferret} on ${formatCardRef(task)}`, error));
     }
-    const session = sessionOf(caller) ?? task.owner;
+    const session = ferretOf(caller) ?? task.owner;
     for (const projectId of projects) {
       await this.ports.changes
         .changed(session, { projectId, cardIds: [task.id] })

@@ -6,7 +6,7 @@
  * ferret may be gone, may have been started for another repository, or may carry a focus the card has since left.
  * Everything the new ferret needs is decided here, from the card, and none of it comes from the client:
  *
- * - **the card** is its focus task and its anchor, and is assigned to it (`SessionCards.open`, the same write
+ * - **the card** is its focus task and its anchor, and is assigned to it (`FerretCards.open`, the same write
  *   `fy new --card` makes) — the start itself moves the card into its working lane;
  * - **the folder** is the card's own project's folder, resolved from the card as it is NOW, so a card refiled to
  *   another project starts in that project's folder;

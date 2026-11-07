@@ -2,14 +2,14 @@
  * "LAST TOUCHED" AND THE ACTIVITY STATE (`board-design.md` §3.3), derived at read time from session
  * liveness and the cards, never stored.
  *
- * - **Attribution.** A session's liveness touches exactly one card: its `config.focusTask`. A lead with
+ * - **Attribution.** A session's liveness touches exactly one card: its `config.focusCard`. A lead with
  *   forty cards touches only the one it is on.
  * - **Signals** are read, never detected: a session's strong life-signs (`lastTokenAdvanceAt`,
  *   `lastTranscriptAt`, `lastSubprocessAt`/`subprocessSince`, `lastActivityAt`) after the Warden's
  *   liveness ledger is laid over them; every history event on the card; and a linked PR's merge. A pane
  *   redraw or a config write alone is never activity, the way the Warden reasons (`warden/detect.ts`).
  * - **Roll-up.** `lastTouchedAt(card)` is the latest of its own signals and every live descendant's
- *   `lastTouchedAt`, so a sub-ferret's work makes its lead's card active.
+ *   `lastTouchedAt`, so a helper's work makes its lead's card active.
  * - **States**, first match wins: `active` → `orphaned` → `waiting` → `stale` → `idle`. A closed or
  *   dropped card is `idle`: nobody's clock runs on it.
  *
@@ -64,8 +64,8 @@ export interface FerretLiveness {
   readonly id: string;
   readonly status: FerretStatus;
   readonly turnState?: FerretTurnState;
-  /** The card its activity is attributed to (`config.focusTask`). */
-  readonly focusTask: CardRef | null;
+  /** The card its activity is attributed to (`config.focusCard`). */
+  readonly focusCard: CardRef | null;
   /** It declared a wait (`fy signal waiting`): it is parked on purpose and must not be nudged. */
   readonly declaredWait: boolean;
   /** The session that started it (`config.parent`); absent for a root. */
@@ -219,7 +219,7 @@ export const deriveActivities = (
 ): ReadonlyMap<CardId, CardActivityFacts> => {
   const focused = new Map<CardId, FerretLiveness[]>();
   for (const session of roster.sessions.values()) {
-    const ref = session.focusTask;
+    const ref = session.focusCard;
     if (ref === null || !inputs.index.isLocal(ref)) continue;
     const list = focused.get(ref.id);
     if (list === undefined) focused.set(ref.id, [session]);

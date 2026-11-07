@@ -55,13 +55,3 @@ export const shippedCloseReason = (card: Card, laneSet: LaneSet): string | null 
 export const helperCloseReason = (card: Card, laneSet: LaneSet): string | null =>
   closable(card, laneSet) && isPrFreeHelper(card) ? SUB_CARD_HELPER_REASON : null;
 
-/**
- * A sub-card already sitting in a verify lane, from before sub-cards closed themselves: the reason its PRs give
- * (shipped, else a helper that finished). `null` for anything else, and for a card with a PR still open.
- */
-export const strandedCloseReason = (card: Card, laneSet: LaneSet): string | null => {
-  if (!closable(card, laneSet) || hasOpenPr(card)) return null;
-  const category = categoryOf(laneSet, card.laneId);
-  if (!category.ok || category.value !== 'verify') return null;
-  return hasMergedPr(card) ? SUB_CARD_SHIPPED_REASON : SUB_CARD_HELPER_REASON;
-};

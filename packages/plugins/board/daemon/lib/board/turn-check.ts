@@ -19,7 +19,7 @@ import { BoardError } from './errors.ts';
  *   replayed journal, a restart) is one send, and the check remembers when it last spoke so two turns in
  *   the same hour are one nudge.
  * - **A recorded skip silences it** until the session takes a card, which clears the skip (the session owns
- *   both facts, `config.focusTask` and `config.boardSkip`).
+ *   both facts, `config.focusCard` and `config.boardSkip`).
  * - **A turn the nudge started is never checked**, so a reply to it cannot start a loop.
  * - **Silence when unsure.** A card or a session that cannot be read says nothing rather than guessing.
  *
@@ -121,7 +121,7 @@ export interface BoardTurnCheckPorts {
   readonly boardOn: (ferret: string) => Promise<boolean>;
   /** The newest transcript events, oldest first. */
   readonly tail: (ferret: string, limit: number) => Promise<readonly TranscriptEvent[]>;
-  /** The session's focus card and standing skip (`config.focusTask`, `config.boardSkip`). */
+  /** The session's focus card and standing skip (`config.focusCard`, `config.boardSkip`). */
   readonly focus: {
     focusOf(ferret: string): Promise<CardRef | null>;
     skipOf(ferret: string): Promise<BoardSkip | null>;

@@ -59,7 +59,7 @@ export type PrAlertReason = 'ci-failing' | 'closed-unmerged';
 /**
  * Who a PR alert goes to when {@link noticeRecipient} found nobody: the same session it went to before routing
  * existed — the card's working ferret for a red CI, its owner for a PR closed unmerged. The sender then lets a
- * sub-ferret's lead stand in for it (`nudgeTarget`), and the send path revives an ended session.
+ * helper's lead stand in for it (`nudgeTarget`), and the send path revives an ended session.
  */
 export const alertFallback = (card: Pick<Card, 'owner' | 'assignee'>, reason: PrAlertReason): string =>
   reason === 'ci-failing' ? (card.assignee ?? card.owner) : card.owner;

@@ -10,9 +10,9 @@
  * 3. a ferret recorded it from a session the OWNER started (`session:<id>`, or the recording ferret itself
  *    when the source names no session): only the owner talks in such a session.
  *
- * Everything else is **agent**: the card of a sub-ferret a lead started (`fy new` and `fy start` from a
+ * Everything else is **agent**: the card of a helper a lead started (`fy new` and `fy start` from a
  * ferret, ask `session:<lead>`), the daemon's own cards (the board import's untriaged asks), and a card a
- * sub-ferret recorded from its own brief. A session this daemon does not know reads as owner-started: a
+ * helper recorded from its own brief. A session this daemon does not know reads as owner-started: a
  * card is never hidden from the owner on a guess.
  *
  * The rule cannot tell a top-level ferret's own idea from the owner's words in that ferret's chat; both read
@@ -38,7 +38,7 @@ export interface OriginFacts {
  * card's origin; `undefined` when the card decides without one (the owner made it, its source names the
  * owner, or the daemon made it).
  */
-export const askSessionOf = (card: Pick<Card, 'createdBy' | 'ask'>): string | undefined => {
+export const askFerretOf = (card: Pick<Card, 'createdBy' | 'ask'>): string | undefined => {
   if (card.createdBy.kind !== 'ferret' || NAMES_OWNER.test(card.ask.source)) return undefined;
   return SESSION_SOURCE.exec(card.ask.source.trim())?.[1] ?? card.createdBy.ferret;
 };
@@ -47,7 +47,7 @@ export const askSessionOf = (card: Pick<Card, 'createdBy' | 'ask'>): string | un
 export const cardOrigin = (card: Pick<Card, 'createdBy' | 'ask'>, facts: OriginFacts): CardOrigin => {
   if (card.createdBy.kind === 'owner' || NAMES_OWNER.test(card.ask.source)) return 'human';
   if (card.createdBy.kind === 'daemon') return 'agent';
-  const session = askSessionOf(card);
+  const session = askFerretOf(card);
   return session !== undefined && facts.startedByFerret(session) ? 'agent' : 'human';
 };
 
@@ -121,7 +121,7 @@ const SESSION_IN_SOURCE = /\b([a-z0-9]{8}-[a-f0-9]{8})\b/u;
  * names, else the recording ferret's own. A ferret on the admin token is stored as the owner and the board
  * import as the daemon, and both still copy an ask from a session the owner talks in.
  */
-export const wordsSessionOf = (card: Pick<Card, 'createdBy' | 'ask'>): string | undefined =>
+export const wordsFerretOf = (card: Pick<Card, 'createdBy' | 'ask'>): string | undefined =>
   SESSION_SOURCE.exec(card.ask.source.trim())?.[1] ??
   SESSION_IN_SOURCE.exec(card.ask.source)?.[1] ??
   (card.createdBy.kind === 'ferret' ? card.createdBy.ferret : undefined);
@@ -142,7 +142,7 @@ export const decideAskedBy = async (
   // ferret's words, so a long quote of the owner inside it proves nothing. Only a source naming the owner (the app's
   // New session) makes it a person's, and that was decided above.
   if (card.createdBy.kind === 'daemon' && card.createdBy.ferret !== undefined) return 'agent';
-  const session = wordsSessionOf(card);
+  const session = wordsFerretOf(card);
   return session !== undefined && ownerWordsMatch(card.ask.text, await said(session)) ? 'person' : 'agent';
 };
 

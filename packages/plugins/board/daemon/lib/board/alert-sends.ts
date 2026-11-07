@@ -1,12 +1,12 @@
 /**
  * A BOARD ALERT IS NEVER TYPED INTO THE OWNER'S OWN CHAT. A stale card, a red CI and a PR closed unmerged are
  * routed by `noticeRecipient` (`notice-route.ts`), which falls to an interactive session only when no automatic one is alive —
- * and for a lead the owner chats with, whose sub-ferrets have ended, that is nearly always: from 2026-10-31 to
+ * and for a lead the owner chats with, whose helpers have ended, that is nearly always: from 2026-10-31 to
  * 2026-11-03 one such lead had 177 of them typed into it as turns, 158 of them "CI is red".
  *
  * The send path cannot hold them back: a daemon message to an interactive session is not in the queue's delivery
  * order (`boardOnly`), so the queue hands it to the direct send path, which TYPES it. So this does, at the one
- * place every alert passes, whoever it was routed to — the alert route, the pre-routing fallback, or a sub-ferret's
+ * place every alert passes, whoever it was routed to — the alert route, the pre-routing fallback, or a helper's
  * lead standing in for it. The session's mode is read as the send path reads it (`config.mode`).
  *
  * Holding one back loses nothing the board does not show: a red CI is the card's PR fact, a PR closed unmerged is

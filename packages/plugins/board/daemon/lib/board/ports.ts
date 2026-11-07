@@ -2,7 +2,7 @@
  * What the board needs from the rest of the daemon, as ports. `BoardService` is constructed with one of each; the
  * adapters (`daemon/adapters/`) implement them over the kernel ports and the contracts of the subsystems Board needs:
  *
- * - Ferrets (`FerretsApi`): lineage (`SessionParents`), a ferret's liveness (`FerretLivenessSource`), the card a ferret
+ * - Ferrets (`FerretsApi`): lineage (`FerretParents`), a ferret's liveness (`FerretLivenessSource`), the card a ferret
  *   is on (`FerretFocus`), the board a ferret works on (`LaneSetSource.projectOf`), telling a ferret (`ReopenNotifier`,
  *   `DoneNotifier`, `BoardNudgeSender`).
  * - Asks (`AsksApi`): the `card` source's obligations (`CardObligations`, in `gate-items.ts`), the open asks that name a
@@ -78,15 +78,15 @@ export interface LaneSetSource {
 // ---------------------------------------------------------------------------------------------------
 
 /** One step of lineage: the session that started this one (`config.parent`). */
-export interface SessionParents {
+export interface FerretParents {
   parentOf(ferret: string): Promise<string | undefined>;
 }
 
 /**
- * The card a session's activity is attributed to (`config.focusTask`, `board-design.md` §3.3). The board
+ * The card a session's activity is attributed to (`config.focusCard`, `board-design.md` §3.3). The board
  * writes it; U5 (activity) and U7 (agenda inference) read it.
  */
-export interface SessionFocus {
+export interface FerretFocus {
   /**
    * `false` when there is no such session to focus. Taking a card clears the session's {@link skip}. The card's
    * `title` also becomes the name of a session the daemon titled itself, so an unnamed one is called by its work.
@@ -96,7 +96,7 @@ export interface SessionFocus {
   focusOf(ferret: string): Promise<CardRef | null>;
   /**
    * The card the session's own delegations go under (`config.focusAnchor`): set only on purpose (`fy task
-   * focus`, creating a card, the card a start gave it), never by a plain touch like `focusTask` is.
+   * focus`, creating a card, the card a start gave it), never by a plain touch like `focusCard` is.
    */
   anchorOf(ferret: string): Promise<CardRef | null>;
   /**

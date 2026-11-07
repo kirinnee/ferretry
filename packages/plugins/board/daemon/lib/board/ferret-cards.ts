@@ -14,7 +14,7 @@
  *
  * **Only where the board is on** (`board-switch.ts`): the board is opt-in. On a board that is off a start makes
  * no card, and a `fy new` makes one only when the lead holds a card to put it under (the brief names one, or
- * the lead's focus) or hands one over (`--card`): a lead may always give its sub-ferrets cards.
+ * the lead's focus) or hands one over (`--card`): a lead may always give its helpers cards.
  *
  * The card is written after the session's record and before its agent launches, so the agent's first turn
  * already has its focus card, and a start refused earlier leaves no card behind. **A board failure never
@@ -30,7 +30,7 @@ import type { BoardSwitchReader } from '../lanes/board-switch.ts';
 import { effectiveAssignee } from './authority.ts';
 import { BoardError } from './errors.ts';
 import { cardCategory } from './graph.ts';
-import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, SessionFocus } from './ports.ts';
+import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, FerretFocus } from './ports.ts';
 import type { BoardService, CardHolders, SignalDoneOutcome } from './service.ts';
 import { clip } from './signal-done.ts';
 
@@ -44,14 +44,14 @@ const OWNER_ASK_SOURCE = 'owner';
 const PACK_ASK_SOURCE = 'fy new';
 
 /** The source an ask carries when a ferret's brief said it. */
-const sessionAskSource = (ferret: string): string => `session:${ferret}`;
+const ferretAskSource = (ferret: string): string => `session:${ferret}`;
 
 /** The board's name as the owner reads it. */
 interface BoardProjectNames {
   nameOf(projectId: BoardProjectId): Promise<string>;
 }
 
-export interface SessionCardsPorts {
+export interface FerretCardsPorts {
   readonly board: Pick<
     BoardService,
     | 'reserve'
@@ -65,7 +65,7 @@ export interface SessionCardsPorts {
     | 'mayAdoptUnder'
   >;
   readonly lanes: LaneSetSource;
-  /** The board a session about to start in a folder will work on, for a `fy new --cwd` (`SessionProjects`). */
+  /** The board a session about to start in a folder will work on, for a `fy new --cwd` (`FerretProjects`). */
   readonly starts: {
     projectForStart(start: { readonly cwd: string; readonly parent?: string }): Promise<BoardProjectId>;
   };
@@ -75,7 +75,7 @@ export interface SessionCardsPorts {
   /** Registers the repository of a session on the Unfiled board, so its card goes on that project's board. */
   readonly adoption?: ProjectAdopter;
   readonly projects: BoardProjectNames;
-  readonly focus: Pick<SessionFocus, 'anchorOf'>;
+  readonly focus: Pick<FerretFocus, 'anchorOf'>;
   readonly diagnostics: BoardDiagnostics;
   /** The shipped command name, so every command a note prints exists after a rename. */
   readonly bin: string;
@@ -87,7 +87,7 @@ export type ParentFrom = 'brief' | 'focus';
 /** A `fy new`'s card, decided before the child exists so its brief can name it. */
 export interface Delegation {
   readonly lead: string;
-  /** The sub-ferret's brief as the lead wrote it, without the footer the daemon adds. */
+  /** The helper's brief as the lead wrote it, without the footer the daemon adds. */
   readonly brief: string;
   /** The child's card id: reserved for a new card, the lead's own for an existing one. */
   readonly id: CardId;
@@ -137,7 +137,7 @@ const normalisedTitle = (title: string): string =>
     .trim();
 
 /** What a start is about to launch. */
-export interface StartedSession {
+export interface StartedFerret {
   readonly ferret: string;
   readonly name?: string | undefined;
   /** The brief as given; a `fy new`'s is its delegation's. */
@@ -179,7 +179,7 @@ export const ownerDelegation = (card: Pick<Card, 'id' | 'owner' | 'assignee' | '
   held: holdersOf(card),
 });
 
-/** The line a sub-ferret's brief gains (`subFerretFooter`): its card and where it is. */
+/** The line a helper's brief gains (`subFerretFooter`): its card and where it is. */
 export const cardFooterLine = (
   id: CardId,
   project: string | undefined,
@@ -215,8 +215,8 @@ const startRequest = (fields: {
 
 const said = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export class SessionCards {
-  constructor(private readonly ports: SessionCardsPorts) {}
+export class FerretCards {
+  constructor(private readonly ports: FerretCardsPorts) {}
 
   /**
    * A `fy new`'s card, before the child starts, and the child's id reserved (or the existing card named).
@@ -251,7 +251,7 @@ export class SessionCards {
             ...(project === undefined ? {} : { project }),
           },
           notes: [
-            `You already had ${formatCardRef(twin)} ("${twin.title}") for this work, so it was assigned to the sub-ferret instead of making a second card.`,
+            `You already had ${formatCardRef(twin)} ("${twin.title}") for this work, so it was assigned to the helper instead of making a second card.`,
           ],
         };
       }
@@ -265,7 +265,7 @@ export class SessionCards {
         const name = project ?? (await this.ports.projects.nameOf(childBoard));
         return {
           notes: [
-            `No card was made for the sub-ferret: the ${name} board is off and you hold no card for this work. \`${this.ports.bin} new --card <id>\` hands it one.`,
+            `No card was made for the helper: the ${name} board is off and you hold no card for this work. \`${this.ports.bin} new --card <id>\` hands it one.`,
           ],
         };
       }
@@ -273,7 +273,7 @@ export class SessionCards {
       const notes =
         parent === null
           ? [
-              `The sub-ferret's card has no parent, so it is at the top level of the board: \`${this.ports.bin} card reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} card focus <id>\` (or \`--card <id>\`) says where your sub-ferrets' cards go next time.`,
+              `The helper's card has no parent, so it is at the top level of the board: \`${this.ports.bin} card reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} card focus <id>\` (or \`--card <id>\`) says where your helpers' cards go next time.`,
             ]
           : [];
       return {
@@ -289,7 +289,7 @@ export class SessionCards {
         notes,
       };
     } catch (error) {
-      const note = `No card was made for the sub-ferret: ${said(error)}`;
+      const note = `No card was made for the helper: ${said(error)}`;
       this.ports.diagnostics.warn(note);
       return { notes: [note] };
     }
@@ -416,7 +416,7 @@ export class SessionCards {
    * The card of a session being started, after its record and before its launch. Never rejects: a board
    * failure is a note, and the start goes on.
    */
-  async open(start: StartedSession): Promise<OpenedCard> {
+  async open(start: StartedFerret): Promise<OpenedCard> {
     try {
       const delegation = start.delegation;
       const owner = delegation?.lead ?? start.ferret;
@@ -434,7 +434,7 @@ export class SessionCards {
       if (delegation !== undefined && !(await this.licensed(placed.projectId, delegation.parent))) {
         return {
           notes: [
-            `No card was made for the sub-ferret: the ${placed.project} board is off and you hold no card on it for this work.`,
+            `No card was made for the helper: the ${placed.project} board is off and you hold no card on it for this work.`,
           ],
         };
       }
@@ -446,7 +446,7 @@ export class SessionCards {
           brief,
           ask: askOf(
             brief,
-            from !== undefined ? sessionAskSource(from) : start.viaPack === true ? PACK_ASK_SOURCE : OWNER_ASK_SOURCE,
+            from !== undefined ? ferretAskSource(from) : start.viaPack === true ? PACK_ASK_SOURCE : OWNER_ASK_SOURCE,
           ),
           parent: delegation?.parent ?? null,
           assignee: delegation === undefined ? null : start.ferret,
@@ -455,7 +455,7 @@ export class SessionCards {
       );
       if (delegation?.project !== undefined && delegation.project !== placed.project) {
         placed.notes.push(
-          `The brief said ${formatCardRef(card)} is on the ${delegation.project} board; it is on the ${placed.project} board, where the sub-ferret runs.`,
+          `The brief said ${formatCardRef(card)} is on the ${delegation.project} board; it is on the ${placed.project} board, where the helper runs.`,
         );
       }
       for (const note of placed.notes) this.ports.diagnostics.warn(`${formatCardRef(card)}: ${note}`);
@@ -498,7 +498,7 @@ export class SessionCards {
 
   /**
    * A start IS the work starting (`work.started`), so the card enters the lane that trigger names for its
-   * workflow (In progress, or Plan/Design for a plan-first card), whoever may move cards: a sub-ferret cannot,
+   * workflow (In progress, or Plan/Design for a plan-first card), whoever may move cards: a helper cannot,
    * and a card left in the backlog while it is built tells the owner nothing. Best effort, like the card.
    */
   private async workStarted(card: Card, ferret: string): Promise<Card> {

@@ -83,7 +83,7 @@ export const EMPTY_SWEEP_MEMORY: SweepMemory = { v: 1, sweptAt: null, nudged: {}
  */
 interface BoardNudge {
   readonly kind: 'stale' | 'unblocked';
-  readonly taskId: CardId;
+  readonly cardId: CardId;
   readonly ferret: string;
   readonly message: string;
 }
@@ -187,7 +187,7 @@ const unblockNudge = (
   const shipped = shippedBlockers(view, mark.blockedBy, board, byId);
   const assignee = effectiveAssignee(view);
   if (shipped.length === 0 || presenceOf(roster, assignee) !== 'alive') return null;
-  return { kind: 'unblocked', taskId: view.id, ferret: assignee, message: unblockedMessage(view, shipped) };
+  return { kind: 'unblocked', cardId: view.id, ferret: assignee, message: unblockedMessage(view, shipped) };
 };
 
 /**
@@ -241,7 +241,7 @@ export const planSweep = (memory: SweepMemory, board: SweepBoard, roster: Ferret
     const idle = nowMs - Date.parse(view.lastTouchedAt ?? view.createdAt);
     nudges.push({
       kind: 'stale',
-      taskId: view.id,
+      cardId: view.id,
       ferret,
       message: nudgeMessage(view, idle, laneName(board, view, view.laneId)),
     });
@@ -332,11 +332,11 @@ export class BoardSweep {
     const seen = { ...plan.memory.seen };
     for (const nudge of plan.nudges) {
       await this.ports.nudges.send(nudge.ferret, nudge.message, nudge.kind).then(
-        () => (nudge.kind === 'stale' ? nudged : unblocked).push(nudge.taskId),
+        () => (nudge.kind === 'stale' ? nudged : unblocked).push(nudge.cardId),
         (error: unknown) => {
-          const previous = memory.seen[nudge.taskId];
-          if (nudge.kind === 'unblocked' && previous !== undefined) seen[nudge.taskId] = previous;
-          this.ports.diagnostics.warn(`could not nudge ${nudge.ferret} about &${nudge.taskId}: ${messageOf(error)}`);
+          const previous = memory.seen[nudge.cardId];
+          if (nudge.kind === 'unblocked' && previous !== undefined) seen[nudge.cardId] = previous;
+          this.ports.diagnostics.warn(`could not nudge ${nudge.ferret} about &${nudge.cardId}: ${messageOf(error)}`);
         },
       );
     }

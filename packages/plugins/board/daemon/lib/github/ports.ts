@@ -33,7 +33,7 @@ export interface WorkingCopies {
 }
 
 /** Where a session works: its `cwd`, or `null` for a session this daemon does not know. */
-export interface SessionFolders {
+export interface FerretFolders {
   cwdOf(ferret: string): Promise<string | null>;
 }
 

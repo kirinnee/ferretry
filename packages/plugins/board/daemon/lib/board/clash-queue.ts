@@ -46,7 +46,7 @@ export const claimsClash = (a: string, b: string): boolean => {
 /** One card a claim queues behind, and the first pair of paths that clash. */
 interface Clash {
   /** The card to wait on: the one whose PR ships the clashing work (`ShippingUnits.shippingCard`). */
-  readonly task: CardRef;
+  readonly card: CardRef;
   /** The card that claims the clashing path, when it is not {@link task} itself (a helper of it). */
   readonly via?: CardRef;
   /** The path this card claims. */
@@ -76,7 +76,7 @@ const inQueue = (card: Card, laneSets: LaneSets): boolean => {
 const releasedOnPurpose = (card: Card, other: CardRef, index: BoardIndex): boolean =>
   card.history.some(event => event.type === 'undepended' && event.task.id === other.id && index.isLocal(event.task));
 
-const firstClash = (claimed: readonly string[], theirs: readonly string[]): Omit<Clash, 'task'> | undefined => {
+const firstClash = (claimed: readonly string[], theirs: readonly string[]): Omit<Clash, 'card'> | undefined => {
   for (const ours of claimed) {
     const match = theirs.find(path => claimsClash(ours, path));
     if (match !== undefined) return { ours, theirs: match };
@@ -156,12 +156,12 @@ export const planClashes = (
     if (card.dependsOn.some(dependency => dependency.task.id === target.id && index.isLocal(dependency.task))) continue;
     if (releasedOnPurpose(card, target, index)) continue;
     const clash: Clash = {
-      task: { id: target.id },
+      card: { id: target.id },
       ...(target.id === other.id ? {} : { via: { id: other.id } }),
       ...pair,
     };
     edges ??= unitWaits(index, laneSets, units);
-    const cycle = dependencyCycle(index, card.id, clash.task);
+    const cycle = dependencyCycle(index, card.id, clash.card);
     if (cycle !== null) {
       unqueued.push({ ...clash, why: `${formatCardRef(target)} already waits on this card (${cycle})` });
     } else if (reaches(edges, units.key(target), units.rides(card))) {
@@ -191,11 +191,11 @@ const overlap = (clash: Clash): string => {
 
 /** The note a queued card carries: who it waits on and why. */
 const queuedNote = (clash: Clash): string =>
-  `${CLASH_QUEUED_PREFIX} ${formatCardRef(clash.task)} to merge: ${overlap(clash)}. It can be built now; its PR merges after ${formatCardRef(clash.task)} ships.`;
+  `${CLASH_QUEUED_PREFIX} ${formatCardRef(clash.card)} to merge: ${overlap(clash)}. It can be built now; its PR merges after ${formatCardRef(clash.card)} ships.`;
 
 /** The note a clash that could not be queued leaves, so a lead still sees it. */
 const unqueuedNote = (clash: Clash & { readonly why: string }): string =>
-  `clashes with ${formatCardRef(clash.task)} (${overlap(clash)}) but was not queued: ${clash.why}`;
+  `clashes with ${formatCardRef(clash.card)} (${overlap(clash)}) but was not queued: ${clash.why}`;
 
 type NewEvent = CardEvent extends infer E
   ? E extends CardEvent
@@ -228,9 +228,9 @@ export const queueBehindClashes = (card: Card, claimed: readonly string[], conte
     context.actor.ferret === undefined ? { kind: 'daemon' } : { kind: 'daemon', ferret: context.actor.ferret };
   let queued = card;
   for (const clash of plan.waits) {
-    queued = appended(queued, { type: 'depended', task: clash.task, until: 'shipped' }, context.now, daemon);
+    queued = appended(queued, { type: 'depended', task: clash.card, until: 'shipped' }, context.now, daemon);
     queued = appended(queued, { type: 'note', text: queuedNote(clash) }, context.now, daemon);
-    queued = { ...queued, dependsOn: [...queued.dependsOn, { task: clash.task, until: 'shipped' }] };
+    queued = { ...queued, dependsOn: [...queued.dependsOn, { task: clash.card, until: 'shipped' }] };
   }
   for (const clash of plan.unqueued) {
     queued = appended(queued, { type: 'note', text: unqueuedNote(clash) }, context.now, daemon);
