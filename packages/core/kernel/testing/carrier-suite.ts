@@ -11,6 +11,7 @@ import type {
   SessionLayer,
 } from '../contract/session.ts';
 import { createIdentitySigner } from '../host/session/signer.ts';
+import { encodeFrame, FRAME_KINDS, type SessionId, sessionIdFromBytes } from '../host/session/wire/frames.ts';
 import { type TestIdentity, testIdentity } from './identity.ts';
 
 /** The far end of a carrier's own transport, driven by the suite (a WebSocket client, a relay peer, a data channel). */
@@ -116,8 +117,25 @@ export class RecordingLink implements CarrierLink {
 }
 
 const ENDED: SessionEnd = Object.freeze({ code: 4400, reason: 'the session ended' });
-const frame = (sequence: number, text: string): SealedFrame => ({ sequence, bytes: new TextEncoder().encode(text) });
-const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
+/** The session id every suite frame carries: sixteen fixed bytes, so a carrier that routes by it sees one session. */
+export const SUITE_SESSION_ID: SessionId = (() => {
+  const id = sessionIdFromBytes(Uint8Array.from({ length: 16 }, (_, index) => index + 1));
+  if (id === null) throw new Error('suite session id');
+  return id;
+})();
+
+/**
+ * A VALID wire frame (the 28-byte envelope a real direct or relay carrier checks) carrying `payload` as a data
+ * record, built with the real encoder: what the suite sends and offers, so a real carrier can run it unchanged.
+ */
+export function suiteFrame(sequence: number, payload: string, sessionId: SessionId = SUITE_SESSION_ID): Uint8Array {
+  return encodeFrame({ kind: FRAME_KINDS.data, sessionId, sequence, payload: new TextEncoder().encode(payload) });
+}
+
+/** How the suite builds the frames it sends and offers; a carrier with its own envelope supplies its encoder. */
+export interface CarrierSuiteOptions {
+  readonly frame?: (sequence: number, payload: string) => Uint8Array;
+}
 
 /**
  * The carrier conformance suite (§3.9, §4.8, §7.3): a carrier moves only sealed bytes, opens one link per peer under
@@ -128,7 +146,10 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 export function carrierConformance(
   name: string,
   make: (layer: RecordingSessionLayer) => Promise<CarrierHarness>,
+  options: CarrierSuiteOptions = {},
 ): void {
+  const bytesOf = options.frame ?? ((sequence: number, payload: string) => suiteFrame(sequence, payload));
+  const frame = (sequence: number, payload: string): SealedFrame => ({ sequence, bytes: bytesOf(sequence, payload) });
   describe(`carrier conformance: ${name}`, () => {
     const started = async (): Promise<{
       layer: RecordingSessionLayer;
@@ -168,10 +189,12 @@ export function carrierConformance(
     test('hands inbound bytes to the session layer unchanged and in order', async () => {
       const h = await started();
       const peer = await h.harness.connect();
-      peer.send(new TextEncoder().encode('one'));
-      peer.send(new TextEncoder().encode('two'));
+      const one = bytesOf(1, 'one');
+      const two = bytesOf(2, 'two');
+      peer.send(one);
+      peer.send(two);
       await h.harness.flush();
-      expect((h.layer.links[0]?.inbounds ?? []).map(decode)).toEqual(['one', 'two']);
+      expect(h.layer.links[0]?.inbounds ?? []).toEqual([one, two]);
       await done(h);
     });
 
@@ -180,9 +203,11 @@ export function carrierConformance(
       const peer = await h.harness.connect();
       await h.harness.flush();
       const link = h.layer.links[0] as RecordingLink;
-      link.offer(frame(1, 'a'), frame(2, 'b'));
+      const a = frame(1, 'a');
+      const b = frame(2, 'b');
+      link.offer(a, b);
       await h.harness.flush();
-      expect(peer.received().map(decode)).toEqual(['a', 'b']);
+      expect(peer.received()).toEqual([a.bytes, b.bytes]);
       expect(link.nextCalls).toBeGreaterThanOrEqual(2);
       await done(h);
     });

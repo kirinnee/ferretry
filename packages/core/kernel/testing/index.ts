@@ -26,6 +26,9 @@ export {
   RecordingLink,
   RecordingSessionLayer,
   carrierConformance,
+  type CarrierSuiteOptions,
+  SUITE_SESSION_ID,
+  suiteFrame,
 } from './carrier-suite.ts';
 export { type DrivenClock, fixedClock } from './clock.ts';
 export { type TestIdentity, testIdentity } from './identity.ts';
