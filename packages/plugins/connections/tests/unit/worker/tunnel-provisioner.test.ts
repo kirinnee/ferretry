@@ -338,6 +338,41 @@ describe('releasing a tunnel', () => {
     },
   );
 
+  it('R640 release retires its row before deletion but resolves only after deleteTunnel settles', async () => {
+    // declared gap: release awaits deleteTunnel; Appendix D says it does not
+    const test = world(poolAccount(1));
+    const daemon = await newDaemonIdentity();
+    expectOk(await test.provision(daemon));
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const deleteTunnel = test.cloudflare.deleteTunnel.bind(test.cloudflare);
+    test.cloudflare.deleteTunnel = async (account, tunnelId) => {
+      entered.resolve();
+      await finish.promise;
+      return await deleteTunnel(account, tunnelId);
+    };
+    let settled = false;
+    const pending = test.release(daemon).then(result => {
+      settled = true;
+      return result;
+    });
+    try {
+      await entered.promise;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      should(test.store.active.has(daemon.daemonId)).equal(false);
+      should(test.store.deleting.size).equal(1);
+      should(settled).equal(false);
+      finish.resolve();
+      should(expectOk(await pending)).match({ version: 1, released: true });
+      should(settled).equal(true);
+      should(test.store.deleting.size).equal(0);
+      should(test.cloudflare.liveTunnels()).be.empty();
+    } finally {
+      finish.resolve();
+      await pending;
+    }
+  });
+
   it('should refuse a release when no pool is set up', async () => {
     const test = world(poolAccount(1));
     const daemon = await newDaemonIdentity();
