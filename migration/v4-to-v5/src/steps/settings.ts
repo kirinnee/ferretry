@@ -111,7 +111,7 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   { what: 'config/learning.yaml', why: 'read by the Lessons step, not this one' },
   {
     what: 'config/daemon.json, config/routing.json',
-    why: 'JSON daemon documents, not YAML config kinds; their keys are split by their own owners (Gate grants, Connections, Usage pricing, Packs routing)',
+    why: 'JSON daemon documents, not YAML config kinds: the Daemon settings step splits their keys (Gate, Connections, the harness files, Agenda) and the Usage step takes the pricing',
   },
   {
     what: 'instructions component harness and clonedFrom* fields',

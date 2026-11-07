@@ -75,11 +75,18 @@ export interface V5Writer {
    * would accept it at that place ({@link v5ConfigProblem}); the error names the path and key paths only.
    */
   config(target: V5ConfigTarget, name: string | undefined, text: string): Promise<void>;
+  /**
+   * The text an earlier step of THIS run gave {@link V5Writer.config} for that place (also in a dry run), or
+   * `undefined`. Two steps that each own keys of one v5 file (Settings and Daemon settings both write the harness
+   * and agenda files) merge through this instead of the later one overwriting the earlier one.
+   */
+  written(target: V5ConfigTarget, name: string | undefined): string | undefined;
   /** Where a byte-for-byte file lands (sealed blobs, a harness's own folder). */
   resolve(relativePath: string): string;
 }
 
 export function v5Writer(home: string, options: { readonly dryRun: boolean }): V5Writer {
+  const configs = new Map<string, string>();
   const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
     if (options.dryRun) return;
     const target = join(home, relativePath);
@@ -110,7 +117,11 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
       const path = configPath(target, name);
       const problem = v5ConfigProblem(target, name, text);
       if (problem !== undefined) throw new Error(`${path}: v5 refuses it: ${problem}`);
+      configs.set(path, text);
       await place(path, text, 0o600);
+    },
+    written(target, name) {
+      return configs.get(configPath(target, name));
     },
     resolve(relativePath) {
       return join(home, relativePath);
