@@ -20,6 +20,7 @@ export interface WorkSearchSubsystem {
 const TEXT_FIELDS = ['q', 'kind', 'project'] as const;
 
 /** The search, from the URL's query string. A field given empty is a field not given. */
+// read-scoped: none — reads the query string only; it shows no text
 const searchQueryOf = (call: Parameters<RouteHandler>[0]): WorkSearchQuery => {
   const input: Record<string, unknown> = {};
   for (const field of TEXT_FIELDS) {
@@ -49,6 +50,7 @@ const searchQueryOf = (call: Parameters<RouteHandler>[0]): WorkSearchQuery => {
  * names cards and asks and quotes a line of each. The related check is a POST only because a title and an ask do not
  * fit a URL; it reads, never writes.
  */
+// read-scoped: none — answers what the service already masked; the route shows no text of its own
 export function searchRoute(search: WorkSearchSubsystem): RouteHandler {
   return async call => jsonResponse(await search.search(searchQueryOf(call)));
 }
@@ -58,6 +60,7 @@ export function relatedRoute(search: WorkSearchSubsystem): RouteHandler {
 }
 
 /** The `search_work` agent tool: the same search, answered as the lines a model reads, with the hits as data. */
+// read-scoped: none — answers what the service already masked; the route shows no text of its own
 export function searchWorkTool(search: WorkSearchSubsystem) {
   return async (_call: unknown, input: unknown) => {
     const parsed = SearchWorkToolInputSchema.safeParse(input);

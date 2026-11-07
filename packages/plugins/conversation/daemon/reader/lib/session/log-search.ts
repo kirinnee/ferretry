@@ -57,6 +57,7 @@ export function prefilterNeedle(query: string): string | undefined {
  *
  * Throws when the file is replaced under the read, which the caller reports as an unreadable transcript.
  */
+// read-scoped: none — a pure scan of raw records; the reads service masks every snippet before it leaves
 export async function searchTranscriptRecords(
   source: TranscriptSource,
   scanner: TranscriptRecordScanner,

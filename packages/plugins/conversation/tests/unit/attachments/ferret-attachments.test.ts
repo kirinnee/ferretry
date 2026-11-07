@@ -378,17 +378,6 @@ describe('AttachmentStore', () => {
     originals.failList = true;
     should(await refusal(store.list('session-a'))).have.property('failure', 'corrupt');
   });
-
-  it('reads the wall clock when no clock is injected', async () => {
-    const before = Date.now();
-    const { store } = harness({ now: undefined });
-    const uploaded = await store.upload('session-a', {
-      filename: 'a.txt',
-      mime: 'text/plain',
-      bytes: new Uint8Array([1]),
-    });
-    should(Date.parse(uploaded.createdAt)).be.aboveOrEqual(before);
-  });
 });
 
 describe('parseStoredAttachmentManifest', () => {

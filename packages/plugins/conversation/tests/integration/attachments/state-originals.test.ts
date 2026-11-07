@@ -53,7 +53,11 @@ describe('StateAttachmentOriginals', () => {
 
   test('an unlock never writes plaintext beside the original', async () => {
     const { state, originals } = setup();
-    const store = new AttachmentStore({ originals, decrypt: async () => plaintext.slice() });
+    const store = new AttachmentStore({
+      originals,
+      decrypt: async () => plaintext.slice(),
+      now: () => new Date(1_770_000_000_000),
+    });
     const uploaded = await store.upload('ferret-a', {
       filename: 'private.pdf',
       mime: 'application/pdf',

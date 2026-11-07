@@ -69,7 +69,8 @@ const bytes = (base64: string): Uint8Array => {
  */
 const ENCODE_SLICE_BYTES = 3 * 256 * 1024;
 
-const yieldToLoop = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
+/** Gives the event loop back for a turn; the daemon runs on Bun, whose `sleep(0)` is a macrotask. */
+const yieldToLoop = async (): Promise<void> => await Bun.sleep(0);
 
 /**
  * The download's JSON, `{ attachment, base64 }`, spelled exactly as `JSON.stringify` spells it.

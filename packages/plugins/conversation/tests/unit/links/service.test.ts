@@ -28,7 +28,8 @@ const files = (map: Record<string, string>): ConversationFiles => ({
     }
     return [...names].map(([name, kind]) => ({ name, kind }));
   },
-  info: async file => (map[file] === undefined ? undefined : { modifiedAtMs: 1_770_000_000_000, size: map[file].length }),
+  info: async file =>
+    map[file] === undefined ? undefined : { modifiedAtMs: 1_770_000_000_000, size: map[file].length },
   head: async (file, max) => map[file]?.slice(0, max),
   tail: async (file, max) => map[file]?.slice(-max),
 });
@@ -37,12 +38,17 @@ const harness: LinkHarness = {
   key: 'claude-code',
   parser: 'claude',
   home: '.claude',
-  list: async () => [{ id: ID, folder: '/work/app', title: 'login page', updatedAt: '2026-02-01T09:05:00.000Z' as Instant }],
+  list: async () => [
+    { id: ID, folder: '/work/app', title: 'login page', updatedAt: '2026-02-01T09:05:00.000Z' as Instant },
+  ],
 };
 
 const build = (kept: Array<[string, string]> = [], held: Record<string, string> = {}) => {
   const fs = files({ [`.claude/projects/-work-app/${ID}.jsonl`]: TRANSCRIPT, ...held });
-  const stored = { format: 1 as const, links: [] as Array<{ id: string; harness: string; ferret: FerretId; linkedAt: Instant }> };
+  const stored = {
+    format: 1 as const,
+    links: [] as Array<{ id: string; harness: string; ferret: FerretId; linkedAt: Instant }>,
+  };
   let cache: Record<string, Record<string, string>> = {};
   const service = new LinkService({
     harnesses: () => [harness],
@@ -57,10 +63,19 @@ const build = (kept: Array<[string, string]> = [], held: Record<string, string> 
         stored.links.push(link);
       },
     },
-    finder: { read: async () => cache, write: async files => void (cache = files as typeof cache) },
+    finder: {
+      read: async () => cache,
+      write: async files => {
+        cache = files as typeof cache;
+      },
+    },
     keeper: {
       keep: async input =>
-        ok({ ferret: 'login-page' as FerretId, name: input.name, state: input.start ? ('working' as const) : ('stopped' as const) }),
+        ok({
+          ferret: 'login-page' as FerretId,
+          name: input.name,
+          state: input.start ? ('working' as const) : ('stopped' as const),
+        }),
     },
     now: () => '2026-02-02T00:00:00.000Z' as Instant,
     keptPublished: (ferret, link) => void kept.push([ferret, link]),
@@ -117,13 +132,26 @@ describe('links', () => {
   test('Q19 keeping links the conversation: the ledger names the ferret, the harness file is only read', async () => {
     const kept: Array<[string, string]> = [];
     const { service, stored } = build(kept);
-    const result = await service.keep({ harness: 'claude-code', runtime: 'default', conversations: [{ id: ID, start: false }] });
+    const result = await service.keep({
+      harness: 'claude-code',
+      runtime: 'default',
+      conversations: [{ id: ID, start: false }],
+    });
     expect(result.kept).toEqual([{ id: ID, ferret: 'login-page' as FerretId, name: 'login page', state: 'stopped' }]);
     expect(stored.links).toEqual([
-      { id: ID, harness: 'claude-code', ferret: 'login-page' as FerretId, linkedAt: '2026-02-02T00:00:00.000Z' as Instant },
+      {
+        id: ID,
+        harness: 'claude-code',
+        ferret: 'login-page' as FerretId,
+        linkedAt: '2026-02-02T00:00:00.000Z' as Instant,
+      },
     ]);
     expect(kept).toEqual([['login-page', ID]]);
-    const again = await service.keep({ harness: 'claude-code', runtime: 'default', conversations: [{ id: ID, start: false }] });
+    const again = await service.keep({
+      harness: 'claude-code',
+      runtime: 'default',
+      conversations: [{ id: ID, start: false }],
+    });
     expect(again.refused).toEqual([{ id: ID, code: 'already_kept', reason: 'Ferret login-page already keeps it.' }]);
     const listed = await service.list({});
     expect(listed.conversations[0]?.keptBy).toBe('login-page');
@@ -145,12 +173,22 @@ describe('links', () => {
     const routes = linkRoutes(service);
     const call = (query: Record<string, string>, params: Record<string, string> = {}) =>
       ({
-        request: { query: new Map(Object.entries(query).map(([k, v]) => [k, [v]])), headers: new Map(), text: async () => '' } as unknown as ApiRequest,
+        request: {
+          query: new Map(Object.entries(query).map(([k, v]) => [k, [v]])),
+          headers: new Map(),
+          text: async () => '',
+        } as unknown as ApiRequest,
         params: new Map(Object.entries(params)),
       }) as never;
     const failure = async (promise: Promise<unknown>) =>
-      await promise.then(() => undefined, (error: unknown) => error as { status: number; code?: string });
-    expect(await failure(routes['GET /v1/links/conversations'](call({ limit: '0' })))).toMatchObject({ status: 400, code: 'invalid_query' });
+      await promise.then(
+        () => undefined,
+        (error: unknown) => error as { status: number; code?: string },
+      );
+    expect(await failure(routes['GET /v1/links/conversations'](call({ limit: '0' })))).toMatchObject({
+      status: 400,
+      code: 'invalid_query',
+    });
     expect(
       await failure(
         routes['GET /v1/links/conversations/:harness/:conversationId/preview'](

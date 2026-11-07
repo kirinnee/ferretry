@@ -37,7 +37,8 @@ const ALPHABET = ((): Uint8Array => {
   return table;
 })();
 
-const yieldToLoop = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
+/** Gives the event loop back for a turn; the daemon runs on Bun, whose `sleep(0)` is a macrotask. */
+const yieldToLoop = async (): Promise<void> => await Bun.sleep(0);
 
 /** The image type `head` (the first decoded bytes) is, by its magic number. */
 export function sniffImageType(head: Uint8Array): TranscriptImageMediaType | undefined {

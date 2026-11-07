@@ -138,7 +138,7 @@ interface UnlockedAttachment {
 export interface AttachmentStoreOptions {
   readonly originals: AttachmentOriginalsPort;
   readonly decrypt: PdfDecryptor;
-  readonly now?: () => Date;
+  readonly now: () => Date;
   /**
    * Arranges for `evict` to run once `delayMs` have passed. The store calls it on every unlock so a
    * plaintext nobody reads again is still zeroed at its expiry rather than at process exit. Expiry
@@ -160,7 +160,7 @@ export class AttachmentStore {
   private readonly now: () => Date;
 
   constructor(private readonly options: AttachmentStoreOptions) {
-    this.now = options.now ?? (() => new Date());
+    this.now = options.now;
   }
 
   private key(ferretId: string, attachmentId: string): string {

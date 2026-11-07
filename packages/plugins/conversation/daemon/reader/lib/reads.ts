@@ -187,6 +187,7 @@ export interface SessionTranscriptSearch {
 
 /** The stand-in for a daemon that wired no search: an honest refusal, never "no matches". */
 const NO_SEARCH: SessionTranscriptSearch = {
+  // read-scoped: none — the port returns raw events to the service, which masks every snippet through the read-scoped redactor
   search: async () => ({ kind: 'unreadable' }),
 };
 
@@ -626,7 +627,14 @@ export class TranscriptReadService {
               ];
             }),
           );
-    return { v: 1, ferret: sessionId as FerretId, query: text, file: result.file, matches, truncated: result.truncated };
+    return {
+      v: 1,
+      ferret: sessionId as FerretId,
+      query: text,
+      file: result.file,
+      matches,
+      truncated: result.truncated,
+    };
   }
 
   /**
@@ -780,7 +788,13 @@ export class TranscriptReadService {
               servedRow(row, point, scrub.text(row.text), selectionBinding),
             ),
           );
-    return { v: 1, ferret: sessionId as FerretId, messages, nextCursor, ...(backward === undefined ? {} : { previousCursor }) };
+    return {
+      v: 1,
+      ferret: sessionId as FerretId,
+      messages,
+      nextCursor,
+      ...(backward === undefined ? {} : { previousCursor }),
+    };
   }
 
   /**
@@ -832,7 +846,8 @@ export class TranscriptReadService {
     // surface cannot honestly issue a token without an exact block: two blocks in one record would
     // otherwise share it.
     const point = ExactConversationMessagePointSchema.safeParse(row.point);
-    if (!point.success) throw new TranscriptReadError('transcript_unreadable', 'transcript row has no exact block point');
+    if (!point.success)
+      throw new TranscriptReadError('transcript_unreadable', 'transcript row has no exact block point');
     const selectionBinding = await issueSessionTranscriptMessageToken(
       this.messageTokens,
       SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,

@@ -64,6 +64,7 @@ export function snippetAround(text: string, at: number, queryLength: number): st
 }
 
 /** Search every explicitly text-bearing event without inspecting harness-specific records. */
+// read-scoped: none — a pure scan of parsed records; the reads service masks every snippet before it leaves
 export function searchTranscript(
   events: readonly TranscriptEvent[],
   query: string,

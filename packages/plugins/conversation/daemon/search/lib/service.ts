@@ -36,7 +36,8 @@ export const WORK_SEARCH_SWEEP_MS = 5_000;
  */
 export const WORK_SEARCH_INDEX_CHUNK = 100;
 
-const yieldToLoop = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
+/** Gives the event loop back for a turn; the daemon runs on Bun, whose `sleep(0)` is a macrotask. */
+const yieldToLoop = async (): Promise<void> => await Bun.sleep(0);
 
 /** `items` in runs of at most `size`. */
 const chunksOf = <T>(items: readonly T[], size: number): T[][] => {
@@ -91,6 +92,7 @@ export class WorkSearchService {
     );
   }
 
+  // read-scoped: none — every hit is masked by the epoch-keyed read redaction before it leaves the service
   async search(query: WorkSearchQuery): Promise<WorkSearchResponse> {
     await this.current();
     const { hits, total, olderHidden } = this.index.search(query, this.ports.now());
@@ -131,10 +133,7 @@ export class WorkSearchService {
     await this.serial(async () => {
       const epoch = await this.ports.redaction.epoch();
       if (epoch !== this.epoch) await this.rebuild(epoch);
-      else
-        await this.refresh(
-          this.ports.sources.filter(source => source.cheap === true || this.dirty.has(source.id)),
-        );
+      else await this.refresh(this.ports.sources.filter(source => source.cheap === true || this.dirty.has(source.id)));
     });
     if (this.ports.now() - this.lastSweepMs >= WORK_SEARCH_SWEEP_MS) this.startSweep();
   }

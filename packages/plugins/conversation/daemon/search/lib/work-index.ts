@@ -17,11 +17,7 @@
  *    names one thing and finds it at any age, and a query that asks for `all`. What the window left out is
  *    counted, so a client can say so instead of looking like the work does not exist.
  */
-import {
-  type WorkHit,
-  type WorkSearchQuery,
-  WORK_SEARCH_CLOSED_WINDOW_DAYS,
-} from '../../../contract/index.ts';
+import { type WorkHit, type WorkSearchQuery, WORK_SEARCH_CLOSED_WINDOW_DAYS } from '../../../contract/index.ts';
 import type { WorkDocument, WorkField } from './documents.ts';
 import { matchLine, meaningfulTokens, normalizePhrase, tokensOf } from './text.ts';
 
@@ -179,6 +175,7 @@ export class WorkIndex {
     if (this.byId.get(id)?.size === 0) this.byId.delete(id);
   }
 
+  // read-scoped: none — an index over documents already scrubbed at index time; it holds no unmasked text
   search(query: WorkSearchQuery, nowMs: number): WorkSearchResult {
     const text = query.q.trim();
     const bare = text.replace(SIGILS, '');

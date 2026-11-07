@@ -146,9 +146,14 @@ export class EntriesTranscriptSource
     return { kind: 'read', events, start, file: whole.file };
   }
 
+  // read-scoped: none — returns raw events to the reads service, which masks every snippet through the read-scoped redactor
   async search(
     sessionId: string,
-    query: { readonly needle: string | undefined; readonly accept: (event: TranscriptEvent) => boolean; readonly limit: number },
+    query: {
+      readonly needle: string | undefined;
+      readonly accept: (event: TranscriptEvent) => boolean;
+      readonly limit: number;
+    },
   ): Promise<TranscriptSearchReadResult> {
     const whole = await this.#whole(sessionId);
     if (typeof whole === 'string') return { kind: whole };
