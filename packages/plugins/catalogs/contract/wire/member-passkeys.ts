@@ -108,3 +108,7 @@ export const UnlockGrantedSchema = z.strictObject({
 });
 
 export type UnlockGranted = z.infer<typeof UnlockGrantedSchema>;
+
+export const PasskeyOptionsRequestSchema = z.strictObject({ origin: AppOriginSchema });
+
+export type PasskeyOptionsRequest = z.infer<typeof PasskeyOptionsRequestSchema>;

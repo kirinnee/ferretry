@@ -1,4 +1,6 @@
-import { Credentials, StepUp } from '@ferretry/core-gate/contract';
+import { Credentials, StepUp, GatePort } from '@ferretry/core-gate/contract';
+import { VaultPort, SealedDocumentsPort } from '@ferretry/core-vault/contract';
+import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from '@ferretry/plugin-access/contract';
@@ -35,7 +37,7 @@ export default definePlugin({
   kinds: ['session-mode', 'credential-provider', 'item', 'command', 'view'],
   words: CATALOGS_WORDS,
 
-  needs: { access: AccessPort },
+  needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   provides: { catalogs: CatalogsPort },
 
   actions: {
@@ -528,13 +530,14 @@ export default definePlugin({
         onDamaged: { narrower: 'that version is refused; the catalog lists it as missing' },
       }),
       defineState({ name: 'links', path: 'links.json', store: 'json', format: 1 }),
-      defineState({ name: 'link-keys', path: 'link-keys.json', store: 'secret', format: 1, mode: 0o600 }),
+      CatalogLinkKeys.state,
       defineState({ name: 'members', path: 'members.json', store: 'json', format: 1 }),
       /** Shares keep a hash of their code, never the code. */
       defineState({ name: 'shares', path: 'shares.json', store: 'json', format: 1 }),
       defineState({ name: 'member-passkeys', path: 'member-passkeys.json', store: 'json', format: 1 }),
       defineState({ name: 'member-unlocks', path: 'member-unlocks.json', store: 'json', format: 1 }),
       defineState({ name: 'installs', path: 'installs.json', store: 'json', format: 1 }),
+      CatalogInstallPrefs,
     ],
     readModels: ['installs'],
     publishes: [CatalogsChanged],
