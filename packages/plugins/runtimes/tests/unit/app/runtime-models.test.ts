@@ -130,8 +130,8 @@ describe('daemon-scoped runtime model catalog queries', () => {
 
     should(result.choices[0]?.label).equal('A');
     should(calls).have.length(1);
-    should(calls[0]?.route).equal('GET /v1/ferrets/:sessionId/runtime-models');
-    should(calls[0]?.params).deepEqual({ sessionId: 'same/session' });
+    should(calls[0]?.route).equal('GET /v1/ferrets/:id/runtime-models');
+    should(calls[0]?.params).deepEqual({ id: 'same/session' });
   });
 
   it('should expose daemon failures and refuse an answer that is not a catalog', async () => {

@@ -14,13 +14,7 @@ import type {
   SetupCatalogDeps,
 } from '../lib/service/setup-service.ts';
 import { HostHarnessScanner } from './host-harness-scan.ts';
-import type {
-  AdapterHost,
-  ApplyLockOptions,
-  ConfigFileService,
-  HostFiles,
-  StoredCredentialMaterialReader,
-} from './ports.ts';
+import type { AdapterHost, ApplyLockOptions, ConfigFileService, HostFiles } from './ports.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
 export const MAX_FOLDER_FILE_BYTES = 256 * 1024;
@@ -133,8 +127,8 @@ export interface FileFleetSetupOptions {
   /** `CLAUDE_CONFIG_DIR` / `CODEX_HOME` as this daemon inherited them. */
   readonly claudeConfigDir?: string;
   readonly codexHome?: string;
-  /** The platform credential store: reads a login, never hands one out of this adapter. */
-  readonly credentials: StoredCredentialMaterialReader;
+  /** Safe Logins contract facts; host sign-in files stay opaque. */
+  readonly logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>;
   /** How long the clone record's update waits for a running fleet apply; a test shortens it. */
   readonly lockOptions?: ApplyLockOptions;
   readonly tools: FleetSetupServiceDeps['tools'];
@@ -198,8 +192,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     commands: {
       resolve: name => (name === 'claude' || name === 'codex' ? catalog.locate(name) : host.commands.which(name)),
     },
-    credentials: options.credentials,
-    now: () => catalog.now(),
+    logins: options.logins,
     maxDocumentBytes: MAX_HOST_DOCUMENT_BYTES,
   });
   return {

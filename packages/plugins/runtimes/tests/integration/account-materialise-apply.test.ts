@@ -57,7 +57,7 @@ const layoutIn = (root: string): FleetLayout => ({
 
 /** One Claude agent on the person's own login and one Codex runtime on an empty Ferretry slot. */
 const documentWith = (layers: readonly string[]): AccountModelDocument => ({
-  version: 2,
+  version: 1,
   machine: { agentPermissions: 'skip' },
   credentials: {
     'claude-you': { harness: 'claude', store: 'host' },

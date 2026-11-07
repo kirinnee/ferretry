@@ -1,5 +1,5 @@
 /**
- * Materialisation — a version-2 fleet as the writes an apply performs
+ * Materialisation — a format-1 fleet as the writes an apply performs
  * (docs/design/account-model.md §5.4, §8, R6, H1).
  *
  * Every runtime becomes two things: a hidden config directory, `<homes>/<runtime id>` (the internal
@@ -255,7 +255,7 @@ function withoutLaunchFolder(layer: FixedLayer): FixedLayer {
 const topLevel = (dest: string): string => dest.split('/')[0] as string;
 
 /**
- * Plan the whole version-2 fleet. Throws {@link FleetMaterialiseError} naming every problem when the
+ * Plan the whole format-1 fleet. Throws {@link FleetMaterialiseError} naming every problem when the
  * configuration asks for something no apply can write; never writes anything itself.
  */
 export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {

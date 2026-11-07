@@ -18,7 +18,7 @@ import {
 /** A machine with one component of every scope, and profiles built from them. */
 const model = (profiles: Record<string, { layers: string[] }>, runtimes: Record<string, unknown> = {}): AccountModel =>
   parseAccountModel({
-    version: 2,
+    version: 1,
     credentials: {
       'claude-you': { harness: 'claude', store: 'host' },
       'codex-you': { harness: 'codex', store: 'host' },

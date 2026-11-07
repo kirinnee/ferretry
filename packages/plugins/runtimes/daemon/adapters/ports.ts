@@ -12,8 +12,6 @@
  * falls back to `node:fs`. Each refusal sits beside a `GAP(<owner>)` comment naming the missing piece.
  */
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
-import type { CredentialMaterial } from '../lib/identity.ts';
 import type { RuntimeRename } from '../lib/service/foreign.ts';
 import type { DisplacedState, FleetApplyPlan, FleetApplyPreview, UnrestoredPath } from '../lib/provisioning.ts';
 
@@ -334,17 +332,6 @@ export interface ProvisionerKernel {
 export interface ProvisionerHost {
   readonly disk: ProvisionerDisk;
   readonly kernel: ProvisionerKernel;
-}
-
-// ─── logins (credential reads) ───────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Reading one account-model credential's raw material from its one store. The platform store satisfies it.
- *
- * GAP(logins): the credential classifier lives with Logins; this is the one method the scan calls.
- */
-export interface StoredCredentialMaterialReader {
-  storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
 }
 
 // ─── the refusals ────────────────────────────────────────────────────────────────────────────────────────────────

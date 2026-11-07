@@ -1003,7 +1003,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   // that moves between the review and the apply asks for the review again.
   const fingerprint = sha256Hex(
     JSON.stringify({
-      version: 2,
+      version: 1,
       source: source?.id ?? '',
       verified: source?.verified ?? '',
       sourceDaemon: input.sourceDaemon ?? '',

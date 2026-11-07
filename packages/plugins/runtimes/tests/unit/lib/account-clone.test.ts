@@ -19,7 +19,7 @@ const EXPORTED_AT = '2026-10-13T09:00:00Z';
 /** A model with a little of everything a clone has to carry, so a test only varies what it is about. */
 const sourceModel = (): AccountModel =>
   parseAccountModel({
-    version: 2,
+    version: 1,
     credentials: {
       'claude-you': { harness: 'claude', store: 'host' },
       'codex-work': { harness: 'codex', store: 'ferretry', label: 'work' },
@@ -53,7 +53,7 @@ const sourceModel = (): AccountModel =>
     },
   });
 
-const emptyTarget = (patch: Record<string, unknown> = {}): AccountModel => parseAccountModel({ version: 2, ...patch });
+const emptyTarget = (patch: Record<string, unknown> = {}): AccountModel => parseAccountModel({ version: 1, ...patch });
 
 const options = (patch: Partial<CloneOptions> = {}): CloneOptions => ({
   mode: 'alongside',
@@ -114,7 +114,7 @@ describe('cloneSources', () => {
   it('should treat a home, a variable and a climbing path as outside the asset tree', () => {
     // Arrange
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         instructions: {
           a: { file: '~/a.md' },
@@ -169,7 +169,7 @@ describe('buildCloneBundle', () => {
   it('should carry an environment login as plain values and secret NAMES, never a value or a store', () => {
     // Arrange
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         keyed: {
           harness: 'claude',
@@ -217,7 +217,7 @@ describe('buildCloneBundle', () => {
     // Arrange: an instruction document read on its own sits in a hook subfolder that could not be read (a
     // link), and another document was read whole but then left out of its folder for room.
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: { you: { harness: 'claude', store: 'ferretry' } },
       components: {
         instructions: {
@@ -1063,7 +1063,7 @@ describe('planClone alongside', () => {
 describe('planClone replace', () => {
   const populatedTarget = (): AccountModel =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         'claude-you': { harness: 'claude', store: 'host', label: 'own' },
         'codex-mine': { harness: 'codex', store: 'ferretry', label: 'mine' },
@@ -1151,7 +1151,7 @@ describe('describeClone', () => {
   it('should say a replace removes the target setup first and keeps its logins', () => {
     // Arrange
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: { you: { harness: 'claude', store: 'host' } },
       components: { instructions: { main: { file: 'm.md' } } },
       profiles: { base: { layers: ['instructions/main'] } },
@@ -1402,7 +1402,7 @@ describe('Clone from a machine that may have been broken into', () => {
       files: [{ path: 'components/shared/README.md', content: '# Main' }],
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: { hooks: { mine: { harness: 'claude', directory: 'components/shared' } } },
     });
 
@@ -1553,7 +1553,7 @@ describe('Clone writes nothing the review did not list (review H1)', () => {
   it('should export an honest ./-spelled setup in its one plain spelling, so the target accepts it', () => {
     // Arrange
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         instructions: { main: { file: './CLAUDE.md' } },
         hooks: { s: { harness: 'claude', directory: 'components//hooks/s/' } },
@@ -1601,7 +1601,7 @@ describe('planClone default runtime for new agents', () => {
   /** A target whose own default names a runtime Replace removes, which is the owner's failure. */
   const targetWithDefault = (name = 'claude-kirin'): AccountModel =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       machine: { defaultRuntime: name },
       credentials: { 'claude-kirin': { harness: 'claude', store: 'host' } },
       profiles: { base: { layers: [] } },
@@ -1657,7 +1657,7 @@ describe('planClone default runtime for new agents', () => {
   it('should apply the runtime the person chose, under the name it lands with on an alongside copy', () => {
     // Arrange
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
       profiles: { default: { layers: [] } },
       runtimes: { 'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true } },
@@ -1754,7 +1754,7 @@ describe('planClone default runtime for new agents', () => {
 describe('planClone reuses a login the target already has (L2)', () => {
   const signedIn = (): AccountModel =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         'claude-kirin': { harness: 'claude', store: 'host', label: 'kirin' },
         'codex-kirin': { harness: 'codex', store: 'ferretry', label: 'kirin' },
@@ -1832,7 +1832,7 @@ describe('planClone reuses a login the target already has (L2)', () => {
       runtimes: { 'codex-default': { credential: 'codex-you', profile: 'default', agent: false } },
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: { 'claude-kirin': { harness: 'claude', store: 'host' } },
     });
 
@@ -1849,7 +1849,7 @@ describe('planClone reuses a login the target already has (L2)', () => {
   it('should ask, and add an empty slot for now, when two logins here fit', () => {
     // Arrange
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         'claude-a': { harness: 'claude', store: 'host', label: 'a' },
         'claude-b': { harness: 'claude', store: 'ferretry', label: 'b' },
@@ -1886,7 +1886,7 @@ describe('planClone reuses a login the target already has (L2)', () => {
   it('should reuse the login in Replace too, and leave every login of the target exactly as it was', () => {
     // Arrange
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         'claude-kirin': { harness: 'claude', store: 'host', label: 'kirin', clonedFrom: 'older-mac' },
         'codex-kirin': { harness: 'codex', store: 'ferretry', label: 'kirin' },
@@ -1938,7 +1938,7 @@ describe('planClone reuses a login the target already has (L2)', () => {
   it('should never match an environment login on the target', () => {
     // Arrange
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         'claude-keys': {
           harness: 'claude',

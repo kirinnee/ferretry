@@ -31,7 +31,7 @@ import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
-import type { CarrierDisclosure } from './hosted-relay.ts';
+import type { CarrierDisclosure } from './connection-disclosure.ts';
 import {
   AGENT_HARNESSES,
   agentHarness,

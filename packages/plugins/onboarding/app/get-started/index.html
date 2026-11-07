@@ -7,10 +7,10 @@
     <title>Get started — Ferretry</title>
     <meta
       name="description"
-      content="Install Ferretry on your computer and run fy setup: it starts the daemon and pairs your phone."
+      content="Install Ferretry on your computer and run fy onboard, then fy pair for your phone."
     />
     <!-- A static page like the landing: no PWA bundle, no manifest. Every command
-         below must also appear in INSTALLATION.md, which owns them — the
+         below use the rebuilt CLI command registry — the
          `installation-parity` contract and tests/unit/get-started-document.test.ts
          both refuse a command the doc does not carry. -->
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
@@ -597,8 +597,9 @@
           <p class="eyebrow">Get started</p>
           <h1 id="title">One command to <span>your fleet</span></h1>
           <p class="intro">
-            Install Ferretry where Claude Code or Codex runs, then run <code>fy setup</code>. It starts the daemon,
-            checks it, and shows a QR code for your phone.
+            Install Ferretry where Claude Code or Codex runs, then run <code>fy onboard</code> to check the first-run
+            steps. Use <code>fy runtime scan</code> to inspect your setup, then <code>fy runtime import claude</code> or
+            <code>fy runtime import codex</code> to import it. Pair your phone with <code>fy pair</code>.
           </p>
           <p class="note after">
             Rather have your agent do it? <a class="jump" href="#agent">Copy the prompt</a> — it hands you each command
@@ -620,10 +621,10 @@
               <h2 id="step-1-title">Install it, then run setup.</h2>
               <p>
                 Pick how you install software. The tab for this device is chosen for you. Each one ends with
-                <code>fy setup</code>, which starts the daemon as a user service, checks it, and offers the QR code for
-                your phone.
+                <code>fy onboard</code>, which checks the first-run steps and records what is found. Missing setup can
+                be left for later.
               </p>
-              <p>Safe to run again: it leaves a running daemon alone.</p>
+              <p>Run <code>fy onboard --check</code> to inspect the steps without recording answers.</p>
             </div>
             <div class="work" data-method-tabs>
               <div class="tablist" role="tablist" aria-label="How you install software" hidden>
@@ -665,7 +666,7 @@
                 <h3 class="panel-title">Homebrew</h3>
                 <div class="command">
                   <header><span>Homebrew · macOS</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry</code><code data-command>brew install --cask ferretry</code><code data-command>fy setup</code></pre>
+                  <pre><code data-command>brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry</code><code data-command>brew install --cask ferretry</code><code data-command>fy onboard</code></pre>
                 </div>
                 <p class="note">The cask clears macOS's quarantine flag for you, so the first run just works.</p>
               </div>
@@ -675,9 +676,9 @@
                   <header>
                     <span>Nix · macOS or Linux</span><button class="copy" type="button" hidden>Copy</button>
                   </header>
-                  <pre><code data-command>nix profile install github:kirinnee/ferretry</code><code data-command>fy setup</code></pre>
+                  <pre><code data-command>nix profile install github:kirinnee/ferretry</code><code data-command>fy onboard</code></pre>
                 </div>
-                <p class="note">Updates with <code>fy daemon update</code>, no config to edit.</p>
+                <p class="note">Updates with <code>fy update</code>, no config to edit.</p>
               </div>
               <div
                 class="panel"
@@ -693,7 +694,7 @@
                 </div>
                 <div class="command">
                   <header><span>Then rebuild</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>home-manager switch --flake .</code><code data-command>fy setup</code></pre>
+                  <pre><code data-command>home-manager switch --flake .</code><code data-command>fy onboard</code></pre>
                 </div>
                 <p class="note">
                   On nix-darwin, rebuild with <code>darwin-rebuild switch --flake .</code> instead. Updating means
@@ -710,7 +711,7 @@
                 <h3 class="panel-title">Installer</h3>
                 <div class="command">
                   <header><span>Any Mac or Linux</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash</code><code data-command>PATH=&quot;$HOME/.local/bin:$PATH&quot; fy setup</code></pre>
+                  <pre><code data-command>curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash</code><code data-command>PATH=&quot;$HOME/.local/bin:$PATH&quot; fy onboard</code></pre>
                 </div>
                 <p class="note">
                   It checks the download and puts both programs in <code>~/.local/bin</code>; add that to your
@@ -720,7 +721,7 @@
               <p class="note after">
                 Debian, Ubuntu or Fedora package? Every option is in
                 <a href="https://github.com/kirinnee/ferretry/blob/main/INSTALLATION.md">INSTALLATION.md</a>; run
-                <code>fy setup</code> after any of them.
+                <code>fy onboard</code> after any of them.
               </p>
               <section class="agent" id="agent" aria-labelledby="agent-title">
                 <h3 id="agent-title">Or let your agent do it.</h3>
@@ -759,8 +760,8 @@ What you may run
 1. Look around (read-only; an error just means "not there"):
    uname -sm
    command -v brew nix fy home-manager darwin-rebuild
-   fy setup --check --json
-   If that says "ready": true, go to step 3. Otherwise recommend ONE way to install with a one-line reason, list the others one line each, and let me choose:
+   fy onboard --check --json
+   If that says "complete": true, go to step 3. Otherwise recommend ONE way to install with a one-line reason, list the others one line each, and let me choose:
    - Homebrew, if brew is there: easiest updates.
    - Home Manager or nix-darwin, if I use one: it lives in my config.
    - nix profile, if nix is there: one command, no config.
@@ -770,24 +771,24 @@ What you may run
    Homebrew:
      brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
      brew install --cask ferretry
-     fy setup --yes
+     fy onboard --yes
    nix profile:
      nix profile install github:kirinnee/ferretry
-     fy setup --yes
+     fy onboard --yes
    Home Manager or nix-darwin: first show me where these two lines go in my flake.
-   Then hand me the rebuild (home-manager switch --flake . or darwin-rebuild switch --flake .) and fy setup --yes:
+   Then hand me the rebuild (home-manager switch --flake . or darwin-rebuild switch --flake .) and fy onboard --yes:
      inputs.ferretry.url = "github:kirinnee/ferretry";
      home.packages = [ inputs.ferretry.packages.${pkgs.stdenv.hostPlatform.system}.default ];
    Installer:
      curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
-     PATH="$HOME/.local/bin:$PATH" fy setup --yes
+     PATH="$HOME/.local/bin:$PATH" fy onboard --yes
 
-3. Check: run fy setup --check --json. Until "ready" is true, hand me the first entry of "next" as a "Run this". Then tell me it is done in one line.
+3. Check: run fy onboard --check --json. Read the steps and remedies. If incomplete, show the next remedy and wait. --yes leaves missing steps for later; it does not install or import.
 
 4. Pair my phone: hand me fy pair as a "Run this" for my own terminal, not this chat, so the code never reaches you. What I'll see: a QR code to scan with my phone's camera within two minutes.
 
-5. Stop. Afterwards, only when I ask: fy daemon status, fy credentials, fy runtimes, fy import conversations, and fy daemon setup (it asks questions, so I run it in my own terminal).
-   To update later: fy daemon update, or the Update button in the app.</code></pre>
+5. Stop. Afterwards, only when I ask: fy daemon status, fy login ls, fy runtime ls, fy runtime import claude or fy runtime import codex, and fy onboard (it asks questions, so I run it in my own terminal).
+   To update later: fy update, or the Update button in the app.</code></pre>
                 </div>
               </section>
             </div>
@@ -800,8 +801,8 @@ What you may run
               <p class="step-label">Step 02</p>
               <h2 id="step-2-title">Pair your phone.</h2>
               <p>
-                <code>fy setup</code> offers this at the end. To pair later, or another phone, run this and scan the QR
-                code with your phone's camera. The code lasts two minutes and works once.
+                After checking the first-run steps, run this and scan the QR code with your phone's camera. The code
+                lasts two minutes and works once.
               </p>
               <p>
                 Your phone does not need to be on the same network. When it cannot reach the computer directly, it
@@ -868,10 +869,10 @@ What you may run
           <ul class="trouble-list">
             <li>
               <h3>Check everything.</h3>
-              <p>Daemon, version, updates and the relay, changing nothing.</p>
+              <p>Check the first-run steps, changing nothing.</p>
               <div class="command">
                 <header><span>Check</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy setup --check</code></pre>
+                <pre><code data-command>fy onboard --check</code></pre>
               </div>
             </li>
             <li>
@@ -884,10 +885,10 @@ What you may run
             </li>
             <li>
               <h3>What went wrong?</h3>
-              <p>Prints the daemon's log.</p>
+              <p>Checks this CLI against the daemon, plugin by plugin.</p>
               <div class="command">
-                <header><span>Logs</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy daemon logs</code></pre>
+                <header><span>Doctor</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy doctor</code></pre>
               </div>
             </li>
             <li>
@@ -902,14 +903,14 @@ What you may run
               </div>
             </li>
             <li class="danger">
-              <h3>Start over completely.</h3>
+              <h3>Review the first-run steps again.</h3>
               <p>
-                Removes ALL Ferretry data on this computer: settings, sessions, stored secrets and paired devices. It
-                lists what will go and asks before it deletes anything.
+                Forgets which first-run steps were answered so you can check them again. Your setup and paired devices
+                stay in place.
               </p>
               <div class="command">
                 <header><span>Reset</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy daemon reset</code></pre>
+                <pre><code data-command>fy onboard reset</code></pre>
               </div>
             </li>
           </ul>

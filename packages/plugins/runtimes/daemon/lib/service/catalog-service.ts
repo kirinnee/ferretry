@@ -81,13 +81,8 @@ import {
 import { type RuntimeRename, type SessionStatus } from './foreign.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
 import { type ModelCatalogSources } from '../models/catalog.ts';
-import {
-  type LoginList,
-  LoginRefusal,
-  type LoginsReader,
-  type LoginSignOutOutcome,
-  type RuntimeConfigWriter,
-} from './ports.ts';
+import type { LoginsApi } from '@ferretry/plugin-logins/contract';
+import { type RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
   type AccountComponentFile,
@@ -236,8 +231,8 @@ export interface FleetCatalogServiceDeps {
    */
   renameSessions?(rename: SessionRuntimeRename): Promise<number>;
   machineName(): string;
-  /** The credentials surface: its list for status words and sign-out sentences, its sign-out executor. */
-  readonly credentials: LoginsReader;
+  /** The required Logins contract: safe status and email facts, never credential material. */
+  readonly credentials: Pick<LoginsApi, 'list'>;
   /** Writes the configuration documents of a change. GAP(kernel): no plugin config write port; see `ports.ts`. */
   readonly configWriter: RuntimeConfigWriter;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
@@ -923,33 +918,12 @@ export class FleetCatalogService {
       .map(runtime => ({ name: runtime.name, harness: runtime.harness, agent: runtime.agent, launch: runtime.launch }));
   }
 
-  async #stageSignOut(id: string): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
-    let list: LoginList;
-    try {
-      list = await this.deps.credentials.list();
-    } catch (error) {
-      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
-    }
-    const row = list.logins.find(login => login.id === id);
-    if (row === undefined)
-      throw new FleetCatalogRefusal('fleet_change_refused', `no login ${id} exists on this machine`);
-    if (!row.signOut.available) {
-      throw new FleetCatalogRefusal('fleet_change_refused', `Login ${id} cannot be signed out from here.`);
-    }
-    return {
-      summary: `Sign out of login ${id}`,
-      payload: {
-        kind: 'sign-out',
-        // E25: the confirm card's question is the credentials surface's own sentence.
-        consequences: [row.signOut.sentence],
-        preview: {
-          kind: 'sign-out',
-          credential: id,
-          runtimesAffected: row.signOut.runtimesAffected,
-          signsOutTerminal: row.signOut.signsOutTerminal,
-        },
-      },
-    };
+  async #stageSignOut(_id: string): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
+    // PENDING(logins): LoginsPort is read-only; only Logins may perform a sign-out.
+    throw new FleetCatalogRefusal(
+      'fleet_change_refused',
+      'Sign out through Logins; its port does not expose sign-out here.',
+    );
   }
 
   async #stageExecutor<Change extends SetupChange | CloneChange>(
@@ -1017,16 +991,11 @@ export class FleetCatalogService {
       }
     }
     if (payload.kind === 'sign-out') {
-      let outcome: LoginSignOutOutcome;
-      try {
-        // U13's executor: the harness's own logout against the one store. Never re-implemented here.
-        outcome = await this.deps.credentials.signOut(payload.preview.credential);
-      } catch (error) {
-        throw error instanceof LoginRefusal ? new FleetCatalogRefusal('fleet_change_failed', error.message) : error;
-      }
-      return outcome.outcome === 'signed-out'
-        ? { outcome: 'signed-out', credential: outcome.credential }
-        : { outcome: 'sign-out-failed', reason: outcome.reason, credential: outcome.credential };
+      // PENDING(logins): LoginsPort is read-only; only Logins may perform a sign-out.
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        'Sign out through Logins; its port does not expose sign-out here.',
+      );
     }
     return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run(caller) };
   }

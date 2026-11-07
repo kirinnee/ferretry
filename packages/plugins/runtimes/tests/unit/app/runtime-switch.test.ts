@@ -21,8 +21,8 @@ describe('runtimeControlApi', () => {
     await api.runtime('s-1', { action: 'model', model: 'gpt-6', effort: 'high' }, 'req-1');
     expect(calls).toEqual([
       {
-        route: 'POST /v1/ferrets/:sessionId/runtime',
-        params: { sessionId: 's-1' },
+        route: 'POST /v1/ferrets/:id/runtime',
+        params: { id: 's-1' },
         query: undefined,
         body: { action: 'model', model: 'gpt-6', effort: 'high' },
       },

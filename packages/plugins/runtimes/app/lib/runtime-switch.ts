@@ -18,18 +18,17 @@ export interface RuntimeControlApi {
   runtime(sessionId: string, command: RuntimeControlCommand, requestId: string): Promise<void>;
 }
 
-// GAP(ferrets): both routes are a ferret's own (parity R-0365, R-0135) and are not in Ferrets' manifest yet; the
-// session document has no contract schema, so the read is checked for the few fields the pickers use and no more.
-export const RUNTIME_SWITCH_ROUTE = 'POST /v1/ferrets/:sessionId/runtime' as const;
-export const FERRET_ROUTE = 'GET /v1/ferrets/:sessionId' as const;
+// Runtime control is owned by Runtimes; Ferrets keeps the ferret detail GET.
+export const RUNTIME_SWITCH_ROUTE = 'POST /v1/ferrets/:id/runtime' as const;
+export const FERRET_ROUTE = 'GET /v1/ferrets/:id' as const;
 
 /**
  * GAP(kernel): `PluginClient.call` carries no headers, so the per-click request id (the daemon's idempotency key
- * for this act) cannot ride along yet; the daemon applies each call once as it arrives.
+ * for this act) cannot ride along yet; the route refuses controls without that key until the client supports headers.
  */
 export const runtimeControlApi = (client: RuntimesClient): RuntimeControlApi => ({
   runtime: async (sessionId, command) => {
-    await client.call(RUNTIME_SWITCH_ROUTE, { params: { sessionId }, body: command });
+    await client.call(RUNTIME_SWITCH_ROUTE, { params: { id: sessionId }, body: command });
   },
 });
 
@@ -74,4 +73,4 @@ export const parseRuntimeSessionView = (value: unknown): RuntimeSessionView => {
 };
 
 export const readRuntimeSessionView = async (client: RuntimesClient, sessionId: string): Promise<RuntimeSessionView> =>
-  parseRuntimeSessionView(await client.call(FERRET_ROUTE, { params: { sessionId } }));
+  parseRuntimeSessionView(await client.call(FERRET_ROUTE, { params: { id: sessionId } }));

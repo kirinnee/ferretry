@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { registry } from '../../../../../cli/src/generated/commands.ts';
+import { buildVerbTable } from '../../../../../cli/src/lib/verbs.ts';
 
 const pluginDir = join(import.meta.dir, '../../..');
 const page = readFileSync(join(pluginDir, 'app/get-started/index.html'), 'utf8');
-const installation = readFileSync(join(pluginDir, '../../../INSTALLATION.md'), 'utf8');
 /** The prompt's golden copy. Changing the prompt means changing this file too, in the same review. */
 const goldenPrompt = readFileSync(join(pluginDir, 'tests/fixtures/agent-setup-prompt.txt'), 'utf8').replace(/\n$/, '');
 
@@ -24,16 +25,9 @@ const pageCommands = [...page.matchAll(/<code[^>]* data-command>([^<]*)<\/code>/
 /** The prompt exactly as the page ships it, before any script runs. */
 const shippedPrompt = decode(page.match(/<code data-agent-prompt>([^<]*)<\/code>/)?.[1] ?? '');
 
-/** Every line inside a fenced block of INSTALLATION.md, with its list indentation dropped. */
-const fencedLines = (() => {
-  const lines: string[] = [];
-  let fenced = false;
-  for (const line of installation.split('\n')) {
-    if (/^ *```/.test(line)) fenced = !fenced;
-    else if (fenced) lines.push(line.replace(/^ +/, ''));
-  }
-  return new Set(lines);
-})();
+const verbs = buildVerbTable(registry).entries.map(entry => entry.line);
+const isRegistered = (command: string): boolean =>
+  !command.startsWith('fy ') || verbs.some(verb => command === `fy ${verb}` || command.startsWith(`fy ${verb} `));
 
 const METHODS = ['brew', 'nix', 'home-manager', 'installer'] as const;
 
@@ -59,7 +53,7 @@ describe('the static /get-started document', () => {
     expect(page).not.toContain('fy daemon install');
   });
 
-  it('gives every install method a tab whose commands end with fy setup', () => {
+  it('gives every install method a tab whose commands end with fy onboard', () => {
     for (const method of METHODS) {
       const panel = page.match(
         new RegExp(`<div[^>]*role="tabpanel"[^>]*data-method="${method}"[^>]*>([\\s\\S]*?)\\n {14}</div>`),
@@ -68,21 +62,21 @@ describe('the static /get-started document', () => {
       const commands = [...(panel?.[1] ?? '').matchAll(/<code[^>]* data-command>([^<]*)<\/code>/g)].map(match =>
         decode(match[1] ?? ''),
       );
-      expect(commands.at(-1)).toMatch(/fy setup$/);
+      expect(commands.at(-1)).toMatch(/fy onboard$/);
     }
   });
 
   it('shows the troubleshooting commands and the build-time release version', () => {
-    for (const command of ['fy setup --check', 'fy daemon status', 'fy daemon logs', 'fy daemon reset']) {
+    for (const command of ['fy onboard --check', 'fy daemon status', 'fy doctor', 'fy onboard reset']) {
       expect(pageCommands).toContain(command);
     }
     expect(pageCommands).toContain('xattr -d com.apple.quarantine "$(command -v fy)"');
     expect(page).toContain('v%FY_RELEASE_VERSION%');
   });
 
-  it('shows only commands INSTALLATION.md carries, in a fenced block, exactly as written', () => {
+  it('shows only registered fy commands', () => {
     expect(pageCommands.length).toBeGreaterThan(10);
-    expect(pageCommands.filter(command => !fencedLines.has(command))).toEqual([]);
+    expect(pageCommands.filter(command => !isRegistered(command))).toEqual([]);
   });
 
   it('keeps the existing app as the secondary step for a device that is already paired', () => {
@@ -125,7 +119,7 @@ describe('the "Or let your agent do it" prompt', () => {
     for (const probe of [
       'uname -sm',
       'command -v brew nix fy home-manager darwin-rebuild',
-      'fy setup --check --json',
+      'fy onboard --check --json',
     ]) {
       expect(lines).toContain(`   ${probe}`);
     }
@@ -137,17 +131,18 @@ describe('the "Or let your agent do it" prompt', () => {
     }
   });
 
-  it('hands over only commands INSTALLATION.md carries, and every tab command but the interactive fy setup', () => {
+  it('hands over registered commands and every tab install command', () => {
     const handed = lines.filter(line => /^ {5}\S/.test(line)).map(line => line.trim());
     expect(handed.length).toBeGreaterThan(8);
-    expect(handed.filter(command => !fencedLines.has(command))).toEqual([]);
+    expect(handed.filter(command => !isRegistered(command))).toEqual([]);
     const tabCommands = pageCommands.filter(
-      command => !/^fy (setup --check|daemon |pair)|^xattr/.test(command) && command !== 'fy setup',
+      command =>
+        !/^fy (onboard --check|onboard reset|daemon |doctor|pair)|^xattr/.test(command) && command !== 'fy onboard',
     );
     for (const command of tabCommands) {
-      expect(shippedPrompt).toContain(command.endsWith(' fy setup') ? `${command} --yes` : command);
+      expect(shippedPrompt).toContain(command.endsWith(' fy onboard') ? `${command} --yes` : command);
     }
-    expect(handed).toContain('fy setup --yes');
+    expect(handed).toContain('fy onboard --yes');
   });
 
   it('stays short enough to read before pasting', () => {
@@ -158,13 +153,14 @@ describe('the "Or let your agent do it" prompt', () => {
   it('names only fy commands this CLI has for afterwards, and the in-app update', () => {
     for (const command of [
       'fy daemon status',
-      'fy credentials',
-      'fy runtimes',
-      'fy import conversations',
-      'fy daemon setup',
+      'fy login ls',
+      'fy runtime ls',
+      'fy runtime import claude',
+      'fy runtime import codex',
+      'fy onboard',
     ]) {
       expect(shippedPrompt).toContain(command);
     }
-    expect(shippedPrompt).toContain('fy daemon update, or the Update button in the app');
+    expect(shippedPrompt).toContain('fy update, or the Update button in the app');
   });
 });

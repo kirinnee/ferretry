@@ -12,15 +12,15 @@
  */
 
 import type { ReactNode } from 'react';
+import type { HostedRelayFallback } from './pending-connections.ts';
 
 import {
-  type HostedRelayFallback,
   HOSTED_RELAY_DISABLED_NOTE,
   HOSTED_RELAY_DISCLOSURE,
   HOSTED_RELAY_ROW_NOTE,
   HOSTED_RELAY_UNDETERMINED_NOTE,
   TRANSPORT_NOT_WIRED_NOTE,
-} from './hosted-relay.ts';
+} from './connection-disclosure.ts';
 
 export interface OnboardingConnectionNoteProps {
   /**

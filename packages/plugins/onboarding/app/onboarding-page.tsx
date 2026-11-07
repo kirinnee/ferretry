@@ -57,7 +57,8 @@ import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useStat
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
-import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
+import type { HostedRelayFallback } from './pending-connections.ts';
+import { activeCarrierStatus, carrierDisclosure } from './connection-disclosure.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
 import { OnboardingConnectionNote } from './onboarding-connection-note.tsx';

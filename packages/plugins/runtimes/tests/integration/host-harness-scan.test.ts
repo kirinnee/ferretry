@@ -8,12 +8,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { HostHarnessScanner, type HostHarnessScanDeps } from '../../daemon/adapters/host-harness-scan.ts';
-import type { StoredCredentialMaterialReader } from '../../daemon/adapters/ports.ts';
+import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { planImport } from '../../daemon/lib/account/import.ts';
-import { fileCredentials, nodeHostFiles } from './support/node-host.ts';
-
-const NOW = Date.parse('2026-10-13T00:00:00Z');
-const HOUR = 3_600_000;
+import { nodeHostFiles } from './support/node-host.ts';
 
 const created: string[] = [];
 afterEach(async () => {
@@ -31,29 +28,28 @@ async function put(file: string, content: string): Promise<void> {
   await writeFile(file, content);
 }
 
-/** An unsigned JWT with these claims: shaped like Codex's, worthless as a token. */
-const jwt = (claims: Record<string, unknown>): string =>
-  `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.sig`;
-
 const scanner = (userHome: string, patch: Partial<HostHarnessScanDeps> = {}): HostHarnessScanner =>
   new HostHarnessScanner({
     files: nodeHostFiles,
     userHome,
     commands: { resolve: name => (['claude', 'codex', 'npx'].includes(name) ? `/bin/${name}` : undefined) },
-    credentials: fileCredentials,
-    now: () => NOW,
+    logins: fakeLogins([
+      sampleLogin('claude-you', { email: 'person@example.test' }),
+      sampleLogin('codex-you', {
+        harness: 'codex',
+        harnesses: ['codex'],
+        email: 'codex@example.test',
+        status: { ...sampleLogin('codex-you').status, word: 'refresh_due' },
+      }),
+    ]),
     maxDocumentBytes: 4096,
     ...patch,
   });
 
 describe('HostHarnessScanner — a set-up machine', () => {
-  it('should read both harnesses where they keep their setup, and classify each login', async () => {
+  it('should read both harnesses where they keep their setup, and read safe sign-in facts', async () => {
     // Arrange
     const user = await home();
-    await put(
-      path.join(user, '.claude/.credentials.json'),
-      JSON.stringify({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: NOW + HOUR } }),
-    );
     await put(path.join(user, '.claude/CLAUDE.md'), '# Rules\n');
     await put(path.join(user, '.claude/settings.json'), JSON.stringify({ model: 'claude-opus-5' }));
     await put(
@@ -75,16 +71,6 @@ describe('HostHarnessScanner — a set-up machine', () => {
     await put(path.join(user, '.claude/skills/stray-file'), 'not a skill');
     await put(path.join(user, '.claude/skills/.hidden/SKILL.md'), 'hidden');
 
-    await put(
-      path.join(user, '.codex/auth.json'),
-      JSON.stringify({
-        tokens: {
-          access_token: jwt({ exp: Math.trunc((NOW - HOUR) / 1000) }),
-          refresh_token: 'r',
-          id_token: jwt({ email: 'codex@example.test' }),
-        },
-      }),
-    );
     await put(path.join(user, '.codex/AGENTS.md'), '# Rules\n');
     await put(path.join(user, '.codex/config.toml'), 'model = "gpt-5.6"\n');
     await put(path.join(user, '.codex/hooks.json'), '{}');
@@ -128,66 +114,51 @@ describe('HostHarnessScanner — a set-up machine', () => {
 });
 
 describe('HostHarnessScanner — logins', () => {
-  it('should say not signed in when there is no login, and not installed when no command resolves', async () => {
+  it('should report unknown for an unregistered host, and not installed when no command resolves', async () => {
     const user = await home();
-    const [claude, codex] = await scanner(user, { commands: { resolve: () => undefined } }).scan();
-    should(claude?.login).deepEqual({ state: 'not-signed-in' });
+    const [claude, codex] = await scanner(user, {
+      commands: { resolve: () => undefined },
+      logins: fakeLogins(),
+    }).scan();
+    should(claude?.login.state).equal('unknown');
+    should(codex?.login.state).equal('unknown');
     should(claude?.command).be.undefined();
-    should(codex?.login).deepEqual({ state: 'not-signed-in' });
-    should(claude?.instructions).deepEqual({ kind: 'absent', source: path.join(user, '.claude/CLAUDE.md') });
   });
-
-  it('should refuse to share a Codex login kept in a keyring (G5)', async () => {
+  it('should not infer sign-in from a Codex keyring preference (G5)', async () => {
     const user = await home();
     await put(path.join(user, '.codex/config.toml'), 'cli_auth_credentials_store = "keyring"\n');
-    const [, codex] = await scanner(user).scan();
-    should(codex?.login.state).equal('not-shareable');
-    should(codex?.login.reason).match(/system keyring/);
+    const [, codex] = await scanner(user, { logins: fakeLogins() }).scan();
+    should(codex?.login.state).equal('unknown');
   });
-
-  it('should explain a missing auth.json when Codex may be using the keyring', async () => {
+  it('should not infer a missing login from a Codex auto store preference', async () => {
     const user = await home();
     await put(path.join(user, '.codex/config.toml'), 'cli_auth_credentials_store = "auto"\n');
-    const [, codex] = await scanner(user).scan();
-    should(codex?.login.state).equal('not-signed-in');
-    should(codex?.login.reason).match(/may be in the system keyring/);
+    const [, codex] = await scanner(user, { logins: fakeLogins() }).scan();
+    should(codex?.login.state).equal('unknown');
   });
-
-  it('should report a damaged credential as unreadable, never as signed out', async () => {
+  it('should keep an inconclusive status unknown, never signed out', async () => {
     const user = await home();
-    await put(path.join(user, '.claude/.credentials.json'), 'not json');
-    await put(path.join(user, '.codex/auth.json'), 'not json');
-    const [claude, codex] = await scanner(user).scan();
-    should(claude?.login).deepEqual({ state: 'unreadable', reason: 'the Claude credential is not readable JSON' });
-    should(codex?.login.state).equal('unreadable');
+    const row = sampleLogin('you');
+    const [claude] = await scanner(user, {
+      logins: fakeLogins([{ ...row, status: { ...row.status, lastCheckInconclusive: true } }]),
+    }).scan();
+    should(claude?.login.state).equal('unknown');
   });
-
-  it('should turn a throwing credential reader into an unreadable login', async () => {
+  it('should turn a throwing facts port into an unknown login', async () => {
     const user = await home();
-    const credentials: StoredCredentialMaterialReader = {
-      storedMaterial: async () => {
+    const logins = {
+      list: async () => {
         throw new Error('locked');
       },
     };
-    const [claude] = await scanner(user, { credentials }).scan();
-    should(claude?.login).deepEqual({ state: 'unreadable', reason: 'locked' });
+    const [claude] = await scanner(user, { logins }).scan();
+    should(claude?.login.state).equal('unknown');
   });
-
-  it('should read no email from a Codex token without one', async () => {
+  it('should read email only from safe Logins facts', async () => {
     const user = await home();
-    await put(
-      path.join(user, '.codex/auth.json'),
-      JSON.stringify({ tokens: { access_token: jwt({ exp: Math.trunc((NOW + HOUR) / 1000) }), id_token: 'no-dots' } }),
-    );
-    const [, codex] = await scanner(user).scan();
+    const row = sampleLogin('codex-you', { harness: 'codex', harnesses: ['codex'] });
+    const [, codex] = await scanner(user, { logins: fakeLogins([row]) }).scan();
     should(codex?.login).deepEqual({ state: 'signed-in' });
-    await put(
-      path.join(user, '.codex/auth.json'),
-      JSON.stringify({
-        tokens: { access_token: jwt({ exp: Math.trunc((NOW + HOUR) / 1000) }), id_token: 'a.!!!.c' },
-      }),
-    );
-    should((await scanner(user).scan())[1]?.login).deepEqual({ state: 'signed-in' });
   });
 });
 

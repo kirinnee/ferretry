@@ -2,18 +2,14 @@
  * The seams the Runtimes services stand on. Each is a narrow interface: the services never touch a disk, a clock or
  * another plugin, they ask one of these, and `daemon/index.ts` builds the real answer from the kernel's ports.
  *
- * Three of them exist because the rebuild has not given plugins a way to do the thing yet:
+ * The config writer remains pending until the kernel exposes one:
  *
  *  - {@link RuntimeConfigWriter}: plugins have NO config write port (GAP(kernel)); only the kernel's host can write
  *    `config/**`. The apply pipeline is written against this interface and tested with a fake; the daemon wires
  *    {@link refusingConfigWriter} until the kernel offers a writer.
- *  - {@link LoginsReader}: the sign-in surface is Logins' (GAP(logins)). Runtimes may not import another plugin's
- *    contract, so what it needs from a login (its status word, its sign-out words) is the shape below.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import type { FleetDocumentWrite } from '../provisioning.ts';
-import type { CredentialStatusWord, CredentialView } from '../../../contract/index.ts';
 
 // ── config writes ────────────────────────────────────────────────────────────────────────────────
 
@@ -93,47 +89,4 @@ export function configFileWriteRefusal(
     return `this device may not ${what} ${path}`;
   }
   return undefined;
-}
-
-// ── logins ───────────────────────────────────────────────────────────────────────────────────────
-
-/** What a runtime change reads about one login. GAP(logins): the rest of a login's view is Logins' own. */
-export interface LoginFacts {
-  readonly id: string;
-  /** The harness it drives. A login that drives both is listed once per harness by Logins; Runtimes reads the first. */
-  readonly harness: HarnessKey;
-  /** Switched off: a start on any runtime of this login refuses. */
-  readonly disabled?: { readonly reason?: string; readonly until?: string };
-  readonly email?: string;
-  readonly status: { readonly word: CredentialStatusWord };
-  readonly signOut: {
-    readonly available: boolean;
-    readonly sentence: string;
-    readonly runtimesAffected: number;
-    readonly signsOutTerminal: boolean;
-  };
-}
-
-/** The logins on this machine. */
-export interface LoginList {
-  readonly logins: readonly LoginFacts[];
-}
-
-/** How a sign-out ended. `credential` is the login as Logins answers for it afterwards. */
-export type LoginSignOutOutcome =
-  | { readonly outcome: 'signed-out'; readonly credential: CredentialView }
-  | { readonly outcome: 'sign-out-failed'; readonly reason: string; readonly credential: CredentialView };
-
-/** A sign-out refused before anything happened. */
-export class LoginRefusal extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'LoginRefusal';
-  }
-}
-
-/** The sign-in surface, as the catalogue needs it. GAP(logins). */
-export interface LoginsReader {
-  list(): Promise<LoginList>;
-  signOut(id: string): Promise<LoginSignOutOutcome>;
 }

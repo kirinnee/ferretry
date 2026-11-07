@@ -36,4 +36,4 @@ Also for the shell (not this package):
   app/landing-geometry.ts is used by the browser harness that measures the static pages.
 
 Everything else in app/ (onboarding-model, onboarding-progress, first-run-entry, setup-handoff, command-syntax,
-hosted-relay, device-kind, link-costs, onboarding-screen, index) is pure and tested without any of the above.
+connection-disclosure, pending-connections, device-kind, link-costs, onboarding-screen, index) is pure and tested without any of the above.

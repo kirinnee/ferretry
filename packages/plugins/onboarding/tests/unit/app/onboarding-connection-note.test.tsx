@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
-import { CHECKING_HOSTED_RELAY } from '../../../app/hosted-relay.ts';
+import { CHECKING_HOSTED_RELAY } from '../../../app/pending-connections.ts';
 import { OnboardingConnectionNote } from '../../../app/onboarding-connection-note.tsx';
-import { mount, must } from '../../support/dom.ts';
+import { mount, must } from '../support/dom.ts';
 
 describe('the connection note', () => {
   it('says how other devices reach the daemon and asks nothing', async () => {

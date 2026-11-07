@@ -492,7 +492,7 @@ describe('clone settings: the record keeps digests, never values', () => {
 });
 
 describe('clone settings: controls are one keyed document', () => {
-  const machine = parseAccountModel({ version: 2 }).machine;
+  const machine = parseAccountModel({ version: 1 }).machine;
   const mine = controlsDocument(machine);
   const controls = (theirs: object, patch: Partial<CloneSettingsInput> = {}): CloneSettingsInput => ({
     path: 'controls',

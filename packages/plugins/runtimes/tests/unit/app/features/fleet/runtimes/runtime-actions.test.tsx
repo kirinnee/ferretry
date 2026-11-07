@@ -517,7 +517,7 @@ describe('Runtime actions: Remove', () => {
             : stagedFrom(call),
         [APPLY]: COMMITTED,
         'GET /v1/runtimes': {
-          format: 'version-2',
+          format: 'present',
           runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
             ...(entry as object),
             agent: true,

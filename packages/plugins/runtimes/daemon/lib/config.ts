@@ -1,5 +1,5 @@
 /**
- * Schema pieces the version-2 fleet configuration (`./account/schema.ts`) is built from: safe names,
+ * Schema pieces the format-1 fleet configuration (`./account/schema.ts`) is built from: safe names,
  * launch environment, aliases and the usage block — the one place untrusted YAML for each becomes a
  * domain type.
  *

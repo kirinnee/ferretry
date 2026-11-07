@@ -92,7 +92,7 @@ const targetOf = (side: Side, link: Record<string, unknown> = { clonedFromKey: K
     targetFiles.push({ path: 'components/instructions/notes.md', content: side.notes });
   }
   const model = parseAccountModel({
-    version: 2,
+    version: 1,
     credentials: {
       'claude-you': { harness: 'claude', store: 'ferretry', label: 'you', ...FROM, clonedFromKey: KEY_LOGIN },
     },
@@ -382,7 +382,7 @@ describe('matching', () => {
 
   it('should not pair an item that says it came from another machine', () => {
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         instructions: { main: { file: MAIN_PATH, clonedFrom: 'other', clonedFromDaemon: 'daemon-other' } },
       },
@@ -664,7 +664,7 @@ describe('resolving logins from the record and from keys', () => {
       ...targetOf({ main: 'A' }).model,
     });
     should(resolveCloneLogins(bundle, one, undefined).matched.get('claude-you')).equal('claude-you');
-    const none = parseAccountModel({ version: 2 });
+    const none = parseAccountModel({ version: 1 });
     const resolved = resolveCloneLogins(bundle, none, undefined);
     should(resolved.matched.size).equal(0);
     should(resolved.ask.size).equal(0);
@@ -1119,7 +1119,7 @@ const sourceBundle = (patch: Record<string, unknown> = {}): CloneBundle =>
 /** An update of an otherwise empty machine (or `target`) from `bundle`, with no record. */
 const bareInput = (
   bundle: CloneBundle,
-  target = parseAccountModel({ version: 2 }),
+  target = parseAccountModel({ version: 1 }),
   targetFiles: { path: string; content: string }[] = [],
   patch: Partial<CloneUpdateInput> = {},
 ): CloneUpdateInput => ({
@@ -1156,7 +1156,7 @@ describe('a taken item never writes a path another item here uses (#F544 finding
       ],
     });
   const sharing = parseAccountModel({
-    version: 2,
+    version: 1,
     components: {
       hooks: { a: hooksAt('components/hooks/shared', KEY_A), b: hooksAt('components/hooks/shared', KEY_B) },
     },
@@ -1206,7 +1206,7 @@ describe('a taken item never writes a path another item here uses (#F544 finding
       ],
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         instructions: {
           x: { file: 'components/instructions/shared.md', ...FROM, clonedFromKey: KEY_A },
@@ -1241,7 +1241,7 @@ describe('a taken item never writes a path another item here uses (#F544 finding
       ],
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         hooks: { h: hooksAt('components/shared', KEY_A) },
         instructions: { i: { file: 'components/shared/README.md', ...FROM, clonedFromKey: KEY_B } },
@@ -1276,7 +1276,7 @@ describe('a taken item never writes a path another item here uses (#F544 finding
       ],
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         skills: { pack: { items: ['review', 'own'], ...FROM, clonedFromKey: KEY_A }, local: { items: ['review'] } },
       },
@@ -1319,7 +1319,7 @@ describe('a moved path respects folder ownership both ways (#F544 finding 1, anc
     });
   const targetWith = (hookDirectory = folder) =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         hooks: { h: hooksAt(hookDirectory, KEY_A) },
         instructions: { i: { file: readme, ...FROM, clonedFromKey: KEY_B } },
@@ -1380,7 +1380,7 @@ describe('a moved path respects folder ownership both ways (#F544 finding 1, anc
       files: [{ path: `${folder}/run.sh`, content: 'run' }],
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: { instructions: { own: { file: readme } } },
     });
     const analysis = analyseCloneUpdate(bareInput(bundle, target, [{ path: readme, content: 'mine' }]));
@@ -1448,7 +1448,7 @@ describe('an owner reached through an alias is the same owner (#F544 finding 1, 
     });
   const withAlias = (alias: string) =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       components: { hooks: { a: hooksAt(shared, KEY_A), b: hooksAt(alias, KEY_B) } },
     });
   const filesAt = (...spellings: string[]) => [
@@ -1550,7 +1550,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
   };
   const withOwner = (alias: string) =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       components: { hooks: { a: hooksAt(shared, KEY_A), b: hooksAt(alias, KEY_B) } },
     });
   const here = [
@@ -1590,7 +1590,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
       profiles: { p: { layers: ['hooks/c'] } },
       files: [{ path: 'components/hooks/c/run.sh', content: 'new' }],
     });
-    const target = parseAccountModel({ version: 2, components: { hooks: { b: hooksAt('.', KEY_B) } } });
+    const target = parseAccountModel({ version: 1, components: { hooks: { b: hooksAt('.', KEY_B) } } });
     const analysis = analyseCloneUpdate(bareInput(bundle, target, here));
 
     // Act
@@ -1607,7 +1607,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
     const KEY_P = 'iiiiiiiiiiiiiiiiiiiiiiiiii';
     const KEY_Q = 'jjjjjjjjjjjjjjjjjjjjjjjjjj';
     const KEY_R = 'kkkkkkkkkkkkkkkkkkkkkkkkkk';
-    const owner = parseAccountModel({ version: 2, components: { hooks: { b: hooksAt('.', KEY_B) } } });
+    const owner = parseAccountModel({ version: 1, components: { hooks: { b: hooksAt('.', KEY_B) } } });
     const hookC = { hooks: { c: { harness: 'claude', directory: 'components/hooks/c' } } };
     const fileC = [{ path: 'components/hooks/c/run.sh', content: 'new' }];
     const chain = (target = owner, direct = true) => {
@@ -1675,7 +1675,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
 
     it('should still tick every item of the chain when nothing blocks it', () => {
       // Arrange + Act: the same chain onto a machine that owns nothing.
-      const analysis = chain(parseAccountModel({ version: 2 }), false);
+      const analysis = chain(parseAccountModel({ version: 1 }), false);
       const plan = planCloneUpdate(analysis, { decisions: {} });
 
       // Assert
@@ -1690,7 +1690,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
       const keyed = (layers: string[]) => ({ layers, clonedFromKey: KEY_P });
       const withP = (layers: string[]) =>
         parseAccountModel({
-          version: 2,
+          version: 1,
           components: { hooks: { b: hooksAt('.', KEY_B) } },
           profiles: { p: keyed(layers) },
         });
@@ -1778,7 +1778,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
       components: { hooks: { c: { harness: 'claude', directory: 'components/hooks/c' } } },
       files: [{ path: 'components/hooks/c/run.sh', content: 'new' }],
     });
-    const target = parseAccountModel({ version: 2, components: { hooks: { b: hooksAt('.', KEY_B) } } });
+    const target = parseAccountModel({ version: 1, components: { hooks: { b: hooksAt('.', KEY_B) } } });
     const analysis = analyseCloneUpdate(bareInput(bundle, target, here));
 
     // Act
@@ -1834,7 +1834,7 @@ describe('a taken item lands exactly where its review listed it (#F575 finding 2
         files: [{ path: 'components/hooks/source/run.sh', content: 'new' }],
       });
       const alias = `${prefix}components/hooks/old`;
-      const target = parseAccountModel({ version: 2, components: { hooks: { a: hooksAt(alias, KEY_A) } } });
+      const target = parseAccountModel({ version: 1, components: { hooks: { a: hooksAt(alias, KEY_A) } } });
       const files = [
         { path: `${alias}/run.sh`, content: 'old' },
         { path: `${alias}/gone.sh`, content: 'dropped by the source' },
@@ -1869,7 +1869,7 @@ describe('a taken item lands exactly where its review listed it (#F575 finding 2
     });
     const alias = `${prefix}components/hooks/old.json`;
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: { hooks: { a: { harness: 'claude', file: alias, ...FROM, clonedFromKey: KEY_A } } },
     });
     const analysis = analyseCloneUpdate(
@@ -1896,7 +1896,7 @@ describe('an omitted subtree protects what is beneath it (#F544 finding 6, subtr
     notCopied: [{ path: 'components/hooks/a/sub', reason: 'it is a link or a special file' }],
   });
   const target = parseAccountModel({
-    version: 2,
+    version: 1,
     components: { hooks: { a: hooksAt('components/hooks/a', KEY_A) } },
   });
   const files = (...extra: { path: string; content: string }[]) => [
@@ -1956,7 +1956,7 @@ describe('a carried file beneath a folder marked not copied (#F575 finding 3)', 
       notCopied: [{ path: marker, reason: 'it is a link or a special file' }],
     });
   const target = parseAccountModel({
-    version: 2,
+    version: 1,
     components: { hooks: { a: hooksAt('components/hooks/a', KEY_A) } },
   });
 
@@ -2012,7 +2012,7 @@ describe('profile and runtime settings an update writes (#F575 finding 4)', () =
     });
   const mine = (profile: Record<string, unknown>, runtime: Record<string, unknown>) =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: { api: { harness: 'claude', store: 'ferretry', label: 'api', ...FROM, clonedFromKey: KEY_L } },
       profiles: { default: { layers: [], clonedFromKey: KEY_P, ...profile } },
       runtimes: { agent: { credential: 'api', profile: 'default', agent: true, clonedFromKey: KEY_R, ...runtime } },
@@ -2152,7 +2152,7 @@ describe('an environment login a copy adds (#F544 finding 3)', () => {
 describe('the review binds what an apply acts on (#F544 finding 4)', () => {
   it('should name a different review when a gone item was edited here after the review', () => {
     const goneTarget = (command: string) =>
-      parseAccountModel({ version: 2, components: { mcp: { old: { command, ...FROM, clonedFromKey: KEY_A } } } });
+      parseAccountModel({ version: 1, components: { mcp: { old: { command, ...FROM, clonedFromKey: KEY_A } } } });
     const before = analyseCloneUpdate(bareInput(sourceBundle(), goneTarget('before-review')));
     const after = analyseCloneUpdate(bareInput(sourceBundle(), goneTarget('edited-here-after-review')));
     should(reviewCloneUpdate(before).items).match([{ ref: 'mcp/old', outcome: 'gone' }]);
@@ -2167,7 +2167,7 @@ describe('the review binds what an apply acts on (#F544 finding 4)', () => {
     });
     const at = (directory: string) =>
       analyseCloneUpdate(
-        bareInput(bundle, parseAccountModel({ version: 2, components: { hooks: { a: hooksAt(directory, KEY_A) } } }), [
+        bareInput(bundle, parseAccountModel({ version: 1, components: { hooks: { a: hooksAt(directory, KEY_A) } } }), [
           { path: `${directory}/run.sh`, content: 'local' },
         ]),
       );
@@ -2263,7 +2263,7 @@ describe('files a take removes (#F544 finding 6)', () => {
     notCopied: [{ path: 'components/hooks/a/huge.bin', reason: 'too large' }],
   });
   const folderTarget = parseAccountModel({
-    version: 2,
+    version: 1,
     components: { hooks: { a: hooksAt('components/hooks/a', KEY_A) } },
   });
   const folderFiles = [
@@ -2294,7 +2294,7 @@ describe('files a take removes (#F544 finding 6)', () => {
       components: { settings: { s: { harness: 'claude', flags: ['--verbose'] } } },
     });
     const target = parseAccountModel({
-      version: 2,
+      version: 1,
       components: {
         settings: { s: { harness: 'claude', file: 'components/settings/s.json', ...FROM, clonedFromKey: KEY_A } },
       },
@@ -2311,7 +2311,7 @@ describe('matching a login by email or label after the record and the key (#F544
     sourceBundle({ credentials: [{ id: 'you', harness: 'claude-code', label: 'work', ...patch }] });
   const heldBy = (credentials: Record<string, Record<string, unknown>>) =>
     parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: Object.fromEntries(
         Object.entries(credentials).map(([id, held]) => [id, { harness: 'claude', store: 'ferretry', ...held }]),
       ),
@@ -2529,7 +2529,7 @@ const matrixTarget = (kind: Kind, v: string | undefined) => {
   }
   return {
     model: parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: {
         'claude-you': { harness: 'claude', store: 'ferretry', label: 'you', ...FROM, clonedFromKey: KEY_LOGIN },
       },

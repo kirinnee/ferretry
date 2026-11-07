@@ -12,7 +12,6 @@ import type {
   HostEntry,
   HostFiles,
   ProvisionerDisk,
-  StoredCredentialMaterialReader,
   TextStore,
 } from '../../../daemon/adapters/ports.ts';
 import { atomicTextWrite } from './text-write.ts';
@@ -83,22 +82,6 @@ export const nodeTextStore: TextStore = {
 export const fixedCommands = (found: Readonly<Record<string, string>>): CommandLocator => ({
   which: name => found[name],
 });
-
-/**
- * A {@link StoredCredentialMaterialReader} that reads the one file a resolution names (the Linux file store). A test's
- * stand-in for Logins' platform store: it classifies nothing and returns the blob a test wrote.
- */
-export const fileCredentials: StoredCredentialMaterialReader = {
-  storedMaterial: async resolution => {
-    const file = resolution.harness === 'claude' ? resolution.credentialFile : resolution.canonicalFile;
-    try {
-      return { outcome: 'found', blob: await readFile(file, 'utf8') };
-    } catch (error) {
-      if (missing(error)) return { outcome: 'absent' };
-      return { outcome: 'unreadable', reason: error instanceof Error ? error.message : String(error) };
-    }
-  },
-};
 
 const READ_PROOF = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 

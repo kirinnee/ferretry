@@ -17,7 +17,7 @@ import {
 
 /** A valid document with one of everything, so a test only varies what it is about. */
 const documentWith = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  version: 2,
+  version: 1,
   credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
   components: {
     instructions: { main: { file: 'components/instructions/main.md' } },
@@ -107,9 +107,9 @@ describe('AccountModelSchema', () => {
     should(actual).deepEqual([]);
   });
 
-  it('should refuse any version other than 2', () => {
+  it('should refuse any version other than 1', () => {
     // Act
-    const actual = messagesOf(documentWith({ version: 3 }));
+    const actual = messagesOf(documentWith({ version: 2 }));
 
     // Assert
     should(actual).matchAny(/^version: /);

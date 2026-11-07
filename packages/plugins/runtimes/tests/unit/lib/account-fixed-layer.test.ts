@@ -97,7 +97,7 @@ const profileWith = (
   settings: { flags?: string[]; body?: Record<string, unknown> },
 ): ResolvedProfile => {
   const model = parseAccountModel({
-    version: 2,
+    version: 1,
     components: {
       settings: {
         mine: {

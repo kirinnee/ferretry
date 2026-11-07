@@ -33,7 +33,7 @@ import {
   PairStage,
   ScanStage,
 } from '../../../app/onboarding-stages.tsx';
-import { interact, mount, must } from '../../support/dom.ts';
+import { interact, mount, must } from '../support/dom.ts';
 
 /** The bare setup page, which is what a reader can open on the other machine. */
 const PLAIN_URL = 'https://ferretry.example.invalid/setup';

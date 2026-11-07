@@ -8,7 +8,7 @@
  * `runtimes.default-changed` so a view wakes without polling.
  *
  * What the services stand on is `RuntimesAssembly`. {@link runtimesDaemon} takes a function that builds it from the
- * kernel's ports; the default builds the one that refuses in a sentence, because three things are not yet reachable
+ * kernel's ports; the default builds the one that refuses in a sentence, because host collaborators are not yet reachable
  * from a plugin:
  *
  *  - GAP(kernel): a config WRITE port. The apply pipeline writes through {@link RuntimeConfigWriter}
@@ -16,7 +16,7 @@
  *  - GAP(kernel): `permissions.roots` is empty and `RootName` is a fixed set, so the state home's `fleet/` folder and
  *    the harnesses' own homes are out of reach; the adapters (`daemon/adapters`) are written against narrow host ports
  *    and take their real answers from the kernel when it opens those.
- *  - GAP(logins): the sign-in surface and each login's harness are Logins'; `LoginsReader` is the seam.
+ * LoginsPort is required and supplies safe sign-in facts independently of the pending host assembly.
  */
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
@@ -37,9 +37,9 @@ import {
 import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
-import type { LoginsReader } from './lib/service/ports.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import type { FleetSetupService } from './lib/service/setup-service.ts';
+import { ferretRuntimeRoutes } from './routes/ferret-runtime.ts';
 import { fleetCatalogRoutes } from './routes/fleet-catalog.ts';
 import { fleetSetupRoutes } from './routes/fleet-setup.ts';
 import { RecommendError, type RecommendSubsystem, recommendRoutes } from './routes/recommend.ts';
@@ -69,8 +69,8 @@ export interface RuntimesAssembly {
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
   >;
   readonly recommend: RecommendSubsystem;
-  /** The sign-in surface: which harness each login drives and whether it is signed in. */
-  readonly logins: LoginsReader;
+  /** Running-ferret model discovery and controls. Pending until Ferrets exposes these operations. */
+  readonly runtime?: import('./routes/ferret-runtime.ts').FerretRuntimeSubsystem;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -81,14 +81,13 @@ export const RECOMMENDER_NOT_WIRED =
 
 /** The assembly of a daemon whose host seams are not wired: every read and change answers in a sentence. */
 export const unavailableAssembly: RuntimesAssembler = ctx => {
-  const catalogDeps = unavailableCatalogDeps(() => ctx.kernel.clock.nowMs());
+  const catalogDeps = unavailableCatalogDeps(() => ctx.kernel.clock.nowMs(), ctx.needs.logins);
   const services = assembleServices(catalogDeps, unavailableSetupDeps);
   return {
     ...services,
     recommend: {
       recommend: async () => await Promise.reject(new RecommendError('unconfigured', RECOMMENDER_NOT_WIRED)),
     },
-    logins: catalogDeps.credentials,
   };
 };
 
@@ -111,7 +110,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         profiles: () => config.collection(profileItems),
         defaultSetting: () => config.file(runtimesFile)?.defaultRuntime,
         harnesses: () => ctx.needs.ferrets.harnesses(),
-        logins: assembly.logins,
+        logins: ctx.needs.logins,
         now: () => clock.nowMs(),
         install: async (change: CatalogInstallChange): Promise<ApplyOutcome> => {
           const { outcome } = await assembly.catalog.installCatalogItem(change);
@@ -160,6 +159,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
           ...fleetCatalogRoutes(assembly.catalog),
           ...fleetSetupRoutes(assembly.setup),
           ...recommendRoutes(assembly.recommend),
+          ...ferretRuntimeRoutes(assembly.runtime),
         },
         provides: { runtimes: api },
       };

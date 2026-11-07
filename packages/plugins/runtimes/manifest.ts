@@ -1,4 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
@@ -19,10 +20,8 @@ import {
  * the Clone export. Route paths follow §3.2 (`/v1/<id>/…`): today's `/v1/fleet/…` and `/v1/recommend` moved under
  * `/v1/runtimes/…`, descriptors copied from `lib/runtime/mounts/{fleet-catalog,fleet-setup,recommend}.ts`.
  *
- * NOT HERE, on purpose: the per-ferret runtime switch (`GET /v1/sessions/:sessionId/runtime-models`,
- * `POST …/runtime`) and revoking a ferret's credential (`POST …/revoke-credential`) are a ferret's own acts and belong
- * to Ferrets; `GET /v1/fleet/credentials`, `/presets`, `/login*` and `/v1/models*` belong to Logins; MCP and skill
- * installs to their plugins.
+ * The per-ferret runtime model/control routes belong here. Ferrets owns its detail GET; Logins owns sign-in.
+ * MCP and skill installs belong to their plugins.
  */
 export default definePlugin({
   id: 'runtimes',
@@ -33,11 +32,25 @@ export default definePlugin({
   kinds: ['runtime', 'command', 'view'],
   words: RUNTIMES_WORDS,
 
-  needs: { ferrets: FerretsPort },
+  needs: { ferrets: FerretsPort, logins: LoginsPort },
   provides: { runtimes: RuntimesPort },
 
   actions: {
     routes: [
+      route('GET /v1/ferrets/:id/runtime-models', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a live catalog read' },
+        guard: { none: 'model choices; no pane text' },
+      }),
+      route('POST /v1/ferrets/:id/runtime', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'the runtime subsystem records the control outcome' },
+        guard: { none: 'runtime control; no pane text' },
+      }),
       // ── the catalogue (fleet-catalog.ts): noStore on all eight, every answer is a statement about now ─────────────
       route('GET /v1/runtimes/machine', {
         minimum: 'operator',

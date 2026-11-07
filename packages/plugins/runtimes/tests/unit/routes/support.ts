@@ -6,6 +6,7 @@
  * The admission is Gate's stand-in (`StandInAdmission`), which reads the manifest's descriptors in today's boundary
  * order; it is not Gate, and these tests prove none of Gate's guarantees.
  */
+import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import type { CallStanding } from '@ferretry/kernel/contract';
 import { StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
@@ -33,7 +34,7 @@ export async function hostRuntimes(
   const daemon = runtimesDaemon(() => assembly) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
-    fakes: { ferrets },
+    fakes: { ferrets, logins: fakeLogins() },
     gate: new StandInAdmission(() => standing),
     ...(options.config === undefined ? {} : { config: options.config }),
   });

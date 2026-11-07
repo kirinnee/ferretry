@@ -62,7 +62,7 @@ const KEYS = {
 const bundleOf = (patch: Record<string, unknown> = {}): CloneBundle =>
   CloneBundleSchema.parse({ ...bundleShape, version: 1, daemon: 'daemon-source', keys: KEYS, ...patch });
 
-const emptyTarget = (patch: Record<string, unknown> = {}): AccountModel => parseAccountModel({ version: 2, ...patch });
+const emptyTarget = (patch: Record<string, unknown> = {}): AccountModel => parseAccountModel({ version: 1, ...patch });
 
 const item = (patch: Partial<CloneBaseItem> = {}): CloneBaseItem => ({
   kind: 'instructions',
@@ -80,7 +80,7 @@ const linkedModel = (...keys: string[]): AccountModel => linkedModelFrom(undefin
 /** As {@link linkedModel}, the items stamped with the daemon id a browser verified for their source. */
 const linkedModelFrom = (daemon: string | undefined, ...keys: string[]): AccountModel =>
   parseAccountModel({
-    version: 2,
+    version: 1,
     components: {
       instructions: Object.fromEntries(
         keys.map((key, index) => [
@@ -497,7 +497,7 @@ describe('applyCloneToBase', () => {
 
     it('should keep an entry linked here by a login the copy matched, though the login carries no key', () => {
       const model = parseAccountModel({
-        version: 2,
+        version: 1,
         credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
         components: { instructions: { main: { file: 'components/instructions/main.md', clonedFromKey: KEY_A } } },
       });

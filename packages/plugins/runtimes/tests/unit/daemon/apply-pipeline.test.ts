@@ -5,6 +5,7 @@
  * pipeline against a fake one: the documents land first (they are the source of truth), the plan follows with no documents
  * of its own, a refusing writer fails the apply in a sentence, and a configuration that moved after the preview is refused.
  */
+import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { FleetCatalogRefusal, FleetCatalogService } from '../../../daemon/lib/service/catalog-service.ts';
@@ -23,7 +24,7 @@ import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetCatalogServiceDeps } from '../../../daemon/lib/service/catalog-service.ts';
 
 const MODEL = parseAccountModel({
-  version: 2,
+  version: 1,
   credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
   components: {},
   profiles: { default: { layers: [] } },
@@ -60,7 +61,7 @@ function world(configWriter: RuntimeConfigWriter | 'fake' = 'fake'): World {
       written.push(documents.map(document => ({ path: document.path, content: document.content })));
     },
   };
-  const base = unavailableCatalogDeps(() => 1_794_052_800_000);
+  const base = unavailableCatalogDeps(() => 1_794_052_800_000, fakeLogins());
   const deps: FleetCatalogServiceDeps = {
     ...base,
     document: async () => ({
@@ -80,7 +81,7 @@ function world(configWriter: RuntimeConfigWriter | 'fake' = 'fake'): World {
     documentRevision: async () => 'absent',
     ids: async () => undefined,
     locate: () => '/usr/bin/claude',
-    credentials: { list: async () => ({ logins: [] }), signOut: async () => await Promise.reject(new Error('no')) },
+    credentials: fakeLogins(),
     configWriter: configWriter === 'fake' ? fake : configWriter,
     layout: LAYOUT,
     claudeStatusline: own => (own === undefined ? "'fy' statusline" : `'fy' statusline --then '${own}'`),
@@ -216,10 +217,18 @@ describe('the apply pipeline over a fake config writer', () => {
     should(w.order).deepEqual([]);
   });
 
+  it('should refuse catalog sign-out because LoginsPort exposes reads only', async () => {
+    const w = world();
+    await should(w.service.propose({ kind: 'credential.signout', id: 'claude-you' })).be.rejectedWith(
+      /Sign out through Logins/,
+    );
+    should(w.order).deepEqual([]);
+  });
+
   it('should answer a read in a sentence when the daemon has no host seam wired', async () => {
     // Arrange
     const service = assembleServices(
-      unavailableCatalogDeps(() => 0),
+      unavailableCatalogDeps(() => 0, fakeLogins()),
       unavailableSetupDeps,
     ).catalog;
 

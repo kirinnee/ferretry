@@ -22,16 +22,11 @@ import {
 import { runtimesConformance } from '../../../contract/testing/index.ts';
 import { RECOMMENDER_NOT_WIRED, type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
-import type { LoginFacts } from '../../../daemon/lib/service/ports.ts';
+import type { LoginView } from '@ferretry/plugin-logins/contract';
+import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import manifest from '../../../manifest.ts';
 
-const login = (id: string, overrides: Partial<LoginFacts> = {}): LoginFacts => ({
-  id,
-  harness: 'claude-code',
-  status: { word: 'ready' },
-  signOut: { available: true, sentence: 'Sign out', runtimesAffected: 1, signsOutTerminal: false },
-  ...overrides,
-});
+const login = sampleLogin;
 
 const FILES = {
   runtimes: {
@@ -50,7 +45,7 @@ interface Built {
 async function build(
   options: {
     readonly config?: Record<string, unknown>;
-    readonly logins?: readonly LoginFacts[];
+    readonly logins?: readonly LoginView[];
     readonly assembled?: boolean;
   } = {},
 ): Promise<Built> {
@@ -80,14 +75,13 @@ async function build(
     } as unknown as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],
     recommend: { recommend: async () => await Promise.reject(new Error('not used here')) },
-    logins: { list: async () => ({ logins }), signOut: async () => await Promise.reject(new Error('not used here')) },
   });
   const daemon = (
     options.assembled === false ? runtimesDaemon() : runtimesDaemon(assembly)
   ) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
-    fakes: { ferrets },
+    fakes: { ferrets, logins: fakeLogins(logins) },
     gate: new StandInAdmission(() => ownerStanding()),
     config: options.config ?? FILES,
   });
@@ -103,14 +97,14 @@ describe('the runtimes daemon', () => {
     // Act — a handler that exists answers something other than 404 (a refusal or a 200), never "no such route".
     for (const route of manifest.actions.routes) {
       const [method, path] = route.key.split(' ') as [string, string];
-      const concrete = path.replace(':proposalId', 'fy_fprop_abcdefghijklmnopqrstuv');
+      const concrete = path.replace(':proposalId', 'fy_fprop_abcdefghijklmnopqrstuv').replace(':id', 'f-1');
       const response = await host.request(method, concrete, method === 'POST' ? { body: {} } : {});
       if (response.status === 404 && response.json<{ code?: string }>().code !== 'fleet_change_unknown')
         missing.push(route.key);
     }
 
     // Assert
-    should(manifest.actions.routes).have.length(15);
+    should(manifest.actions.routes).have.length(17);
     should(missing).deepEqual([]);
   });
 
@@ -202,7 +196,10 @@ describe('the runtimes daemon', () => {
   it('should not offer a runtime whose login needs sign-in, or whose harness is not on the machine', async () => {
     // Arrange
     const { host } = await build({
-      logins: [login('claude-you', { status: { word: 'needs_sign_in' } }), login('codex-work', { harness: 'codex' })],
+      logins: [
+        login('claude-you', { status: { ...sampleLogin('claude-you').status, word: 'needs_sign_in' } }),
+        login('codex-work', { harness: 'codex' }),
+      ],
     });
 
     // Act

@@ -70,7 +70,7 @@ describe('disabled time helpers', () => {
 
 const modelOf = (disabled?: { login?: object; first?: object; second?: object }) =>
   parseAccountModel({
-    version: 2,
+    version: 1,
     credentials: {
       'claude-work': { harness: 'claude', store: 'ferretry', ...(disabled?.login ? { disabled: disabled.login } : {}) },
       'claude-home': { harness: 'claude', store: 'host' },
@@ -133,7 +133,7 @@ describe('runtimeDisable', () => {
     const second = runtimeDisable(modelOf({ first: {}, second: {} }), 'claude-a', NOW, 'fy');
     should(second?.alternative).equal('claude-b');
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       credentials: { only: { harness: 'claude', store: 'ferretry', disabled: {} } },
       components: {},
       profiles: { default: { layers: [] } },

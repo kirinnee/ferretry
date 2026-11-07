@@ -1,6 +1,6 @@
 /**
- * The version-2 fleet configuration — Machine, Credential, Component, Profile, Runtime — as the one
- * place an untrusted version-2 document becomes a domain type.
+ * The format-1 fleet configuration — Machine, Credential, Component, Profile, Runtime — as the one
+ * place an untrusted format-1 document becomes a domain type.
  *
  * The words are the product's words (docs/design/account-model.md §2) and nothing else: there is no
  * agent, route, variant, identity, home or lane here. Everything a later unit needs to reason about
@@ -59,9 +59,6 @@ const secureMcpUrl = (url: string): boolean => {
 };
 
 const NonEmptyString = z.string().min(1);
-
-/** The version this module parses. Any other document is refused (`./document.ts`). */
-export const ACCOUNT_MODEL_VERSION = 2 as const;
 
 const NAME_GRAMMAR = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 
@@ -848,7 +845,7 @@ export function wouldIncludeItself(
 }
 
 /**
- * A whole version-2 fleet configuration, `<FY_HOME>/fleet/config.yaml` (§5.3).
+ * A whole format-1 fleet configuration, `<FY_HOME>/fleet/config.yaml` (§5.3).
  *
  * Strict everywhere, so a typo is an error rather than a silently ignored key, and cross-referential:
  * an unknown credential, profile or layer, a profile that reaches itself, a second `host` login for
@@ -856,7 +853,7 @@ export function wouldIncludeItself(
  */
 export const AccountModelSchema = z
   .strictObject({
-    version: z.literal(ACCOUNT_MODEL_VERSION),
+    version: z.literal(1),
     machine: MachineSchema,
     credentials: namedRecord(CredentialSchema, CredentialIdSchema, 'credential id').default({}),
     components: ComponentsSchema,
@@ -999,7 +996,7 @@ export type AccountModel = z.infer<typeof AccountModelSchema>;
 export type AccountModelDocument = z.input<typeof AccountModelSchema>;
 
 /**
- * Parse a version-2 document from untrusted input, so downstream code holds an {@link AccountModel}
+ * Parse a format-1 document from untrusted input, so downstream code holds an {@link AccountModel}
  * rather than a promise that one was checked. Throws a `ZodError` naming every problem at once.
  */
 export function parseAccountModel(input: unknown): AccountModel {

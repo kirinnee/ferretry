@@ -60,10 +60,6 @@ function assemblyOf(subsystem: RecommendSubsystem): RuntimesAssembly {
     catalog: {} as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],
     recommend: subsystem,
-    logins: {
-      list: async () => ({ logins: [] }),
-      signOut: async () => await Promise.reject(new Error('not used here')),
-    },
   };
 }
 

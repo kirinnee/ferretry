@@ -97,7 +97,7 @@ export const STEP_CHECKS: Readonly<Record<string, StepCheck>> = {
         return {
           kind: 'missing',
           line: 'No runtime is set up yet.',
-          remedy: `Run \`${bin} runtime scan\` to see what you could bring in, then \`${bin} runtime import\`.`,
+          remedy: `Run \`${bin} runtime scan\` to see what you could bring in, then \`${bin} runtime import claude\` or \`${bin} runtime import codex\`.`,
         };
       return {
         kind: 'found',

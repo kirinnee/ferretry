@@ -132,7 +132,7 @@ describe('accountSecretReferences', () => {
   it('should name every secret a credential, a settings component and an MCP server reach for', () => {
     // Arrange
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       machine: {},
       credentials: {
         'claude-key': { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } },
@@ -163,6 +163,6 @@ describe('accountSecretReferences', () => {
   });
 
   it('should name nothing for a configuration that names no secret', () => {
-    should(accountSecretReferences(parseAccountModel({ version: 2, machine: {} }))).deepEqual([]);
+    should(accountSecretReferences(parseAccountModel({ version: 1, machine: {} }))).deepEqual([]);
   });
 });

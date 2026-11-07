@@ -70,7 +70,7 @@ import {
  * - `unreadable` — something is there that could not be read (a locked keychain, a damaged file).
  * - `not-shareable` — a login may exist but cannot be shared in place (Codex on a keyring, G5).
  */
-export type HostLoginState = 'signed-in' | 'refresh-due' | 'not-signed-in' | 'unreadable' | 'not-shareable';
+export type HostLoginState = 'signed-in' | 'refresh-due' | 'not-signed-in' | 'unreadable' | 'not-shareable' | 'unknown';
 
 export interface HostLogin {
   readonly state: HostLoginState;
@@ -981,6 +981,8 @@ function loginNote(harness: HarnessKind, login: HostLogin): string {
       return `Login · ${who} · Refresh due. Ferretry renews it the first time you launch.`;
     case 'not-signed-in':
       return `${label} isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch.`;
+    case 'unknown':
+      return `${label} sign-in is unknown (${login.reason ?? 'Logins has no host discovery fact'}). Your login stays shared in place.`;
     case 'unreadable':
       return `Ferretry couldn't read your ${label} login (${login.reason ?? 'no reason given'}). It is still shared in place; check it on the Sign-ins tab.`;
     default:
@@ -1274,7 +1276,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
 }
 
 /** A configuration to import into when the machine has none yet. */
-const EMPTY_MODEL: AccountModelDocument = { version: 2 };
+const EMPTY_MODEL: AccountModelDocument = { version: 1 };
 
 /**
  * The configuration after an import: what is there, plus what the plan adds, plus each offered

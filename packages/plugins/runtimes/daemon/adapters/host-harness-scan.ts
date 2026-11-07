@@ -3,8 +3,7 @@
  * (docs/design/account-model.md §4.3, §7 `/v1/fleet/setup/scan`).
  *
  * This is the half of the import that touches the host: it finds each harness's instructions,
- * settings, MCP servers, hooks and skills where the harness itself keeps them, classifies the
- * person's own login, and looks each MCP command up on this machine. Everything it reads is handed to
+ * settings, MCP servers, hooks and skills where the harness itself keeps them, reads safe sign-in facts, and looks each MCP command up on this machine. Everything it reads is handed to
  * `../lib/account/import.ts`, which decides what becomes a component. Nothing here writes.
  *
  * WHERE EACH HARNESS KEEPS ITS SETUP, as the harness resolves it:
@@ -18,10 +17,8 @@
  * | hooks | the `hooks` block of `settings.json` | `<home>/hooks.json` |
  * | skills | `<home>/skills/<item>/` | `<home>/skills/<item>/`, never `.system` |
  *
- * THE LOGIN IS READ AND CLASSIFIED, NEVER RETURNED. The credential goes through the same store the
- * account model reads (`store: host`: `""` for Claude, the person's own `auth.json` for Codex) and
- * comes out as a verdict and, where the harness records one, an email. A Codex host whose
- * `config.toml` keeps the login in a keyring has no file to share (gap G5), and is said so.
+ * The login is an opaque host pointer. Only Logins contract status and email facts are consumed.
+ * Missing host discovery facts are reported as unknown. No sign-in file is opened.
  *
  * Nothing is launched: a `PATH` lookup and file reads, so it is safe to run on a page open.
  *
@@ -29,13 +26,8 @@
  */
 import { isAbsolute, join, relative } from 'node:path';
 import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
-import {
-  CODEX_CREDENTIAL_STORE_FILE,
-  CODEX_CREDENTIAL_STORE_KEY,
-  hostCodexHome,
-  resolveCredentialStore,
-  type StoredCredentialResolution,
-} from '../lib/account/credentials.ts';
+import { hostCodexHome } from '../lib/account/credentials.ts';
+import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import {
   type HostDocumentRead,
   type HostHarnessScan,
@@ -43,10 +35,8 @@ import {
   type HostSkill,
   scannedMcpServers,
 } from '../lib/account/import.ts';
-import { classifyCredential, type CredentialMaterial } from '../lib/identity.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
-import { parseSettings } from '../lib/settings.ts';
-import type { HostFiles, StoredCredentialMaterialReader } from './ports.ts';
+import type { HostFiles } from './ports.ts';
 
 /** Resolving a bare command name on this machine's `PATH`. The daemon's one harness locator. */
 export interface HostCommandResolver {
@@ -56,16 +46,15 @@ export interface HostCommandResolver {
 export interface HostHarnessScanDeps {
   /** The host's files, read only. */
   readonly files: HostFiles;
-  /** The person's REAL home. */
+  /** The home root provided by the permitted host adapter. */
   readonly userHome: string;
   /** `CLAUDE_CONFIG_DIR` as the person's shell has it, if at all. */
   readonly claudeConfigDir?: string;
   /** `CODEX_HOME` as the person's shell has it, if at all. */
   readonly codexHome?: string;
   readonly commands: HostCommandResolver;
-  /** Reads a `store: host` credential's material. The platform credential store satisfies it. */
-  readonly credentials: StoredCredentialMaterialReader;
-  readonly now: () => number;
+  /** Safe sign-in facts only; no credential material is reachable through this port. */
+  readonly logins: Pick<LoginsApi, 'list'>;
   /** Largest document read; anything larger is reported, never truncated. */
   readonly maxDocumentBytes: number;
   /** Most files hashed in one skill folder before the folder is reported as too large. */
@@ -75,33 +64,6 @@ export interface HostHarnessScanDeps {
 const DEFAULT_MAX_SKILL_FILES = 2_000;
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** The email in a JWT's payload, without checking its signature: display only. */
-function jwtEmail(token: unknown): string | undefined {
-  if (typeof token !== 'string') return undefined;
-  const payload = token.split('.')[1];
-  if (payload === undefined) return undefined;
-  try {
-    const claims: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return isRecord(claims) && typeof claims.email === 'string' ? claims.email : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Codex's own record of who is signed in: the `email` claim of its id token. */
-function codexEmail(material: CredentialMaterial): string | undefined {
-  if (material.outcome !== 'found') return undefined;
-  try {
-    const document: unknown = JSON.parse(material.blob);
-    return isRecord(document) && isRecord(document.tokens) ? jwtEmail(document.tokens.id_token) : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export class HostHarnessScanner {
   readonly #maxSkillFiles: number;
@@ -126,7 +88,7 @@ export class HostHarnessScanner {
       this.#read(claudeJson),
       this.#skills('claude', join(home, 'skills')),
     ]);
-    const login = await this.#login('claude', mcp, undefined);
+    const login = await this.#login('claude');
     return await this.#complete({
       harness: 'claude',
       login,
@@ -164,7 +126,7 @@ export class HostHarnessScanner {
       this.#read(join(home, 'hooks.json')),
       this.#skills('codex', join(home, 'skills')),
     ]);
-    const login = await this.#login('codex', settings, home);
+    const login = await this.#login('codex');
     return await this.#complete({
       harness: 'codex',
       login,
@@ -195,64 +157,34 @@ export class HostHarnessScanner {
     return this.deps.commands.resolve(command) !== undefined;
   }
 
-  /**
-   * The person's own login: classified through the account model's `host` store, never returned.
-   *
-   * `document` is the harness's file that names the account (Claude's `.claude.json`) or says where
-   * the login is kept (Codex's `config.toml`). `codexHome` is the Codex home already named for a Codex
-   * scan.
-   */
-  async #login(harness: HarnessKind, document: HostDocumentRead, codexHome: string | undefined): Promise<HostLogin> {
-    const parsed = parsedRecord(document, harness === 'claude' ? 'json' : 'toml');
-    if (harness === 'codex') {
-      const kept = parsed?.[CODEX_CREDENTIAL_STORE_KEY];
-      if (kept === 'keyring') {
-        return {
-          state: 'not-shareable',
-          reason: `your Codex keeps its login in the system keyring (${CODEX_CREDENTIAL_STORE_KEY} = "keyring"), not in a file Ferretry can share`,
-        };
-      }
-    }
-    // A host store never resolves to an environment login, and the caller only reaches here for Codex
-    // once its home has been named, so what comes back is always a stored credential.
-    const resolution = resolveCredentialStore(
-      `${harness}-host`,
-      { harness, store: 'host' },
-      {
-        fleetRoot: this.deps.userHome,
-        userHome: this.deps.userHome,
-        ...(codexHome === undefined ? {} : { hostCodexHome: codexHome }),
-      },
-    ) as StoredCredentialResolution;
-    let material: CredentialMaterial;
+  /** Host links are opaque. Unknown facts stay unknown; never inspect a harness sign-in file. */
+  async #login(harness: HarnessKind): Promise<HostLogin> {
+    const key = harness === 'claude' ? 'claude-code' : 'codex';
+    const unknown: HostLogin = {
+      state: 'unknown',
+      reason: 'Logins has no unambiguous host sign-in fact for this harness',
+    };
     try {
-      material = await this.deps.credentials.storedMaterial(resolution);
-    } catch (error) {
-      material = { outcome: 'unreadable', reason: errorText(error) };
-    }
-    const reading = classifyCredential(harness, material, this.deps.now());
-    const email =
-      harness === 'claude'
-        ? (() => {
-            const account = parsed?.oauthAccount;
-            return isRecord(account) && typeof account.emailAddress === 'string' ? account.emailAddress : undefined;
-          })()
-        : codexEmail(material);
-    const withEmail = email === undefined ? {} : { email };
-    switch (reading.state) {
-      case 'valid':
-        return { state: 'signed-in', ...withEmail };
-      case 'refreshable':
-        return { state: 'refresh-due', ...withEmail };
-      case 'missing':
-        return harness === 'codex' && parsed?.[CODEX_CREDENTIAL_STORE_KEY] === 'auto'
-          ? {
-              state: 'not-signed-in',
-              reason: `no auth.json was found; with ${CODEX_CREDENTIAL_STORE_KEY} = "auto" your login may be in the system keyring, which Ferretry cannot share — set it to "${CODEX_CREDENTIAL_STORE_FILE}" and sign in again to share it`,
-            }
-          : { state: 'not-signed-in' };
-      default:
-        return { state: 'unreadable', reason: reading.reason ?? 'the credential could not be read', ...withEmail };
+      const rows = (await this.deps.logins.list()).logins.filter(
+        login => login.store === 'host' && login.harnesses.includes(key),
+      );
+      if (rows.length !== 1) return unknown;
+      const row = rows[0];
+      if (row === undefined) return unknown;
+      const email = row.email === undefined ? {} : { email: row.email };
+      if (row.status.lastCheckInconclusive) return { ...unknown, ...email };
+      switch (row.status.word) {
+        case 'ready':
+          return { state: 'signed-in', ...email };
+        case 'refresh_due':
+          return { state: 'refresh-due', ...email };
+        case 'needs_sign_in':
+          return { state: 'not-signed-in', ...email };
+        default:
+          return { ...unknown, ...email };
+      }
+    } catch {
+      return unknown;
     }
   }
 
@@ -331,15 +263,5 @@ export class HostHarnessScanner {
       hasher.update('\0');
     }
     return hasher.digest('hex');
-  }
-}
-
-/** A read document as a record, or `undefined` when it is absent or will not parse. */
-function parsedRecord(read: HostDocumentRead, format: 'json' | 'toml'): Readonly<Record<string, unknown>> | undefined {
-  if (read.kind !== 'text') return undefined;
-  try {
-    return parseSettings(read.text, format);
-  } catch {
-    return undefined;
   }
 }

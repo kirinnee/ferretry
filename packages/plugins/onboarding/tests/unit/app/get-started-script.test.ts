@@ -69,7 +69,7 @@ describe('the page script', () => {
     await Promise.resolve();
     expect(copied).toEqual([
       goldenPrompt,
-      'brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry\nbrew install --cask ferretry\nfy setup',
+      'brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry\nbrew install --cask ferretry\nfy onboard',
     ]);
   });
 });

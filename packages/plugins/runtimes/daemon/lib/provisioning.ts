@@ -151,7 +151,7 @@ export interface FleetApplyPreview extends FleetApplyPlan {
 }
 
 /**
- * The plan a version-2 configuration produces, plus the `ids.json` it was planned against.
+ * The plan a format-1 configuration produces, plus the `ids.json` it was planned against.
  *
  * The ids travel with the plan because the plan already WRITES them — `ids.json` is one of its file
  * operations, inside the same rollback boundary — and a caller reporting what it applied names

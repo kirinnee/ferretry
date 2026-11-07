@@ -39,7 +39,7 @@ const resolve = (
   layers: string[],
   settingsBodies?: Record<string, SettingsObject>,
 ): ResolvedProfile => {
-  const model = parseAccountModel({ version: 2, components, profiles: { p: { layers } } });
+  const model = parseAccountModel({ version: 1, components, profiles: { p: { layers } } });
   const result = resolveProfile({ model, profile: 'p', harness, ...(settingsBodies ? { settingsBodies } : {}) });
   if (!result.ok) throw new Error('unexpected');
   return result.resolved;
@@ -762,7 +762,7 @@ describe('componentPartialSupport', () => {
   it('should be the table layering carries through to a runtime', () => {
     // Arrange
     const model = parseAccountModel({
-      version: 2,
+      version: 1,
       components: { skills: { mine: { items: ['release-notes'] } } },
       profiles: { p: { layers: ['skills/mine'] } },
     });

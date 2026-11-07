@@ -18,7 +18,7 @@ import { type AccountModel, parseAccountModel } from '../../../daemon/lib/accoun
 
 /** A parsed model with exactly the components and profiles a test is about. */
 const modelWith = (components: Record<string, unknown>, profiles: Record<string, unknown>): AccountModel =>
-  parseAccountModel({ version: 2, components, profiles });
+  parseAccountModel({ version: 1, components, profiles });
 
 /** A catalogue the schema would refuse, for the total-function cases it cannot reach. */
 const rawCatalogue = (components: Record<string, unknown>, profiles: Record<string, unknown>) =>

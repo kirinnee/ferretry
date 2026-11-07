@@ -79,7 +79,7 @@ export function bundleModel(bundle: CloneBundle | CloneBundleDraft, sourceName: 
   }
   try {
     return parseAccountModel({
-      version: 2,
+      version: 1,
       credentials,
       components: bundle.components,
       profiles: bundle.profiles,

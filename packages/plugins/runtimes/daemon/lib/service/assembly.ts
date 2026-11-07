@@ -11,7 +11,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { HarnessKind } from '../manifest.ts';
 import { type FleetCatalogServiceDeps, FleetCatalogService } from './catalog-service.ts';
 import { createFleetSetupSubsystem, type FleetSetupService, type FleetSetupServiceDeps } from './setup-service.ts';
-import { LoginRefusal, refusingConfigWriter } from './ports.ts';
+import { refusingConfigWriter } from './ports.ts';
 
 /** What every unreachable collaborator says. It names the state, not an internal. */
 export const UNAVAILABLE =
@@ -20,7 +20,10 @@ export const UNAVAILABLE =
 const unavailable = async (): Promise<never> => await Promise.reject(new Error(UNAVAILABLE));
 
 /** The catalogue's collaborators when no host seam is wired: reading refuses, so every read and change answers `UNAVAILABLE`. */
-export function unavailableCatalogDeps(now: () => number): FleetCatalogServiceDeps {
+export function unavailableCatalogDeps(
+  now: () => number,
+  logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>,
+): FleetCatalogServiceDeps {
   const nowhere = '';
   return {
     document: unavailable,
@@ -31,10 +34,7 @@ export function unavailableCatalogDeps(now: () => number): FleetCatalogServiceDe
     commandExists: () => false,
     sessionStatuses: async () => [],
     machineName: () => 'this machine',
-    credentials: {
-      list: async () => await Promise.reject(new LoginRefusal(UNAVAILABLE)),
-      signOut: async () => await Promise.reject(new LoginRefusal(UNAVAILABLE)),
-    },
+    credentials: logins,
     configWriter: refusingConfigWriter,
     provisioner: { preview: unavailable, apply: unavailable },
     // Never read: every method reads the configuration first, and that refuses.

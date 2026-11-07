@@ -13,7 +13,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { OnboardingTrack } from '../../../app/onboarding-track.tsx';
 import type { OnboardingPath } from '../../../app/onboarding-model.ts';
-import { interact, mount, must } from '../../support/dom.ts';
+import { interact, mount, must } from '../support/dom.ts';
 
 const click = async (target: Element): Promise<void> => {
   await interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true })));

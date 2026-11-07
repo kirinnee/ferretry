@@ -13,7 +13,7 @@ import { describe, expect, it } from 'bun:test';
 
 import type { OnboardingStepId } from '../../../app/onboarding-model.ts';
 import { SetupDiagram } from '../../../app/setup-diagram.tsx';
-import { mount, must } from '../../support/dom.ts';
+import { mount, must } from '../support/dom.ts';
 
 /**
  * EVERY step any route can put on the glass — not one route's list.

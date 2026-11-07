@@ -2,13 +2,12 @@
  * `RuntimesApi` (the port others read through): the runtimes on this machine, the default one, and what a start on one
  * would use or why it cannot start. Everything is read from the declared configuration (`config/runtimes/*.yaml`,
  * `config/profiles/*.yaml`, `config/runtimes.yaml`) and from the two things Runtimes needs of other subsystems: which
- * harnesses are on (Ferrets) and what state each login is in (Logins, behind {@link LoginsReader}).
+ * harnesses are on (Ferrets) and what state each login is in (Logins, behind {@link LoginsApi}).
  *
  * Pure apart from the seams in {@link RuntimesApiDeps}: no disk, no clock global.
  *
  * A runtime whose harness cannot be named (the file does not say, and Logins does not know its login) is not listed:
- * `resolve` answers `no_login` for it, so a start never guesses a harness. GAP(logins): the harness of a login comes
- * from Logins; this plugin may not import its contract.
+ * `resolve` answers `no_login` for it, so a start never guesses a harness. The harness of a login comes from the required Logins contract.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
@@ -24,7 +23,7 @@ import {
   type RuntimeSummary,
 } from '../../../contract/index.ts';
 import { disabledUntilMs } from '../account/disabled.ts';
-import type { LoginFacts, LoginsReader } from './ports.ts';
+import type { LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
 
 /** The runtime a start uses when nobody names one and the setting is empty, when it is an agent runtime here. */
 export const FALLBACK_DEFAULT_RUNTIME = 'claude-default';
@@ -38,13 +37,13 @@ export interface RuntimesApiDeps {
   defaultSetting(): string | undefined;
   /** The harness keys currently on (`FerretsApi.harnesses`). */
   harnesses(): readonly HarnessKey[];
-  readonly logins: Pick<LoginsReader, 'list'>;
+  readonly logins: Pick<LoginsApi, 'list'>;
   now(): number;
   /** Puts a catalog item into this machine's setup. The signature, digest, passkey and ferret checks are the installer's. */
   install(change: CatalogInstallChange): Promise<ApplyOutcome>;
 }
 
-async function loginsById(logins: Pick<LoginsReader, 'list'>): Promise<ReadonlyMap<string, LoginFacts>> {
+async function loginsById(logins: Pick<LoginsApi, 'list'>): Promise<ReadonlyMap<string, LoginView>> {
   try {
     return new Map((await logins.list()).logins.map(login => [login.id, login]));
   } catch {
@@ -73,7 +72,7 @@ const phrase = (block: { readonly reason?: string; readonly until?: string }): s
 export function createRuntimesApi(deps: RuntimesApiDeps): RuntimesApi {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
-  const read = (name: string, file: RuntimeFile, logins: ReadonlyMap<string, LoginFacts>, now: number): Read => {
+  const read = (name: string, file: RuntimeFile, logins: ReadonlyMap<string, LoginView>, now: number): Read => {
     const id = RuntimeIdSchema.parse(name);
     const login = logins.get(file.login);
     const harness = file.harness ?? login?.harness;

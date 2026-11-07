@@ -133,10 +133,6 @@ function stub(overrides: Partial<CatalogStub> = {}): { assembly: RuntimesAssembl
       catalog,
       setup: {} as RuntimesAssembly['setup'],
       recommend: { recommend: async () => await Promise.reject(new Error('not used here')) },
-      logins: {
-        list: async () => ({ logins: [] }),
-        signOut: async () => await Promise.reject(new Error('not used here')),
-      },
     },
   };
 }

@@ -47,7 +47,7 @@ const DEFAULT_LAYERS = ['instructions/main', 'mcp/github', 'skills/mine', 'model
 /** A two-runtime machine: Claude on the person's own login, Codex on a login Ferretry keeps. */
 const modelOf = (overrides: Partial<AccountModelDocument> = {}): AccountModel =>
   parseAccountModel({
-    version: 2,
+    version: 1,
     credentials: {
       'claude-you': { harness: 'claude', store: 'host' },
       'codex-work': { harness: 'codex', store: 'ferretry' },

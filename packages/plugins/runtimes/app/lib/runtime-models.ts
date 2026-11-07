@@ -126,15 +126,15 @@ export const requireRuntimeModelCatalogHarness = (
 export const runtimeModelCatalogErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-// GAP(ferrets): `GET /v1/ferrets/:sessionId/runtime-models` (parity row R-0171) is not in Ferrets' manifest yet.
-export const RUNTIME_MODELS_ROUTE = 'GET /v1/ferrets/:sessionId/runtime-models' as const;
+// Runtimes owns the per-ferret model catalog route.
+export const RUNTIME_MODELS_ROUTE = 'GET /v1/ferrets/:id/runtime-models' as const;
 
 /** Fetches one session's advertised model catalog from the daemon the client is bound to. */
 export const fetchRuntimeModelCatalog = async (
   client: RuntimesClient,
   sessionId: string,
 ): Promise<RuntimeModelCatalog> =>
-  parseRuntimeModelCatalog(await client.call(RUNTIME_MODELS_ROUTE, { params: { sessionId } }));
+  parseRuntimeModelCatalog(await client.call(RUNTIME_MODELS_ROUTE, { params: { id: sessionId } }));
 
 interface InFlight {
   readonly generation: number;
