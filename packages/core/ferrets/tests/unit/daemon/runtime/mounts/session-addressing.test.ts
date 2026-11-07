@@ -11,7 +11,7 @@ import {
   type SessionAddressBook,
   sessionAddressedRoutes,
   sessionAddressedSockets,
-} from '../../../../src/lib/runtime/mounts/session-addressing.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-addressing.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, GRANTED, human } from './support.ts';
 

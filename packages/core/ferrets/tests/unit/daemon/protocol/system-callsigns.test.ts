@@ -8,7 +8,7 @@ import {
   SYSTEM_CALLSIGN_PREFIXES,
   systemCallsignName,
   systemCallsignSequence,
-} from '../../src/lib/system-callsigns.ts';
+} from '../../../../daemon/lib/protocol/system-callsigns.ts';
 
 describe('system callsigns', () => {
   it('should name a session of every prefix with six hex digits, stored lowercase', () => {

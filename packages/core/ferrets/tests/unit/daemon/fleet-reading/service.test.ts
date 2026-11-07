@@ -17,8 +17,8 @@ import {
   FleetReading,
   type FleetReadingPorts,
   type FleetReadingSubject,
-} from '../../../src/lib/fleet-reading/service.ts';
-import { SESSION_ROSTER_MAX_AGE_MS, SessionRoster } from '../../../src/lib/fleet-reading/session-roster.ts';
+} from '../../../../daemon/lib/fleet-reading/service.ts';
+import { SESSION_ROSTER_MAX_AGE_MS, SessionRoster } from '../../../../daemon/lib/fleet-reading/session-roster.ts';
 import type { HousekeepingJob } from '../../../src/lib/housekeeping/protocol.ts';
 
 const MINUTE = 60_000;

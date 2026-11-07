@@ -1,7 +1,7 @@
 import { SessionConfigSchema } from '@ferretry/protocol';
 import { join } from 'node:path';
-import { FileNameClaimStore, FileSystemCallsignCounters } from '../../src/adapters/names/index.ts';
-import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import { FileNameClaimStore, FileSystemCallsignCounters } from '../adapters/names/index.ts';
+import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import {
   type FileSystemPort,
   type FoundationPaths,
@@ -14,7 +14,7 @@ import {
   sessionNameClaim,
 } from '../../src/lib/index.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { type NameSubsystem, nameRoutes } from '../../src/lib/runtime/mounts/names.ts';
+import { type NameSubsystem, nameRoutes } from '../lib/runtime/mounts/names.ts';
 
 /**
  * The callsigns the fleet answers to: the claim ledger a start and a rename take names through, the issuer of the

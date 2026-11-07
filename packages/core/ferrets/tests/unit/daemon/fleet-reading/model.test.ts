@@ -10,7 +10,7 @@ import {
   withObserved,
   withPassive,
   withPassiveUnknown,
-} from '../../../src/lib/fleet-reading/model.ts';
+} from '../../../../daemon/lib/fleet-reading/model.ts';
 
 const MINUTE = 60_000;
 const NOW = 1_786_000_000_000;

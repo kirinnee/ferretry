@@ -2,14 +2,14 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
-import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../src/lib/agent-tools/policy.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../../daemon/lib/agent-tools/policy.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
   SessionEffectAdmission,
   SessionEffectKey,
   SessionEffectLedger,
   SessionEffectStanding,
-} from '../../../../src/lib/session/effects/index.ts';
+} from '../../../../../daemon/lib/session/effects/index.ts';
 import {
   type CreateSessionLifecycleRequest,
   defaultSessionLifecycleSettings,
@@ -30,13 +30,13 @@ import {
   SessionStopPending,
   type SessionTaskStore,
   type WorkingDirectoryResolver,
-} from '../../../../src/lib/session/lifecycle/index.ts';
+} from '../../../../../daemon/lib/session/lifecycle/index.ts';
 import {
   dropFerretIdentity,
   FERRET_IDENTITY_VARIABLES,
   sessionPaneEnvironment,
-} from '../../../../src/lib/session/lifecycle/policy.ts';
-import { SessionCredentialRevokedError } from '../../../../src/lib/session/lifecycle/types.ts';
+} from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { SessionCredentialRevokedError } from '../../../../../daemon/lib/session/lifecycle/types.ts';
 import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';

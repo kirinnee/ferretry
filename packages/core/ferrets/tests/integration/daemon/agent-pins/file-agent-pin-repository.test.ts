@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { agentPinsFile, FileAgentPinRepository } from '../../../src/adapters/agent-pins/index.ts';
+import { agentPinsFile, FileAgentPinRepository } from '../../../../daemon/adapters/agent-pins/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 

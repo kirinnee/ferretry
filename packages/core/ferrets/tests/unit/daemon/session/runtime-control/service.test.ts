@@ -8,8 +8,8 @@ import {
   runtimeQuarantineState,
   SessionRuntimeControlService,
   type SessionRuntimeControlPorts,
-} from '../../../../src/lib/session/runtime-control/service.ts';
-import { SessionRuntimeError } from '../../../../src/lib/session/runtime-control/types.ts';
+} from '../../../../../daemon/lib/session/runtime-control/service.ts';
+import { SessionRuntimeError } from '../../../../../daemon/lib/session/runtime-control/types.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 import {
   account,

@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { ExitedSessionTransition, SessionExitObservation } from '../../../../src/lib/session/health/exit.ts';
-import type { SessionExitPort } from '../../../../src/lib/session/health/service.ts';
-import type { ExitObserveOptions, SurveyedSession } from '../../../../src/lib/session/health/types.ts';
-import { UnwatchedPaneExits, WatchedPanes } from '../../../../src/lib/session/health/watched-panes.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+import type { ExitedSessionTransition, SessionExitObservation } from '../../../../../daemon/lib/session/health/exit.ts';
+import type { SessionExitPort } from '../../../../../daemon/lib/session/health/service.ts';
+import type { ExitObserveOptions, SurveyedSession } from '../../../../../daemon/lib/session/health/types.ts';
+import { UnwatchedPaneExits, WatchedPanes } from '../../../../../daemon/lib/session/health/watched-panes.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 const OBSERVATION: SessionExitObservation = {
   id: 'b',

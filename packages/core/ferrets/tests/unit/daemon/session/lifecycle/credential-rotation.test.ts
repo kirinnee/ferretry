@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
-import { NodeSessionCredentialIssuer } from '../../../../src/adapters/session/lifecycle/node-session-credential-issuer.ts';
-import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../src/lib/agent-tools/policy.ts';
+import { NodeSessionCredentialIssuer } from '../../../../../daemon/adapters/session/lifecycle/node-session-credential-issuer.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../../daemon/lib/agent-tools/policy.ts';
 import {
   authenticate,
   isSessionCredential,
@@ -10,13 +10,13 @@ import {
   SESSION_CREDENTIAL_PREFIX,
   secretsMatch,
 } from '../../../../src/lib/api/authentication.ts';
-import { SessionCredentialRotation } from '../../../../src/lib/session/lifecycle/credential-rotation.ts';
+import { SessionCredentialRotation } from '../../../../../daemon/lib/session/lifecycle/credential-rotation.ts';
 import type {
   SessionCapabilityHashStore,
   SessionCredential,
   SessionEnvironmentStore,
-} from '../../../../src/lib/session/lifecycle/types.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/lib/session/lifecycle/types.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 
 const ID = parseSessionId('session-1');
 const FRESH: SessionCredential = { capability: 'fresh-capability', hash: 'f'.repeat(64) };

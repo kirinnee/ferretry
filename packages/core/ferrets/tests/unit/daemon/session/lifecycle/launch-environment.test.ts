@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { LaunchEnvironmentStore } from '../../../../src/lib/session/lifecycle/launch-environment.ts';
-import type { SessionEnvironmentStore } from '../../../../src/lib/session/lifecycle/types.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
+import { LaunchEnvironmentStore } from '../../../../../daemon/lib/session/lifecycle/launch-environment.ts';
+import type { SessionEnvironmentStore } from '../../../../../daemon/lib/session/lifecycle/types.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /** An in-memory environment store, as the session's own file would answer. */
 class MemoryStore implements SessionEnvironmentStore {

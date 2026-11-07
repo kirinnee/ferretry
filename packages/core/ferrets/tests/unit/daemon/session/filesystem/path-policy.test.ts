@@ -8,7 +8,7 @@ import {
   looksBinary,
   normalizeRelativePath,
   rootIsDenied,
-} from '../../../../src/lib/session/filesystem/index.ts';
+} from '../../../../../daemon/lib/session/filesystem/index.ts';
 
 const NUL = String.fromCharCode(0);
 

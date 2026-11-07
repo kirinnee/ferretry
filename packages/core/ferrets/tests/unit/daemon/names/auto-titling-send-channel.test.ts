@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AutoTitlingSendChannel } from '../../../src/adapters/names/index.ts';
+import { AutoTitlingSendChannel } from '../../../../daemon/adapters/names/index.ts';
 import type { InboundMessage, SendChannel } from '../../../src/lib/session/send/types.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 
 const ID = parseSessionId('11111111-1111-4111-8111-111111111111');
 

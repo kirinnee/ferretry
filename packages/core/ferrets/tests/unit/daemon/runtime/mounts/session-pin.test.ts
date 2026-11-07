@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import { type SessionView, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
-import { AgentPinError } from '../../../../src/lib/agent-pins/index.ts';
+import { AgentPinError } from '../../../../../daemon/lib/agent-pins/index.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { type SessionPinSubsystem, sessionPinRoutes } from '../../../../src/lib/runtime/mounts/session-pin.ts';
+import { type SessionPinSubsystem, sessionPinRoutes } from '../../../../../daemon/lib/runtime/mounts/session-pin.ts';
 import { request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, human, sessionView } from './support.ts';
 

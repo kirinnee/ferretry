@@ -7,7 +7,7 @@ import {
   retryDelayMs,
   type ResumePolicy,
   type ResumeTarget,
-} from '../../../../src/lib/session/resume/index.ts';
+} from '../../../../../daemon/lib/session/resume/index.ts';
 
 const SETTINGS = defaultSessionResumeSettings;
 const AUTOMATIC_RETRY: ResumePolicy = {

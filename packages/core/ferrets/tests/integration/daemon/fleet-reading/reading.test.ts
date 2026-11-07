@@ -17,7 +17,7 @@ import { unrefFileEventTimers } from '../../../src/adapters/file-events/bun-file
 import { platformFileEventSource } from '../../../src/adapters/file-events/platform.ts';
 import { InlineHousekeepingJobs, WorkerCredentialPorts } from '../../../src/adapters/housekeeping/index.ts';
 import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
-import { FleetReading } from '../../../src/lib/fleet-reading/service.ts';
+import { FleetReading } from '../../../../daemon/lib/fleet-reading/service.ts';
 import type { HousekeepingJob } from '../../../src/lib/housekeeping/protocol.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { waitFor } from '../support/wait-for.ts';

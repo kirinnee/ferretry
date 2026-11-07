@@ -1,7 +1,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner, GitProcessError } from '../../../src/adapters/git/index.ts';
+import { BunGitRunner, GitProcessError } from '../../../../daemon/adapters/git/index.ts';
 import { cleanupTempDirectories, tempRepository } from '../support/repository.ts';
 
 describe('BunGitRunner working-directory validation', () => {

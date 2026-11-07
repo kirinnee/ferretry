@@ -6,7 +6,7 @@ import {
   type DaemonHealthInput,
   type SelfCheckLedger,
   type WardenSweepVerdict,
-} from '../../../../src/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/index.ts';
 
 const AT = '2026-07-31T10:00:00.000Z';
 const FRESH_SWEEP: WardenSweepVerdict = { state: 'fresh', needsRearm: false, ageMs: 20_000, deadlineMs: 120_000 };

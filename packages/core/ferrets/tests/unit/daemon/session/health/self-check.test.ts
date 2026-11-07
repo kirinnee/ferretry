@@ -7,7 +7,7 @@ import {
   planSelfCheck,
   type SelfCheckInput,
   type SessionHealthObservation,
-} from '../../../../src/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const AT = '2026-07-31T10:00:00.000Z';

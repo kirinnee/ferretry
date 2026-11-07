@@ -9,7 +9,7 @@
 import { describe, it } from 'bun:test';
 import { type AccountModel, parseAccountModel } from '@ferretry/fleet';
 import should from 'should';
-import { AccountModelAgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
+import { AccountModelAgentControlPolicy } from '../../../../daemon/lib/fleet/agent-control.ts';
 
 const modelWith = (agentControl: Partial<AccountModel['machine']['agentControl']>): AccountModel =>
   parseAccountModel({ version: 2, machine: { agentControl } });

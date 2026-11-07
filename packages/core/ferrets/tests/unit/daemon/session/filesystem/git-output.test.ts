@@ -16,7 +16,7 @@ import {
   type SessionGitChange,
   underPrefix,
   withLineStats,
-} from '../../../../src/lib/session/filesystem/index.ts';
+} from '../../../../../daemon/lib/session/filesystem/index.ts';
 
 /**
  * Every place a hostile filename could be mistaken for structure.

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileLastSnapshotStore } from '../../../../src/adapters/session/snapshot/index.ts';
+import { FileLastSnapshotStore } from '../../../../../daemon/adapters/session/snapshot/index.ts';
 
 const ID = 'session-1';
 

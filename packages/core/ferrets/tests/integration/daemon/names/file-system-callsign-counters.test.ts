@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { FileSystemCallsignCounters } from '../../../src/adapters/names/index.ts';
+import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 
 /**

@@ -6,7 +6,7 @@ import {
   nextAutoTitle,
   titleFromMessage,
   withAutoTitle,
-} from '../../../src/lib/names/index.ts';
+} from '../../../../daemon/lib/names/index.ts';
 
 describe('auto-titling a session', () => {
   it('should title from the first line of a message, cut to a short title', () => {

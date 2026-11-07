@@ -9,7 +9,7 @@ import {
   AGENT_SESSION_CAPABILITY_HEADER,
   agentToolRoutes,
   sessionCredentialDirectory,
-} from '../../../../src/lib/runtime/mounts/agent-tools.ts';
+} from '../../../../../daemon/lib/runtime/mounts/agent-tools.ts';
 import { terminalRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';

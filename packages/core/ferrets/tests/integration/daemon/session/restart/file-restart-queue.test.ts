@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileRestartQueue } from '../../../../src/adapters/session/restart/file-restart-queue.ts';
+import { FileRestartQueue } from '../../../../../daemon/adapters/session/restart/file-restart-queue.ts';
 
 const entry = { id: 'ses-1', since: '2026-10-30T01:00:00.000Z', reason: 'mid-turn' as const, onlyIfOutdated: true };
 

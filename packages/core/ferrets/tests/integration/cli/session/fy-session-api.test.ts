@@ -10,10 +10,10 @@ import type {
 } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
-import { createFyClientConnector } from '../../../src/adapters/session/client-connector.ts';
-import { FySessionApi } from '../../../src/adapters/session/fy-session-api.ts';
-import { SystemClock } from '../../../src/adapters/session/system-clock.ts';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import { createFyClientConnector } from '../../../../cli/adapters/session/client-connector.ts';
+import { FySessionApi } from '../../../../cli/adapters/session/fy-session-api.ts';
+import { SystemClock } from '../../../../cli/adapters/session/system-clock.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 
 const view = { config: { id: 'ses-1' }, state: { id: 'ses-1' }, directory: '/d' } as unknown as SessionView;
 const sendResult = { ...view, disposition: 'delivered' } as SendResult;

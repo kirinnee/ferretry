@@ -9,8 +9,8 @@ import {
   SessionEffectRecordSchema,
   sessionEffectStanding,
   settleSessionEffect,
-} from '../../../../src/lib/session/effects/index.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/lib/session/effects/index.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /**
  * The durable effect record's own rules, with no filesystem anywhere near them.

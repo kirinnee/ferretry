@@ -9,7 +9,7 @@ import {
   type InstructionRefreshPorts,
   instructionsUpdatedNote,
   recordTold,
-} from '../../../../src/lib/session/launch/instruction-refresh.ts';
+} from '../../../../../daemon/lib/session/launch/instruction-refresh.ts';
 
 const NOW: readonly AlwaysOnSection[] = [
   { id: 'tools', text: 'Tools: drive terminals.' },

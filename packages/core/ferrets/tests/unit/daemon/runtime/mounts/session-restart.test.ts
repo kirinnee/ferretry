@@ -13,7 +13,7 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
   type SessionRestartSubsystem,
   sessionRestartRoutes,
-} from '../../../../src/lib/runtime/mounts/session-restart.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-restart.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, agentIn, human } from './support.ts';
 

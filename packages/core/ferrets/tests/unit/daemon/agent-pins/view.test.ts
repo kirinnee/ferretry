@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { withPinned } from '../../../src/lib/agent-pins/view.ts';
+import { withPinned } from '../../../../daemon/lib/agent-pins/view.ts';
 import { sessionView } from '../runtime/mounts/support.ts';
 
 describe('withPinned', () => {

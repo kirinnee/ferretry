@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseWorktreeList, parseWorktreeStatus } from '../../../src/lib/worktrees/index.ts';
+import { parseWorktreeList, parseWorktreeStatus } from '../../../../daemon/lib/worktrees/index.ts';
 
 describe('worktree parsers', () => {
   it('should preserve whitespace in paths and parse porcelain flags and reasons', () => {

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { ACCOUNT_HINT_NEXT, type AccountSummary, AgentToolCallSchema, type SignInSummary } from '@ferretry/protocol';
 import should from 'should';
-import { actsOn } from '../../../src/lib/agent-tools/service.ts';
+import { actsOn } from '../../../../daemon/lib/agent-tools/service.ts';
 import type { AgentToolError } from '../../../src/lib/index.ts';
 import { LoginEntryError, RecipeValueError } from '../../../src/lib/secrets/index.ts';
 import { agent, agentToolWorld } from './support.ts';

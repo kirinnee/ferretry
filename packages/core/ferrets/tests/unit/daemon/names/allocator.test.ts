@@ -6,7 +6,7 @@ import {
   type NameClaimAttempt,
   type NameClaimStore,
   type NameRandomSource,
-} from '../../../src/lib/names/index.ts';
+} from '../../../../daemon/lib/names/index.ts';
 
 class MemoryClaimStore implements NameClaimStore {
   readonly claims: NameClaim[];

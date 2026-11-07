@@ -2,10 +2,10 @@ import { afterAll, describe, it } from 'bun:test';
 import { chmod, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner, GitCommandError } from '../../../../src/adapters/git/index.ts';
-import { RunnerSessionGit } from '../../../../src/adapters/session/filesystem/index.ts';
-import { MAX_DIFF_SIDE_BYTES } from '../../../../src/lib/session/filesystem/index.ts';
-import type { GitInvocation, GitRunner } from '../../../../src/lib/worktrees/ports.ts';
+import { BunGitRunner, GitCommandError } from '../../../../../daemon/adapters/git/index.ts';
+import { RunnerSessionGit } from '../../../../../daemon/adapters/session/filesystem/index.ts';
+import { MAX_DIFF_SIDE_BYTES } from '../../../../../daemon/lib/session/filesystem/index.ts';
+import type { GitInvocation, GitRunner } from '../../../../../daemon/lib/worktrees/ports.ts';
 import {
   cleanupTempDirectories,
   setupGit,

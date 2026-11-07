@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerRestartCommands } from '../../../src/lib/restart/commands.ts';
-import { RestartController } from '../../../src/lib/restart/controller.ts';
+import { registerRestartCommands } from '../../../../cli/lib/restart/commands.ts';
+import { RestartController } from '../../../../cli/lib/restart/controller.ts';
 import { restartHarness } from './fixtures.ts';
 
 function run(argv: string[]) {

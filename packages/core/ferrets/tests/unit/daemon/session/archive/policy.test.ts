@@ -10,7 +10,7 @@ import {
   parseArchiveAfter,
   selfKeepReason,
   unknownLineageBlocks,
-} from '../../../../src/lib/session/archive/policy.ts';
+} from '../../../../../daemon/lib/session/archive/policy.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const HOUR = 3_600_000;

@@ -12,8 +12,8 @@ import {
   wakeSendId,
   type ParkedSession,
   type SessionMonitorSettings,
-} from '../../../../src/lib/session/monitor/index.ts';
-import type { DeclaredWait } from '../../../../src/lib/session/signal/index.ts';
+} from '../../../../../daemon/lib/session/monitor/index.ts';
+import type { DeclaredWait } from '../../../../../daemon/lib/session/signal/index.ts';
 
 /**
  * The two properties a wait tick must have, proved without a clock or a filesystem.

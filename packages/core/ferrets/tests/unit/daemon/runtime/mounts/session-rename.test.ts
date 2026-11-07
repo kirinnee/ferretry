@@ -4,8 +4,8 @@ import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { SessionRenameError } from '../../../../src/lib/names/index.ts';
-import { type SessionRenameSubsystem, sessionRenameRoutes } from '../../../../src/lib/runtime/mounts/session-rename.ts';
+import { SessionRenameError } from '../../../../../daemon/lib/names/index.ts';
+import { type SessionRenameSubsystem, sessionRenameRoutes } from '../../../../../daemon/lib/runtime/mounts/session-rename.ts';
 import { request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, human, sessionView } from './support.ts';
 

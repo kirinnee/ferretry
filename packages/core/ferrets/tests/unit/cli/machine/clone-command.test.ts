@@ -7,7 +7,7 @@ import {
   FleetCloneReviewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { registerMachineCommands } from '../../../src/lib/machine/commands.ts';
+import { registerMachineCommands } from '../../../../cli/lib/machine/commands.ts';
 import { bundle, cloneReview, fakeWorld, runCommand } from '../fleet/account-fakes.ts';
 
 const item = (ref: string, outcome: CloneReviewItem['outcome'], overrides: Partial<CloneReviewItem> = {}) =>

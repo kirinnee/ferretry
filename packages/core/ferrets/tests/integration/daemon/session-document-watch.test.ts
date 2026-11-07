@@ -28,9 +28,9 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../src/adapters/index.ts';
-import { StorageCredentialedSessions } from '../../src/adapters/agent-tools/storage-credentialed-sessions.ts';
+import { StorageCredentialedSessions } from '../../../daemon/adapters/agent-tools/storage-credentialed-sessions.ts';
 import { secretsMatch } from '../../src/lib/api/authentication.ts';
-import { CredentialAgentIdentities, CredentialDigestLocations } from '../../src/lib/agent-tools/policy.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../daemon/lib/agent-tools/policy.ts';
 import { FileEventHub } from '../../src/lib/file-events/hub.ts';
 import { createSessionPaths, type FileSystemPort, type FoundationPaths, parseSessionId } from '../../src/lib/index.ts';
 import { waitFor, waitForValue } from './support/wait-for.ts';

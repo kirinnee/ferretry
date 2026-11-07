@@ -4,7 +4,7 @@ import { SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { SessionSignalError, sessionSignalRoutes } from '../../../../src/lib/runtime/mounts/session-signal.ts';
+import { SessionSignalError, sessionSignalRoutes } from '../../../../../daemon/lib/runtime/mounts/session-signal.ts';
 import { request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FakeSessionSignal, human } from './support.ts';
 

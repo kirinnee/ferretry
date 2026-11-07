@@ -13,10 +13,10 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { AutoTitlingSendChannel } from '../../../src/adapters/names/index.ts';
-import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
+import { AutoTitlingSendChannel } from '../../../../daemon/adapters/names/index.ts';
+import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import type { InboundMessage, SendChannel } from '../../../src/lib/session/send/types.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 
 /**
  * The first-message title, over a REAL session document: the config the daemon reads back after a send

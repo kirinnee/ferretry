@@ -29,7 +29,7 @@ import {
   FleetCredentialCatalog,
   type FleetCredentialsService,
 } from '../../../src/lib/fleet/credentials-service.ts';
-import { FleetRefreshService } from '../../../src/lib/fleet-refresh/index.ts';
+import { FleetRefreshService } from '../../../../daemon/lib/fleet-refresh/index.ts';
 import { CredentialUsageSource } from '../../../src/lib/usage/credential-usage.ts';
 import type { UsageFeedPort } from '../../../src/lib/usage/types.ts';
 

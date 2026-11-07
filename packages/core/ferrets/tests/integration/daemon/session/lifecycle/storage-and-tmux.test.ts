@@ -43,9 +43,9 @@ import {
 // functions, each of which has to be proven on its own. They are named apart rather than sharing one
 // name because `lifecycle/index.ts` star-exports all three modules, and a shared name would collide
 // there and again in `adapters/index.ts`.
-import { fsyncEnvironmentDirectory } from '../../../../src/adapters/session/lifecycle/file-session-environment-store.ts';
-import { fsyncTaskDirectory } from '../../../../src/adapters/session/lifecycle/file-session-task-store.ts';
-import { fsyncReservedDirectory } from '../../../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { fsyncEnvironmentDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
+import { fsyncTaskDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
+import { fsyncReservedDirectory } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import {
   type AccountLaunchEnvironment,
   type AccountLaunchRenewal,

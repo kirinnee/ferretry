@@ -26,7 +26,7 @@ import {
   ReviveDedupeConflict,
   SessionResumeService,
   UnregisteredResumeReplacement,
-} from '../../../../src/lib/session/resume/index.ts';
+} from '../../../../../daemon/lib/session/resume/index.ts';
 
 /** The advisory a bare human relaunch may dismiss, and the blocking one it may never touch. */
 const RELEASED = 'structured-answer-released-unconfirmed';

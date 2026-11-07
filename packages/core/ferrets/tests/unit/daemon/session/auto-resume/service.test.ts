@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
 import type { AutoResumeSummary } from '@ferretry/protocol';
 import should from 'should';
-import { AutoResumeService } from '../../../../src/lib/session/auto-resume/service.ts';
+import { AutoResumeService } from '../../../../../daemon/lib/session/auto-resume/service.ts';
 import {
   type AutoResumeCandidate,
   type AutoResumeOutcome,
   type AutoResumePorts,
   type AutoResumeSubject,
   defaultAutoResumeSettings,
-} from '../../../../src/lib/session/auto-resume/types.ts';
+} from '../../../../../daemon/lib/session/auto-resume/types.ts';
 
 const NOW = '2026-10-21T12:00:00.000Z';
 const SETTINGS = { concurrency: 2, staggerMs: 4_000, maxAgeMs: 24 * 3_600_000 };

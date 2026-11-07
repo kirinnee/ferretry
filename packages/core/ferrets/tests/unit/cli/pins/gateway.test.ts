@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import type { PinSnapshot } from '@ferretry/protocol';
 import should from 'should';
 import { type z } from 'zod';
-import { ProtocolPinGateway, pinBoardPath } from '../../../src/lib/pins/gateway';
-import type { PinApiClient } from '../../../src/lib/pins/ports';
+import { ProtocolPinGateway, pinBoardPath } from '../../../../cli/lib/pins/gateway';
+import type { PinApiClient } from '../../../../cli/lib/pins/ports';
 import { NOTE_ID, SESSION, humanNote, snapshot } from './fixtures';
 
 interface Call {

@@ -3,7 +3,7 @@ import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { StateHomeReach } from '../../../../src/lib/api/state-homes.ts';
 import { sessionFilesystemRoutes } from '../../../../src/lib/runtime/index.ts';
-import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
+import { SessionFilesystem } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   directory,

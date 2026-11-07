@@ -6,7 +6,7 @@ import {
   registerMachineCommands,
   renderInstallOutcome,
   renderMachine,
-} from '../../../src/lib/machine/commands.ts';
+} from '../../../../cli/lib/machine/commands.ts';
 import { bundle, fakeWorld, machine, runCommand, scan } from '../fleet/account-fakes.ts';
 
 const noManager = scan({

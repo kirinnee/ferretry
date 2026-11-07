@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import { runningChildCount } from '../../../../src/lib/pack/admission.ts';
-import { claimsRunningAgent, exitedSessionTransition } from '../../../../src/lib/session/health/exit.ts';
-import type { RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
+import { claimsRunningAgent, exitedSessionTransition } from '../../../../../daemon/lib/session/health/exit.ts';
+import type { RegisteredTerminalPane } from '../../../../../daemon/lib/session/reap.ts';
 import {
   defaultSessionResumeSettings,
   INTERRUPTED_LAUNCH_REASON,
@@ -17,7 +17,7 @@ import {
   type ResumeTarget,
   type ResumeTransition,
   SessionResumeService,
-} from '../../../../src/lib/session/resume/index.ts';
+} from '../../../../../daemon/lib/session/resume/index.ts';
 
 const NOW = '2026-10-30T08:41:01.000Z';
 const STARTING = parseSessionId('mvun2vi2-e9bf27a2');

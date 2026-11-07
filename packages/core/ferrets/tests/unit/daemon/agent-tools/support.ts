@@ -9,7 +9,7 @@ import type {
   BrowserStatus,
   SurfaceOpener,
 } from '@ferretry/protocol';
-import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
+import type { AgentControlKind, AgentControlPolicy } from '../../../../daemon/lib/fleet/agent-control.ts';
 import {
   type AgentFileError,
   type AgentFiles,

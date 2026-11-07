@@ -22,7 +22,7 @@ import {
   transitionSessionRecord,
   unrunnableAccountRefusal,
   withHarnessStartup,
-} from '../../../../src/lib/session/lifecycle/index.ts';
+} from '../../../../../daemon/lib/session/lifecycle/index.ts';
 
 const NOW = '2026-07-31T10:00:00.000Z';
 const AGENT = '/opt/fleet/bin/claude-auto-loge';

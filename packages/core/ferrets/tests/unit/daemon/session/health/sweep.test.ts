@@ -5,7 +5,7 @@ import {
   defaultSessionHealthSettings,
   wardenSweepDeadlineMs,
   type WardenSweepObservation,
-} from '../../../../src/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const NOW_MS = Date.parse('2026-07-31T10:00:00.000Z');

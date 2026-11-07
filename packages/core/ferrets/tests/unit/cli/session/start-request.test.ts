@@ -1,14 +1,14 @@
 import { StartSessionRequestSchema } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
-import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
+import type { SessionEnvironment } from '../../../../cli/lib/session/ports.ts';
 import {
   buildStartRequest,
   resolveParent,
   type StartFlags,
   TURN_TIMEOUT_HINT_SECONDS,
-} from '../../../src/lib/session/start-request.ts';
+} from '../../../../cli/lib/session/start-request.ts';
 
 const HERE: SessionEnvironment = { cwd: '/work/repo' };
 const auto: StartFlags = { agent: 'claude-alpha', mode: 'auto', prompt: 'do the thing' };

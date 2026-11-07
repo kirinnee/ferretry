@@ -11,7 +11,7 @@ import {
   type SignalTarget,
   type SignalTerminal,
   type SignalTransition,
-} from '../../../../src/lib/session/signal/index.ts';
+} from '../../../../../daemon/lib/session/signal/index.ts';
 
 /**
  * What the daemon does about each of the four things a session may say about itself.

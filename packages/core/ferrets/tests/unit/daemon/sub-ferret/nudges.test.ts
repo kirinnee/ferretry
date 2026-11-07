@@ -8,7 +8,7 @@ import {
   nudgeTarget,
   sessionSubFerretDirectory,
   subFerretRefusal,
-} from '../../../src/lib/sub-ferret/index.ts';
+} from '../../../../daemon/lib/sub-ferret/index.ts';
 import { card } from '../board/support.ts';
 import { DIRECTORY } from './support.ts';
 

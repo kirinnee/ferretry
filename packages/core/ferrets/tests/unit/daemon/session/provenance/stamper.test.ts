@@ -5,7 +5,7 @@ import {
   SessionProvenanceStamper,
   type SessionAncestor,
   type SessionProvenance,
-} from '../../../../src/lib/session/provenance/index.ts';
+} from '../../../../../daemon/lib/session/provenance/index.ts';
 import { WARDEN_LABEL } from '../../../../src/lib/warden/index.ts';
 
 const SPAWNED_AT = '2026-07-30T12:00:00.000Z';

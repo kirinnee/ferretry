@@ -4,8 +4,8 @@ import { NameSuggestionsSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { CALLSIGN_WINDOW_MS, DEFAULT_CALLSIGN_POOL, type NameClaim } from '../../../../src/lib/names/index.ts';
-import { nameRoutes } from '../../../../src/lib/runtime/mounts/names.ts';
+import { CALLSIGN_WINDOW_MS, DEFAULT_CALLSIGN_POOL, type NameClaim } from '../../../../../daemon/lib/names/index.ts';
+import { nameRoutes } from '../../../../../daemon/lib/runtime/mounts/names.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { AT_MS, CREDENTIALS, human, nameClaim, nameSubsystem } from './support.ts';
 

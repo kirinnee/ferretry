@@ -29,7 +29,7 @@ import {
   type TurnFacts,
   type TurnStateChange,
   turnFactsOf,
-} from '../../../../src/lib/session/observer/index.ts';
+} from '../../../../../daemon/lib/session/observer/index.ts';
 import {
   type AnswerOperationRecord,
   reconcileAnswerEvidence,

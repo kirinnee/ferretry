@@ -1,8 +1,8 @@
 import type { PendingQuestion } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { planAnswer } from '../../../src/lib/session/answer-plan.ts';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import { planAnswer } from '../../../../cli/lib/session/answer-plan.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 
 const oneQuestion: PendingQuestion = {
   toolUseId: 'tool-1',

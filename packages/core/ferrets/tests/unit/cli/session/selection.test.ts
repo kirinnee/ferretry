@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { selectSessions } from '../../../src/lib/session/selection.ts';
+import { selectSessions } from '../../../../cli/lib/session/selection.ts';
 import { sessionView } from './session-fixtures.ts';
 
 const running = sessionView({ id: 'ses-run', label: 'batch' }, { status: 'running' });

@@ -6,7 +6,7 @@ import {
   ambiguousAgentAddressMessage,
   isLiveAgentCandidate,
   resolveAgentAddress,
-} from '../../src/lib/agent-address.ts';
+} from '../../../../daemon/lib/protocol/agent-address.ts';
 
 const aniya: AgentAddressCandidate = { id: 'mvb0sw7d-27f71326', name: 'aniya', status: 'running' };
 const torrey: AgentAddressCandidate = { id: 'mvb0aaaa-11111111', name: 'Torrey', status: 'waiting' };

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { grantedConfirmations, grantedOverrides, unclearedBlockers } from '../../../src/lib/worktrees/overrides';
+import { grantedConfirmations, grantedOverrides, unclearedBlockers } from '../../../../cli/lib/worktrees/overrides';
 import { blocker, decision } from './fixtures';
 
 describe('removal consent', () => {

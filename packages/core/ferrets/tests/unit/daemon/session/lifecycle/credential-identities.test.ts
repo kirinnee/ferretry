@@ -5,7 +5,7 @@ import {
   CredentialAgentIdentities,
   CredentialDigestLocations,
   type CredentialedSession,
-} from '../../../../src/lib/agent-tools/policy.ts';
+} from '../../../../../daemon/lib/agent-tools/policy.ts';
 import { secretsMatch } from '../../../../src/lib/api/authentication.ts';
 
 const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');

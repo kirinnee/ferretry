@@ -17,7 +17,7 @@ import {
   renderCloneDiff,
   renderItemDetail,
   resolveCloneChoices,
-} from '../../../src/lib/machine/clone-update.ts';
+} from '../../../../cli/lib/machine/clone-update.ts';
 import { cloneReview } from '../fleet/account-fakes.ts';
 
 const item = (ref: string, outcome: CloneOutcome, overrides: Partial<CloneReviewItem> = {}): CloneReviewItem => {

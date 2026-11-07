@@ -13,7 +13,7 @@ import {
   SessionRenameError,
   SessionRenameService,
   sessionNameClaim,
-} from '../../../src/lib/names/index.ts';
+} from '../../../../daemon/lib/names/index.ts';
 
 const CREATED = '2026-10-01T00:00:00.000Z';
 const CREATED_MS = Date.parse(CREATED);

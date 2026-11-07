@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import { EMPTY_RUNTIME_IDS, evaluateConfigFiles, type FleetLayout, materialiseFleet } from '@ferretry/fleet';
 import should from 'should';
-import { currentLaunchCompactAt } from '../../../../src/lib/session/launch/index.ts';
+import { currentLaunchCompactAt } from '../../../../../daemon/lib/session/launch/index.ts';
 
 const LAYOUT: FleetLayout = {
   stateHome: '/fy',

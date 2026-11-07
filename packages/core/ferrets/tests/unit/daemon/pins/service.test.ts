@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { Pin, PinSnapshot } from '@ferretry/protocol';
-import { PinError, PinService, type PinRepository } from '../../../src/lib/pins/index.ts';
+import { PinError, PinService, type PinRepository } from '../../../../daemon/lib/pins/index.ts';
 
 class MemoryPins implements PinRepository {
   private pins: Pin[] = [];

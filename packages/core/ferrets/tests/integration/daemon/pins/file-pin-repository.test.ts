@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import should from 'should';
 import { createFoundationPaths, resolveStateHome, type FoundationPaths } from '../../../src/lib/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { FilePinRepository, FilePinSessionDirectory } from '../../../src/adapters/pins/index.ts';
+import { FilePinRepository, FilePinSessionDirectory } from '../../../../daemon/adapters/pins/index.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 
 const clock = { now: () => '2026-07-31T00:00:00.000Z' };

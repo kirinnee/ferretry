@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { readSessionFleet } from '../../../src/lib/agent-tools/fleet-read.ts';
+import { readSessionFleet } from '../../../../daemon/lib/agent-tools/fleet-read.ts';
 
 /**
  * The one way the daemon walks every session.

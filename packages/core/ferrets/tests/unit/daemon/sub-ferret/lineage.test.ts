@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { AgendaLedger, AgendaLedgerRepository, AgendaMutation } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
-import { isAncestorOf, NO_SUB_FERRETS, type SubFerretDirectory } from '../../../src/lib/sub-ferret/index.ts';
+import { isAncestorOf, NO_SUB_FERRETS, type SubFerretDirectory } from '../../../../daemon/lib/sub-ferret/index.ts';
 import { DIRECTORY } from './support.ts';
 
 class MemoryRepository implements AgendaLedgerRepository {

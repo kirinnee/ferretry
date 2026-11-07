@@ -4,7 +4,7 @@ import {
   currentLaunchEffort,
   currentLaunchFast,
   currentLaunchModel,
-} from '../../../../src/lib/session/launch/index.ts';
+} from '../../../../../daemon/lib/session/launch/index.ts';
 import { launchConfig, launchState } from './support.ts';
 
 const LATER = '2027-01-15T09:00:00.000Z';

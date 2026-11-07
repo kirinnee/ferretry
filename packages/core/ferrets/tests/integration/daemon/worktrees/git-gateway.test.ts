@@ -2,14 +2,14 @@ import { afterAll, describe, it } from 'bun:test';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../src/adapters/git/index.ts';
+import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
 import {
   GitWorktreeGateway,
   NodeWorktreeFileSystem,
   SystemWorktreeClock,
-} from '../../../src/adapters/worktrees/index.ts';
-import { WorktreeError } from '../../../src/lib/worktrees/index.ts';
-import type { GitExecution, GitInvocation, GitRunner } from '../../../src/lib/worktrees/ports.ts';
+} from '../../../../daemon/adapters/worktrees/index.ts';
+import { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
+import type { GitExecution, GitInvocation, GitRunner } from '../../../../daemon/lib/worktrees/ports.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRemote, tempRepository } from '../support/repository.ts';
 
 const files = new NodeWorktreeFileSystem();

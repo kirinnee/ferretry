@@ -7,7 +7,7 @@ import {
   type TurnFacts,
   type TurnLook,
   turnPaneEvidenceOf,
-} from '../../../../src/lib/session/observer/index.ts';
+} from '../../../../../daemon/lib/session/observer/index.ts';
 import type { TurnObservation } from '../../../../src/lib/session/turn/policy.ts';
 import { parsePaneMetadata, paneStateFrom } from '../../../../src/lib/tmux/pane.ts';
 import { ClaudeTranscriptParser } from '../../../../src/lib/transcript/claude.ts';

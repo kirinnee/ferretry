@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { LimitsViewSchema } from '../../src/lib/limits.ts';
 import * as service from '../../src/lib/service.ts';
-import * as session from '../../src/lib/session.ts';
+import * as session from '../../../../daemon/lib/protocol/session.ts';
 import {
   attachmentView,
   cgroupConfigView,

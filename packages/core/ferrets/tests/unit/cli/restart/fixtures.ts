@@ -1,5 +1,5 @@
 import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from '@ferretry/protocol';
-import type { IRestartGateway } from '../../../src/lib/restart/ports.ts';
+import type { IRestartGateway } from '../../../../cli/lib/restart/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 
 const RESULT: RestartResult = {

@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileSessionTaskStore } from '../../../../src/adapters/session/lifecycle/file-session-task-store.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+import { FileSessionTaskStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /**
  * The assigned-task document, when what stands at its path is not a readable earlier copy of it.

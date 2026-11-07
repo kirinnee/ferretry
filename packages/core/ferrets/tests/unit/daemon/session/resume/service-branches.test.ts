@@ -7,7 +7,7 @@ import {
   type ResumeTarget,
   type ResumeTransition,
   SessionResumeService,
-} from '../../../../src/lib/session/resume/index.ts';
+} from '../../../../../daemon/lib/session/resume/index.ts';
 
 const ID = parseSessionId('session-1');
 const DEAD_PANE: PaneObservation = { alive: true, dead: true, promptReady: false };

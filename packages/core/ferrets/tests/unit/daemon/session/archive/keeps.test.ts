@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type ArchiveKeepSources, sessionKeeps } from '../../../../src/lib/session/archive/keeps.ts';
+import { type ArchiveKeepSources, sessionKeeps } from '../../../../../daemon/lib/session/archive/keeps.ts';
 
 function sources(overrides: Partial<ArchiveKeepSources> = {}): ArchiveKeepSources {
   return {

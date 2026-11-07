@@ -11,7 +11,7 @@ import {
   renderSessionList,
   type SessionDirectorySubsystem,
   sessionRoutes,
-} from '../../../../src/lib/runtime/mounts/sessions.ts';
+} from '../../../../../daemon/lib/runtime/mounts/sessions.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 

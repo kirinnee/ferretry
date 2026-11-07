@@ -5,7 +5,7 @@ import {
   SessionFilesystem,
   type FsFileView,
   type FsListing,
-} from '../../../../src/lib/session/filesystem/index.ts';
+} from '../../../../../daemon/lib/session/filesystem/index.ts';
 import {
   directory,
   FAKE_MTIME,

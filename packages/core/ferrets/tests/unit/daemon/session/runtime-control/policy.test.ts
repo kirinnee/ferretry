@@ -8,7 +8,7 @@ import {
   needsLiveCatalog,
   paneRefusal,
   switchRequest,
-} from '../../../../src/lib/session/runtime-control/policy.ts';
+} from '../../../../../daemon/lib/session/runtime-control/policy.ts';
 import { CLAUDE_VIEW, CODEX_VIEW } from './support.ts';
 
 /**

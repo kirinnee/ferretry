@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionLiveActivitySchema } from '@ferretry/protocol';
 import should from 'should';
-import { type LiveActivityReads, StorageLiveActivitySource } from '../../../../src/adapters/session/live/index.ts';
+import { type LiveActivityReads, StorageLiveActivitySource } from '../../../../../daemon/adapters/session/live/index.ts';
 import type {
   CompactionHistory,
   CompactionRecord,

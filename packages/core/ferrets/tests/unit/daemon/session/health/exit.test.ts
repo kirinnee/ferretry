@@ -5,7 +5,7 @@ import {
   exitedSessionTransition,
   type SessionExitObservation,
   type SessionPaneExit,
-} from '../../../../src/lib/session/health/exit.ts';
+} from '../../../../../daemon/lib/session/health/exit.ts';
 
 function observation(exit: SessionPaneExit, status = 'running'): SessionExitObservation {
   return {

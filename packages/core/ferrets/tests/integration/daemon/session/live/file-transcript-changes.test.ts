@@ -9,7 +9,7 @@ import {
   FileTranscriptChanges,
   type TranscriptFileEvents,
   type TranscriptFileStamp,
-} from '../../../../src/adapters/session/live/file-transcript-changes.ts';
+} from '../../../../../daemon/adapters/session/live/file-transcript-changes.ts';
 import { FileEventHub } from '../../../../src/lib/file-events/hub.ts';
 import { waitFor } from '../../support/wait-for.ts';
 

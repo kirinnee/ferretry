@@ -3,7 +3,7 @@ import should from 'should';
 import {
   type ObservationStorage,
   recordTurnChange,
-} from '../../../../src/adapters/session/observer/session-observation-applier.ts';
+} from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
 import { parseSessionId } from '../../../../src/lib/index.ts';
 
 /** The usage-limit dialog is recorded as a rate-limited session, and released again when it closes. */

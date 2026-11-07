@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { ArchiveSession } from '../../../../src/lib/session/archive/policy.ts';
-import { SessionArchiveService, type SessionArchivePorts } from '../../../../src/lib/session/archive/service.ts';
+import type { ArchiveSession } from '../../../../../daemon/lib/session/archive/policy.ts';
+import { SessionArchiveService, type SessionArchivePorts } from '../../../../../daemon/lib/session/archive/service.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const HOUR = 3_600_000;

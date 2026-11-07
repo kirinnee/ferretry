@@ -8,7 +8,7 @@ import {
   DEFAULT_GIT_STDOUT_LIMIT,
   DEFAULT_GIT_TIMEOUT_MS,
   GitProcessError,
-} from '../../../src/adapters/git/index.ts';
+} from '../../../../daemon/adapters/git/index.ts';
 import { cleanupTempDirectories, setupGit, stubGitDirectory, tempRepository } from '../support/repository.ts';
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);

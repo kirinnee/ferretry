@@ -17,7 +17,7 @@ import {
   withRemovalStarted,
   withRemovedManagedWorktree,
   WorktreeError,
-} from '../../../src/lib/worktrees/index.ts';
+} from '../../../../daemon/lib/worktrees/index.ts';
 
 const record = (overrides: Partial<ManagedWorktree> = {}): ManagedWorktree => ({
   version: 1,

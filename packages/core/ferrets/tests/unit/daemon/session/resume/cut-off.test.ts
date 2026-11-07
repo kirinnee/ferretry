@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { cutOffResume, resumeUnderCutOff } from '../../../../src/lib/session/resume/cut-off.ts';
+import { cutOffResume, resumeUnderCutOff } from '../../../../../daemon/lib/session/resume/cut-off.ts';
 
 /** A session a person cut off (`fy session revoke-credential`) comes back only when a person resumes it. */
 describe('resuming a session a person cut off', () => {

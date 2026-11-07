@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 import { capturedPresenter } from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
 

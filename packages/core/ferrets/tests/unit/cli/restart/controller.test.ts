@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { RestartController } from '../../../src/lib/restart/controller.ts';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import { RestartController } from '../../../../cli/lib/restart/controller.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 import { RecordingRestartGateway, restartHarness } from './fixtures.ts';
 
 const controller = (caller?: string, gateway = new RecordingRestartGateway()) => {

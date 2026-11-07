@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { StorageCredentialedSessions } from '../../../src/adapters/agent-tools/storage-credentialed-sessions.ts';
+import { StorageCredentialedSessions } from '../../../../daemon/adapters/agent-tools/storage-credentialed-sessions.ts';
 
 const AT = '2026-07-31T09:00:00.000Z';
 const HASH = 'a'.repeat(64);

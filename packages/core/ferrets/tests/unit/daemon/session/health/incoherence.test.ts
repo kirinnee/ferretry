@@ -5,7 +5,7 @@ import {
   emptyIncoherenceLedger,
   recordIncoherencePass,
   type IncoherencePass,
-} from '../../../../src/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 

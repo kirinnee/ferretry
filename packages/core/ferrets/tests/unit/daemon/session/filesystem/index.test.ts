@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FsError, MAX_INDEX_WALL_MS, SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
+import { FsError, MAX_INDEX_WALL_MS, SessionFilesystem } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import {
   directory,
   FAKE_POLICY_CWD,

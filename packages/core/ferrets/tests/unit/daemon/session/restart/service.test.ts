@@ -8,7 +8,7 @@ import {
   RestartService,
   type RestartPorts,
   type RestartSubject,
-} from '../../../../src/lib/session/restart/service.ts';
+} from '../../../../../daemon/lib/session/restart/service.ts';
 
 const AT = '2026-10-30T01:00:00.000Z';
 

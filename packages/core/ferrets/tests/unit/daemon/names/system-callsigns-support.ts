@@ -1,6 +1,6 @@
 import type { SerialExecutor } from '../../../src/lib/index.ts';
-import type { SystemCallsignCounters, SystemCallsignCounterStore } from '../../../src/lib/names/index.ts';
-import { SystemCallsignIssuer } from '../../../src/lib/names/index.ts';
+import type { SystemCallsignCounters, SystemCallsignCounterStore } from '../../../../daemon/lib/names/index.ts';
+import { SystemCallsignIssuer } from '../../../../daemon/lib/names/index.ts';
 
 export class MemoryCounters implements SystemCallsignCounterStore {
   constructor(public counters: SystemCallsignCounters = {}) {}

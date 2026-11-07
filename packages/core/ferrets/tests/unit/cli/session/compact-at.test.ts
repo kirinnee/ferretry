@@ -8,8 +8,8 @@ import {
   ProtocolSessionCompactAtGateway,
   registerSessionCompactAtCommand,
   SessionCompactAtController,
-} from '../../../src/lib/session/compact-at.ts';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+} from '../../../../cli/lib/session/compact-at.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 import { capturedPresenter } from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
 

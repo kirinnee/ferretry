@@ -7,7 +7,7 @@ import type {
   TerminalRuntimePort,
 } from '../../../../src/lib/index.ts';
 import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
-import { type WorktreesNeeds, worktreesModule } from '../../../../bin/modules/worktrees.ts';
+import { type WorktreesNeeds, worktreesModule } from '../../../../../daemon/modules/worktrees.ts';
 
 /**
  * THE `worktrees` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).

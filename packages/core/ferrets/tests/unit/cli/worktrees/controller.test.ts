@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CONFIRMATION_WORD, WorktreeController } from '../../../src/lib/worktrees/controller';
+import { CONFIRMATION_WORD, WorktreeController } from '../../../../cli/lib/worktrees/controller';
 import {
   blocker,
   CALLER_CWD,

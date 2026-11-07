@@ -2,16 +2,16 @@ import { describe, it } from 'bun:test';
 import type { SendRecord, SendResult } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
-import { AnswerQuestionController } from '../../../src/lib/session/answer-controller.ts';
-import { InterruptSessionController, ResumeSessionController } from '../../../src/lib/session/lifecycle-controllers.ts';
-import { SuggestNamesController } from '../../../src/lib/session/name-controller.ts';
-import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
-import { ListSessionsController } from '../../../src/lib/session/ps-controller.ts';
-import { SendMessageController } from '../../../src/lib/session/send-controller.ts';
-import { describeDisposition, describeFate } from '../../../src/lib/session/send-plan.ts';
-import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
-import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
-import { SessionStatusController } from '../../../src/lib/session/status-controller.ts';
+import { AnswerQuestionController } from '../../../../cli/lib/session/answer-controller.ts';
+import { InterruptSessionController, ResumeSessionController } from '../../../../cli/lib/session/lifecycle-controllers.ts';
+import { SuggestNamesController } from '../../../../cli/lib/session/name-controller.ts';
+import type { SessionEnvironment } from '../../../../cli/lib/session/ports.ts';
+import { ListSessionsController } from '../../../../cli/lib/session/ps-controller.ts';
+import { SendMessageController } from '../../../../cli/lib/session/send-controller.ts';
+import { describeDisposition, describeFate } from '../../../../cli/lib/session/send-plan.ts';
+import { SignalSessionController } from '../../../../cli/lib/session/signal-controller.ts';
+import { StartSessionController } from '../../../../cli/lib/session/start-controller.ts';
+import { SessionStatusController } from '../../../../cli/lib/session/status-controller.ts';
 import {
   attachmentView,
   capturedPresenter,

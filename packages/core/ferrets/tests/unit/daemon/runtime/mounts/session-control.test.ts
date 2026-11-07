@@ -10,7 +10,7 @@ import {
   refuseStateHomeStart,
   SessionControlError,
   sessionControlRoutes,
-} from '../../../../src/lib/runtime/mounts/session-control.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-control.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,

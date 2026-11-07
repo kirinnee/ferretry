@@ -6,7 +6,7 @@ import {
   SessionProvenanceStamper,
   type SessionProvenanceRecord,
   type SessionProvenanceStore,
-} from '../../../../src/lib/session/provenance/index.ts';
+} from '../../../../../daemon/lib/session/provenance/index.ts';
 
 const AT = '2026-08-06T07:00:00.000Z';
 const LATER = '2026-08-06T09:00:00.000Z';

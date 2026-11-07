@@ -12,7 +12,7 @@ import should from 'should';
 import {
   SESSION_STATUS_TALLY_MAX_AGE_MS,
   SessionStatusTally,
-} from '../../../src/lib/fleet-reading/session-status-tally.ts';
+} from '../../../../daemon/lib/fleet-reading/session-status-tally.ts';
 
 const NOW = 1_786_000_000_000;
 

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FleetRefreshService } from '../../../src/lib/fleet-refresh/index.ts';
+import { FleetRefreshService } from '../../../../daemon/lib/fleet-refresh/index.ts';
 
 /**
  * The invariant these tests exist for is NEGATIVE: an unattended pass must reach nothing that spends.

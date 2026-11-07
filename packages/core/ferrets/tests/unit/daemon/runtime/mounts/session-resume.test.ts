@@ -11,7 +11,7 @@ import {
   SessionResumeError,
   type SessionResumeSubsystem,
   sessionResumeRoutes,
-} from '../../../../src/lib/runtime/mounts/session-resume.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-resume.ts';
 import { request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FakeSessionResume, human } from './support.ts';
 

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerWorktreeCommands } from '../../../src/lib/worktrees/commands';
-import { WorktreeController } from '../../../src/lib/worktrees/controller';
+import { registerWorktreeCommands } from '../../../../cli/lib/worktrees/commands';
+import { WorktreeController } from '../../../../cli/lib/worktrees/controller';
 import { CALLER_CWD, CapturingOutput, RecordingWorktreeGateway, ScriptedPrompt, WORKTREE_PATH } from './fixtures';
 
 function run(argv: string[]) {

@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileLastSnapshotStore } from '../../../../src/adapters/session/snapshot/file-last-snapshot-store.ts';
+import { FileLastSnapshotStore } from '../../../../../daemon/adapters/session/snapshot/file-last-snapshot-store.ts';
 
 async function withTempRoot(run: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), 'fy-last-snapshot-'));

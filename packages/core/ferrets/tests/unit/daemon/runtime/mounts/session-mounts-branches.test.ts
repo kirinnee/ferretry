@@ -15,14 +15,14 @@ import {
   type SessionAttachmentSubsystem,
   sessionAttachmentRoutes,
 } from '../../../../src/lib/runtime/mounts/session-attachments.ts';
-import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import { sessionControlRoutes } from '../../../../../daemon/lib/runtime/mounts/session-control.ts';
 import {
   type SessionProcessSubsystem,
   sessionProcessRoutes,
 } from '../../../../src/lib/runtime/mounts/session-processes.ts';
 import { sessionReadRoutes } from '../../../../src/lib/runtime/mounts/session-reads.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
-import { sessionRoutes } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import { sessionRoutes } from '../../../../../daemon/lib/runtime/mounts/sessions.ts';
 import type { OperatorReadService } from '../../../../src/lib/session/reads/service.ts';
 import { request } from '../../api/support.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';

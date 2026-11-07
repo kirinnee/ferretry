@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { fixture, ended } from './session-archive-commit-contract.ts';
-import { parseSessionId } from '../../src/lib/session-id.ts';
-import { StorageSessionLifecycleRepository } from '../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { createSessionArchive } from '../../src/adapters/session/archive/session-archive.ts';
+import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
 import { createFoundationPaths } from '../../src/lib/paths.ts';
-import { parseArchiveAfter } from '../../src/lib/session/archive/policy.ts';
+import { parseArchiveAfter } from '../../../daemon/lib/session/archive/policy.ts';
 
 function deferred() {
   let resolve!: () => void;

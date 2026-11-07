@@ -1,5 +1,5 @@
 import type { MessagePin, NotePin, Pin, PinActionRequest, PinBlockKind, PinSnapshot } from '@ferretry/protocol';
-import type { IPinGateway, IPinOutput } from '../../../src/lib/pins/ports';
+import type { IPinGateway, IPinOutput } from '../../../../cli/lib/pins/ports';
 
 export const SESSION = 'ms8kkfyd-95b7037e';
 export const NOTE_ID = '11111111-1111-4111-8111-111111111111';

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { reviveRuling, type SessionView } from '@ferretry/protocol';
 import should from 'should';
-import { withRevive } from '../../../../src/lib/session/resume/revive-view.ts';
+import { withRevive } from '../../../../../daemon/lib/session/resume/revive-view.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 
 const view = (id: string, status: SessionView['state']['status']): SessionView => sessionView(id, {}, { status });

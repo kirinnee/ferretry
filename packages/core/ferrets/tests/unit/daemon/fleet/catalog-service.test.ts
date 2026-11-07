@@ -47,7 +47,7 @@ import {
   sameManifest,
 } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
-import { deriveAccountChange, FleetMutationRefusal } from '../../../src/lib/fleet/mutations.ts';
+import { deriveAccountChange, FleetMutationRefusal } from '../../../../daemon/lib/fleet/mutations.ts';
 import { configReading } from '../../support/config-reading.ts';
 
 const LAYOUT: FleetLayout = {

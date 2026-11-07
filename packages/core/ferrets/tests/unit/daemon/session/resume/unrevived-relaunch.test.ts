@@ -5,7 +5,7 @@ import {
   restoreRestamped,
   settleRejectedRelaunch,
   settleUnrevivedRelaunch,
-} from '../../../../src/lib/session/resume/index.ts';
+} from '../../../../../daemon/lib/session/resume/index.ts';
 
 const settle = async (
   disposition: Parameters<typeof settleUnrevivedRelaunch>[0]['disposition'],

@@ -6,7 +6,7 @@ import {
   FixedSettingsUnreadableError,
   settingsArguments,
   transcriptLaunchArguments,
-} from '../../../../src/lib/session/launch/index.ts';
+} from '../../../../../daemon/lib/session/launch/index.ts';
 
 const WRAPPER = '/fleet/bin/claude-auto-boot';
 const HARNESS_SESSION = '0f7f4a1c-1111-2222-3333-444455556666';

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { unsupportedPlatform } from '../../../../src/lib/session/filesystem/index.ts';
+import { unsupportedPlatform } from '../../../../../daemon/lib/session/filesystem/index.ts';
 
 /**
  * The words a viewer shows when the whole surface is closed.

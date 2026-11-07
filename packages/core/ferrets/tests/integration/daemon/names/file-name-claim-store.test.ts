@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { FileNameClaimStore } from '../../../src/adapters/names/index.ts';
+import { FileNameClaimStore } from '../../../../daemon/adapters/names/index.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import {
   CALLSIGN_WINDOW_MS,

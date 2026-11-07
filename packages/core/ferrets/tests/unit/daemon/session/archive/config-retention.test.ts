@@ -1,3 +1,3 @@
-import { sessionArchiveConfigRetentionContract } from '../../../support/session-archive-config-retention-contract.ts';
+import { sessionArchiveConfigRetentionContract } from '../../../../support/daemon/session-archive-config-retention-contract.ts';
 
 sessionArchiveConfigRetentionContract();

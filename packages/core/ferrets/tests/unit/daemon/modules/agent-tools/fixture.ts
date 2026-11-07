@@ -1,5 +1,5 @@
 import { StateFileSystem } from '../../../../src/adapters/index.ts';
-import type { DaemonStorage } from '../../../../src/adapters/storage/session-storage.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import {
   createFoundationPaths,
   resolveStateHome,
@@ -13,7 +13,7 @@ import {
   type AgentToolsNeeds,
   type AgentToolsProvides,
   agentToolsModule,
-} from '../../../../bin/modules/agent-tools.ts';
+} from '../../../../../daemon/modules/agent-tools.ts';
 
 /**
  * THE `agentTools` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).

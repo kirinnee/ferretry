@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { FileAgentPinRepository } from '../../src/adapters/agent-pins/index.ts';
-import { StorageCredentialedSessions } from '../../src/adapters/agent-tools/index.ts';
+import { FileAgentPinRepository } from '../adapters/agent-pins/index.ts';
+import { StorageCredentialedSessions } from '../adapters/agent-tools/index.ts';
 import { asActivity, KeyedSerialExecutor, NodeAgentFilesystem } from '../../src/adapters/index.ts';
-import { FilePinRepository, FilePinSessionDirectory } from '../../src/adapters/pins/index.ts';
-import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import { FilePinRepository, FilePinSessionDirectory } from '../adapters/pins/index.ts';
+import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import {
   type AccountDirectory,
   type ActivityLedger,
@@ -41,9 +41,9 @@ import {
   tryParseSessionId,
   type TypedIdentities,
 } from '../../src/lib/index.ts';
-import type { AgentControlPolicy } from '../../src/lib/fleet/agent-control.ts';
+import type { AgentControlPolicy } from '../lib/fleet/agent-control.ts';
 import type { DaemonModule, LateBound } from '../../src/lib/runtime/modules.ts';
-import { agentToolsContribution } from '../../src/lib/runtime/mounts/agent-tools.ts';
+import { agentToolsContribution } from '../lib/runtime/mounts/agent-tools.ts';
 import type { BrowserMountedSubsystem } from '../../src/lib/runtime/mounts/browser-login.ts';
 
 /**

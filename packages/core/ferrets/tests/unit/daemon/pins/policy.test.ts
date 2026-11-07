@@ -11,7 +11,7 @@ import {
   pinPreview,
   pinProvenance,
   PinError,
-} from '../../../src/lib/pins/index.ts';
+} from '../../../../daemon/lib/pins/index.ts';
 
 const note = (id: string, by: 'human' | 'agent' = 'human'): Pin =>
   by === 'human'

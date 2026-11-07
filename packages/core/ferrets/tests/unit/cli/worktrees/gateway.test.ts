@@ -6,8 +6,8 @@ import {
   WORKTREE_REMOVE_PATH,
   WORKTREES_PATH,
   worktreeRemovalCheckPath,
-} from '../../../src/lib/worktrees/gateway';
-import type { WorktreeApiClient } from '../../../src/lib/worktrees/ports';
+} from '../../../../cli/lib/worktrees/gateway';
+import type { WorktreeApiClient } from '../../../../cli/lib/worktrees/ports';
 import { CALLER_CWD, created, decision, listResponse, removed, WORKTREE_PATH } from './fixtures';
 
 interface Call {

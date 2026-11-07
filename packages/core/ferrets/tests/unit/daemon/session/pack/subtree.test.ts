@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { type BoardTask, type PrLink, SubtreeRowSchema, SubtreeViewSchema } from '@ferretry/protocol';
 import should from 'should';
-import { mapBounded } from '../../../../src/lib/session/pack/bounded.ts';
-import { newestMessageScanning, scanOutbox } from '../../../../src/lib/session/pack/outbox-scan.ts';
+import { mapBounded } from '../../../../../daemon/lib/session/pack/bounded.ts';
+import { newestMessageScanning, scanOutbox } from '../../../../../daemon/lib/session/pack/outbox-scan.ts';
 import {
   EXCERPT_WITHHELD,
   excerptEligible,
@@ -18,7 +18,7 @@ import {
   SubtreeService,
   subtreeMembers,
   subtreeStateOf,
-} from '../../../../src/lib/session/pack/subtree.ts';
+} from '../../../../../daemon/lib/session/pack/subtree.ts';
 import { card, lanes, PROJECT } from '../../board/support.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 

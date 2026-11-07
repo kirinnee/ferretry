@@ -19,8 +19,8 @@ import {
   type SessionHealthPorts,
   SessionHealthService,
   type SurveyedSession,
-} from '../../../../src/lib/session/health/index.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/lib/session/health/index.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const AT = '2026-07-31T10:00:00.000Z';

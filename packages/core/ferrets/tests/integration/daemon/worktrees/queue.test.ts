@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { WorktreeOperationQueue } from '../../../src/adapters/worktrees/index.ts';
+import { WorktreeOperationQueue } from '../../../../daemon/adapters/worktrees/index.ts';
 
 /** One turn of the event loop, so overlapping work would interleave if the queue allowed it. */
 const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve));

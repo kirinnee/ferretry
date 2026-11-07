@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { WatchedDocument } from '../../../src/lib/fleet-reading/watched-document.ts';
+import { WatchedDocument } from '../../../../daemon/lib/fleet-reading/watched-document.ts';
 
 /** A file a test changes on cue, behind a watch it can make live or not, and a count of its reads. */
 function documentWorld() {

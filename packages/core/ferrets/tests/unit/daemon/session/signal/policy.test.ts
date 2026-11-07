@@ -12,7 +12,7 @@ import {
   signalStatusOf,
   waitDetail,
   type SignalTarget,
-} from '../../../../src/lib/session/signal/index.ts';
+} from '../../../../../daemon/lib/session/signal/index.ts';
 
 /**
  * The pure decisions a signal makes.

@@ -5,7 +5,7 @@ import {
   type FleetBacklogPasses,
   type FleetEventBacklog,
   SharedFleetBacklog,
-} from '../../../../src/lib/session/events/index.ts';
+} from '../../../../../daemon/lib/session/events/index.ts';
 
 /**
  * Live feeds opening together, seen from the domain.

@@ -10,7 +10,7 @@ import {
   parsePeerEnvelope,
   peerEnvelopePreamble,
   splitFerretryNotice,
-} from '../../src/lib/agent-messages.ts';
+} from '../../../../daemon/lib/protocol/agent-messages.ts';
 
 describe('the peer envelope', () => {
   it('should write the note banner as ONE line the receiving ferret reads, then the message on the next', () => {

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { stepTurn, type TurnFacts, type TurnLook } from '../../../../src/lib/session/observer/index.ts';
+import { stepTurn, type TurnFacts, type TurnLook } from '../../../../../daemon/lib/session/observer/index.ts';
 import { limitPatch } from '../../../../src/lib/session/turn/usage-limit.ts';
 import { CodexTranscriptParser } from '../../../../src/lib/transcript/codex.ts';
 

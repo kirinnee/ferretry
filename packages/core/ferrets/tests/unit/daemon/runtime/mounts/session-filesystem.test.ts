@@ -3,7 +3,7 @@ import { SessionFileIndexResponseSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { sessionFilesystemRoutes } from '../../../../src/lib/runtime/index.ts';
-import { FsError, SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
+import { FsError, SessionFilesystem } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   directory,

@@ -1,4 +1,4 @@
-import { namesModule, type NamesNeeds, type NamesProvides } from '../../../../bin/modules/names.ts';
+import { namesModule, type NamesNeeds, type NamesProvides } from '../../../../../daemon/modules/names.ts';
 import { KeyedSerialExecutor, StateFileSystem } from '../../../../src/adapters/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../../src/lib/index.ts';
 import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';

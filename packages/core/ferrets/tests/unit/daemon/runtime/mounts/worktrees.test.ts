@@ -10,8 +10,8 @@ import type {
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { type WorktreeSubsystem, worktreeRoutes } from '../../../../src/lib/runtime/mounts/worktrees.ts';
-import { WorktreeError, type WorktreeErrorCode } from '../../../../src/lib/worktrees/index.ts';
+import { type WorktreeSubsystem, worktreeRoutes } from '../../../../../daemon/lib/runtime/mounts/worktrees.ts';
+import { WorktreeError, type WorktreeErrorCode } from '../../../../../daemon/lib/worktrees/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, GRANTED, human } from './support.ts';
 

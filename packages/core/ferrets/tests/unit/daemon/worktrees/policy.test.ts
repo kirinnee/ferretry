@@ -11,7 +11,7 @@ import {
   sharingSessionIds,
   type WorktreeRemovalEvidence,
   type WorktreeStatusSummary,
-} from '../../../src/lib/worktrees/index.ts';
+} from '../../../../daemon/lib/worktrees/index.ts';
 
 const cleanStatus: WorktreeStatusSummary = {
   staged: false,

@@ -21,7 +21,7 @@ import {
   type WorktreeSessionFact,
   WorktreeError,
   WorktreeRemovalRefusal,
-} from '../../../src/lib/worktrees/index.ts';
+} from '../../../../daemon/lib/worktrees/index.ts';
 
 const MANAGED_ROOT = '/managed';
 

@@ -10,7 +10,7 @@ import {
   type SelfRestartInput,
   type SelfRestartStamp,
   type SelfRestartStampStore,
-} from '../../../../src/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const NOW = '2026-07-31T10:00:00.000Z';

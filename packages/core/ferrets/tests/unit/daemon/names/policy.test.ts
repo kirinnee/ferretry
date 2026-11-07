@@ -8,7 +8,7 @@ import {
   normalizeCallsign,
   resolveSessionReference,
   suggestCallsigns,
-} from '../../../src/lib/names/index.ts';
+} from '../../../../daemon/lib/names/index.ts';
 
 /** A pool is usable when every callsign is plain lowercase letters, and the list is sorted and free of repeats. */
 function isValidCallsignPool(pool: readonly string[]): boolean {

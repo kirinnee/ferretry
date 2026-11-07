@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { adoptedLaunchArgv } from '../../../../src/lib/session/launch/index.ts';
+import { adoptedLaunchArgv } from '../../../../../daemon/lib/session/launch/index.ts';
 
 const WRAPPER = '/fleet/bin/claude-auto-boot';
 

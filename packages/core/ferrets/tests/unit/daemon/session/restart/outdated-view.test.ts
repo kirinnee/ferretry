@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { LaunchInstructionSectionId, SessionView } from '@ferretry/protocol';
 import should from 'should';
-import { withOutdated } from '../../../../src/lib/session/restart/outdated-view.ts';
+import { withOutdated } from '../../../../../daemon/lib/session/restart/outdated-view.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 
 const view = (id: string, status: SessionView['state']['status'] = 'running'): SessionView =>

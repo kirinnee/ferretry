@@ -8,7 +8,7 @@ import {
   type WorktreeClock,
 } from '../../src/lib/index.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { worktreesContribution } from '../../src/lib/runtime/mounts/worktrees.ts';
+import { worktreesContribution } from '../lib/runtime/mounts/worktrees.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is

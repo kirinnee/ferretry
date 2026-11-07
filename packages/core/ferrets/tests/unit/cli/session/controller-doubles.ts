@@ -7,8 +7,8 @@ import type {
   SignalKind,
   SignalOptions,
 } from '@ferretry/protocol';
-import type { IClock, ISessionApi, ISessionBoard, ISessionFiles, ISessionIo } from '../../../src/lib/session/ports.ts';
-import { SessionPresenter } from '../../../src/lib/session/presenter.ts';
+import type { IClock, ISessionApi, ISessionBoard, ISessionFiles, ISessionIo } from '../../../../cli/lib/session/ports.ts';
+import { SessionPresenter } from '../../../../cli/lib/session/presenter.ts';
 
 /** Captured terminal output, so a test asserts what a user would actually see. */
 export class CapturedIo implements ISessionIo {

@@ -10,10 +10,10 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import { createFoundationPaths, createSessionPaths } from '../../src/lib/paths.ts';
-import { parseSessionId, type SessionId } from '../../src/lib/session-id.ts';
-import { serializeArchiveRegistry } from '../../src/lib/session/archive/registry.ts';
+import { parseSessionId, type SessionId } from '../../../daemon/lib/session-id.ts';
+import { serializeArchiveRegistry } from '../../../daemon/lib/session/archive/registry.ts';
 
 const NOW = '2026-11-06T12:00:00.000Z';
 const paths = createFoundationPaths('/state-home-that-is-never-touched' as never);

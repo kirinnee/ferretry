@@ -8,8 +8,8 @@ import {
   type PinFileCalls,
   PosixSessionRootPinner,
   ProcfsSessionRootPinner,
-} from '../../../../src/adapters/session/filesystem/index.ts';
-import type { PinnedRoot, SessionRootPinner, WorkBudget } from '../../../../src/lib/session/filesystem/index.ts';
+} from '../../../../../daemon/adapters/session/filesystem/index.ts';
+import type { PinnedRoot, SessionRootPinner, WorkBudget } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../support/repository.ts';
 
 /**

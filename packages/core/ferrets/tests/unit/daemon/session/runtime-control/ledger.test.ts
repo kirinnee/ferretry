@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { RuntimeControlRequest } from '@ferretry/protocol';
 import should from 'should';
-import { runtimeRequestFingerprint } from '../../../../src/lib/session/runtime-control/ledger.ts';
+import { runtimeRequestFingerprint } from '../../../../../daemon/lib/session/runtime-control/ledger.ts';
 
 /** The stable payload identity handed to the durable session-effect ledger. */
 

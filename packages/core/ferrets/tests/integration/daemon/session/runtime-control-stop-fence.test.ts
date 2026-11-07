@@ -29,13 +29,13 @@ import {
   SessionLifecycleService,
   transitionSessionRecord,
 } from '../../../src/lib/index.ts';
-import { runtimeRequestFingerprint } from '../../../src/lib/session/runtime-control/ledger.ts';
+import { runtimeRequestFingerprint } from '../../../../daemon/lib/session/runtime-control/ledger.ts';
 import {
   runtimeQuarantineState,
   SessionRuntimeControlService,
   type SessionRuntimeControlPorts,
-} from '../../../src/lib/session/runtime-control/service.ts';
-import { SessionRuntimeError } from '../../../src/lib/session/runtime-control/types.ts';
+} from '../../../../daemon/lib/session/runtime-control/service.ts';
+import { SessionRuntimeError } from '../../../../daemon/lib/session/runtime-control/types.ts';
 import { sessionView } from '../../unit/runtime/mounts/support.ts';
 
 /**

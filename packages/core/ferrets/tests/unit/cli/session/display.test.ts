@@ -10,8 +10,8 @@ import {
   renderSessionView,
   statusLabel,
   TERMINAL_STATUSES,
-} from '../../../src/lib/session/display.ts';
-import type { ICellColour } from '../../../src/lib/session/ports.ts';
+} from '../../../../cli/lib/session/display.ts';
+import type { ICellColour } from '../../../../cli/lib/session/ports.ts';
 import { sessionView } from './session-fixtures.ts';
 
 /** Wraps what the renderer asked to emphasise, so a test sees which cell carried the colour. */

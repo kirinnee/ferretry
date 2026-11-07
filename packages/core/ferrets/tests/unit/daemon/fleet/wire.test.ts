@@ -19,7 +19,7 @@ import {
   applyResultSummary,
   operationSummary,
   skippedWithinRuntimes,
-} from '../../../src/lib/fleet/wire.ts';
+} from '../../../../daemon/lib/fleet/wire.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 

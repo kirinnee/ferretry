@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as live from '../../src/lib/session-live.ts';
+import * as live from '../../../../daemon/lib/protocol/session-live.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const sample = {

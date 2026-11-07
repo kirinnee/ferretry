@@ -6,7 +6,7 @@ import {
   type ObservedTerminalPane,
   planTerminalReap,
   type RegisteredTerminalPane,
-} from '../../../src/lib/session/reap.ts';
+} from '../../../../daemon/lib/session/reap.ts';
 
 const DAEMON = 'daemon-a';
 const SESSION = 'msa1ny28-4f0f298e';

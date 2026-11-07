@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileSessionEnvironmentStore } from '../../../../src/adapters/session/lifecycle/file-session-environment-store.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /**
  * The per-session credential file, against a real filesystem.

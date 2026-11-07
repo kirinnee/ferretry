@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import { KeyedSerialExecutor } from '../../src/adapters/system/keyed-serial-executor.ts';
-import { createSessionArchive } from '../../src/adapters/session/archive/session-archive.ts';
-import { StorageSessionLifecycleRepository } from '../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
+import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { createFoundationPaths, createSessionPaths } from '../../src/lib/paths.ts';
-import { parseSessionId } from '../../src/lib/session-id.ts';
+import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 
 const NOW = '2026-11-06T12:00:00.000Z';
 const OLD = '2026-11-01T00:00:00.000Z';

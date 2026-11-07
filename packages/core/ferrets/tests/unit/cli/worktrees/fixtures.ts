@@ -9,8 +9,8 @@ import type {
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
 } from '@ferretry/protocol';
-import type { IWorktreePrompt } from '../../../src/lib/worktrees/controller';
-import type { IWorktreeGateway, IWorktreeOutput } from '../../../src/lib/worktrees/ports';
+import type { IWorktreePrompt } from '../../../../cli/lib/worktrees/controller';
+import type { IWorktreeGateway, IWorktreeOutput } from '../../../../cli/lib/worktrees/ports';
 
 export const WORKTREE_PATH = '/managed/ferretry-wt-cli6';
 export const CALLER_CWD = '/repos/ferretry';

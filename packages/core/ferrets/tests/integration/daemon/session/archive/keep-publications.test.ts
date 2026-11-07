@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FileAgendaLedgerRepository } from '../../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileAgentPinRepository } from '../../../../src/adapters/agent-pins/file-agent-pin-repository.ts';
+import { FileAgentPinRepository } from '../../../../../daemon/adapters/agent-pins/file-agent-pin-repository.ts';
 import { FileBoardStore } from '../../../../src/adapters/board/file-board-store.ts';
 import {
   BunSqliteIndexFactory,
@@ -15,11 +15,11 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../../src/adapters/index.ts';
-import type { DaemonStorage } from '../../../../src/adapters/storage/session-storage.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { AgendaService } from '../../../../src/lib/agenda/service.ts';
-import { AgentPinService } from '../../../../src/lib/agent-pins/service.ts';
+import { AgentPinService } from '../../../../../daemon/lib/agent-pins/service.ts';
 import { createSessionPaths, parseSessionId } from '../../../../src/lib/index.ts';
-import { sessionsOnOpenCards } from '../../../../src/lib/session/archive/open-cards.ts';
+import { sessionsOnOpenCards } from '../../../../../daemon/lib/session/archive/open-cards.ts';
 import { card } from '../../../unit/board/support.ts';
 
 const homes: string[] = [];

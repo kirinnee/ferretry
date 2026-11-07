@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { sessionAddressCandidates } from '../../../src/adapters/session/session-address-candidates.ts';
+import { sessionAddressCandidates } from '../../../../daemon/adapters/session/session-address-candidates.ts';
 import { parseSessionId, type SessionId } from '../../../src/lib/index.ts';
 
 const ANIYA = parseSessionId('mvb0sw7d-27f71326');

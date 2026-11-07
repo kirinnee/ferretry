@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { MAX_PIN_NOTE_LENGTH } from '@ferretry/protocol';
 import should from 'should';
-import { PinController } from '../../../src/lib/pins/controller';
+import { PinController } from '../../../../cli/lib/pins/controller';
 import {
   CapturingOutput,
   MESSAGE_ID,

@@ -1,5 +1,5 @@
-import { sessionArchiveCommitContract } from '../../../support/session-archive-commit-contract.ts';
-import { sessionArchiveConfigRetentionContract } from '../../../support/session-archive-config-retention-contract.ts';
+import { sessionArchiveCommitContract } from '../../../../support/daemon/session-archive-commit-contract.ts';
+import { sessionArchiveConfigRetentionContract } from '../../../../support/daemon/session-archive-config-retention-contract.ts';
 
 sessionArchiveCommitContract();
 sessionArchiveConfigRetentionContract();

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FileCompactionHistory } from '../../../../src/adapters/session/live/index.ts';
+import { FileCompactionHistory } from '../../../../../daemon/adapters/session/live/index.ts';
 import type { CompactionRecord, FileSystemPort } from '../../../../src/lib/index.ts';
 
 /**

@@ -2,7 +2,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { chmod, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { FileManagedWorktreeRegistry } from '../../../src/adapters/worktrees/index.ts';
+import { FileManagedWorktreeRegistry } from '../../../../daemon/adapters/worktrees/index.ts';
 import {
   type ManagedWorktree,
   type ManagedWorktreeIntent,
@@ -11,7 +11,7 @@ import {
   withManagedWorktreeIntent,
   withRemovalStarted,
   withRemovedManagedWorktree,
-} from '../../../src/lib/worktrees/index.ts';
+} from '../../../../daemon/lib/worktrees/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const record = (overrides: Partial<ManagedWorktree> = {}): ManagedWorktree => ({

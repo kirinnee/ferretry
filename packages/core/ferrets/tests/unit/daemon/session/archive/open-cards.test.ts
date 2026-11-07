@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { BoardTask } from '@ferretry/protocol';
 import should from 'should';
 import type { LaneSets } from '../../../../src/lib/board/graph.ts';
-import { sessionsOnOpenCards } from '../../../../src/lib/session/archive/open-cards.ts';
+import { sessionsOnOpenCards } from '../../../../../daemon/lib/session/archive/open-cards.ts';
 
 /** A card as far as the rule reads it: who owns and holds it, whether it was dropped and in which lane. */
 function card(owner: string, assignee: string | null, laneId: string, dropped = false): BoardTask {

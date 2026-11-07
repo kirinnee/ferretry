@@ -1,3 +1,3 @@
-import { sessionArchiveCommitContract } from '../../../support/session-archive-commit-contract.ts';
+import { sessionArchiveCommitContract } from '../../../../support/daemon/session-archive-commit-contract.ts';
 
 sessionArchiveCommitContract();

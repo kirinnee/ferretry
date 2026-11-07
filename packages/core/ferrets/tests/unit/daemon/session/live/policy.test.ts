@@ -7,7 +7,7 @@ import {
   sameLiveReading,
   tokenCounterValue,
   turnTokensSince,
-} from '../../../../src/lib/session/live/policy.ts';
+} from '../../../../../daemon/lib/session/live/policy.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../../../../src/lib/transcript/types.ts';
 
 /**

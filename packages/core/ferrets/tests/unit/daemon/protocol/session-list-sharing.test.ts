@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ZodError } from 'zod';
-import type { SessionView } from '../../src/lib/session.ts';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import { sessionView } from '../fixtures.ts';
 import { connectClient, headersOf } from '../integration/client-harness.ts';
 import { captureError, jsonResponse, QueuedHttpTransport } from '../integration/fakes.ts';

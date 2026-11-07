@@ -9,11 +9,11 @@ import {
   AgentPinSubsystem,
   MAX_AGENT_PINS,
   withPinned,
-} from '../../../src/lib/agent-pins/index.ts';
+} from '../../../../daemon/lib/agent-pins/index.ts';
 import type { SerialExecutor } from '../../../src/lib/ports.ts';
-import type { SessionDirectorySubsystem } from '../../../src/lib/runtime/mounts/sessions.ts';
+import type { SessionDirectorySubsystem } from '../../../../daemon/lib/runtime/mounts/sessions.ts';
 import { sessionView } from '../runtime/mounts/support.ts';
-import { byPinOrder } from '../../../src/lib/agent-pins/service.ts';
+import { byPinOrder } from '../../../../daemon/lib/agent-pins/service.ts';
 
 class MemoryPins implements AgentPinRepository {
   saved: readonly AgentPin[] = [];

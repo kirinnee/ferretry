@@ -3,23 +3,23 @@ import { rmSync } from 'node:fs';
 import { mkdir, rename, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../src/adapters/git/index.ts';
-import { PosixSessionRootPinner, ProcfsSessionRootPinner } from '../../../src/adapters/session/filesystem/index.ts';
+import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
+import { PosixSessionRootPinner, ProcfsSessionRootPinner } from '../../../../daemon/adapters/session/filesystem/index.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
   NodeWorktreeFileSystem,
   SystemWorktreeClock,
   WorktreeOperationQueue,
-} from '../../../src/adapters/worktrees/index.ts';
-import { WorktreeError } from '../../../src/lib/worktrees/index.ts';
+} from '../../../../daemon/adapters/worktrees/index.ts';
+import { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
 import type {
   GitExecution,
   GitInvocation,
   GitRunner,
   WorktreeDirectoryPinner,
   WorktreeFileSystem,
-} from '../../../src/lib/worktrees/ports.ts';
+} from '../../../../daemon/lib/worktrees/ports.ts';
 import type {
   CheckManagedWorktreeRemovalInput,
   CreateManagedWorktreeInput,
@@ -29,7 +29,7 @@ import type {
   ManagedWorktreePlan,
   WorktreeRemovalDecision,
   WorktreeRemovalOverride,
-} from '../../../src/lib/worktrees/types.ts';
+} from '../../../../daemon/lib/worktrees/types.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRemote, tempRepository } from '../support/repository.ts';
 
 const files = new NodeWorktreeFileSystem();

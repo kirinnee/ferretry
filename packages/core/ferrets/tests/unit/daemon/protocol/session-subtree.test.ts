@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { SessionView } from '../../src/lib/session.ts';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import {
   displayModel,
   lastLineLength,
@@ -9,7 +9,7 @@ import {
   SubtreeRowSchema,
   sessionsById,
   subtreeDepths,
-} from '../../src/lib/session-subtree.ts';
+} from '../../../../daemon/lib/protocol/session-subtree.ts';
 
 const node = (id: string, parent?: string): SessionView =>
   ({ config: { id, ...(parent === undefined ? {} : { parent }) }, state: {} }) as unknown as SessionView;

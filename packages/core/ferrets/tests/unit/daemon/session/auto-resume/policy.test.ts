@@ -5,7 +5,7 @@ import {
   couldNotAutoResume,
   freshCandidates,
   stillOwed,
-} from '../../../../src/lib/session/auto-resume/policy.ts';
+} from '../../../../../daemon/lib/session/auto-resume/policy.ts';
 
 const NOW = Date.parse('2026-10-21T12:00:00.000Z');
 const HOUR = 3_600_000;

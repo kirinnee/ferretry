@@ -7,9 +7,9 @@ import {
   effectFileName,
   FileSessionEffectLedger,
   fsyncEffectDirectory,
-} from '../../../../src/adapters/session/effects/file-session-effect-ledger.ts';
-import { type SessionEffectKey, SessionEffectLedgerError } from '../../../../src/lib/session/effects/index.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
+import { type SessionEffectKey, SessionEffectLedgerError } from '../../../../../daemon/lib/session/effects/index.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /**
  * The durable begun/settled ledger, against a real filesystem.

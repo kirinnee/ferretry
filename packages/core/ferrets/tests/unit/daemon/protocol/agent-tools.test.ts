@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as tools from '../../src/lib/agent-tools.ts';
+import * as tools from '../../../../daemon/lib/protocol/agent-tools.ts';
 import type { AgentToolCall, SurfaceControlView } from '../../src/lib/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';

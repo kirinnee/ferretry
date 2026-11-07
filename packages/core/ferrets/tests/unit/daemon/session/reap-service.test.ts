@@ -5,14 +5,14 @@ import type {
   ObservedTerminalPane,
   RegisteredTerminalPane,
   TerminalReapTarget,
-} from '../../../src/lib/session/reap.ts';
+} from '../../../../daemon/lib/session/reap.ts';
 import {
   type ExactTerminalReaper,
   type RegisteredPaneObserver,
   type TerminalPaneRegistry,
   TerminalReapService,
   type TerminalReapSessionDirectory,
-} from '../../../src/lib/session/reap-service.ts';
+} from '../../../../daemon/lib/session/reap-service.ts';
 
 const DAEMON = 'daemon-a';
 const PANE: RegisteredTerminalPane = {

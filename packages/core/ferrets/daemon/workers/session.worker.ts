@@ -8,14 +8,14 @@
  */
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { SessionWorkerRuntime } from '../src/adapters/session/observer/session-worker-runtime.ts';
-import { countWorkerChildren } from '../src/adapters/session/observer/worker-children.ts';
+import { SessionWorkerRuntime } from '../adapters/session/observer/session-worker-runtime.ts';
+import { countWorkerChildren } from '../adapters/session/observer/worker-children.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/bun-tmux-process.ts';
 import { ControlModeTmuxProcess } from '../src/adapters/tmux/control-tmux-process.ts';
 import { readAskedQuestion } from '../src/adapters/session/question/asked-question-file.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/file-source.ts';
-import { SessionObserver } from '../src/lib/session/observer/observer.ts';
-import type { FromSessionWorker, ToSessionWorker } from '../src/lib/session/observer/protocol.ts';
+import { SessionObserver } from '../lib/session/observer/observer.ts';
+import type { FromSessionWorker, ToSessionWorker } from '../lib/session/observer/protocol.ts';
 import { PANE_WATCH, PANE_WATCH_FORMAT, SESSION_WORKER_ATTACH_FLAGS } from '../src/lib/tmux/control-protocol.ts';
 import { ClaudeTranscriptParser } from '../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../src/lib/transcript/codex.ts';

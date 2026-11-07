@@ -5,8 +5,8 @@ import {
   decodeGitOutput,
   requireGitExit,
   stripFinalLineFeed,
-} from '../../../src/adapters/git/index.ts';
-import type { GitExecution } from '../../../src/lib/worktrees/ports.ts';
+} from '../../../../daemon/adapters/git/index.ts';
+import type { GitExecution } from '../../../../daemon/lib/worktrees/ports.ts';
 
 const execution = (overrides: Partial<GitExecution> = {}): GitExecution => ({
   exitCode: 0,

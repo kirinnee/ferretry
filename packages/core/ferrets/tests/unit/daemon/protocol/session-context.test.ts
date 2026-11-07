@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SessionContextSchema } from '../../src/lib/session.ts';
+import { SessionContextSchema } from '../../../../daemon/lib/protocol/session.ts';
 import { assertRejects, assertRoundTrips } from './schema-cases.ts';
 
 const AT = '2026-10-30T08:00:00.000Z';

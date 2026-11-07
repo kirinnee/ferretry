@@ -13,14 +13,14 @@ import {
   type PaneScreenReader,
   RuntimeSupervisedLauncher,
   RuntimeSupervisedReaper,
-} from '../../../../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
+} from '../../../../../daemon/adapters/session/lifecycle/runtime-launch-supervision.ts';
 import { CODEX_OFFLINE_LAUNCH_ERROR, type CodexAppServerOutcome } from '../../../../src/lib/fleet/codex-runtime.ts';
 import {
   diedParked,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
-} from '../../../../src/lib/session/lifecycle/index.ts';
-import type { TerminalReapTarget } from '../../../../src/lib/session/reap.ts';
+} from '../../../../../daemon/lib/session/lifecycle/index.ts';
+import type { TerminalReapTarget } from '../../../../../daemon/lib/session/reap.ts';
 
 const WRAPPER = '/state/fleet/bin/codex-default';
 const RECORD = {

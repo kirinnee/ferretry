@@ -4,8 +4,8 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import type { ApiRoute } from '../../../../src/lib/api/route.ts';
 import type { SocketRoute } from '../../../../src/lib/api/socket.ts';
-import type { AgentControlKind } from '../../../../src/lib/fleet/agent-control.ts';
-import { agentControlledRoutes, agentControlledSockets } from '../../../../src/lib/runtime/mounts/agent-control.ts';
+import type { AgentControlKind } from '../../../../../daemon/lib/fleet/agent-control.ts';
+import { agentControlledRoutes, agentControlledSockets } from '../../../../../daemon/lib/runtime/mounts/agent-control.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
 

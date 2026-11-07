@@ -18,7 +18,7 @@ import {
   orderFleetBacklog,
   type TranscriptChangeSource,
   type TranscriptChangeWatch,
-} from '../../../../src/lib/session/events/index.ts';
+} from '../../../../../daemon/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 
 /**

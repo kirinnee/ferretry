@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { createSessionArchive } from '../../../../src/adapters/session/archive/session-archive.ts';
+import { createSessionArchive } from '../../../../../daemon/adapters/session/archive/session-archive.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { IndexedSession } from '../../../../src/lib/storage-types.ts';
 import { sessionView } from '../../../unit/runtime/mounts/support.ts';
 

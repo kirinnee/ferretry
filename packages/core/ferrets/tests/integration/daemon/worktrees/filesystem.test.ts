@@ -2,7 +2,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { lstat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { NodeWorktreeFileSystem, SystemWorktreeClock } from '../../../src/adapters/worktrees/index.ts';
+import { NodeWorktreeFileSystem, SystemWorktreeClock } from '../../../../daemon/adapters/worktrees/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 describe('NodeWorktreeFileSystem', () => {

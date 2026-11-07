@@ -5,7 +5,7 @@ import {
   harnessReadyWords,
   SLOW_CODEX_START_MS,
   slowCodexStartNote,
-} from '../../../src/lib/session/harness-startup.ts';
+} from '../../../../cli/lib/session/harness-startup.ts';
 import { sessionView } from './session-fixtures.ts';
 
 const NOTE =

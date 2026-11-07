@@ -5,8 +5,8 @@ import {
   createSessionDirectory,
   SESSION_LIST_BATCH,
   type SessionDirectoryPorts,
-} from '../../../../src/lib/session/directory/session-directory.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/lib/session/directory/session-directory.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { IndexedSession } from '../../../../src/lib/storage-types.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 

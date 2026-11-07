@@ -14,7 +14,7 @@ import {
   type TurnFacts,
   turnFactsOf,
   turnLeftToSettle,
-} from '../../../../src/lib/session/observer/index.ts';
+} from '../../../../../daemon/lib/session/observer/index.ts';
 import type { AnswerOperationRecord } from '../../../../src/lib/session/question/answer-ledger.ts';
 import type { TurnPaneEvidence } from '../../../../src/lib/session/turn/policy.ts';
 import type { TranscriptBatch, TranscriptEvent } from '../../../../src/lib/transcript/types.ts';

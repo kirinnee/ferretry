@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { PIN_SHORT_ID_LENGTH, assertEditablePin, resolvePinId, shortPinId } from '../../../src/lib/pins/pin-id';
+import { PIN_SHORT_ID_LENGTH, assertEditablePin, resolvePinId, shortPinId } from '../../../../cli/lib/pins/pin-id';
 import { MESSAGE_ID, NOTE_ID, humanMessage, humanNote } from './fixtures';
 
 const pins = [humanNote(NOTE_ID, 'first'), humanMessage(MESSAGE_ID, 'second')];

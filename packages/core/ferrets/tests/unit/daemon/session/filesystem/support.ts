@@ -19,7 +19,7 @@ import {
   type SessionRootPinner,
   type SpawnBudget,
   type WorkBudget,
-} from '../../../../src/lib/session/filesystem/index.ts';
+} from '../../../../../daemon/lib/session/filesystem/index.ts';
 
 /**
  * Programmable stand-ins for the two capabilities the working-tree viewer needs.

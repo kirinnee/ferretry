@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { type SubtreeRow, type SubtreeView, SubtreeViewSchema } from '@ferretry/protocol';
 import should from 'should';
-import type { ICellColour } from '../../../src/lib/session/ports.ts';
-import { prCell, renderSubtreeTable, sinceLabel } from '../../../src/lib/session/subtree-table.ts';
+import type { ICellColour } from '../../../../cli/lib/session/ports.ts';
+import { prCell, renderSubtreeTable, sinceLabel } from '../../../../cli/lib/session/subtree-table.ts';
 
 const NOW = Date.parse('2026-11-03T12:00:00.000Z');
 const markerColour: ICellColour = { amber: cell => `<amber>${cell}</amber>` };

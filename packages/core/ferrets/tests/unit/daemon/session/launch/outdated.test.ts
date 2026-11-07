@@ -3,9 +3,9 @@ import { launchInstructions } from '@ferretry/fleet';
 import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import { launchEnvironment } from '../../../../src/lib/fleet/launch-environment.ts';
-import { outdatedSections, relaunchInstructionEnvironment } from '../../../../src/lib/session/launch/outdated.ts';
-import { sessionPaneEnvironment } from '../../../../src/lib/session/lifecycle/policy.ts';
-import { parseSessionId } from '../../../../src/lib/session-id.ts';
+import { outdatedSections, relaunchInstructionEnvironment } from '../../../../../daemon/lib/session/launch/outdated.ts';
+import { sessionPaneEnvironment } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 type Section = SessionLaunchInstructions['sections'][number];
 

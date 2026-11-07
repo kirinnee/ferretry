@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerPinCommands } from '../../../src/lib/pins/commands';
-import { PinController } from '../../../src/lib/pins/controller';
+import { registerPinCommands } from '../../../../cli/lib/pins/commands';
+import { PinController } from '../../../../cli/lib/pins/controller';
 import {
   CapturingOutput,
   MESSAGE_ID,

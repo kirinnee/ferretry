@@ -9,7 +9,7 @@ import {
   ARCHIVED_SESSIONS_LIMIT_MAX,
   type SessionArchiveSubsystem,
   sessionArchiveRoutes,
-} from '../../../../src/lib/runtime/mounts/session-archive.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-archive.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionView } from './support.ts';
 

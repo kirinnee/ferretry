@@ -8,8 +8,8 @@ import {
   SESSION_WORKER_CRASH_WINDOW_MS,
   sessionWorkerRestart,
   turnPaneEvidenceOf,
-} from '../../../../src/lib/session/observer/index.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/lib/session/observer/index.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { PaneState } from '../../../../src/lib/tmux/contracts.ts';
 
 /**

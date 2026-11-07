@@ -1,4 +1,4 @@
-import type { SubFerretDirectory } from '../../../src/lib/sub-ferret/index.ts';
+import type { SubFerretDirectory } from '../../../../daemon/lib/sub-ferret/index.ts';
 
 /** `child` and `grandchild` are sub-ferrets; `lead` (callsign `lizzette`) and `stranger` are leads. */
 export const DIRECTORY: SubFerretDirectory = {

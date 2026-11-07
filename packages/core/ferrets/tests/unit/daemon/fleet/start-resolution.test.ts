@@ -13,8 +13,8 @@ import {
   type CoreAccount,
   FleetManifestUnreadableError,
 } from '../../../src/lib/core/inventory.ts';
-import { resolveStartAccount } from '../../../src/lib/fleet/start-resolution.ts';
-import { SessionControlError } from '../../../src/lib/runtime/mounts/session-control.ts';
+import { resolveStartAccount } from '../../../../daemon/lib/fleet/start-resolution.ts';
+import { SessionControlError } from '../../../../daemon/lib/runtime/mounts/session-control.ts';
 
 /** One published account, as the fleet manifest declares it. */
 function account(patch: Partial<CoreAccount> = {}): CoreAccount {

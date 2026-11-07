@@ -4,8 +4,8 @@ import {
   type ArchivedSession,
   parseArchiveRegistry,
   serializeArchiveRegistry,
-} from '../../../../src/lib/session/archive/registry.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
+} from '../../../../../daemon/lib/session/archive/registry.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 
 const entry = (id: string, overrides: Partial<ArchivedSession['indexed']> = {}): [SessionId, ArchivedSession] => [
   parseSessionId(id),

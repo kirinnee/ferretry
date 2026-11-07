@@ -9,7 +9,7 @@ import {
   deriveAccountChange,
   FleetMutationRefusal,
   isAccountPlanChange,
-} from '../../../src/lib/fleet/mutations.ts';
+} from '../../../../daemon/lib/fleet/mutations.ts';
 
 /** A reference to the secret store, spelled `${secret:NAME}`. */
 const secretRef = (name: string): string => `\${secret:${name}}`;

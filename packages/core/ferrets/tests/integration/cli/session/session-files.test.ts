@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import should from 'should';
-import { BunFileSource, SessionFiles } from '../../../src/adapters/session/session-files.ts';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import { BunFileSource, SessionFiles } from '../../../../cli/adapters/session/session-files.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 
 // A temp directory of its own: no test may resolve the real state home.
 let directory: string;

@@ -7,7 +7,7 @@ import {
   MAX_BOARD_PAGE,
 } from '@ferretry/protocol';
 import should from 'should';
-import { type BoardLaneSource, boardLaneNames, laneNamesFrom } from '../../../src/lib/session/ps-cards.ts';
+import { type BoardLaneSource, boardLaneNames, laneNamesFrom } from '../../../../cli/lib/session/ps-cards.ts';
 import { card, listing, OTHER_ID, otherProject, project, response } from '../board/fixtures.ts';
 
 /** The page a cross-project read returns: no one lane set, cards from several boards. */

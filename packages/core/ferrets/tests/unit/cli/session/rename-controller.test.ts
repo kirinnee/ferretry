@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
-import { RenameSessionController } from '../../../src/lib/session/rename-controller.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
+import { RenameSessionController } from '../../../../cli/lib/session/rename-controller.ts';
 import { capturedPresenter, RecordingApi } from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
 

@@ -2,12 +2,12 @@ import { describe, it } from 'bun:test';
 import { SessionCredentialRevokedSchema, type SessionStatus } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 import {
   ProtocolSessionCredentialGateway,
   RevokeCredentialController,
   registerSessionCredentialCommands,
-} from '../../../src/lib/session/revoke-credential.ts';
+} from '../../../../cli/lib/session/revoke-credential.ts';
 import { capturedPresenter } from './controller-doubles.ts';
 
 /** `fy session revoke-credential <session>`: what is sent, and what a person reads back. */

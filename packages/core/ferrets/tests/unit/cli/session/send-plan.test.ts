@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
 import type { SendDisposition } from '@ferretry/protocol';
 import should from 'should';
-import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
+import type { SessionEnvironment } from '../../../../cli/lib/session/ports.ts';
 import {
   describeDisposition,
   describePark,
   describeSendResult,
   planSend,
   waitingInFerretryQueue,
-} from '../../../src/lib/session/send-plan.ts';
+} from '../../../../cli/lib/session/send-plan.ts';
 
 const HUMAN: SessionEnvironment = { cwd: '/work/repo' };
 const IN_PANE: SessionEnvironment = { cwd: '/work/repo', callerSessionId: 'ses-caller' };

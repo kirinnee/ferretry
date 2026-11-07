@@ -16,7 +16,7 @@ import { FleetCredentialRefusal } from '../../../../src/lib/fleet/credentials-se
 import {
   type FleetCredentialsSubsystem,
   fleetCredentialRoutes,
-} from '../../../../src/lib/runtime/mounts/fleet-credentials.ts';
+} from '../../../../../daemon/lib/runtime/mounts/fleet-credentials.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, GRANTED, human } from './support.ts';
 

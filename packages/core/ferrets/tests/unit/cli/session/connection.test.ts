@@ -6,8 +6,8 @@ import {
   FY_DEFAULT_DAEMON_URL,
   FY_SESSION_ID_HEADER,
   resolveConnection,
-} from '../../../src/lib/session/connection.ts';
-import { SessionCommandError } from '../../../src/lib/session/errors.ts';
+} from '../../../../cli/lib/session/connection.ts';
+import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 
 describe('resolveConnection', () => {
   it('should resolve the address, token and CLI attribution', () => {

@@ -7,9 +7,9 @@ import type {
 } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
-import { registerHarnessCommands } from '../../../src/lib/harness/commands.ts';
-import { HARNESS_UPDATE_POLL_MS, HarnessController } from '../../../src/lib/harness/controller.ts';
-import type { IHarnessOutput, IHarnessUpdateGateway } from '../../../src/lib/harness/ports.ts';
+import { registerHarnessCommands } from '../../../../cli/lib/harness/commands.ts';
+import { HARNESS_UPDATE_POLL_MS, HarnessController } from '../../../../cli/lib/harness/controller.ts';
+import type { IHarnessOutput, IHarnessUpdateGateway } from '../../../../cli/lib/harness/ports.ts';
 import { renderHarnessStatus, verificationWords } from '../../../src/lib/harness/render.ts';
 
 const CHANGELOG = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md';

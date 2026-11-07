@@ -5,7 +5,7 @@ import {
   currentLaunchCompactAt,
   launchedCompactAt,
   settingsArguments,
-} from '../../../../src/lib/session/launch/index.ts';
+} from '../../../../../daemon/lib/session/launch/index.ts';
 
 const WRAPPER = '/fleet/bin/claude-auto-boot';
 

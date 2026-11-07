@@ -2,19 +2,19 @@ import { afterAll, describe, it } from 'bun:test';
 import { mkdir, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../../src/adapters/git/index.ts';
+import { BunGitRunner } from '../../../../../daemon/adapters/git/index.ts';
 import {
   PosixSessionRootPinner,
   ProcfsSessionRootPinner,
   RunnerSessionGit,
-} from '../../../../src/adapters/session/filesystem/index.ts';
+} from '../../../../../daemon/adapters/session/filesystem/index.ts';
 import {
   FsError,
   type PinnedRoot,
   type PinnedTarget,
   SessionFilesystem,
   type SessionRootPinner,
-} from '../../../../src/lib/session/filesystem/index.ts';
+} from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../support/repository.ts';
 
 /**

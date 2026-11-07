@@ -11,7 +11,7 @@ import {
   paneCompaction,
   resolveCompaction,
   TYPICAL_COMPACTION_MS,
-} from '../../../../src/lib/session/live/compaction.ts';
+} from '../../../../../daemon/lib/session/live/compaction.ts';
 import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
 
 /**

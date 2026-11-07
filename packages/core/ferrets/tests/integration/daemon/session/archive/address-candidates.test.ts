@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { sessionAddressCandidates } from '../../../../src/adapters/session/session-address-candidates.ts';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
+import { sessionAddressCandidates } from '../../../../../daemon/adapters/session/session-address-candidates.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 
 const LIVE = parseSessionId('live-1');
 const OLD = parseSessionId('old-1');
