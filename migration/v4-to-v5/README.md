@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, board and asks/agenda have real conversions. The other steps remain `pending`, so the default conversion
+terminals, harness-homes, board and asks/agenda have real conversions; conversation is partial (below). The other steps remain `pending`, so the default conversion
 still exits 3. Each step names what it waits for. Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -74,6 +74,14 @@ are ordinary cards. History, clarifications, terms and links are carried whole i
 as loose records. Lane sets and the switch become one `boards/<project>.json` each. The ask's `source`, `legacyRef`,
 the session an owner or the daemon acted from, the sweep's nudge memory and the switch's `migratedAt` have no v5 field
 and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).
+
+Conversation is half done on purpose and reports `pending`. It writes only what `rebuild/5.0` and the Conversation
+port (`origin/rebuild/fix-port-conversation-r1`) agree on: the message-token key (moved unopened), each ferret's
+`turns/` (copied byte for byte), its chat draft (the port's `{chat, items}` drafts document, through v5's
+`DraftSnapshotSchema`) and `links.json` (from v4 ferrets whose transcript identity is `adopted`). Queue, sends,
+answers, inbox/outbox, the open question, attachments and renders are read and checked by `src/v4/conversation.ts`
+but not written, because the port changes their v5 shape; their mapping is added when the port lands. Agenda reply
+drafts are kept under their ask ids, which v5 leaves unchanged.
 
 Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
 runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these

@@ -12,6 +12,7 @@ import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
+import { conversationStep } from './conversation.ts';
 import { ferretsStep } from './ferrets.ts';
 import { harnessHomesStep } from './harness-homes.ts';
 import { terminalsStep } from './terminals.ts';
@@ -58,23 +59,7 @@ const CACHE: NotCarried = {
 
 export const STEPS: readonly Step[] = [
   ferretsStep,
-  pending(
-    {
-      id: 'conversation',
-      title: 'Conversation (message queue, shared drafts, pins, sitrep)',
-      owner: ['plugin-conversation'],
-      reads: [
-        'state/sessions/<sid>/channel/{queue,sends,answers}.jsonl',
-        'state/sessions/<sid>/{turns/,pins.json,media/}',
-        'state/shared-drafts/',
-        'state/renders/',
-        'state/attachments/<daemonId>/',
-      ],
-      sealed: ['state/session-message-token.key'],
-      notCarried: [{ what: 'search and finder caches', why: 'rebuilt' }],
-    },
-    'the Conversation state schema (@ferretry/plugin-conversation/contract)',
-  ),
+  conversationStep,
   terminalsStep,
   harnessHomesStep,
   boardStep,
