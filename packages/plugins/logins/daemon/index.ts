@@ -278,7 +278,9 @@ export function buildLoginsDaemon() {
         view: id => api.get(id as LoginId),
         signOut: id => credentials.signOut(id),
         write: (id, patch) => config.write(LOGINS_CONFIG, id, { patch }),
-        remove: id => config.remove(LOGINS_CONFIG, id),
+        // A removal that the kernel would hold is refused instead: a held removal would leave the login in effect and be
+        // put through later by a path that does not ask what uses it.
+        remove: id => config.remove(LOGINS_CONFIG, id, { refuseIfHeld: true }),
         changed: (loginId, change) => {
           events.publish(LoginChanged, { loginId: loginId as LoginId, change });
         },
