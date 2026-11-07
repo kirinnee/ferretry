@@ -140,7 +140,7 @@ describe('rendezvous: claiming the slot', () => {
     should(settled.state.pending).deepEqual([]);
   });
 
-  guarantee(['R47'], 'should refuse a claim that did not verify', () => {
+  it('should refuse a claim that did not verify', () => {
     const arrived = reduceRendezvous(initialRendezvousState(daemonId), {
       kind: 'daemon-arrived',
       socketId: 'daemon',
@@ -897,7 +897,7 @@ describe('rendezvous: the claim probe', () => {
 });
 
 describe('rendezvous: reconciling the stored state with the attached sockets', () => {
-  guarantee(['R104'], 'should change nothing when the state and the sockets agree', () => {
+  it('should change nothing when the state and the sockets agree', () => {
     const state = withClient().state;
     should(reconcileRendezvous(state, [{ socketId: 'daemon', claim: {} }, { socketId: 'phone' }], 3_000)).be.null();
     should(reconcileRendezvous(initialRendezvousState(daemonId), [], 3_000)).be.null();
@@ -1277,6 +1277,6 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
 });
 
 /** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
+function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
   for (const id of ids) it(`${id} ${name}`, run);
 }

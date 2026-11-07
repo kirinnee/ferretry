@@ -5,8 +5,15 @@
  */
 
 import { expect, it } from 'bun:test';
+import { WEBRTC_SESSION_CHANNEL_LABEL } from '../../../contract/index.ts';
+import { WebRtcCarrier, type WebRtcChannelPort, type WebRtcPeerPort } from '../../../daemon/lib/webrtc/index.ts';
 import { sealedWebRtcSessions } from '../../../daemon/lib/webrtc/session.ts';
-import { RELAY_LIMITS, RELAY_PROTOCOL_ID, RENDEZVOUS_SESSION_ID } from '../../../worker/src/lib/index.ts';
+import {
+  DEFAULT_HOSTED_RELAY_LIMITS,
+  RELAY_LIMITS,
+  RELAY_PROTOCOL_ID,
+  RENDEZVOUS_SESSION_ID,
+} from '../../../worker/src/lib/index.ts';
 import { BrowserEnd, type KernelFixture, kernelCrypto, kernelFixture } from '../../support/kernel-session.ts';
 
 const ADDRESS = 'webrtc-peer:minted-by-daemon';
@@ -102,5 +109,106 @@ it('R675 pairing never crosses WebRTC: the channel carries the uniform pair-refu
   expect(browser.end?.code).toBe(4440);
   expect(fx.pair.attempts).toHaveLength(0);
   expect(released()).toBe(1);
+  fx.layer.close();
+});
+
+/** A data channel between the carrier and one {@link BrowserEnd}. */
+class Channel implements WebRtcChannelPort {
+  readonly label = WEBRTC_SESSION_CHANNEL_LABEL;
+  closed = false;
+  #message: ((frame: string | Uint8Array) => void) | undefined;
+  readonly browser = new BrowserEnd(bytes => this.#message?.(bytes));
+  send(frame: Uint8Array): boolean {
+    if (this.closed) return false;
+    this.browser.receive(frame);
+    return true;
+  }
+  sendText(): boolean {
+    return !this.closed;
+  }
+  bufferedBytes(): number {
+    return 0;
+  }
+  close(): void {
+    this.closed = true;
+  }
+  onMessage(listener: (frame: string | Uint8Array) => void): void {
+    this.#message = listener;
+  }
+  onClosed(): void {}
+}
+
+class Peer implements WebRtcPeerPort {
+  #channel: ((channel: WebRtcChannelPort) => void) | undefined;
+  onChannel(listener: (channel: WebRtcChannelPort) => void): void {
+    this.#channel = listener;
+  }
+  onClosed(): void {}
+  close(): void {}
+  open(): Channel {
+    const channel = new Channel();
+    this.#channel?.(channel);
+    return channel;
+  }
+}
+
+it('R670 WebRTC sessions are never charged against hosted ceilings: more than the hosted per-daemon cap are all served, none 4432/4433', async () => {
+  // Arrange — the carrier as Connections composes it, over the real kernel layer.
+  const fx = await kernelFixture();
+  const peers: Peer[] = [];
+  let minted = 0;
+  const carrier = new WebRtcCarrier({
+    availability: { kind: 'ready' },
+    engine: {
+      answer: async () => {
+        const peer = new Peer();
+        peers.push(peer);
+        return { sdp: 'answer', peer };
+      },
+      release: () => undefined,
+    },
+    iceServers: [],
+    scheduler: { after: (delay, fn) => ({ cancel: fx.clock.after(delay, fn) }) },
+    peerId: () => {
+      minted += 1;
+      return `peer-${String(minted)}`;
+    },
+    sessions: sealedWebRtcSessions(
+      fx.layer,
+      { after: (delay, fn) => ({ cancel: fx.clock.after(delay, fn) }) },
+      length => kernelCrypto.randomBytes(length),
+    ),
+  });
+  const device = await fx.paired();
+  const wanted = DEFAULT_HOSTED_RELAY_LIMITS.maxConcurrentConnectionsPerDaemon + 4;
+
+  // Act — three copies of the app, each with a full peer of channels, every channel a proved session.
+  for (let copy = 0; copy < 3; copy += 1)
+    expect(await carrier.offer('offer', { deviceId: device.deviceId, appSession: `copy-${String(copy)}` })).toEqual({
+      kind: 'answered',
+      sdp: 'answer',
+    });
+  const channels: Channel[] = [];
+  // One at a time: the kernel's own pre-credential bound (R232) is not what is being measured here.
+  for (const peer of peers)
+    for (let index = 0; index < 8 && channels.length < wanted; index += 1) {
+      const channel = peer.open();
+      channels.push(channel);
+      await channel.browser.settled();
+      const ready = channel.browser.controls[0];
+      if (ready === undefined) throw new Error('no ready');
+      expect(await channel.browser.handshake(ready.sessionId, fx.daemonId)).toBe(true);
+      await channel.browser.auth(device);
+    }
+  for (const channel of channels) await channel.browser.settled();
+
+  // Assert — every one is live; nothing refused with a hosted code, and no channel closed.
+  expect(channels).toHaveLength(wanted);
+  for (const channel of channels) {
+    expect(channel.browser.last('authenticated')).toBeDefined();
+    expect(channel.browser.controls.map(control => control.message.t)).toEqual(['ready']);
+    expect(channel.closed).toBe(false);
+  }
+  carrier.close();
   fx.layer.close();
 });

@@ -503,30 +503,26 @@ describe('the WebRTC carrier', () => {
       should(lingers(scheduler)).have.length(1);
     });
 
-    guarantee(
-      ['R670'],
-      'should refuse an offer as `webrtc_unavailable` when the engine cannot start, saying why',
-      async () => {
-        // Arrange
-        const { subject, engine, scheduler } = harness();
-        engine.next = async () => {
-          throw new WebRtcEngineUnavailable('the WebRTC engine could not be loaded on linux-riscv64 (no addon)');
-        };
+    it('should refuse an offer as `webrtc_unavailable` when the engine cannot start, saying why', async () => {
+      // Arrange
+      const { subject, engine, scheduler } = harness();
+      engine.next = async () => {
+        throw new WebRtcEngineUnavailable('the WebRTC engine could not be loaded on linux-riscv64 (no addon)');
+      };
 
-        // Act
-        const actual = await subject.offer('o', device('a'));
+      // Act
+      const actual = await subject.offer('o', device('a'));
 
-        // Assert
-        should(actual).deepEqual({
-          kind: 'refused',
-          status: 503,
-          code: 'webrtc_unavailable',
-          reason: 'the WebRTC engine could not be loaded on linux-riscv64 (no addon)',
-        });
-        should(subject.peers).equal(0);
-        should(lingers(scheduler)).have.length(1);
-      },
-    );
+      // Assert
+      should(actual).deepEqual({
+        kind: 'refused',
+        status: 503,
+        code: 'webrtc_unavailable',
+        reason: 'the WebRTC engine could not be loaded on linux-riscv64 (no addon)',
+      });
+      should(subject.peers).equal(0);
+      should(lingers(scheduler)).have.length(1);
+    });
 
     guarantee(['R691'], 'should not hand the engine back when the daemon stops, nor arm anything after', async () => {
       // Arrange
@@ -824,6 +820,6 @@ describe('the WebRTC carrier', () => {
 });
 
 /** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
+function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
   for (const id of ids) it(`${id} ${name}`, run);
 }

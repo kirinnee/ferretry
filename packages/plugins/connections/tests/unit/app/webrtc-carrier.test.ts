@@ -697,7 +697,7 @@ describe('the WebRTC dialer', () => {
   });
 
   guarantee(
-    ['R685'],
+    ['R670', 'R685'],
     'should drop every connection when the network changes, and report no round trip after',
     async () => {
       // Arrange
@@ -768,6 +768,6 @@ describe('the browser’s own WebRTC dialer', () => {
 });
 
 /** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
+function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
   for (const id of ids) it(`${id} ${name}`, run);
 }

@@ -488,7 +488,71 @@ describe('hosted rendezvous enforcement', () => {
     },
   );
 
-  guarantee(['R62', 'R116'], 'should send a control refusal before closing when metering denies', async () => {
+  guarantee(
+    ['R116'],
+    'should keep every close code to its fixed meaning and carry 4440 and 4441 to the client unchanged, ending only that session',
+    async () => {
+      // The fixed meanings of §9's table, as the Worker spells them; 4440 and 4441 are the daemon's own.
+      should({ ...SESSION_CLOSE_CODES }).deepEqual({
+        protocolError: 4400,
+        claimRejected: 4401,
+        claimTimeout: 4402,
+        authRejected: 4403,
+        daemonAbsent: 4404,
+        heartbeatTimeout: 4408,
+        claimLost: 4410,
+        rendezvousClaimed: 4409,
+        frameTooLarge: 4413,
+        sequenceBroken: 4420,
+        frameForged: 4421,
+        versionUnsupported: 4426,
+        rendezvousBusy: 4429,
+        flowViolation: 4430,
+        hostedDisabled: 4431,
+        hostedCapacity: 4432,
+        hostedBandwidth: 4433,
+        relayInternal: 4500,
+      });
+
+      const harness = makeObject();
+      const { identity, daemonSocket } = await claimRendezvous(harness);
+      const concluded = await joinClient(harness, identity.daemonId);
+      const leased = await joinClient(harness, identity.daemonId);
+      daemonSocket.drain();
+      const closedFrom = (sessionId: SessionId, code: number, reason: string) =>
+        bytesOf({
+          kind: FRAME_KINDS.control,
+          sessionId,
+          sequence: 0,
+          payload: encodeControlMessage({ t: 'closed', code, reason }),
+        });
+
+      // 4440: whatever the sealed outcome was, the clear code and reason are the one constant pair, passed on as sent.
+      await harness.object.webSocketMessage(
+        daemonSocket,
+        closedFrom(concluded.sessionId, 4440, 'the session concluded'),
+      );
+      should(concluded.clientSocket.drain().map(controlOf)).deepEqual([
+        { t: 'closed', code: 4440, reason: 'the session concluded' },
+      ]);
+      should(concluded.clientSocket.closed).match({ code: 4440, reason: 'the session concluded' });
+
+      // 4441: the lease ended — never a revocation. The client is told to open a new session, and the daemon,
+      // its claim and the next phone are untouched.
+      await harness.object.webSocketMessage(daemonSocket, closedFrom(leased.sessionId, 4441, 'the access lease ended'));
+      should(leased.clientSocket.drain().map(controlOf)).deepEqual([
+        { t: 'closed', code: 4441, reason: 'the access lease ended' },
+      ]);
+      should(leased.clientSocket.closed?.code).equal(4441);
+      should(daemonSocket.closed).be.null();
+      should(daemonSocket.drain()).deepEqual([]);
+      const next = await joinClient(harness, identity.daemonId);
+      should(next.ready).match({ t: 'ready' });
+      should(next.clientSocket.closed).be.null();
+    },
+  );
+
+  guarantee(['R62'], 'should send a control refusal before closing when metering denies', async () => {
     const hosted = hostedEnvironment(() => ({
       ok: false,
       code: SESSION_CLOSE_CODES.hostedBandwidth,
@@ -1184,6 +1248,51 @@ describe('rendezvous durable object: a claim the stored state lost', () => {
     await evict(harness).object.fetch(socketRequest(identity.daemonId, 'daemon', undefined, probing));
     should(controlOf(harness.objectState.sockets.at(-1)?.drain()[0])).match({ t: 'challenge' });
   });
+
+  guarantee(
+    ['R104'],
+    'should reconcile the stored state with the runtime sockets before every arrival, frame and sweep',
+    async () => {
+      const quiet = console.warn;
+      console.warn = () => undefined;
+      try {
+        // Before an arrival: the phone is served by the daemon socket the document forgot, never told 4404.
+        const arrival = makeObject();
+        const first = await claimRendezvous(arrival, undefined, probing);
+        first.daemonSocket.drain();
+        forgetTheClaim(arrival);
+        const { ready } = await joinClient(evict(arrival), first.identity.daemonId);
+        should(ready).match({ t: 'ready' });
+
+        // Before a frame: the forgotten holder's own probe is answered `held`, not refused 4410.
+        const frame = makeObject();
+        const second = await claimRendezvous(frame, undefined, probing);
+        second.daemonSocket.drain();
+        forgetTheClaim(frame);
+        await evict(frame).object.webSocketMessage(second.daemonSocket, probe);
+        should(second.daemonSocket.drain().map(controlOf)).deepEqual([{ t: 'held' }]);
+        should(frame.objectState.storage.values.get('rendezvous')).match({ daemon: { restored: true } });
+
+        // Before a sweep: the alarm restores the claim from the socket that still holds it.
+        const sweep = makeObject();
+        const third = await claimRendezvous(sweep, undefined, probing);
+        third.daemonSocket.drain();
+        forgetTheClaim(sweep);
+        await evict(sweep).object.alarm();
+        should(sweep.objectState.storage.values.get('rendezvous')).match({ daemon: { restored: true } });
+        should(third.daemonSocket.closed).be.null();
+      } finally {
+        console.warn = quiet;
+      }
+
+      // A socket the runtime no longer holds is gone: its slot is freed for the redial instead of refused 4409.
+      const lost = makeObject();
+      const fourth = await claimRendezvous(lost, undefined, probing);
+      lost.objectState.sockets.splice(lost.objectState.sockets.indexOf(fourth.daemonSocket), 1);
+      await evict(lost).object.fetch(socketRequest(fourth.identity.daemonId, 'daemon', undefined, probing));
+      should(controlOf(lost.objectState.sockets.at(-1)?.drain()[0])).match({ t: 'challenge' });
+    },
+  );
 });
 
 describe('hosted reservations a rendezvous lost without a close', () => {
@@ -1403,6 +1512,6 @@ describe('hosted reservations a rendezvous lost without a close', () => {
 });
 
 /** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
+function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
   for (const id of ids) it(`${id} ${name}`, run);
 }

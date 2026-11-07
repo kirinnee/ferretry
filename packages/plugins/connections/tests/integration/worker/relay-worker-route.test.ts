@@ -108,7 +108,7 @@ describe('relay worker route', () => {
   });
 
   guarantee(
-    ['R113', 'R125'],
+    ['R113'],
     'should refuse a fingerprint this deployment does not carry, without allocating anything',
     async () => {
       const { value, routed } = environment(daemonId);
@@ -471,6 +471,6 @@ describe('hosted relay reservations whose answer is lost', () => {
 });
 
 /** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
+function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
   for (const id of ids) it(`${id} ${name}`, run);
 }

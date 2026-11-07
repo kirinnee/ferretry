@@ -67,7 +67,7 @@ describe('the tunnel switch store', () => {
     should(notified).equal(1);
   });
 
-  it('R634 keeps the last answer through a failed control read', async () => {
+  it('should keep the last answer through a failed control read', async () => {
     const { control } = scripted(
       Response.json(UP),
       new Response('', { status: 503 }),
@@ -142,6 +142,6 @@ describe('what an answer means for the tunnel this device keeps', () => {
 });
 
 /** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
+function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
   for (const id of ids) it(`${id} ${name}`, run);
 }
