@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { AUDIT_KIND_NAMES, AuditRecordSchema } from '@ferretry/core-gate/contract';
 import { chmod, mkdir, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { gateStep, packChanges, V5_ADMIN_TOKEN, V5_AUDIT, V5_WARDEN_TOKEN } from '../../src/steps/gate.ts';
+import { gateStep, V5_ADMIN_TOKEN, V5_AUDIT, V5_WARDEN_TOKEN } from '../../src/steps/gate.ts';
 import { V4_AUDIT_EVENTS, v5AuditKind } from '../../src/v4/gate.ts';
 import { fixture } from './ferret-fixture.ts';
 
@@ -80,7 +80,7 @@ test('a token behind a link is refused, never followed, and the step names only 
   expect(await everything(f.to)).not.toContain('FAKE-ADMIN-TOKEN');
 });
 
-test('all six v4 audit files become one v5 audit.jsonl, oldest first, every line a v5 record', async () => {
+test('all four v4 audit files become one v5 audit.jsonl, oldest first, every line a v5 record; the journals are Access’s', async () => {
   const device = { kind: 'device', deviceId: 'dev-000001', deviceName: 'FAKE phone' };
   await raw(
     'state/audit.1.jsonl',
@@ -107,25 +107,13 @@ test('all six v4 audit files become one v5 audit.jsonl, oldest first, every line
   );
   await raw(
     'state/grant-audit.jsonl',
-    jsonl(
-      { kind: 'grant.changed', at: at(3), actor: 'device:dev-000001', changes: ['fleet.use=on', 'terminal.use=off'] },
-      { kind: 'grant.changed', at: at(4), actor: 'peer:mw5pf53b-4c9a262b', changes: ['fleet.configure=on'] },
-    ),
-  );
-  await raw(
-    'state/security-audit.jsonl',
-    jsonl(
-      { kind: 'security.changed', at: at(8), actor: 'admin-cli', changes: ['unlockHours=8'] },
-      { kind: 'device.key-rotated', at: at(9), actor: 'device:dev-000001', changes: ['device.key-rotated=dev-000001'] },
-      { kind: 'grant.changed', at: at(10), actor: 'admin-ui', changes: [] },
-    ),
+    jsonl({ kind: 'grant.changed', at: at(3), actor: 'device:dev-000001', changes: ['fleet.use=on'] }),
   );
 
   const report = await gateStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect(report.kept).toContainEqual({ what: 'audit records', count: 7 });
-  expect(report.note).toContain('3 unreadable audit line(s) skipped');
-  expect(report.note).toContain('1 journal record(s) by an actor v5 cannot name (a ferret) skipped');
+  expect(report.kept).toContainEqual({ what: 'audit records', count: 4 });
+  expect(report.note).toContain('2 unreadable audit line(s) skipped');
   expect(JSON.stringify(report)).not.toContain('FAKE');
 
   const lines = await auditLines();
@@ -136,11 +124,8 @@ test('all six v4 audit files become one v5 audit.jsonl, oldest first, every line
   expect(lines.map(line => [line.at, line.event])).toEqual([
     [at(1), 'terminal.opened'],
     [at(2), 'device.paired'],
-    [at(3), 'grants.changed'],
     [at(5), 'input.hold-ended'],
     [at(6), 'ferret.credential-refused'],
-    [at(8), 'security.changed'],
-    [at(9), 'device.key-rotated'],
   ]);
   expect(lines[1]).toEqual({
     format: 1,
@@ -151,30 +136,7 @@ test('all six v4 audit files become one v5 audit.jsonl, oldest first, every line
     outcome: 'succeeded',
     detail: { carrier: 'relay' },
   });
-  expect(lines[2]).toEqual({
-    format: 1,
-    at: at(3),
-    event: 'grants.changed',
-    actor: { kind: 'device', deviceId: 'dev-000001' },
-    outcome: 'succeeded',
-    detail: { journal: 'grant-audit', changes: 'fleet.use=on, terminal.use=off' },
-  });
-  expect(lines[5]?.actor).toEqual({ kind: 'host' });
-  expect(lines[6]).toMatchObject({ subject: 'dev-000001', detail: { journal: 'security-audit' } });
   expect((await stat(join(f.to, V5_AUDIT))).mode & 0o777).toBe(0o600);
-});
-
-test('long change lists are packed into bounded details and the overflow is counted', () => {
-  const change = (n: number) => `capability${String(n).padStart(3, '0')}.configure=on`;
-  const detail = packChanges(Array.from({ length: 60 }, (_, n) => change(n)));
-  const keys = Object.keys(detail);
-  expect(keys.length).toBeLessThanOrEqual(11);
-  for (const value of Object.values(detail))
-    if (typeof value === 'string') expect(value.length).toBeLessThanOrEqual(160);
-  expect(detail.changes).toStartWith(change(0));
-  expect(typeof detail.more).toBe('number');
-  expect(packChanges(['x'.repeat(161), 'ok=1'])).toEqual({ changes: 'ok=1', more: 1 });
-  expect(packChanges([])).toEqual({});
 });
 
 test('a link in place of an audit file is refused, naming the file', async () => {

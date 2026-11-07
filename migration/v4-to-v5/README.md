@@ -162,12 +162,19 @@ key, which the Vault step moves once, BEFORE this step; every entry moves as the
 moved key. Nothing is decrypted by the tool.
 
 Gate (`src/steps/gate.ts`): `api-token` and `api-warden-token` (home root) move byte for byte to
-`state/gate/admin-token` and `warden-token` (`0600`; v5's CLI reads the same raw text). All six audit files — the
-general and kept stores with their rotated halves, `grant-audit.jsonl` and `security-audit.jsonl` — become one
-`audit.jsonl` of v5 `AuditRecordSchema` lines, oldest first. Four kinds are renamed (`input.quarantine_*` →
-`input.hold-*`, `session.credential-*` → `ferret.credential-*`); journal records take v5's actor
-(`admin-*` → host) and keep their change strings in bounded `detail` keys. A record by a ferret's own credential has
-no v5 actor kind and is counted, not carried.
+`state/gate/admin-token` and `warden-token` (`0600`; v5's CLI reads the same raw text). The four audit files — the
+general and kept stores with their rotated halves — become one `audit.jsonl` of v5 `AuditRecordSchema` lines, oldest
+first. Four kinds are renamed (`input.quarantine_*` → `input.hold-*`, `session.credential-*` →
+`ferret.credential-*`). The grant and security journals are not Gate's in v5 (Access below).
+
+Access (`src/steps/access.ts`) writes `state/access/`: `devices.json` keeps every device field and public key with
+`daemonId` (the identity is carried), and each grant is v4's effective value over v5's capability set (a capability
+v4 did not name is off, `configure` only where `use` is on, a capability v5 dropped is reported); a `schemaVersion: 1`
+bearer document is not converted. `passkeys.json` keeps credential ids, public keys, sign counters and origins; a
+passkey of a device that is not carried goes with it. Live unlocks are not carried (each device unlocks again once);
+the unlock settings are `gate.yaml` `security` (Daemon settings). v4's `grant-audit.jsonl` and
+`security-audit.jsonl` become the ONE `grant-audit.jsonl` v5 Access declares and writes both journals into, line for
+line with `format: 1` first, oldest first. Push (`push.json` with the VAPID key) is pending.
 
 Lessons (`src/steps/lessons.ts`) writes every file `@ferretry/plugin-lessons` declares under `state/lessons/`:
 `state.json` (v4's learning state, with `sessions.json`'s per-ferret switches folded in as `ferrets`, lead decision M5),
