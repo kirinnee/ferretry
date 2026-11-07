@@ -13,7 +13,7 @@ interface RedirectStat {
 
 /** TODO(kernel contract): lstat refuses symlink parents, never follows the leaf; directory removal is plain rmdir. */
 export interface PairingRedirectStatePort extends StatePort {
-  lstat(file: typeof PairingRedirectsFile, name: string): Promise<RedirectStat | undefined>;
+  stat(file: typeof PairingRedirectsFile, name: string): Promise<RedirectStat | undefined>;
   removeEmptyDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
 }
 
@@ -27,8 +27,8 @@ export function pairingRedirectBoot(): PairingBootHalf {
   return {
     beforeListen: async ({ kernel }) => {
       const state = kernel.state as Partial<PairingRedirectStatePort>;
-      if (state.lstat === undefined || state.removeEmptyDirectory === undefined) {
-        kernel.log.warn('pairing redirect boot cleanup needs kernel state lstat and empty-directory removal ports');
+      if (state.stat === undefined || state.removeEmptyDirectory === undefined) {
+        kernel.log.warn('pairing redirect boot cleanup needs kernel state stat and empty-directory removal ports');
         return;
       }
       await sweepPairingRedirectState(state as PairingRedirectStatePort, kernel.clock.nowMs());
@@ -47,10 +47,10 @@ export async function sweepPairingRedirectState(state: PairingRedirectStatePort,
   for (const directory of entries) {
     if (!isPairingRedirectDirectoryName(directory)) continue;
     try {
-      const parent = await state.lstat(PairingRedirectsFile, directory);
+      const parent = await state.stat(PairingRedirectsFile, directory);
       if (parent?.kind !== 'directory') continue;
       const page = `${directory}/${PAIRING_REDIRECT_FILE_NAME}`;
-      const details = await state.lstat(PairingRedirectsFile, page).catch(() => undefined);
+      const details = await state.stat(PairingRedirectsFile, page).catch(() => undefined);
       const written = details ?? parent;
       if (!isPairingRedirectStale(written.modifiedMs, nowMs)) continue;
       if (details?.kind === 'file') await state.remove(PairingRedirectsFile, page);

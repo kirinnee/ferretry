@@ -34,9 +34,9 @@ function fixture() {
       calls.push('list');
       return [...nodes.keys()].filter(name => !name.includes('/'));
     },
-    lstat: async (_file, name) => {
+    stat: async (_file, name) => {
       check();
-      calls.push(`lstat:${name}`);
+      calls.push(`stat:${name}`);
       return nodes.get(name);
     },
     remove: async (_file, name) => {
@@ -111,7 +111,7 @@ test('P106 daemon build exposes a boot sweep that removes stale pages under the 
   expect(f.nodes.has('pair-open-Extra1/notes')).toBe(true);
   expect(f.nodes.has('pair-open-Extra1')).toBe(true);
   expect(f.nodes.has('pair-open-near-miss')).toBe(true);
-  expect(f.calls).not.toContain('lstat:pair-open-Links1/pairing.html');
+  expect(f.calls).not.toContain('stat:pair-open-Links1/pairing.html');
   expect(f.calls.at(-1)).toBe('listen');
   expect(f.warnings).toEqual([]);
 });
@@ -160,7 +160,7 @@ test('P106 daemon boot names the missing kernel state ports instead of claiming 
   Object.assign(f.kernel, { state: {} });
   await f.boot();
   expect(f.warnings).toEqual([
-    'pairing redirect boot cleanup needs kernel state lstat and empty-directory removal ports',
+    'pairing redirect boot cleanup needs kernel state stat and empty-directory removal ports',
   ]);
   expect(f.calls).toEqual(['listen']);
 });

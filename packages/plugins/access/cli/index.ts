@@ -32,7 +32,7 @@ export default implementCli(manifest, {
   build(ctx) {
     const { client, io } = ctx;
     // TODO(kernel contract): the CLI receives this plugin's fenced StatePort, never the whole state home.
-    const state = (ctx as typeof ctx & { readonly state?: StatePort }).state;
+    const state = (ctx as typeof ctx & { readonly ownState?: StatePort }).ownState;
     const host = hostFacilities(io);
     const exit = new ExitStatus();
     const out = {
