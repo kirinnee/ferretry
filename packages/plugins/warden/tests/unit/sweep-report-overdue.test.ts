@@ -157,4 +157,23 @@ describe('a sub-ferret that has not answered its parent', () => {
     should(run.anomalies.map(anomaly => anomaly.kind)).eql(['report_overdue']);
     should(subject.remedies).be.empty();
   });
+
+  it('should be flagged but tell nobody, even forced, when the daemon does not nudge overdue reports', async () => {
+    // Arrange: the Warden on and allowed to nudge alone, but no wait or done fact to tell a waiting helper apart
+    const subject = harness({
+      config: enabled(),
+      fleet: [leadWithName, reviewer()],
+      exchanges: ledgers({ reviewer: [asked] }),
+      settings: { nudgesOverdue: false },
+    });
+
+    // Act
+    const run = await subject.service.run({ force: true });
+
+    // Assert
+    should(run.anomalies.map(anomaly => [anomaly.kind, anomaly.sessionId])).eql([['report_overdue', 'reviewer']]);
+    should(subject.remedies).be.empty();
+    should(subject.state().overdue).be.undefined();
+    should(journalTypes(subject)).not.containEql('fleet.warden_overdue_told');
+  });
 });

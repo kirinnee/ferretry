@@ -170,7 +170,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
       jevChecks: new StateWardenJevCheckLog(kernel.state, nowMs),
       revive,
-      // The send ledgers, for a sub-ferret overdue on a report its parent asked for (a flag and a notice, no act).
+      // The send ledgers, for DETECTION only: a sub-ferret overdue on a report its parent asked for is flagged
+      // `report_overdue`, and nobody is typed to (`nudgesOverdue: false` below).
       exchanges: { sends: async ferret => await exchangeSends(conversation, ferret as FerretId) },
       nowMs,
       capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
@@ -179,6 +180,10 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       clientName: 'Ferretry',
       wardenCwd: '',
       supervisesMonitors: true,
+      // GAP(ferrets): today nudged an overdue sub-ferret, then told its parent, but skipped one that had declared a
+      // wait or signalled done. `FerretSummary` carries neither (and the signal route answers 503), so the act would
+      // nudge a helper legitimately waiting: no unattended act until Ferrets exposes waiting/done.
+      nudgesOverdue: false,
       mayAct: false,
       machineName: () => undefined,
     },

@@ -14,6 +14,8 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   own pane that neither Terminals' port nor Browsers' offers on 5.0 (D2 #19). The liveness monitor is not built and
  *   the classifiers that need those facts stay quiet; what the sweep can flag from the contracts is a question nobody
  *   answered (an open ask of the ferret's own) and a sub-ferret overdue on a report (Conversation's send ledger).
+ * - A sub-ferret overdue on a report is flagged only: today nudged it and told its parent, skipping one that declared a
+ *   wait or signalled done, and `FerretSummary` carries neither, so nothing is typed to anyone until Ferrets does.
  * - Investigator wardens, failover and auto-move need a folder Ferrets can start a warden in and read reports back from,
  *   and a "move to another login" in the Ferrets contract: they refuse, so nothing is spent and nothing is moved.
  *   Auto-revive is wired through `FerretsApi.resume` but revives nothing until Ferrets reports a death cause.

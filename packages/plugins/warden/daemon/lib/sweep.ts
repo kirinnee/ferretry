@@ -611,6 +611,15 @@ export interface WardenSweepSettings extends WardenPromptSettings {
    * not to suppress the evidence.
    */
   readonly supervisesMonitors: boolean;
+  /**
+   * Whether a sub-ferret overdue on a report is nudged, then its parent told (`escalateOverdue`), or only flagged.
+   *
+   * The act is safe only when the fleet says which ferrets declared a wait or signalled done
+   * (`overdueCandidates` skips those): without those facts a helper legitimately waiting on CI, a review or a
+   * person is nudged and its lead told, two unattended turns per ask. False: `report_overdue` is still flagged,
+   * and nothing is typed to anyone.
+   */
+  readonly nudgesOverdue: boolean;
   /** This machine's name, read when a notification is written, so one among every machine's says which. */
   readonly machineName?: () => string | undefined;
 }
@@ -3008,6 +3017,7 @@ export class WardenSweepService {
     readonly at: string;
     readonly force: boolean;
   }): Promise<WardenRuntimeState> {
+    if (!this.settings.nudgesOverdue) return input.state;
     const plan = planOverdueReports({
       overdue: input.anomalies,
       exchanges: input.exchanges,
