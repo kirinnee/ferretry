@@ -1,5 +1,5 @@
 import type { Duration, Instant } from '@ferretry/std';
-import { epochMs, instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { epochMs, instantFromEpochMs } from '@ferretry/std';
 import type { Cancel, Clock } from '../contract/ports.ts';
 
 /** A clock the test drives: time moves only on `advance`, and timers due by then run in order. */
@@ -61,5 +61,3 @@ export function fixedClock(start: string | Instant = '2026-11-06T09:00:00.000Z')
   return clock;
 }
 
-/** @public Fake-time helper for ports to come. */
-export { milliseconds };

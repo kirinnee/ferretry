@@ -275,7 +275,7 @@ P85	kept	access	-	behaviour as written	pairing	P85
 P86	kept	access	-	behaviour as written	pairing	P86
 P87	kept	access	-	behaviour as written	pairing	P87
 P88	kept	connections	-	`advertisesForeignAddress`	pairing	P88
-P89	kept	kernel	-	`recordedBindAddress`, `declaredBind`	pairing	P89
+P89	kept	kernel	-	`recordedBindAddress`	pairing	P89
 P90	kept	gate	fy-shell	`FY_URL`, `FY_TOKEN`	pairing	P90
 P91	kept	access	-	`ApiRequest.loopback`	pairing	P91
 P92	kept	access	kernel	behaviour as written	pairing	P92
@@ -606,7 +606,7 @@ S36	kept	vault	-	`/v1/fleet/proposals/:id/apply`	secrets	S36
 S37	kept	mcp	-	behaviour as written	secrets	S37
 S38	kept	vault	-	`POST /v1/secrets/use`	secrets	S38
 S39	kept	access	-	`fy pair --limited`	secrets	S39
-S40	kept	kernel	-	`StateHomeFence` in `@ferretry/fleet`	secrets	S40
+S40	kept	kernel	-	`fenceOf`, `fencedReal`	secrets	S40
 S41	kept	kernel	-	behaviour as written	secrets	S41
 S42	kept	kernel	-	behaviour as written	secrets	S42
 S43	kept	kernel	-	provisioner; opening `<fleet>/assets`	secrets	S43

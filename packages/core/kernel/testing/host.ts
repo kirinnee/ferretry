@@ -1284,5 +1284,3 @@ async function start(world: World): Promise<TestHost> {
   return host;
 }
 
-/** @public Test-caller shape for ports to come. */
-export type { TestCaller };
