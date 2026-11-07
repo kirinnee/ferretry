@@ -12,6 +12,7 @@ import { type AccountsApi, type AccountsConfig, AccountsConfigSchema, type Place
 import type manifest from '../manifest.ts';
 import { accountHintSummary, placeHosts } from '../contract/routes/index.ts';
 import { machineName } from './adapters/host.ts';
+import { gateAuditSink } from './adapters/gate-audit.ts';
 import { KernelAccountDefaultsWriter } from './adapters/kernel-defaults-writer.ts';
 import { StateAccountIndexStore } from './adapters/state-account-index-store.ts';
 import {
@@ -149,6 +150,7 @@ export function buildAccounts(
     defaults,
     choice,
     ...(seeds === undefined ? {} : { seeds }),
+    audit: gateAuditSink(ctx.needs.gate),
   });
 
   /** `account_hint`: the summary only, never a value (S13, I131). A page by name is read for its address (Browsers). */

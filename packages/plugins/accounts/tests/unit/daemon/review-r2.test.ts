@@ -1,7 +1,7 @@
 import { expect, it } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
-import type { AuditDraft } from '@ferretry/core-gate/contract';
+import { type AuditDraft, STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { deviceStanding, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { StateFileDef } from '@ferretry/kernel/contract';
 import { device, ferret, fixedClock, testHost, type TestHost } from '@ferretry/kernel/testing';
@@ -24,11 +24,13 @@ const security = {
 const stateDef = (name: string): StateFileDef => accounts.manifest.data.state.find(file => file.name === name)!;
 
 /** The composed Accounts daemon over the contract fakes, with the stored-proof registry a rule world answers. */
-async function host(options: { proofs?: () => FakeProofs | undefined; audits?: AuditDraft[] } = {}) {
+async function host(
+  options: { proofs?: () => FakeProofs | undefined; audits?: AuditDraft[]; gate?: StandInAdmission } = {},
+) {
   const audits = options.audits ?? [];
   return await testHost({
     plugins: [accounts],
-    gate: new StandInAdmission(() => ownerStanding()),
+    gate: options.gate ?? new StandInAdmission(() => ownerStanding()),
     clock: fixedClock('2026-11-01T12:00:00.000Z'),
     uses: {
       access: {
@@ -61,7 +63,7 @@ async function savedSignIn(h: TestHost): Promise<SignInSummary> {
 }
 
 /** Plants an approved standing rule for the account's sign-in in the daemon's rules file, then loads it. */
-async function plantRule(h: TestHost, added: SignInSummary) {
+async function plantRule(h: TestHost, added: SignInSummary, registry: { proofs?: FakeProofs }) {
   const index = JSON.parse(h.state('accounts').raw(stateDef('accounts')) ?? '{}') as AccountIndexDocument;
   h.state('accounts').plant(
     stateDef('accounts'),
@@ -72,6 +74,7 @@ async function plantRule(h: TestHost, added: SignInSummary) {
   );
   const listing = (await h.request('GET', '/v1/accounts')).json<{ accounts: never[]; signIns: SignInSummary[] }>();
   const w = await world({ listing: { ...listing, keys: new Map([['REVIEW', index.accounts.REVIEW!.key]]) } });
+  registry.proofs = w.proofs;
   await approved(w, { signIn: added.id, fields: ['username', 'password'] });
   if (w.store.document === undefined) throw new Error('fixture missing');
   h.state('accounts').plant(stateDef('sign-in-rules'), JSON.stringify({ format: 1, ...w.store.document }));
@@ -80,13 +83,12 @@ async function plantRule(h: TestHost, added: SignInSummary) {
 }
 
 it('S123 an orderly stop writes the suspension a failed write left in memory, so a restart keeps the rule suspended', async () => {
-  let proofs: FakeProofs | undefined;
-  const h = await host({ proofs: () => proofs });
+  const registry: { proofs?: FakeProofs } = {};
+  const h = await host({ proofs: () => registry.proofs });
   let restarted: TestHost | undefined;
   try {
     const added = await savedSignIn(h);
-    const rulesWorld = await plantRule(h, added);
-    proofs = rulesWorld.proofs;
+    await plantRule(h, added, registry);
     const rulesPath = stateDef('sign-in-rules').path;
     expect(
       (await h.request('GET', '/v1/sign-in-rules')).json<{ rules: SignInRuleView[] }>().rules[0]?.suspended,
@@ -308,6 +310,114 @@ it('I184 a project default orders a sign-in by the project the Board names and P
     expect(onProject.find(each => each.account.id === 'ONE')?.default).toBeUndefined();
     // A ferret on no project gets the site lines alone.
     expect((await hintAs('F9')).every(each => each.default === undefined)).toBe(true);
+  } finally {
+    await h.stop();
+  }
+});
+
+// ─── finding 5: the 2FA key routes keep their own records ───────────────────────────────────────────────────────
+
+it('S102 factor changes are kept secrets.changed records by account and key id, a seed save records proof passkey, none a value', async () => {
+  const audits: AuditDraft[] = [];
+  let allowed: string | undefined;
+  const gate = new StandInAdmission(() => ({
+    ...ownerStanding(),
+    claimFreshStepUp: ((act: string, subject?: string) => act === 'add-2fa-key' && subject === allowed) as ReturnType<
+      typeof ownerStanding
+    >['claimFreshStepUp'],
+  }));
+  const h = await host({ audits, gate });
+  try {
+    await savedSignIn(h);
+    audits.length = 0;
+    const body = { padded: padInputValue(SEED), totpAcknowledged: true };
+    const staged = await h.request('POST', '/v1/accounts/REVIEW/factors/seed', { body });
+    const stage = staged.json<{ stage: `st_${string}` }>().stage;
+    const index = JSON.parse(h.state('accounts').raw(stateDef('accounts')) ?? '{}') as AccountIndexDocument;
+    // Without the passkey proof the commit is refused, and the refusal is a kept record too.
+    expect((await h.request('POST', `/v1/accounts/REVIEW/factors/seed/${stage}/commit`)).status).toBe(403);
+    allowed = addTwoFactorKeySubject(index.accounts.REVIEW?.key as never, stage);
+    const saved = await h.request('POST', `/v1/accounts/REVIEW/factors/seed/${stage}/commit`);
+    expect(saved.status).toBe(200);
+    const factor = saved.json<{ factor: { id: string } }>().factor.id;
+    const added = await h.request('POST', '/v1/accounts/REVIEW/factors', { body: { kind: 'push', label: 'Phone' } });
+    expect(added.status).toBe(201);
+    const pushId = added.json<{ id: string }>().id;
+    expect(
+      (await h.request('PATCH', `/v1/accounts/REVIEW/factors/${pushId}`, { body: { label: 'Phone 2' } })).status,
+    ).toBe(200);
+    expect((await h.request('DELETE', `/v1/accounts/REVIEW/factors/${pushId}`)).status).toBe(200);
+    expect((await h.request('DELETE', '/v1/accounts/REVIEW/factors/tf_000000000000')).status).toBe(404);
+
+    const kept = audits.map(entry => ({
+      event: entry.event,
+      subject: entry.subject,
+      actor: entry.actor,
+      outcome: entry.outcome,
+      detail: entry.detail,
+    }));
+    const host = { kind: 'host' };
+    expect(kept as unknown[]).toEqual([
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'succeeded',
+        detail: { action: 'factor-seed-staged', stage },
+      },
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'refused',
+        detail: { action: 'factor-added', code: STEP_UP_REQUIRED_CODE },
+      },
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'succeeded',
+        detail: { action: 'factor-added', proof: 'passkey', factor },
+      },
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'succeeded',
+        detail: { action: 'factor-added', factor: pushId },
+      },
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'succeeded',
+        detail: { action: 'factor-relabelled', factor: pushId },
+      },
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'succeeded',
+        detail: { action: 'factor-removed', factor: pushId },
+      },
+      {
+        event: 'secrets.changed',
+        subject: 'REVIEW',
+        actor: host,
+        outcome: 'refused',
+        detail: { action: 'factor-removed', code: 'unknown_2fa_key' },
+      },
+    ]);
+    expect(JSON.stringify(audits)).not.toContain(SEED);
+    expect(JSON.stringify(audits)).not.toContain(PASSWORD);
+    // The route keeps its own record, so Gate's generic route record is not a second one.
+    for (const key of [
+      'POST /v1/accounts/:id/factors',
+      'PATCH /v1/accounts/:id/factors/:factor',
+      'DELETE /v1/accounts/:id/factors/:factor',
+      'POST /v1/accounts/:id/factors/seed/:stage/commit',
+    ])
+      expect(accounts.manifest.actions.routes.find(route => route.key === key)?.audit).toHaveProperty('skip');
   } finally {
     await h.stop();
   }

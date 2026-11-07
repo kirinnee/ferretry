@@ -10,7 +10,7 @@
  * - secure copies (the Vault's child runner and folders): no copy exists, so the copy routes list none.
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
-import { auditKind } from '@ferretry/core-gate/contract';
+import { gateAuditSink } from './adapters/gate-audit.ts';
 import { accountSecurity } from './adapters/pending-security.ts';
 import { randomUUID } from 'node:crypto';
 import type { StateFileDef } from '@ferretry/kernel/contract';
@@ -58,10 +58,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
   const clock = { now: () => kernel.clock.nowMs() };
   const isoClock = { now: () => kernel.clock.now() as string };
   const redact = async (text: string): Promise<string> => await kernel.redaction.read(scope => scope.text(text));
-  const audit: AuditSink = {
-    // TODO(gate contract): cause is approved additively; preserve it at the call until Gate accepts it.
-    record: async entry => await ctx.needs.gate.audit({ ...entry, event: auditKind(entry.event) }),
-  };
+  const audit: AuditSink = gateAuditSink(ctx.needs.gate);
   const id = (): string => randomUUID().replaceAll('-', '');
   const security = accountSecurity(ctx.uses.access);
   const terminalRules = () => TERMINAL_RULES_OFFERED;

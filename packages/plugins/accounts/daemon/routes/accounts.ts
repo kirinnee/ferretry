@@ -62,10 +62,12 @@ import {
   type TwoFactorStageId,
   TwoFactorStageIdSchema,
 } from '../../contract/routes/index.ts';
+import { idAt, paramOf, factorAudit, type FactorAudit } from './factor-audit.ts';
 import { AccountDefaultsNotWritten } from '../adapters/kernel-defaults-writer.ts';
 import { AccountDefaultNotUsable, type AccountDefaults, AccountDefaultsFileBroken } from '../lib/account-defaults.ts';
 import { type AccountDirectory, type AccountListing, type AccountVault, LoginEntryError } from '../lib/accounts.ts';
 import { parseBody } from '../lib/body.ts';
+import type { AuditSink } from '../lib/local-ports.ts';
 import { SecretStoreError } from '../lib/seal.ts';
 import type { SignInChoicePort } from '../lib/sign-in-context.ts';
 import {
@@ -103,6 +105,8 @@ export interface AccountRoutesDeps {
   readonly choice?: SignInChoicePort;
   /** Staged 2FA seeds, waiting for the passkey bound to each. It never answers a seed. */
   readonly seeds?: TwoFactorSeedStages;
+  /** Where the 2FA key routes keep their `secrets.changed` records (S102); Gate stamps them. */
+  readonly audit?: AuditSink;
 }
 
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: CAPABILITIES.secrets, axis: 'configure' };
@@ -342,18 +346,31 @@ const seedProofDemand = (): ApiResponse =>
 
 /** An owner-only handler: a ferret is refused before the body is read, and a domain refusal is its HTTP answer. */
 const owned =
-  (act: string, run: (call: Call) => Promise<unknown>, status = 200): Handler =>
+  (act: string, run: (call: Call) => Promise<unknown>, status = 200, audit?: FactorAudit): Handler =>
   async call => {
-    ownerOnly(call, act);
     try {
-      return jsonResponse(await run(call), status);
+      ownerOnly(call, act);
+      const answer = await run(call);
+      await audit?.answered(call, answer);
+      return jsonResponse(answer, status);
     } catch (error) {
-      if (error instanceof TwoFactorSeedError) throw new ApiError(error.status, error.message, error.code);
-      if (error instanceof LoginEntryError && error.refusal === 'unknown_2fa_key')
-        throw new ApiError(404, error.message, TWO_FACTOR_ERROR_CODES.unknownFactor);
-      return reraise(error);
+      const mapped = ownedFailure(error);
+      await audit?.refused(call, mapped);
+      throw mapped;
     }
   };
+
+/** A failure of an owner-only handler as the error the caller is answered with. */
+function ownedFailure(error: unknown): unknown {
+  try {
+    if (error instanceof TwoFactorSeedError) return new ApiError(error.status, error.message, error.code);
+    if (error instanceof LoginEntryError && error.refusal === 'unknown_2fa_key')
+      return new ApiError(404, error.message, TWO_FACTOR_ERROR_CODES.unknownFactor);
+    return reraise(error);
+  } catch (mapped) {
+    return mapped;
+  }
+}
 
 /** A route this daemon cannot answer because a part it needs is not built (`503 unavailable`). */
 const unavailable =
@@ -470,7 +487,7 @@ export function accountRoutes(deps: AccountRoutesDeps) {
       const { from } = await parseBody(call.request, AccountPairRequestSchema);
       return await accounts.apart(id, from);
     }),
-    ...factorRoutes(accounts, seeds),
+    ...factorRoutes(accounts, seeds, deps.audit),
   } satisfies Readonly<Record<string, Handler>>;
 }
 
@@ -480,8 +497,25 @@ export function accountRoutes(deps: AccountRoutesDeps) {
  * asked of every caller, the machine included: the commit never reads `governance`, an unlock or `stepUpOnActions`
  * (S88, S90, S91).
  */
-function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | undefined) {
+function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | undefined, sink: AuditSink | undefined) {
   const noSeeds = unavailable('cannot save 2FA seeds yet');
+  const stageId = (call: Call, answer: unknown) => ({ stage: idAt(answer, 'stage') ?? paramOf(call, 'stage') });
+  const audit = {
+    staged: factorAudit(sink, { action: 'factor-seed-staged', ids: stageId }),
+    saved: factorAudit(sink, {
+      action: 'factor-added',
+      proof: 'passkey',
+      ids: (_call, answer) => ({ factor: idAt(answer, 'factor', 'id') }),
+    }),
+    confirming: factorAudit(sink, { action: 'factor-seed-confirm-in-app', ids: stageId }),
+    dropped: factorAudit(sink, { action: 'factor-seed-dropped', ids: stageId }),
+    added: factorAudit(sink, { action: 'factor-added', ids: (_call, answer) => ({ factor: idAt(answer, 'id') }) }),
+    relabelled: factorAudit(sink, {
+      action: 'factor-relabelled',
+      ids: (_call, answer) => ({ factor: idAt(answer, 'id') }),
+    }),
+    removed: factorAudit(sink, { action: 'factor-removed', ids: call => ({ factor: paramOf(call, 'factor') }) }),
+  };
   return {
     'POST /v1/accounts/:id/factors/seed':
       seeds === undefined
@@ -497,6 +531,7 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
                 ),
               ),
             201,
+            audit.staged,
           ),
     // The card names no account: the app reads its stage, and the account it is for, by the stage id alone (S101).
     'GET /v1/accounts/seed-stages/:stage':
@@ -517,10 +552,10 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
       seeds === undefined
         ? noSeeds
         : ((async (call: Call) => {
-            ownerOnly(call, 'save a 2FA key');
-            const id = pathAccountId(call);
-            const stage = pathStageId(call);
             try {
+              ownerOnly(call, 'save a 2FA key');
+              const id = pathAccountId(call);
+              const stage = pathStageId(call);
               // EVERY CALLER proves it: no `governance` read here, so the machine's token skips nothing. The subject
               // is today's `sha256("ferretry.add-2fa-key.v1\0" + account key + "\0" + stage)` (S90), which binds the
               // proof to the account as well as the stage; Gate's claim is typed by the stage id alone.
@@ -530,11 +565,17 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
                 subject => call.claimFreshStepUp?.(STEP_UP_ACTS.addTwoFactorKey, subject as `st_${string}`) === true,
                 seedSaver(call),
               );
-              return jsonResponse(TwoFactorSeedSavedSchema.parse(saved));
+              const answer = TwoFactorSeedSavedSchema.parse(saved);
+              await audit.saved.answered(call, answer);
+              return jsonResponse(answer);
             } catch (error) {
-              if (error instanceof TwoFactorSeedProofMissing) return seedProofDemand();
-              if (error instanceof TwoFactorSeedError) throw new ApiError(error.status, error.message, error.code);
-              return reraise(error);
+              if (error instanceof TwoFactorSeedProofMissing) {
+                await audit.saved.refused(call, new ApiError(403, 'a passkey is needed', STEP_UP_REQUIRED_CODE));
+                return seedProofDemand();
+              }
+              const mapped = ownedFailure(error);
+              await audit.saved.refused(call, mapped);
+              throw mapped;
             }
           }) satisfies Handler),
     'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app':
@@ -556,33 +597,50 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
               return TwoFactorSeedConfirmingSchema.parse({ stage, session: sessionId, agendaItemId });
             },
             201,
+            audit.confirming,
           ),
     'DELETE /v1/accounts/:id/factors/seed/:stage':
       seeds === undefined
         ? noSeeds
-        : owned('drop a staged 2FA key', async call => {
-            const stage = pathStageId(call);
-            await seeds.drop(pathAccountId(call), stage, stageCaller(call));
-            return { stage, dropped: true };
-          }),
+        : owned(
+            'drop a staged 2FA key',
+            async call => {
+              const stage = pathStageId(call);
+              await seeds.drop(pathAccountId(call), stage, stageCaller(call));
+              return { stage, dropped: true };
+            },
+            200,
+            audit.dropped,
+          ),
     'POST /v1/accounts/:id/factors': owned(
       'add a 2FA key',
       async call =>
         await accounts.addFactor(pathAccountId(call), await parseBody(call.request, AddTwoFactorKeyRequestSchema)),
       201,
+      audit.added,
     ),
-    'PATCH /v1/accounts/:id/factors/:factor': owned('change a 2FA key', async call => {
-      const id = pathAccountId(call);
-      const factor = pathFactorId(call);
-      return await accounts.patchFactor(id, factor, await parseBody(call.request, PatchTwoFactorKeyRequestSchema));
-    }),
+    'PATCH /v1/accounts/:id/factors/:factor': owned(
+      'change a 2FA key',
+      async call => {
+        const id = pathAccountId(call);
+        const factor = pathFactorId(call);
+        return await accounts.patchFactor(id, factor, await parseBody(call.request, PatchTwoFactorKeyRequestSchema));
+      },
+      200,
+      audit.relabelled,
+    ),
     // NEVER a passkey: removing a key only narrows what this machine can do. Its seed is swept with it (S99).
-    'DELETE /v1/accounts/:id/factors/:factor': owned('remove a 2FA key', async call => {
-      const id = pathAccountId(call);
-      const factor = pathFactorId(call);
-      if (!(await accounts.removeFactor(id, factor)))
-        throw new ApiError(404, `${id} has no 2FA key ${factor}`, TWO_FACTOR_ERROR_CODES.unknownFactor);
-      return RemovedTwoFactorKeySchema.parse({ account: id, factor, removed: true });
-    }),
+    'DELETE /v1/accounts/:id/factors/:factor': owned(
+      'remove a 2FA key',
+      async call => {
+        const id = pathAccountId(call);
+        const factor = pathFactorId(call);
+        if (!(await accounts.removeFactor(id, factor)))
+          throw new ApiError(404, `${id} has no 2FA key ${factor}`, TWO_FACTOR_ERROR_CODES.unknownFactor);
+        return RemovedTwoFactorKeySchema.parse({ account: id, factor, removed: true });
+      },
+      200,
+      audit.removed,
+    ),
   } satisfies Readonly<Record<string, Handler>>;
 }
