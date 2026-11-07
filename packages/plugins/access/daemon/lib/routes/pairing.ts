@@ -236,14 +236,15 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
         // ADDING A DEVICE ALWAYS WANTS A PASSKEY PROVED FOR IT, from any device — unlocked or not, and
         // whatever `stepUpOnActions` says. The unlock alone must never be enough to put another device on
         // this machine. At the machine nothing is asked: it already has the machine (B4).
-        if (isGovernedCaller({ loopback: presentation.local }) && presentation.freshStepUp !== true)
+        // ONE PROOF, ONE ACT: the proof is CLAIMED here, before the code is minted, never read from the admission
+        // snapshot and spent after — of two requests admitted on one proof exactly one mints. No restore: a mint that
+        // then fails has used the proof up, and the person confirms again. The machine claims nothing.
+        if (isGovernedCaller({ loopback: presentation.local }) && context.claimFreshStepUp?.() !== true)
           return addsAccessRefusal(
             'adding a device to this machine needs a passkey confirmation for it, from this device',
             STEP_UP_ACTS.addDevice,
           );
-        const minted = subsystem.mint(grantSet);
-        context.spendFreshStepUp?.();
-        return jsonResponse(PairingCodeMintResponseSchema.parse(minted), 201);
+        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint(grantSet)), 201);
       },
     },
     {

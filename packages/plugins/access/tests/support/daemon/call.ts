@@ -141,3 +141,20 @@ export async function respond(
     throw error;
   }
 }
+
+/**
+ * ONE fresh passkey proof, as Gate's registry holds it: `claim` takes it in one step, so of any number of calls built
+ * on it exactly one gets `true`. Every call is stamped `freshStepUp` BEFORE any runs (the admission snapshot), so a
+ * route that reads the snapshot instead of claiming lets all of them through. `taken` counts the claims that won.
+ */
+export function oneFreshProof(): { readonly claim: CallStanding['claimFreshStepUp']; readonly taken: () => number } {
+  let held = true;
+  let taken = 0;
+  const claim = ((): boolean => {
+    if (!held) return false;
+    held = false;
+    taken += 1;
+    return true;
+  }) as CallStanding['claimFreshStepUp'];
+  return { claim, taken: () => taken };
+}
