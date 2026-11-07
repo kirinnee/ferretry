@@ -4,6 +4,7 @@ import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/ke
 import { ok } from '@ferretry/std';
 import should from 'should';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
+import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
 
 const FERRET = 'f1' as FerretId;
@@ -15,7 +16,10 @@ function fakeRoots() {
   const written = new Map<string, string>();
   const handle = {
     name: 'agent-homes',
-    resolve: (relative: string) => ok(`${HOME}/${relative}` as FencedPath),
+    resolve: (relative: string) =>
+      ok((relative.startsWith('/') ? relative : relative === '' ? HOME : `${HOME}/${relative}`) as FencedPath),
+    list: async () => [],
+    stat: async () => undefined,
     writeText: async (path: FencedPath, text: string) => void written.set(path, text),
   } as unknown as RootHandle;
   return { written, roots: { root: () => handle } as unknown as KernelPorts['roots'] };
@@ -41,7 +45,9 @@ function fakeRunner() {
   const runner = {
     key: 'tmux',
     start: async (spec: RunSpec) => (seen.push({ call: 'start', spec }), ok(running)),
-    resume: async (spec: RunSpec, conversation: string) => (seen.push({ call: 'resume', spec, conversation }), ok(running)),
+    resume: async (spec: RunSpec, conversation: string) => (
+      seen.push({ call: 'resume', spec, conversation }), ok(running)
+    ),
     stop: async () => undefined,
   } as unknown as Runner;
   return { runner, seen };
@@ -50,7 +56,13 @@ function fakeRunner() {
 const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
   const { written, roots } = fakeRoots();
   const harness = codexHarness({
-    kernel: { roots, log: undefined as never },
+    kernel: {
+      roots,
+      state: { write: async () => undefined } as never,
+      log: undefined as never,
+      clock: realClock(),
+      redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
+    },
     locate: async () => location,
     probe: {
       version: async () => ({ state: 'ok', version: '0.145.0' }),
@@ -69,7 +81,12 @@ const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof 
   return { harness, written };
 };
 
-const LOCATED = { outcome: 'located', path: '/opt/bin/codex', rule: 'inherited environment', declaredBy: 'PATH' } as const;
+const LOCATED = {
+  outcome: 'located',
+  path: '/opt/bin/codex',
+  rule: 'inherited environment',
+  declaredBy: 'PATH',
+} as const;
 const ENV = {} as RunSpec['env'];
 
 describe('the Codex harness', () => {
@@ -80,13 +97,22 @@ describe('the Codex harness', () => {
   });
 
   it('discovers the binary and its version, and says plainly when it is missing', async () => {
-    should(await harnessOver(LOCATED).harness.discover()).eql({ found: true, binary: '/opt/bin/codex', version: '0.145.0' });
+    should(await harnessOver(LOCATED).harness.discover()).eql({
+      found: true,
+      binary: '/opt/bin/codex',
+      version: '0.145.0',
+    });
     should(await harnessOver({ outcome: 'absent', searched: [] }).harness.discover()).eql({
       found: false,
       reason: 'codex was not found on this machine',
     });
     should(
-      await harnessOver({ outcome: 'override-absent', path: '/x', declaredBy: 'harness-codex.yaml binary', reason: 'cannot run it' }).harness.discover(),
+      await harnessOver({
+        outcome: 'override-absent',
+        path: '/x',
+        declaredBy: 'harness-codex.yaml binary',
+        reason: 'cannot run it',
+      }).harness.discover(),
     ).eql({ found: false, reason: 'cannot run it' });
   });
 

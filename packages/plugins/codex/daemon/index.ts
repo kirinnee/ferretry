@@ -1,7 +1,15 @@
 import type { ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { CODEX_CONFIG, CODEX_DISCOVERY, type CodexApi, type Discovery, type HarnessConfig, HarnessConfigSchema } from '../contract/index.ts';
+import {
+  CODEX_CONFIG,
+  CODEX_DISCOVERY,
+  CodexUpdateFinished,
+  type CodexApi,
+  type Discovery,
+  type HarnessConfig,
+  HarnessConfigSchema,
+} from '../contract/index.ts';
 import { codexHarness } from './adapters/codex-harness.ts';
 import { HostCodexFacts } from './adapters/facts.ts';
 import { HostPrograms } from './adapters/host-programs.ts';
@@ -16,7 +24,8 @@ export default implementDaemon(manifest, {
     const host = new HostPrograms(kernel.spawn);
 
     // `config/harness-codex.yaml`, read each time so an edit is seen on the next look.
-    const paths = () => HarnessConfigSchema.parse(kernel.config.file(CODEX_CONFIG as ConfigFileDef<HarnessConfig>) ?? {});
+    const paths = () =>
+      HarnessConfigSchema.parse(kernel.config.file(CODEX_CONFIG as ConfigFileDef<HarnessConfig>) ?? {});
     let home: Promise<string> | undefined;
     const homeDirectory = async (): Promise<string> => {
       home ??= host.environment('HOME').then(value => value ?? '');
@@ -24,7 +33,11 @@ export default implementDaemon(manifest, {
     };
     const locate = async () => {
       const configured = paths();
-      return await locateCodex({ binary: configured.binary, searchPaths: configured.searchPaths }, host, await homeDirectory());
+      return await locateCodex(
+        { binary: configured.binary, searchPaths: configured.searchPaths },
+        host,
+        await homeDirectory(),
+      );
     };
 
     const probeHome = kernel.roots.root('agent-homes', { subfolder: 'probe' }).resolve('');
@@ -62,12 +75,39 @@ export default implementDaemon(manifest, {
       return read.ok ? read.value : undefined;
     };
 
-    const routes = codexUpdateRoutes({ view, start: request => service.start(request) });
+    const start: typeof service.start = async request => {
+      const result = await service.start(request);
+      void service
+        .settled()
+        .then(async () => {
+          const job = (await service.view()).job;
+          if (job?.state === 'finished')
+            kernel.events.publish(CodexUpdateFinished, {
+              outcome: job.report.outcome,
+              finishedAt: job.report.finishedAt,
+            });
+        })
+        .catch(() => kernel.log.warn('Codex update completion could not be reported'));
+      return result;
+    };
+    const routes = codexUpdateRoutes({ view, start });
 
     return {
       routes,
       provides: { codex: { view, discovery } },
-      hooks: { 'harnesses:codex': codexHarness({ kernel, locate, probe, update: { view, start: request => service.start(request), settled: () => service.settled() } }) },
+      hooks: {
+        'harnesses:codex': codexHarness({
+          kernel,
+          locate,
+          probe,
+          permissionMode: () => paths().permissionMode,
+          historyDirectory: async () => {
+            const home = await homeDirectory();
+            return home === '' ? undefined : `${home}/.codex/sessions`;
+          },
+          update: { view, start, settled: () => service.settled() },
+        }),
+      },
     };
   },
 });

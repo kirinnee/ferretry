@@ -4,6 +4,7 @@ import { ok } from '@ferretry/std';
 import manifest from '../../manifest.ts';
 import { CODEX_SETTINGS } from '../../contract/index.ts';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
+import { realClock } from '../support/ports.ts';
 import { RUNTIME_SETTINGS_FILE } from '../../daemon/lib/index.ts';
 
 /**
@@ -19,7 +20,7 @@ function home() {
   const asked: string[] = [];
   const handle = {
     name: 'agent-homes',
-    resolve: (relative: string) => ok(`${HOME}/${relative}` as FencedPath),
+    resolve: (relative: string) => ok((relative.startsWith('/') ? relative : `${HOME}/${relative}`) as FencedPath),
     writeText: async (path: FencedPath) => void written.push(path.slice(HOME.length + 1)),
   } as unknown as RootHandle;
   const roots = { root: (name: string) => (asked.push(name), handle) } as unknown as KernelPorts['roots'];
@@ -30,10 +31,20 @@ describe('codex storage parity', () => {
   test('F-0005 the config.toml of a ferret’s home is written inside the agent-homes root, never beside it', async () => {
     const { written, asked, roots } = home();
     const harness = codexHarness({
-      kernel: { roots, log: undefined as never },
+      kernel: {
+        roots,
+        state: undefined as never,
+        log: undefined as never,
+        clock: realClock(),
+        redaction: undefined as never,
+      },
       locate: async () => ({ outcome: 'absent', searched: [] }),
       probe: { version: async () => ({ state: 'unreadable', reason: '' }), startup: async () => ({ ok: true }) },
-      update: { view: async () => Promise.reject(new Error('unused')), start: async () => Promise.reject(new Error('unused')), settled: async () => undefined },
+      update: {
+        view: async () => Promise.reject(new Error('unused')),
+        start: async () => Promise.reject(new Error('unused')),
+        settled: async () => undefined,
+      },
     });
     await harness.prepareHome({
       ferret: 'f1',

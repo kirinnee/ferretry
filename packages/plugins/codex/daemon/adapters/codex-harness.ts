@@ -5,10 +5,6 @@
  * the launch argv, and starts, resumes and stops through whichever runner Ferrets hands it. It never reads
  * `auth.json`: the login's credentials arrive as the Vault's `ChildEnvironment`, which this code passes on unopened.
  *
- * WHAT IS NOT HERE, on purpose:
- *  - delivering a message, the transcript, usage and finding Codex's own conversations belong to Conversation, which
- *    owns the rollout reader and the send path; this harness answers those honestly (a refusal, empty readers) rather
- *    than reaching around it.
  */
 import type { FencedPath, FerretId, KernelPorts } from '@ferretry/kernel/contract';
 import type {
@@ -26,13 +22,24 @@ import type {
 } from '@ferretry/core-ferrets/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
-import { HarnessUpdateRefusal, type HarnessLocation, type HarnessProbe, type HarnessUpdateSubsystem } from '../lib/update/index.ts';
+import type { HarnessConfig } from '../../contract/index.ts';
+import { codexFixedArguments } from '../lib/fixed-layer.ts';
+import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
+import { CodexRollouts } from './rollouts.ts';
+import {
+  HarnessUpdateRefusal,
+  type HarnessLocation,
+  type HarnessProbe,
+  type HarnessUpdateSubsystem,
+} from '../lib/update/index.ts';
 
 /** The Vault-resolved environment a launch passes on unopened. */
 type ChildEnvironment = RunSpec['env'];
 
 export interface CodexHarnessOptions {
-  readonly kernel: Pick<KernelPorts, 'roots' | 'log'>;
+  readonly kernel: Pick<KernelPorts, 'roots' | 'log' | 'clock' | 'redaction' | 'state'>;
+  readonly permissionMode?: () => HarnessConfig['permissionMode'];
+  readonly historyDirectory?: () => Promise<string | undefined>;
   readonly locate: () => Promise<HarnessLocation>;
   readonly probe: HarnessProbe;
   readonly update: HarnessUpdateSubsystem & { settled(): Promise<void> };
@@ -60,6 +67,7 @@ function configDocument(spec: LaunchSpec): string {
 
 export function codexHarness(options: CodexHarnessOptions): Harness {
   const { kernel, locate, probe, update } = options;
+  const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
   /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
   const command = async (spec: LaunchSpec, resume?: string): Promise<Result<readonly string[], StartRefusal>> => {
@@ -70,6 +78,10 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       `CODEX_HOME=${spec.home}`,
       ...buildCodexLaunchArgv({
         executable: location.path,
+        harnessFlags: [
+          ...codexFixedArguments(options.permissionMode?.() ?? 'auto', spec.folder),
+          ...codexCorrelationArguments(spec.home),
+        ],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
@@ -86,13 +98,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   ): Promise<Result<Started, StartRefusal>> => {
     const argv = await command(spec, harnessConversation);
     if (!argv.ok) return argv;
+    await rollouts.launched(spec, harnessConversation);
     const running =
       harnessConversation === undefined
         ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
-        : await runner.resume(
-            { ferret: spec.ferret, command: argv.value, cwd: spec.folder, env },
-            harnessConversation,
-          );
+        : await runner.resume({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env }, harnessConversation);
     if (!running.ok) return running;
     // Codex mints its own conversation id after launch; Conversation finds it, so none is claimed here.
     return ok({ running: running.value, ...(harnessConversation === undefined ? {} : { harnessConversation }) });
@@ -105,8 +115,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     async discover(): Promise<HarnessInstall | HarnessMissing> {
       const location = await locate();
-      if (location.outcome === 'absent')
-        return { found: false, reason: 'codex was not found on this machine' };
+      if (location.outcome === 'absent') return { found: false, reason: 'codex was not found on this machine' };
       if (location.outcome === 'override-absent') return { found: false, reason: location.reason };
       const installed = await probe.version(location.path);
       return installed.state === 'ok'
@@ -143,7 +152,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         ['config.toml', configDocument(spec)],
       ] as const) {
         if (text === '') continue;
-        const target = root.resolve(name);
+        const target = root.resolve(`${spec.home}/${name}`);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
         await root.writeText(target.value, text);
         files.push(target.value);
@@ -162,12 +171,8 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       return refused(message.id, 'Codex messages are sent through Conversation, which owns the send path');
     },
 
-    transcript: {
-      read: async () => [],
-      follow: async function* () {},
-      find: async () => undefined,
-    },
-    usage: { turns: async () => [] },
-    conversations: { list: async () => [] },
+    transcript: rollouts.transcript,
+    usage: rollouts.usage,
+    conversations: rollouts.conversations,
   };
 }
