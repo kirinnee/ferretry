@@ -20,6 +20,13 @@ export function lessonsSubsystem(store: FakeLessonsStore, world: LessonsWorld = 
     lessons: world.service,
     serial: new SerialSection(),
     config: async () => world.config,
+    // The kernel writer's plain outcome: the patch is in effect at once (its held and refused answers are driven on the
+    // real writer in parity/routes.test.ts).
+    writeConfig: async patch => {
+      world.config = { ...world.config, ...patch };
+      return { kind: 'written', etag: 'etag-1', loosened: [] };
+    },
+    configHeld: () => false,
     now: () => AT,
     changed: () => {},
     run: async (spawn): Promise<RunManifest> => ({
