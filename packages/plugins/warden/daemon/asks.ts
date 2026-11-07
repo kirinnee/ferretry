@@ -22,8 +22,11 @@ const ONE_LINE = /[\r\n]+/gu;
 
 const oneLine = (text: string, max: number): string => text.replaceAll(ONE_LINE, ' ').trim().slice(0, max) || '-';
 
-/** A per-ferret entry: `f.<ferret>.<sourceRef>`. A ferret id has no `.` and a notice's ref starts `warden:`. */
-const PER_FERRET = /^f\.([A-Za-z0-9_-]+)\.(warden:.+)$/u;
+/**
+ * A per-ferret entry: `f.<ferret>.<sourceRef>`. A ferret id has no `.`, and a notice's ref starts `warden:` (a flag's)
+ * or `warden-` (the auto-revive breaker's).
+ */
+const PER_FERRET = /^f\.([A-Za-z0-9_-]+)\.(warden[:-].+)$/u;
 
 /** Whether a notice is about the machine (one for every ferret the fault names), not about one ferret. */
 export const isFleetNotice = (sourceRef: string): boolean =>
@@ -129,6 +132,38 @@ export class AsksWardenAgenda implements WardenAgendaPort {
         why: oneLine(request.why, 2_048),
         howToResolve: oneLine(request.howToResolve, 2_048),
         context: request.context,
+        raisedBy: { kind: 'daemon' },
+        ferret: sessionId,
+      });
+      return 'created';
+    } catch {
+      return 'rejected';
+    }
+  }
+
+  /** A plain notice on one ferret's board that no flag stands behind (the auto-revive breaker's). */
+  async notice(
+    sessionId: string,
+    notice: {
+      readonly sourceRef: string;
+      readonly subject: string;
+      readonly why: string;
+      readonly howToResolve: string;
+      readonly context: string;
+    },
+  ): Promise<WardenAgendaWrite> {
+    try {
+      const entry = this.entries.entryOf(notice.sourceRef, sessionId);
+      const standing = await this.asks.open({ source: DAEMON, entry, ferret: sessionId as FerretId, state: 'open' });
+      if (standing.length > 0) return 'unchanged';
+      await this.asks.notify({
+        source: DAEMON,
+        entry,
+        ref: { ferret: sessionId },
+        subject: oneLine(notice.subject, 240),
+        why: oneLine(notice.why, 2_048),
+        howToResolve: oneLine(notice.howToResolve, 2_048),
+        context: notice.context,
         raisedBy: { kind: 'daemon' },
         ferret: sessionId,
       });

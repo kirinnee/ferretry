@@ -1,5 +1,5 @@
-import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
+import { type AskSummary, type AsksApi, SourceKeySchema } from '@ferretry/core-asks/contract';
+import type { FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type { WardenFleetSession, WardenSessionStatus } from './lib/index.ts';
 
@@ -132,17 +132,26 @@ export async function readFleet(
   );
 }
 
+/** Asks' own source for a ferret's `fy ask`. */
+const FERRET_SOURCE = SourceKeySchema.parse('ferret');
+
+/** A ferret's own ask that wants an answer: not a notice, not a card. */
+const isQuestion = (ask: AskSummary): boolean => ask.kind !== 'notice' && ask.kind !== 'task';
+
+/**
+ * Whether one ferret has a question of its own open (today's `pendingQuestion`). An Asks that cannot be read throws:
+ * the caller is a refusal check, and an unknown answer must not read as "no question".
+ */
+export async function hasOpenQuestion(asks: AsksApi, ferret: FerretId): Promise<boolean> {
+  return (await asks.open({ source: FERRET_SOURCE, ferret, state: 'open' })).some(isQuestion);
+}
+
 /** The oldest open question each ferret has raised itself (a ferret's own ask that wants an answer, not a notice). */
 async function openQuestions(asks: AsksApi): Promise<ReadonlyMap<string, string>> {
   const since = new Map<string, string>();
   try {
-    for (const ask of await asks.open({ source: 'ferret' as never, state: 'open' }))
-      if (
-        ask.ferret !== undefined &&
-        ask.kind !== 'notice' &&
-        ask.kind !== 'task' &&
-        (since.get(ask.ferret) ?? '\uffff') > ask.raisedAt
-      )
+    for (const ask of await asks.open({ source: FERRET_SOURCE, state: 'open' }))
+      if (ask.ferret !== undefined && isQuestion(ask) && (since.get(ask.ferret) ?? '\uffff') > ask.raisedAt)
         since.set(ask.ferret, ask.raisedAt);
   } catch {
     // Asks unreadable: no ferret is thought to be waiting, which is the quiet reading.

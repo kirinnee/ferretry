@@ -16,9 +16,10 @@ import {
   WardenReportReader,
 } from './adapters/index.ts';
 import { readFleet, TurnOrdinals } from './fleet.ts';
+import { createWardenRemedies } from './remedies.ts';
 import {
   type WardenAgentInventory,
-  type WardenRemedyPort,
+  WardenReviveService,
   WardenSweepLoop,
   WardenSweepService,
   type WardenSpawner,
@@ -93,48 +94,39 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
 
   const acted = (ferret: string, action: string, outcome: 'done' | 'failed'): void =>
     kernel.events.publish(WardenActed, { ferret: ferret as FerretId, action, outcome });
-  const act = async (ferret: string, action: string, work: () => Promise<void>): Promise<void> => {
-    try {
-      await work();
-      acted(ferret, action, 'done');
-    } catch (error) {
-      acted(ferret, action, 'failed');
-      throw error;
-    }
-  };
+  // ── the remedies: every one goes through Ferrets or Conversation, never around them (`remedies.ts`) ──────────────
+  const { remedies, resume: automaticResume } = createWardenRemedies({ ferrets, conversation, asks, acted });
 
-  // ── the remedies: every one goes through Ferrets or Conversation, never around them ──────────────────────────────────
-  const remedies: WardenRemedyPort = {
-    // A nudge is a message to the ferret. Conversation names two kinds of sender; the owner's is the one a daemon's act
-    // on the owner's behalf uses (declared GAP: a third `warden` caller so the transcript can say who spoke).
-    nudge: async (ferret, message) =>
-      await act(ferret, 'nudge', async () => {
-        const sent = await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
-        if (!sent.ok) throw new Error(`the nudge was refused: ${JSON.stringify(sent.error)}`);
+  // ── auto-revive: today's default-on revive, resuming through Ferrets under today's automatic refusals ─────────────
+  // It revives only a ferret that DIED (status `failed`, its journal ending in an abnormal exit: `classifyEnd`).
+  // GAP(ferrets): 5.0's `FerretSummary` carries no death cause (four states, no exit status or signal), so no ferret
+  // reads as failed and nothing is revived until Ferrets adds one. The breaker, the per-day caps and the owner's
+  // `mayActAlone.resume` still govern it when it can act.
+  const revive = new WardenReviveService({
+    events: {
+      read: async () => [],
+      emit: async (ferret, type, data) => kernel.log.info(type, { ferret, ...scalars(data) }),
+    },
+    resume: automaticResume,
+    // Ferrets owns the runner and refuses a resume it cannot start; there is no separate tmux server to wait for.
+    tmuxReady: async () => true,
+    sleep: async ms =>
+      await new Promise<void>(resolve => {
+        kernel.clock.after(milliseconds(ms), resolve);
       }),
-    resume: async (ferret, message) =>
-      await act(ferret, 'resume', async () => {
-        const resumed = await ferrets.resume(ferret as FerretId);
-        if (!resumed.ok) throw new Error(`resume refused: ${resumed.error.reason}`);
-        if (message !== undefined)
-          await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
-      }),
-    // A restart replaces a process that only looks alive: stop it for real, then resume the conversation.
-    restart: async (ferret, message) =>
-      await act(ferret, 'restart', async () => {
-        await ferrets.stop(ferret as FerretId, 'now');
-        const resumed = await ferrets.resume(ferret as FerretId);
-        if (!resumed.ok) throw new Error(`restart refused: ${resumed.error.reason}`);
-        if (message !== undefined)
-          await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
-      }),
-    stop: async (ferret, _reason) =>
-      await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite')),
-    // Moving a ferret to another login belongs to Ferrets/Runtimes and is not in the Ferrets contract yet (GAP).
-    failover: async () => refuse('Moving a ferret to another account'),
-    // Browsers belong to the Browsers plugin, which Warden does not need (GAP).
-    closeLeftoverBrowsers: async () => 0,
-  };
+    notifyOwner: async notice => {
+      // The breaker's one notice lands on the ferret that tripped it, as a plain notification (today's).
+      await agenda.notice(notice.sessionId, {
+        sourceRef: 'warden-revive-breaker',
+        subject: `${notice.title}: ${notice.subject}`,
+        why: notice.why,
+        context: 'Auto-revive paused itself after revived sessions kept dying.',
+        howToResolve:
+          'Nothing to answer. Look at why sessions keep dying; revives resume by themselves after the pause.',
+      });
+    },
+    journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
+  });
 
   // ── investigators ────────────────────────────────────────────────────────────────────────────────────────────────────
   // A report is a file the investigating ferret writes; it needs a folder Ferrets may start it in AND the daemon can read
@@ -176,6 +168,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       attention: agenda,
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
       jevChecks: new StateWardenJevCheckLog(kernel.state, nowMs),
+      revive,
       nowMs,
       capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
     },
