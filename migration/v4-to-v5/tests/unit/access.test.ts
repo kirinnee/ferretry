@@ -1,10 +1,23 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { CAPABILITY_NAMES } from '@ferretry/core-gate/contract';
-import { DevicesFileSchema, GrantAuditLineSchema, PasskeysFileSchema } from '@ferretry/plugin-access/contract';
+import {
+  DevicesFileSchema,
+  GrantAuditLineSchema,
+  PasskeysFileSchema,
+  PushFileSchema,
+  PushKeysFileSchema,
+} from '@ferretry/plugin-access/contract';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { accessStep, V5_DEVICES_FILE, V5_GRANT_AUDIT_FILE, V5_PASSKEYS_FILE } from '../../src/steps/access.ts';
+import {
+  accessStep,
+  V5_DEVICES_FILE,
+  V5_GRANT_AUDIT_FILE,
+  V5_PASSKEYS_FILE,
+  V5_PUSH_FILE,
+  V5_PUSH_KEYS_FILE,
+} from '../../src/steps/access.ts';
 import { v4Paths } from '../../src/v4/layout.ts';
 import { v5Writer } from '../../src/v5/write.ts';
 
@@ -16,6 +29,17 @@ const DAEMON_ID = `fy_daemon_${'A'.repeat(43)}`;
 const CREDENTIAL = 'RkFLRS1jcmVkZW50aWFsLWlk';
 const PASSKEY_SPKI = 'RkFLRS1wYXNza2V5LXB1YmxpYy1rZXktc3BraQ';
 const ORIGIN = 'https://app.example.test';
+// A FAKE VAPID key: the right shape for v5's schema, not a P-256 key. Members in v4's written order, not sorted.
+const JWK = {
+  kty: 'EC',
+  crv: 'P-256',
+  d: 'FAKEdFAKEdFAKEdFAKEdFAKEdFAKEdFAKEdFAKEdFAK',
+  x: 'FAKExFAKExFAKExFAKExFAKExFAKExFAKExFAKExFAK',
+  y: 'FAKEyFAKEyFAKEyFAKEyFAKEyFAKEyFAKEyFAKEyFAK',
+} as const;
+const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/FAKE-endpoint-token';
+const P256DH = `B${'F'.repeat(86)}`;
+const AUTH = 'FAKEauthFAKEauthFAKEau';
 
 let root: string;
 let v4: string;
@@ -69,6 +93,23 @@ const passkey = (deviceId: string, credentialId = CREDENTIAL) => ({
   createdAt: '2026-11-02T00:00:00.000Z',
 });
 
+const pushRow = (deviceId: string, id = 'push-00000000-0000-4000-8000-000000000001') => ({
+  id,
+  deviceId,
+  deviceName: 'Phone',
+  subscription: { endpoint: ENDPOINT, expirationTime: null, keys: { p256dh: P256DH, auth: AUTH } },
+  createdAt: '2026-11-02T00:00:00.000Z',
+  updatedAt: '2026-11-02T00:00:00.000Z',
+});
+const v4Vapid = (envelope: Record<string, unknown> = { schemaVersion: 1 }) =>
+  `${JSON.stringify({ ...envelope, privateKeyJwk: JWK })}\n`;
+/** No member of the key and no part of a subscription may reach the report. */
+const holdsNoPushSecret = (report: unknown) => {
+  const text = JSON.stringify(report);
+  for (const value of [JWK.d, JWK.x, JWK.y, ENDPOINT, P256DH, AUTH]) expect(text).not.toContain(value);
+  expect(text).not.toContain('FAKE');
+};
+
 test('a paired device keeps every field, its public key and its grants, so it stays paired', async () => {
   await put('devices.json', v4Devices({ fleet: { use: true, configure: false } }));
   const report = await accessStep.run(ctx());
@@ -93,8 +134,7 @@ test('a paired device keeps every field, its public key and its grants, so it st
   expect(Object.keys((await read(V5_DEVICES_FILE)) as object)[0]).toBe('format');
   expect((await stat(join(v5, V5_DEVICES_FILE))).mode & 0o777).toBe(0o600);
   expect(JSON.stringify(report)).not.toContain(PUBLIC_KEY);
-  // Push still waits for the VAPID key decision, so the step is not finished.
-  expect(report.status).toBe('pending');
+  expect(report.status).toBe('converted');
 });
 
 test('grants are never wider than v4: a missing capability is off, configure needs use, a dropped one is reported', async () => {
@@ -127,7 +167,7 @@ test('an old bearer document is not converted, and its passkeys go with it', asy
 
 test('a home with no access files reports none and does not fail', async () => {
   const report = await accessStep.run(ctx());
-  expect(report.status).toBe('pending');
+  expect(report.status).toBe('converted');
   expect(report.kept).toEqual([]);
   expect(await readdir(v5)).toEqual([]);
 });
@@ -221,4 +261,107 @@ test('a dry run reads and counts, and writes nothing', async () => {
     { what: 'grant and security journal lines', count: 1 },
   ]);
   expect(await readdir(v5)).toEqual([]);
+});
+
+test('the VAPID key changes envelope only: the same JWK, v5-readable, 0600, and never in the report', async () => {
+  await put('devices.json', v4Devices({ fleet: { use: true, configure: false } }));
+  await put('push-vapid.json', v4Vapid());
+  await put(
+    'push.json',
+    JSON.stringify({
+      schemaVersion: 1,
+      subscriptions: [
+        { ...pushRow(DEVICE_ID), prefs: { agenda: true } },
+        pushRow(OTHER_DEVICE, 'push-00000000-0000-4000-8000-000000000002'),
+      ],
+    }),
+  );
+  const report = await accessStep.run(ctx());
+  expect(report.status).toBe('converted');
+
+  const bytes = await readFile(join(v5, V5_PUSH_KEYS_FILE), 'utf8');
+  // Exactly what v5's own writer stores: format first, the JWK object as v4 had it, member order kept.
+  expect(bytes).toBe(JSON.stringify({ format: 1, privateKeyJwk: JWK }));
+  // Read back the way v5's reader does (bytes → JSON → PushKeysFileSchema).
+  expect(PushKeysFileSchema.parse(JSON.parse(bytes)).privateKeyJwk).toEqual(JWK);
+  expect((await stat(join(v5, V5_PUSH_KEYS_FILE))).mode & 0o777).toBe(0o600);
+
+  // push.json moved in the same run, legacy prefs dropped, the other device's row gone with its device.
+  const push = PushFileSchema.parse(await read(V5_PUSH_FILE));
+  expect(push.subscriptions as unknown).toEqual([pushRow(DEVICE_ID)]);
+  expect((await stat(join(v5, V5_PUSH_FILE))).mode & 0o777).toBe(0o600);
+  expect(report.kept).toContainEqual({ what: 'push signing key (envelope only, never shown)', count: 1 });
+  expect(report.kept).toContainEqual({ what: 'push subscriptions', count: 1 });
+  expect(report.notCarried.some(item => item.what.startsWith('1 push subscription(s) of a device'))).toBe(true);
+  expect(report.sealed).toEqual([]);
+  holdsNoPushSecret(report);
+});
+
+for (const [name, envelope] of [
+  ['a v5-style envelope', { format: 1 }],
+  ['another schema version', { schemaVersion: 2 }],
+  ['an extra field', { schemaVersion: 1, publicKey: 'FAKE-extra' }],
+] as const)
+  test(`a VAPID document with ${name} fails naming the file only, and writes neither push file`, async () => {
+    await put('devices.json', v4Devices({ fleet: { use: true, configure: false } }));
+    await put('push-vapid.json', v4Vapid(envelope));
+    await put('push.json', JSON.stringify({ schemaVersion: 1, subscriptions: [pushRow(DEVICE_ID)] }));
+    const report = await accessStep.run(ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toBe("state/push-vapid.json: is not v4's {schemaVersion: 1, privateKeyJwk} document");
+    holdsNoPushSecret(report);
+    for (const file of [V5_PUSH_KEYS_FILE, V5_PUSH_FILE])
+      expect(await stat(join(v5, file)).catch(() => undefined)).toBeUndefined();
+  });
+
+test('a key v5 cannot read, or a push.json v5 refuses, writes neither push file', async () => {
+  await put('devices.json', v4Devices({ fleet: { use: true, configure: false } }));
+  await put('push-vapid.json', JSON.stringify({ schemaVersion: 1, privateKeyJwk: { ...JWK, crv: 'P-384' } }));
+  const badKey = await accessStep.run(ctx());
+  expect(badKey.note).toBe('state/push-vapid.json: the key is not one v5 can read');
+  holdsNoPushSecret(badKey);
+
+  await put('push-vapid.json', v4Vapid());
+  const row = pushRow(DEVICE_ID);
+  await put(
+    'push.json',
+    JSON.stringify({
+      schemaVersion: 1,
+      subscriptions: [{ ...row, subscription: { ...row.subscription, endpoint: 'https://FAKE.example.test/x' } }],
+    }),
+  );
+  const badPush = await accessStep.run(ctx());
+  expect(badPush.status).toBe('failed');
+  expect(badPush.note).toBe(
+    'state/push.json: a subscription does not fit v5 at: subscriptions.0.subscription.endpoint',
+  );
+  holdsNoPushSecret(badPush);
+  for (const file of [V5_PUSH_KEYS_FILE, V5_PUSH_FILE])
+    expect(await stat(join(v5, file)).catch(() => undefined)).toBeUndefined();
+});
+
+test('push.json with no VAPID key is not carried; a key with no push.json moves alone', async () => {
+  await put('devices.json', v4Devices({ fleet: { use: true, configure: false } }));
+  await put('push.json', JSON.stringify({ schemaVersion: 1, subscriptions: [pushRow(DEVICE_ID)] }));
+  const noKey = await accessStep.run(ctx());
+  expect(noKey.status).toBe('converted');
+  expect(noKey.notCarried.some(item => item.what === '1 push subscription(s) with no VAPID key')).toBe(true);
+  expect(await stat(join(v5, V5_PUSH_FILE)).catch(() => undefined)).toBeUndefined();
+
+  await rm(join(v4, 'state', 'push.json'));
+  await rm(v5, { recursive: true });
+  await mkdir(v5, { mode: 0o700 });
+  await put('push-vapid.json', v4Vapid());
+  const keyOnly = await accessStep.run(ctx());
+  expect(keyOnly.kept).toContainEqual({ what: 'push signing key (envelope only, never shown)', count: 1 });
+  expect(await stat(join(v5, V5_PUSH_KEYS_FILE))).toBeDefined();
+  expect(await stat(join(v5, V5_PUSH_FILE)).catch(() => undefined)).toBeUndefined();
+});
+
+test('a dry run checks the push key and writes nothing', async () => {
+  await put('push-vapid.json', v4Vapid());
+  const report = await accessStep.run(ctx(true));
+  expect(report.kept).toContainEqual({ what: 'push signing key (envelope only, never shown)', count: 1 });
+  expect(await readdir(v5)).toEqual([]);
+  holdsNoPushSecret(report);
 });

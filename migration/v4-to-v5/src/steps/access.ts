@@ -21,8 +21,17 @@
  *   declares and writes both journals into (`kind` keeps them apart, `daemon/runtime.ts`). Each line is v4's
  *   `{kind, at, actor, changes}` with `format: 1` first, parsed by `GrantAuditLineSchema`, oldest first. A line v4
  *   could not read is skipped and counted, as v4 counted it; a line v5 refuses is counted too.
- * - Push: waits for the lead's decision on the VAPID key's envelope (v5 reads `{format: 1, privateKeyJwk}`, v4 wrote
- *   `{schemaVersion: 1, privateKeyJwk}`); `push.json` moves only with its key, so both stay unwritten until then.
+ * - Push keys: v4 `push-vapid.json` `{schemaVersion: 1, privateKeyJwk}` → `push-keys.json` (`store: 'secret'`), which
+ *   v5 reads as bytes and parses as `{format: 1, privateKeyJwk}` (`daemon/adapters/push/webcrypto-vapid-keys.ts`), so
+ *   a byte-for-byte move would read as damaged. Lead decision (2026-11-07, option a): ONLY the envelope changes. The
+ *   document is read once into memory, must be exactly `{schemaVersion: 1, privateKeyJwk: {…}}` or the step fails
+ *   naming the file; the JWK object is written back unchanged (same members, same order) as
+ *   `{format: 1, privateKeyJwk}`, the way v5's own writer encodes it, in one atomic 0600 write. No log, report field
+ *   or error ever holds a JWK member; the report counts the key.
+ * - Push subscriptions: `push.json` `{schemaVersion: 1, subscriptions}` → `{format: 1, subscriptions}`
+ *   (`PushFileSchema`), v4's legacy `prefs` dropped as v4 dropped it on rewrite. Every subscription was made against
+ *   that VAPID key, so `push.json` is written only in the run that writes the key, after both were checked: a key
+ *   that fails writes neither. A subscription of a device that is not carried goes with it.
  */
 import { CAPABILITY_NAMES } from '@ferretry/core-gate/contract';
 import {
@@ -33,6 +42,10 @@ import {
   GrantAuditLineSchema,
   PasskeysFile,
   PasskeysFileSchema,
+  PushFile,
+  PushFileSchema,
+  PushKeysFile,
+  PushKeysFileSchema,
 } from '@ferretry/plugin-access/contract';
 import { join } from 'node:path';
 import type { z } from 'zod';
@@ -49,8 +62,9 @@ import {
   type V4Grant,
   V4JournalLine,
   V4PasskeysSchema,
+  V4PushSchema,
 } from '../v4/access.ts';
-import { failureNote, readV4Json, readV4Lines, V4InputError } from '../v4/documents.ts';
+import { failureNote, isRecord, readV4Json, readV4Lines, V4InputError } from '../v4/documents.ts';
 import { jsonLine } from '../v4/gate.ts';
 import type { Step, StepContext } from './index.ts';
 
@@ -58,6 +72,8 @@ const V5_DIR = 'state/access';
 export const V5_DEVICES_FILE = join(V5_DIR, DevicesFile.path);
 export const V5_PASSKEYS_FILE = join(V5_DIR, PasskeysFile.path);
 export const V5_GRANT_AUDIT_FILE = join(V5_DIR, GrantAuditFile.path);
+export const V5_PUSH_FILE = join(V5_DIR, PushFile.path);
+export const V5_PUSH_KEYS_FILE = join(V5_DIR, PushKeysFile.path);
 
 const OFF = { use: false, configure: false } as const;
 
@@ -175,12 +191,75 @@ async function convertJournals(ctx: StepContext, part: Part): Promise<void> {
   if (refused > 0) part.notes.push(`${String(refused)} journal line(s) v5 refuses skipped`);
 }
 
+/**
+ * The bytes of v5's `push-keys.json` for v4's VAPID document, held in memory only. Every failure names the file and
+ * never a member: a zod issue path would be harmless, but nothing about the key is worth a sentence.
+ */
+function v5PushKeys(decoded: unknown): string {
+  const envelope = new V4InputError(`${V4_PUSH_VAPID}: is not v4's {schemaVersion: 1, privateKeyJwk} document`);
+  if (!isRecord(decoded)) throw envelope;
+  const names = Object.keys(decoded).sort();
+  if (names.join() !== 'privateKeyJwk,schemaVersion' || decoded.schemaVersion !== 1 || !isRecord(decoded.privateKeyJwk))
+    throw envelope;
+  // v5's writer: `JSON.stringify({ format: 1, privateKeyJwk: jwk })`, no newline. The JWK object goes in as it is.
+  const bytes = JSON.stringify({ format: PushKeysFile.format, privateKeyJwk: decoded.privateKeyJwk });
+  // Read back exactly as v5's reader does; only the verdict leaves this block.
+  let readable = false;
+  try {
+    readable = PushKeysFileSchema.safeParse(JSON.parse(bytes)).success;
+  } catch {
+    readable = false;
+  }
+  if (!readable) throw new V4InputError(`${V4_PUSH_VAPID}: the key is not one v5 can read`);
+  return bytes;
+}
+
+async function convertPush(ctx: StepContext, part: Part, devices: ReadonlySet<string>): Promise<void> {
+  const keyDocument = await readV4Json(ctx.v4.home, join(ctx.v4.state, 'push-vapid.json'));
+  const pushDocument = await readV4Json(ctx.v4.home, join(ctx.v4.state, 'push.json'));
+  // Both are checked before either is written: a key that fails leaves neither file.
+  const keyBytes = keyDocument === undefined ? undefined : v5PushKeys(keyDocument);
+  let subscriptions: unknown[] | undefined;
+  let total = 0;
+  let orphaned = 0;
+  if (pushDocument !== undefined) {
+    const parsed = V4PushSchema.safeParse(pushDocument);
+    if (!parsed.success) throw new V4InputError(`${V4_PUSH}: does not match v4's shape at: ${where(parsed.error)}`);
+    const rows = parsed.data.subscriptions.filter(row => devices.has(row.deviceId));
+    total = parsed.data.subscriptions.length;
+    orphaned = total - rows.length;
+    subscriptions = rows.map(({ prefs: _legacyPrefs, ...row }) => row);
+  }
+  if (keyBytes === undefined) {
+    if (total > 0)
+      part.notCarried.push({
+        what: `${String(total)} push subscription(s) with no VAPID key`,
+        why: `${V4_PUSH_VAPID} is absent, so no subscription can be signed for; each phone enrols again`,
+      });
+    return;
+  }
+  const checked = subscriptions === undefined ? undefined : PushFileSchema.safeParse({ format: 1, subscriptions });
+  if (checked !== undefined && !checked.success)
+    throw new V4InputError(`${V4_PUSH}: a subscription does not fit v5 at: ${where(checked.error)}`);
+  await ctx.v5.opaque(V5_PUSH_KEYS_FILE, keyBytes);
+  part.kept.push({ what: 'push signing key (envelope only, never shown)', count: 1 });
+  if (checked === undefined) return;
+  await ctx.v5.json({ path: V5_PUSH_FILE, format: 1, schema: PushFileSchema }, checked.data);
+  part.kept.push({ what: 'push subscriptions', count: checked.data.subscriptions.length });
+  if (orphaned > 0)
+    part.notCarried.push({
+      what: `${String(orphaned)} push subscription(s) of a device that is not carried`,
+      why: 'a subscription goes with its device',
+    });
+}
+
 export const accessStep: Step = {
   id: 'access',
   title: 'Paired devices and passkeys (public keys, grants, grant journal, push)',
   owner: ['plugin-access'],
-  reads: [V4_DEVICES, V4_PASSKEYS, V4_UNLOCKS, V4_PUSH, V4_GRANT_JOURNAL, V4_SECURITY_JOURNAL],
-  sealed: [V4_PUSH_VAPID],
+  reads: [V4_DEVICES, V4_PASSKEYS, V4_UNLOCKS, V4_PUSH, V4_PUSH_VAPID, V4_GRANT_JOURNAL, V4_SECURITY_JOURNAL],
+  // The VAPID key is opened (its envelope changes), so it is not a sealed move; it is never shown.
+  sealed: [],
   notCarried: ACCESS_NOT_CARRIED,
   async run(ctx: StepContext): Promise<StepReport> {
     const base = { id: this.id, title: this.title, sealed: [] };
@@ -193,18 +272,22 @@ export const accessStep: Step = {
       const devices = await convertDevices(ctx, part);
       await convertPasskeys(ctx, part, devices);
       await convertJournals(ctx, part);
+      await convertPush(ctx, part, devices);
     } catch (error) {
       return {
         ...base,
         status: 'failed',
-        note: failureNote(error, 'cannot convert the paired devices, passkeys or grant journal'),
+        note: failureNote(error, 'cannot convert the paired devices, passkeys, grant journal or push'),
         kept: [],
         notCarried: part.notCarried,
       };
     }
-    part.notes.push(
-      `${V4_PUSH} and ${V4_PUSH_VAPID} wait for the decision on the VAPID key's envelope (they move together)`,
-    );
-    return { ...base, status: 'pending', note: part.notes.join('; '), kept: part.kept, notCarried: part.notCarried };
+    return {
+      ...base,
+      status: 'converted',
+      ...(part.notes.length > 0 ? { note: part.notes.join('; ') } : {}),
+      kept: part.kept,
+      notCarried: part.notCarried,
+    };
   },
 };
