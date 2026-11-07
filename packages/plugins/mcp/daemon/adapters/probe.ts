@@ -8,12 +8,7 @@
  */
 
 import type { ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
-import {
-  type McpProbe,
-  type McpProbeAnswer,
-  McpProbeFailure,
-  type McpProbeSpec,
-} from '../lib/inventory/check.ts';
+import { type McpProbe, type McpProbeAnswer, McpProbeFailure, type McpProbeSpec } from '../lib/inventory/check.ts';
 import {
   initializedNotification,
   initializeRequest,
@@ -239,11 +234,13 @@ async function probeHttp(ports: ProbePorts, spec: RemoteSpec, signal: AbortSigna
     return found;
   });
   if (session !== undefined)
-    await ports.fetch.request(spec.url, {
-      method: 'DELETE',
-      headers: { ...spec.headers, 'mcp-session-id': session },
-      signal: AbortSignal.timeout(2000),
-    }).catch(() => undefined);
+    await ports.fetch
+      .request(spec.url, {
+        method: 'DELETE',
+        headers: { ...spec.headers, 'mcp-session-id': session },
+        signal: AbortSignal.timeout(2000),
+      })
+      .catch(() => undefined);
   return answer;
 }
 
@@ -317,7 +314,9 @@ export class TransportMcpProbe implements McpProbe {
   async probe(spec: McpProbeSpec, signal: AbortSignal): Promise<McpProbeAnswer> {
     if (spec.transport === 'stdio') return await probeStdio(this.ports, spec, signal);
     try {
-      return spec.transport === 'sse' ? await probeSse(this.ports, spec, signal) : await probeHttp(this.ports, spec, signal);
+      return spec.transport === 'sse'
+        ? await probeSse(this.ports, spec, signal)
+        : await probeHttp(this.ports, spec, signal);
     } catch (error) {
       throw timedOut(signal) ?? error;
     }

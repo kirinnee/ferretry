@@ -1,0 +1,21 @@
+What the composer (porter C2) could not bring over, or brought over with a stand-in, and what each waits for.
+
+NOT COPIED (need a harness packages/app does not have)
+pwa/tests/integration/composer-editor.visual.test.ts | playwright-core, the Vite browser harness (pwa/tests/integration/support/{chromium,composer-scene}.ts) and today's Transcript (C3) and runtime controls (Runtimes); never run locally
+pwa/tests/integration/fixtures/composer-editor-scene.tsx | the scene the visual test serves; same reasons
+pwa/tests/integration/features/reference-actions.test.ts (second describe) | Skills' skills-composer.ts and skills-catalog.ts; the first describe is a unit test in tests/unit/app/composer/reference-actions.test.ts
+
+GAPS (stand-ins in seam.ts, seam-drafts.ts, seam-attachments.ts)
+carrierDelivery | GAP(app-shell): the 5.0 client marks no carrier outage, so a send that died on the carrier reads as an ordinary failure, never "not sent — send it again" / "checking whether it arrived"
+shared-draft stream | GAP(app-shell): PluginClient.socket takes no query and reports no close code, so an Agenda item's own draft has no live stream, every reconnect reads the whole draft, and the 4413 resync close is read from the close reason
+outbox retry | GAP(app-shell): a half hears no "machine recovered" moment; the outbox retries on the browser's online event, its 20 s timer, or a composer offering a sender
+drafts on unpair | GAP(app-shell): nothing calls clearDaemon when a daemon is unpaired, so its drafts stay in storage
+foreground pin scope | GAP(ferrets): nothing sets the pinned pane in front until Ferrets' app half does, so a quote goes to the visible chat's composer only
+FerretContext / ContextUsage | GAP(ferrets, Q0): a local shape until the Ferrets contract exports today's SessionContext
+LedgerSendRecord (ferretry-sender.ts) | GAP(C3): a minimal local type until C3's chat/send-ledger.ts exports it
+transcript images, work-search helpers (seam-attachments.ts) | GAP(C3, C4): copies of today's transcript-image-source.ts and work-search.ts helpers until C3 and C4 land
+WorkSearchPort | GAP(C4): the port's shape until app/search/work-search.ts lands
+reference.catalog providers | GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes the hook yet, so every prefix answers `provided: false` and its menu is empty (never an error)
+"Include agent tasks" | GAP(board): a catalog entry does not say who asked for a card, so the switch is read but filters nothing
+dictation in the composer | moved to Voice's `composer.tools` panel (ComposerDraftProvider); the composer draws the slot only inside the shell
+composer quota line | moved to Usage's `composer.tools` panel (lead decision Q5)

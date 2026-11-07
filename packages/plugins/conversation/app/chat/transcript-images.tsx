@@ -56,7 +56,7 @@ export function TranscriptImages({ images, initialLimit, className }: Transcript
         : images.map(
             ({ marker, alt }): TranscriptImage => ({
               kind: 'transcript',
-              sessionId,
+              ferretId: sessionId,
               handle: formatTranscriptImageHandle(marker.handle),
               ...(marker.mediaType === undefined ? {} : { mediaType: marker.mediaType }),
               alt,

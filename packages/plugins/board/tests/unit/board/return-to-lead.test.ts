@@ -44,7 +44,7 @@ const idle = (stored: Card, derived: Partial<CardView> = {}): CardView => ({
     lastTouchedAt: null,
   },
   suggestedLane: null,
-  
+
   openAsks: [],
   blockedBy: [],
   blocks: [],

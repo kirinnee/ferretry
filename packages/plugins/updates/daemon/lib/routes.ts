@@ -45,16 +45,20 @@ const hostUnavailable = (): PlainApiResponse =>
  * automatic install OFF never needs one — the safe direction is never gated — but a ferret still may not change how
  * the machine updates.
  */
-export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door: ConfigDoor | undefined) {
+export function updateRoutes(
+  subsystem: DaemonUpdateSubsystem,
+  door: ConfigDoor | undefined,
+  hostReady: () => Promise<boolean> = async () => true,
+) {
   return {
     'GET /v1/daemon/update': async () =>
-      subsystem === undefined ? hostUnavailable() : jsonResponse(await subsystem.view()),
+      !(await hostReady()) ? hostUnavailable() : jsonResponse(await subsystem.view()),
 
     'POST /v1/daemon/update': async (call: CallContext) => {
       const request = await parseBody(call.request, DaemonUpdateStartRequestSchema, BODY_LIMIT);
       const refused = claimOwnerOnly(call, 'update this machine');
       if (refused !== undefined) return refused;
-      if (subsystem === undefined) return hostUnavailable();
+      if (!(await hostReady())) return hostUnavailable();
       let view: DaemonUpdateView;
       try {
         view = await subsystem.start(request);
@@ -72,7 +76,7 @@ export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door:
       } else if (isFerretCall(call)) {
         throw new ApiError(403, 'a ferret cannot change how this machine updates; the owner does', 'forbidden');
       }
-      if (subsystem === undefined) return hostUnavailable();
+      if (!(await hostReady())) return hostUnavailable();
       if (door === undefined)
         return errorResponse(503, 'this daemon cannot change its settings yet', UPDATE_HOST_CODES.configUnavailable);
       const written = await door.write(UPDATES_CONFIG, undefined, { patch });

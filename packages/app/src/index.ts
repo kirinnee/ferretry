@@ -93,7 +93,7 @@ export {
 } from './layout/layout.ts';
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
-export { PanelSlot } from './shell/views.tsx';
+export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar. */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 export {
@@ -215,6 +215,23 @@ export { absoluteTime, relativeTime, statusLabel } from './shared/time-labels.ts
 // ─── mounting other plugins' views, and addressing screens ────────────────────────────────────────────────────────
 export { RendererView } from './shell/renderer-view.tsx';
 export { ScreenHrefProvider, type ScreenHrefOf, screenHref, useScreenHref } from './router/screen-href.ts';
+
+// ─── the composer's shared kit: the editor, quoting, this device's controls and preferences ───────────────────────
+export * from './compose/composer-editing.ts';
+export * from './compose/live-markdown.ts';
+export * from './compose/live-markdown-editor.tsx';
+export * from './compose/md-compose.ts';
+export * from './compose/quote.ts';
+export * from './compose/ferret-scope.ts';
+export * from './compose/composer-keybinding.ts';
+export * from './compose/controls.ts';
+export * from './compose/device-controls.ts';
+export * from './compose/setting-row.tsx';
+export * from './compose/context-readout.ts';
+export * from './compose/context-ring.tsx';
+export * from './compose/use-location-share.ts';
+export * from './compose/composer-draft.ts';
+export { type DevicePreference, devicePreference } from './storage/device-preference.ts';
 
 // ─── the chat's chrome: receipts, command rows, the live readout, quoting, the reading position (C3-1 … C3-6) ──────
 export { ReceiptMark, type SendReceiptKind } from './shared/receipt-mark.tsx';

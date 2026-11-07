@@ -86,7 +86,8 @@ export function budgetInFile(text: string, login: string): Budget | undefined | 
 /** `usage.yaml` with `login`'s entry in `budgets` made `budget` (or removed when `undefined`). Throws when it cannot be edited. */
 export function withLoginBudget(text: string, login: string, budget: Budget | undefined): string {
   const value = readConfigValue(text);
-  if (value === null || typeof value !== 'object') throw new BudgetEditError('usage.yaml does not parse; fix it first.');
+  if (value === null || typeof value !== 'object')
+    throw new BudgetEditError('usage.yaml does not parse; fix it first.');
   const current = (value as { readonly budgets?: unknown }).budgets;
   const others = typeof current === 'object' && current !== null ? { ...(current as Record<string, unknown>) } : {};
   delete others[login];

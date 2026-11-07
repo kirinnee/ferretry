@@ -118,7 +118,6 @@ const SETTLING: QuestionScript = {
       .map(record => ({ ...record, outcome: 'confirmed' as const, reason: 'stamped' })),
 };
 
-
 describe('SessionObserver.step', () => {
   it('should remember the facts it is told, and change nothing else', () => {
     // Arrange
@@ -287,11 +286,14 @@ describe('stepQuestion', () => {
 describe('questionReceipts', () => {
   // A look that found the answered form stamped while its copy of the ledger still said `accepted`.
   const looked = (): QuestionPatch => {
-    const patch = stepQuestion({
-      state: state({ lastAnsweredQuestionToolUseId: 'tool-1' }),
-      events: [question, answered],
-      answers: new Map([[accepted.requestId, accepted]]),
-    }, scripted(SETTLING));
+    const patch = stepQuestion(
+      {
+        state: state({ lastAnsweredQuestionToolUseId: 'tool-1' }),
+        events: [question, answered],
+        answers: new Map([[accepted.requestId, accepted]]),
+      },
+      scripted(SETTLING),
+    );
     if (patch === undefined) throw new Error('the look implied nothing');
     return patch;
   };
@@ -356,11 +358,14 @@ describe('questionDocumentPatch', () => {
         ...(current.needsHumanKind === undefined ? {} : { needsHumanKind: undefined }),
       }),
     });
-    const patch = stepQuestion({
-      state: state({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-1', questions: [] } }),
-      events: [question, answered],
-      answers: new Map(),
-    }, clearing);
+    const patch = stepQuestion(
+      {
+        state: state({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-1', questions: [] } }),
+        events: [question, answered],
+        answers: new Map(),
+      },
+      clearing,
+    );
     const locked = state({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-1', questions: [] },

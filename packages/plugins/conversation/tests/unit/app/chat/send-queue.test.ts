@@ -435,7 +435,7 @@ describe('the queue history a page holds', () => {
 });
 
 describe('which look at a message is the later one', () => {
-  const stamped = (overrides: Partial<QueuedMessage>) =>
+  const stamped = (overrides: Partial<Record<keyof QueuedMessage, unknown>>) =>
     message({ id: 'a', enqueuedAt: '2026-10-30T10:00:00.000Z', stateAt: '2026-10-30T11:00:00.000Z', ...overrides });
   const held = (...messages: QueuedMessage[]) => startQueueHistory({ messages, nextCursor: 'a' });
   const merged = (from: QueuedMessage, incoming: QueuedMessage) =>
@@ -556,9 +556,10 @@ describe('queueActions', () => {
 
 describe('joinOutbox', () => {
   const entry = (overrides: Partial<OutboxEntry> = {}): OutboxEntry => ({
+    format: 1,
     id: 'o1',
     daemonId: 'd1',
-    sessionId: 's1',
+    ferretId: 's1',
     message: 'thank you',
     attachmentIds: ['a'],
     files: [],

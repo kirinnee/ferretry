@@ -194,9 +194,15 @@ describe('viewer stream over a real socket adapter', () => {
     const socket = new FakeSocket();
     socket.buffered = 0;
     socket.result = 0;
-    await BrowserViewerStream.connect(host, 'session-1', new SocketViewerDownstream(socket), new KernelFrameClock(wallClock()), {
-      recoveryPollMs: 5,
-    });
+    await BrowserViewerStream.connect(
+      host,
+      'session-1',
+      new SocketViewerDownstream(socket),
+      new KernelFrameClock(wallClock()),
+      {
+        recoveryPollMs: 5,
+      },
+    );
 
     // Act
     host.publish?.({ dataBase64: btoa('jpeg'), width: 800, height: 600, pageId: 'page-7' });

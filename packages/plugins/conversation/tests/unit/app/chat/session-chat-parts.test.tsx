@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { PendingAttachment } from '../../../../app/chat/session-chat-model.ts';
-import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../../../../app/chat/session-chat-parts.tsx';
-import type { StoredTranscriptImage } from '../../../../app/composer/attachments.ts';
+import { PendingMessage, ThreadSkeleton } from '../../../../app/chat/session-chat-parts.tsx';
+import type { StoredTranscriptAttachment } from '../../../../app/composer/attachments.ts';
+import { type PendingAttachment, PendingAttachmentStrip } from '../../../../app/composer/pending-attachments.tsx';
 import { interact, mount, must } from '@ferretry/app/testing';
 
 const file = (name: string, type: string, size = 472_000): File => ({ name, type, size }) as unknown as File;
@@ -155,7 +155,7 @@ describe('PendingAttachmentStrip', () => {
 });
 
 describe('PendingMessage', () => {
-  const images: readonly StoredTranscriptImage[] = [];
+  const images: readonly StoredTranscriptAttachment[] = [];
 
   test('shows the message the instant it is sent, with a spinner', async () => {
     const screen = await mount(<PendingMessage attachments={images} status="sending" text="ship it" />);

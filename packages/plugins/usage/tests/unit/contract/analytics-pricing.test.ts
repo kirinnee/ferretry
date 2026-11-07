@@ -317,7 +317,6 @@ describe('analytics pricing contract', () => {
     assertRejects([{ name: 'per-million object', schema: AnalyticsPricingRateSchema, value: perMillionRate }]);
   });
 
-
   it('should refuse damaged or ambiguous evidence before anything can be priced with it', () => {
     // A catalog cannot name two prices for the same effective model instant, and an alias must never
     // resolve to two models: either would make a plausible amount depend on incidental catalog order.

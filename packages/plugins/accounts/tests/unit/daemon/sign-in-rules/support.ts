@@ -1,4 +1,15 @@
-import type { AccountId, AccountSummary, LoginObserved, SignInId, SignInRuleDraft, SignInRuleStageId, SignInRulesDocument, SignInSummary, StoredStepUpProof, TwoFactorKeySummary } from '../../../../contract/routes/index.ts';
+import type {
+  AccountId,
+  AccountSummary,
+  LoginObserved,
+  SignInId,
+  SignInRuleDraft,
+  SignInRuleStageId,
+  SignInRulesDocument,
+  SignInSummary,
+  StoredStepUpProof,
+  TwoFactorKeySummary,
+} from '../../../../contract/routes/index.ts';
 import type { PasteRuleCaller } from '../../../../daemon/lib/secure-copy/rules.ts';
 import type { RuleListing, SignInRuleProofPort, SignInRuleStore } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import { SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';

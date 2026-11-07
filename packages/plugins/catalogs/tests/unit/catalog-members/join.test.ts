@@ -13,7 +13,7 @@ import type {
   MemberJoinAttempt,
   MemberJoinCarrier,
   MemberJoinResult,
-} from '../../../daemon/adapters/member-session.ts';
+} from '../../../daemon/lib/catalog-members/member-session.ts';
 import { DAEMON_ID, MINUTE, multiFor, rig, singleFor, storedKey, T0 } from './support.ts';
 
 type Rig = Awaited<ReturnType<typeof rig>>;

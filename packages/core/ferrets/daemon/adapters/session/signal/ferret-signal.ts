@@ -1,4 +1,9 @@
-import { type FerretId, type FerretRecord, type FerretWaiting, FerretWaitingSchema } from '../../../../contract/index.ts';
+import {
+  type FerretId,
+  type FerretRecord,
+  type FerretWaiting,
+  FerretWaitingSchema,
+} from '../../../../contract/index.ts';
 import { DEFAULT_COMPLETION_SUMMARY } from '../../../lib/session/signal/policy.ts';
 import {
   type DeclaredWait,
@@ -93,11 +98,7 @@ export class FerretSignalRepository implements SignalRepository {
   async transition(id: SessionId, change: SignalTransition): Promise<SignalTarget> {
     const ferret = asFerret(id);
     if (change.event === 'session.waiting' && change.waiting !== undefined && change.waiting !== 'clear')
-      await this.host.saveWaiting(
-        ferret,
-        FerretWaitingSchema.parse(change.waiting),
-        await this.host.creditOf(ferret),
-      );
+      await this.host.saveWaiting(ferret, FerretWaitingSchema.parse(change.waiting), await this.host.creditOf(ferret));
     else if (change.event === 'session.completed' && change.finishedAt !== undefined)
       await this.host.saveFinished(ferret, change.finishedAt);
     else if (change.event === 'session.waiting_cleared')
@@ -123,7 +124,10 @@ export class FerretSignalArtifacts implements SignalArtifacts {
 
   async writeSummary(id: SessionId, message: string | undefined): Promise<void> {
     const trimmed = message?.trim();
-    await this.host.writeSummary(asFerret(id), trimmed === undefined || trimmed === '' ? DEFAULT_COMPLETION_SUMMARY : `${trimmed}\n`);
+    await this.host.writeSummary(
+      asFerret(id),
+      trimmed === undefined || trimmed === '' ? DEFAULT_COMPLETION_SUMMARY : `${trimmed}\n`,
+    );
   }
 
   async markDone(): Promise<void> {}

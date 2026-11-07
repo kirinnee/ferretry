@@ -76,7 +76,9 @@ describe('signal done', () => {
     const h = await running();
     const id = await started(h);
     await say(h, id, { kind: 'done' });
-    expect(await h.provided(FerretsPort).summary(ferretId(id))).toBe('Task completed; inspect chat and repository diff.\n');
+    expect(await h.provided(FerretsPort).summary(ferretId(id))).toBe(
+      'Task completed; inspect chat and repository diff.\n',
+    );
     await h.stop();
   });
 

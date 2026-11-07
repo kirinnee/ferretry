@@ -128,7 +128,9 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     await this.register(record);
     // Read off the environment the pane was just given, never the stored one: a switch flipped after
     // this launch reaches the agent only at its next one.
-    return this.clientName === undefined || this.describe === undefined ? undefined : this.describe(this.clientName, env);
+    return this.clientName === undefined || this.describe === undefined
+      ? undefined
+      : this.describe(this.clientName, env);
   }
 
   /**

@@ -119,7 +119,11 @@ export function jsonBody(response: ApiResponse): Record<string, unknown> {
  * `{ error, code }` envelope (the kernel's job), so a case asserts on the response either way.
  */
 export async function respond(
-  routes: readonly { readonly method: string; readonly path: string; readonly handle: (call: CallContext) => Promise<ApiResponse> }[],
+  routes: readonly {
+    readonly method: string;
+    readonly path: string;
+    readonly handle: (call: CallContext) => Promise<ApiResponse>;
+  }[],
   key: string,
   overrides: CallOverrides = {},
 ): Promise<ApiResponse> {

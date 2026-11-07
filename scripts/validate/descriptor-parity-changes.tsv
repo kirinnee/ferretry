@@ -408,3 +408,4 @@ route	GET /v1/ferrets/:ferretId/pack	added	a lead's pack table (design §1.2), P
 route	PATCH /v1/sessions/:sessionId/pack	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	PATCH /v1/ferrets/:ferretId/pack	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/pack/new	removed	fy new is Ferrets' verb (lead decision D2 #14): Packs starts no helper and shapes a start only through its start.decide taker and the start options
+route	GET /v1/ferrets/:ferretId/references	added	the composer reference menus read one route that answers what each prefix owner provides through the reference.catalog hook (lead decision Q6), instead of the composer reading Board, Agenda and Skills routes itself

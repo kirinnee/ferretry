@@ -27,7 +27,7 @@ import {
   type RouteParameters,
   type RoutePattern,
 } from '@ferretry/kernel/contract';
-import { parseBody } from '../../adapters/body.ts';
+import { parseBody } from '../body.ts';
 import { namesTag } from '../response-headers.ts';
 import type { AuditEntry } from '../audit.ts';
 import { CatalogRefusal, type CatalogRefusalCode } from '../shared-catalogs/refusal.ts';

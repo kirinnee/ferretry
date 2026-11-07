@@ -16,7 +16,7 @@
  * caller logs or answers can echo a challenge, a signature or a key.
  */
 
-import { bytesEqual, concatBytes, fromBase64Url, utf8Bytes, utf8Text } from '../../../daemon/adapters/relay.ts';
+import { bytesEqual, concatBytes, fromBase64Url, utf8Bytes, utf8Text } from '../../../daemon/lib/relay-wire/index.ts';
 import { decodeCbor, decodeCborItem, isCborMap } from './cbor.ts';
 import { coseKeyToSpki, derSignatureToRaw, ES256, type PasskeyAlgorithm } from './keys.ts';
 

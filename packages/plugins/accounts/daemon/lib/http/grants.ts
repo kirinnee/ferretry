@@ -52,7 +52,12 @@ export function refusedSecretWrite(context: RouteContext, act: string): ApiRespo
 
 /** A value into a PAGE through a `terminal` route also needs `browser.use`. */
 export function refusedPageInput(context: RouteContext, act = 'allow a value into a page'): ApiResponse | undefined {
-  return refusedExtra(context, { capability: CAPABILITIES.browser, axis: 'use' }, act, 'that needs the browser permission');
+  return refusedExtra(
+    context,
+    { capability: CAPABILITIES.browser, axis: 'use' },
+    act,
+    'that needs the browser permission',
+  );
 }
 
 /** A route that answers ACCOUNT NAMES through another capability's route also needs `secrets.use`. */
@@ -60,7 +65,12 @@ export function refusedAccountNames(
   context: RouteContext,
   act = 'read the accounts a task plan names',
 ): ApiResponse | undefined {
-  return refusedExtra(context, { capability: CAPABILITIES.secrets, axis: 'use' }, act, 'that needs the secrets permission');
+  return refusedExtra(
+    context,
+    { capability: CAPABILITIES.secrets, axis: 'use' },
+    act,
+    'that needs the secrets permission',
+  );
 }
 
 /** One more demand behind a route that already passed its own: the refusal, or `undefined` when allowed. */

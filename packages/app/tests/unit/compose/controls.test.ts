@@ -1,0 +1,795 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  browserControlsStorage,
+  CONTROLS_KEY,
+  CONTROLS_FORMAT,
+  type ControlsRecord,
+  type ControlsStorage,
+  controlsFor,
+  DaemonControlsStore,
+  DEFAULT_DEVICE_CONTROLS,
+  type DeviceControls,
+  emptyControlsRecord,
+  evictDaemonScopes,
+  MAX_DAEMON_SCOPES,
+  parseControlsRecord,
+  RETRY_DAEMON_SCOPES,
+  withDaemonScope,
+  withDeviceControls,
+  withoutDaemonScope,
+} from '../../../src/compose/controls.ts';
+/** A paired daemon's id. */
+const daemonId = (value: string): string => value;
+
+const alpha = daemonId('daemon-alpha');
+const beta = daemonId('daemon-beta');
+
+/** Records every write so a no-op patch can be proved to write nothing. */
+class MemoryStorage implements ControlsStorage {
+  readonly writes: string[] = [];
+  #value: string | null;
+
+  constructor(value: string | null = null) {
+    this.#value = value;
+  }
+
+  getItem(): string | null {
+    return this.#value;
+  }
+
+  setItem(_key: string, value: string): void {
+    this.#value = value;
+    this.writes.push(value);
+  }
+
+  record(): ControlsRecord {
+    return parseControlsRecord(this.#value);
+  }
+}
+
+const stored = (record: unknown): string => JSON.stringify(record);
+
+/**
+ * Every device field, each holding a value that differs from its default.
+ *
+ * Typed as the total `DeviceControls`, so a new control is a COMPILE error here
+ * until it is listed — which is what makes the loop over it a completeness proof
+ * rather than a sample. The failure it guards is specific: a field the interface
+ * has and the patch path does not enumerate applies on screen, persists nothing,
+ * and no type and no gate notices.
+ */
+const ALTERED_DEVICE_CONTROLS: DeviceControls = {
+  query: 'needle',
+  mode: 'interactive',
+  rcOnly: true,
+  includeFinished: true,
+  dashboardView: 'table',
+  density: 'compact',
+  groupNeedsYou: false,
+  chatWidth: 'full',
+  composerEnterKey: 'send',
+  composerPhoneEnterKey: 'send',
+  motion: 'reduced',
+  sidebarCollapsed: true,
+  sessionsList: 'current',
+  sessionsMode: 'auto',
+  machineOrder: ['b', 'a'],
+  wardenDaemon: 'daemon-b',
+  suggestionKeys: 'both',
+  skillSuggestions: false,
+  composerVimMode: true,
+  openLinksIn: 'panel',
+  keepChatsFresh: false,
+  keepChatsFreshNotOnCellular: true,
+};
+
+const scopeRecord = (entries: readonly (readonly [string, string, number])[]): ControlsRecord => {
+  let record = emptyControlsRecord();
+  for (const [id, projectScope, seq] of entries) {
+    record = { ...record, scopes: { ...record.scopes, [id]: { projectScope, seq } } };
+  }
+  return record;
+};
+
+describe('parseControlsRecord — kteam controls cases, on the new nested shape', () => {
+  it('keeps every persisted device field and leaves density implicit', () => {
+    const record = parseControlsRecord(
+      stored({
+        format: CONTROLS_FORMAT,
+        device: {
+          query: 'transcript',
+          mode: 'interactive',
+          rcOnly: true,
+          includeFinished: true,
+          dashboardView: 'table',
+          sidebarCollapsed: true,
+        },
+      }),
+    );
+
+    should(record.device).eql({
+      query: 'transcript',
+      mode: 'interactive',
+      rcOnly: true,
+      includeFinished: true,
+      dashboardView: 'table',
+      // Absent means "follow the device", not a written default.
+      density: null,
+      // A payload written before `chatWidth` existed degrades to 'full', which
+      // IS the previous behaviour — so the field cannot change what an older
+      // blob meant, which is why it needed no version bump.
+      chatWidth: 'readable',
+      // Enter follows the current device until the reader explicitly chooses.
+      composerEnterKey: null,
+      composerPhoneEnterKey: null,
+      motion: 'system',
+      sidebarCollapsed: true,
+      // A payload written before the list could span machines shows every machine: the new default.
+      sessionsList: 'all',
+      // Never chosen: the Sessions bar opens on Interactive.
+      sessionsMode: null,
+      groupNeedsYou: true,
+      // A payload written before the composer fields existed opens suggestions
+      // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
+      suggestionKeys: 'ladder',
+      skillSuggestions: true,
+      machineOrder: [],
+      wardenDaemon: null,
+      composerVimMode: false,
+      // A payload written before links had a home opens them in the reader's browser.
+      openLinksIn: 'browser',
+      keepChatsFresh: true,
+      keepChatsFreshNotOnCellular: false,
+    });
+    // The old shape had no daemon scopes at all.
+    should(Object.keys(record.scopes)).be.empty();
+  });
+
+  it('accepts a persisted scope per daemon and rejects non-strings and empty', () => {
+    const record = parseControlsRecord(
+      stored({
+        format: CONTROLS_FORMAT,
+        scopes: {
+          [alpha]: { projectScope: '/home/kirin/work', seq: 1 },
+          // Empty string is not "scoped to a folder called nothing" — it is no
+          // scope, so the entry is dropped rather than remembered as blank.
+          [beta]: { projectScope: '', seq: 2 },
+          'daemon-gamma': { projectScope: 42, seq: 3 },
+        },
+      }),
+    );
+
+    should(controlsFor(record, alpha).projectScope).equal('/home/kirin/work');
+    should(controlsFor(record, beta).projectScope).be.null();
+    should(controlsFor(record, daemonId('daemon-gamma')).projectScope).be.null();
+  });
+
+  it('preserves both existing chatWidth values, accepts balanced, and rejects anything else', () => {
+    for (const chatWidth of ['full', 'balanced', 'readable'] as const) {
+      should(parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { chatWidth } })).device.chatWidth).equal(
+        chatWidth,
+      );
+    }
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { chatWidth: 'wide' } })).device.chatWidth,
+    ).equal('readable');
+  });
+
+  it('keeps an explicit composer Enter choice device-local and rejects invented values', () => {
+    for (const composerEnterKey of ['send', 'newline'] as const) {
+      should(
+        parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { composerEnterKey } })).device.composerEnterKey,
+      ).equal(composerEnterKey);
+    }
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { composerEnterKey: 'toggle' } })).device
+        .composerEnterKey,
+    ).be.null();
+  });
+
+  it('reads the suggestion keys and the skills switch, defaulting anything unreadable', () => {
+    for (const keys of ['ladder', 'symbols', 'both'] as const)
+      should(
+        parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { suggestionKeys: keys } })).device
+          .suggestionKeys,
+      ).equal(keys);
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { suggestionKeys: 'all' } })).device.suggestionKeys,
+    ).equal('ladder');
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { skillSuggestions: false } })).device
+        .skillSuggestions,
+    ).be.false();
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { skillSuggestions: 'off' } })).device
+        .skillSuggestions,
+    ).be.true();
+  });
+
+  it('reads the phone send key and motion, defaulting anything unreadable', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device })).device;
+    should(read({ composerPhoneEnterKey: 'send' }).composerPhoneEnterKey).equal('send');
+    should(read({ composerPhoneEnterKey: 'newline' }).composerPhoneEnterKey).equal('newline');
+    should(read({ composerPhoneEnterKey: 'toggle' }).composerPhoneEnterKey).be.null();
+    // A blob from before "Show details" was removed still parses; the retired field is ignored.
+    should(Object.keys(read({ showDetails: true }))).not.containEql('showDetails');
+    should(read({ motion: 'reduced' }).motion).equal('reduced');
+    should(read({ motion: 'none' }).motion).equal('system');
+  });
+
+  it('opens links in the reader’s browser unless the side panel or this computer’s browser was explicitly chosen', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device })).device.openLinksIn;
+    should(read({ openLinksIn: 'panel' })).equal('panel');
+    should(read({ openLinksIn: 'browser' })).equal('browser');
+    should(read({ openLinksIn: 'computer' })).equal('computer');
+    should(read({ openLinksIn: 'safari' })).equal('browser');
+    should(read({})).equal('browser');
+  });
+
+  it('keeps Vim-style composer editing off unless it was explicitly turned on', () => {
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { composerVimMode: true } })).device
+        .composerVimMode,
+    ).be.true();
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { composerVimMode: 'yes' } })).device
+        .composerVimMode,
+    ).be.false();
+    should(parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: {} })).device.composerVimMode).be.false();
+  });
+
+  it('accepts each valid persisted density and mode, and rejects the rest', () => {
+    for (const density of ['full', 'compact', 'minimal'] as const) {
+      should(parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { density } })).device.density).equal(
+        density,
+      );
+    }
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { density: 'tiny' } })).device.density,
+    ).be.null();
+
+    for (const mode of ['all', 'auto', 'interactive'] as const) {
+      should(parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { mode } })).device.mode).equal(mode);
+    }
+    should(parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { mode: 'headless' } })).device.mode).equal(
+      'all',
+    );
+    should(
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { dashboardView: 'grid' } })).device.dashboardView,
+    ).be.null();
+    const cards = parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { dashboardView: 'cards' } }));
+    should(cards.device.dashboardView).equal('cards');
+  });
+
+  it('falls back field by field so one bad field cannot poison the others', () => {
+    const record = parseControlsRecord(
+      stored({
+        format: CONTROLS_FORMAT,
+        device: { query: 'keep me', density: 'tiny', sidebarCollapsed: 'yes', rcOnly: 1, includeFinished: null },
+      }),
+    );
+
+    should(record.device.query).equal('keep me');
+    should(record.device.density).be.null();
+    should(record.device.sidebarCollapsed).be.false();
+    should(record.device.rcOnly).be.false();
+    should(record.device.includeFinished).be.false();
+  });
+
+  it('resets cleanly on a corrupt, non-object, array or wrong-version payload', () => {
+    const defaults = emptyControlsRecord();
+    should(parseControlsRecord('{')).eql(defaults);
+    should(parseControlsRecord(null)).eql(defaults);
+    should(parseControlsRecord(undefined)).eql(defaults);
+    should(parseControlsRecord('')).eql(defaults);
+    should(parseControlsRecord('"a string"')).eql(defaults);
+    should(parseControlsRecord('null')).eql(defaults);
+    should(parseControlsRecord(stored([1, 2]))).eql(defaults);
+    should(parseControlsRecord(stored({ format: 2, device: { query: 'ignored' } }))).eql(defaults);
+    should(parseControlsRecord(stored({ device: { query: 'ignored' } }))).eql(defaults);
+  });
+
+  it('reads a flat blob with no format as a clean reset, never its un-namespaced scope', () => {
+    // No `format: 1`, so this is a clean reset. A top-level projectScope
+    // must never leak in without a daemon.
+    const record = parseControlsRecord(
+      stored({ query: 'transcript', chatWidth: 'readable', projectScope: '/home/kirin/work' }),
+    );
+
+    should(record).eql(emptyControlsRecord());
+    should(controlsFor(record, alpha).projectScope).be.null();
+  });
+
+  it('drops individually unusable daemon entries and tolerates a non-object scopes field', () => {
+    const record = parseControlsRecord(
+      stored({
+        format: CONTROLS_FORMAT,
+        scopes: {
+          [alpha]: { projectScope: '/keep', seq: 3 },
+          '': { projectScope: '/no-daemon', seq: 4 },
+          'daemon-null': null,
+          'daemon-text': 'not an object',
+          'daemon-no-seq': { projectScope: '/x' },
+          'daemon-bad-seq': { projectScope: '/x', seq: 'first' },
+          'daemon-nan-seq': { projectScope: '/x', seq: Number.NaN },
+          'daemon-fractional-seq': { projectScope: '/x', seq: 1.5 },
+          'daemon-negative-seq': { projectScope: '/x', seq: -1 },
+          'daemon-unsafe-seq': { projectScope: '/x', seq: Number.MAX_VALUE },
+        },
+      }),
+    );
+
+    should(Object.keys(record.scopes)).eql([alpha]);
+    should(Object.keys(parseControlsRecord(stored({ format: CONTROLS_FORMAT, scopes: 'none' })).scopes)).be.empty();
+    should(Object.keys(parseControlsRecord(stored({ format: CONTROLS_FORMAT, scopes: [] })).scopes)).be.empty();
+    should(Object.keys(parseControlsRecord(stored({ format: CONTROLS_FORMAT, scopes: null })).scopes)).be.empty();
+  });
+
+  it('bounds a hand-edited overlong scope list on the way in, keeping the newest', () => {
+    const entries = Array.from(
+      { length: MAX_DAEMON_SCOPES + 5 },
+      (_, index) => [`daemon-${index}`, `/project-${index}`, index] as const,
+    );
+    const record = parseControlsRecord(stored({ format: CONTROLS_FORMAT, scopes: scopeRecord(entries).scopes }));
+
+    should(Object.keys(record.scopes)).have.length(MAX_DAEMON_SCOPES);
+    should(record.scopes['daemon-0']).be.undefined();
+    should(record.scopes[`daemon-${MAX_DAEMON_SCOPES + 4}`]?.projectScope).equal(`/project-${MAX_DAEMON_SCOPES + 4}`);
+  });
+
+  it('rejects whitespace-only daemon ids before they can evict a valid scope', () => {
+    const corrupt = Object.fromEntries(
+      Array.from({ length: MAX_DAEMON_SCOPES }, (_, index) => [
+        ' '.repeat(index + 1),
+        { projectScope: `/unreachable-${index}`, seq: index + 1 },
+      ]),
+    );
+    const record = parseControlsRecord(
+      stored({
+        format: CONTROLS_FORMAT,
+        scopes: { [alpha]: { projectScope: '/keep', seq: 0 }, ...corrupt },
+      }),
+    );
+
+    // Paired daemon ids reject blank text. Keeping corrupt blank keys until
+    // after eviction would let their newer sequence numbers displace alpha.
+    should(Object.keys(record.scopes)).eql([alpha]);
+    should(controlsFor(record, alpha).projectScope).equal('/keep');
+  });
+});
+
+describe('pure transitions', () => {
+  it('returns the SAME record when a device patch changes nothing', () => {
+    const record = emptyControlsRecord();
+    should(withDeviceControls(record, {})).be.exactly(record);
+    should(withDeviceControls(record, { query: '', mode: 'all' })).be.exactly(record);
+    // An explicitly undefined value leaves the field alone rather than clobbering it.
+    should(withDeviceControls(record, { query: undefined })).be.exactly(record);
+  });
+
+  it('treats a composer switch already in that position as a no-op by identity', () => {
+    const record = emptyControlsRecord();
+    // The defaults ARE the pre-field behaviour, so re-asserting them writes nothing.
+    should(withDeviceControls(record, { suggestionKeys: 'ladder', composerVimMode: false })).be.exactly(record);
+
+    const quiet = withDeviceControls(record, { skillSuggestions: false });
+    should(quiet).not.be.exactly(record);
+    should(quiet.device.skillSuggestions).be.false();
+    // Only the family that was asked for moves.
+    should(quiet.device.suggestionKeys).equal('ladder');
+    should(withDeviceControls(quiet, { skillSuggestions: false })).be.exactly(quiet);
+  });
+
+  it('applies a device patch immutably and ignores explicit undefined and unknown keys', () => {
+    const record = emptyControlsRecord();
+    const next = withDeviceControls(record, { query: 'warden', density: 'compact' });
+
+    should(next).not.be.exactly(record);
+    should(record.device.query).equal('');
+    should(next.device.query).equal('warden');
+    should(next.device.density).equal('compact');
+
+    const kept = withDeviceControls(next, { query: undefined, chatWidth: 'readable' } as Partial<
+      typeof DEFAULT_DEVICE_CONTROLS
+    >);
+    should(kept.device.query).equal('warden');
+    should(kept.device.chatWidth).equal('readable');
+  });
+
+  it('scopes a daemon, normalises blank to none, and never touches another daemon', () => {
+    const record = emptyControlsRecord();
+    const scoped = withDaemonScope(record, alpha, '/work/alpha');
+
+    should(controlsFor(scoped, alpha).projectScope).equal('/work/alpha');
+    should(controlsFor(scoped, beta).projectScope).be.null();
+    // Re-asking for the identical scope is a no-op by identity.
+    should(withDaemonScope(scoped, alpha, '/work/alpha')).be.exactly(scoped);
+    // Blank and null both mean "whole fleet", so the entry is forgotten.
+    should(controlsFor(withDaemonScope(scoped, alpha, ''), alpha).projectScope).be.null();
+    should(Object.keys(withDaemonScope(scoped, alpha, null).scopes)).be.empty();
+    // Clearing a daemon that never had a scope is a no-op by identity.
+    should(withDaemonScope(record, alpha, null)).be.exactly(record);
+    should(withoutDaemonScope(record, alpha)).be.exactly(record);
+  });
+
+  it('advances recency deterministically without a clock', () => {
+    let record = emptyControlsRecord();
+    record = withDaemonScope(record, alpha, '/work/alpha');
+    record = withDaemonScope(record, beta, '/work/beta');
+
+    should(record.scopes[alpha]?.seq).equal(0);
+    should(record.scopes[beta]?.seq).equal(1);
+    // Changing alpha's scope makes it the most recent.
+    record = withDaemonScope(record, alpha, '/work/alpha-2');
+    should(record.scopes[alpha]?.seq).equal(2);
+  });
+
+  it('evicts the least recently changed scope once the bound is exceeded', () => {
+    let record = emptyControlsRecord();
+    for (let index = 0; index <= MAX_DAEMON_SCOPES; index += 1) {
+      record = withDaemonScope(record, daemonId(`daemon-${index}`), `/project-${index}`);
+    }
+
+    should(Object.keys(record.scopes)).have.length(MAX_DAEMON_SCOPES);
+    should(record.scopes['daemon-0']).be.undefined();
+    should(record.scopes[`daemon-${MAX_DAEMON_SCOPES}`]?.projectScope).equal(`/project-${MAX_DAEMON_SCOPES}`);
+    // Within the bound, eviction is an identity no-op.
+    const bounded = scopeRecord([['daemon-x', '/x', 1]]);
+    should(evictDaemonScopes(bounded)).be.exactly(bounded);
+  });
+
+  it('rebases an exhausted safe sequence before recording the newest scope', () => {
+    const entries = Array.from({ length: MAX_DAEMON_SCOPES }, (_, index) => [
+      `daemon-${index}`,
+      `/project-${index}`,
+      Number.MAX_SAFE_INTEGER - MAX_DAEMON_SCOPES + index + 1,
+    ]) as readonly (readonly [string, string, number])[];
+    const next = withDaemonScope(scopeRecord(entries), daemonId('daemon-newest'), '/project-newest');
+
+    should(Object.keys(next.scopes)).have.length(MAX_DAEMON_SCOPES);
+    should(next.scopes['daemon-0']).be.undefined();
+    should(next.scopes['daemon-newest']).eql({ projectScope: '/project-newest', seq: MAX_DAEMON_SCOPES });
+    should(Object.values(next.scopes).every(entry => Number.isSafeInteger(entry.seq))).be.true();
+  });
+});
+
+describe('DaemonControlsStore', () => {
+  it('hydrates once from storage and keeps snapshot and merged views identity-stable', () => {
+    const storage = new MemoryStorage(
+      stored({
+        format: CONTROLS_FORMAT,
+        device: { query: 'warden', chatWidth: 'balanced' },
+        scopes: { [alpha]: { projectScope: '/work/alpha', seq: 0 } },
+      }),
+    );
+    const store = new DaemonControlsStore(storage);
+
+    should(store.snapshot()).be.exactly(store.snapshot());
+    should(store.controls(alpha)).be.exactly(store.controls(alpha));
+    should(store.controls(alpha).query).equal('warden');
+    should(store.controls(alpha).projectScope).equal('/work/alpha');
+  });
+
+  it('gives two daemons the same device preferences and different scopes', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+
+    store.setControls(alpha, { projectScope: '/work/alpha', density: 'compact' });
+    store.setControls(beta, { projectScope: '/work/beta' });
+
+    should(store.controls(alpha).projectScope).equal('/work/alpha');
+    should(store.controls(beta).projectScope).equal('/work/beta');
+    // The device preference is shared; the daemon-derived path is not.
+    should(store.controls(alpha).density).equal('compact');
+    should(store.controls(beta).density).equal('compact');
+  });
+
+  it('never lets a scope survive its daemon, and re-pairing starts unscoped', () => {
+    const storage = new MemoryStorage();
+    const store = new DaemonControlsStore(storage);
+    store.setControls(alpha, { projectScope: '/work/alpha' });
+    store.setControls(beta, { projectScope: '/work/beta' });
+
+    should(store.clearDaemon(alpha)).be.true();
+    should(store.controls(alpha).projectScope).be.null();
+    should(store.controls(beta).projectScope).equal('/work/beta');
+    // Clearing again changes nothing.
+    should(store.clearDaemon(alpha)).be.false();
+    // A daemon that pairs again is unscoped until the reader chooses a scope,
+    // never restored to what a previous pairing had.
+    should(new DaemonControlsStore(storage).controls(alpha).projectScope).be.null();
+    should(new DaemonControlsStore(storage).controls(beta).projectScope).equal('/work/beta');
+  });
+
+  it('persists device and scope changes under the sole controls key', () => {
+    const storage = new MemoryStorage();
+    const store = new DaemonControlsStore(storage);
+
+    store.setControls(alpha, { query: 'transcript', projectScope: '/work/alpha' });
+    should(storage.writes).have.length(1);
+    should(storage.record().device.query).equal('transcript');
+    should(controlsFor(storage.record(), alpha).projectScope).equal('/work/alpha');
+    should(CONTROLS_KEY).equal('fy:app:controls');
+  });
+
+  it('writes nothing and notifies nobody for a patch that changes nothing', () => {
+    const storage = new MemoryStorage();
+    const store = new DaemonControlsStore(storage);
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    const before = store.controls(alpha);
+    should(store.setControls(alpha, { query: '', projectScope: null })).be.exactly(before);
+    should(store.setControls(alpha, {})).be.exactly(before);
+    // A no-op keeps the very same device object, not an equal copy.
+    should(store.setDeviceControls({ mode: 'all' })).be.exactly(store.snapshot().device);
+    should(storage.writes).be.empty();
+    should(notifications).equal(0);
+
+    store.setControls(alpha, { query: 'now different' });
+    should(notifications).equal(1);
+    should(storage.writes).have.length(1);
+
+    unsubscribe();
+    store.setControls(alpha, { query: 'after unsubscribe' });
+    should(notifications).equal(1);
+    should(storage.writes).have.length(2);
+  });
+
+  it('leaves an explicitly undefined projectScope alone and uses null to clear it', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+    store.setControls(alpha, { projectScope: '/work/alpha' });
+    const scoped = store.controls(alpha);
+
+    should(store.setControls(alpha, { projectScope: undefined })).be.exactly(scoped);
+    should(store.controls(alpha).projectScope).equal('/work/alpha');
+    should(store.setControls(alpha, { projectScope: null }).projectScope).be.null();
+  });
+
+  it('releases a daemon cached view on unpair even when it had no persisted scope', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+    const before = store.controls(alpha);
+
+    should(store.clearDaemon(alpha)).be.false();
+    should(store.controls(alpha)).not.be.exactly(before);
+  });
+
+  it('treats a whitespace-only scope as no scope, and stores a valid one unmodified', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+
+    // Empty and whitespace-only are both "no scope", per the same blank rule
+    // `daemonId` and `upsertDraft` use.
+    for (const blank of ['', ' ', '\t', '\n  ']) {
+      should(store.setControls(alpha, { projectScope: blank }).projectScope).be.null();
+    }
+    const blankScope = parseControlsRecord(
+      stored({ format: CONTROLS_FORMAT, scopes: { [alpha]: { projectScope: '   ', seq: 1 } } }),
+    );
+    should(Object.keys(blankScope.scopes)).be.empty();
+
+    // A real path survives byte for byte: a group key is compared against
+    // daemon-supplied paths and must not be silently rewritten.
+    should(store.setControls(alpha, { projectScope: '/work/a b' }).projectScope).equal('/work/a b');
+  });
+
+  it('reuses the merged view of a daemon whose scope did not change', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+    store.setControls(alpha, { projectScope: '/work/alpha' });
+    store.setControls(beta, { projectScope: '/work/beta' });
+    const alphaBefore = store.controls(alpha);
+    const betaBefore = store.controls(beta);
+
+    // Only beta's scope moves, so alpha's view keeps its identity and a screen
+    // reading alpha does not re-render.
+    store.setControls(beta, { projectScope: '/work/beta-2' });
+    should(store.controls(alpha)).be.exactly(alphaBefore);
+    should(store.controls(beta)).not.be.exactly(betaBefore);
+    should(store.controls(beta).projectScope).equal('/work/beta-2');
+
+    // Clearing a daemon likewise leaves the others' identity intact.
+    const betaScoped = store.controls(beta);
+    store.clearDaemon(alpha);
+    should(store.controls(beta)).be.exactly(betaScoped);
+
+    // A device preference legitimately changes every daemon's view.
+    store.setDeviceControls({ density: 'minimal' });
+    should(store.controls(beta)).not.be.exactly(betaScoped);
+    should(store.controls(beta).density).equal('minimal');
+  });
+
+  it('applies device preferences with no daemon in context', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+    store.setControls(alpha, { projectScope: '/work/alpha' });
+
+    should(store.setDeviceControls({ sidebarCollapsed: true }).sidebarCollapsed).be.true();
+    // A device patch must not disturb any daemon's scope.
+    should(store.controls(alpha).projectScope).equal('/work/alpha');
+    should(store.controls(alpha).sidebarCollapsed).be.true();
+  });
+
+  it('applies, persists and reloads every device field, so a new control cannot be dropped in silence', () => {
+    const fields = Object.keys(DEFAULT_DEVICE_CONTROLS) as (keyof DeviceControls)[];
+    should(fields).have.length(Object.keys(ALTERED_DEVICE_CONTROLS).length);
+
+    for (const field of fields) {
+      const altered = ALTERED_DEVICE_CONTROLS[field];
+      // An altered value equal to the default would make the rest vacuous.
+      should(altered).not.equal(DEFAULT_DEVICE_CONTROLS[field]);
+
+      const storage = new MemoryStorage();
+      const store = new DaemonControlsStore(storage);
+
+      should(store.setDeviceControls({ [field]: altered } as Partial<DeviceControls>)[field]).equal(altered);
+      should(storage.writes).have.length(1);
+      should(new DaemonControlsStore(storage).snapshot().device[field]).eql(altered);
+    }
+  });
+
+  it('works with no storage at all, keeping controls for the life of the tab', () => {
+    const store = new DaemonControlsStore(undefined);
+
+    should(store.controls(alpha)).eql({ ...DEFAULT_DEVICE_CONTROLS, projectScope: null });
+    should(store.setControls(alpha, { projectScope: '/work/alpha', query: 'q' }).projectScope).equal('/work/alpha');
+    should(store.controls(alpha).query).equal('q');
+  });
+
+  it('falls back to defaults when the storage read itself throws', () => {
+    const store = new DaemonControlsStore({
+      getItem: () => {
+        throw new Error('storage denied');
+      },
+      setItem: () => undefined,
+    });
+
+    should(store.snapshot()).eql(emptyControlsRecord());
+  });
+
+  it('retries a quota-denied write with only the most recent scopes', () => {
+    let attempts = 0;
+    const written: string[] = [];
+    const store = new DaemonControlsStore({
+      getItem: () =>
+        stored({
+          format: CONTROLS_FORMAT,
+          scopes: Object.fromEntries(
+            Array.from({ length: RETRY_DAEMON_SCOPES + 3 }, (_, index) => [
+              `daemon-${index}`,
+              { projectScope: `/project-${index}`, seq: index },
+            ]),
+          ),
+        }),
+      setItem: (_key, value) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('QuotaExceededError');
+        written.push(value);
+      },
+    });
+
+    store.setControls(alpha, { query: 'busy' });
+
+    should(attempts).equal(2);
+    const retried = parseControlsRecord(written[0] ?? null);
+    should(Object.keys(retried.scopes)).have.length(RETRY_DAEMON_SCOPES);
+    // The in-memory controls are unaffected by how much of them persisted.
+    should(store.controls(alpha).query).equal('busy');
+  });
+
+  it('keeps working when every write is denied', () => {
+    const store = new DaemonControlsStore({
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+    });
+
+    should(store.setControls(alpha, { projectScope: '/work/alpha' }).projectScope).equal('/work/alpha');
+    should(store.controls(alpha).projectScope).equal('/work/alpha');
+  });
+
+  it('detects a real browser store and refuses anything that only looks like one', () => {
+    const backing = new MemoryStorage();
+    should(browserControlsStorage({ localStorage: backing })).be.exactly(backing);
+
+    should(browserControlsStorage({})).be.undefined();
+    should(browserControlsStorage({ localStorage: null })).be.undefined();
+    should(browserControlsStorage({ localStorage: { getItem: 'not a function' } })).be.undefined();
+    should(browserControlsStorage({ localStorage: { getItem: () => null } })).be.undefined();
+
+    // Reading `localStorage` at all throws in some privacy modes; that is an
+    // ordinary condition, not an error the reader can act on. Injected rather
+    // than done to the real global, which the rest of the suite depends on.
+    should(
+      browserControlsStorage({
+        get localStorage() {
+          throw new Error('access denied');
+        },
+      }),
+    ).be.undefined();
+  });
+
+  it('uses the ambient browser store when constructed with no argument', () => {
+    // Whatever this environment provides, resolving it must not throw and a
+    // default-constructed store must still answer with usable controls.
+    const ambient = browserControlsStorage();
+    if (ambient !== undefined) {
+      should(ambient.getItem).be.a.Function();
+      should(ambient.setItem).be.a.Function();
+    }
+    should(new DaemonControlsStore().controls(alpha)).have.property('projectScope');
+  });
+
+  it('supports a daemon ID that collides with an object prototype key', () => {
+    // A DaemonId is any non-blank string. On an ordinary object
+    // `scopes.__proto__ = entry` hits the prototype setter and stores nothing,
+    // and `'toString' in scopes` is true for a daemon with no scope at all.
+    for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
+      const hostile = daemonId(name);
+      const storage = new MemoryStorage();
+      const store = new DaemonControlsStore(storage);
+
+      should(store.controls(hostile).projectScope).be.null();
+      // No scope yet, so clearing must be a no-op rather than a spurious write.
+      should(store.clearDaemon(hostile)).be.false();
+      should(storage.writes).be.empty();
+
+      should(store.setControls(hostile, { projectScope: `/work/${name}` }).projectScope).equal(`/work/${name}`);
+      should(store.controls(hostile).projectScope).equal(`/work/${name}`);
+      // It has to survive a reload, and must not leak onto another daemon.
+      should(new DaemonControlsStore(storage).controls(hostile).projectScope).equal(`/work/${name}`);
+      should(new DaemonControlsStore(storage).controls(alpha).projectScope).be.null();
+
+      should(store.clearDaemon(hostile)).be.true();
+      should(store.controls(hostile).projectScope).be.null();
+      should(new DaemonControlsStore(storage).controls(hostile).projectScope).be.null();
+    }
+  });
+
+  it('parses a persisted __proto__ entry as an own key without polluting anything', () => {
+    // Hand-written JSON, because a `__proto__:` object literal would set the
+    // prototype instead of creating the key this must survive.
+    const record = parseControlsRecord('{"format":1,"scopes":{"__proto__":{"projectScope":"/p","seq":1}}}');
+
+    should(Object.getPrototypeOf(record.scopes)).be.null();
+    should(Object.keys(record.scopes)).eql(['__proto__']);
+    should(controlsFor(record, daemonId('__proto__')).projectScope).equal('/p');
+    // Nothing has been grafted onto ordinary objects.
+    should(({} as Record<string, unknown>).projectScope).be.undefined();
+    should(controlsFor(record, alpha).projectScope).be.null();
+  });
+});
+
+describe('the Sessions list scope', () => {
+  it('reads every machine by default, keeps "current", and refuses anything else', () => {
+    const read = (sessionsList: unknown) =>
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { sessionsList } })).device.sessionsList;
+    should(read(undefined)).equal('all');
+    should(read('current')).equal('current');
+    should(read('every')).equal('all');
+  });
+});
+
+describe('the Sessions bar kind filter', () => {
+  it('is unchosen by default, keeps each kind, and refuses anything else', () => {
+    const read = (sessionsMode: unknown) =>
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { sessionsMode } })).device.sessionsMode;
+    should(read(undefined)).be.null();
+    for (const kind of ['all', 'auto', 'interactive'] as const) should(read(kind)).equal(kind);
+    should(read('headless')).be.null();
+  });
+});
+
+describe('the Warden page daemon filter', () => {
+  it('is All (null) by default, keeps a named daemon, and refuses anything else', () => {
+    const read = (wardenDaemon: unknown) =>
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { wardenDaemon } })).device.wardenDaemon;
+    should(read(undefined)).be.null();
+    should(read('daemon-b')).equal('daemon-b');
+    should(read('')).be.null();
+    should(read('   ')).be.null();
+    should(read(7)).be.null();
+  });
+});

@@ -131,9 +131,7 @@ export interface AnalyticsIndexShape {
  */
 export function decideAnalyticsIndexSchema(shape: AnalyticsIndexShape): AnalyticsIndexSchemaDecision {
   if (!shape.hasTables) return 'create';
-  return shape.foundVersion === ANALYTICS_INDEX_SCHEMA_VERSION && shape.hasExpectedShape
-    ? 'use'
-    : 'drop-and-rebuild';
+  return shape.foundVersion === ANALYTICS_INDEX_SCHEMA_VERSION && shape.hasExpectedShape ? 'use' : 'drop-and-rebuild';
 }
 
 /**

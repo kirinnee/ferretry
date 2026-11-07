@@ -36,34 +36,9 @@
 // unknown-shaped daemon output, so every field is read through an index
 // signature on purpose rather than asserted into a shape we do not control.
 import type { FerretView } from '@ferretry/core-ferrets/contract';
-import type { AttachmentView } from '../composer/attachments.ts';
 import { TERMINAL_STATUSES } from '@ferretry/app';
 
 export type PendingStatus = 'sending' | 'queued' | 'delivered' | 'error';
-
-/**
- * `deferred`: the connection is gone, so the file is not uploaded now — it goes to this device's outbox with the
- * message and is uploaded there, before the send, once the machine answers again.
- */
-type PendingAttachmentStatus = 'uploading' | 'ready' | 'failed' | 'deferred';
-
-export interface PendingAttachment {
-  readonly localId: string;
-  readonly file: File;
-  readonly objectUrl?: string;
-  readonly status: PendingAttachmentStatus;
-  readonly view?: AttachmentView;
-  readonly error?: string;
-  /** What an upload that has not finished is doing instead — waiting its turn, or retrying a drop. */
-  readonly note?: string;
-  /**
-   * The file's size when `file` does not hold its bytes: a file another of the owner's devices attached,
-   * which this one only names.
-   */
-  readonly size?: number;
-  /** `false` for a placeholder this device cannot remove: another device's upload still on its way. */
-  readonly removable?: false;
-}
 
 /**
  * Is the session — as far as this client AUTHORITATIVELY knows — waiting on an

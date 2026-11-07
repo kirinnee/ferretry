@@ -3,10 +3,16 @@ import type { Instant } from '@ferretry/std';
 import type { LoopbackFirewallMarker } from '../../../../daemon/proxy/wire/ports.ts';
 import type { LoopbackFirewallState } from '../../../../daemon/proxy/wire/firewall.ts';
 import should from 'should';
-import { firewallRefusal, judgeLoopbackFirewall, LoopbackFirewallWatch, loopbackFirewallRemedy, readLoopbackFirewall } from '../../../../daemon/proxy/firewall/state.ts';
+import {
+  firewallRefusal,
+  judgeLoopbackFirewall,
+  LoopbackFirewallWatch,
+  loopbackFirewallRemedy,
+  readLoopbackFirewall,
+} from '../../../../daemon/proxy/firewall/state.ts';
 
 const NOW = Date.parse('2026-10-31T01:10:00.000Z');
-const FRESH = ('2026-10-31T01:08:00.000Z' as Instant);
+const FRESH = '2026-10-31T01:08:00.000Z' as Instant;
 
 const marker = (
   entries: LoopbackFirewallMarker['entries'],
@@ -14,7 +20,7 @@ const marker = (
   base = 20000,
 ): LoopbackFirewallMarker => ({
   version: 1,
-  appliedAt: ('2026-10-31T01:02:03.000Z' as Instant),
+  appliedAt: '2026-10-31T01:02:03.000Z' as Instant,
   base,
   entries,
   ...extra,
@@ -29,7 +35,7 @@ describe('loopback firewall state', () => {
 
     // Assert
     should(state?.state).equal('applied');
-    should(state?.appliedAt).equal(('2026-10-31T01:02:03.000Z' as Instant));
+    should(state?.appliedAt).equal('2026-10-31T01:02:03.000Z' as Instant);
   });
 
   it('should derive from the marker base, so a moved base moves the ports it expects', () => {
@@ -109,11 +115,16 @@ describe('loopback firewall state', () => {
   it('should say unverified when no check ever ran or the last one is older than 15 minutes', () => {
     // Act
     const never = judgeLoopbackFirewall('per-user', 1001, marker(ENTRY), NOW);
-    const old = judgeLoopbackFirewall('per-user', 1001, marker(ENTRY, { verifiedAt: ('2026-10-31T00:54:59.000Z' as Instant) }), NOW);
+    const old = judgeLoopbackFirewall(
+      'per-user',
+      1001,
+      marker(ENTRY, { verifiedAt: '2026-10-31T00:54:59.000Z' as Instant }),
+      NOW,
+    );
     const edge = judgeLoopbackFirewall(
       'per-user',
       1001,
-      marker(ENTRY, { verifiedAt: ('2026-10-31T00:55:00.000Z' as Instant) }),
+      marker(ENTRY, { verifiedAt: '2026-10-31T00:55:00.000Z' as Instant }),
       NOW,
     );
 
@@ -129,7 +140,7 @@ describe('loopback firewall state', () => {
   it('should rank failed over missing over stale over unverified', () => {
     // Arrange
     const stalePorts = [{ uid: 1001, ports: [20004, 20005, 20099] as [number, number, number] }];
-    const old = ('2026-10-31T00:00:00.000Z' as Instant);
+    const old = '2026-10-31T00:00:00.000Z' as Instant;
 
     // Act + Assert
     should(

@@ -37,7 +37,11 @@ export const CLAUDE_CODE_LABEL = 'Claude Code';
 export const RELEASE_OWNER = 'kirinnee';
 
 /** THE one place the harness's package names are spelled: its npm package, its Homebrew cask, and its nixpkgs attribute. */
-export const CLAUDE_CODE_PACKAGES = { npm: '@anthropic-ai/claude-code', cask: 'claude-code', nixpkgs: 'claude-code' } as const;
+export const CLAUDE_CODE_PACKAGES = {
+  npm: '@anthropic-ai/claude-code',
+  cask: 'claude-code',
+  nixpkgs: 'claude-code',
+} as const;
 
 /**
  * THE VERSION FERRETRY HAS VERIFIED: what the harness contract guard measures in every build, which is the
@@ -110,7 +114,8 @@ export function parseVersionOutput(output: string): string | undefined {
 export function parseNpmLatest(value: unknown): LatestRelease | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const version = (value as { version?: unknown }).version;
-  if (typeof version !== 'string' || !VersionSchema.safeParse(version).success || version.includes('-')) return undefined;
+  if (typeof version !== 'string' || !VersionSchema.safeParse(version).success || version.includes('-'))
+    return undefined;
   return { version, url: changelogUrl() };
 }
 

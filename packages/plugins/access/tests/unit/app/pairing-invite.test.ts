@@ -77,8 +77,14 @@ describe('the paired device list', () => {
   it('orders newest first and breaks ties by id, so no row moves between renders', () => {
     // A list that reshuffles is a list where somebody revokes the wrong device.
     // Arrange
-    const older = device({ id: `fy_device_id_${'b'.repeat(22)}`, createdAt: InstantSchema.parse('2026-07-01T09:00:00.000Z') });
-    const newer = device({ id: `fy_device_id_${'c'.repeat(22)}`, createdAt: InstantSchema.parse('2026-08-02T09:00:00.000Z') });
+    const older = device({
+      id: `fy_device_id_${'b'.repeat(22)}`,
+      createdAt: InstantSchema.parse('2026-07-01T09:00:00.000Z'),
+    });
+    const newer = device({
+      id: `fy_device_id_${'c'.repeat(22)}`,
+      createdAt: InstantSchema.parse('2026-08-02T09:00:00.000Z'),
+    });
     const tieFirst = device({ id: `fy_device_id_${'d'.repeat(22)}`, createdAt: newer.createdAt });
 
     // Act

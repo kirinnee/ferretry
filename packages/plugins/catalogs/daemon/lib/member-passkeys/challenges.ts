@@ -4,7 +4,7 @@ import type {
   EveryCallerStepUpAct,
   StoredProofStepUpAct,
 } from '@ferretry/core-gate/contract';
-import { bytesEqual } from '../../adapters/relay.ts';
+import { bytesEqual } from '../relay-wire/index.ts';
 export interface StepUpSubject {
   readonly deviceId: string;
   readonly appSession: string;

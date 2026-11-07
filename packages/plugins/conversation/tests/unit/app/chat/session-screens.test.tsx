@@ -253,7 +253,7 @@ describe('session screen components', () => {
         daemon={daemonA}
         draftStore={drafts}
         onSent={() => sent.push('callback')}
-        sessionId="same-id"
+        ferretId="same-id"
       />,
     );
     const textarea = composer.root.findByType('textarea');
@@ -275,7 +275,7 @@ describe('session screen components', () => {
         api={{ send: async () => Promise.reject(new Error('offline')) as never }}
         daemon={daemonA}
         draftStore={drafts}
-        sessionId="failed-id"
+        ferretId="failed-id"
       />,
     );
     run(() => failing.root.findByType('textarea').props.onChange({ currentTarget: { value: 'retry this' } }));
@@ -297,7 +297,7 @@ describe('session screen components', () => {
           disabled
           enterKeyPreference="newline"
           phoneEnterKeyPreference="newline"
-          sessionId="disabled-id"
+          ferretId="disabled-id"
         />,
       );
       const textarea = composer.root.findByType('textarea');
@@ -325,7 +325,7 @@ describe('session screen components', () => {
           disabled
           enterKeyPreference="send"
           phoneEnterKeyPreference="send"
-          sessionId="desktop-id"
+          ferretId="desktop-id"
         />,
       );
       let desktopPrevented = false;
@@ -361,7 +361,7 @@ describe('session screen components', () => {
           draftStore={drafts}
           enterKeyPreference={preference}
           phoneEnterKeyPreference={preference}
-          sessionId={sessionId}
+          ferretId={sessionId}
         />,
       );
       let prevented = false;

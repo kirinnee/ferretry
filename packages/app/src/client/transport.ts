@@ -58,6 +58,9 @@ export class DaemonCallError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** The refusal's whole JSON body, for a route whose refusal carries a fact beside its sentence (a 409 naming
+     *  the draft that holds the agent's box, or the send that was typed but never shown). */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'DaemonCallError';

@@ -76,11 +76,7 @@ import { wardenTeammateToken } from './prompt.ts';
 import type { WardenVerdictSpawn } from './reports.ts';
 import { instantMs } from './time.ts';
 import { isTerminalStatus, type WardenSessionConfig, type WardenSessionStatus } from './types.ts';
-import {
-  parseWardenAnomalyKind,
-  type WardenRecommendation,
-  type WardenVerdict,
-} from './verdicts.ts';
+import { parseWardenAnomalyKind, type WardenRecommendation, type WardenVerdict } from './verdicts.ts';
 
 /**
  * The board source a Warden notification is written to.

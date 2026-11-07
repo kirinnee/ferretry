@@ -148,5 +148,7 @@ export function budgetAlternative(
 ): string | undefined {
   return logins
     .toSorted((left, right) => (left < right ? -1 : 1))
-    .find(candidate => candidate !== login && !(pauses[candidate] !== undefined && pauses[candidate].resetsAtMs > nowMs));
+    .find(
+      candidate => candidate !== login && !(pauses[candidate] !== undefined && pauses[candidate].resetsAtMs > nowMs),
+    );
 }

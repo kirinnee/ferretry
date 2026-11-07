@@ -194,7 +194,7 @@ export function HandoffBody({
           : [
               {
                 kind: 'attachment',
-                sessionId: source.sessionId,
+                ferretId: source.sessionId,
                 attachmentId: attachment.attachmentId,
                 filename: attachment.filename,
                 mime: attachment.mime,

@@ -30,11 +30,7 @@ import type {
 } from '@ferretry/core-vault/contract';
 import type { ProviderQuotaReading, ProviderQuotaSpend } from '../../../../contract/index.ts';
 import type { ParsedProviderQuota, ProviderQuotaParse } from './parse.ts';
-import {
-  hasQuotaEndpoint,
-  type ProviderQuotaLogin,
-  planProviderQuota,
-} from './plan.ts';
+import { hasQuotaEndpoint, type ProviderQuotaLogin, planProviderQuota } from './plan.ts';
 
 /** The fewest milliseconds between two reads of one login's quota. */
 export const PROVIDER_QUOTA_MIN_INTERVAL_MS = 60_000;

@@ -5,7 +5,7 @@
  * does so because the bytes are right.
  */
 
-import { concatBytes, fromBase64Url, toBase64Url, utf8Bytes } from '../../daemon/adapters/relay.ts';
+import { concatBytes, fromBase64Url, toBase64Url, utf8Bytes } from '../../daemon/lib/relay-wire/index.ts';
 import type { PasskeyAlgorithm, PasskeyCrypto } from './passkeys/index.ts';
 
 export const ORIGIN = 'https://ferretry.pages.dev';

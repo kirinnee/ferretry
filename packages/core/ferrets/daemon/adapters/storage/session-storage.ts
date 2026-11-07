@@ -292,7 +292,8 @@ export class DaemonStorage {
       this.readDocumentSource(SessionStateFiles, id),
       this.readJournal(id),
     ]);
-    if (config === undefined && state === undefined && journal.lines.length === 0) return { source: undefined, journal };
+    if (config === undefined && state === undefined && journal.lines.length === 0)
+      return { source: undefined, journal };
     const file = fileOf(FerretHistoryFiles, id);
     const scan = scanJournal(journal.lines, { file, sessionId: id });
     const fingerprint = journalFingerprint(journal.lines.length);
@@ -464,7 +465,9 @@ export class DaemonStorage {
     );
     return {
       session,
-      problems: plan.problems.filter(problem => problem.file !== source.journal?.file || problem.byteOffset >= fromOffset),
+      problems: plan.problems.filter(
+        problem => problem.file !== source.journal?.file || problem.byteOffset >= fromOffset,
+      ),
     };
   }
 
@@ -999,7 +1002,8 @@ export class DaemonStorage {
     // wholly lost index as an honestly empty fleet. Every readable session is therefore
     // synchronized into the disposable index before its id is claimed by an idle proof or tail.
     for (const evidence of surveyed) {
-      if (evidence.journalLost) throw new MissingSessionJournalError(evidence.id, fileOf(FerretHistoryFiles, evidence.id));
+      if (evidence.journalLost)
+        throw new MissingSessionJournalError(evidence.id, fileOf(FerretHistoryFiles, evidence.id));
       const synchronized = await this.synchronizedSession(evidence.id);
       if (synchronized === undefined)
         throw new Error(`session ${evidence.id} has durable directory evidence but could not be indexed`);
