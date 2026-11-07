@@ -16,3 +16,4 @@ export * from './quirks.ts';
 export * from './runtime-switch.ts';
 export * from './startup.ts';
 export * from './launch.ts';
+export * from './update/index.ts';
