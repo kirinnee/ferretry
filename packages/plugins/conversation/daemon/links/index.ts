@@ -35,10 +35,16 @@ const ledger = (state: StatePort): LinkLedger => ({
     return read.value ?? EMPTY;
   },
   async add(link) {
-    const updated = await state.update(LINKS_STATE, (current): LinksFile => ({
-      format: 1,
-      links: [...(current ?? EMPTY).links.filter(each => !(each.harness === link.harness && each.id === link.id)), link],
-    }));
+    const updated = await state.update(
+      LINKS_STATE,
+      (current): LinksFile => ({
+        format: 1,
+        links: [
+          ...(current ?? EMPTY).links.filter(each => !(each.harness === link.harness && each.id === link.id)),
+          link,
+        ],
+      }),
+    );
     if (!updated.ok) throw new Error(updated.error.sentence);
   },
 });
@@ -47,7 +53,9 @@ const ledger = (state: StatePort): LinkLedger => ({
 const finder = (state: StatePort): FinderCache => ({
   async read() {
     const read = await state.read(FINDER_STATE);
-    return read.ok && read.value !== undefined ? (read.value as { files?: Record<string, Record<string, string>> }).files ?? {} : {};
+    return read.ok && read.value !== undefined
+      ? ((read.value as { files?: Record<string, Record<string, string>> }).files ?? {})
+      : {};
   },
   async write(files) {
     await state.write(FINDER_STATE, { format: 1, files } as never);

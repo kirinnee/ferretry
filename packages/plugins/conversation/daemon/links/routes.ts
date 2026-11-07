@@ -1,10 +1,4 @@
-import {
-  ApiError,
-  decodeParameter,
-  jsonResponse,
-  queryValue,
-  type RouteHandler,
-} from '@ferretry/kernel/contract';
+import { ApiError, decodeParameter, jsonResponse, queryValue, type RouteHandler } from '@ferretry/kernel/contract';
 import {
   type KeepRequest,
   KeepRequestSchema,
@@ -29,7 +23,8 @@ const QUERY_KEYS = ['source', 'harness', 'q', 'since', 'limit'] as const;
 export function linkRoutes(links: Pick<LinkService, 'list' | 'preview' | 'keep' | 'history' | 'historyEntry'>) {
   const param = (call: Call, name: string): string => {
     const decoded = decodeParameter(call.params.get(name) ?? '');
-    if (decoded === undefined || decoded === '') throw new ApiError(400, `the ${name} in the path is not usable`, 'invalid_id');
+    if (decoded === undefined || decoded === '')
+      throw new ApiError(400, `the ${name} in the path is not usable`, 'invalid_id');
     return decoded;
   };
   return {

@@ -18,8 +18,11 @@ const harness = (answers: Record<string, unknown> = {}) => {
   return { verbs, calls, out, err };
 };
 
-const run = (verb: (invocation: never) => Promise<number>, args: string[], options: Record<string, string | boolean> = {}) =>
-  verb({ args, options } as never);
+const run = (
+  verb: (invocation: never) => Promise<number>,
+  args: string[],
+  options: Record<string, string | boolean> = {},
+) => verb({ args, options } as never);
 
 describe('the reading verbs', () => {
   test('logs reads the ferret tail with --turn and prints the text', async () => {
@@ -42,8 +45,23 @@ describe('the reading verbs', () => {
     const { verbs, out } = harness({
       'GET /v1/search': {
         hits: [
-          { kind: 'card', id: 'F303', project: 'p', ferret: null, standing: 'In progress', title: 'Search backend', match: { field: 'title', line: 'Search backend' } },
-          { kind: 'ask', id: 'A3', ferret: 'lead', standing: 'open', title: 'Pick one', match: { field: 'ask', line: 'which backend' } },
+          {
+            kind: 'card',
+            id: 'F303',
+            project: 'p',
+            ferret: null,
+            standing: 'In progress',
+            title: 'Search backend',
+            match: { field: 'title', line: 'Search backend' },
+          },
+          {
+            kind: 'ask',
+            id: 'A3',
+            ferret: 'lead',
+            standing: 'open',
+            title: 'Pick one',
+            match: { field: 'ask', line: 'which backend' },
+          },
         ],
         total: 5,
         indexed: { cards: 4, asks: 1 },
@@ -82,7 +100,14 @@ describe('the reading verbs', () => {
     });
     expect(await run(verbs['link keep'], ['claude-code', 'default', 'c1', 'c2'], { start: true })).toBe(1);
     expect(calls[0]?.init).toEqual({
-      body: { harness: 'claude-code', runtime: 'default', conversations: [{ id: 'c1', start: true }, { id: 'c2', start: true }] },
+      body: {
+        harness: 'claude-code',
+        runtime: 'default',
+        conversations: [
+          { id: 'c1', start: true },
+          { id: 'c2', start: true },
+        ],
+      },
     });
     expect(out.join('')).toContain('kept c1 as login page');
     expect(out.join('')).toContain('refused c2');
@@ -91,7 +116,18 @@ describe('the reading verbs', () => {
   test('link lists, with the kept-by mark, and link preview prints the exchanges', async () => {
     const { verbs, out } = harness({
       'GET /v1/links/conversations': {
-        conversations: [{ id: 'c1', harness: 'codex', project: '/w', preview: 'hello', lastActivityAt: '2026-02-01T09:05:00.000Z', turns: 3, turnsAtLeast: true, keptBy: 'lead' }],
+        conversations: [
+          {
+            id: 'c1',
+            harness: 'codex',
+            project: '/w',
+            preview: 'hello',
+            lastActivityAt: '2026-02-01T09:05:00.000Z',
+            turns: 3,
+            turnsAtLeast: true,
+            keptBy: 'lead',
+          },
+        ],
         matched: 1,
         skipped: 0,
       },

@@ -2,7 +2,12 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../daemon/reader/lib/transcript/codex.ts';
-import { eventImages, markerMediaType, numberRecordImages, recordImages } from '../../../daemon/reader/lib/transcript/images.ts';
+import {
+  eventImages,
+  markerMediaType,
+  numberRecordImages,
+  recordImages,
+} from '../../../daemon/reader/lib/transcript/images.ts';
 import type { TranscriptEvent } from '../../../daemon/reader/lib/transcript/types.ts';
 import {
   claudeText,

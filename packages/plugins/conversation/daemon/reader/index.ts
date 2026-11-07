@@ -2,10 +2,7 @@ import type { RootHandle } from '@ferretry/kernel/contract';
 import { EntriesTranscriptSource, type HarnessTranscripts } from './adapters/entries-source.ts';
 import { historyFiles } from './adapters/history-files.ts';
 import { TranscriptReadService, type TranscriptReadRedactor } from './lib/reads.ts';
-import {
-  TranscriptImageReader,
-  type TranscriptImageLocator,
-} from './lib/session/image-reader.ts';
+import { TranscriptImageReader, type TranscriptImageLocator } from './lib/session/image-reader.ts';
 import type { SessionTranscriptMessageTokenCodec } from './lib/session/message-token.ts';
 import { ClaudeTranscriptParser } from './lib/transcript/claude.ts';
 import { CodexTranscriptParser } from './lib/transcript/codex.ts';

@@ -3,7 +3,11 @@ import { CONVERSATION_EXCHANGE_TEXT_MAX, type LinkPreview } from '../../../contr
 import { CONVERSATION_EXCHANGE_COUNT } from './constants.ts';
 
 type ConversationExchangeMessage = LinkPreview['messages'][number];
-import { parseHandoffPointer, parseMessageAttachments, readHandoffDocument } from '../../attachments/lib/turn-handoff.ts';
+import {
+  parseHandoffPointer,
+  parseMessageAttachments,
+  readHandoffDocument,
+} from '../../attachments/lib/turn-handoff.ts';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import type { TranscriptEvent } from '../../reader/lib/transcript/types.ts';
 

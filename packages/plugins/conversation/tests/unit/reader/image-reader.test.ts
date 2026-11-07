@@ -1,9 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  TranscriptImageError,
-  type TranscriptImageFailure,
-} from '../../../daemon/reader/lib/session/image-reader.ts';
+import { TranscriptImageError, type TranscriptImageFailure } from '../../../daemon/reader/lib/session/image-reader.ts';
 import {
   claudeText,
   claudeToolResultImage,

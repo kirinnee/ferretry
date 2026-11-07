@@ -22,7 +22,9 @@ interface WorkInput {
 }
 
 /** A card as its source hands it over. */
-export const cardWork = (input: WorkInput & { readonly project?: string; readonly ferret?: string | null }): RawWork => ({
+export const cardWork = (
+  input: WorkInput & { readonly project?: string; readonly ferret?: string | null },
+): RawWork => ({
   key: cardKey(input.id),
   kind: 'card',
   updatedAtMs: input.updatedAtMs ?? NOW_MS,

@@ -37,15 +37,18 @@ const reader = (current: () => TranscriptEntry[], known = true) =>
     },
     redactor: {
       redact: async text => text.replaceAll('hunter2', '[redacted]'),
-      batch: async work =>
-        work({ text: text => text.replaceAll('hunter2', '[redacted]'), data: value => value }),
+      batch: async work => work({ text: text => text.replaceAll('hunter2', '[redacted]'), data: value => value }),
     },
     history: {} as never,
     locate: { locate: async () => undefined },
     now: () => 0,
   });
 
-const call = (query: Record<string, string> = {}, headers: Record<string, string> = {}, params: Record<string, string> = {}) =>
+const call = (
+  query: Record<string, string> = {},
+  headers: Record<string, string> = {},
+  params: Record<string, string> = {},
+) =>
   ({
     request: {
       query: new Map(Object.entries(query).map(([key, value]) => [key, [value]])),
@@ -96,15 +99,18 @@ describe('the transcript routes', () => {
     );
     expect(next.status).toBe(200);
     const stale = await refusal(
-      Promise.resolve(routes['GET /v1/ferrets/:ferretId/log-page'](call({ before: String(page.start), file: 'other' }))),
+      Promise.resolve(
+        routes['GET /v1/ferrets/:ferretId/log-page'](call({ before: String(page.start), file: 'other' })),
+      ),
     );
     expect(stale).toMatchObject({ status: 409, code: 'log_cursor_stale' });
   });
 
   test('G41 messages are bounded rows with a binding, and a cursor walks to the end without a row twice', async () => {
-    const first = JSON.parse(
-      (await routes['GET /v1/ferrets/:ferretId/messages'](call({ limit: '2' }))).body,
-    ) as { messages: { text: string; selectionBinding: string; point: string }[]; nextCursor: string | null };
+    const first = JSON.parse((await routes['GET /v1/ferrets/:ferretId/messages'](call({ limit: '2' }))).body) as {
+      messages: { text: string; selectionBinding: string; point: string }[];
+      nextCursor: string | null;
+    };
     expect(first.messages.map(row => row.text)).toEqual(['please fix the build', 'done, the key was [redacted]']);
     expect(first.messages.every(row => row.selectionBinding !== '')).toBe(true);
     const second = JSON.parse(
@@ -116,9 +122,9 @@ describe('the transcript routes', () => {
   test('G41 a cursor stays valid across an append and refuses once an earlier entry changed', async () => {
     let live = entries();
     const moving = reader(() => live).routes;
-    const first = JSON.parse(
-      (await moving['GET /v1/ferrets/:ferretId/messages'](call({ limit: '2' }))).body,
-    ) as { nextCursor: string };
+    const first = JSON.parse((await moving['GET /v1/ferrets/:ferretId/messages'](call({ limit: '2' }))).body) as {
+      nextCursor: string;
+    };
     live = [...live, { id: 'e4', at: at(4), role: 'user', text: 'thanks' }];
     const grown = await moving['GET /v1/ferrets/:ferretId/messages'](call({ cursor: first.nextCursor }));
     expect(grown.status).toBe(200);
@@ -130,9 +136,9 @@ describe('the transcript routes', () => {
   });
 
   test('G164 a search snippet is cut from the masked text', async () => {
-    const found = JSON.parse(
-      (await routes['GET /v1/ferrets/:ferretId/log-search'](call({ q: 'key was' }))).body,
-    ) as { matches: { snippet: string }[] };
+    const found = JSON.parse((await routes['GET /v1/ferrets/:ferretId/log-search'](call({ q: 'key was' }))).body) as {
+      matches: { snippet: string }[];
+    };
     expect(found.matches).toHaveLength(1);
     expect(JSON.stringify(found)).not.toContain('hunter2');
   });

@@ -70,7 +70,10 @@ function renderListing(listing: LinkListing): string {
     const floor = row.turnsAtLeast === true ? '+' : '';
     return `${row.id}  ${row.harness}  ${row.lastActivityAt.slice(0, 16).replace('T', ' ')}  ${String(row.turns)}${floor} turns  ${row.name ?? clip(flat(row.preview), 60)}${kept}`;
   });
-  const more = listing.matched > listing.conversations.length ? [`Showing ${String(listing.conversations.length)} of ${String(listing.matched)}.`] : [];
+  const more =
+    listing.matched > listing.conversations.length
+      ? [`Showing ${String(listing.conversations.length)} of ${String(listing.matched)}.`]
+      : [];
   const skipped = listing.skipped > 0 ? [`${String(listing.skipped)} could not be read and are not listed.`] : [];
   return [...lines, ...more, ...skipped].join('\n');
 }
@@ -129,7 +132,10 @@ export function readingVerbs({ client, io }: Context) {
       if (ferret === undefined) throw new Usage(`name the ferret: ${BIN} logs <ferret>`);
       const turn = number(invocation, 'turn');
       const limit = number(invocation, 'limit');
-      const query = { ...(turn === undefined ? {} : { turn: String(turn) }), ...(limit === undefined ? {} : { limit: String(limit) }) };
+      const query = {
+        ...(turn === undefined ? {} : { turn: String(turn) }),
+        ...(limit === undefined ? {} : { limit: String(limit) }),
+      };
       print(await client.call<string>('GET /v1/ferrets/:ferretId/logs', { params: { ferretId: ferret }, query }));
     }),
 
@@ -153,14 +159,18 @@ export function readingVerbs({ client, io }: Context) {
       const older =
         answer.olderHidden === undefined || answer.olderHidden < 1
           ? []
-          : [`${String(answer.olderHidden)} older closed ${answer.olderHidden === 1 ? 'item' : 'items'} hidden — ${BIN} search --all ${query}`];
+          : [
+              `${String(answer.olderHidden)} older closed ${answer.olderHidden === 1 ? 'item' : 'items'} hidden — ${BIN} search --all ${query}`,
+            ];
       if (answer.hits.length === 0) {
         const subject = kind === 'card' ? 'cards' : kind === 'ask' ? 'asks' : 'cards or asks';
         return print([`No ${subject} match “${query}”.`, ...older].join('\n'));
       }
       const more =
         answer.total > answer.hits.length
-          ? [`Showing ${String(answer.hits.length)} of ${String(answer.total)}; narrow it with --kind, --open or --project, or raise --limit.`]
+          ? [
+              `Showing ${String(answer.hits.length)} of ${String(answer.total)}; narrow it with --kind, --open or --project, or raise --limit.`,
+            ]
           : [];
       print([...renderHits(answer.hits, option(invocation, 'ferret')), ...more, ...older].join('\n'));
     }),

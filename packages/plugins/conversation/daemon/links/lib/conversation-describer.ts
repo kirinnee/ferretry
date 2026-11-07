@@ -64,7 +64,9 @@ export interface ConversationCandidate {
 }
 
 /** The listing row a transcript describes, before the listing adds where it was kept. */
-export type DescribedConversation = Omit<LinkableConversation, 'harness' | 'keptBy' | 'keptIn'> & { readonly harness: Harness };
+export type DescribedConversation = Omit<LinkableConversation, 'harness' | 'keptBy' | 'keptIn'> & {
+  readonly harness: Harness;
+};
 
 /** Describes the conversation one transcript holds; where its read and parse run is the adapter's choice. */
 export interface ConversationDescriber {

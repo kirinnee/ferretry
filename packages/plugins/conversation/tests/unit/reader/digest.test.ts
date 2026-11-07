@@ -12,7 +12,11 @@ import {
   sessionTranscriptRawPrefixStart,
   startPortableConversation,
 } from '../../../daemon/reader/lib/session/index.ts';
-import type { TranscriptBatch, TranscriptEvent, TranscriptRawRecord } from '../../../daemon/reader/lib/transcript/types.ts';
+import type {
+  TranscriptBatch,
+  TranscriptEvent,
+  TranscriptRawRecord,
+} from '../../../daemon/reader/lib/transcript/types.ts';
 
 const point = (byteOffset: number, blockIndex = 0): ConversationMessagePoint => ({
   v: 1,

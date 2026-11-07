@@ -2,10 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { WorkSearchService, WORK_SEARCH_SWEEP_MS } from '../../../daemon/search/lib/service.ts';
 import { askWork, cardWork, FakeRedaction, FakeSource, NOW_MS, query } from '../../support/work.ts';
 
-const build = (
-  sources: readonly FakeSource[],
-  options: { redaction?: FakeRedaction; clock?: { ms: number } } = {},
-) => {
+const build = (sources: readonly FakeSource[], options: { redaction?: FakeRedaction; clock?: { ms: number } } = {}) => {
   const warnings: string[] = [];
   const clock = options.clock ?? { ms: NOW_MS };
   const service = new WorkSearchService({

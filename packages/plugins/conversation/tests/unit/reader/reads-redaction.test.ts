@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
 import type { Instant } from '@ferretry/std';
-import { TranscriptReadError, TranscriptReadService, type TranscriptReadRedactor } from '../../../daemon/reader/lib/reads.ts';
+import {
+  TranscriptReadError,
+  TranscriptReadService,
+  type TranscriptReadRedactor,
+} from '../../../daemon/reader/lib/reads.ts';
 import type { PortableConversationRow } from '../../../daemon/reader/lib/session/digest.ts';
 import type { SessionTranscriptMessageTokenContext } from '../../../daemon/reader/lib/session/message-token.ts';
 import type { TranscriptEvent } from '../../../daemon/reader/lib/transcript/types.ts';

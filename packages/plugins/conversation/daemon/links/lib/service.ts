@@ -123,7 +123,9 @@ export class LinkService {
     const computerListed = true;
     if (query.source === 'ferretry') return { conversations: [], matched: 0, skipped: 0 };
     const { located, skipped } = await this.#discover(query.harness);
-    const kept = new Map((await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret]));
+    const kept = new Map(
+      (await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret]),
+    );
     const matching = located.map(item => item.row).filter(linkMatcher(query));
     return {
       conversations: matching.slice(0, query.limit ?? matching.length).map(row => {
@@ -186,7 +188,9 @@ export class LinkService {
     const { located } = await this.#discover(request.harness);
     const byId = new Map(located.map(item => [item.row.id, item.row]));
     const result: { kept: KeepResult['kept']; refused: KeepResult['refused'] } = { kept: [], refused: [] };
-    const taken = new Map((await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret]));
+    const taken = new Map(
+      (await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret]),
+    );
     for (const item of request.conversations) {
       const row = byId.get(item.id);
       if (row === undefined) {
@@ -241,7 +245,10 @@ export class LinkService {
     for (const each of this.needs.harnesses()) {
       if (harness !== undefined && each.key !== harness) continue;
       const found = await each.list().catch((): readonly FoundLink[] => []);
-      const files = await this.#files(each, found.map(item => item.id));
+      const files = await this.#files(
+        each,
+        found.map(item => item.id),
+      );
       const names = await this.#codexNames(each);
       for (const conversation of found) {
         if (seen.has(`${each.key}:${conversation.id}`)) continue;
@@ -295,7 +302,12 @@ export class LinkService {
     for (const id of ids) {
       const relative = hinted[id];
       if (relative !== undefined && (await this.needs.files.info(`${harness.home}/${relative}`)) !== undefined)
-        known.set(id, { harness: harness.parser, source: `${harness.home}/${relative}`, relativePath: relative, nameId: id });
+        known.set(id, {
+          harness: harness.parser,
+          source: `${harness.home}/${relative}`,
+          relativePath: relative,
+          nameId: id,
+        });
     }
     if (ids.every(id => known.has(id))) return known;
     const scanned = await this.#scan(harness);
@@ -315,7 +327,12 @@ export class LinkService {
           if (entry.kind !== 'file' || !entry.name.endsWith('.jsonl')) continue;
           const id = entry.name.slice(0, -'.jsonl'.length);
           const relative = `projects/${project.name}/${entry.name}`;
-          found.set(id, { harness: 'claude', source: `${harness.home}/${relative}`, relativePath: relative, nameId: id });
+          found.set(id, {
+            harness: 'claude',
+            source: `${harness.home}/${relative}`,
+            relativePath: relative,
+            nameId: id,
+          });
         }
       }
       return found;
@@ -324,11 +341,17 @@ export class LinkService {
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
       for (const entry of await files.entries(`${harness.home}/${next.relative}`)) {
         const relative = `${next.relative}/${entry.name}`;
-        if (entry.kind === 'directory' && next.depth < CODEX_MAX_DEPTH) pending.push({ relative, depth: next.depth + 1 });
+        if (entry.kind === 'directory' && next.depth < CODEX_MAX_DEPTH)
+          pending.push({ relative, depth: next.depth + 1 });
         else if (entry.kind === 'file' && entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) {
           const id = ROLLOUT_ID.exec(entry.name)?.[1];
           if (id !== undefined)
-            found.set(id, { harness: 'codex', source: `${harness.home}/${relative}`, relativePath: relative, nameId: id });
+            found.set(id, {
+              harness: 'codex',
+              source: `${harness.home}/${relative}`,
+              relativePath: relative,
+              nameId: id,
+            });
         }
       }
     }

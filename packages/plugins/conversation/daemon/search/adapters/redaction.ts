@@ -15,7 +15,9 @@ export function workRedaction(redaction: Redaction): WorkRedaction & { bump(): v
   let epoch = 0;
   return {
     batch: async work =>
-      await redaction.read(scope => work((text: string): string => scope.text(text)) as never as ReturnType<typeof work>),
+      await redaction.read(
+        scope => work((text: string): string => scope.text(text)) as never as ReturnType<typeof work>,
+      ),
     epoch: async () => String(epoch),
     bump: () => {
       epoch += 1;

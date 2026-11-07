@@ -24,14 +24,20 @@ const asks = {
 
 const built = buildSearch({
   asks,
-  redaction: { read: async fn => await fn({ text: s => s.replaceAll('hunter2', '[redacted]'), cells: g => g, lines: l => l }) },
+  redaction: {
+    read: async fn => await fn({ text: s => s.replaceAll('hunter2', '[redacted]'), cells: g => g, lines: l => l }),
+  },
   now: () => NOW_MS,
   warn: () => undefined,
 });
 
 const get = (query: Record<string, string>) =>
   ({
-    request: { query: new Map(Object.entries(query).map(([k, v]) => [k, [v]])), headers: new Map(), text: async () => '' } as unknown as ApiRequest,
+    request: {
+      query: new Map(Object.entries(query).map(([k, v]) => [k, [v]])),
+      headers: new Map(),
+      text: async () => '',
+    } as unknown as ApiRequest,
     params: new Map(),
   }) as never;
 

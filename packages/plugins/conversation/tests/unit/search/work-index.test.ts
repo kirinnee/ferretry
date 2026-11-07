@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { WorkIndex } from '../../../daemon/search/lib/work-index.ts';
-import { askWork, cardWork, DAY_MS, doc, NOW_MS, query} from '../../support/work.ts';
-
+import { askWork, cardWork, DAY_MS, doc, NOW_MS, query } from '../../support/work.ts';
 
 const indexOf = (...works: Parameters<typeof doc>[0][]) => {
   const index = new WorkIndex();
@@ -43,7 +42,12 @@ describe('the work search index', () => {
 
   test('an ask is found by words in its body and says whose it is', () => {
     const index = indexOf(
-      askWork({ id: 'A3', title: 'Relay drops', ferret: 'lead', fields: { body: 'the relay drops sessions after a deploy' } }),
+      askWork({
+        id: 'A3',
+        title: 'Relay drops',
+        ferret: 'lead',
+        fields: { body: 'the relay drops sessions after a deploy' },
+      }),
     );
     const hit = index.search(query('deploy'), NOW_MS).hits[0];
     expect(hit?.kind).toBe('ask');
