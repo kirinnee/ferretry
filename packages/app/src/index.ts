@@ -121,3 +121,8 @@ export {
   removeRecord,
   writeRecord,
 } from './storage/records.ts';
+
+// ─── shared browser facilities used by app halves ─────────────────────────────────────────────────────────────
+export { Badge, Button, cn, FullscreenToggle, useDocumentVisible, useFullscreen } from './ui/index.ts';
+export { describeSurfaceOwnership, type SurfaceOwnership, type SurfaceOwnershipLabel } from './references/ownership.ts';
+export { FY_REQUEST_ID_HEADER } from './client/request-id.ts';

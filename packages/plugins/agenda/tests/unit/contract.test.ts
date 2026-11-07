@@ -20,8 +20,8 @@ describe('agenda wire schemas', () => {
     expect(AgendaOpenQuerySchema.safeParse({ limit: 500, after: 'x' }).success).toBe(true);
   });
   test('the daemon agenda takes only the owner’s four verbs', () => {
-    expect(DaemonAgendaActionSchema.safeParse({ action: 'dismiss', ask: 'a1' }).success).toBe(true);
-    expect(DaemonAgendaActionSchema.safeParse({ action: 'raise', ask: 'a1' }).success).toBe(false);
+    expect(DaemonAgendaActionSchema.safeParse({ action: 'dismiss', id: 'A1' }).success).toBe(true);
+    expect(DaemonAgendaActionSchema.safeParse({ action: 'raise', id: 'A1' }).success).toBe(false);
   });
   test('stored files start at format 1 and the config defaults are on with a 3 hour warning', () => {
     expect(SeenFileSchema.safeParse({ format: 1, seen: {} }).success).toBe(true);

@@ -1,0 +1,141 @@
+/* AN AGENDA MESSAGE IN THE OWNER'S BUBBLE (agenda-message.tsx): what happened and the item's chip on one small
+   line, the item's title muted under it, then the owner's words — the one thing set large. Theme tokens only,
+   so every theme and both modes read the same; calm rules: no rail, no box inside the bubble, sentence case.
+   The accent marks exactly two things: the reference chip and a chosen option. */
+.fy-agenda-msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-width: 0;
+}
+.fy-agenda-msg-part {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* A batch: each answer its own block, a hairline apart. */
+.fy-agenda-msg-part + .fy-agenda-msg-part {
+  border-top: var(--border-width) solid var(--border);
+  padding-top: var(--gap-md);
+}
+.fy-message .fy-agenda-msg-head {
+  align-items: center;
+  color: var(--muted);
+  flex-wrap: wrap;
+  font-size: 0.85em;
+  gap: var(--gap-sm);
+  line-height: 1.3;
+}
+.fy-agenda-msg-kind {
+  font-weight: var(--weight-strong);
+}
+/* The `!A45` reference, drawn by the shared Markdown renderer (so proof and click are the grammar's own) and
+   dressed as a pill. Unproved, it is the same pill holding plain text. */
+.fy-agenda-msg-chip {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--accent-strong);
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  padding: 0 8px;
+}
+.fy-agenda-msg-chip .md,
+.fy-message .fy-agenda-msg-chip p {
+  display: inline;
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+.fy-agenda-msg-chip .md,
+.fy-agenda-msg-chip .md a {
+  color: inherit;
+  text-decoration: none;
+}
+.fy-agenda-msg-chip .md a:hover,
+.fy-agenda-msg-chip .md a:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fy-message .fy-agenda-msg-title {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 0.9em;
+  line-height: 1.35;
+  margin: 4px 0 0;
+  overflow: hidden;
+  white-space: normal;
+}
+.fy-message .fy-agenda-msg-text {
+  color: var(--bubble-fg, var(--fg));
+  font-size: 1.06em;
+  font-weight: var(--weight-medium);
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+.fy-message .fy-agenda-msg-choice {
+  margin: 8px 0 0;
+}
+/* The option the owner chose: the accent, filled, with a tick — selected, by shape as well as by colour. */
+.fy-agenda-msg-option {
+  align-items: center;
+  background: var(--accent);
+  /* A pill on one line; a long choice that wraps keeps soft corners rather than becoming a lozenge. */
+  border-radius: var(--radius-lg);
+  color: var(--accent-fg);
+  display: inline-flex;
+  font-weight: var(--weight-strong);
+  gap: var(--gap-xs);
+  line-height: 1.35;
+  max-width: 100%;
+  padding: 4px 12px 4px 9px;
+}
+.fy-agenda-msg-option > svg {
+  flex: 0 0 auto;
+}
+.fy-message .fy-agenda-msg-note {
+  color: var(--muted);
+  font-size: 0.9em;
+  margin: 6px 0 0;
+}
+.fy-agenda-msg-note-label {
+  font-weight: var(--weight-strong);
+}
+/* What the ferret was actually sent, one quiet tap away. */
+.fy-agenda-msg-raw-bar {
+  align-items: center;
+  display: flex;
+  gap: var(--gap-xs);
+  justify-content: flex-end;
+  margin: calc(-1 * var(--gap-sm)) -6px calc(-1 * var(--gap-md)) 0;
+}
+.fy-agenda-msg-raw-toggle {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--faint);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 4px 6px;
+}
+.fy-agenda-msg-raw-toggle:hover,
+.fy-agenda-msg-raw-toggle:focus-visible {
+  color: var(--accent);
+}
+.fy-agenda-msg-raw {
+  background: color-mix(in srgb, var(--bubble-fg, var(--fg)) 5%, transparent);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin: 0;
+  max-height: 16rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}

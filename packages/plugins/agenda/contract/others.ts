@@ -13,5 +13,11 @@ export interface AccessBuzzApi {
     readonly body: string;
     readonly url: string;
   }): Promise<number>;
+  /**
+   * Takes buzzes down on every enrolled device but the caller's (`except` is a paired device's id, read from the
+   * credential): the buzz lines named by these tags. Resolves how many devices were told. Absent while Access offers
+   * no clear: opening an ask then records that it was seen and cannot take the other devices' lines down.
+   */
+  clear?(tags: readonly string[], except?: string): Promise<number>;
 }
 export const AccessPort = definePort<AccessBuzzApi>('access');

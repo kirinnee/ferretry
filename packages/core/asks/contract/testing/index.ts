@@ -17,6 +17,10 @@ import {
   type AskSourceSpec,
   type AskSummary,
   type AsksApi,
+  AskItemSchema,
+  type AskBoardSnapshot,
+  type AskOwnerAction,
+  AskOwnerActionError,
   type CloseReason,
   type EntryId,
   type SourceKey,
@@ -42,6 +46,73 @@ export class FakeAsks implements AsksApi {
   readonly #answers: AskAnswer[] = [];
   readonly #next = new Map<string, number>();
   #nextAnswer = 0;
+  readonly #drafts = new Map<string, AskDraft>();
+  readonly #parked = new Map<string, string>();
+  readonly #notes = new Map<string, string | undefined>();
+
+  async snapshots(filter: { readonly ferret?: string } = {}): Promise<readonly AskBoardSnapshot[]> {
+    const boards = filter.ferret === undefined ? [...this.#next.keys()] : [filter.ferret];
+    return boards.map(ferret => {
+      const rows = [...this.#asks.values()].filter(ask => ask.ferret === ferret);
+      const item = (ask: AskSummary) => {
+        const key = keyOf({ ferret, id: ask.id });
+        const draft = this.#drafts.get(key);
+        return AskItemSchema.parse({
+          id: ask.id,
+          subject: ask.subject,
+          kind: ask.kind === 'notice' ? 'info' : ask.kind,
+          source: 'question',
+          sourceRef: `ask:${ask.source}:${ask.entry}`,
+          why: draft?.why ?? 'because',
+          howToResolve: draft?.howToResolve ?? draft?.why ?? 'Read it.',
+          waitingSince: ask.raisedAt,
+          raisedBy: ask.raisedBy.kind === 'owner' ? 'human' : ask.raisedBy.kind === 'ferret' ? 'agent' : 'daemon',
+          raisedBySession: ask.raisedBy.kind === 'ferret' ? ferret : null,
+          raisedByName: null,
+          ...(this.#parked.has(key) ? { parked: { reason: 'snoozed', at: AT, until: this.#parked.get(key) } } : {}),
+        });
+      };
+      const items = rows.filter(row => row.state === 'open').map(item);
+      return {
+        v: 1 as const,
+        sessionId: ferret,
+        items,
+        count: items.length,
+        parseErrors: 0,
+        updatedAt: AT,
+        resolved: rows
+          .filter(row => row.state !== 'open')
+          .map(row => ({
+            ...item(row),
+            resolvedAt: AT,
+            resolvedBy: 'human' as const,
+            resolvedBySession: null,
+            resolvedByName: null,
+            resolutionNote: this.#notes.get(keyOf({ ferret, id: row.id })) ?? null,
+            disposition: row.state === 'answered' ? ('done' as const) : ('dismissed' as const),
+          })),
+      };
+    });
+  }
+
+  async ownerAction(action: AskOwnerAction): Promise<AskBoardSnapshot> {
+    if (action.ref.ferret !== 'machine-agenda')
+      throw new AskOwnerActionError('forbidden', 'these owner actions belong to the machine agenda');
+    const key = keyOf(action.ref);
+    const ask = this.#asks.get(key);
+    if (ask === undefined || ask.state !== 'open') throw new AskOwnerActionError('not-found', 'agenda item not found');
+    if (action.action === 'snooze') {
+      if (ask.kind === 'notice') throw new AskOwnerActionError('invalid', 'a notice is read, not snoozed');
+      if (action.until <= AT) throw new AskOwnerActionError('invalid', 'snooze until must be in the future');
+      this.#parked.set(key, action.until);
+    } else if (action.action === 'unsnooze') this.#parked.delete(key);
+    else {
+      this.#parked.delete(key);
+      this.#notes.set(key, action.note);
+      this.#asks.set(key, { ...ask, state: action.action === 'dismiss' ? 'closed' : 'answered' });
+    }
+    return (await this.snapshots({ ferret: action.ref.ferret }))[0]!;
+  }
 
   async raise(ask: AskDraft): Promise<AskRef> {
     const draft = AskDraftSchema.parse(ask);
@@ -52,6 +123,7 @@ export class FakeAsks implements AsksApi {
     const next = (this.#next.get(ferret) ?? 0) + 1;
     this.#next.set(ferret, next);
     const id = `A${next}` as AskId;
+    this.#drafts.set(keyOf({ ferret, id }), draft);
     this.#asks.set(keyOf({ ferret, id }), {
       id,
       source: draft.source,
