@@ -28,8 +28,12 @@ export function summaryOf(record: FerretRecord, details?: FerretDetails): Ferret
   // Public reads never carry the launch-time rollout exclusion set (today's session view).
   const summary: FerretSummary =
     transcript === undefined
-      ? rest
-      : { ...rest, transcript: (({ baseline: _baseline, ...shown }) => shown)(transcript) };
+      ? { ...rest, mode: record.mode ?? 'auto' }
+      : {
+          ...rest,
+          mode: record.mode ?? 'auto',
+          transcript: (({ baseline: _baseline, ...shown }) => shown)(transcript),
+        };
   if (details === undefined) return summary;
   const model = details.options?.model;
   const card = details.options?.card;

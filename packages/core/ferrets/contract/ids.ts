@@ -71,6 +71,8 @@ export const FerretRecordSchema = z.strictObject({
   parent: FerretIdSchema.optional(),
   pack: PackIdSchema.optional(),
   role: FerretRoleSchema,
+  /** Whether this ferret works autonomously or is the person's interactive terminal. */
+  mode: z.enum(['auto', 'interactive']).optional(),
   harness: HarnessKeySchema,
   runner: RunnerKeySchema,
   runtime: RuntimeNameSchema.optional(),

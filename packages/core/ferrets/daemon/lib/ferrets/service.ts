@@ -210,6 +210,7 @@ export class FerretsService implements FerretsApi {
       ...(request.pack === undefined ? {} : { pack: request.pack }),
       role,
       harness: harnessKey,
+      mode: request.options?.mode ?? 'auto',
       runner: 'tmux',
       ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
       ...(request.login === undefined ? {} : { login: request.login }),

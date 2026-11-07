@@ -230,3 +230,15 @@ test('Y a start bound to a harness conversation resumes it and carries it in the
     expect(bad.runner.starts).toBe(0);
   }
 });
+
+test('Z2 summaries carry the stored interaction mode across restart', async () => {
+  for (const mode of ['auto', 'interactive'] as const) {
+    const f = fixture();
+    f.registry.remove(f.id);
+    expect((await f.service.start({ folder: '/work', by: 'owner', options: { mode } })).ok).toBe(true);
+    const record = f.registry.get(f.id)!;
+    expect(record.mode).toBe(mode);
+    const loaded = new FerretRegistry([record]);
+    expect(loaded.summary(f.id)?.mode).toBe(mode);
+  }
+});
