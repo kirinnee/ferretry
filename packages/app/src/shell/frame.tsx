@@ -134,7 +134,7 @@ function Main({ route }: { readonly route: Route }) {
 function Side({ daemon }: { readonly daemon: string | undefined }) {
   const { plan, viewport } = useShell();
   const { show, holds } = plan.side;
-  if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
+  if (show === 'none' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
   if (daemon === undefined) return null;
   if (holds.kind === 'screen' && holds.screen.path.includes(':')) return null; // needs a subject the route lacks
   return (

@@ -1,9 +1,15 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { type FramePlan, planFrame, type Views, viewsOf } from '../layout/engine.ts';
-import { chooseLayout, type LayoutChoice, resolveLayout, type Viewport } from '../layout/layout.ts';
+import type { DeviceLayoutStore } from '../layout/device-layout.ts';
+import {
+  chooseLayout,
+  type Layout,
+  type LayoutChoice,
+  layoutCandidates,
+  resolveLayout,
+  type Viewport,
+} from '../layout/layout.ts';
 import { type RouteTable, routeTable } from '../router/routes.ts';
-import { APP_STORAGE } from '../storage/names.ts';
-import { type KeyValueStore, readRecord } from '../storage/records.ts';
 import {
   applyTextScale,
   resolveThemeMode,
@@ -13,7 +19,6 @@ import {
 } from '../theme/preferences.ts';
 import type { ScrollMemory } from '../scroll/scroll-memory.ts';
 import type { ShellRuntime } from './runtime.ts';
-import { z } from 'zod';
 
 /** Everything the shell's components read: the runtime, the views, the route table, the layout in force. */
 export interface ShellModel {
@@ -24,6 +29,8 @@ export interface ShellModel {
   readonly plan: FramePlan;
   readonly viewport: Viewport;
   readonly themes: ThemePreferenceStore;
+  /** This device's layout changes (`--device`), on top of the owner's layout. */
+  readonly layouts: DeviceLayoutStore;
   /** Where each page was scrolled, per history entry (`fy:app:scroll`, this tab only). */
   readonly scroll: ScrollMemory;
 }
@@ -80,30 +87,45 @@ function useAppliedTheme(browser: ShellWindow, preference: ThemePreference, dens
 export interface ShellProviderProps {
   readonly runtime: ShellRuntime;
   readonly themes: ThemePreferenceStore;
-  /** This device's local storage, for the `--device` layout override. */
-  readonly storage: KeyValueStore | null;
+  /** This device's layout changes (`--device`, saved in this browser), on top of the owner's layout. */
+  readonly layouts: DeviceLayoutStore;
   readonly browser: ShellWindow;
   readonly scroll: ScrollMemory;
   readonly children: ReactNode;
 }
 
-export function ShellProvider({ runtime, themes, storage, browser, scroll, children }: ShellProviderProps) {
+/**
+ * The owner's layout from the selected daemon (the Layouts plugin), re-read on `layouts.changed` and whenever the
+ * runtime changes (an inventory read can allow or block Layouts there). `undefined` with no daemon or no Layouts.
+ */
+function useOwnerLayout(runtime: ShellRuntime): Layout | undefined {
+  const version = useRuntimeVersion(runtime);
+  const selected = runtime.daemons.snapshot().selected;
+  useEffect(() => {
+    if (selected !== null) runtime.layouts.watch(selected);
+  }, [runtime, selected, version]);
+  return useSyncExternalStore(runtime.layouts.subscribe, () =>
+    selected === null ? undefined : runtime.layouts.current(selected),
+  );
+}
+
+export function ShellProvider({ runtime, themes, layouts, browser, scroll, children }: ShellProviderProps) {
   const phone = useMedia(browser, PHONE_QUERY);
   const preference = useSyncExternalStore(themes.subscribe, () => themes.snapshot());
+  const overrides = useSyncExternalStore(layouts.subscribe, layouts.snapshot);
+  const owner = useOwnerLayout(runtime);
   const views = useMemo(() => viewsOf(runtime.surfaces), [runtime]);
   const routes = useMemo(() => routeTable(views.screens.values()), [views]);
   const layout = useMemo(
-    // GAP: the daemon's layout (Layouts plugin, `config/layout.yaml`) has no app-side channel in the leaf yet; the
-    // device override and the built-in default are the two candidates today.
-    () => chooseLayout([readRecord(storage, APP_STORAGE.layout, z.unknown())], views.installed),
-    [storage, views],
+    () => chooseLayout(layoutCandidates(owner, overrides), views.installed),
+    [owner, overrides, views],
   );
   const viewport: Viewport = phone ? 'phone' : 'wide';
   const plan = useMemo(() => planFrame(resolveLayout(layout.layout, viewport), views), [layout, viewport, views]);
   useAppliedTheme(browser, preference, plan.density);
   const model = useMemo<ShellModel>(
-    () => ({ runtime, views, routes, layout, plan, viewport, themes, scroll }),
-    [runtime, views, routes, layout, plan, viewport, themes, scroll],
+    () => ({ runtime, views, routes, layout, plan, viewport, themes, layouts, scroll }),
+    [runtime, views, routes, layout, plan, viewport, themes, layouts, scroll],
   );
   return <ShellContext.Provider value={model}>{children}</ShellContext.Provider>;
 }

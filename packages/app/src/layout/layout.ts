@@ -1,62 +1,21 @@
-import { z } from 'zod';
+import { type Layout, LayoutSchema, LayoutSelectionSchema } from '@ferretry/plugin-layouts/contract';
+import type { z } from 'zod';
 import { isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './slots.ts';
 
 /**
  * A LAYOUT IS DATA (§5.3): a YAML item (`layouts/<id>.yaml`, or `config/layout.yaml` written by `fy layout set`),
- * read by the Layouts plugin and handed to the shell as JSON. The shell parses it here, checks it against the slot
- * list and the installed views, and places plugin views by it. An unknown view name is refused, so a layout cannot
- * break the app: a refused layout leaves the built-in default in force and says why.
+ * read by the Layouts plugin and handed to the shell as JSON (`GET /v1/layouts/current`). Its shape is the Layouts
+ * contract's `LayoutSchema`, the one schema both ends parse; the shell checks a layout against the slot list and the
+ * installed views, and places plugin views by it. An unknown view name is refused, so a layout cannot break the app:
+ * a refused layout leaves the next candidate (in the end the built-in default) in force and says why.
  */
 
-const ItemName = z
-  .string()
-  .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)?$/u)
-  .max(80);
-
-const NavSchema = z.strictObject({
-  side: z.enum(['left', 'right', 'top', 'bottom']),
-  style: z.enum(['rail', 'bar', 'list']).default('rail'),
-  items: z.array(ItemName).max(24),
-});
-
-const SideSchema = z.strictObject({
-  show: z.enum(['never', 'wide-only', 'always']),
-  /** `none`, a screen id, or `panels` (the `side` slot's panels). */
-  holds: ItemName,
-});
-
-const PanelsSchema = z.record(z.string().max(80), z.array(ItemName).max(24));
-
-const Density = z.enum(['compact', 'comfortable']);
-
-/** What a narrow screen overrides. Every field optional; `nav` replaces field by field. */
-const PhoneSchema = z.strictObject({
-  nav: NavSchema.partial().optional(),
-  side: SideSchema.partial().optional(),
-  top: z.array(ItemName).max(8).optional(),
-  density: Density.optional(),
-});
-
-export const LayoutSchema = z.strictObject({
-  id: z
-    .string()
-    .regex(/^[a-z][a-z0-9-]*$/u)
-    .max(40),
-  nav: NavSchema,
-  side: SideSchema.default({ show: 'never', holds: 'none' }),
-  top: z.array(ItemName).max(8).default(['daemon-picker', 'search']),
-  'composer.tools': z.array(ItemName).max(16).optional(),
-  panels: PanelsSchema.default({}),
-  density: Density.default('comfortable'),
-  phone: PhoneSchema.optional(),
-});
-
-export type Layout = z.infer<typeof LayoutSchema>;
-export type Density = z.infer<typeof Density>;
+export { LayoutSchema };
+export type { Layout };
 
 /**
- * The shell's built-in layout (§5.3): what is in force with Layouts off, or when a layout is refused. The Layouts
- * plugin ships the same default as its `layouts/default.yaml` item.
+ * The shell's built-in layout (§5.3): what is in force with Layouts off, or when every other layout is refused. The
+ * same layout the Layouts plugin ships as its `layouts/default.yaml` item.
  */
 export const DEFAULT_LAYOUT: Layout = LayoutSchema.parse({
   id: 'default',
@@ -79,12 +38,13 @@ export interface ResolvedLayout {
   readonly side: Layout['side'];
   readonly top: readonly string[];
   readonly panels: Readonly<Record<string, readonly string[]>>;
-  readonly density: Density;
+  readonly density: Layout['density'];
 }
 
 export function resolveLayout(layout: Layout, viewport: Viewport): ResolvedLayout {
   const panels: Record<string, readonly string[]> = { ...layout.panels };
-  if (layout['composer.tools'] !== undefined) panels['composer.tools'] = layout['composer.tools'];
+  // An empty `composer.tools` is the contract's default for "not listed": every declared tool shows, by order.
+  if (layout['composer.tools'].length > 0) panels['composer.tools'] = layout['composer.tools'];
   const base: ResolvedLayout = {
     id: layout.id,
     nav: layout.nav,
@@ -94,14 +54,7 @@ export function resolveLayout(layout: Layout, viewport: Viewport): ResolvedLayou
     density: layout.density,
   };
   if (viewport !== 'phone' || layout.phone === undefined) return base;
-  const phone = layout.phone;
-  return {
-    ...base,
-    nav: { ...base.nav, ...phone.nav },
-    side: { ...base.side, ...phone.side },
-    top: phone.top ?? base.top,
-    density: phone.density ?? base.density,
-  };
+  return { ...base, nav: { ...base.nav, ...layout.phone.nav } };
 }
 
 /** What a layout is checked against: the views the installed plugins declare (from their manifests). */
@@ -133,25 +86,17 @@ export function checkLayout(layout: Layout, installed: InstalledViews): readonly
     }
   };
   checkNav('nav.items', layout.nav.items);
-  checkNav('phone.nav.items', layout.phone?.nav?.items);
-  for (const [at, items] of [
-    ['top', layout.top],
-    ['phone.top', layout.phone?.top],
-  ] as const) {
-    for (const item of items ?? []) {
-      if (!topItems.includes(item)) issues.push({ at, message: `"${item}" is not a top-bar item` });
-    }
+  checkNav('phone.nav.items', layout.phone?.nav.items);
+  for (const item of layout.top) {
+    if (!topItems.includes(item)) issues.push({ at: 'top', message: `"${item}" is not a top-bar item` });
   }
-  for (const [at, side] of [
-    ['side.holds', layout.side.holds],
-    ['phone.side.holds', layout.phone?.side?.holds],
-  ] as const) {
-    if (side === undefined || side === 'none' || side === 'panels') continue;
-    if (!installed.screens.has(side)) issues.push({ at, message: `"${side}" is not an installed screen` });
+  const holds = layout.side.holds;
+  if (holds !== 'none' && holds !== 'panels' && !installed.screens.has(holds)) {
+    issues.push({ at: 'side.holds', message: `"${holds}" is not an installed screen` });
   }
   const panelSlots: readonly string[] = PANEL_SLOTS;
   const slots: [string, readonly string[]][] = Object.entries(layout.panels);
-  if (layout['composer.tools'] !== undefined) slots.push(['composer.tools', layout['composer.tools']]);
+  if (layout['composer.tools'].length > 0) slots.push(['composer.tools', layout['composer.tools']]);
   for (const [slot, ids] of slots) {
     if (!isSlotName(slot) || (!panelSlots.includes(slot) && !slot.includes('.') && slot !== 'side')) {
       issues.push({ at: `panels.${slot}`, message: `"${slot}" is not a slot that holds panels` });
@@ -246,4 +191,69 @@ export function setLayoutField(
   const parsed = LayoutSchema.safeParse(draft);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'not a valid layout' };
   return { ok: true, layout: parsed.data };
+}
+
+/**
+ * A device's own layout changes (`--device`, §5.3): whole top-level keys of a layout, the same shape as the owner's
+ * `overrides` in `config/layout.yaml` (the Layouts contract's `LayoutSelection.overrides`). They sit ON TOP of the
+ * owner's layout, so a key this device did not change still follows the owner's.
+ */
+export const LayoutOverridesSchema = LayoutSelectionSchema.shape.overrides.unwrap();
+export type LayoutOverrides = z.infer<typeof LayoutOverridesSchema>;
+
+/**
+ * Parses stored overrides, keeping ONLY the keys that were written. The contract's partial schema still fills the
+ * defaults of `top`, `composer.tools` and `panels`, which as an override would wipe the owner's top bar; an override
+ * names exactly what this device changed.
+ */
+export function parseOverrides(raw: unknown): LayoutOverrides | undefined {
+  const parsed = LayoutOverridesSchema.safeParse(raw);
+  if (!parsed.success || typeof raw !== 'object' || raw === null) return undefined;
+  const written = new Set(Object.keys(raw));
+  return Object.fromEntries(Object.entries(parsed.data).filter(([key]) => written.has(key))) as LayoutOverrides;
+}
+
+/** The layout with a device's overrides on top; an empty override set is the layout itself. */
+export function applyOverrides(layout: Layout, overrides: LayoutOverrides): Layout {
+  return Object.keys(overrides).length === 0 ? layout : { ...layout, ...overrides };
+}
+
+/** The top-level layout key a {@link setLayoutField} path edits. */
+const KEY_OF_PATH: Readonly<Record<string, keyof LayoutOverrides>> = {
+  'nav.side': 'nav',
+  'nav.style': 'nav',
+  'nav.items': 'nav',
+  'side.show': 'side',
+  'side.holds': 'side',
+  top: 'top',
+  density: 'density',
+};
+
+/**
+ * `fy layout set --device <path> <value>`: the same edit as {@link setLayoutField}, made to the layout in force and
+ * kept as this device's override of that one top-level key.
+ */
+export function setDeviceOverride(
+  base: Layout,
+  overrides: LayoutOverrides,
+  path: string,
+  value: string,
+): { readonly ok: true; readonly overrides: LayoutOverrides } | { readonly ok: false; readonly error: string } {
+  const key = KEY_OF_PATH[path];
+  if (key === undefined) return { ok: false, error: `"${path}" is not a layout setting` };
+  const edited = setLayoutField(applyOverrides(base, overrides), path, value);
+  if (!edited.ok) return edited;
+  return { ok: true, overrides: { ...overrides, [key]: edited.layout[key] } };
+}
+
+/**
+ * The candidates {@link chooseLayout} tries, in order (§5.3: a layout applies to the owner on every device by default,
+ * `--device` for one): the owner's layout from the daemon with this device's overrides on top, then the owner's
+ * layout alone (when the overrides are what a check refuses), then the built-in default with the overrides, and in
+ * the end the built-in default itself.
+ */
+export function layoutCandidates(owner: Layout | undefined, overrides: LayoutOverrides): readonly Layout[] {
+  const own = Object.keys(overrides).length > 0;
+  if (owner === undefined) return own ? [applyOverrides(DEFAULT_LAYOUT, overrides)] : [];
+  return own ? [applyOverrides(owner, overrides), owner, applyOverrides(DEFAULT_LAYOUT, overrides)] : [owner];
 }
