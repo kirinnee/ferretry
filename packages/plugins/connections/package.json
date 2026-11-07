@@ -20,7 +20,12 @@
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "react": "^19.0.0",
+    "lucide-react": "^0.468.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0"
+  }
 }
