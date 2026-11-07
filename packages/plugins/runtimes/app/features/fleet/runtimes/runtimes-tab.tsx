@@ -3,9 +3,8 @@
  * plus a profile — and each runtime's own page: its login, its profile's layers newest on top, its
  * model set, the fixed layer Ferretry adds last for an agent runtime, and Launch.
  *
- * GAP(conversation): today's "Import conversations…" button and screen are gone from this tab; the verb is now
- * Conversation's `fy link` (V-0285), and its screen is Conversation's to draw. Recorded in `ports-pending.json`
- * (`pendingReasons.runtimes`).
+ * Today's "Import conversations…" button is a link to Conversation's `links` screen (V-0285): the verb is now
+ * Conversation's `fy link`, so the screen that lists, previews and keeps conversations is Conversation's to draw.
  *
  * Launch never starts anything by itself. It opens the ordinary New session form with this runtime
  * picked, so the person still chooses the folder and says what they want; it is a click, never a load.
@@ -14,11 +13,13 @@
 import { daemonHomeHref } from '@ferretry/app';
 import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Badge, Button } from '../../../ui.ts';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { credentialEmail } from '../../../lib/logins-view.ts';
+import { CONVERSATIONS_HREF } from '../../../lib/conversations-link.ts';
+import { type MoveFerret, moveFerretWith } from '../../../lib/move-ferret.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.tsx';
@@ -30,7 +31,6 @@ import { DefaultRuntimeControl } from './default-runtime.tsx';
 import { isDefaultRuntime } from './default-runtime-model.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
 import {
-  type MoveFerret,
   RemoveRuntimeDialog,
   RenameRuntimeDialog,
   RuntimeActionButtons,
@@ -507,8 +507,8 @@ export interface RuntimesTabOptions {
   /** Supplied in tests. */
   readonly pollMs?: number;
   /**
-   * Moves one ferret onto another runtime, restarting it there with its conversation. Ferrets provides it; without it
-   * the removal dialog offers no move and a ferret simply keeps running until it ends.
+   * Moves one ferret onto another runtime, restarting it there with its conversation. Absent, it is Ferrets' declared
+   * move route over `client` (R-0355); a test supplies its own.
    */
   readonly moveFerret?: MoveFerret;
 }
@@ -519,10 +519,11 @@ export function RuntimesTab({
   machine,
   online,
   pollMs,
-  moveFerret,
+  moveFerret: suppliedMove,
   onRetry,
   onRefresh,
 }: MachineTabProps & RuntimesTabOptions) {
+  const moveFerret = useMemo(() => suppliedMove ?? moveFerretWith(client), [suppliedMove, client]);
   const { state, data, reload } = useMachineData(client);
   const changes = useAccountChanges({ client });
   const [detail, openDetail] = useMachineDetail(machineName, 'runtimes');
@@ -604,7 +605,7 @@ export function RuntimesTab({
         machine={machine}
         machineName={machineName}
         changes={changes}
-        {...(moveFerret === undefined ? {} : { moveFerret })}
+        moveFerret={moveFerret}
         onClose={() => setAct(null)}
         onMachineChanged={() => (onRefresh ?? onRetry)()}
         onRemoved={() => {
@@ -691,6 +692,14 @@ export function RuntimesTab({
                 <Plus size={16} aria-hidden="true" />
                 Add runtime
               </Button>
+              <a
+                className="inline-flex min-h-control items-center text-cell font-semibold text-accent underline"
+                href={CONVERSATIONS_HREF}
+                data-import-conversations-link=""
+                onClick={followInApp}
+              >
+                Import conversations
+              </a>
             </span>
           </div>
           <ul className="m-0 flex list-none flex-col gap-2 p-0">

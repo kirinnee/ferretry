@@ -29,10 +29,10 @@ import { Button, ContextMenu, type MenuAnchor, useDialogFocus } from '../../../u
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
+import type { MoveFerret } from '../../../lib/move-ferret.ts';
 import {
   blocksAsDefault,
   defaultCandidates,
-  type MoveConversation,
   moveConversation,
   movePlanSentence,
   moveTargets,
@@ -321,11 +321,9 @@ export interface RemoveRuntimeDialogProps {
   readonly machineName: string;
   readonly changes: AccountChanges;
   /**
-   * Moves one ferret onto another runtime, restarting it there with its conversation. The Ferrets app half
-   * provides it; without it the dialog offers no move and a ferret simply keeps running until it ends.
-   *
-   * GAP(ferrets): Ferrets declares no migrate/move route yet (R-0355), so nothing supplies it today. Recorded in
-   * `ports-pending.json` (`pendingReasons.runtimes`).
+   * Moves one ferret onto another runtime, restarting it there with its conversation: Ferrets' declared move route
+   * (R-0355), through `moveFerretWith`. Without it the dialog offers no move and a ferret simply keeps running until
+   * it ends.
    */
   readonly moveFerret?: MoveFerret;
   readonly onClose: () => void;
@@ -333,10 +331,6 @@ export interface RemoveRuntimeDialogProps {
   /** The machine's settings changed here (a new default runtime): read the machine again. */
   readonly onMachineChanged: () => void;
 }
-
-/** The Ferrets app half's move of one ferret to `runtime`, resumed on the same CLI or converted across to the other. */
-// GAP(ferrets): the move route is Ferrets' (R-0355) and its app half is not built; this is the seam it will fill.
-export type MoveFerret = (sessionId: string, runtime: string, conversation: MoveConversation) => Promise<void>;
 
 /** A ferret that could not be moved, and why. */
 interface MoveFailure {

@@ -20,7 +20,6 @@
 import { RendererView } from '@ferretry/app';
 import { FileWarning } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { FY_RENDER_LIMITS } from './fy-render-bounds.ts';
 import type { FyRenderEmbedBlock } from './fy-render.ts';
 
 /** What a host that can reach a board lends a block: the daemon whose board to ask. */
@@ -57,15 +56,12 @@ function CardRow({ id, host }: { readonly id: string; readonly host: FyRenderCar
 
 export function FyRenderCardEmbed({ block, host }: FyRenderCardEmbedProps) {
   const { embed } = block;
-  const shown = embed.kind === 'cards' ? embed.ids.slice(0, FY_RENDER_LIMITS.embedChildren) : [];
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset draws a border and legend; this is a plain labelled group of cards.
     <div className="fy-card-embed" data-fy-card-embed={block.type} role="group" aria-label={block.alt}>
       {embed.kind === 'card' ? <CardRow id={embed.id} host={host} /> : null}
-      {embed.kind === 'cards' ? shown.map(id => <CardRow key={id} id={id} host={host} />) : null}
-      {embed.kind === 'cards' && embed.ids.length > shown.length ? (
-        <p className="fy-card-embed-more">{embed.ids.length - shown.length} more on the board.</p>
-      ) : null}
+      {/* The grammar already bounds a list at `embedCards`, so no row is dropped here. */}
+      {embed.kind === 'cards' ? embed.ids.map(id => <CardRow key={id} id={id} host={host} />) : null}
       {embed.kind === 'children' ? (
         <>
           {noteRow(embed.parent, 'The cards under this one are on the board.')}
