@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type CapabilityGrants,
+  type CapabilityName,
   type CapabilityPresentation,
+  CAPABILITY_NAMES,
   DEFAULT_CAPABILITY_GRANTS,
+  GateConfigSchema,
   LIMITED_DEVICE_GRANTS,
 } from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
+import { grantsNamedIn, grantsProvenFrom } from '../../../../daemon/lib/grants/provenance.ts';
 import {
   type GrantAuditEntry,
   GrantError,
@@ -13,7 +17,10 @@ import {
   GrantsPatchSchema,
 } from '../../../../daemon/lib/grants/service.ts';
 
-function service(start: CapabilityGrants | 'undetermined' = DEFAULT_CAPABILITY_GRANTS, written = false) {
+function service(
+  start: CapabilityGrants | 'undetermined' = DEFAULT_CAPABILITY_GRANTS,
+  written: readonly CapabilityName[] = [],
+) {
   let grants: CapabilityGrants | undefined = start === 'undetermined' ? undefined : start;
   const history: GrantAuditEntry[] = [];
   const svc = new GrantService({
@@ -101,13 +108,47 @@ describe('the grants surface', () => {
     await svc.patch({ browser: { configure: false } }, owner);
     expect(grants().browser).toEqual({ use: true, configure: false });
     expect(history).toEqual([
-      { at: '2026-11-07T12:00:00.000Z' as GrantAuditEntry['at'], actor: 'admin-cli', changes: ['browser.configure=off'] },
+      {
+        at: '2026-11-07T12:00:00.000Z' as GrantAuditEntry['at'],
+        actor: 'admin-cli',
+        changes: ['browser.configure=off'],
+      },
     ]);
   });
 
-  test('G155 each capability reports its origin: default, or the config file', () => {
-    expect(service().svc.view(owner).capabilities[0]?.origin).toBe('default');
-    expect(service(DEFAULT_CAPABILITY_GRANTS, true).svc.view(owner).capabilities[0]?.origin).toBe('config file');
+  test('G155 each capability reports its OWN origin: a capability the file does not name is a default', () => {
+    expect(
+      service()
+        .svc.view(owner)
+        .capabilities.every(c => c.origin === 'default'),
+    ).toBe(true);
+    const origins = Object.fromEntries(
+      service(DEFAULT_CAPABILITY_GRANTS, ['terminal'])
+        .svc.view(owner)
+        .capabilities.map(c => [c.capability, c.origin]),
+    );
+    expect(origins.terminal).toBe('config file');
+    expect(origins.fleet).toBe('default');
+    expect(origins.browser).toBe('default');
+  });
+
+  test('G155 provenance is read from the raw document: an empty or security-only gate.yaml names no grant', () => {
+    expect(grantsNamedIn({})).toEqual([]);
+    expect(grantsNamedIn({ security: { unlockOnOpen: true } })).toEqual([]);
+    expect(grantsNamedIn(null)).toEqual([]);
+    expect(
+      grantsNamedIn({ grants: { fleet: { use: true, configure: true }, pairing: { use: false, configure: false } } }),
+    ).toEqual(['fleet', 'pairing']);
+  });
+
+  test('G155 without the raw text, the parsed grants never claim the file for a value it cannot prove', () => {
+    // An empty gate.yaml parses to the product default on every axis: none of it came from the file.
+    expect(grantsProvenFrom(GateConfigSchema.parse({}).grants)).toEqual([]);
+    expect(grantsProvenFrom(undefined)).toEqual([]);
+    // A written grants key narrows what it leaves out, so the file decided every capability.
+    expect(
+      grantsProvenFrom(GateConfigSchema.parse({ grants: { fleet: { use: true, configure: true } } }).grants),
+    ).toEqual(CAPABILITY_NAMES);
   });
 
   test('G154 an undetermined document reports both axes shut and refuses every change', async () => {

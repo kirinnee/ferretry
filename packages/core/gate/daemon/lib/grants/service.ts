@@ -125,8 +125,8 @@ export function grantChanges(current: CapabilityGrants, next: CapabilityGrants):
 export interface GrantDocumentPort {
   /** The daemon-wide half in effect, or `undefined` when undetermined. */
   read(): CapabilityGrants | undefined;
-  /** Whether `gate.yaml` is on disk (the provenance column, G155). */
-  written(): boolean;
+  /** Which capabilities `gate.yaml` actually names (the provenance column, per capability, G155). */
+  written(): readonly CapabilityName[];
   write(next: CapabilityGrants): Promise<void>;
 }
 
@@ -177,7 +177,7 @@ export class GrantService {
           configureRefusal: configure.refusal,
           // LOCALITY decides it, and nothing else can: no caller off this host ever widens (G46).
           mayGrant: evaluation.hostLocal,
-          origin: written ? 'config file' : 'default',
+          origin: written.includes(name) ? 'config file' : 'default',
         };
       }),
       governed: evaluation.governed,
@@ -195,7 +195,10 @@ export class GrantService {
   async patch(patch: GrantsPatch, presentation: CapabilityPresentation): Promise<GrantsView> {
     const current = this.deps.document.read();
     if (current === undefined)
-      throw new GrantError('unavailable', 'this daemon could not read its capability grants, so it will not change them');
+      throw new GrantError(
+        'unavailable',
+        'this daemon could not read its capability grants, so it will not change them',
+      );
     const evaluation = this.#evaluate(presentation);
     const next = applyGrantPatch(current, patch);
     const widened = widenedBy(current, next);
@@ -223,13 +226,20 @@ export class GrantService {
           );
       }
       if (!evaluation.stepUp)
-        throw new GrantError('step-up-required', 'changing these grants needs a passkey confirmation from this device.');
+        throw new GrantError(
+          'step-up-required',
+          'changing these grants needs a passkey confirmation from this device.',
+        );
     }
     const changes = grantChanges(current, next);
     await this.deps.document.write(next);
     // AFTER the write, so a record can never claim a change that did not reach the document.
     if (changes.length > 0)
-      await this.deps.history.record({ at: this.deps.clock.now() as GrantAuditEntry['at'], actor: presentation.actor, changes });
+      await this.deps.history.record({
+        at: this.deps.clock.now() as GrantAuditEntry['at'],
+        actor: presentation.actor,
+        changes,
+      });
     return this.view({ ...presentation });
   }
 
