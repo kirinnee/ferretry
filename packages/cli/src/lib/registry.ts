@@ -7,6 +7,13 @@
  */
 import type { CliImplementation, Manifest } from '@ferretry/kernel/manifest';
 
+/**
+ * A half built for one manifest. `CliImplementation<M>` is not assignable to `CliImplementation<Manifest>` (its `build`
+ * takes a `CliContext<M>`), so the registry holds them as `any` and the shell reads only `skeleton` and `build`.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: variance of the leaf's CliImplementation<M>
+export type AnyCliImplementation = CliImplementation<any>;
+
 export interface RegistryEntry {
   /** The plugin id (`board`), also the first word of its noun. */
   readonly id: string;
@@ -15,7 +22,7 @@ export interface RegistryEntry {
   /** The effective contract hash compiled into this `fy` (§9.6). Compared with the daemon's before every call. */
   readonly contract: string;
   /** Loads the `cli/` half. Lazy, so a verb loads only the plugin it runs. */
-  load(): Promise<CliImplementation>;
+  load(): Promise<AnyCliImplementation>;
 }
 
 export interface CommandRegistry {

@@ -1,0 +1,262 @@
+import { describe, it } from 'bun:test';
+import { definePort } from '@ferretry/kernel/contract';
+import { definePlugin } from '@ferretry/kernel/manifest';
+import should from 'should';
+import { ASK_ROUTES, askRows } from '../../src/lib/commands/ask.ts';
+import { diagnose, renderFindings } from '../../src/lib/commands/doctor.ts';
+import { compiledWords, findWords } from '../../src/lib/commands/words.ts';
+import { runFy } from '../../src/lib/run.ts';
+import { boardEntry, fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';
+import { route } from '@ferretry/kernel/manifest';
+
+const up = { state: 'up', baseUrl: 'http://127.0.0.1:7431', health: { protocol: 1, version: '5.0.0' } } as const;
+const down = { state: 'down', baseUrl: 'http://127.0.0.1:7431', why: 'refused' } as const;
+
+describe('fy plugin', () => {
+  it('should list code plugins with state, contract agreement and who needs them, and daemon-only data plugins', async () => {
+    const { world, io } = fakeWorld({
+      registry: registryOf(boardEntry()),
+      inventory: inventoryOf({ id: 'board', contract: 'other' }, { id: 'tiny', contract: 'x' }),
+    });
+    should(await runFy(['plugin', 'list'], world)).equal(0);
+    const text = io.stdout();
+    should(text).match(/board\s+code\s+on\s+5\.0\.0\s+differs\s+3 verbs, 2 routes, 2 tools/u);
+    should(text).match(/tiny\s+data\s+on\s+-\s+daemon only/u);
+  });
+
+  it('should show one plugin in words, and a data plugin as the daemon’s', async () => {
+    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'h-board' }, { id: 'tiny', contract: 'x' }) });
+    should(await runFy(['plugin', 'show', 'board'], world)).equal(0);
+    should(io.stdout()).containEql('Board (board) 5.0.0  code plugin, on');
+    should(io.stdout()).containEql('verbs     card show, card move, board');
+    should(await runFy(['plugin', 'show', 'tiny'], world)).equal(0);
+    should(io.stdout()).containEql('tiny  data plugin, on');
+  });
+
+  it('should refuse to show a plugin nobody has, and to name none', async () => {
+    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf() });
+    should(await runFy(['plugin', 'show', 'ghost'], world)).equal(1);
+    should(io.stderr()).containEql('no plugin "ghost"');
+    should(await runFy(['plugin', 'show'], world)).equal(2);
+  });
+
+  const A = definePort<{ a(): void }>('a');
+  const dependency = () => {
+    const base = definePlugin({ id: 'base', title: 'Base', version: '5.0.0', api: 5, core: false, kinds: ['command'], provides: { a: A } });
+    const top = definePlugin({ id: 'top', title: 'Top', version: '5.0.0', api: 5, core: false, kinds: ['command'], needs: { a: A } });
+    return registryOf(skeletonEntry(base, 'b'), skeletonEntry(top, 't'));
+  };
+
+  it('should refuse to turn a plugin off while a running plugin needs it, naming the dependents and the flag', async () => {
+    const { world, io } = fakeWorld({ registry: dependency(), inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }) });
+    should(await runFy(['plugin', 'off', 'base'], world)).equal(1);
+    should(io.stderr()).containEql('needed by top');
+    should(io.stderr()).containEql('--with-dependents');
+  });
+
+  it('should, once confirmed, say the write is not built yet instead of pretending', async () => {
+    const { world, io } = fakeWorld({ registry: dependency(), inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }) });
+    should(await runFy(['plugin', 'off', 'base', '--with-dependents'], world)).equal(69);
+    should(io.stderr()).containEql('not built yet');
+  });
+
+  it('should refuse to turn a plugin on while what it needs is off, and a core piece either way', async () => {
+    const { world, io } = fakeWorld({ registry: dependency(), inventory: inventoryOf({ id: 'base', on: false, contract: 'b' }, { id: 'top', on: false, contract: 't' }) });
+    should(await runFy(['plugin', 'on', 'top'], world)).equal(1);
+    should(io.stderr()).containEql('needs base');
+    const core = definePlugin({ id: 'gate', title: 'Gate', version: '5.0.0', api: 5, core: true, kinds: [] });
+    const coreWorld = fakeWorld({ registry: registryOf(skeletonEntry(core)), inventory: inventoryOf({ id: 'gate', contract: 'g' }) });
+    should(await runFy(['plugin', 'off', 'gate'], coreWorld.world)).equal(1);
+    should(coreWorld.io.stderr()).containEql('core piece');
+  });
+
+  it('should say the data-plugin verbs are not built yet', async () => {
+    const { world, io } = fakeWorld();
+    should(await runFy(['plugin', 'add', './x'], world)).equal(69);
+    should(io.stderr()).containEql('data plugins is not built yet');
+  });
+});
+
+describe('fy words', () => {
+  const registry = registryOf(boardEntry());
+
+  it('should find a word, or the word it replaced', () => {
+    const words = compiledWords(registry);
+    should(findWords(words, 'card').map(word => word.word)).deepEqual(['card']);
+    should(findWords(words, 'Task').map(word => word.word)).deepEqual(['card']);
+    should(findWords(words, 'nothing')).deepEqual([]);
+  });
+
+  it('should print the compiled words with a note when the daemon is away', async () => {
+    const { world, io } = fakeWorld({ registry, probe: down });
+    should(await runFy(['words', 'task'], world)).equal(0);
+    should(io.stdout()).match(/card\s+Board\s+a unit of work on the board\s+task/u);
+    should(io.stderr()).containEql('compiled into this fy');
+  });
+
+  it('should prefer the daemon’s glossary, data plugins’ words included', async () => {
+    const fake = fakeWorld({ registry });
+    fake.transport.replies.push({ status: 200, body: { words: [{ word: 'sitrep', means: 'a ferret report', insteadOf: ['status'], plugin: 'tiny' }] } });
+    should(await runFy(['words', 'status'], fake.world)).equal(0);
+    should(fake.io.stdout()).containEql('sitrep');
+    should(fake.io.stderr()).equal('');
+  });
+
+  it('should exit 1 for a word nobody owns', async () => {
+    const { world, io } = fakeWorld({ registry, probe: down });
+    should(await runFy(['words', 'zzz'], world)).equal(1);
+    should(io.stderr()).containEql('no word "zzz"');
+  });
+});
+
+describe('fy doctor', () => {
+  const base = {
+    binary: 'fy',
+    probe: up,
+    inventory: inventoryOf({ id: 'board', contract: 'h' }),
+    registry: [{ id: 'board', contract: 'h' }],
+    titles: { board: 'Board' },
+    halves: [{ id: 'board', title: 'Board', skeleton: false }],
+    conflicts: [],
+    environment: {},
+  } as const;
+
+  it('should pass when everything agrees', () => {
+    const findings = diagnose(base);
+    should(findings.every(finding => finding.state === 'ok')).be.true();
+  });
+
+  it('should fail with the fix when the daemon is away', () => {
+    const findings = diagnose({ ...base, probe: down, inventory: { unreadable: 'x' } });
+    should(findings[0]).match({ state: 'fail', title: 'daemon', fix: 'fy daemon start' });
+  });
+
+  it('should fail on a protocol mismatch and on a plugin whose contract differs, warn on one turned off', () => {
+    const mismatched = diagnose({ ...base, probe: { ...up, health: { protocol: 2, version: '9' } } as never });
+    should(mismatched.find(finding => finding.title === 'session protocol')?.state).equal('fail');
+    const different = diagnose({ ...base, inventory: inventoryOf({ id: 'board', contract: 'other' }) });
+    should(different.find(finding => finding.title === 'plugin board')?.state).equal('fail');
+    const off = diagnose({ ...base, inventory: inventoryOf({ id: 'board', on: false, contract: 'h' }) });
+    should(off.find(finding => finding.title === 'plugin board')?.state).equal('warn');
+  });
+
+  it('should name skeleton halves, halves that will not load, verb conflicts and daemon-only plugins', () => {
+    const findings = diagnose({
+      ...base,
+      inventory: inventoryOf({ id: 'board', contract: 'h' }, { id: 'tiny', contract: 'x' }),
+      halves: [{ id: 'board', title: 'Board', skeleton: true }, { id: 'bad', title: 'Bad', skeleton: false, error: 'boom' }],
+      conflicts: [{ line: 'doctor', owner: 'clash', keptFrom: 'shell' }],
+    });
+    const titles = findings.map(finding => finding.title);
+    should(titles).containEql('not built yet');
+    should(titles).containEql('bad commands');
+    should(titles).containEql('verb conflict');
+    should(titles).containEql('daemon-only plugins');
+  });
+
+  it('S60 should warn about FY_TOKEN in a pane', () => {
+    const findings = diagnose({ ...base, environment: { FY_SESSION_ID: 's', FY_TOKEN: 'x' } });
+    should(findings.find(finding => finding.title === 'credential')?.state).equal('warn');
+  });
+
+  it('should render a fix under a failing line, and exit 1 only when something failed', async () => {
+    should(renderFindings(diagnose({ ...base, probe: down, inventory: { unreadable: 'x' } }))).containEql('      fix: fy daemon start');
+    const healthy = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'h-board' }) });
+    should(await runFy(['doctor'], healthy.world)).equal(0);
+    const broken = fakeWorld({ registry: registryOf(boardEntry()), probe: down });
+    should(await runFy(['doctor'], broken.world)).equal(1);
+  });
+});
+
+describe('fy daemon', () => {
+  it('should report a running daemon with its build and whether the plugins agree', async () => {
+    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'h-board' }) });
+    should(await runFy(['daemon', 'status'], world)).equal(0);
+    should(io.stdout()).containEql('version  5.0.0');
+    should(io.stdout()).containEql('every plugin of this fy agrees with the daemon');
+  });
+
+  it('should point at the restart when a plugin differs', async () => {
+    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'other' }) });
+    await runFy(['daemon', 'status'], world);
+    should(io.stdout()).containEql('board differ or are missing: restart the daemon with `fy daemon restart`');
+  });
+
+  it('should exit 1 when the daemon is not running, naming the start command', async () => {
+    const { world, io } = fakeWorld({ probe: down });
+    should(await runFy(['daemon', 'status'], world)).equal(1);
+    should(io.stderr()).containEql('fy daemon start');
+  });
+
+  it('should start the daemon, or say why not, or note it is already up', async () => {
+    const started = fakeWorld({ probe: down, launch: { started: true, baseUrl: 'http://127.0.0.1:7431' } });
+    should(await runFy(['daemon', 'start'], started.world)).equal(0);
+    const failed = fakeWorld({ probe: down, launch: { started: false, why: 'no fyd' } });
+    should(await runFy(['daemon', 'start'], failed.world)).equal(1);
+    should(failed.io.stderr()).equal('no fyd\n');
+    const already = fakeWorld();
+    should(await runFy(['daemon', 'start'], already.world)).equal(0);
+    should(already.io.stdout()).containEql('already running');
+  });
+
+  it('should say stop and restart are not built yet', async () => {
+    const { world, io } = fakeWorld();
+    should(await runFy(['daemon', 'stop'], world)).equal(69);
+    should(await runFy(['daemon', 'restart'], world)).equal(69);
+    should(io.stderr()).containEql('Restarting the daemon from fy is not built yet');
+  });
+});
+
+describe('fy ask', () => {
+  const asksManifest = definePlugin({
+    id: 'asks', title: 'Asks', version: '5.0.0', api: 5, core: true, kinds: [],
+    actions: {
+      routes: [
+        route(ASK_ROUTES.list, { minimum: 'authenticated', caller: 'any', audit: { skip: 'read' }, guard: { none: 'ids' } }),
+        route(ASK_ROUTES.show, { minimum: 'authenticated', caller: 'any', audit: { skip: 'read' }, guard: { none: 'ids' } }),
+        route(ASK_ROUTES.answer, { minimum: 'authenticated', caller: 'person', audit: { skip: 'test' }, guard: { none: 'ids' } }),
+      ],
+    },
+  });
+  const withAsks = () => {
+    const fake = fakeWorld({ registry: registryOf(skeletonEntry(asksManifest, 'h-asks')), inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }) });
+    return fake;
+  };
+
+  it('should say Asks is not built yet while it declares no routes', async () => {
+    const { world, io } = fakeWorld();
+    should(await runFy(['ask'], world)).equal(69);
+    should(io.stderr()).containEql('Asks is not built yet');
+  });
+
+  it('should list the asks waiting, or say none are', async () => {
+    const { world, io, transport } = withAsks();
+    transport.replies.push({ status: 200, body: { asks: [{ id: 'a1', source: 'board', title: 'Move c1?' }] } });
+    should(await runFy(['ask'], world)).equal(0);
+    should(io.stdout()).match(/a1\s+board\s+Move c1\?/u);
+    transport.replies.push({ status: 200, body: [] });
+    await runFy(['ask', 'list'], world);
+    should(io.stdout()).containEql('no asks are waiting');
+  });
+
+  it('should answer an ask with the text, and show one', async () => {
+    const { world, io, transport } = withAsks();
+    should(await runFy(['ask', 'answer', 'a1', 'yes', 'please'], world)).equal(0);
+    should(transport.sent).deepEqual([{ method: 'POST', path: '/v1/asks/a1/answer', body: { answer: 'yes please' } }]);
+    should(io.stdout()).containEql('answered a1');
+    transport.replies.push({ status: 200, body: { id: 'a1' } });
+    should(await runFy(['ask', 'show', 'a1'], world)).equal(0);
+  });
+
+  it('should refuse an answer without an id and text, and an unknown subcommand', async () => {
+    const { world } = withAsks();
+    should(await runFy(['ask', 'answer', 'a1'], world)).equal(2);
+    should(await runFy(['ask', 'show'], world)).equal(2);
+    should(await runFy(['ask', 'zap'], world)).equal(2);
+  });
+
+  it('should read a list shape it does not know as an error, not a crash', () => {
+    should(() => askRows({ nope: true })).throw(/shape this fy does not read/u);
+  });
+});
+
