@@ -221,3 +221,36 @@ route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1
 tool	card_plan	added	tasks are cards (design §1.4): today's task_plan; descriptor fields unchanged
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
 route	GET /v1/plans	added	new in 5.0: the owner's list of staged plans (design §3.3)
+route	GET /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	PATCH /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	PATCH /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/status	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/status	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/proposals	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/proposals	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/proposals/:id	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/proposals/:id	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/proposals/:id/patch	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/proposals/:id/patch	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/proposals/:id/apply-preview	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/proposals/:id/apply-preview	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/proposals/:id/apply	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/proposals/:id/apply	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/run	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/run	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/sessions	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; sessions are ferrets (design §1.4)
+route	GET /v1/lessons/ferrets	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; sessions are ferrets (design §1.4)
+route	PATCH /v1/sessions/:sessionId/learning	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/…
+route	PATCH /v1/ferrets/:ferretId/lessons	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/…
+route	POST /v1/learning/scan/estimate	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/scan/estimate	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/scan	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/scan	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/scan/cancel	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/scan/cancel	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/scan	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/scan	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/agent/lessons	removed	learning is lessons and /v1/agent/… is replaced (agent word, design §1.4): the ferret files a lesson at /v1/lessons/suggest; Gate admits the ferret credential, so minimum none becomes authenticated and the handler still refuses any caller without a ferret credential (403 forbidden)
+route	POST /v1/lessons/suggest	added	learning is lessons and /v1/agent/… is replaced (agent word, design §1.4): the ferret files a lesson at /v1/lessons/suggest; Gate admits the ferret credential, so minimum none becomes authenticated and the handler still refuses any caller without a ferret credential (403 forbidden)
+route	GET /v1/lessons/directory	added	new in 5.0: the ferrets a Lessons view names (id, name, folder); the screens used the sessions list for this, and a half talks only to its own plugin
