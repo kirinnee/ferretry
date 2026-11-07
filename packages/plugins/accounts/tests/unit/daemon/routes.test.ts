@@ -74,9 +74,11 @@ describe('the account routes through the kernel', () => {
     await h.request('POST', '/v1/accounts/GITHUB/sign-ins', {
       body: { place: { kind: 'site', domains: ['github.com'], match: ['github.com'] } },
     });
-    // The owner's read through the kernel; a ferret's (today's `operator` admits a ferret, which the kernel's stand-in
-    // admission does not model yet) on the route table below.
-    const hint = await h.request('GET', '/v1/accounts/hint', { query: { site: 'https://github.com/login' } });
+    // `operator` admits a ferret (today's `meetsMinimum`): the hint is a ferret's read.
+    const hint = await h.request('GET', '/v1/accounts/hint', {
+      query: { site: 'https://github.com/login' },
+      as: ferret('F1'),
+    });
     should(hint.status).equal(200);
     should(hint.body).not.match(/"fields"|"seals?"|"totp"|"params"|"recipe"|"proposals"|"factors"/u);
     should(hint.json<{ site: string; hints: unknown[] }>()).match({ site: 'github.com' });
