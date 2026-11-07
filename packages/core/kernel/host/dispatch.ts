@@ -1,6 +1,14 @@
 import type { Admission, AdmissionDecision, OutputGuard } from '../contract/bound.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
-import type { ApiRequest, ApiResponse, PlainApiResponse, PublishedApiResponse } from '../contract/http.ts';
+import type { Actor } from '../contract/act.ts';
+import type {
+  ApiRequest,
+  ApiResponse,
+  PlainApiResponse,
+  PublishedApiResponse,
+  RouteParameters,
+} from '../contract/http.ts';
 import { errorResponse } from '../contract/http.ts';
 import type { PluginId } from '../contract/ids.ts';
 import type {
@@ -63,6 +71,8 @@ export interface DispatchBindings {
   /** Undefined, a throw or a damaged Vault: a `guard: 'secrets'` body is withheld. */
   outputGuard(): OutputGuard | undefined;
   readonly version: string;
+  /** Gzips an opted-in answer (`compress: true`); absent, every answer is plain. */
+  readonly compressor?: ResponseCompressor;
 }
 
 /**
@@ -133,6 +143,8 @@ async function run(
   descriptor: RouteDescriptor | MemberRouteDescriptor,
   build: () => Promise<ApiResponse>,
   owner?: Owner,
+  /** What the dispatcher decides about the built answer before its final check (a route's compression). */
+  prepare?: (built: ApiResponse) => Promise<ApiResponse>,
 ): Promise<ApiResponse> {
   const policy = <R extends ApiResponse>(response: R): R =>
     withVersion(descriptor.noStore === true ? noStore(response) : response, bindings.version);
@@ -153,6 +165,8 @@ async function run(
   } catch (error) {
     built = failureResponse(error);
   }
+  // Never a guarded answer: its body is chosen by the final check.
+  if (prepare !== undefined && !guarded && built.late === undefined) built = await prepare(built);
   const showable = (): boolean => {
     if (!guarded) return true;
     try {
@@ -244,9 +258,68 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
-    return await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call), found.route.owner),
+    let executed = false;
+    const response = await runInCall({ actor: decision.actor }, () =>
+      run(
+        this.bindings,
+        found.route,
+        () => {
+          executed = true;
+          return handle(call);
+        },
+        found.route.owner,
+        // Decided once, after the handler (and any 304 it chose), before the final check publishes it: only an
+        // opted-in route's plain 200 JSON GET.
+        async built => {
+          const packed = await compressed(
+            request,
+            built,
+            this.bindings.compressor,
+            found.route.compress === true,
+          ).catch((): { readonly response: ApiResponse; readonly gzip?: Uint8Array } => ({ response: built }));
+          return packed.gzip === undefined ? packed.response : { ...packed.response, gzip: packed.gzip };
+        },
+      ),
     );
+    if (executed)
+      this.recorded({
+        table: 'route',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
+    return response;
+  }
+
+  /** Tells Gate about one audited call after its handler settled (`Admission.recorded`); never changes the answer. */
+  private recorded(input: {
+    readonly table: 'route' | 'socket' | 'member';
+    readonly descriptor: (RouteDescriptor | MemberRouteDescriptor) & { readonly audit: RouteDescriptor['audit'] };
+    readonly request: ApiRequest;
+    readonly params: RouteParameters;
+    readonly decision: { readonly standing: object; readonly actor: Actor };
+    readonly status: number;
+    readonly response?: ApiResponse;
+  }): void {
+    if (!('record' in input.descriptor.audit)) return;
+    try {
+      this.bindings.admission()?.recorded?.({
+        table: input.table,
+        descriptor: input.descriptor as ScopedRoute,
+        request: input.request,
+        params: input.params,
+        standing: input.decision.standing,
+        actor: input.decision.actor,
+        ...(input.request.principal === undefined ? {} : { principal: input.request.principal }),
+        status: input.status,
+        ...(input.response === undefined ? {} : { response: input.response }),
+      });
+    } catch {
+      // The record is Gate's; the answer stands.
+    }
   }
 
   private async dispatchMember(request: ApiRequest): Promise<ApiResponse> {
@@ -271,9 +344,29 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as MemberCallContext;
-    return await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call), found.route.owner),
+    let executed = false;
+    const response = await runInCall({ actor: decision.actor }, () =>
+      run(
+        this.bindings,
+        found.route,
+        () => {
+          executed = true;
+          return handle(call);
+        },
+        found.route.owner,
+      ),
     );
+    if (executed)
+      this.recorded({
+        table: 'member',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
+    return response;
   }
 
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
@@ -289,6 +382,7 @@ export class Dispatcher {
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     try {
       const attach = await runInCall({ actor: decision.actor }, () => accept(call));
+      this.recorded({ table: 'socket', descriptor: found.route, request, params: found.params, decision, status: 101 });
       return {
         outcome: 'accepted',
         attach: async downstream => {
@@ -356,7 +450,17 @@ export class Dispatcher {
         },
       };
     } catch (error) {
-      return { outcome: 'refused', response: failureResponse(error) };
+      const response = failureResponse(error);
+      this.recorded({
+        table: 'socket',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
+      return { outcome: 'refused', response };
     }
   }
 

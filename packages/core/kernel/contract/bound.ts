@@ -51,6 +51,49 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    * warden. Anything not returned is omitted, so a limited device cannot discover it.
    */
   inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+  /**
+   * The Gate axis of a plugin's own config write (`kernel.config.write`/`remove`): asked only when the edit
+   * LOOSENS, with the plain sentences of what widens and the actor of the call in progress (the default actor outside
+   * a call). `apply` puts it into
+   * effect; `hold` (and an absent judge, or one that throws) holds it for the owner, the tighter version in effect.
+   */
+  judgeConfigWrite?(input: ConfigWriteJudgement): 'apply' | 'hold';
+  /**
+   * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
+   * the handler's own refusals (an `ApiError`) and failures included, as today's audited-route decorator recorded
+   * every outcome of the handler. A call admission refused, or a plugin not serving, never reached a handler and is
+   * not told (today: "a request the authorization boundary refuses before the handler runs is not recorded").
+   * Never changes the answer; a throw is swallowed.
+   */
+  recorded?(call: RecordedCall): void;
+}
+
+/** What Gate's judge is asked about one loosening config edit. */
+export interface ConfigWriteJudgement {
+  readonly plugin: string;
+  /** The file, relative to `config/`. */
+  readonly path: string;
+  readonly removal: boolean;
+  readonly sentences: readonly string[];
+  /** Who the call in progress runs as. */
+  readonly actor: Actor;
+}
+
+/** One audited call, as the dispatcher reports it after the handler (or the refusal) settled. */
+export interface RecordedCall {
+  readonly table: 'route' | 'socket' | 'tool' | 'member';
+  readonly descriptor: ScopedRoute | MemberRouteDescriptor;
+  readonly request: ApiRequest;
+  readonly params: RouteParameters;
+  /** Gate's standing for the call; absent when admission refused it. */
+  readonly standing?: object;
+  readonly actor?: Actor;
+  /** The session principal the call carried, if any. */
+  readonly principal?: ApiRequest['principal'];
+  /** The final status the caller was answered (or, for a socket, the upgrade's: 101 when accepted). */
+  readonly status: number;
+  /** The answer as built (a route's), for a rule that reads NAMES out of it; absent for a socket. */
+  readonly response?: ApiResponse;
 }
 
 /** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */
@@ -89,7 +132,20 @@ export const WITHHELD_SENTENCE = 'This was withheld because a private value was 
 
 /** Asked by `kernel.act` inside the target's queue immediately before every act (§4.7). Synchronous. */
 export interface InputHolds {
+  /**
+   * The fresh read a decision needs (the target adapter's `document()` / facts), awaited by the kernel INSIDE the
+   * target's queue; the kernel then calls {@link decide} synchronously in the same continuation, with no await
+   * between, so the decision is made on what the target is now rather than on a read from before a queued act. A
+   * throw fails closed (`holds_unavailable`).
+   */
+  prepare?(target: TargetRef, op: Op, actor: Actor): Promise<void>;
   decide(target: TargetRef, op: Op, actor: Actor, reveal?: RevealGrant): HoldDecision;
+  /**
+   * Told by the kernel after each act that was allowed and whose `fn` settled successfully (a write-only act only
+   * when its Ack is `done`); never for a refused or failed act, never by a tool. Feeds what follows from acts (today's
+   * sign-in lock from page acts). A throw is swallowed: the act already happened.
+   */
+  observed?(target: TargetRef, op: Op, actor: Actor): void;
 }
 
 export const InputHoldsPort = defineBoundPort<InputHolds>('input-holds', 'vault');
@@ -157,6 +213,24 @@ export interface ChildEnvironmentOpener {
 
 export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');
 
+/**
+ * The Vault's value for one secret name, for the KERNEL's own-secret resolve only (`kernel.secrets`, lead decision J):
+ * the kernel asks it after checking the plugin declared the name and its own configuration names it. `undefined` =
+ * the Vault has no such secret. No half may hold it.
+ */
+export interface SecretResolver {
+  resolve(name: string): Promise<string | undefined>;
+}
+
+export const SecretResolverPort = defineBoundPort<SecretResolver>('secret-resolver', 'vault');
+
+/**
+ * Kernel-bound ports no half may hold, not even through `needs` or `uses`: the kernel binds them into its own
+ * adapters only (the ChildEnvironment opener into the spawn adapter, lead decision 8). A manifest that asks for one
+ * is refused at plan, and plugin-graph refuses it in CI.
+ */
+export const KERNEL_ONLY_PORTS: readonly string[] = Object.freeze([ChildEnvironmentPort.name, SecretResolverPort.name]);
+
 export const KERNEL_BOUND_PORTS = [
   AdmissionPort,
   OutputGuardPort,
@@ -164,4 +238,5 @@ export const KERNEL_BOUND_PORTS = [
   RedactionPort,
   WorkFoldersPort,
   ChildEnvironmentPort,
+  SecretResolverPort,
 ] as const;

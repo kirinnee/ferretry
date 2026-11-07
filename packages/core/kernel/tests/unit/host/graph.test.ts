@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AdmissionPort } from '../../../contract/bound.ts';
+import { AdmissionPort, ChildEnvironmentPort } from '../../../contract/bound.ts';
 import { definePort } from '../../../contract/define.ts';
 import { dependentsOf, planGraph } from '../../../host/graph.ts';
 import type { Manifest } from '../../../manifest/types.ts';
@@ -78,5 +78,24 @@ describe('the plugin graph (§7.6 step 1, §2.4)', () => {
     ];
     const plan = planGraph(manifests, () => true, none);
     expect(dependentsOf('asks', plan.order, plan.providers)).toEqual(['board', 'agenda']);
+  });
+});
+
+describe('DD the ChildEnvironment opener reaches no half (lead decision 8)', () => {
+  test('a plugin that needs or uses it is refused at plan; Vault providing it still starts', () => {
+    const plan = planGraph(
+      [
+        plugin('vault', { provides: { childEnvironments: ChildEnvironmentPort } }),
+        plugin('thief', { needs: { opener: ChildEnvironmentPort } }),
+        plugin('peeker', { uses: { opener: ChildEnvironmentPort } }),
+      ],
+      () => true,
+      none,
+    );
+    expect(plan.order.map(manifest => manifest.id)).toEqual(['vault']);
+    expect(plan.refused.map(refusal => [refusal.plugin, refusal.reason, refusal.sentence])).toEqual([
+      ['thief', 'kernel-only-port', 'thief asks for child-environment, which only the kernel may hold.'],
+      ['peeker', 'kernel-only-port', 'peeker asks for child-environment, which only the kernel may hold.'],
+    ]);
   });
 });

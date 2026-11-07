@@ -56,6 +56,8 @@ function fakeChild(pid: number, onSignal: (signal: string, child: FakeChild) => 
     },
     handle: {
       pid,
+      pipes: [],
+      closePipes: () => undefined,
       stdout,
       stderr: new ReadableStream<Uint8Array>({ start: controller => controller.close() }),
       write: chunk => void child.written.push(String(chunk)),

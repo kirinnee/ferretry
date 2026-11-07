@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { chmod, lstat, mkdir, open, readdir, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import { AtomicFileWriter } from './atomic-file.ts';
 import type { FileOperations, TempNameSource } from './file-operations.ts';
 import { NodeFileOperations, RandomTempNameSource } from './file-operations.ts';
@@ -13,6 +13,7 @@ export interface HostFileInfo {
   /** An ordinary file: not a link, a directory or a device. */
   readonly regularFile: boolean;
   readonly directory: boolean;
+  readonly symlink?: boolean;
 }
 
 export interface HostDirEntry {
@@ -31,6 +32,11 @@ export interface HostFs {
   /** The file's text, or `undefined` when it does not exist. A link, or any other fault, throws. */
   readText(path: string): Promise<string | undefined>;
   readBytes(path: string): Promise<Uint8Array | undefined>;
+  /**
+   * At most the last `maxBytes` of a regular file and the offset they start at; `undefined` when it does not exist.
+   * A link is refused, never followed.
+   */
+  readTail(path: string, maxBytes: number): Promise<{ readonly bytes: Uint8Array; readonly from: number } | undefined>;
   /** `lstat`: `undefined` when the path does not exist. */
   info(path: string): Promise<HostFileInfo | undefined>;
   /** The entries of a directory; `[]` when it does not exist. */
@@ -40,6 +46,8 @@ export interface HostFs {
   /** Appends one record on a line of its own: a complete last record is closed with a newline, a torn one (cut short by a crash) is cut off first. */
   appendLine(path: string, line: string, mode: number): Promise<void>;
   ensureDirectory(path: string, mode: number): Promise<void>;
+  createPrivateDirectory(path: string): Promise<void>;
+  removeEmptyDirectory(path: string): Promise<void>;
   /** Removes a file or a whole folder; a path already gone is no error. */
   remove(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
@@ -88,6 +96,30 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
     async readBytes(path) {
       return (await writer.readBytes(path)) ?? undefined;
     },
+    async readTail(path, maxBytes) {
+      let handle: FileHandle;
+      try {
+        handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      } catch (error) {
+        if (isMissing(error)) return undefined;
+        throw error;
+      }
+      try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) throw new Error('not a regular file');
+        const from = Math.max(0, stats.size - maxBytes);
+        const bytes = new Uint8Array(stats.size - from);
+        let read = 0;
+        while (read < bytes.byteLength) {
+          const { bytesRead } = await handle.read(bytes, read, bytes.byteLength - read, from + read);
+          if (bytesRead === 0) break;
+          read += bytesRead;
+        }
+        return { bytes: bytes.subarray(0, read), from };
+      } finally {
+        await handle.close();
+      }
+    },
     async info(path) {
       try {
         const stats = await lstat(path);
@@ -97,6 +129,7 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
           inode: stats.ino,
           regularFile: stats.isFile(),
           directory: stats.isDirectory(),
+          symlink: stats.isSymbolicLink(),
         };
       } catch (error) {
         if (isMissing(error)) return undefined;
@@ -150,6 +183,16 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
     },
     async ensureDirectory(path, mode) {
       await mkdir(path, { recursive: true, mode });
+    },
+    async createPrivateDirectory(path) {
+      await mkdir(path, { mode: 0o700 });
+    },
+    async removeEmptyDirectory(path) {
+      try {
+        await rmdir(path);
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
     },
     async remove(path) {
       await rm(path, { recursive: true, force: true });

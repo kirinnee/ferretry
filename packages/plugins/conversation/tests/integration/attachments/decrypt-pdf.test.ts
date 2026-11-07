@@ -29,6 +29,10 @@ class FakeWorker implements WorkerHandle {
     };
   }
 
+  onExit(): Cancel {
+    return () => undefined;
+  }
+
   async terminate(): Promise<void> {
     this.terminated = true;
   }

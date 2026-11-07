@@ -1,6 +1,7 @@
 import type { Server, ServerWebSocket } from 'bun';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
-import { ApiError, finalised, headersFrom, queryFrom } from '../contract/http.ts';
+import { finalised, headersFrom, queryFrom } from '../contract/http.ts';
+import { BodyTooLargeError, MAX_REQUEST_BODY_BYTES } from '../contract/body.ts';
 import type { LocalArrival } from '../contract/session.ts';
 import { DAEMON_RUN_FILE, DAEMON_SOCKET_FILE, type DaemonRun, recordedBindAddress } from '../contract/run.ts';
 import type { SocketHandler } from '../contract/socket.ts';
@@ -25,12 +26,6 @@ export { recordedBindAddress };
 export const runSocketPath = (home: string): string => `${home}/${DAEMON_SOCKET_FILE}`;
 export const runBindPath = (home: string): string => `${home}/${DAEMON_RUN_FILE}`;
 
-class BodyTooLarge extends ApiError {
-  constructor(limit: number) {
-    super(413, `The request body is larger than ${limit} bytes.`, 'body_too_large');
-  }
-}
-
 /** Reads at most `limit` bytes piece by piece; `request.text()` would allocate the whole body first. */
 async function boundedText(request: Request, limit: number | undefined): Promise<string> {
   if (limit === undefined) return await request.text();
@@ -44,7 +39,7 @@ async function boundedText(request: Request, limit: number | undefined): Promise
     size += value.byteLength;
     if (size > limit) {
       await reader.cancel();
-      throw new BodyTooLarge(limit);
+      throw new BodyTooLargeError(limit);
     }
     chunks.push(value);
   }
@@ -132,6 +127,8 @@ function serve(
   });
   return Bun.serve<SocketData>({
     ...bind,
+    // Today's body cap, enforced by the runtime: an oversized body is refused before this heap holds it.
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     fetch,
     websocket: {
       maxPayloadLength: SOCKET_MAX_FRAME_BYTES,
