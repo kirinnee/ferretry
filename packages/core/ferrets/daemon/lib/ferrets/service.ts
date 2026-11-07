@@ -526,7 +526,11 @@ export class FerretsService implements FerretsApi {
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
     if (record.handle !== undefined && (harness === undefined || runner === undefined))
-      throw new ApiError(503, 'the harness or runner needed to replace this ferret\x27s pane is unavailable', 'plugin_unavailable');
+      throw new ApiError(
+        503,
+        'the harness or runner needed to replace this ferret\x27s pane is unavailable',
+        'plugin_unavailable',
+      );
     if (record.handle !== undefined && harness !== undefined && runner !== undefined)
       await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
     await this.settle(record, 'stopped', 'stopped', { kind: 'stopped' });
@@ -592,7 +596,10 @@ export class FerretsService implements FerretsApi {
     if (this.registry.get(ferret) === undefined) return err({ code: 'not_found', reason: `no ferret ${ferret}` });
     this.requireMayTouch(caller, ferret);
     if (this.ports.move === undefined)
-      return err({ code: 'plugin_unavailable', reason: 'Moving a ferret is not built yet in this version of Ferretry.' });
+      return err({
+        code: 'plugin_unavailable',
+        reason: 'Moving a ferret is not built yet in this version of Ferretry.',
+      });
     try {
       await this.ports.move(ferret, runtime, options);
     } catch (error) {
