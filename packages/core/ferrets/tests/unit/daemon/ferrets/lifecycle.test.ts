@@ -260,3 +260,9 @@ test('Z2 summaries carry the stored interaction mode across restart', async () =
     expect(loaded.summary(f.id)?.mode).toBe(mode);
   }
 });
+
+test('Z2 a record with no stored mode cannot be selected as an automatic agent', async () => {
+  const f = fixture();
+  expect((await f.service.get(f.id))?.mode).toBeUndefined();
+  expect((await f.service.list()).filter(summary => summary.mode === 'auto')).toEqual([]);
+});
