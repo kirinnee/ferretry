@@ -25,7 +25,7 @@ import {
   type StepUpOptions,
   type UnlockGranted,
 } from '../boundary.ts';
-import { fromBase64Url, toBase64Url } from '../../adapters/relay.ts';
+import { fromBase64Url, toBase64Url } from '../relay-wire/index.ts';
 import { secretsMatch } from '../secrets-match.ts';
 import { relyingPartyIdFor } from '../member-passkeys/helpers.ts';
 import type { PasskeysChangedSignal } from '../member-passkeys/changed.ts';

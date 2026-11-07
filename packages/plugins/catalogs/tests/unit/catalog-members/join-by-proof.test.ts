@@ -5,7 +5,7 @@ import type { AuditEntry } from '../../../daemon/lib/audit.ts';
 import { MemberJoinGate, type MemberJoinPublisher } from '../../../daemon/lib/catalog-members/join.ts';
 import { MemberJoinProver } from '../../../daemon/lib/catalog-members/join-proof.ts';
 import type { PasskeyVerifierPort, StoredPasskey } from '../../../daemon/lib/member-passkeys/types.ts';
-import type { MemberJoinCarrier } from '../../../daemon/adapters/member-session.ts';
+import type { MemberJoinCarrier } from '../../../daemon/lib/catalog-members/member-session.ts';
 import {
   DAEMON_ID,
   MINUTE,

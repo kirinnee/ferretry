@@ -32,12 +32,7 @@ import type {
 } from '../../protocol/session.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
 import { documentRefusal, needsFastFacts, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
-import {
-  type AccountInventoryPort,
-  type CoreAccount,
-  findAccountByAgent,
-  servableModels,
-} from '../peers/core.ts';
+import { type AccountInventoryPort, type CoreAccount, findAccountByAgent, servableModels } from '../peers/core.ts';
 import { type FrozenJsonValue, jsonObject } from '@ferretry/std';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
@@ -298,7 +293,9 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
             allowedModels: servableModels(account).map(model => model.id),
             ...(account.modelCatalog?.customIds === true ? { acceptsCustomModels: true } : {}),
           }),
-      ...(needsLiveCatalog(wanted) ? { catalog: this.ports.catalogs.codexSwitchContext(await this.#advertised(id)) } : {}),
+      ...(needsLiveCatalog(wanted)
+        ? { catalog: this.ports.catalogs.codexSwitchContext(await this.#advertised(id)) }
+        : {}),
       ...(fastCatalog === undefined ? {} : { fast: this.ports.catalogs.fastModeFacts(current, fastCatalog) }),
     });
 

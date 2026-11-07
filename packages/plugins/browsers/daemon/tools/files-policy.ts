@@ -43,7 +43,6 @@ export function isDaemonOwnedScratchEntry(name: string): boolean {
   return name.includes('.tmp.') && base !== undefined && DAEMON_OWNED_SCRATCH_ENTRIES.has(base);
 }
 
-
 /**
  * The pure decisions of the agent file tools (`browser.upload`, `browser.download`, `browser.pdf`): which
  * path an agent may name, what a saved file is called, and how much one call may carry.

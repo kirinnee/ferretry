@@ -4,13 +4,7 @@ import {
   SIGN_IN_RULES_SCREEN_PATH,
 } from '../../../contract/routes/index.ts';
 import type { TerminalIo, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
-import {
-  ACCOUNT_LISTING,
-  type RulesController,
-  type RulesStageOptions,
-  SIGN_IN_LISTING,
-} from './controller.ts';
-
+import { ACCOUNT_LISTING, type RulesController, type RulesStageOptions, SIGN_IN_LISTING } from './controller.ts';
 
 /** `fy rules` help. The root line and the honest limit are the protocol's own sentences, quoted, never paraphrased. */
 export const RULES_HELP = `The owner's command for standing sign-in rules: a sign-in a ferret may use unasked until the rule ends.
@@ -38,7 +32,14 @@ ${SIGN_IN_RULE_HONEST_LIMIT}
 A ferret's pane can't run these commands. A paste rule is not one of these: see \`fy copy rules\`.`;
 
 /** The `fy rules` verbs the manifest declares, each answered by the controller. */
-export type RulesVerb = 'rules ls' | 'rules add' | 'rules resume' | 'rules renew' | 'rules widen' | 'rules narrow' | 'rules rm';
+export type RulesVerb =
+  | 'rules ls'
+  | 'rules add'
+  | 'rules resume'
+  | 'rules renew'
+  | 'rules widen'
+  | 'rules narrow'
+  | 'rules rm';
 
 /** A flag as the shell hands it: by its long name (`i-understand-one-factor`) or its camel-cased key. */
 function flag(invocation: VerbInvocation, name: string): string | boolean | undefined {

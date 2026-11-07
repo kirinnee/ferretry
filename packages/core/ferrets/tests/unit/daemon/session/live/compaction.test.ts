@@ -60,7 +60,6 @@ const evidence = (over: Partial<CompactionEvidence>): CompactionEvidence => ({
   ...over,
 });
 
-
 const CLAUDE_LINE = '✻ Compacting conversation… (12s · esc to interrupt · ctrl+t to show todos)';
 const CODEX_LINE = '• Compacting (3s • Esc to interrupt)';
 

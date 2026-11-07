@@ -1,7 +1,7 @@
 /**
  * The fixed keys a launch asserts in a ferret home's `.claude.json`, MERGED into the document that is already there —
  * the fixed-layer keys and the Chrome keys of today's wrapper seed (`fleet/src/lib/wrappers.ts`, `SEED_FILTER` /
- * `SEED_NEW_DOCUMENT`), copied; the API-key tail is not seeded (GAP: needs a child-side seed step). Claude writes its
+ * `SEED_NEW_DOCUMENT`), copied; the API-key tail is seeded by the child, never here (`api-key-seed.ts`). Claude writes its
  * own decisions into the same document (`projects[<root>].disabledMcpjsonServers`, `enabledMcpjsonServers`, …), so a
  * launch that replaced it would undo a decision the person made in the previous session.
  *

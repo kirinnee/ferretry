@@ -17,7 +17,7 @@ import {
   type RelayCrypto,
   signLinkStoreRequest,
   toBase64Url,
-} from './relay.ts';
+} from '../lib/relay-wire/index.ts';
 import type { LinkStoreClient, LinkUpload, StoreAnswer } from '../lib/catalog-links/ports.ts';
 import type { CatalogIdentitySource } from '../lib/shared-catalogs/ports.ts';
 

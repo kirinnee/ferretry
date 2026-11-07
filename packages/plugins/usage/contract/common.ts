@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-export { NonEmptyStringSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
+export {
+  NonEmptyStringSchema,
+  NonNegativeFiniteSchema,
+  NonNegativeIntegerSchema,
+  PositiveIntegerSchema,
+} from '@ferretry/std';
 
 /**
  * The plain ISO instant today's analytics and performance wire carries. Unlike `@ferretry/std`'s `InstantSchema` it does

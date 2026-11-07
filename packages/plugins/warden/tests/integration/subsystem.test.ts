@@ -3,7 +3,7 @@ import should from 'should';
 import { FakeAsks, entryId, sourceKey } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId, T0 } from '@ferretry/core-ferrets/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
-import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
+import type { ApiRequest, CallContext, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { WardenFlagSchema } from '../../contract/index.ts';
 import { wardenRoutes } from '../../daemon/routes.ts';
 import { createWardenSubsystem } from '../../daemon/subsystem.ts';
@@ -21,8 +21,12 @@ const call = (method: string, path: string, body?: unknown, query: Record<string
   params: new Map(),
 });
 
-function warden(options: { readonly config?: unknown } = {}) {
-  const fake = fakeKernel({ config: wardenConfig(options.config), start: '2026-11-07T12:00:00.000Z' });
+function warden(options: { readonly config?: unknown; readonly written?: ConfigWriteOutcome } = {}) {
+  const config = wardenConfig(options.config);
+  const written = options.written;
+  const port =
+    written === undefined ? config : Object.assign(config, { write: async () => written, remove: async () => written });
+  const fake = fakeKernel({ config: port, start: '2026-11-07T12:00:00.000Z' });
   const ferrets = new FakeFerrets();
   const conversation = fakeConversation();
   const asks = new FakeAsks();
@@ -139,9 +143,15 @@ describe('the warden over the ports it is handed', () => {
     should((escaping as { status: number }).status).equal(404);
   });
 
-  it('should refuse a config change when the host gives no door, in words', async () => {
+  it('should answer a config change the kernel refused as invalid_request, in its words', async () => {
     // Arrange
-    const { routes } = warden();
+    const { routes } = warden({
+      written: {
+        kind: 'refused',
+        reason: 'schema',
+        issues: [{ path: 'warden.yaml', message: 'enabled must be true or false' }],
+      },
+    });
 
     // Act
     const patch = routes['PATCH /v1/warden/config'](call('PATCH', '/v1/warden/config', { enabled: false }));
@@ -149,7 +159,11 @@ describe('the warden over the ports it is handed', () => {
     // Assert
     await patch.then(
       () => should.fail('', '', 'should have refused'),
-      (error: { status: number; code: string }) => should(error.code).equal('plugin_unavailable'),
+      (error: { status: number; code: string; message: string }) => {
+        should(error.status).equal(400);
+        should(error.code).equal('invalid_request');
+        should(error.message).containEql('enabled must be true or false');
+      },
     );
   });
 

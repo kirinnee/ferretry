@@ -24,10 +24,14 @@ export class StateWardenJevCheckLog implements WardenJevCheckLog {
 
   async append(check: WardenJevCheck): Promise<void> {
     const day = jevCheckDay(check) ?? new Date(this.nowMs()).toISOString().slice(0, 10);
-    const written = await this.state.update(WARDEN_JEV_CHECKS, current => ({
-      format: 1 as const,
-      checks: [...((current as DayDocument | undefined)?.checks ?? []), check],
-    }), day);
+    const written = await this.state.update(
+      WARDEN_JEV_CHECKS,
+      current => ({
+        format: 1 as const,
+        checks: [...((current as DayDocument | undefined)?.checks ?? []), check],
+      }),
+      day,
+    );
     if (!written.ok) throw new Error(written.error.sentence);
     const expired = expiredJevCheckFiles((await this.days()).map(jevCheckFileName), this.nowMs());
     for (const name of expired) {

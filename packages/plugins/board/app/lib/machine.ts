@@ -38,7 +38,10 @@ export const addReferenceToComposer = (scope: FerretScope, reference: string): s
     readonly dispatchEvent?: (event: unknown) => boolean;
     readonly CustomEvent?: new (type: string, init: { detail: ComposeReference }) => unknown;
   };
-  if (browser.CustomEvent === undefined || browser.dispatchEvent === undefined) return `Could not add ${reference} to the chat.`;
-  browser.dispatchEvent(new browser.CustomEvent(COMPOSE_REFERENCE_EVENT, { detail: { ferret: scope.ferret, reference } }));
+  if (browser.CustomEvent === undefined || browser.dispatchEvent === undefined)
+    return `Could not add ${reference} to the chat.`;
+  browser.dispatchEvent(
+    new browser.CustomEvent(COMPOSE_REFERENCE_EVENT, { detail: { ferret: scope.ferret, reference } }),
+  );
   return `Added ${reference} to the chat.`;
 };

@@ -19,7 +19,8 @@ const inline = (text: string): ReactNode[] =>
     if (part === '') return null;
     // biome-ignore lint/suspicious/noArrayIndexKey: the pieces of one line keep their order
     const key = index;
-    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2)
+      return <code key={key}>{part.slice(1, -1)}</code>;
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4)
       return <strong key={key}>{part.slice(2, -2)}</strong>;
     const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/u.exec(part);
@@ -31,7 +32,11 @@ const inline = (text: string): ReactNode[] =>
       );
     if (/^&[BFIC][1-9][0-9]{0,8}$/u.test(part))
       return (
-        <a data-card-reference={part.slice(1).toUpperCase()} href={boardCardPath(undefined, part.slice(1).toUpperCase())} key={key}>
+        <a
+          data-card-reference={part.slice(1).toUpperCase()}
+          href={boardCardPath(undefined, part.slice(1).toUpperCase())}
+          key={key}
+        >
           {part}
         </a>
       );
@@ -44,8 +49,7 @@ export const cardProse: ProseRenderer = text => {
   let list: { readonly ordered: boolean; readonly items: string[] } | null = null;
   let paragraph: string[] = [];
   const flushParagraph = (): void => {
-    if (paragraph.length > 0)
-      blocks.push(<p key={`p${String(blocks.length)}`}>{inline(paragraph.join(' '))}</p>);
+    if (paragraph.length > 0) blocks.push(<p key={`p${String(blocks.length)}`}>{inline(paragraph.join(' '))}</p>);
     paragraph = [];
   };
   const flushList = (): void => {
@@ -54,7 +58,13 @@ export const cardProse: ProseRenderer = text => {
       // biome-ignore lint/suspicious/noArrayIndexKey: list items keep their order
       <li key={index}>{inline(item)}</li>
     ));
-    blocks.push(list.ordered ? <ol key={`l${String(blocks.length)}`}>{items}</ol> : <ul key={`l${String(blocks.length)}`}>{items}</ul>);
+    blocks.push(
+      list.ordered ? (
+        <ol key={`l${String(blocks.length)}`}>{items}</ol>
+      ) : (
+        <ul key={`l${String(blocks.length)}`}>{items}</ul>
+      ),
+    );
     list = null;
   };
   for (const line of text.split(/\r?\n/u)) {
@@ -81,6 +91,14 @@ export const cardProse: ProseRenderer = text => {
 };
 
 /** Text in point form: a bullet list when it is written as bullets, a paragraph otherwise. */
-export function PointForm({ text, className = '', renderProse = cardProse }: { readonly text: string; readonly className?: string; readonly renderProse?: ProseRenderer }) {
+export function PointForm({
+  text,
+  className = '',
+  renderProse = cardProse,
+}: {
+  readonly text: string;
+  readonly className?: string;
+  readonly renderProse?: ProseRenderer;
+}) {
   return <div className={`${className} min-w-0 break-words`.trim()}>{renderProse(text)}</div>;
 }

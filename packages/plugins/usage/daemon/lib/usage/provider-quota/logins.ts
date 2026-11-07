@@ -28,7 +28,9 @@ export function providerQuotaLogins(list: LoginList, presets: ProviderPresetCata
         variables,
         ...(keyed === undefined ? {} : { keyVariable: keyed.name }),
         ...(keyed?.secret === undefined ? {} : { presetSecretName: keyed.secret }),
-        ...(environment.codexProvider?.baseUrl === undefined ? {} : { codexBaseUrl: environment.codexProvider.baseUrl }),
+        ...(environment.codexProvider?.baseUrl === undefined
+          ? {}
+          : { codexBaseUrl: environment.codexProvider.baseUrl }),
         builtIn: preset?.origin === 'built-in',
         unverified: (preset?.unverified.length ?? 0) > 0,
         agent: login.id,

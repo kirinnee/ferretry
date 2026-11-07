@@ -83,12 +83,9 @@ export function ChatTasks({
       for (const project of state.projects ?? []) byId.set(project.id, project.name);
     return byId;
   }, [projects]);
-  const openCard = useCallback(
-    (card: BoardCardOf): void => {
-      setOpenId(card.task.id);
-    },
-    [],
-  );
+  const openCard = useCallback((card: BoardCardOf): void => {
+    setOpenId(card.task.id);
+  }, []);
   const navigateFromDrawer = useCallback(
     (to: string): void => {
       const id = cardIdOf(to, daemonId);

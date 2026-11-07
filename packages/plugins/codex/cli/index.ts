@@ -24,7 +24,9 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
 const itemVerb =
   (io: { err(text: string): void }, what: string): VerbHandler =>
   async () => {
-    io.err(`Codex ${what} items are edited through the item service, which is not served by this daemon yet; nothing was changed.`);
+    io.err(
+      `Codex ${what} items are edited through the item service, which is not served by this daemon yet; nothing was changed.`,
+    );
     return 69;
   };
 
@@ -52,7 +54,8 @@ export default implementCli(manifest, {
           const plan = current.plan;
           if (plan.kind === 'manual') {
             io.err(`Codex: ${plan.explanation}\n`);
-            for (const step of plan.steps) io.out(`  ${step.command}${step.note === undefined ? '' : `   # ${step.note}`}\n`);
+            for (const step of plan.steps)
+              io.out(`  ${step.command}${step.note === undefined ? '' : `   # ${step.note}`}\n`);
             return 1;
           }
           if (!on(invocation, 'yes')) {

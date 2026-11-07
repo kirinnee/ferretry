@@ -201,7 +201,9 @@ describe('credentialUsageRows — environment logins (docs/provider-quotas.md)',
 });
 
 describe('credentialUsageRows with a limit proven by a pane', () => {
-  const limits = new Map([['work', { notice: "You've hit your org's monthly spend limit", spend: true, retryAt: 5_000 }]]);
+  const limits = new Map([
+    ['work', { notice: "You've hit your org's monthly spend limit", spend: true, retryAt: 5_000 }],
+  ]);
 
   it('should read a spend-limited login as at its limit, unavailable for spend_limit, until the reset', () => {
     // Act

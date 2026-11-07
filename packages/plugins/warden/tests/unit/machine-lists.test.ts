@@ -92,10 +92,15 @@ describe('the auto-move failures item', () => {
 
   it('should give a runnable command when a login can take the ferret', async () => {
     const { port, raised } = machine();
-    const failures = new AutoMoveFailures(new Members(), port, {
-      ...facts,
-      candidate: async id => (id === 'a' ? 'codex-2' : undefined),
-    }, () => '2026-11-06T09:00:00.000Z');
+    const failures = new AutoMoveFailures(
+      new Members(),
+      port,
+      {
+        ...facts,
+        candidate: async id => (id === 'a' ? 'codex-2' : undefined),
+      },
+      () => '2026-11-06T09:00:00.000Z',
+    );
     await failures.note('a', 'Not moved although its login hit its limit: a background job runs');
     const request = raised.at(-1)!.request;
     should(request.context).equal('a (a): A background job runs. A login can take it now:\n$ fy move a -a codex-2');
@@ -104,10 +109,15 @@ describe('the auto-move failures item', () => {
 
   it('should say to wait for the turn, with no command, when the ferret is mid-turn', async () => {
     const { port, raised } = machine();
-    const failures = new AutoMoveFailures(new Members(), port, {
-      current: async () => ({ agent: 'c', name: 'piper', midTurn: true }),
-      candidate: async () => 'codex-2',
-    }, () => '2026-11-06T09:00:00.000Z');
+    const failures = new AutoMoveFailures(
+      new Members(),
+      port,
+      {
+        current: async () => ({ agent: 'c', name: 'piper', midTurn: true }),
+        candidate: async () => 'codex-2',
+      },
+      () => '2026-11-06T09:00:00.000Z',
+    );
     await failures.note('p', '');
     should(raised.at(-1)?.request.context).equal('piper (p): It could not be moved. Wait for it to finish its turn.');
   });
@@ -128,10 +138,15 @@ describe('the auto-move failures item', () => {
   it('should drop a ferret that stopped or moved, and close the item when none is left', async () => {
     const { port, raised, resolved } = machine();
     const agents = new Map(live);
-    const failures = new AutoMoveFailures(new Members(), port, {
-      current: async id => (agents.has(id) ? { agent: agents.get(id)! } : undefined),
-      candidate: async () => undefined,
-    }, () => '2026-11-06T09:00:00.000Z');
+    const failures = new AutoMoveFailures(
+      new Members(),
+      port,
+      {
+        current: async id => (agents.has(id) ? { agent: agents.get(id)! } : undefined),
+        candidate: async () => undefined,
+      },
+      () => '2026-11-06T09:00:00.000Z',
+    );
     await failures.note('a', 'x');
     await failures.note('b', 'y');
     agents.delete('a');
@@ -145,10 +160,15 @@ describe('the auto-move failures item', () => {
   it('should list a dozen and say how many more', async () => {
     const { port, raised } = machine();
     const many = new Map(Array.from({ length: 15 }, (_, index) => [`s${String(index).padStart(2, '0')}`, 'c']));
-    const failures = new AutoMoveFailures(new Members(), port, {
-      current: async id => (many.has(id) ? { agent: 'c' } : undefined),
-      candidate: async () => undefined,
-    }, () => '2026-11-06T09:00:00.000Z');
+    const failures = new AutoMoveFailures(
+      new Members(),
+      port,
+      {
+        current: async id => (many.has(id) ? { agent: 'c' } : undefined),
+        candidate: async () => undefined,
+      },
+      () => '2026-11-06T09:00:00.000Z',
+    );
     for (const id of many.keys()) await failures.note(id, 'x');
     should(raised.at(-1)?.request.context).containEql('…and 3 more.');
   });

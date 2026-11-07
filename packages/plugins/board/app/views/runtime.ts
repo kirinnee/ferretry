@@ -29,10 +29,15 @@ export const createBoardRuntime = (client: PluginClient): BoardRuntime => {
     store,
     ferrets: async () => {
       try {
-        const rows = await client.call<readonly { readonly id: string; readonly name?: string; readonly parent?: string }[]>(
-          'GET /v1/ferrets',
-        );
-        return rows.map(row => ({ id: row.id, name: row.name ?? row.id, ...(row.parent === undefined ? {} : { parent: row.parent }) }));
+        const rows =
+          await client.call<readonly { readonly id: string; readonly name?: string; readonly parent?: string }[]>(
+            'GET /v1/ferrets',
+          );
+        return rows.map(row => ({
+          id: row.id,
+          name: row.name ?? row.id,
+          ...(row.parent === undefined ? {} : { parent: row.parent }),
+        }));
       } catch {
         return [];
       }

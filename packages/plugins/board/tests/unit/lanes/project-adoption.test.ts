@@ -1,8 +1,5 @@
 import { describe, it } from 'bun:test';
-import {
-  LANE_TEMPLATES,
-  type LaneSet,
-} from '../../../daemon/lib/lanes/index.ts';
+import { LANE_TEMPLATES, type LaneSet } from '../../../daemon/lib/lanes/index.ts';
 import type { ProjectInfo, RegisterProjectRequest } from '@ferretry/plugin-projects/contract';
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';

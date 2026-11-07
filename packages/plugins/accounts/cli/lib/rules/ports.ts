@@ -33,7 +33,6 @@ export interface IRulesGateway {
   eligibility(signIn: string): Promise<SignInRuleEligibility>;
 }
 
-
 export interface RulesPorts {
   readonly gateway: IRulesGateway;
   readonly out: IRulesOutput;

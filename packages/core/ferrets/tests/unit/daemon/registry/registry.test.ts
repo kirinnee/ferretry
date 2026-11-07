@@ -37,7 +37,9 @@ workFoldersConformance('RegistryWorkFolders', () => {
 
 describe('lineage', () => {
   test('G43 an unknown ferret, a cycle and a chain past the depth limit are never an ancestor', () => {
-    const chain = Array.from({ length: 20 }, (_, index) => record(`c${index}`, index === 0 ? undefined : `c${index - 1}`));
+    const chain = Array.from({ length: 20 }, (_, index) =>
+      record(`c${index}`, index === 0 ? undefined : `c${index - 1}`),
+    );
     const registry = new FerretRegistry([...chain, record('x', 'y'), record('y', 'x')]);
     expect(registry.mayTouch('c0' as FerretId, 'c5' as FerretId)).toBe(true);
     expect(registry.mayTouch('c0' as FerretId, 'c19' as FerretId)).toBe(false);

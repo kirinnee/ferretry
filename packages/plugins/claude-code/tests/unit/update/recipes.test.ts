@@ -27,17 +27,13 @@ describe('classifyInstall', () => {
   it('reads an nvm npm global with its prefix and node manager', () => {
     const prefix = `${HOME}/.nvm/versions/node/v22`;
     should(
-      classifyInstall(
-        facts(`${prefix}/bin/claude`, `${prefix}/lib/node_modules/@anthropic-ai/claude-code/cli.js`),
-      ),
+      classifyInstall(facts(`${prefix}/bin/claude`, `${prefix}/lib/node_modules/@anthropic-ai/claude-code/cli.js`)),
     ).eql({ kind: 'npm-global', tool: 'npm', package: '@anthropic-ai/claude-code', prefix, nodeManager: 'nvm' });
   });
 
   it('reads bun, pnpm and volta globals', () => {
     should(
-      classifyInstall(
-        facts('/b/claude', `${HOME}/.bun/install/global/node_modules/@anthropic-ai/claude-code/cli.js`),
-      ),
+      classifyInstall(facts('/b/claude', `${HOME}/.bun/install/global/node_modules/@anthropic-ai/claude-code/cli.js`)),
     ).containEql({ kind: 'npm-global', tool: 'bun' });
     should(
       classifyInstall(
@@ -50,11 +46,13 @@ describe('classifyInstall', () => {
   });
 
   it('reads a Caskroom as a Homebrew cask and a Cellar as a formula', () => {
-    should(classifyInstall(facts('/opt/homebrew/bin/claude', '/opt/homebrew/Caskroom/claude-code/2.1.200/claude'))).eql({
-      kind: 'homebrew',
-      type: 'cask',
-      package: 'claude-code',
-    });
+    should(classifyInstall(facts('/opt/homebrew/bin/claude', '/opt/homebrew/Caskroom/claude-code/2.1.200/claude'))).eql(
+      {
+        kind: 'homebrew',
+        type: 'cask',
+        package: 'claude-code',
+      },
+    );
     should(classifyInstall(facts('/opt/homebrew/bin/claude', '/opt/homebrew/Cellar/claude/2.1.200/bin/claude'))).eql({
       kind: 'homebrew',
       type: 'formula',
@@ -63,9 +61,10 @@ describe('classifyInstall', () => {
   });
 
   it('reads Claude Code’s own installer', () => {
-    should(
-      classifyInstall(facts(`${HOME}/.local/bin/claude`, `${HOME}/.local/share/claude/versions/2.1.200`)),
-    ).eql({ kind: 'native-installer', directory: `${HOME}/.local/share/claude` });
+    should(classifyInstall(facts(`${HOME}/.local/bin/claude`, `${HOME}/.local/share/claude/versions/2.1.200`))).eql({
+      kind: 'native-installer',
+      directory: `${HOME}/.local/share/claude`,
+    });
   });
 
   it('asks the nix store rule BEFORE the npm layout, because nixpkgs ships an npm layout', () => {
@@ -78,7 +77,9 @@ describe('classifyInstall', () => {
     should(method).eql({ kind: 'nix-module', manager: 'home-manager', via: 'nixos' });
     should(classifyInstall(facts(`${store}/bin/claude`, `${store}/bin/claude`))).containEql({ kind: 'nix-shell' });
     should(
-      classifyInstall(facts(`${HOME}/.nix-profile/bin/claude`, `${store}/bin/claude`, { nixProfileElement: 'claude-code' })),
+      classifyInstall(
+        facts(`${HOME}/.nix-profile/bin/claude`, `${store}/bin/claude`, { nixProfileElement: 'claude-code' }),
+      ),
     ).eql({ kind: 'nix-profile', element: 'claude-code' });
   });
 
@@ -96,7 +97,9 @@ describe('updateRecipe', () => {
     if (recipe.kind !== 'self') return;
     should(recipe.run.map(commandLine)).eql(['npm install -g --prefix /p @anthropic-ai/claude-code@2.1.230']);
     should(recipe.pinsVersion).be.true();
-    should(recipe.rollback?.('2.1.200').map(commandLine)).eql(['npm install -g --prefix /p @anthropic-ai/claude-code@2.1.200']);
+    should(recipe.rollback?.('2.1.200').map(commandLine)).eql([
+      'npm install -g --prefix /p @anthropic-ai/claude-code@2.1.200',
+    ]);
   });
 
   it('takes the newest from Homebrew and keeps no previous version', () => {

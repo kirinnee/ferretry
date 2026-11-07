@@ -17,8 +17,6 @@ import {
   servableModels,
 } from '../../../../../daemon/lib/session/peers/core.ts';
 
-
-
 /**
  * What resolving one request for a model came to: a model, or the reason the account cannot serve
  * the one that was asked for.

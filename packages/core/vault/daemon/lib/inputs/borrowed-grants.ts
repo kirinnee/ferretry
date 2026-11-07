@@ -710,4 +710,3 @@ export function matchSignInGrant(
     fieldSet,
   };
 }
-

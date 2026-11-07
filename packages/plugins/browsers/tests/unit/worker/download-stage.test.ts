@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DOWNLOAD_SETTLE_MS, DownloadStage, type DownloadStageDisk, type StageableDownload } from '../../../daemon/worker/download-stage.ts';
+import {
+  DOWNLOAD_SETTLE_MS,
+  DownloadStage,
+  type DownloadStageDisk,
+  type StageableDownload,
+} from '../../../daemon/worker/download-stage.ts';
 
 const MINUTE = 60_000;
 

@@ -5,7 +5,11 @@ import {
   AnalyticsPricingSyncPreviewRequestSchema,
 } from '../../contract/index.ts';
 import { parseBody } from '../lib/body.ts';
-import { AnalyticsPricingError, type AnalyticsPricingFailure, type AnalyticsPricingService } from '../lib/analytics/pricing-service.ts';
+import {
+  AnalyticsPricingError,
+  type AnalyticsPricingFailure,
+  type AnalyticsPricingService,
+} from '../lib/analytics/pricing-service.ts';
 
 const FAILURE_STATUS = {
   configuration_unavailable: 503,
@@ -42,7 +46,9 @@ export const pricingHandlers = (service: AnalyticsPricingService) => ({
   patch: async (request: ApiRequest): Promise<ApiResponse> =>
     jsonResponse(await service.patch(await parseBody(request, AnalyticsPricingPatchSchema)).catch(refuse)),
   preview: async (request: ApiRequest): Promise<ApiResponse> =>
-    jsonResponse(await service.preview(await parseBody(request, AnalyticsPricingSyncPreviewRequestSchema)).catch(refuse)),
+    jsonResponse(
+      await service.preview(await parseBody(request, AnalyticsPricingSyncPreviewRequestSchema)).catch(refuse),
+    ),
   apply: async (request: ApiRequest): Promise<ApiResponse> =>
     jsonResponse(await service.apply(await parseBody(request, AnalyticsPricingSyncApplySchema)).catch(refuse)),
 });

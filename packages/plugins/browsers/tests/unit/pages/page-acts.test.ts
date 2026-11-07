@@ -1,6 +1,23 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type ActableCdp, type ActableLocator, type ActablePage, BROWSER_MAX_FIND_LINES, BROWSER_MAX_READ_CHARS, browserElementParam, browserTargetParam, clickOn, findSnapshotLines, PDF_NEEDS_HEADLESS, printPdf, readPage, shootPage, staleRefMessage, typeInto, uploadFiles } from '../../../daemon/pages/page-acts.ts';
+import {
+  type ActableCdp,
+  type ActableLocator,
+  type ActablePage,
+  BROWSER_MAX_FIND_LINES,
+  BROWSER_MAX_READ_CHARS,
+  browserElementParam,
+  browserTargetParam,
+  clickOn,
+  findSnapshotLines,
+  PDF_NEEDS_HEADLESS,
+  printPdf,
+  readPage,
+  shootPage,
+  staleRefMessage,
+  typeInto,
+  uploadFiles,
+} from '../../../daemon/pages/page-acts.ts';
 
 const SNAPSHOT = [
   '- main [ref=e1]:',

@@ -4,15 +4,22 @@ import type { Actor, Clock, KernelPorts, Op, RefusalCode, TargetRef } from '@fer
 import { wallClock } from './wall-clock.ts';
 
 /** Same-width `*` over each secret, the way the Vault's redaction masks a read (S16). */
-const mask = (secrets: readonly string[]) => (text: string): string =>
-  secrets.reduce((masked, secret) => (secret === '' ? masked : masked.split(secret).join('*'.repeat(secret.length))), text);
+const mask =
+  (secrets: readonly string[]) =>
+  (text: string): string =>
+    secrets.reduce(
+      (masked, secret) => (secret === '' ? masked : masked.split(secret).join('*'.repeat(secret.length))),
+      text,
+    );
 
 /**
  * The three kernel ports the browser tools take (`act`, `redaction`, `clock`), as the test host binds them: the real
  * test act runner (one queue per target, `InputHolds.decide` right before the act, `closeAck` on a write-only op), a
  * stand-in Vault redaction that masks the given secrets, and holds a test can set per target.
  */
-export function browserKernel(options: { readonly secrets?: readonly string[]; readonly clock?: Clock; readonly actor?: Actor } = {}) {
+export function browserKernel(
+  options: { readonly secrets?: readonly string[]; readonly clock?: Clock; readonly actor?: Actor } = {},
+) {
   const acts: ActRecord[] = [];
   const held = new Map<string, { readonly code: RefusalCode; readonly ops?: readonly Op[] }>();
   const keyOf = (target: TargetRef): string => `${target.kind}\u0000${target.key}`;

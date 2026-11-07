@@ -88,7 +88,8 @@ export function decideWait(
     outcome: { kind: 'keep-waiting' as const, ...(note === undefined ? {} : { note }) },
     notices: { ...notices, ...used },
   });
-  const declaredNote = () => (declared && !notices.declaredWait ? keep(declaredWaitNote(ferret), { declaredWait: true }) : keep());
+  const declaredNote = () =>
+    declared && !notices.declaredWait ? keep(declaredWaitNote(ferret), { declaredWait: true }) : keep();
 
   if (marker !== undefined) {
     if (marker.present) return { outcome: { kind: 'settled', reason: 'marker' }, notices };
@@ -96,7 +97,9 @@ export function decideWait(
     if (parked && !declared) return { outcome: { kind: 'needs-attention', state }, notices };
     if (expired) return { outcome: { kind: 'timed-out', state }, notices };
     if (finished && !notices.missingMarker)
-      return keep(`the ferret finished but ${marker.path} is not there yet; still waiting for it`, { missingMarker: true });
+      return keep(`the ferret finished but ${marker.path} is not there yet; still waiting for it`, {
+        missingMarker: true,
+      });
     return declaredNote();
   }
 

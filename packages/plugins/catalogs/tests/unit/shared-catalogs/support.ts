@@ -3,9 +3,9 @@ import {
   catalogVersionsSignedBytes,
   catalogLinkSignedBytes,
 } from '../../../contract/wire/index.ts';
-import { toBase64Url } from '../../../worker/kernel-wire/index.ts';
-import { WebCryptoSessionCrypto } from '../../../worker/kernel-wire/index.ts';
-import type { CatalogSigningIdentity } from '../../../daemon/adapters/relay.ts';
+import { toBase64Url } from '../../../worker/src/kernel-wire/index.ts';
+import { WebCryptoSessionCrypto } from '../../../worker/src/kernel-wire/index.ts';
+import type { CatalogSigningIdentity } from '../../../daemon/lib/relay-wire/index.ts';
 import { type CatalogsDocument, EMPTY_CATALOGS_DOCUMENT } from '../../../daemon/lib/shared-catalogs/document.ts';
 import type { McpSourceServer } from '../../../daemon/lib/shared-catalogs/mcp-source.ts';
 import type {
@@ -182,7 +182,7 @@ export const harnessServer = (name: string): McpSourceServer => ({
 });
 
 function testSigningIdentity(
-  identity: import('../../../worker/kernel-wire/index.ts').DaemonIdentity,
+  identity: import('../../../worker/src/kernel-wire/index.ts').DaemonIdentity,
 ): CatalogSigningIdentity {
   return {
     daemonId: identity.daemonId,

@@ -193,7 +193,10 @@ export function unwiredTranscriptSource(harness: TranscriptHarness): TranscriptS
 }
 
 /** Today's `readAskedQuestion(file, transcript)` (conversation `adapters/session/question/asked-question-file.ts`). */
-export async function unwiredReadAskedQuestion(_file: string, _transcript: string | undefined): Promise<AskedQuestion | undefined> {
+export async function unwiredReadAskedQuestion(
+  _file: string,
+  _transcript: string | undefined,
+): Promise<AskedQuestion | undefined> {
   throw new UnwiredPeer('readAskedQuestion (conversation)');
 }
 

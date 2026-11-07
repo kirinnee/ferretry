@@ -5,7 +5,7 @@ import type {
   CatalogInstallTarget,
   SharedCatalogItem,
 } from '../../../daemon/lib/boundary.ts';
-import type { DaemonIdentity } from '../../../daemon/adapters/relay.ts';
+import type { DaemonIdentity } from '../../../daemon/lib/relay-wire/index.ts';
 import should from 'should';
 import { CatalogInstallRefusalError } from '../../../daemon/lib/catalog-installs/ports.ts';
 import { CatalogInstallStateError } from '../../../daemon/lib/catalog-installs/store.ts';

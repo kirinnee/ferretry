@@ -14,10 +14,7 @@ import {
 import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import type { SessionCredentialRotator } from '../../../../../daemon/lib/session/lifecycle/types.ts';
-import type {
-  AccountLaunchEnvironment,
-  AccountLaunchRenewal,
-} from '../../../../../daemon/lib/session/peers/fleet.ts';
+import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { FakePaneDelivery, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
@@ -154,7 +151,11 @@ describe('storage resume repository', () => {
     const other = parseSessionId('session-2');
     await opened.storage.writeConfig(other, config('session-2'));
     await opened.storage.writeState(other, sessionState('session-2'));
-    opened.folder.plant(SessionStateFiles, JSON.stringify(sessionState('session-2', { status: 'transcending' })), other);
+    opened.folder.plant(
+      SessionStateFiles,
+      JSON.stringify(sessionState('session-2', { status: 'transcending' })),
+      other,
+    );
     const repository = new StorageResumeRepository(opened.storage);
 
     // Act
@@ -208,7 +209,10 @@ describe('storage resume repository', () => {
     // Arrange
     const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped', needsHumanKind: 'picker_cleanup' }));
+    await opened.storage.writeState(
+      ID,
+      sessionState('session-1', { status: 'stopped', needsHumanKind: 'picker_cleanup' }),
+    );
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).transition(ID, {
@@ -231,7 +235,11 @@ describe('storage resume repository', () => {
     // Arrange
     const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    const before: SessionLaunchInstructions = { sections: [{ id: 'tools', chars: 10 }], mode: 'auto', questions: false };
+    const before: SessionLaunchInstructions = {
+      sections: [{ id: 'tools', chars: 10 }],
+      mode: 'auto',
+      questions: false,
+    };
     const after: SessionLaunchInstructions = {
       sections: [
         { id: 'tools', chars: 10 },

@@ -217,13 +217,11 @@ export const LessonsConfigPatchSchema = z.strictObject({ passiveDefault: z.boole
 export type LessonsConfigPatch = z.infer<typeof LessonsConfigPatchSchema>;
 
 /**
- * DECLARED GAP (D2 #16): the write goes through the kernel's config write port, which is not on this base. Until it is,
- * `PATCH /v1/lessons/config` answers `503` with this code and sentence; `lessons.yaml` stays the only place the switch
- * lives, and nothing keeps a second copy of it.
+ * What `PATCH /v1/lessons/config` answers: the settings IN EFFECT after the write, and `held` when the kernel held the
+ * write for the owner — plain sentences naming what waits, never a value.
  */
-export const LESSONS_CONFIG_WRITE_GAP_CODE = 'config_write_unavailable';
-export const LESSONS_CONFIG_WRITE_GAP =
-  'Ferretry cannot write config/lessons.yaml from here yet. Set passiveDefault in config/lessons.yaml by hand: new ferrets follow that file.';
+export const LessonsConfigAnswerSchema = LessonsConfigSchema.extend({ held: z.array(z.string()).optional() });
+export type LessonsConfigAnswer = z.infer<typeof LessonsConfigAnswerSchema>;
 
 /**
  * DECLARED GAP (D2 #19): a miner needs a work folder of Lessons' own (today's daemon home and `runs/` folder), and no

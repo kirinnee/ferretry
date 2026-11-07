@@ -31,7 +31,7 @@ import {
   revealHidden,
   SHARED_CATALOG_ITEM_FORMAT,
 } from '../boundary.ts';
-import { catalogItemCanonical, type RelayCrypto } from '../../adapters/relay.ts';
+import { catalogItemCanonical, type RelayCrypto } from '../relay-wire/index.ts';
 import { skillFrontMatter } from '../skill-front-matter.ts';
 import { CatalogRefusal } from './refusal.ts';
 

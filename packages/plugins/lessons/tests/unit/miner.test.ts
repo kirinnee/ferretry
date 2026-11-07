@@ -13,7 +13,7 @@ import { AT, FakeLessonsStore, LESSONS_CONFIG } from './support.ts';
 
 const OWNER_PROJECT = '/home/owner/Workspace/repo';
 
-function miner(minerFolder?: MinerDependencies['minerFolder']) {
+function miner(minerFolder?: MinerDependencies['minerFolder'], agent: string = LESSONS_CONFIG.agent) {
   const ferrets = new FakeFerrets();
   ferrets.add({
     id: ferretId('f-old'),
@@ -35,7 +35,7 @@ function miner(minerFolder?: MinerDependencies['minerFolder']) {
     ferrets,
     conversation: conversation as never,
     roots: { root: () => ({}) as never },
-    config: () => ({ ...LESSONS_CONFIG, model: 'claude-haiku-5-5' }),
+    config: () => ({ ...LESSONS_CONFIG, agent, model: 'claude-haiku-5-5' }),
     now: () => AT,
     ...(minerFolder === undefined ? {} : { minerFolder }),
   });
@@ -75,5 +75,28 @@ describe('the lesson miner (finding 6)', () => {
     expect(request?.prompt).not.toContain(OWNER_PROJECT + '/.fy-lessons');
     expect(request?.options?.model).toBe('claude-haiku-5-5');
     expect(request?.by).toBe('owner');
+  });
+
+  // Today: packages/daemon/src/adapters/learning/miner.ts:134 (and lessons.ts:433 for a scan) starts the miner with the
+  // configured agent as its runtime, whatever the name; nothing guesses a harness or a login from it.
+  it.each(['claude', 'codex', 'claude-llm2', 'gpt-6.1-sol'])(
+    'starts the miner on the runtime the agent names (%s), as today miner.ts:134',
+    async agent => {
+      const { subject, ferrets } = miner(run => `/fy-home/state/lessons/runs/${run}`);
+      await subject.start('scan-1', 0, ['f-old'], agent, undefined);
+      const [request] = ferrets.starts;
+      expect(request?.runtime).toBe(agent);
+      expect(request?.harness).toBeUndefined();
+      expect(request?.login).toBeUndefined();
+    },
+  );
+
+  it('starts a spawning run’s miner on the lessons.yaml agent as its runtime, as today miner.ts:134', async () => {
+    const { subject, ferrets } = miner(run => `/fy-home/state/lessons/runs/${run}`, 'claude-llm1');
+    await subject.run(true);
+    const [request] = ferrets.starts;
+    expect(request?.runtime).toBe('claude-llm1');
+    expect(request?.harness).toBeUndefined();
+    expect(request?.login).toBeUndefined();
   });
 });

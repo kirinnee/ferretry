@@ -18,12 +18,12 @@ import {
   LINK_STORE_DELETE_LABEL,
   LINK_STORE_STATUS_LABEL,
   LINK_STORE_UPLOAD_LABEL,
-} from '../../../daemon/adapters/catalog-wire/link-store.ts';
+} from '../../../daemon/lib/relay-wire/catalog-wire/link-store.ts';
 import {
   LINK_BUNDLE_KEY_LABEL,
   LINK_ENVELOPE_AAD_LABEL,
   LINK_FETCH_TOKEN_LABEL,
-} from '../../../daemon/adapters/catalog-wire/link-bundle.ts';
+} from '../../../daemon/lib/relay-wire/catalog-wire/link-bundle.ts';
 import {
   APP_ORIGIN,
   BOX_KEY,

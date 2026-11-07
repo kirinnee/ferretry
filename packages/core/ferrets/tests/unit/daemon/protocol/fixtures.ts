@@ -1,4 +1,9 @@
-import type { FyEvent, FyEventStreamFrame, SessionAttachTarget, SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import type {
+  FyEvent,
+  FyEventStreamFrame,
+  SessionAttachTarget,
+  SessionView,
+} from '../../../../daemon/lib/protocol/session.ts';
 
 /** The session cut of today's protocol test fixtures (packages/protocol/tests/fixtures.ts), verbatim. */
 export const INSTANT = '2026-07-30T12:00:00Z';

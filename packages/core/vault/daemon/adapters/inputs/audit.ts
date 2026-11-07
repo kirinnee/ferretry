@@ -1,4 +1,10 @@
-import { type AuditActor, type AuditDetail, type AuditDraft, auditKind, type GateApi } from '@ferretry/core-gate/contract';
+import {
+  type AuditActor,
+  type AuditDetail,
+  type AuditDraft,
+  auditKind,
+  type GateApi,
+} from '@ferretry/core-gate/contract';
 import type { InputAudit, InputAuditEntry, InputSaveAuditEntry, InputStoreAuditEntry } from '../../lib/inputs/ports.ts';
 
 /**

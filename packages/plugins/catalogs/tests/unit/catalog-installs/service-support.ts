@@ -15,7 +15,7 @@ import type {
   CatalogInstallTarget,
   SignedCatalogItemVersions,
 } from '../../../daemon/lib/boundary.ts';
-import type { DaemonIdentity } from '../../../daemon/adapters/relay.ts';
+import type { DaemonIdentity } from '../../../daemon/lib/relay-wire/index.ts';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import {
   type CatalogCaller,

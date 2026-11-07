@@ -27,12 +27,11 @@
     "onboarding"
   ],
   "pendingReasons": {
+    "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
       "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",
-      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)",
-      "GAP(ferrets): removing a runtime cannot move its running ferrets, because Ferrets declares no migrate route yet (R-0355)",
-      "GAP(conversation): Import conversations is gone from the Runtimes tab; its verb is now Conversation's `fy link` (V-0285)"
+      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
     ],
     "ferrets": [
       "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
@@ -44,18 +43,17 @@
       "restart is stop then resume with today’s refusals checked first: needs a Ferrets additive automatic resume that replaces a live pane (today’s replaceLiveTerminal)",
       "nudges must carry actor warden (D2 #19); needs Conversation’s additive warden caller",
       "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
-      "PATCH /v1/warden/config answers 503 plugin_unavailable: needs the kernel config write port (D2 #16)",
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)",
-      "the liveness reflex detects but never nudges (frozen, sus_* and dead_monitor still fire): reflex nudges need `FerretSummary` to carry `waiting` and the per-ferret `nudgeAfterSeconds`/`killAfterSeconds` (Ferrets additive)"
+      "the liveness reflex detects but never nudges (frozen, sus_* and dead_monitor still fire): reflex nudges need `FerretSummary` to carry `waiting` and the per-ferret `nudgeAfterSeconds`/`killAfterSeconds` (Ferrets additive)",
+      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost; refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
-      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read",
-      "GAP(runtimes): the API-key tail of today's .claude.json seed (customApiKeyResponses.approved) is not seeded; it needs a child-side seed step, because the daemon half never holds the key"
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
     ],
     "codex": [
       "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",

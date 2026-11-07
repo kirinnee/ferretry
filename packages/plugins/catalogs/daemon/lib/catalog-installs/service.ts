@@ -51,7 +51,7 @@ import {
   verifyCatalogItemAgainstVersions,
   verifySignedCatalogManifest,
   type RelayCrypto,
-} from '../../adapters/relay.ts';
+} from '../relay-wire/index.ts';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import { type McpComponentRecord, mcpSetupOf } from '../shared-catalogs/mcp-source.ts';
 import type { ItemRuntime, FreshStepUpContext } from '../item-runtime.ts';

@@ -12,7 +12,7 @@
  * Every function is total: a refusal is `undefined`, never a throw.
  */
 
-import { utf8Text } from '../../../daemon/adapters/relay.ts';
+import { utf8Text } from '../../../daemon/lib/relay-wire/index.ts';
 
 /** One decoded CBOR item. Maps keep their keys as the integers or strings they were encoded as. */
 export type CborValue = number | string | boolean | null | Uint8Array | readonly CborValue[] | CborMap;

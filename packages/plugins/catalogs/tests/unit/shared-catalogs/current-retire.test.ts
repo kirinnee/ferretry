@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { verifySignedCatalogItemVersions, verifySignedCatalogManifest } from '../../../daemon/adapters/relay.ts';
+import { verifySignedCatalogItemVersions, verifySignedCatalogManifest } from '../../../daemon/lib/relay-wire/index.ts';
 import should from 'should';
 import { CatalogRefusal } from '../../../daemon/lib/shared-catalogs/refusal.ts';
 import { crypto, rig, SKILL_MD, SKILL_PATH } from './support.ts';

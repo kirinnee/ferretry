@@ -20,13 +20,7 @@ const METER_LABEL = 'w-12 shrink-0 whitespace-nowrap text-muted';
 const METER_WORDS = 'w-48 shrink-0 text-right text-muted';
 
 /** A login's budget as the Budgets tab shows it, wherever a row or page lists one. */
-export function BudgetMeter({
-  budget,
-  machineName,
-}: {
-  readonly budget: LoginBudget;
-  readonly machineName: string;
-}) {
+export function BudgetMeter({ budget, machineName }: { readonly budget: LoginBudget; readonly machineName: string }) {
   return (
     <div className="flex flex-col gap-1" data-credential-budget="">
       {budgetMeterRows(budget).map(row => (
