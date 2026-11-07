@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
 import { type AccountId, type AccountKey, type AccountSummary, factorFingerprint, type SignInId, type SignInRuleId, type SignInSummary } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
+import { identityOf } from '../../../../daemon/lib/vault-inputs.ts';
 import {
   type GrantSighting,
   matchSignInGrant,
   NO_SCRIPTED_ORIGINS,
   type SignInGrant,
-} from '../../../src/lib/sign-in-grants/matcher.ts';
+} from '../../../../daemon/lib/sign-in-grants/matcher.ts';
 import { type InputRequestField } from '../../../../daemon/lib/vault-inputs.ts';
 import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
@@ -25,7 +25,7 @@ const OTHER_SIGN_IN = 'si_fedcba9876543210fedcba98' as SignInId;
 const KEY = `L${'a'.repeat(31)}` as AccountKey;
 const AT = '2026-10-01T00:00:00.000Z';
 
-type PageFacts = Extract<InputTargetFacts, { readonly kind: 'browser' }>;
+type PageFacts = Extract<InputTargetFacts, { readonly kind: 'page' }>;
 type PageField = PageFacts['fields'][number];
 type TerminalFacts = Extract<InputTargetFacts, { readonly kind: 'terminal' }>;
 
@@ -49,7 +49,7 @@ const pageField = (
 });
 
 const page = (over: Partial<PageFacts> = {}, fields?: PageField[]): PageFacts => ({
-  kind: 'browser',
+  kind: 'page',
   pageId: 'p1',
   origin: 'https://github.com',
   secure: true,
@@ -144,7 +144,7 @@ function sighting(over: Partial<GrantSighting> = {}, listing?: Partial<GrantSigh
     sessionId: SESSION,
     facts,
     matchKey:
-      'matchKey' in over ? over.matchKey : facts.kind === 'browser' ? new URL(facts.origin).host : 'sudo@kirin-box',
+      'matchKey' in over ? over.matchKey : facts.kind === 'page' ? new URL(facts.origin).host : 'sudo@kirin-box',
     fields: LOGIN_FIELDS,
     listing: { accounts: [account()], signIns: [site()], ...listing },
     keys: new Map([['GITHUB' as AccountId, KEY]]),

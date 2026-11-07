@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import type { AccountKey, SignInRuleStageId } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { FileSignInRuleStore } from '../../../src/adapters/sign-in-rules/index.ts';
-import { PasteRuleService } from '../../../src/lib/secure-copy/rules.ts';
-import { SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
-import { TaskPlanService } from '../../../src/lib/task-plans/index.ts';
+import { FileSignInRuleStore } from '../../../../daemon/adapters/sign-in-rules/index.ts';
+import { PasteRuleService } from '../../../../daemon/lib/secure-copy/rules.ts';
+import { SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
+import { TaskPlanService } from '../../../../daemon/lib/task-plans/index.ts';
 import {
   DEVICE,
   DRAFT,

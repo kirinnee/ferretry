@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { factorFingerprint, type SignInRuleBody } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { type RuleListing, ruleDrift, samePins, snapshotPins } from '../../../src/lib/sign-in-rules/index.ts';
+import { type RuleListing, ruleDrift, samePins, snapshotPins } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import { account, DEVICE, GITHUB, KEY, listing, OTHER_KEY, signIn, T, tappedFact, totpKey } from './support.ts';
 
 /** Pinned facts and their drift, pure (r3c-plan §8, invariant 16). */

@@ -9,14 +9,14 @@ import {
   type CopyCapture,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
+import { EphemeralValues } from '../support/masking.ts';
 import {
-  EphemeralValues,
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
   SecureCopyError,
   SecureCopyService,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/index.ts';
 
 const TOKEN = 'vcp_SEALED-UNIQUE-7f3a';
 

@@ -22,8 +22,8 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';
 import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
-import { PASTE_RULE_POINTER, RulesController, ruleWarnings } from '../../../src/lib/rules/controller';
-import type { IRulesGateway, RulesPorts } from '../../../src/lib/rules/ports';
+import { PASTE_RULE_POINTER, RulesController, ruleWarnings } from '../../../../cli/lib/rules/controller';
+import type { IRulesGateway, RulesPorts } from '../../../../cli/lib/rules/ports';
 
 const STAGE = `srs_${'a'.repeat(24)}`;
 const RULE = `sr_${'b'.repeat(24)}`;

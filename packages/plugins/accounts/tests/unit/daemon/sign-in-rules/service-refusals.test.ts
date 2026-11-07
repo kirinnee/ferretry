@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { SIGN_IN_RULE_MAX, type SignInId, type SignInRuleStageId } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { FINISHED_STAGES_KEPT, SignInRuleError } from '../../../src/lib/sign-in-rules/index.ts';
+import { FINISHED_STAGES_KEPT, SignInRuleError } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import {
   actions,
   approved,

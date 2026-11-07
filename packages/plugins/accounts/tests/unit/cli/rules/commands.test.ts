@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import { SIGN_IN_RULE_HONEST_LIMIT, SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULES_SCREEN_PATH } from '../../../../contract/routes/index.ts';
 import { Command } from 'commander';
 import should from 'should';
-import { RULES_HELP, registerRulesCommands } from '../../../src/lib/rules/commands';
-import type { RulesController } from '../../../src/lib/rules/controller';
+import { RULES_HELP, registerRulesCommands } from '../../../../cli/lib/rules/commands';
+import type { RulesController } from '../../../../cli/lib/rules/controller';
 
 function run(argv: string[]) {
   const reached: unknown[] = [];

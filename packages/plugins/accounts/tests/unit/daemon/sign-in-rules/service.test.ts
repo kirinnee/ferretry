@@ -13,7 +13,7 @@ import {
   type SignInRuleStageId,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { SignInRuleError, SignInRuleProofMissing } from '../../../src/lib/sign-in-rules/index.ts';
+import { SignInRuleError, SignInRuleProofMissing } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import {
   AGENT,
   account,

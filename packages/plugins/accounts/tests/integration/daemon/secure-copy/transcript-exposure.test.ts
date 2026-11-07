@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { TranscriptFileExposure } from '../../../src/adapters/index.ts';
+import { TranscriptFileExposure } from '../../../../daemon/adapters/index.ts';
 
 const roots: string[] = [];
 

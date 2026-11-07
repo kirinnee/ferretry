@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PasteRule } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { FilePasteRuleStore } from '../../../src/adapters/index.ts';
-import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
+import { StateFileSystem } from '../../../../daemon/adapters/filesystem/state-file-system.ts';
+import { FilePasteRuleStore } from '../../../../daemon/adapters/index.ts';
+import { createFoundationPaths, resolveStateHome } from '../../../../daemon/lib/index.ts';
 
 /** The owner's pre-approval rules over a REAL state home: routes and counts only, in a private folder. */
 

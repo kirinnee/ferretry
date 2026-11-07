@@ -24,7 +24,7 @@ import {
   PasteRuleStages,
   PasteRuleStagesFull,
   ProfileTargetsChanged,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/index.ts';
 
 const HOST: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
 const PHONE: PasteRuleCaller = { kind: 'owner', actor: { kind: 'device', deviceId: 'd1' } };

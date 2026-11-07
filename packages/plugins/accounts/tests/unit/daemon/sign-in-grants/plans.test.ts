@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { AccountKey, SignInId } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
-import { type PlanGrantLines, PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';
-import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
+import { SignInGrantLedger } from '../../../../daemon/lib/sign-in-grants/ledger.ts';
+import { type PlanGrantLines, PlanSignInGrants } from '../../../../daemon/lib/sign-in-grants/plans.ts';
+import type { ApprovedSignInLine } from '../../../../daemon/lib/task-plans/service.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
 const SESSION = 'mvv6b4qw-49d0158d';

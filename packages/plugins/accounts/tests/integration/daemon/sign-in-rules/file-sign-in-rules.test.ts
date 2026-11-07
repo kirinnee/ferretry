@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SignInRulesDocument } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { FileSignInRuleStore } from '../../../src/adapters/index.ts';
-import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
+import { StateFileSystem } from '../../../../daemon/adapters/filesystem/state-file-system.ts';
+import { FileSignInRuleStore } from '../../../../daemon/adapters/index.ts';
+import { createFoundationPaths, resolveStateHome } from '../../../../daemon/lib/index.ts';
 
 /**
  * The owner's standing sign-in rules over a REAL state home (r3c-plan §5, invariant 8): a private folder, an atomic

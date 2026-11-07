@@ -7,7 +7,7 @@ import {
   type GrantReservation,
   type GrantTarget,
   SignInGrantLedger,
-} from '../../../src/lib/sign-in-grants/ledger.ts';
+} from '../../../../daemon/lib/sign-in-grants/ledger.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
 const SESSION = 'mvv6b4qw-49d0158d';

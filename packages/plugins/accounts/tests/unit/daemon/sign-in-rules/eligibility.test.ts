@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { foldObservation, type LoginObserved, type LoginObserverBy, type SignInSummary } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
-import { ineligibleBecause, tappedCount, tappedIdentities } from '../../../src/lib/sign-in-rules/index.ts';
+import { type LoginDelivery, LoginObserver } from '../../../../daemon/lib/vault-inputs.ts';
+import { ineligibleBecause, tappedCount, tappedIdentities } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import { signIn, tappedFact } from './support.ts';
 import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
@@ -16,7 +16,7 @@ const DELIVERED = 1_000_000;
 const SIGN_IN = 'si_00000000000000a1';
 
 const page = (navigationId = 'doc-1'): InputTargetFacts => ({
-  kind: 'browser',
+  kind: 'page',
   pageId: 'p',
   origin: 'https://github.com',
   secure: true,

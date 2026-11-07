@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
 import { COPY_AFTER_MASK_SECONDS, COPY_DEFAULT_LIFETIME_SECONDS, type CopyCapture } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import type { BrowserCopyRead } from '../../../src/lib/browser/transport/copy-contracts.ts';
+import { EphemeralValues } from '../support/masking.ts';
+import type { BrowserCopyRead } from '../../../../daemon/lib/local-ports.ts';
 import {
   BrowserCopyPages,
   type CopyPageRead,
-  EphemeralValues,
   PageCopyRecords,
   SecureCopyError,
   SecureCopyService,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/index.ts';
 
 const TOKEN = 'ghp_PAGE-SEALED-UNIQUE-55b0';
 const SESSION = 's1';

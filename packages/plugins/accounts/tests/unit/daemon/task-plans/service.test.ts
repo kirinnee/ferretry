@@ -18,8 +18,8 @@ import {
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { namesOnCard } from '../../support/names-on-card.ts';
-import { type AgendaLedger, AgendaService } from '../../../src/lib/agenda/index.ts';
-import type { AuditEntry } from '../../../src/lib/audit/types.ts';
+import { type AgendaLedger, AgendaService } from '../../../../daemon/lib/agenda/index.ts';
+import type { AuditEntry } from '../../../../daemon/lib/local-ports.ts';
 import {
   boundSelection,
   type PasteRuleCaller,
@@ -31,7 +31,7 @@ import {
   TaskPlanError,
   TaskPlanProofMissing,
   TaskPlanService,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');

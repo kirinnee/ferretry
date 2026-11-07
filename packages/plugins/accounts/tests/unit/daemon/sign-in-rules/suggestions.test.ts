@@ -7,7 +7,7 @@ import {
   SignInRuleSuggestionError,
   SignInRuleSuggestions,
   suggestionHost,
-} from '../../../src/lib/sign-in-rules/index.ts';
+} from '../../../../daemon/lib/sign-in-rules/index.ts';
 import {
   AGENT,
   deviceOwner,

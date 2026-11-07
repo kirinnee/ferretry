@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { StoredStepUpProof } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { SignInRuleError, type SignInRulePorts } from '../../../src/lib/sign-in-rules/index.ts';
+import { SignInRuleError, type SignInRulePorts } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import {
   actions,
   approved,

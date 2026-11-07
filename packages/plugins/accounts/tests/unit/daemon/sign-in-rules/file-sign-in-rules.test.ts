@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import type { SignInRulesDocument } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { FileSignInRuleStore } from '../../../src/adapters/sign-in-rules/index.ts';
-import { SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
+import { FileSignInRuleStore } from '../../../../daemon/adapters/sign-in-rules/index.ts';
+import { SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import { approved, FakeProofs, HOST_OWNER, NOW, world } from './support.ts';
 
 /**

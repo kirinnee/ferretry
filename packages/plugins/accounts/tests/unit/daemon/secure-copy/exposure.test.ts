@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { TRANSCRIPT_EXPOSURE_BYTES, TranscriptFileExposure } from '../../../src/adapters/secure-copy/index.ts';
-import { transcriptExposure } from '../../../src/lib/index.ts';
+import { TRANSCRIPT_EXPOSURE_BYTES, TranscriptFileExposure } from '../../../../daemon/adapters/secure-copy/index.ts';
+import { transcriptExposure } from '../../../../daemon/lib/index.ts';
 
 describe('transcriptExposure', () => {
   it('should find a value as it is, and as JSON lines escape it', () => {

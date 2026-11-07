@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';
-import { ProtocolRulesGateway } from '../../../src/lib/rules/gateway';
-import type { RulesApiClient } from '../../../src/lib/rules/ports';
+import { ProtocolRulesGateway } from '../../../../cli/lib/rules/gateway';
+import type { RulesApiClient } from '../../../../cli/lib/rules/ports';
 
 const STAGE = `srs_${'a'.repeat(24)}`;
 const SIGN_IN = `si_${'1'.repeat(16)}`;

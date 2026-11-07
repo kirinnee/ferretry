@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import type { AccountId, SignInRuleStageId } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { connectSignInRules, SignInRuleDevicePurge, SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
-import { PasskeysChangedSignal } from '../../../src/lib/step-up/passkeys-changed.ts';
+import { connectSignInRules, SignInRuleDevicePurge, SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
+import { PasskeysChangedSignal } from '../../../../daemon/lib/local-ports.ts';
 import { MemoryLoginIndex } from '../runtime/mounts/support.ts';
 import { CountingSealed, daemonOver } from '../secrets/accounts-fixtures.ts';
 import {
