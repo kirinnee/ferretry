@@ -1,8 +1,5 @@
 import type { ArchivedSessions, SessionView } from '../../protocol/session.ts';
-import { ApiError } from '../../api/error.ts';
-import type { ApiRequest, ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute } from '../../api/route.ts';
+import { ApiError, type ApiRequest, type ApiResponse, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
 import type { ArchivePassResult } from '../../session/archive/index.ts';
 
 /**
@@ -43,20 +40,16 @@ function requestedLimit(request: ApiRequest): number {
   return limit;
 }
 
-export function sessionArchiveRoutes(subsystem: SessionArchiveSubsystem): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/archived-sessions',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async (context): Promise<ApiResponse> => {
-        const limit = requestedLimit(context.request);
-        const sessions = limit === 0 ? [] : [...(await subsystem.list(limit))];
-        const body: ArchivedSessions = { count: subsystem.count(), sessions };
-        return jsonResponse(body);
-      },
+/** `GET /v1/archived-sessions` (R-0047, path unchanged per the parity table), keyed for the manifest. */
+export function sessionArchiveRoutes(subsystem: SessionArchiveSubsystem): {
+  readonly 'GET /v1/archived-sessions': RouteHandler;
+} {
+  return {
+    'GET /v1/archived-sessions': async (context): Promise<ApiResponse> => {
+      const limit = requestedLimit(context.request);
+      const sessions = limit === 0 ? [] : [...(await subsystem.list(limit))];
+      const body: ArchivedSessions = { count: subsystem.count(), sessions };
+      return jsonResponse(body);
     },
-  ];
+  };
 }

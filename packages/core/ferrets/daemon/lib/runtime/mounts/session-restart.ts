@@ -6,11 +6,8 @@ import {
   type RestartResult,
   type RestartStatus,
 } from '../../protocol/session-restart.ts';
-import { parseBody } from '../../api/body.ts';
-import { headerValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute } from '../../api/route.ts';
-import { moverOf } from './session-migrate.ts';
+import { type CallContext, headerValue, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
+import { parseBody } from '../../http/body.ts';
 
 /**
  * Restarting the ferrets whose instructions are out of date: `POST`, `GET` and `DELETE /v1/restarts`
@@ -19,7 +16,7 @@ import { moverOf } from './session-migrate.ts';
  * `POST` restarts what is idle and QUEUES what is busy — it never forces past the in-flight inventory, so it
  * is safe to press. `GET` lists the outdated ferrets and the waiting restarts. `DELETE` clears the queue.
  *
- * `operator` scope, as the migrate it drives is. The request id is OPTIONAL here, unlike the migrate's, because a
+ * `operator` scope, as the move it drives is. The request id is OPTIONAL here, unlike the move's, because a
  * repeat of this POST is harmless: whatever it would restart is already current, and whatever waits is
  * already queued. When one is sent, a retried request is answered from memory rather than run again.
  *
@@ -33,35 +30,27 @@ export interface SessionRestartSubsystem {
   drain(): Promise<void>;
 }
 
-export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): readonly ApiRoute[] {
-  return [
-    {
-      method: 'POST',
-      path: '/v1/restarts',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => {
-        const request = await parseBody(context.request, RestartRequestSchema);
-        const id = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim();
-        return jsonResponse(await subsystem.restart(request, id === '' ? undefined : id, moverOf(context.actor)));
-      },
+/**
+ * Who a request came from, in the words the journal keeps: a calling ferret's session, else the owner (today's
+ * `moverOf`, which ferrets-c's move mount also keeps; here read from Gate's standing instead of the actor string).
+ */
+function requestedBy(call: CallContext): string {
+  return call.credential?.tokenClass === 'ferret' ? `session:${call.credential.ferret}` : 'owner';
+}
+
+/** `POST`, `GET` and `DELETE /v1/restarts` (R-0323, R-0128, R-0023; paths unchanged), keyed for the manifest. */
+export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): {
+  readonly 'POST /v1/restarts': RouteHandler;
+  readonly 'GET /v1/restarts': RouteHandler;
+  readonly 'DELETE /v1/restarts': RouteHandler;
+} {
+  return {
+    'POST /v1/restarts': async context => {
+      const request = await parseBody(context.request, RestartRequestSchema);
+      const id = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim();
+      return jsonResponse(await subsystem.restart(request, id === '' ? undefined : id, requestedBy(context)));
     },
-    {
-      method: 'GET',
-      path: '/v1/restarts',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async () => jsonResponse(await subsystem.status()),
-    },
-    {
-      method: 'DELETE',
-      path: '/v1/restarts',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async () => jsonResponse(await subsystem.cancel()),
-    },
-  ];
+    'GET /v1/restarts': async () => jsonResponse(await subsystem.status()),
+    'DELETE /v1/restarts': async () => jsonResponse(await subsystem.cancel()),
+  };
 }

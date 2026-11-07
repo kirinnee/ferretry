@@ -298,3 +298,45 @@ describe('managed worktrees and the file browser before the kernel host IO is bo
     }
   });
 });
+
+describe('a start retried under its request id, and recovered when both answers were lost', () => {
+  const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+  const startBody = { name: 'aniya', folder: '/work/a' };
+  const withId = (id: string) => ({ 'x-fy-request-id': id });
+
+  test('the same id and body answer the ferret already started; another body under that id is refused', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const first = await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-1') });
+    expect(first.status).toBe(201);
+    const id = first.json<{ id: string }>().id;
+    const again = await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-1') });
+    expect(again.status).toBe(200);
+    expect(again.json<{ id: string }>().id).toBe(id);
+    expect((await h.request('GET', '/v1/ferrets')).json<readonly unknown[]>()).toHaveLength(1);
+    const reused = await h.request('POST', '/v1/ferrets', {
+      body: { ...startBody, folder: '/work/b' },
+      headers: withId('req-1'),
+    });
+    expect(reused.status).toBe(409);
+    expect(reused.json<{ code: string }>().code).toBe('request_id_reused');
+  });
+
+  test('the recovery read answers only a caller that proves the exact body it sent', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = (
+      await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-2') })
+    ).json<{ id: string }>().id;
+    const proved = await h.request('GET', '/v1/ferrets/by-request/req-2', {
+      query: { payload: sha(JSON.stringify(startBody)) },
+    });
+    expect(proved.status).toBe(200);
+    expect(proved.json<{ id: string }>().id).toBe(id);
+    const unproved = await h.request('GET', '/v1/ferrets/by-request/req-2');
+    expect(unproved.status).toBe(400);
+    expect(unproved.json<{ code: string }>().code).toBe('missing_payload_digest');
+    const wrong = await h.request('GET', '/v1/ferrets/by-request/req-2', { query: { payload: sha('{}') } });
+    expect(wrong.status).toBe(409);
+    const unknown = await h.request('GET', '/v1/ferrets/by-request/never', { query: { payload: sha('{}') } });
+    expect(unknown.status).toBe(404);
+  });
+});

@@ -28,6 +28,7 @@ import {
   WorkFoldersPort,
   WorktreesFile,
 } from './contract/index.ts';
+import { StartRequestsFile } from './daemon/lib/ferrets/start-requests.ts';
 
 /**
  * Ferrets (§2.2): who each ferret is, its name, parent, pack, token and state. Starting and stopping are done by a
@@ -80,6 +81,14 @@ export default definePlugin({
         caller: 'any',
         audit: { skip: 'a start is recorded in the ferret history, as today' },
         guard: { none: 'answers the new ferret id only' },
+      }),
+      // R-0187: four segments deep with a literal third, so it never matches a ferret id. The payload digest is the proof.
+      route('GET /v1/ferrets/by-request/:requestId', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a start recovery read records nothing, as today' },
+        guard: { none: 'one ferret identity record, for the caller that proves it sent the start' },
       }),
       // R-0372
       route('POST /v1/ferrets/:ferretId/stop', {
@@ -217,6 +226,7 @@ export default definePlugin({
       MoveFiles,
       LimitsAppliedFile,
       FerretIndexFile,
+      StartRequestsFile,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],

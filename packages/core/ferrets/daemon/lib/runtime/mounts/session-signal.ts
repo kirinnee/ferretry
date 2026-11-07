@@ -1,9 +1,15 @@
 import { SignalSessionRequestSchema, type SessionView, type SignalSessionRequest } from '../../protocol/session.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import {
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  jsonResponse,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import { parseBody } from '../../http/body.ts';
+
+type RouteContext = CallContext;
 
 /**
  * What a session says about itself: `POST /v1/sessions/:sessionId/signal`.
@@ -83,7 +89,7 @@ function refuse(error: unknown): never {
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
 function pathSessionId(context: RouteContext): string {
-  const raw = context.params.get('sessionId') ?? '';
+  const raw = context.params.get('ferretId') ?? '';
   const decoded = decodeParameter(raw);
   if (decoded === undefined || decoded === '')
     throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
@@ -110,15 +116,9 @@ async function signal(subsystem: SessionSignalSubsystem, context: RouteContext):
  * `noStore` because the answer is a live session view whose status is exactly what this call changed;
  * a cached one shows the session as it was before it finished or parked.
  */
-export function sessionSignalRoutes(subsystem: SessionSignalSubsystem): readonly ApiRoute[] {
-  return [
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/signal',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await signal(subsystem, context),
-    },
-  ];
+/** `POST /v1/ferrets/:ferretId/signal` (R-0371, today's `/v1/sessions/:sessionId/signal`), keyed for the manifest. */
+export function sessionSignalRoutes(subsystem: SessionSignalSubsystem): {
+  readonly 'POST /v1/ferrets/:ferretId/signal': RouteHandler;
+} {
+  return { 'POST /v1/ferrets/:ferretId/signal': async context => await signal(subsystem, context) };
 }

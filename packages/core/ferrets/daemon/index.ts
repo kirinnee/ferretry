@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { BearerDigest } from '@ferretry/core-gate/contract';
 import {
   ApiError,
@@ -37,6 +37,8 @@ import { isDeniedPath, normalizeRelativePath } from './lib/session/filesystem/pa
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
+import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
+import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
@@ -208,13 +210,29 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
   });
 
-  const body = async (call: CallContext): Promise<unknown> => {
-    const text = await call.request.text();
+  const parseJson = (text: string): unknown => {
     if (text.trim() === '') return {};
     try {
       return JSON.parse(text);
     } catch {
       throw new ApiError(400, 'the request body is not JSON', 'invalid_json');
+    }
+  };
+  const body = async (call: CallContext): Promise<unknown> => parseJson(await call.request.text());
+
+  /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
+  const payloadDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+  /** Starts under one request id run one at a time, so a retry racing its original cannot start a second ferret. */
+  const startsInFlight = new Map<string, Promise<unknown>>();
+  const oneAtATime = async <T>(requestId: string, work: () => Promise<T>): Promise<T> => {
+    const before = startsInFlight.get(requestId) ?? Promise.resolve();
+    const run = before.then(work, work);
+    const settled = run.catch(() => undefined);
+    startsInFlight.set(requestId, settled);
+    try {
+      return await run;
+    } finally {
+      if (startsInFlight.get(requestId) === settled) startsInFlight.delete(requestId);
     }
   };
 
@@ -244,16 +262,63 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       },
       'POST /v1/ferrets': async call => {
         await ready();
-        const parsed = parseStartBody(await body(call));
+        const text = await call.request.text();
+        const parsed = parseStartBody(parseJson(text));
         const own = callerFerret(call);
-        const started = await service.start({
-          ...parsed,
-          // A ferret's start is its helper: the parent is the caller, never a value from the request.
-          ...(own === undefined ? {} : { parent: own }),
-          by: own === undefined ? 'owner' : 'ferret',
+        let startedFerret: FerretId | undefined;
+        const start = async (): Promise<ApiResponse> => {
+          const started = await service.start({
+            ...parsed,
+            // A ferret's start is its helper: the parent is the caller, never a value from the request.
+            ...(own === undefined ? {} : { parent: own }),
+            by: own === undefined ? 'owner' : 'ferret',
+          });
+          if (!started.ok) return startFailure(started.error);
+          startedFerret = started.value;
+          return jsonResponse({ id: started.value }, 201);
+        };
+        // A start is IDEMPOTENT on its request id (today's retry contract): the same id and body answer the ferret it
+        // already started; the same id with another body is a conflict, never a second ferret.
+        const requestId = headerValue(call.request, FY_REQUEST_ID_HEADER)?.trim();
+        if (requestId === undefined || requestId === '') return await start();
+        const digest = payloadDigest(text);
+        return await oneAtATime(requestId, async () => {
+          const held = await kernel.state.read(StartRequestsFile);
+          const seen = lookupStartRequest(held.ok ? held.value : undefined, requestId, digest);
+          if (seen.kind === 'same') return jsonResponse({ id: seen.ferret });
+          if (seen.kind === 'conflict')
+            throw new ApiError(409, `request id ${JSON.stringify(requestId)} already started a different ferret`, 'request_id_reused');
+          const answer = await start();
+          const ferret = startedFerret;
+          if (ferret !== undefined) {
+            await kernel.state.update(StartRequestsFile, current =>
+              withStartRequest(current, { requestId, digest, ferret, at: kernel.clock.now() }),
+            );
+          }
+          return answer;
         });
-        if (!started.ok) return startFailure(started.error);
-        return jsonResponse({ id: started.value }, 201);
+      },
+      // Four segments deep with a literal third, so `by-request` can never be mistaken for a ferret id (R-0187).
+      'GET /v1/ferrets/by-request/:requestId': async call => {
+        await ready();
+        const id = decodeParameter(call.params.get('requestId') ?? '');
+        if (id === undefined || id === '')
+          throw new ApiError(400, 'the request id in the path is not usable', 'invalid_request_id');
+        const digest = call.request.query.get('payload')?.[0]?.trim() ?? '';
+        if (digest === '')
+          throw new ApiError(
+            400,
+            'a recovery read must carry ?payload=<sha-256 of the start body>: without it any caller could ask which session a request id produced',
+            'missing_payload_digest',
+          );
+        const held = await kernel.state.read(StartRequestsFile);
+        const seen = lookupStartRequest(held.ok ? held.value : undefined, id, digest);
+        if (seen.kind === 'conflict')
+          throw new ApiError(409, `request id ${JSON.stringify(id)} started a different ferret`, 'request_id_reused');
+        const summary = seen.kind === 'same' ? registry.summary(seen.ferret) : undefined;
+        if (summary === undefined)
+          throw new ApiError(404, `no start by this daemon carries request id ${JSON.stringify(id)}`, 'not-found');
+        return jsonResponse(summary);
       },
       'POST /v1/ferrets/:ferretId/stop': async call => {
         const id = await pathFerret(call);
