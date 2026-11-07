@@ -201,6 +201,8 @@ export const AskSummarySchema = z.strictObject({
   ferret: z.string().optional(),
   state: AskStateSchema,
   raisedAt: InstantSchema,
+  /** Pings the owner: today's notice flag, read by notify's buzz decision. */
+  blocking: z.boolean().optional(),
   /** The source's plugin is off or no longer registers this ref: the app shows "source unavailable". */
   sourceUnavailable: z.literal(true).optional(),
 });

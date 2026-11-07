@@ -198,6 +198,7 @@ function summaryOf(
     ferret,
     state,
     raisedAt: item.waitingSince as AskSummary['raisedAt'],
+    ...(item.ping === true || item.blockingNow === true ? { blocking: true } : {}),
     ...(unavailable ? { sourceUnavailable: true as const } : {}),
   };
 }
@@ -250,6 +251,7 @@ export function asksPort(
       ...(ask === undefined ? {} : { ask }),
       ...(notice ? { notice: true as const } : {}),
       ...(notice && parsed.blocking === true ? { ping: true as const } : {}),
+      ...(!notice && parsed.blocking === true ? { blockingNow: true as const } : {}),
     };
     const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
     if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
