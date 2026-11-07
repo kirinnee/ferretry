@@ -3,7 +3,6 @@ import { SessionAgendaSummarySchema } from './agenda.ts';
 import { PEER_MESSAGE_LABELS } from './agent-messages.ts';
 import { BoardProjectIdSchema, BoardSkipSchema, BoardTaskIdSchema, TaskRefSchema } from './board-refs.ts';
 import {
-  ApiErrorResponseSchema,
   InstantSchema,
   NonNegativeFiniteSchema,
   NonNegativeIntegerSchema,

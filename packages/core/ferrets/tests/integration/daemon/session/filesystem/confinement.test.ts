@@ -2,7 +2,6 @@ import { afterAll, describe, it } from 'bun:test';
 import { mkdir, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../../../daemon/adapters/git/index.ts';
 import {
   PosixSessionRootPinner,
   ProcfsSessionRootPinner,
@@ -16,6 +15,7 @@ import {
   type SessionRootPinner,
 } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../support/repository.ts';
+import { testGitRunner } from '../../../../support/daemon/host-io.ts';
 
 /**
  * Containment, against the real kernel.
@@ -49,7 +49,7 @@ const PINNERS: readonly (readonly [string, SessionRootPinner])[] = [
 
 const suite = (label: string, pinner: SessionRootPinner) =>
   describe(label, () => {
-    const filesystem = new SessionFilesystem(pinner, new RunnerSessionGit(new BunGitRunner()));
+    const filesystem = new SessionFilesystem(pinner, new RunnerSessionGit(testGitRunner()));
 
     /** A worktree-shaped fixture plus a sibling tree that nothing inside it may ever reach. */
     interface Fixture {
@@ -327,7 +327,7 @@ const suite = (label: string, pinner: SessionRootPinner) =>
         // case where a wrong answer is not a wrong badge but a secrets gate consulting a stranger's repo.
         const root = await repositoryWith('git-pinned', 'pinned.txt');
         const decoy = await repositoryWith('git-decoy', 'decoy.txt');
-        const git = new RunnerSessionGit(new BunGitRunner());
+        const git = new RunnerSessionGit(testGitRunner());
         const pinned = await pinner.pin(root);
 
         // Act

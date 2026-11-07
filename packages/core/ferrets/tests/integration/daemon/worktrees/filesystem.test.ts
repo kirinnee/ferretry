@@ -2,8 +2,10 @@ import { afterAll, describe, it } from 'bun:test';
 import { lstat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { NodeWorktreeFileSystem, SystemWorktreeClock } from '../../../../daemon/adapters/worktrees/index.ts';
+import { fixedClock } from '@ferretry/kernel/testing';
+import { KernelWorktreeClock } from '../../../../daemon/adapters/worktrees/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { NodeWorktreeFileSystem } from '../../../support/daemon/host-io.ts';
 
 describe('NodeWorktreeFileSystem', () => {
   afterAll(async () => {
@@ -136,10 +138,10 @@ describe('NodeWorktreeFileSystem', () => {
   });
 });
 
-describe('SystemWorktreeClock', () => {
-  it('should report the current instant as a UTC ISO-8601 timestamp', () => {
+describe('KernelWorktreeClock', () => {
+  it('should report the kernel clock’s instant as a UTC ISO-8601 timestamp', () => {
     // Arrange
-    const subject = new SystemWorktreeClock();
+    const subject = new KernelWorktreeClock(fixedClock('2026-08-04T09:00:00.000Z'));
 
     // Act
     const actual = subject.nowIso();
@@ -147,5 +149,6 @@ describe('SystemWorktreeClock', () => {
     // Assert
     should(actual).match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     should(Number.isNaN(Date.parse(actual))).be.false();
+    should(actual).equal('2026-08-04T09:00:00.000Z');
   });
 });

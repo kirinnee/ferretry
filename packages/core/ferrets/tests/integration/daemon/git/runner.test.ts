@@ -3,13 +3,13 @@ import { chmod } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import {
-  BunGitRunner,
   DEFAULT_GIT_STDERR_LIMIT,
   DEFAULT_GIT_STDOUT_LIMIT,
   DEFAULT_GIT_TIMEOUT_MS,
   GitProcessError,
 } from '../../../../daemon/adapters/git/index.ts';
 import { cleanupTempDirectories, setupGit, stubGitDirectory, tempRepository } from '../support/repository.ts';
+import { testGitRunner } from '../../../support/daemon/host-io.ts';
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
@@ -47,7 +47,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange
       const repository = await tempRepository('runner-ok');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject.run({ cwd: repository.root, args: ['rev-parse', 'HEAD'] });
@@ -68,7 +68,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange
       const repository = await tempRepository('runner-fail');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject.run({ cwd: repository.root, args: ['rev-parse', '--verify', 'refs/heads/absent'] });
@@ -88,7 +88,7 @@ describe('BunGitRunner', () => {
       const hostile = 'feat/a;b$(id)&&y|z;>pwned';
       const repository = await tempRepository('runner-args');
       await setupGit(repository.root, 'branch', '--', hostile);
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject.run({
@@ -109,7 +109,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange
       const repository = await tempRepository('runner-cap');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject.run({
@@ -131,7 +131,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange
       const repository = await tempRepository('runner-zero');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject.run({ cwd: repository.root, args: ['rev-parse', 'HEAD'], maxStdoutBytes: 0 });
@@ -160,7 +160,7 @@ describe('BunGitRunner', () => {
     async ({ invocation, message }) => {
       // Arrange
       const repository = await tempRepository('runner-limit');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject
@@ -184,7 +184,7 @@ describe('BunGitRunner', () => {
       // `exec` makes the sleeping process the direct child. Killing a shell wrapper alone would
       // orphan `sleep`, which Bun later reaps against an unrelated test's timeout budget.
       const stubs = await stubGitDirectory('#!/bin/sh\nexec sleep 60\n');
-      const subject = new BunGitRunner(() => ({ PATH: `${stubs}:${process.env.PATH ?? ''}` }));
+      const subject = testGitRunner(() => ({ PATH: `${stubs}:${process.env.PATH ?? ''}` }));
 
       // Act
       const actual = await subject.run({ cwd: repository.root, args: ['rev-parse', 'HEAD'], timeoutMs: 25 });
@@ -201,7 +201,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange
       const repository = await tempRepository('runner-spawn');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject
@@ -223,7 +223,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange — the directory exists, so the working-directory check passes; only the program is missing.
       const repository = await tempRepository('runner-no-git');
-      const subject = new BunGitRunner(() => ({ PATH: path.join(repository.root, 'no-such-bin') }));
+      const subject = testGitRunner(() => ({ PATH: path.join(repository.root, 'no-such-bin') }));
 
       // Act
       const actual = await subject
@@ -245,7 +245,7 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange — an inherited GIT_DIR from the daemon's own process would silently retarget Git.
       const repository = await tempRepository('runner-env');
-      const subject = new BunGitRunner(() => ({
+      const subject = testGitRunner(() => ({
         PATH: process.env.PATH,
         GIT_DIR: path.join(repository.root, 'hijacked'),
         GIT_WORK_TREE: path.join(repository.root, 'hijacked-tree'),
@@ -268,7 +268,7 @@ describe('BunGitRunner', () => {
       // Arrange — quotepath=false keeps non-ASCII paths literal instead of octal-escaped.
       const repository = await tempRepository('runner-locale');
       await Bun.write(path.join(repository.root, 'ünicode.txt'), 'x');
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const actual = await subject.run({ cwd: repository.root, args: ['status', '--porcelain'] });
@@ -292,7 +292,7 @@ describe('BunGitRunner', () => {
       await chmod(path.join(hooks, 'post-checkout'), 0o700);
       const pagers = await stubGitDirectory(`#!/bin/sh\ntouch ${JSON.stringify(pagerMarker)}\ncat\n`);
       await setupGit(repository.root, 'config', 'core.pager', path.join(pagers, 'git'));
-      const subject = new BunGitRunner();
+      const subject = testGitRunner();
 
       // Act
       const checkout = await subject.run({

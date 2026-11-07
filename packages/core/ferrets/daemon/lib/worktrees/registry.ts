@@ -59,13 +59,13 @@ const ManagedWorktreeIntentSchema = z.strictObject({
   ownerSessionId: z.string().min(1).optional(),
 });
 
-export const MANAGED_WORKTREE_DOCUMENT_VERSION = 1 as const;
-
+/**
+ * `state/ferrets/worktrees.json` (§9.2, the contract's `WorktreesFile`). Its `format: 1` is stamped and checked by the
+ * kernel's state port, so the document here is the body only.
+ */
 export const ManagedWorktreeDocumentSchema = z.strictObject({
-  version: z.literal(MANAGED_WORKTREE_DOCUMENT_VERSION),
   worktrees: z.array(ManagedWorktreeRecordSchema),
-  /** Defaulted so a document written before intents existed still reads as an ordinary registry. */
-  intents: z.array(ManagedWorktreeIntentSchema).default([]),
+  intents: z.array(ManagedWorktreeIntentSchema),
 });
 export type ManagedWorktreeDocument = z.infer<typeof ManagedWorktreeDocumentSchema>;
 
@@ -83,7 +83,6 @@ export function emptyManagedWorktreeState(): ManagedWorktreeRegistryState {
 /** The document this state makes, ready to be written. */
 export function managedWorktreeDocument(state: ManagedWorktreeRegistryState): ManagedWorktreeDocument {
   return {
-    version: MANAGED_WORKTREE_DOCUMENT_VERSION,
     worktrees: [...state.worktrees],
     intents: [...state.intents],
   };

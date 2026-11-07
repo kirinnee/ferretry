@@ -8,14 +8,11 @@ import {
   type WorktreeRemovalRequest,
   WorktreeRemovalRequestSchema,
 } from '../../protocol/worktrees.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, queryValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { AuditedRouteRule } from '../../audit/routes.ts';
+import { ApiError, type ApiResponse, type CallContext, jsonResponse, queryValue, type RouteHandler } from '@ferretry/kernel/contract';
+import { parseBody } from '../../http/body.ts';
 import { WorktreeError, type WorktreeErrorCode } from '../../worktrees/index.ts';
-import type { ModuleContribution } from '../modules.ts';
+
+type RouteContext = CallContext;
 
 /**
  * The managed-worktree surface: what checkouts this daemon holds, whether one may go, removing one,
@@ -122,61 +119,25 @@ async function create(worktrees: WorktreeSubsystem, context: RouteContext): Prom
   return jsonResponse(await worktrees.create(request).catch(refuse));
 }
 
-export function worktreeRoutes(worktrees: WorktreeSubsystem): readonly ApiRoute[] {
-  return [
-    // The removal check is registered BEFORE the collection, so its deeper literal segment cannot be
-    // shadowed by a pattern that ends at `/v1/worktrees`.
-    {
-      method: 'GET',
-      path: '/v1/worktrees/removal',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'filesystem', axis: 'use' },
-      noStore: true,
-      handle: async context => await checkRemoval(worktrees, context),
-    },
-    {
-      method: 'POST',
-      path: '/v1/worktrees/remove',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'filesystem', axis: 'configure' },
-      noStore: true,
-      handle: async context => await remove(worktrees, context),
-    },
-    {
-      method: 'GET',
-      path: '/v1/worktrees',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'filesystem', axis: 'use' },
-      noStore: true,
-      handle: async () => jsonResponse(await worktrees.list().catch(refuse)),
-    },
-    {
-      method: 'POST',
-      path: '/v1/worktrees',
-      minimum: 'operator',
-      caller: 'any',
-      capability: { capability: 'filesystem', axis: 'configure' },
-      noStore: true,
-      handle: async context => await create(worktrees, context),
-    },
-  ];
-}
-
-/** The security log's rule for the one destructive route: removing a managed checkout. Creating one is not kept. */
-const WORKTREE_AUDIT_RULES: readonly AuditedRouteRule[] = [
-  { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
-];
+/** The four route keys, exactly as `manifest.ts` declares them (R-… rows of the parity table, paths unchanged). */
+export const WORKTREE_ROUTE_KEYS = [
+  'GET /v1/worktrees/removal',
+  'POST /v1/worktrees/remove',
+  'GET /v1/worktrees',
+  'POST /v1/worktrees',
+] as const;
+export type WorktreeRouteKey = (typeof WORKTREE_ROUTE_KEYS)[number];
 
 /**
- * What the worktrees module adds to the daemon: the managed-worktree surface and its one audit rule.
- *
- * The surface registers beside the catalogs for the reason its subsystem field states. Every path is under
- * `/v1/worktrees`, which no other subsystem uses, so it can neither shadow nor be shadowed — and its own two
- * deeper literals are registered before the collection they sit under, which would otherwise match them first.
+ * The managed-worktree handlers, keyed as the manifest names them. The descriptors (operator, any caller, the
+ * `filesystem` capability on `use` for the reads and `configure` for the writes, no-store, the one audited
+ * removal) are today's and live in `manifest.ts`.
  */
-export function worktreesContribution(worktrees: WorktreeSubsystem): ModuleContribution {
-  return { routes: worktreeRoutes(worktrees), audit: { routes: WORKTREE_AUDIT_RULES } };
+export function worktreeRoutes(worktrees: WorktreeSubsystem): { readonly [K in WorktreeRouteKey]: RouteHandler } {
+  return {
+    'GET /v1/worktrees/removal': async context => await checkRemoval(worktrees, context),
+    'POST /v1/worktrees/remove': async context => await remove(worktrees, context),
+    'GET /v1/worktrees': async () => jsonResponse(await worktrees.list().catch(refuse)),
+    'POST /v1/worktrees': async context => await create(worktrees, context),
+  };
 }

@@ -1,8 +1,9 @@
 import { afterAll, describe, it } from 'bun:test';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner, GitProcessError } from '../../../../daemon/adapters/git/index.ts';
+import { GitProcessError } from '../../../../daemon/adapters/git/index.ts';
 import { cleanupTempDirectories, tempRepository } from '../support/repository.ts';
+import { testGitRunner } from '../../../support/daemon/host-io.ts';
 
 describe('BunGitRunner working-directory validation', () => {
   afterAll(async () => {
@@ -12,7 +13,7 @@ describe('BunGitRunner working-directory validation', () => {
   it('fails before spawning Git when the requested working directory is a file', async () => {
     // Arrange
     const repository = await tempRepository('runner-file-cwd');
-    const subject = new BunGitRunner();
+    const subject = testGitRunner();
 
     // Act
     const actual = await subject

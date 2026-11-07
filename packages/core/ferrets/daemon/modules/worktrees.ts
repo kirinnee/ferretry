@@ -1,103 +1,102 @@
-import type { CatalogSubsystem } from '../../src/lib/runtime/mounts/catalogs.ts';
+import type { Clock, RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import { type GitByteSpawn, KernelGitRunner } from '../adapters/git/runner.ts';
+import {
+  GitWorktreeGateway,
+  KernelWorktreeClock,
+  ManagedWorktreeAdapter,
+  StateManagedWorktreeRegistry,
+  WorktreeOperationQueue,
+} from '../adapters/worktrees/index.ts';
+import { type WorktreeRouteKey, worktreeRoutes } from '../lib/runtime/mounts/worktrees.ts';
 import {
   type ManagedWorktreeOperations,
-  type ManagedWorktreeRegistry,
   ManagedWorktreeService,
-  type SessionDirectorySubsystem,
-  type TerminalRuntimePort,
-  type WorktreeClock,
-} from '../../src/lib/index.ts';
-import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { worktreesContribution } from '../lib/runtime/mounts/worktrees.ts';
+  WorktreeError,
+  type WorktreeSessionFact,
+} from '../lib/worktrees/index.ts';
+import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktrees/ports.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is
- * refused on.
- *
- * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter
- * that `DaemonWorld` carries: the Git operations arrive in the {@link WorktreeComposition} with the registry and the
- * managed root, which the opened state home decides), no jobs and no releases: the service is inert until a request.
+ * refused on. Today's `daemon/bin/modules/worktrees.ts`, built inside Ferrets' `build(ctx)`. The service is inert
+ * until a request: no jobs, no releases.
  */
 
 /**
- * The three things the managed-worktree surface cannot decide for itself.
- *
- * Each is a fact about THIS boot rather than about worktrees: the registry is a document inside the
- * state home that was just opened, the managed root is derived from that home's name, and the Git
- * operations are the one collaborator whose real behaviour means creating and destroying checkouts
- * on the machine running the test. Grouping them keeps the composition seam one parameter wide.
+ * The host IO the Git operations need: byte-level Git, the managed root's file system, and the directory pinner.
+ * These are the `kernel.spawn` / `RootHandle` additions being made on `rebuild/port-kernel`; until they land the host
+ * passes none, and this daemon hosts no managed checkouts — which every route then says plainly (`no_managed_root`),
+ * exactly as today's daemon did without a managed root.
  */
-export interface WorktreeComposition {
-  readonly operations: ManagedWorktreeOperations;
-  readonly registry: ManagedWorktreeRegistry;
-  /** Absent means this daemon hosts no managed checkouts, which every route then says plainly. */
-  readonly managedRoot: string | undefined;
+export interface WorktreeHostIo {
+  readonly git: GitByteSpawn;
+  readonly fileSystem: WorktreeFileSystem;
+  readonly pinner: WorktreeDirectoryPinner;
+  /** Where managed checkouts live (inside the `worktrees` root). */
+  readonly managedRoot: string;
 }
 
 /** What the worktrees module is built from. */
 export interface WorktreesNeeds {
-  /** The durable half and the Git operations, decided by the state home this boot opened. */
-  readonly composition: WorktreeComposition;
-  /** The session directory a removal asks which sessions are still in a checkout. */
-  readonly sessions: Pick<SessionDirectorySubsystem, 'list'>;
-  /** The terminal runtime a removal asks which shells are still in a checkout. */
-  readonly terminals: Pick<TerminalRuntimePort, 'list'>;
-  /** The project catalogue a checkout is joined to the Project that owns its repository by. */
-  readonly catalogs: Pick<CatalogSubsystem, 'projects'>;
+  readonly state: StatePort;
   /** The SAME clock the Git adapter stamps records with. */
-  readonly clock: WorktreeClock;
+  readonly clock: Clock;
+  readonly io?: WorktreeHostIo;
+  /**
+   * Which ferrets are standing in which folders (from Ferrets' registry). `undefined` when unreadable, which the
+   * domain turns into an un-forceable refusal.
+   */
+  readonly sessions: () => Promise<readonly WorktreeSessionFact[] | undefined>;
+  /**
+   * Which shells are still in a checkout (today: the terminal runtime). Terminals is a plugin Ferrets cannot read
+   * (§2.1), so the host answers `undefined` until a hook carries it: a read still succeeds and a destructive write
+   * still refuses.
+   */
+  readonly terminalRoots: () => Promise<readonly string[] | undefined>;
+  /** Opaque ids for ownership tokens (today: `crypto.randomUUID`). */
+  readonly newId: () => string;
 }
 
-export const worktreesModule: DaemonModule<void, WorktreesNeeds, ManagedWorktreeService> = {
-  id: 'worktrees',
-  build: needs => {
-    const { composition, sessions, terminals, catalogs } = needs;
-    // The evidence is read through the SAME collaborators the rest of the daemon serves from —
-    // the session directory, the terminal runtime and the project catalog — so a refusal to
-    // remove a checkout because a session or a shell is still in it cites the very records the
-    // client would see if it asked. Collecting any of it separately is how a safety gate ends up
-    // refusing on evidence nobody else can reproduce, or worse, never firing at all.
-    const worktrees = new ManagedWorktreeService(
-      composition.registry,
-      composition.operations,
-      // BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: a
-      // host whose tmux server will not answer used to take the whole worktree surface down with
-      // a 500, and the only thing worse than that is the version that reports zero live shells
-      // and lets a removal proceed. The domain turns an absent answer into an un-forceable
-      // refusal, so a read still succeeds and a destructive write still refuses.
-      {
-        sessions: async () =>
-          await sessions
-            .list()
-            .then(views =>
-              views.map(session => ({
-                id: session.config.id,
-                cwd: session.config.cwd,
-                status: session.state.status,
-                ...(session.state.finishedAt === undefined ? {} : { finishedAt: session.state.finishedAt }),
-              })),
-            )
-            .catch(() => undefined),
-      },
-      {
-        roots: async () =>
-          await terminals
-            .list()
-            .then(records => records.map(record => record.root))
-            .catch(() => undefined),
-      },
-      { projects: async () => await catalogs.projects() },
-      // The SAME clock the Git adapter stamps records with, so an intent this daemon writes
-      // before a mutation and the record it writes after cannot disagree about when.
-      needs.clock,
-      { next: () => crypto.randomUUID() },
-      composition.managedRoot,
-    );
-    return {
-      id: 'worktrees',
-      provides: worktrees,
-      jobs: {},
-      contributes: worktreesContribution(worktrees),
-    };
+export interface BuiltWorktrees {
+  readonly service: ManagedWorktreeService;
+  readonly routes: { readonly [K in WorktreeRouteKey]: RouteHandler };
+}
+
+/** Operations for a daemon with no managed root: the service refuses before it would ever call one. */
+const NO_HOST_OPERATIONS: ManagedWorktreeOperations = new Proxy({} as ManagedWorktreeOperations, {
+  get: () => async () => {
+    throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
   },
-};
+});
+
+export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
+  const clock = new KernelWorktreeClock(needs.clock);
+  const io = needs.io;
+  const operations: ManagedWorktreeOperations =
+    io === undefined
+      ? NO_HOST_OPERATIONS
+      : new ManagedWorktreeAdapter(
+          new GitWorktreeGateway(new KernelGitRunner(io.git), io.fileSystem, clock),
+          io.fileSystem,
+          clock,
+          new WorktreeOperationQueue(),
+          io.pinner,
+        );
+  // The evidence is read through the SAME collaborators the rest of the daemon serves from, so a refusal to
+  // remove a checkout because a ferret or a shell is still in it cites the very records the client would see if
+  // it asked. BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: the domain
+  // turns an absent answer into an un-forceable refusal, so a read still succeeds and a destructive write still
+  // refuses.
+  const service = new ManagedWorktreeService(
+    new StateManagedWorktreeRegistry(needs.state),
+    operations,
+    { sessions: async () => await needs.sessions().catch(() => undefined) },
+    { roots: async () => await needs.terminalRoots().catch(() => undefined) },
+    // The SAME clock the Git adapter stamps records with, so an intent this daemon writes before a mutation and
+    // the record it writes after cannot disagree about when.
+    clock,
+    { next: needs.newId },
+    io?.managedRoot,
+  );
+  return { service, routes: worktreeRoutes(service) };
+}

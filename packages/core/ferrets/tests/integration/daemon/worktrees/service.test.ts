@@ -3,13 +3,10 @@ import { rmSync } from 'node:fs';
 import { mkdir, rename, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
 import { PosixSessionRootPinner, ProcfsSessionRootPinner } from '../../../../daemon/adapters/session/filesystem/index.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
-  NodeWorktreeFileSystem,
-  SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../../../../daemon/adapters/worktrees/index.ts';
 import { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
@@ -31,9 +28,10 @@ import type {
   WorktreeRemovalOverride,
 } from '../../../../daemon/lib/worktrees/types.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRemote, tempRepository } from '../support/repository.ts';
+import { testGitRunner, NodeWorktreeFileSystem, TestWorktreeClock } from '../../../support/daemon/host-io.ts';
 
 const files = new NodeWorktreeFileSystem();
-const clock = new SystemWorktreeClock();
+const clock = new TestWorktreeClock();
 const TOKEN = 'ownership-token-0001';
 
 /** Replays crafted Git results for the defensive paths, and delegates everything else to Git. */
@@ -43,7 +41,7 @@ class ScriptedGitRunner implements GitRunner {
   ) {}
 
   async run(invocation: GitInvocation): Promise<GitExecution> {
-    return (await this.reply(invocation)) ?? (await new BunGitRunner().run(invocation));
+    return (await this.reply(invocation)) ?? (await testGitRunner().run(invocation));
   }
 }
 
@@ -51,7 +49,7 @@ const directoryPinner = (): WorktreeDirectoryPinner =>
   process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
 
 const adapter = (
-  runner: GitRunner = new BunGitRunner(),
+  runner: GitRunner = testGitRunner(),
   pinner: WorktreeDirectoryPinner = directoryPinner(),
 ): ManagedWorktreeAdapter =>
   new ManagedWorktreeAdapter(
@@ -406,7 +404,7 @@ describe('ManagedWorktreeAdapter creation', () => {
     const second = (await setupGit(base.sourceCwd, 'rev-parse', 'HEAD')).trim();
     const runner = new ScriptedGitRunner(invocation =>
       invocation.args[0] === 'worktree' && invocation.args[1] === 'add'
-        ? new BunGitRunner().run({
+        ? testGitRunner().run({
             ...invocation,
             args: invocation.args.map(argument => (argument === second ? base.head : argument)),
           })
@@ -430,7 +428,7 @@ describe('ManagedWorktreeAdapter creation', () => {
 
     // Act
     const actual = await error(
-      adapter(new BunGitRunner(), swap).create(
+      adapter(testGitRunner(), swap).create(
         request(base, {
           onPlanned: async plan => {
             plans.push(plan);
@@ -482,9 +480,9 @@ describe('ManagedWorktreeAdapter creation', () => {
       (result): result is PromiseFulfilledResult<CreatedManagedWorktree> => result.status === 'fulfilled',
     );
     should(
-      (await new GitWorktreeGateway(new BunGitRunner(), files, clock).inspect(winner!.value.managed.path)).branch,
+      (await new GitWorktreeGateway(testGitRunner(), files, clock).inspect(winner!.value.managed.path)).branch,
     ).equal('feature/one');
-    should(await new GitWorktreeGateway(new BunGitRunner(), files, clock).list(base.sourceCwd)).have.length(2);
+    should(await new GitWorktreeGateway(testGitRunner(), files, clock).list(base.sourceCwd)).have.length(2);
   });
 });
 
@@ -814,7 +812,7 @@ describe('ManagedWorktreeAdapter removal', () => {
     const swap = new SwapBeforePin(created.managed.path, replacement.root);
 
     // Act
-    const actual = await error(adapter(new BunGitRunner(), swap).remove(removalInput(base, created.managed)));
+    const actual = await error(adapter(testGitRunner(), swap).remove(removalInput(base, created.managed)));
 
     // Assert — the original checkout survives under its moved name and the replacement is untouched
     should(code(actual)).equal('unsafe_remove');
@@ -1102,7 +1100,7 @@ describe('ManagedWorktreeAdapter consent and branch deletion', () => {
     const created = await adapter().create(request(base));
     const runner = new (class implements GitRunner {
       async run(invocation: GitInvocation): Promise<GitExecution> {
-        const execution = await new BunGitRunner().run(invocation);
+        const execution = await testGitRunner().run(invocation);
         return invocation.args[0] === 'branch' && (invocation.args[1] === '-d' || invocation.args[1] === '-D')
           ? { ...execution, exitCode: 124, timedOut: true, stderr: 'timed out after deleting the ref' }
           : execution;
@@ -1145,7 +1143,7 @@ describe('ManagedWorktreeAdapter consent and branch deletion', () => {
     };
 
     // Act
-    const removed = await adapter(new BunGitRunner(), pinner).remove(
+    const removed = await adapter(testGitRunner(), pinner).remove(
       removal(base, created.managed, { deleteBranch: true, confirmations: ['delete_unmerged_branch'] }),
     );
 
@@ -1417,7 +1415,7 @@ class BentFileSystem extends NodeWorktreeFileSystem implements WorktreeFileSyste
 
 const adapterOver = (fileSystem: WorktreeFileSystem): ManagedWorktreeAdapter =>
   new ManagedWorktreeAdapter(
-    new GitWorktreeGateway(new BunGitRunner(), files, clock),
+    new GitWorktreeGateway(testGitRunner(), files, clock),
     fileSystem,
     clock,
     new WorktreeOperationQueue(),
@@ -1580,7 +1578,7 @@ describe('ManagedWorktreeAdapter defaults, guarded directories and checkout iden
     };
 
     // Act
-    const removed = await adapter(new BunGitRunner(), pinner).remove(removal(base, created.managed));
+    const removed = await adapter(testGitRunner(), pinner).remove(removal(base, created.managed));
 
     // Assert
     should(removed.branchRetained).be.true();
@@ -1627,7 +1625,7 @@ describe('ManagedWorktreeAdapter defaults, guarded directories and checkout iden
     };
 
     // Act
-    const removed = await adapter(new BunGitRunner(), pinner).remove(removal(base, created.managed));
+    const removed = await adapter(testGitRunner(), pinner).remove(removal(base, created.managed));
 
     // Assert
     should(removed.branchRetained).be.true();

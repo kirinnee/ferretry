@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { ManagedWorktreeView, ProjectInfo, WorktreeRemovalRequest } from '@ferretry/protocol';
+import type { ManagedWorktreeView, WorktreeRemovalRequest } from '../../../../daemon/lib/protocol/worktrees.ts';
 import should from 'should';
 import {
   type CheckManagedWorktreeRemovalInput,
@@ -48,15 +48,6 @@ const session = (overrides: Partial<WorktreeSessionFact> = {}): WorktreeSessionF
   status: 'running',
   ...overrides,
 });
-
-const PROJECT: ProjectInfo = {
-  id: '00000000-0000-4000-8000-000000000001',
-  name: 'ferretry',
-  path: '/work/ferretry',
-  source: 'existing-folder',
-  createdAt: '2026-08-04T00:00:00.000Z',
-  git: { commonDirectory: '/work/ferretry/.git' },
-};
 
 const inspection = (overrides: Partial<ManagedWorktreeInspection> = {}): ManagedWorktreeInspection => ({
   live: { detached: false, head: 'b'.repeat(40), branch: 'feat/one', undetermined: [] },
@@ -169,7 +160,6 @@ function build(
     readonly sessions?: readonly WorktreeSessionFact[];
     readonly sessionEvidence?: () => Promise<readonly WorktreeSessionFact[] | undefined>;
     readonly terminalRoots?: readonly string[];
-    readonly projects?: readonly ProjectInfo[];
     readonly managedRoot?: string | undefined;
     readonly ids?: readonly string[];
   } = {},
@@ -182,7 +172,6 @@ function build(
     operations,
     { sessions: options.sessionEvidence ?? (async () => options.sessions ?? []) },
     { roots: async () => options.terminalRoots ?? [] },
-    { projects: async () => options.projects ?? [] },
     { nowIso: () => '2026-08-04T09:00:00.000Z' },
     { next: () => minted.shift() ?? 'exhausted' },
     'managedRoot' in options ? options.managedRoot : MANAGED_ROOT,
@@ -345,7 +334,6 @@ describe('the managed-worktree surface', () => {
     const { subject } = build({
       entries: [record()],
       sessions: [session(), session({ id: 'sess-2', cwd: '/managed/repo/feat-one/packages/cli' })],
-      projects: [PROJECT],
     });
 
     // Act
@@ -361,16 +349,12 @@ describe('the managed-worktree surface', () => {
       ownerSessionId: 'sess-1',
       ownerActive: true,
       sharedWith: ['sess-2'],
-      projectId: PROJECT.id,
     });
   });
 
-  it('should leave a checkout whose repository no Project records unjoined', async () => {
-    // Arrange — matched on the common directory, so a Project elsewhere on disk is not a match
-    const { subject } = build({
-      entries: [record()],
-      projects: [{ ...PROJECT, git: { commonDirectory: '/work/other/.git' } }],
-    });
+  it('should name no Project: Ferrets is core and cannot read Projects', async () => {
+    // Arrange
+    const { subject } = build({ entries: [record()] });
 
     // Act
     const actual = await subject.list();
@@ -555,7 +539,7 @@ describe('the managed-worktree surface', () => {
 
   it('should fork a checkout, file it, and answer with the directory to start work in', async () => {
     // Arrange
-    const { subject, registry, operations } = build({ projects: [PROJECT] });
+    const { subject, registry, operations } = build();
 
     // Act
     const actual = await subject.create({
@@ -577,7 +561,7 @@ describe('the managed-worktree surface', () => {
     });
     should(registry.state.worktrees).have.length(1);
     should(actual.cwd).equal('/managed/repo/feat-one/packages/cli');
-    should(actual.worktree.projectId).equal(PROJECT.id);
+    should(actual.worktree.projectId).be.undefined();
   });
 
   it('should key an unowned checkout by a minted id, and record no owner for it', async () => {
@@ -780,7 +764,7 @@ describe('surviving a crash between the registry and Git', () => {
     const operations = new RecordingOperations({
       adoption: { kind: 'unverified', reason: 'carries no ownership marker this daemon minted' },
     });
-    const { subject, registry } = build({ intents: [intent()], operations, projects: [PROJECT] });
+    const { subject, registry } = build({ intents: [intent()], operations });
 
     // Act
     const actual = await subject.list();
@@ -791,7 +775,6 @@ describe('surviving a crash between the registry and Git', () => {
       path: '/managed/repo/feat-one',
       branch: 'feat/one',
       ownerActive: false,
-      projectId: PROJECT.id,
     });
     should(actual.worktrees[0]?.unresolved).containEql('never finished');
     should(actual.worktrees[0]?.live).be.undefined();
@@ -1017,7 +1000,6 @@ describe('host evidence this daemon could not establish', () => {
       operations,
       { sessions: async () => undefined },
       { roots: async () => undefined },
-      { projects: async () => [] },
       { nowIso: () => '2026-08-04T09:00:00.000Z' },
       { next: () => 'id-0000-0000' },
       MANAGED_ROOT,

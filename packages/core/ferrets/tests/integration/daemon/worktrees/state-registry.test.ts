@@ -1,8 +1,8 @@
-import { afterAll, describe, it } from 'bun:test';
-import { chmod, readFile, stat, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { describe, it } from 'bun:test';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { FileManagedWorktreeRegistry } from '../../../../daemon/adapters/worktrees/index.ts';
+import { WorktreesFile } from '../../../../contract/index.ts';
+import { StateManagedWorktreeRegistry } from '../../../../daemon/adapters/worktrees/index.ts';
 import {
   type ManagedWorktree,
   type ManagedWorktreeIntent,
@@ -12,7 +12,6 @@ import {
   withRemovalStarted,
   withRemovedManagedWorktree,
 } from '../../../../daemon/lib/worktrees/index.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const record = (overrides: Partial<ManagedWorktree> = {}): ManagedWorktree => ({
   version: 1,
@@ -45,23 +44,19 @@ const intent: ManagedWorktreeIntent = {
   relativeCwd: '',
 };
 
-async function registryAt(label: string): Promise<{ registry: FileManagedWorktreeRegistry; file: string }> {
-  const root = await tempDirectory(label);
-  const file = path.join(root, 'state', 'worktrees.json');
-  return { registry: new FileManagedWorktreeRegistry(file), file };
+/** A registry over the kernel's state port, as Ferrets' build makes one (`state/ferrets/worktrees.json`). */
+function registryAt(_label: string): { registry: StateManagedWorktreeRegistry; folder: MemoryStateFolder } {
+  const folder = new MemoryStateFolder();
+  return { registry: new StateManagedWorktreeRegistry(folder.port([WorktreesFile])), folder };
 }
 
 const error = async (operation: Promise<unknown>): Promise<unknown> =>
   await operation.then(() => undefined).catch((thrown: unknown) => thrown);
 
-describe('the file-backed managed-worktree registry', () => {
-  afterAll(async () => {
-    await cleanupTempDirectories();
-  });
-
+describe('the state-backed managed-worktree registry', () => {
   it('should read an absent registry as a daemon that has made no checkouts', async () => {
     // Arrange
-    const { registry } = await registryAt('wt-registry-missing');
+    const { registry } = registryAt('wt-registry-missing');
 
     // Act
     const actual = await registry.read();
@@ -70,21 +65,9 @@ describe('the file-backed managed-worktree registry', () => {
     should(actual).eql({ worktrees: [], intents: [] });
   });
 
-  it('should create its directory owner-only and write the document owner-readable', async () => {
-    // Arrange
-    const { registry, file } = await registryAt('wt-registry-modes');
-
-    // Act
-    await registry.write(state => withManagedWorktree(state, record()));
-
-    // Assert
-    should((await stat(path.dirname(file))).mode & 0o777).equal(0o700);
-    should((await stat(file)).mode & 0o777).equal(0o600);
-  });
-
   it('should round-trip every durable fact, including a declared creation', async () => {
     // Arrange
-    const { registry } = await registryAt('wt-registry-roundtrip');
+    const { registry } = registryAt('wt-registry-roundtrip');
 
     // Act
     await registry.write(state => withManagedWorktree(state, record()));
@@ -96,22 +79,9 @@ describe('the file-backed managed-worktree registry', () => {
     should(actual.intents[0]).eql(intent);
   });
 
-  it('should leave no temporary file behind, because the save is a rename', async () => {
-    // Arrange
-    const { registry, file } = await registryAt('wt-registry-atomic');
-
-    // Act
-    await registry.write(state => withManagedWorktree(state, record()));
-    const entries = [...new Bun.Glob('.*').scanSync({ cwd: path.dirname(file), onlyFiles: true, dot: true })];
-
-    // Assert
-    should(entries).be.empty();
-    should(JSON.parse(await readFile(file, 'utf8'))).match({ version: 1 });
-  });
-
   it('should apply concurrent changes one after another rather than losing one', async () => {
     // Arrange — a read-modify-write in each caller is exactly how an update goes missing
-    const { registry } = await registryAt('wt-registry-serial');
+    const { registry } = registryAt('wt-registry-serial');
 
     // Act
     await Promise.all(
@@ -126,7 +96,7 @@ describe('the file-backed managed-worktree registry', () => {
 
   it('should carry a removal stamp and its tombstone through the file', async () => {
     // Arrange
-    const { registry } = await registryAt('wt-registry-stamps');
+    const { registry } = registryAt('wt-registry-stamps');
     await registry.write(state => withManagedWorktree(state, record()));
 
     // Act
@@ -143,10 +113,10 @@ describe('the file-backed managed-worktree registry', () => {
 
   it('should refuse bytes that are not JSON rather than reporting an empty fleet', async () => {
     // Arrange — a truncated write is the realistic shape of this
-    const { registry, file } = await registryAt('wt-registry-truncated');
+    const { registry, folder } = registryAt('wt-registry-truncated');
     await registry.write(state => withManagedWorktree(state, record()));
-    const complete = await readFile(file, 'utf8');
-    await writeFile(file, complete.slice(0, complete.length / 2));
+    const complete = folder.raw(WorktreesFile) ?? '';
+    folder.plant(WorktreesFile, complete.slice(0, complete.length / 2));
 
     // Act
     const actual = await error(registry.read());
@@ -154,14 +124,14 @@ describe('the file-backed managed-worktree registry', () => {
     // Assert
     should(actual).be.instanceof(WorktreeError);
     should((actual as WorktreeError).code).equal('registry_damaged');
-    should((actual as WorktreeError).message).containEql('not readable JSON');
+    should((actual as WorktreeError).message).containEql('damaged');
   });
 
   it('should refuse readable JSON that is not a registry this build can serve', async () => {
     // Arrange
-    const { registry, file } = await registryAt('wt-registry-foreign');
+    const { registry, folder } = registryAt('wt-registry-foreign');
     await registry.write(state => withManagedWorktree(state, record()));
-    await writeFile(file, JSON.stringify({ version: 99, worktrees: [] }));
+    folder.plant(WorktreesFile, JSON.stringify({ format: 99, worktrees: [] }));
 
     // Act
     const actual = await error(registry.read());
@@ -171,18 +141,21 @@ describe('the file-backed managed-worktree registry', () => {
     should((actual as WorktreeError).message).containEql('damaged');
   });
 
-  it('should let a read failure that is not absence propagate rather than reading as empty', async () => {
+});
+
+describe('the managed-worktree document', () => {
+  it('should be stored at format 1 with no intents default: a document without intents is damaged, not converted', async () => {
     // Arrange
-    const { registry, file } = await registryAt('wt-registry-unreadable');
+    const { registry, folder } = registryAt('wt-registry-format');
     await registry.write(state => withManagedWorktree(state, record()));
-    await chmod(file, 0o000);
 
     // Act
+    const stored = JSON.parse(folder.raw(WorktreesFile) ?? '{}') as { format?: number };
+    folder.plant(WorktreesFile, JSON.stringify({ format: 1, worktrees: [] }));
     const actual = await error(registry.read());
 
-    // Assert — an unreadable registry is not a daemon that has made no worktrees
-    await chmod(file, 0o600);
-    should(actual).be.instanceof(Error);
-    should(actual).not.be.instanceof(WorktreeError);
+    // Assert
+    should(stored.format).equal(1);
+    should((actual as WorktreeError).code).equal('registry_damaged');
   });
 });

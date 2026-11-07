@@ -3,14 +3,12 @@ import {
   type CreatedWorktree,
   type CreateWorktreeRequest,
   type ManagedWorktreeView,
-  type ProjectInfo,
-  projectForWorktree,
   type RemovedWorktree,
-  type SessionStatus,
   type WorktreeListResponse,
   type WorktreeRemovalDecision,
   type WorktreeRemovalRequest,
-} from '@ferretry/protocol';
+} from '../protocol/worktrees.ts';
+import type { SessionStatus } from '../protocol/session-base.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from './errors.ts';
 import { isWithinDirectory, sharingSessionIds } from './policy.ts';
 import type { WorktreeClock } from './ports.ts';
@@ -129,11 +127,6 @@ export interface WorktreeTerminalEvidence {
   roots(): Promise<readonly string[] | undefined>;
 }
 
-/** The registered Projects, so a checkout can be joined to the one that owns its repository. */
-export interface WorktreeProjectDirectory {
-  projects(): Promise<readonly ProjectInfo[]>;
-}
-
 /** Opaque ids for ownership tokens and for the destination key of an unowned checkout. */
 export interface WorktreeIdSource {
   next(): string;
@@ -247,7 +240,6 @@ export class ManagedWorktreeService {
     private readonly operations: ManagedWorktreeOperations,
     private readonly sessions: WorktreeSessionEvidence,
     private readonly terminals: WorktreeTerminalEvidence,
-    private readonly directory: WorktreeProjectDirectory,
     private readonly clock: WorktreeClock,
     private readonly ids: WorktreeIdSource,
     /** Where managed checkouts live. Absent means this daemon cannot host one at all. */
@@ -259,17 +251,16 @@ export class ManagedWorktreeService {
   }
 
   async #list(): Promise<WorktreeListResponse> {
-    const [state, sessions, terminalRoots, projects] = await Promise.all([
+    const [state, sessions, terminalRoots] = await Promise.all([
       this.#settled(),
       this.sessions.sessions(),
       this.terminals.roots(),
-      this.directory.projects(),
     ]);
     const views: ManagedWorktreeView[] = [];
     for (const entry of state.worktrees) {
-      views.push(await this.#view(entry, sessions, terminalRoots, projects));
+      views.push(await this.#view(entry, sessions, terminalRoots));
     }
-    for (const intent of state.intents) views.push(unresolvedView(intent, projects));
+    for (const intent of state.intents) views.push(unresolvedView(intent));
     return {
       worktrees: [...orderManagedWorktreeViews(views)],
       ...(this.managedRoot === undefined ? {} : { managedRoot: this.managedRoot }),
@@ -380,13 +371,9 @@ export class ManagedWorktreeService {
       },
     });
     await this.registry.write(state => withManagedWorktree(state, created.managed));
-    const [sessions, terminalRoots, projects] = await Promise.all([
-      this.sessions.sessions(),
-      this.terminals.roots(),
-      this.directory.projects(),
-    ]);
+    const [sessions, terminalRoots] = await Promise.all([this.sessions.sessions(), this.terminals.roots()]);
     return {
-      worktree: await this.#view(created.managed, sessions, terminalRoots, projects),
+      worktree: await this.#view(created.managed, sessions, terminalRoots),
       cwd: created.cwd,
     };
   }
@@ -480,11 +467,9 @@ export class ManagedWorktreeService {
     managed: ManagedWorktree,
     sessions: readonly WorktreeSessionFact[] | undefined,
     terminalRoots: readonly string[] | undefined,
-    projects: readonly ProjectInfo[],
   ): Promise<ManagedWorktreeView> {
     const active = (sessions ?? []).filter(isWorktreeSessionActive);
     const owner = managed.ownerSessionId;
-    const project = projectForWorktree(projects, managed.commonDir);
     const shared = sharingSessionIds(
       managed.path,
       active.filter(session => session.id !== owner),
@@ -513,7 +498,7 @@ export class ManagedWorktreeService {
       ...(owner === undefined ? {} : { ownerSessionId: owner }),
       ownerActive: owner !== undefined && active.some(session => session.id === owner),
       sharedWith: [...shared],
-      ...(project === undefined ? {} : { projectId: project.id }),
+      // `projectId` (the Projects label) is not filled: Ferrets is core and cannot read Projects (§2.1).
       ...(inspection === undefined ? {} : { live: inspection.live, removal: inspection.decision }),
     };
   }
@@ -526,8 +511,7 @@ export class ManagedWorktreeService {
  * daemon cannot prove is its own checkout. What it carries is the path and the reason, which is what
  * an operator needs in order to go and look.
  */
-function unresolvedView(intent: ManagedWorktreeIntent, projects: readonly ProjectInfo[]): ManagedWorktreeView {
-  const project = projectForWorktree(projects, intent.commonDir);
+function unresolvedView(intent: ManagedWorktreeIntent): ManagedWorktreeView {
   return {
     path: intent.path,
     branch: intent.branch,
@@ -540,7 +524,6 @@ function unresolvedView(intent: ManagedWorktreeIntent, projects: readonly Projec
     ...(intent.ownerSessionId === undefined ? {} : { ownerSessionId: intent.ownerSessionId }),
     ownerActive: false,
     sharedWith: [],
-    ...(project === undefined ? {} : { projectId: project.id }),
     unresolved: `declared at ${intent.declaredAt} and never finished; the daemon cannot prove the directory at this path is its own`,
   };
 }

@@ -1,39 +1,19 @@
-import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
-import type { WorktreeClock, WorktreeFileSystem, WorktreeFileType } from '../../lib/worktrees/ports.ts';
+import type { Clock } from '@ferretry/kernel/contract';
+import type { WorktreeClock } from '../../lib/worktrees/ports.ts';
 
-export class NodeWorktreeFileSystem implements WorktreeFileSystem {
-  async makeDirectory(target: string, mode: number): Promise<void> {
-    await mkdir(target, { recursive: true, mode });
-  }
+/**
+ * Today's `NodeWorktreeFileSystem` (mkdir with a mode, realpath, lstat, exclusive write with a mode) is NOT ported
+ * here: a subsystem reaches the file system only through kernel roots (`banned-globals`). `WorktreeFileSystem` in
+ * `lib/worktrees/ports.ts` names exactly the `RootHandle` additions being made on `rebuild/port-kernel`
+ * (`makeDirectory(mode)`, `realPath`, `lstat`, exclusive `writeText(mode)`); the host binds it to the `worktrees`
+ * root when they land.
+ */
 
-  async realPath(target: string): Promise<string> {
-    return await realpath(target);
-  }
+/** Today's `SystemWorktreeClock`, on the kernel clock. */
+export class KernelWorktreeClock implements WorktreeClock {
+  constructor(private readonly clock: Clock) {}
 
-  async type(target: string): Promise<WorktreeFileType> {
-    try {
-      const stats = await lstat(target);
-      if (stats.isDirectory()) return 'directory';
-      if (stats.isFile()) return 'file';
-      if (stats.isSymbolicLink()) return 'symlink';
-      return 'other';
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
-      throw error;
-    }
-  }
-
-  async readText(target: string): Promise<string> {
-    return await readFile(target, 'utf8');
-  }
-
-  async writeText(target: string, content: string, mode: number): Promise<void> {
-    await writeFile(target, content, { encoding: 'utf8', mode, flag: 'wx' });
-  }
-}
-
-export class SystemWorktreeClock implements WorktreeClock {
   nowIso(): string {
-    return new Date().toISOString();
+    return this.clock.now();
   }
 }

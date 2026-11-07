@@ -2,20 +2,18 @@ import { afterAll, describe, it } from 'bun:test';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
 import {
   GitWorktreeGateway,
-  NodeWorktreeFileSystem,
-  SystemWorktreeClock,
-} from '../../../../daemon/adapters/worktrees/index.ts';
+  } from '../../../../daemon/adapters/worktrees/index.ts';
 import { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
 import type { GitExecution, GitInvocation, GitRunner } from '../../../../daemon/lib/worktrees/ports.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRemote, tempRepository } from '../support/repository.ts';
+import { testGitRunner, NodeWorktreeFileSystem, TestWorktreeClock } from '../../../support/daemon/host-io.ts';
 
 const files = new NodeWorktreeFileSystem();
-const clock = new SystemWorktreeClock();
+const clock = new TestWorktreeClock();
 
-const gateway = (runner: GitRunner = new BunGitRunner()): GitWorktreeGateway =>
+const gateway = (runner: GitRunner = testGitRunner()): GitWorktreeGateway =>
   new GitWorktreeGateway(runner, files, clock);
 
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -39,7 +37,7 @@ class ScriptedGitRunner implements GitRunner {
   async run(invocation: GitInvocation): Promise<GitExecution> {
     this.invocations.push(invocation);
     const scripted = this.reply(invocation);
-    return scripted ?? (await new BunGitRunner().run(invocation));
+    return scripted ?? (await testGitRunner().run(invocation));
   }
 }
 

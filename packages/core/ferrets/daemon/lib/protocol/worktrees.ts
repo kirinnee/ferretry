@@ -16,7 +16,6 @@
  * above both.
  */
 import { z } from 'zod';
-import type { ProjectInfo } from './catalog.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 
 const Text = z.string().min(1);
@@ -318,18 +317,3 @@ export function unclearedRemovalBlockers(
   return blockers.filter(blocker => blocker.override === undefined || !consented.has(blocker.override));
 }
 
-/**
- * The Project a checkout belongs to, or nothing.
- *
- * MATCHED ON THE COMMON DIRECTORY, never on a path prefix. Two checkouts of one repository can live
- * anywhere on disk — a managed worktree deliberately lives under the daemon's own root, nowhere near
- * the Project it forked from — so a prefix rule would file every managed worktree under no Project at
- * all while filing an unrelated neighbouring folder under one.
- *
- * A Project with no Git attachment matches nothing, which is how non-Git Projects stay outside this
- * surface: there is no worktree to join them to and no control to hide.
- */
-export function projectForWorktree(projects: readonly ProjectInfo[], commonDirectory: string): ProjectInfo | undefined {
-  if (commonDirectory.length === 0) return undefined;
-  return projects.find(project => project.git?.commonDirectory === commonDirectory);
-}

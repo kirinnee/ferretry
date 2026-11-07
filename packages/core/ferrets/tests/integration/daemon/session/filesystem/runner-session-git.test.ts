@@ -2,7 +2,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { chmod, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { BunGitRunner, GitCommandError } from '../../../../../daemon/adapters/git/index.ts';
+import { GitCommandError } from '../../../../../daemon/adapters/git/index.ts';
 import { RunnerSessionGit } from '../../../../../daemon/adapters/session/filesystem/index.ts';
 import { MAX_DIFF_SIDE_BYTES } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import type { GitInvocation, GitRunner } from '../../../../../daemon/lib/worktrees/ports.ts';
@@ -13,6 +13,7 @@ import {
   tempDirectory,
   tempRepository,
 } from '../../support/repository.ts';
+import { testGitRunner } from '../../../../support/daemon/host-io.ts';
 
 /**
  * The Git reads behind the working-tree viewer, against a real `git`.
@@ -22,14 +23,14 @@ import {
  * verdict and every rendered diff below comes from a throwaway repository built by the fixture helpers.
  */
 
-const git = new RunnerSessionGit(new BunGitRunner());
+const git = new RunnerSessionGit(testGitRunner());
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 const NUL = String.fromCharCode(0);
 
 /** A runner whose `git` is a script, for the failure paths a real Git will not produce on demand. */
 const gitOnPath = async (script: string): Promise<RunnerSessionGit> => {
   const directory = await stubGitDirectory(script);
-  return new RunnerSessionGit(new BunGitRunner(() => ({ PATH: directory })));
+  return new RunnerSessionGit(testGitRunner(() => ({ PATH: directory })));
 };
 
 afterAll(async () => {
@@ -704,7 +705,7 @@ describe('the hardened runner as this viewer needs it', () => {
     // Arrange
     const { root } = await tempRepository('env-git-dir');
     const elsewhere = await tempRepository('env-elsewhere');
-    const runner = new BunGitRunner(() => ({
+    const runner = testGitRunner(() => ({
       PATH: process.env.PATH,
       GIT_DIR: path.join(elsewhere.root, '.git'),
       GIT_WORK_TREE: elsewhere.root,
