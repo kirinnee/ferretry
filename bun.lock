@@ -162,6 +162,9 @@
     "packages/plugins/browsers": {
       "name": "@ferretry/plugin-browsers",
       "version": "5.0.0",
+      "bin": {
+        "fyd-browser-worker": "daemon/worker/adapters/main.ts",
+      },
       "dependencies": {
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",

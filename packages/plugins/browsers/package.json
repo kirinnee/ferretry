@@ -4,6 +4,9 @@
   "private": true,
   "description": "Browsers (plugins piece of Ferretry 5)",
   "type": "module",
+  "bin": {
+    "fyd-browser-worker": "daemon/worker/adapters/main.ts"
+  },
   "ferretry": {
     "id": "browsers",
     "manifest": "./manifest.ts"
