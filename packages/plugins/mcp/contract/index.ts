@@ -15,6 +15,7 @@ import {
   McpItemSchema,
 } from './wire.ts';
 
+export * from './rules.ts';
 export * from './wire.ts';
 
 export const MCP = 'mcp' as const;
