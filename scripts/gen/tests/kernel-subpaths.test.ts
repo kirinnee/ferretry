@@ -45,3 +45,21 @@ describe('context-imports: the kernel wire and session subpaths', () => {
     );
   });
 });
+
+describe('context-imports: a plugin’s halves share pure code through their own contract folder', () => {
+  test('a half imports its own contract folder by relative path; another plugin’s non-contract path is refused', () => {
+    expect(refusal(edge('accounts', 'daemon/lib/defaults.ts', '../../contract/shared.ts'))).toBeUndefined();
+    expect(refusal(edge('accounts', 'app/screens/defaults.ts', '../../contract/shared.ts'))).toBeUndefined();
+    expect(refusal(edge('accounts', 'daemon/lib/defaults.ts', '@ferretry/plugin-runtimes/contract'))).toBeUndefined();
+    expect(refusal(edge('accounts', 'daemon/lib/defaults.ts', '@ferretry/plugin-runtimes/daemon'))).toContain(
+      'another package is reached only through its contract',
+    );
+    expect(refusal(edge('accounts', 'daemon/lib/defaults.ts', '../../../runtimes/daemon/lib/x.ts'))).toContain(
+      'another package is reached only through its contract',
+    );
+    // and its own other half stays refused: halves share only the manifest and the contract
+    expect(refusal(edge('accounts', 'daemon/lib/defaults.ts', '../../app/screens/x.ts'))).toContain(
+      'halves share only',
+    );
+  });
+});
