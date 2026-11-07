@@ -1,4 +1,10 @@
-import { FerretFiles, FerretRecordSchema, FerretTokensFile, FerretTokensSchema } from '@ferretry/core-ferrets/contract';
+import {
+  FerretFiles,
+  FerretNameSchema,
+  FerretRecordSchema,
+  FerretTokensFile,
+  FerretTokensSchema,
+} from '@ferretry/core-ferrets/contract';
 import { join } from 'node:path';
 import type { StepReport } from '../report.ts';
 import { rewriteTranscript } from '../v5/harness-paths.ts';
@@ -6,6 +12,15 @@ import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/fe
 import type { Step } from './index.ts';
 import { type DetailsSource, prepareDetails } from './ferret-details.ts';
 import { prepareLedgers } from './ferret-ledgers.ts';
+
+/**
+ * v5's `name` is what `:name` references: v4's callsign, `teammate`. v4's `name` is the free-form title (carried as
+ * `details.json` `title`). A session older than callsigns has none: its title is used when it is a valid v5 name,
+ * otherwise its id, so an odd title never fails the step.
+ */
+export const v5FerretName = (config: { id: string; name: string; teammate?: string }): string =>
+  [config.teammate, config.name].find(name => name !== undefined && FerretNameSchema.safeParse(name).success) ??
+  config.id;
 
 export const ferretsStep: Step = {
   id: 'ferrets',
@@ -94,7 +109,7 @@ export const ferretsStep: Step = {
         const record = FerretRecordSchema.parse({
           format: 1,
           id: config.id,
-          name: config.name,
+          name: v5FerretName(config),
           parent: config.parent,
           role: config.parent === undefined ? 'lead' : 'helper',
           harness: config.harness === 'claude' ? 'claude-code' : 'codex',
