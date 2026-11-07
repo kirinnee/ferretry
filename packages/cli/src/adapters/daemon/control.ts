@@ -5,7 +5,6 @@
  * client, so this holds no credential and opens no connection.
  */
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
 import { parseDaemonRun, resolveDaemonUrl } from '../../lib/address.ts';
 import { resolveDaemonBinaryPath } from '../../lib/daemon/binary.ts';
@@ -27,6 +26,7 @@ import { privateRuntimeDirectory } from './runtime-directory.ts';
 import { readDaemonRunDocument } from './run-file.ts';
 import { FileServiceStore } from './service-files.ts';
 import { TmuxSessionTerminalServer } from './session-terminals.ts';
+import { terminalPrompt } from '../terminal/prompt.ts';
 import { homeMarker } from './state-home-marker.ts';
 import type { Fetcher } from './http-transport.ts';
 
@@ -111,16 +111,7 @@ export function buildDaemonController(
     resetInventory: reads.resetInventory,
     sessionTerminals: new TmuxSessionTerminalServer(processes),
     claims,
-    prompt: {
-      ask: async question => {
-        const terminal = createInterface({ input: process.stdin, output: process.stderr });
-        try {
-          return await terminal.question(`${question} `);
-        } finally {
-          terminal.close();
-        }
-      },
-    },
+    prompt: terminalPrompt,
     interactive: () => io.isTty,
     clientName: inputs.clientName,
     clock,

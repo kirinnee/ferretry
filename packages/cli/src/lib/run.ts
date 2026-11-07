@@ -22,6 +22,13 @@ import {
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import { eventsVerb, snapshotVerb } from './commands/reads.ts';
+import {
+  machineCloneVerb,
+  machineExportVerb,
+  machineInstallVerb,
+  machineSetVerb,
+  machineShowVerb,
+} from './commands/machine.ts';
 import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, errorText, ShellError } from './errors.ts';
@@ -51,6 +58,11 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'daemon which': daemonWhich,
   'daemon reset': daemonReset,
   ask: askVerb,
+  machine: machineShowVerb,
+  'machine set': machineSetVerb,
+  'machine install': machineInstallVerb,
+  'machine export': machineExportVerb,
+  'machine clone': machineCloneVerb,
   snapshot: snapshotVerb,
   events: eventsVerb,
   view: eventsVerb,

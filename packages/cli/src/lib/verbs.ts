@@ -36,6 +36,19 @@ const SHELL_VERB_LINES = [
     verb: 'update',
     summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
   },
+  { verb: 'machine', summary: 'this machine: its tools, its agent permissions, export and clone (--json)' },
+  {
+    verb: 'machine set',
+    summary:
+      'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings|scripts on|off, auto-resume on|off, agenda-mode on|off',
+  },
+  { verb: 'machine install', summary: 'install Claude Code or Codex on this machine (shows the command first)' },
+  { verb: 'machine export', summary: "print this machine's setup for `machine clone`: no login and no history" },
+  {
+    verb: 'machine clone',
+    summary:
+      'copy a setup exported from another machine; a repeat copy is an update that shows only what differs (--dry-run to look first)',
+  },
   {
     verb: 'snapshot',
     summary: "snapshot <id>: capture the ferret's live screen (a dead pane is refused, never served as blank)",
