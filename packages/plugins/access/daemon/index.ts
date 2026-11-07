@@ -1,5 +1,5 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { HOSTED_APP_ORIGIN } from '../contract/index.ts';
+import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
 
@@ -35,6 +35,10 @@ export default implementDaemon(manifest, {
       gate: ctx.needs.gate,
       connections: () => ctx.uses.connections.current(),
       host: pendingHost,
+      stages: act => {
+        const provided = ctx.hooks.provider(StepUpStages, act);
+        return provided === 'unavailable' ? undefined : provided;
+      },
     });
     const route = (key: string) => access.handler(key);
     return {

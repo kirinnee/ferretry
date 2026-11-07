@@ -37,6 +37,8 @@ import {
   PairedDeviceIdSchema,
   PairingDeviceNameSchema,
   type PasskeyVerifier,
+  type StagedStepUp,
+  type StagedStepUpAct,
 } from '../contract/index.ts';
 import { JournalGrantAudit } from './adapters/grants/runtime-grant-ports.ts';
 import { NodePairingCryptography } from './adapters/pairing/node-pairing-cryptography.ts';
@@ -99,12 +101,15 @@ export interface AccessRuntimeDeps {
   readonly gate: GateApi;
   readonly connections: () => ConnectionsApi | undefined;
   readonly host: AccessHost;
+  /** The plugin that staged an act's subject (`step-up.stages:<act>`), or nothing when no plugin provides it. */
+  readonly stages?: (act: StagedStepUpAct) => StagedStepUp | undefined;
 }
 
 interface Wired {
   readonly pairing: PairingService;
   readonly registry: PairingDeviceRegistry;
   readonly stepUp: StepUpService;
+  readonly passkeyStore: StatePasskeyStore;
   readonly push: PushService;
   readonly routes: ReadonlyMap<string, RouteHandler>;
 }
@@ -189,8 +194,9 @@ export class AccessRuntime {
       },
     );
     let pairing: PairingService | undefined;
+    const passkeyStore = new StatePasskeyStore(kernel.state);
     const stepUp = new StepUpService({
-      store: new StatePasskeyStore(kernel.state),
+      store: passkeyStore,
       verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
       registry: stepUpRegistry,
       audit: grantAudit,
@@ -287,9 +293,13 @@ export class AccessRuntime {
     });
     const guard = gateGuard(gate, host.clientName);
     const routes = new Map<string, RouteHandler>();
-    for (const route of [...pairingRoutes(pairing, deviceGrants), ...pushRoutes(push, guard), ...stepUpRoutes(stepUp)])
+    for (const route of [
+      ...pairingRoutes(pairing, deviceGrants),
+      ...pushRoutes(push, guard),
+      ...this.#stepUpRoutes(stepUp),
+    ])
       routes.set(routeKey(route), route.handle);
-    return { pairing, registry, stepUp, push, routes };
+    return { pairing, registry, stepUp, passkeyStore, push, routes };
   }
 
   /** Every unlock or lock is persisted through the ledger: each one is a standing change Gate must re-admit on. */
@@ -300,6 +310,21 @@ export class AccessRuntime {
       await write(unlocks);
     };
     return ledger;
+  }
+
+  /**
+   * The step-up routes, with each staged act's binding asked of its provider at the moment a device asks for the
+   * challenge (G83, S90): absent provider, no challenge — the same as today's daemon built without that stage.
+   */
+  #stepUpRoutes(stepUp: StepUpService): readonly ApiRoute[] {
+    const stage = (act: StagedStepUpAct): StagedStepUp | undefined => this.#deps.stages?.(act);
+    return stepUpRoutes(
+      stepUp,
+      { boundSubjectOf: id => stage('add-2fa-key')?.subjectOf?.(id, '') },
+      { boundSubjectOf: id => stage('approve-task-plan')?.subjectOf?.(id, '') },
+      { challengeOf: (id, deviceId) => stage('approve-sign-in-rule')?.challengeOf?.(id, deviceId) },
+      { boundSubjectOf: (id, kind, deviceId) => stage('approve-paste-rule')?.subjectOf?.(id, deviceId, kind) },
+    );
   }
 
   #changed(device: string, change: 'paired' | 'revoked' | 'expired' | 'grants'): void {
@@ -405,6 +430,11 @@ export class AccessRuntime {
   readonly port: AccessApi = {
     devices: async () => await (await this.ready()).pairing.devices(),
     passkeys: this.#verifierProxy(),
+    holdsPasskey: async deviceId => {
+      const { passkeyStore, pairing } = await this.ready();
+      if (pairing.deviceGrants(deviceId) === undefined) return false;
+      return (await passkeyStore.list(deviceId)).length > 0;
+    },
     buzz: async (message: Buzz) => {
       const { push } = await this.ready();
       const result = await push.notify({
