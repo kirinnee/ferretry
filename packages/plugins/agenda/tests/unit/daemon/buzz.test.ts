@@ -135,7 +135,7 @@ describe('buzz policy', () => {
       ...blocking.filter(ask => ask.kind === 'task'),
       { ...open[0], id: 'A9', blocking: true } as BuzzableAsk,
     ];
-    expect(waitingOnOwner(two)[0]?.id).toBe('A9');
+    expect(waitingOnOwner(two)[0]?.id as unknown).toBe('A9' as never);
   });
 
   test('words an ask’s buzz by its subject and opens it', () => {

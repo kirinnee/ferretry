@@ -179,7 +179,7 @@ describe('the roll-up and clearing', () => {
     expect((await asks.open({ ferret: 'h1' as never })).length).toBe(3);
     const done = await host.request('POST', '/v1/agenda/clear-agents', { body: {}, ...as(owner()) });
     expect(done.json()).toEqual({ cleared: 2, ferrets: 1 });
-    expect((await asks.open({ ferret: 'h1' as never })).map(ask => ask.source)).toEqual(['card']);
+    expect((await asks.open({ ferret: 'h1' as never })).map(ask => String(ask.source))).toEqual(['card']);
     expect((await asks.open({ ferret: 'f1' as never })).length).toBe(1);
     expect(
       (await host.request('POST', '/v1/agenda/clear-agents', { body: {}, ...as({ kind: 'ferret', id: 'f1' }) })).status,
