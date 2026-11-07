@@ -23,12 +23,19 @@ export const updateVerb: ShellVerb = async ctx => {
     },
     {
       view: async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          return DaemonUpdateViewSchema.parse(
-            await pluginClient(await ctx.deps(), 'updates').call('GET /v1/daemon/update'),
-          );
+          // One budget for connecting, the inventory pre-read and the view, as in today's update client.
+          const deadline = new Promise<undefined>(resolve => {
+            timer = setTimeout(() => resolve(undefined), 3_000);
+          });
+          const read = async () =>
+            DaemonUpdateViewSchema.parse(await pluginClient(await ctx.deps(), 'updates').call('GET /v1/daemon/update'));
+          return await Promise.race([deadline, read()]);
         } catch {
           return undefined;
+        } finally {
+          clearTimeout(timer);
         }
       },
     },

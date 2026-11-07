@@ -63,10 +63,8 @@ export class UpdateLifecycle implements IUpdateLifecyclePort {
         if (servesOutsideSupervisor(await service.inspect(), health)) await this.#stop(this.deps.direct, health);
         await service.restartInPlace(daemon.path);
       } else {
-        const orphan =
-          owner === service && service !== undefined && servesOutsideSupervisor(await service.inspect(), health);
-        if (orphan) await this.#stop(this.deps.direct, health);
-        await this.#stop(owner, orphan ? undefined : health);
+        if (!(await this.#bringDown(owner, health)))
+          this.deps.out.warn(`${this.deps.layout.daemonName} was not running; starting it`);
         await owner.start(daemon.path);
       }
     });
@@ -112,6 +110,20 @@ export class UpdateLifecycle implements IUpdateLifecyclePort {
       }
       await this.deps.clock.sleep(policy.cadenceMs);
     }
+  }
+
+  /** Stop an orphan directly, then the manager only if it reports a running daemon of its own. */
+  async #bringDown(owner: IDaemonSupervisor, health: LocalUpdateHealth | undefined): Promise<boolean> {
+    const orphan =
+      owner !== this.deps.direct && health !== undefined && servesOutsideSupervisor(await owner.inspect(), health);
+    if (orphan) {
+      await this.#stop(this.deps.direct, health);
+      if ((await owner.inspect()).state === 'running') await this.#stop(owner, undefined);
+      return true;
+    }
+    if (health === undefined && (await owner.inspect()).state !== 'running') return false;
+    await this.#stop(owner, health);
+    return true;
   }
 
   async #serialized(verb: 'restart' | 'install', work: () => Promise<void>): Promise<void> {

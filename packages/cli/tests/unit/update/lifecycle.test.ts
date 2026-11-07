@@ -28,9 +28,21 @@ function harness(platform: 'linux' | 'darwin') {
   const signals: number[] = [];
   let current: LocalUpdateHealth | undefined = { protocol: 1, version: '5.0.0', pid: 4321 };
   let serves = true;
+  let launchdRunning = true;
   const processes: IDaemonProcessPort = {
     run: async argv => {
       ran.push([...argv]);
+      if (argv[0] === 'launchctl') {
+        if (argv.includes('print'))
+          return launchdRunning
+            ? { code: 0, stdout: `state = running\npid = ${current?.pid ?? 4322}`, stderr: '' }
+            : { code: 113, stdout: '', stderr: 'Could not find service' };
+        if (argv.includes('bootout')) {
+          if (!launchdRunning) return { code: 113, stdout: '', stderr: 'Boot-out failed: No such process' };
+          launchdRunning = false;
+        }
+        if (argv.includes('bootstrap')) launchdRunning = true;
+      }
       if (argv.includes('stop') || argv.includes('bootout')) current = undefined;
       if (argv.includes('start') || argv.includes('restart') || argv.includes('bootstrap'))
         current = { protocol: 1, version: '5.0.1', pid: 4322 };
@@ -105,6 +117,11 @@ function harness(platform: 'linux' | 'darwin') {
     foreign: () => {
       serves = false;
     },
+    unload: (orphan: boolean) => {
+      launchdRunning = false;
+      if (!orphan) current = undefined;
+    },
+    health: () => current,
   };
 }
 
@@ -128,6 +145,20 @@ test('the copied systemd adapter rewrites the service for the installed binary a
     ['systemctl', '--user', 'restart', 'fyd.service'],
   ]);
   expect(h.locks).toEqual([...h.layout.lifecycleLocks]);
+  expect(h.releases()).toBe(h.locks.length);
+});
+
+test.each([true, false])('launchd restart skips stop on an unloaded job and starts it (orphan=%s)', async orphan => {
+  const h = harness('darwin');
+  await h.service.install('/fake/bin/old-fyd');
+  h.unload(orphan);
+  h.ran.length = 0;
+  await h.lifecycle.restart();
+  expect(h.signals).toEqual(orphan ? [4322] : []);
+  // start's reload tolerates one failed bootout; a stop before that would throw and prevent bootstrap.
+  expect(h.ran.filter(argv => argv.includes('bootout'))).toHaveLength(1);
+  expect(h.ran.at(-1)).toEqual(['launchctl', 'bootstrap', 'gui/1234', h.layout.launchAgentFile]);
+  expect(h.health()).toEqual({ protocol: 1, version: '5.0.1', pid: 4322 });
   expect(h.releases()).toBe(h.locks.length);
 });
 
