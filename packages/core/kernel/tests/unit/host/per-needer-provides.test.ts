@@ -193,3 +193,82 @@ test('per-needer: the reach a provider narrows to reads only literal entries, an
   expect(neederMayRun(who, '/usr/bin/tmux')).toBe(true);
   expect(neederMayRun(who, 'bash')).toBe(false);
 });
+
+/** A plugin that needs the gadget AND may use it, so one token reaches the same needer by two roads. */
+const bothWays = (id: string) =>
+  definePlugin({
+    id,
+    title: id,
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: [],
+    needs: { gadget: GadgetPort },
+    uses: { again: GadgetPort },
+    permissions: { network: ['api.gamma.test'] },
+  });
+
+test('per-needer: a real boot hands one needer the same built value however often it asks (needs and uses.current() twice)', async () => {
+  const root = await mkdtemp(`${tmpdir()}/per-needer-`);
+  const home = `${root}/home`;
+  let running: RunningHost | undefined;
+  try {
+    const built = { count: 0 };
+    let ctx: { needs: { gadget: Gadget }; uses: { again: { current(): Gadget | undefined } } } | undefined;
+    const adapters: HostOptions['adapters'] = {
+      ...realAdapters(home, () => {}, { binary: 'fy' }),
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    };
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      adapters,
+      implementations: [
+        ...plugins(built, {}).slice(0, 1),
+        implementDaemon(bothWays('gamma'), {
+          build: made => {
+            ctx = made as never;
+            return {};
+          },
+        }),
+      ],
+    });
+    if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+    running = outcome.host;
+    // One build for the `needs` bind...
+    expect(built.count).toBe(1);
+    // ...and asking again through `uses` (twice) builds nothing more: the memo answers.
+    const first = ctx?.uses.again.current();
+    const second = ctx?.uses.again.current();
+    expect(first?.for).toBe('gamma');
+    expect(built.count).toBe(1);
+    expect(second?.for).toBe('gamma');
+  } finally {
+    await running?.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('per-needer: the test host keeps a fake, a uses entry and the loaded provider’s own value in separate slots', async () => {
+  const fake: Gadget = { for: 'fake', network: [], spawn: [], secrets: [] };
+  const viaUses: Gadget = { for: 'uses', network: [], spawn: [], secrets: [] };
+  let ctx: { needs: { gadget: Gadget }; uses: { again: { current(): Gadget | undefined } } } | undefined;
+  const host = await testHost({
+    plugins: [
+      implementDaemon(bothWays('gamma'), {
+        build: made => {
+          ctx = made as never;
+          return {};
+        },
+      }),
+    ],
+    fakes: { gadget: fake },
+    uses: { again: viaUses },
+  });
+  // Same token, same needer, two roads: the first one built did not take the shared slot.
+  expect(ctx?.needs.gadget).toBe(fake);
+  expect(ctx?.uses.again.current()).toBe(viaUses);
+  expect(ctx?.needs.gadget).toBe(fake);
+  await host.stop();
+});

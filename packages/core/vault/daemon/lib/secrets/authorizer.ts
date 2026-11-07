@@ -57,10 +57,15 @@ export class OutboundProviderAuthorizer {
 
   async send(
     secretName: SecretName,
-    hostAllowlist: readonly string[],
-    request: OutboundHttpRequest,
-    placement: CredentialPlacement = DEFAULT_PLACEMENT,
+    allowlist: readonly string[],
+    asked: OutboundHttpRequest,
+    credentialPlacement: CredentialPlacement = DEFAULT_PLACEMENT,
   ): Promise<AuthorizedOutcome> {
+    // What the caller passed is read ONCE into data of our own: the URL checked is the URL sent, whatever a getter on
+    // the caller's object would answer the second time.
+    const request = { ...asked, headers: { ...asked.headers } };
+    const hostAllowlist = [...allowlist];
+    const placement = { ...credentialPlacement };
     if (!allowedDestination(request.url, hostAllowlist)) return { kind: 'refused' };
     if (carriesHeader(request.headers, placement.header)) return { kind: 'refused' };
 

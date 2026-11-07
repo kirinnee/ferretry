@@ -6,12 +6,12 @@
  * routes, the `logins` read model and the five `logins:*` kinds. Nothing here holds a token: a harness writes its own
  * sign-in into its own store, and an environment login names its secrets as `${secret:NAME}` in a file.
  */
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
 import { type Instant, milliseconds } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import { type LoginId, type LoginsApi, LoginChanged, LoginSignedIn, ModelsChanged } from '../contract/index.ts';
 import { HostedModelCatalog, StateModelCatalogCache } from './adapters/models/index.ts';
-import { spendSecretOf } from './lib/credentials/spend-secret.ts';
+import { spendHostsOf, spendableHosts, spendSecretOf } from './lib/credentials/spend-secret.ts';
 import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-probe/index.ts';
 import { deliverCodexCallback } from './adapters/harness-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from './adapters/harness-login/login-child.ts';
@@ -201,21 +201,42 @@ export function buildLoginsDaemon() {
       const modelsView = async () =>
         modelCatalogsView(await catalogs.catalogs(), publishedState(await published.status()));
 
-      const api: LoginsApi = {
+      const api: Omit<LoginsApi, 'authorizeFetch'> = {
         list: () => credentials.list(),
         get: async id => (await credentials.list()).logins.find(login => login.id === id),
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
         models: modelsView,
-        // A login's key on ONE request (Usage's quota read): the secret is read from the login's OWN record, never from
-        // the caller, and the Vault holds this plugin to the secrets it declares or an owner-written record names.
-        authorizeFetch: async (loginId, variable, hostAllowlist, request, placement) => {
-          const login = (await credentials.list()).logins.find(candidate => candidate.id === loginId);
-          const name = spendSecretOf(login, variable);
-          if (name === undefined) return { kind: 'refused' };
-          return await needs.vault.authorizeFetch(name, hostAllowlist, request, placement);
-        },
       };
+
+      /**
+       * THE PORT EACH PLUGIN IS HANDED (§3.7), built once per needing plugin by the kernel. Every read is shared; the one call
+       * that spends a key is held to the CALLER's own manifest network as well as to the login's own hosts, so a piece that
+       * declares no host (Runtimes) reaches none, and Usage reaches only the hosts it declares.
+       *
+       * A login's key on ONE request (Usage's quota read): the secret is read from the login's OWN record, never from the
+       * caller, and so is the host: the allowance is {@link spendHostsOf} (today's keyed Test rule), and a host the caller
+       * names outside it is dropped. The Vault then holds this plugin to the secrets it declares or an owner-written record
+       * names, and to its own network. Everything the caller passed is copied ONCE here and only the copy is used.
+       */
+      const apiFor = (needer: Needer): LoginsApi => ({
+        ...api,
+        authorizeFetch: async (loginId, variable, hostAllowlist, request, placement) => {
+          const id = String(loginId);
+          const key = String(variable);
+          const named = [...hostAllowlist].map(String);
+          const asked = { ...request, headers: { ...request.headers } };
+          const placed = placement === undefined ? undefined : { ...placement };
+          const login = (await credentials.list()).logins.find(candidate => candidate.id === id);
+          const name = spendSecretOf(login, key);
+          if (name === undefined) return { kind: 'refused' };
+          const hosts = spendableHosts(spendHostsOf(login, await credentials.presets()), named, hostname =>
+            neederMayReach(needer, hostname),
+          );
+          if (hosts.length === 0) return { kind: 'refused' };
+          return await needs.vault.authorizeFetch(name, hosts, asked, placed);
+        },
+      });
 
       const kinds = loginKinds({
         clock,
@@ -238,7 +259,7 @@ export function buildLoginsDaemon() {
             refreshLocal: () => localModels.refresh(),
           }),
         },
-        provides: { logins: api },
+        provides: { logins: perNeeder(apiFor) },
         hooks: {
           'logins:anthropic': kinds.anthropic,
           'logins:openai': kinds.openai,

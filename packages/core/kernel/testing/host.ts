@@ -348,14 +348,21 @@ async function start(world: World): Promise<TestHost> {
   // As the kernel does: a per-needer provides entry (or fake) is built once for each plugin it is bound for.
   const perNeeder = new ProvidedPerNeeder();
   // The `${secret:NAME}` references the plugin's own config names IN EFFECT (a held write is not in the world yet).
-  const ownedReferences = (manifest: Manifest): ReadonlySet<string> => {
+  const ownedReferences = (manifest: Manifest, only?: 'credential-records'): ReadonlySet<string> => {
     const named = new Set<string>();
     for (const def of manifest.data?.config ?? [])
-      secretReferencesIn(world.config.get(def.shape === 'file' ? def.file : def.collection), named);
+      if (only === undefined || def.credentialRecords === true)
+        secretReferencesIn(world.config.get(def.shape === 'file' ? def.file : def.collection), named);
     return named;
   };
-  const boundFor = (token: PortToken<unknown>, value: unknown, needer: Needer): unknown =>
-    value === undefined ? undefined : perNeeder.valueFor(token.name, '', value, needer);
+  // The cache slot is (where the value came from, token, needer): a `fakes` entry, a `uses` entry and the loaded
+  // provider's own value for one token are three different values and never share a slot.
+  const boundFor = (
+    token: PortToken<unknown>,
+    value: unknown,
+    needer: Needer,
+    source: 'fake' | 'uses' | 'provided' = 'provided',
+  ): unknown => (value === undefined ? undefined : perNeeder.valueFor(source, token.name, value, needer));
   const usesBound = { done: false };
 
   const subscribersOf = (name: string): ((payload: unknown) => void | Promise<void>)[] =>
@@ -798,8 +805,7 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
+                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
                 )?.[name],
               parsed.host,
             )
@@ -823,8 +829,7 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
+                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
                 )?.[name],
               parsed.host,
             )
@@ -893,9 +898,15 @@ async function start(world: World): Promise<TestHost> {
     if (kernelOnly !== undefined)
       throw new Error(`testHost: ${manifest.id} asks for ${kernelOnly.name}, which only the kernel may hold`);
     const needs: Record<string, unknown> = {};
-    const needer = neederOf(manifest, () => ownedReferences(manifest));
+    const needer = neederOf(manifest, () => ownedReferences(manifest, 'credential-records'));
     for (const [field, token] of Object.entries(manifest.needs ?? {})) {
-      const value = boundFor(token, lookup(options.fakes ?? {}, field, token) ?? providedBy.get(token.name), needer);
+      const fake = lookup(options.fakes ?? {}, field, token);
+      const value = boundFor(
+        token,
+        fake ?? providedBy.get(token.name),
+        needer,
+        fake === undefined ? 'provided' : 'fake',
+      );
       if (value === undefined) throw new Error(`testHost: ${manifest.id} needs ${field} (${token.name}); pass a fake`);
       needs[field] = value;
     }
@@ -904,7 +915,13 @@ async function start(world: World): Promise<TestHost> {
       uses[field] = {
         current: () => {
           if (!usesBound.done) throw new Error(`${manifest.id}: uses.${field}.current() during build`);
-          return boundFor(token, lookup(options.uses ?? {}, field, token) ?? providedBy.get(token.name), needer);
+          const supplied = lookup(options.uses ?? {}, field, token);
+          return boundFor(
+            token,
+            supplied ?? providedBy.get(token.name),
+            needer,
+            supplied === undefined ? 'provided' : 'uses',
+          );
         },
       };
     const ctx = {
@@ -1200,7 +1217,7 @@ async function start(world: World): Promise<TestHost> {
       if (typeof as === 'string') {
         const manifest = options.plugins.find(plugin => plugin.manifest.id === as)?.manifest;
         if (manifest === undefined) throw new Error(`provided: no loaded plugin ${as}`);
-        needer = neederOf(manifest as Manifest, () => ownedReferences(manifest as Manifest));
+        needer = neederOf(manifest as Manifest, () => ownedReferences(manifest as Manifest, 'credential-records'));
       } else if (as !== undefined) needer = as;
       return boundFor(token as PortToken<unknown>, providedBy.get(token.name), needer) as Api;
     },

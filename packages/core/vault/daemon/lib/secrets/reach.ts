@@ -20,9 +20,10 @@ export const isCoreNeeder = (needer: Needer): boolean => (CORE_IDS as readonly s
  * THE ONE PLACE a needer's allowed secret names are decided. Today there are two sources:
  *
  *   1. the secret names its manifest declares (`permissions.secrets`), and
- *   2. the `${secret:NAME}` references written in config files that plugin OWNS (Logins' login records), as they are in
- *      effect: a reference added by a plugin or a hand edit is held for the owner and is NOT in effect, so only an
- *      owner-written reference counts.
+ *   2. the `${secret:NAME}` references written in the config defs the plugin's manifest MARKS as credential records
+ *      (`credentialRecords`: Logins' login records, MCP's server entries), as they are in effect: a reference added by a
+ *      plugin or a hand edit is held for the owner and is NOT in effect, so only an owner-written reference counts. A
+ *      reference in any other file the plugin owns (Logins' endpoints and models) counts for nothing.
  *
  * A caller never supplies this list; a third source is added here and nowhere else.
  */
@@ -32,6 +33,27 @@ export function allowedSecretNames(needer: Needer): ReadonlySet<string> {
 
 /** Whether `needer` may put the secret `name` to use. */
 export const mayUseSecret = (needer: Needer, name: string): boolean => allowedSecretNames(needer).has(name);
+
+/**
+ * Whether `name` is one the needer MINTS itself: a name its manifest's `permissions.mintedSecrets` pattern matches
+ * whole (MCP's OAuth access tokens, in today's exact shape). A plugin that declares none mints none.
+ */
+export const isMintedSecret = (needer: Needer, name: string): boolean =>
+  (needer.permissions.mintedSecrets ?? []).some(source => new RegExp(`^(?:${source})$`, 'u').test(name));
+
+/**
+ * Whether `needer` may put, remove, list or ask for the secret `name`: one it may use ({@link allowedSecretNames}) or one
+ * it mints ({@link isMintedSecret}). The write reach of a non-core needer is exactly this and no more.
+ */
+export const mayTouchSecret = (needer: Needer, name: string): boolean =>
+  mayUseSecret(needer, name) || isMintedSecret(needer, name);
+
+/**
+ * Whether the needer's `names()` is held to {@link mayTouchSecret}. ONE switch: a needer whose manifest declares the
+ * secret-name picker (`permissions.secretNamePicker`, Catalogs' install mapping) is listed every NAME, never a value;
+ * the plugin gates who may see that list (the secrets-use grant). Every other non-core needer is narrowed.
+ */
+export const namesAreNarrowed = (needer: Needer): boolean => needer.permissions.secretNamePicker !== true;
 
 /** Every secret a run names: the ones it lists, and every `${secret:NAME}` or `${secret?:NAME}` in its environment. */
 export function secretsNamedBy(command: Pick<SecretUseCommand, 'secrets' | 'env'>): readonly SecretName[] {
@@ -57,6 +79,14 @@ function hostnameOf(entry: string): string {
   if (entry.startsWith('[')) return entry.slice(0, entry.indexOf(']') + 1);
   const colon = entry.lastIndexOf(':');
   return colon === -1 ? entry : entry.slice(0, colon);
+}
+
+/** The refusal for a secret a non-core needer may neither write nor remove: the Vault's own sentence for it. */
+export class UndeclaredSecretError extends Error {
+  constructor(needer: Needer, name: string, verb: 'write' | 'remove') {
+    super(`${needer.id} may not ${verb} the secret ${name}: its manifest does not declare it.`);
+    this.name = 'PermissionError';
+  }
 }
 
 /**

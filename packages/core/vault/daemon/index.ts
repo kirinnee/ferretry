@@ -11,6 +11,7 @@ import {
   RedactionSources,
   SecretsChanged,
   type SecretName,
+  SecretUseRequestSchema,
   type SecretUseCommand,
   type SecretUseRefusal,
   type SecretUseResult,
@@ -36,10 +37,13 @@ import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
 import {
   isCoreNeeder,
   mayRunProgram,
+  mayTouchSecret,
   mayUseSecret,
+  namesAreNarrowed,
   reachableHosts,
   secretsNamedBy,
   UndeclaredProgramError,
+  UndeclaredSecretError,
 } from './lib/secrets/reach.ts';
 import { ChildEnvironments } from './lib/secrets/child-environments.ts';
 import { type SecretCloneIdentitySource, SecretExportService, SecretImportService } from './lib/secrets/clone.ts';
@@ -224,18 +228,43 @@ export default implementDaemon(manifest, {
       if (isCoreNeeder(needer)) return full;
       return {
         ...full,
-        run: async (command, ferret) => {
+        // WRITE and LIST reach: only the secrets this needer may use or mints itself, so a plugin cannot overwrite, delete
+        // or even see the owner's other secrets (credential substitution, S12).
+        names: async () =>
+          namesAreNarrowed(needer)
+            ? (await full.names()).filter(secret => mayTouchSecret(needer, secret.name))
+            : await full.names(),
+        has: async name => mayTouchSecret(needer, String(name)) && (await full.has(name)),
+        put: async (name, value) => {
+          const secret = String(name);
+          if (!mayTouchSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');
+          await full.put(secret as SecretName, value);
+        },
+        remove: async name => {
+          const secret = String(name);
+          if (!mayTouchSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');
+          return await full.remove(secret as SecretName);
+        },
+        // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses
+        // only that copy: a getter on the caller's object cannot show a declared value to the check and another to the use.
+        run: async (asked, ferret) => {
+          const command = SecretUseRequestSchema.parse(asked);
           const program = command.command[0];
-          if (program !== undefined && !mayRunProgram(needer, program))
-            throw new UndeclaredProgramError(needer, program);
+          if (program === undefined || !mayRunProgram(needer, program))
+            throw new UndeclaredProgramError(needer, program ?? '');
           if (!secretsNamedBy(command).every(name => mayUseSecret(needer, name))) return err('unknown_secret');
           return await full.run(command, ferret);
         },
         authorizeFetch: async (name, hostAllowlist, request, placement) => {
-          if (!mayUseSecret(needer, name)) return { kind: 'refused' };
-          return await full.authorizeFetch(name, reachableHosts(needer, hostAllowlist), request, placement);
+          const secret = String(name);
+          const hosts = [...hostAllowlist].map(String);
+          const copy = { ...request, headers: { ...request.headers } };
+          const placed = placement === undefined ? undefined : { ...placement };
+          if (!mayUseSecret(needer, secret)) return { kind: 'refused' };
+          return await full.authorizeFetch(secret as SecretName, reachableHosts(needer, hosts), copy, placed);
         },
-        childEnvironment: async (ferret, env) => {
+        childEnvironment: async (ferret, asked) => {
+          const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
           const refused = secretsNamedBy({ secrets: [], env }).filter(name => !mayUseSecret(needer, name));
           if (refused.length > 0) return err({ unknown: refused });
           return await full.childEnvironment(ferret, env);

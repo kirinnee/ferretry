@@ -135,6 +135,8 @@ export interface HostConfig {
   startWatching?(): () => void;
   /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
   secretReferences?(plugin: string): ReadonlySet<string>;
+  /** The same names, from the plugin's credential-record defs alone (what a provider counts as its own). Absent: none. */
+  credentialRecordReferences?(plugin: string): ReadonlySet<string>;
 }
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
@@ -679,7 +681,7 @@ async function bootLocked(
       continue;
     }
     const needs: Record<string, unknown> = {};
-    const needer = neederOf(manifest, () => config.secretReferences?.(manifest.id) ?? new Set<string>());
+    const needer = neederOf(manifest, () => config.credentialRecordReferences?.(manifest.id) ?? new Set<string>());
     let missing: string | undefined;
     for (const [key, token] of Object.entries(manifest.needs ?? {})) {
       const provider = providerHalf(token);
@@ -862,8 +864,7 @@ async function bootLocked(
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
       const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        | ToolHandler
-        | undefined;
+        ToolHandler | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

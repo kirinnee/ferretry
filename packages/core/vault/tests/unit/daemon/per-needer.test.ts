@@ -21,7 +21,7 @@ import {
   VaultPort,
 } from '../../../contract/index.ts';
 import vault from '../../../daemon/index.ts';
-import { allowedSecretNames } from '../../../daemon/lib/secrets/reach.ts';
+import { allowedSecretNames, isMintedSecret } from '../../../daemon/lib/secrets/reach.ts';
 
 /**
  * §3.7 through the Vault: the Vault declares `'*'` for spawn and network, and the kernel hands each plugin that needs it
@@ -55,8 +55,24 @@ const recordsOf = (id: string) => {
     schema: z.strictObject({ key: z.string().optional() }),
     axis: 'configure',
     loosens: () => [],
+    credentialRecords: true,
   });
   recordsDefs.set(id, made);
+  return made;
+};
+
+/** A file the plugin owns that is NOT a credential record (Logins' endpoints and models): a reference in it counts for nothing. */
+const notesDefs = new Map<string, ConfigFileDef<{ key?: string | undefined }>>();
+const notesOf = (id: string) => {
+  const held = notesDefs.get(id);
+  if (held !== undefined) return held;
+  const made = defineConfig({
+    file: `${id}/notes.yaml`,
+    schema: z.strictObject({ key: z.string().optional() }),
+    axis: 'configure',
+    loosens: () => [],
+  });
+  notesDefs.set(id, made);
   return made;
 };
 
@@ -78,7 +94,7 @@ const tenantManifest = (id: string, permissions: Permissions) =>
     kinds: [],
     needs: { vault: VaultPort },
     permissions,
-    data: { config: [recordsOf(id)] },
+    data: { config: [recordsOf(id), notesOf(id)] },
   });
 
 async function world(
@@ -239,7 +255,7 @@ describe('a plugin that is not core is held to its own manifest through the Vaul
     expect(reached).toEqual(['api.anywhere.test']);
   });
 
-  test('S7 the Vault’s port is built once per needing plugin, and each plugin is handed its own', async () => {
+  test('the Vault’s port is built once per needing plugin, and each plugin is handed its own', async () => {
     const { of, seen } = await world({ first: TENANT, second: TENANT });
     expect(of('first')).toBe(of('first'));
     expect(seen.first?.vault).toBe(of('first'));
@@ -332,5 +348,210 @@ describe('the two callers that named a login’s secret themselves are refused w
     expect(
       await written.of('tenant').authorizeFetch(OWNED, ['api.z.ai'], request('https://api.z.ai/v1/models')),
     ).toEqual({ kind: 'completion', payload: { ok: true } });
+  });
+});
+
+/**
+ * The write reach of a non-core plugin through the Vault (lead ruling): `put` and `remove` cover only the secrets it may
+ * use and the names it MINTS (a pattern its manifest declares); `names()` lists only those, except for the one plugin
+ * whose manifest declares the secret-name picker. A core caller keeps the whole store.
+ */
+const GITHUB: SecretName = 'GITHUB_TOKEN';
+const MINTED = 'MCP_WORK_0123456789ABCDEF_ACCESS' as SecretName;
+const MINTING: Permissions = {
+  network: [],
+  spawn: [],
+  secrets: [],
+  mintedSecrets: ['MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS'],
+};
+const reference = (name: string): string => '${secret:' + name + '}';
+
+describe('the write reach of a non-core plugin is its allowed and minted secrets and nothing else', () => {
+  test('S12 a plugin that mints sign-in tokens cannot overwrite or delete GITHUB_TOKEN, and can put and remove its own', async () => {
+    const { core, of } = await world({ mcp: MINTING });
+    await core.put(GITHUB, 'ghp-original');
+    const api = of('mcp');
+    await expect(api.put(GITHUB, 'ghp-attacker')).rejects.toThrow(/mcp may not write the secret GITHUB_TOKEN/u);
+    await expect(api.remove(GITHUB)).rejects.toThrow(/mcp may not remove the secret GITHUB_TOKEN/u);
+    expect(await core.has(GITHUB)).toBe(true);
+    // Its own minted name goes through, and is gone again after a remove.
+    await api.put(MINTED, 'access-token');
+    expect(await core.has(MINTED)).toBe(true);
+    expect(await api.remove(MINTED)).toBe(true);
+    expect(await core.has(MINTED)).toBe(false);
+    // The pattern is matched whole: a name that merely contains it, or the refresh half, is not minted.
+    for (const other of ['X_MCP_WORK_0123456789ABCDEF_ACCESS', 'MCP_WORK_0123456789ABCDEF_REFRESH', 'MCP_WORK_ACCESS'])
+      await expect(api.put(other as SecretName, 'v')).rejects.toThrow(/may not write/u);
+  });
+
+  test('S12 the minted pattern is the sign-in names MCP files today, byte for byte', () => {
+    const mcp = { id: 'mcp', permissions: MINTING, ownedSecretReferences: () => new Set<string>() };
+    expect(isMintedSecret(mcp, MINTED)).toBe(true);
+    expect(isMintedSecret(mcp, 'MCP_0123456789ABCDEF_ACCESS')).toBe(true);
+    expect(isMintedSecret(mcp, GITHUB)).toBe(false);
+    expect(isMintedSecret({ ...mcp, permissions: {} }, MINTED)).toBe(false);
+  });
+
+  test('S12 a plugin with a secret-name picker and no minted names (Catalogs) is listed every name and can put or remove nothing', async () => {
+    const { core, of } = await world({ catalogs: { network: [], spawn: [], secrets: [], secretNamePicker: true } });
+    const api = of('catalogs');
+    const everything = (await core.names()).map(secret => secret.name).sort();
+    expect(everything).toEqual([GROQ, OTHER, OWNED].sort());
+    expect((await api.names()).map(secret => secret.name).sort()).toEqual(everything);
+    await expect(api.put(GITHUB, 'ghp-attacker')).rejects.toThrow(/may not write/u);
+    await expect(api.put('LNK_ABC' as SecretName, 'key')).rejects.toThrow(/may not write/u);
+    await expect(api.remove(OTHER)).rejects.toThrow(/may not remove/u);
+    // A name check outside its allowance still answers no, and nothing was removed.
+    expect(await api.has(OTHER)).toBe(false);
+    expect(await core.has(OTHER)).toBe(true);
+  });
+
+  test('S12 another non-core plugin is listed only the names it may use or mints, never the owner’s other secrets', async () => {
+    const { core, of } = await world(
+      { mcp: { ...MINTING, secrets: [GROQ] } },
+      { config: { 'mcp/records.yaml': { key: reference(OWNED) } } },
+    );
+    await core.put(MINTED, 'access-token');
+    const names = (await of('mcp').names()).map(secret => secret.name).sort();
+    expect(names).toEqual([GROQ, MINTED, OWNED].sort());
+    expect(names).not.toContain(OTHER);
+    expect(await of('mcp').has(OTHER)).toBe(false);
+    expect(await of('mcp').has(GROQ)).toBe(true);
+  });
+
+  test('S12 a core caller keeps the whole store: any name listed, written and removed', async () => {
+    const { core } = await world({});
+    await core.put(GITHUB, 'ghp');
+    expect((await core.names()).map(secret => secret.name)).toContain(GITHUB);
+    expect(await core.remove(GITHUB)).toBe(true);
+  });
+});
+
+describe('only the references in a credential record count as a plugin’s own secrets', () => {
+  test('S12 S62 a reference in a file the plugin owns that is not a credential record makes nothing spendable or listed', async () => {
+    const { of, reached } = await world(
+      { tenant: { network: ['api.groq.test'], spawn: [], secrets: [] } },
+      { config: { 'tenant/notes.yaml': { key: reference(OWNED) } } },
+    );
+    const api = of('tenant');
+    expect(await api.authorizeFetch(OWNED, ['api.groq.test'], request('https://api.groq.test/v1'))).toEqual({
+      kind: 'refused',
+    });
+    expect(reached).toEqual([]);
+    expect(await api.names()).toEqual([]);
+    await expect(api.put(OWNED, 'x')).rejects.toThrow(/may not write/u);
+    // The same reference in the record file counts.
+    const marked = await world(
+      { tenant: { network: ['api.groq.test'], spawn: [], secrets: [] } },
+      { config: { 'tenant/records.yaml': { key: reference(OWNED) } } },
+    );
+    expect(
+      await marked.of('tenant').authorizeFetch(OWNED, ['api.groq.test'], request('https://api.groq.test/v1')),
+    ).toEqual({ kind: 'completion', payload: { ok: true } });
+  });
+});
+
+/**
+ * The boundary reads what a caller passes ONCE into plain data and uses only that copy. Each object below answers the
+ * declared value on its first read and a different one on every read after it.
+ */
+const flip = <T>(first: T, later: T): (() => T) => {
+  let reads = 0;
+  return () => (reads++ === 0 ? first : later);
+};
+type UseCommand = ReturnType<typeof SecretUseRequestSchema.parse>;
+
+describe('a caller cannot change what it passed after the check (check-then-use)', () => {
+  test('S3 S162 a program that is declared on the first read and another after is never run', async () => {
+    const { of, programs } = await world({ tenant: TENANT });
+    const pick = flip(['echo'], ['/opt/evil/undeclared']);
+    const swapped = {
+      get command() {
+        return pick();
+      },
+      cwd: '/tmp',
+      secrets: [GROQ],
+      env: {},
+      timeoutMs: 1_000,
+    } as unknown as UseCommand;
+    const ran = await of('tenant').run(swapped);
+    expect(ran.ok).toBe(true);
+    expect(programs).toEqual(['echo']);
+  });
+
+  test('S3 an empty command is refused, not run', async () => {
+    const { of, programs } = await world({ tenant: TENANT });
+    const empty = { command: [], cwd: '/tmp', secrets: [GROQ], env: {}, timeoutMs: 1_000 } as unknown as UseCommand;
+    await expect(of('tenant').run(empty)).rejects.toThrow();
+    expect(programs).toEqual([]);
+  });
+
+  test('S12 S62 a secret listed on the first read and another after is never spent by a run', async () => {
+    const { of, programs } = await world({ tenant: TENANT });
+    const pick = flip([GROQ], [OTHER]);
+    const swapped = {
+      command: ['echo'],
+      cwd: '/tmp',
+      get secrets() {
+        return pick();
+      },
+      env: {},
+      timeoutMs: 1_000,
+    } as unknown as UseCommand;
+    const ran = await of('tenant').run(swapped);
+    expect(ran.ok).toBe(true);
+    if (!ran.ok) throw new Error('expected a run');
+    expect(programs).toEqual(['echo']);
+    expect(ran.value.used).toEqual([GROQ]);
+  });
+
+  test('S162 a url that is declared on the first read and another after is never dialled', async () => {
+    const { of, reached } = await world({ tenant: TENANT });
+    const pick = flip('https://api.groq.test/v1', 'https://evil.test/steal');
+    const swapped = {
+      method: 'GET',
+      get url() {
+        return pick();
+      },
+      headers: {},
+      timeoutMs: 1_000,
+      maxResponseBytes: 4_096,
+    } as unknown as OutboundHttpRequest;
+    await of('tenant').authorizeFetch(GROQ, ['api.groq.test'], swapped);
+    expect(reached).not.toContain('evil.test');
+    expect(reached).toEqual(['api.groq.test']);
+  });
+
+  test('S162 the Vault’s own authorizer sends the request it checked, whatever a getter shows after', async () => {
+    const { core, reached } = await world({});
+    const pick = flip('https://api.groq.test/v1', 'https://evil.test/steal');
+    const swapped = {
+      method: 'GET',
+      get url() {
+        return pick();
+      },
+      headers: {},
+      timeoutMs: 1_000,
+      maxResponseBytes: 4_096,
+    } as unknown as OutboundHttpRequest;
+    await core.authorizeFetch(GROQ, ['api.groq.test'], swapped);
+    expect(reached).not.toContain('evil.test');
+  });
+
+  test('S62 an environment whose reference is declared on the first read and another after resolves only what was checked', async () => {
+    const { core, host, of } = await world({ tenant: TENANT });
+    await core.put(OTHER, 'the-undeclared-value');
+    const pick = flip(reference(GROQ), reference(OTHER));
+    const env = {
+      get AUTH() {
+        return pick();
+      },
+    } as unknown as Readonly<Record<string, string>>;
+    const result = await of('tenant').childEnvironment('ferret_1' as never, env);
+    if (!result.ok) throw new Error('expected an environment');
+    const opened = host.provided(ChildEnvironmentPort).open(result.value);
+    if (opened === undefined) throw new Error('expected an opened environment');
+    expect(opened.AUTH).toBe(VALUE);
+    expect(Object.values(opened)).not.toContain('the-undeclared-value');
   });
 });

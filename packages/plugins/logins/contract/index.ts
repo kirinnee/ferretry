@@ -162,6 +162,8 @@ export const LOGINS_CONFIG = configDef(
     schema: LoginFileSchema,
     axis: 'configure',
     loosens: loginFileLoosens,
+    // A login record names the secret its key is made from: the one def whose `${secret:NAME}` counts as Logins' own.
+    credentialRecords: true,
   }),
 );
 

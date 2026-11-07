@@ -1142,6 +1142,17 @@ describe('catalog install: secret names are only told to a caller who may list t
   });
 });
 
+describe('catalog install: the Vault’s secret names are read only for a caller who may list them', () => {
+  it('S12 should not ask the Vault for any secret name when the caller may not list secrets (a ferret through Catalogs)', async () => {
+    const r = rig();
+    const asked = await request(alice, mcpItem(alice.daemonId), projectTarget());
+    await r.as({ id: 'agents', mayListSecrets: false }).preview('project', asked);
+    should(r.secretNameReads).equal(0);
+    await r.as({ id: 'host', mayListSecrets: true }).preview('project', asked);
+    should(r.secretNameReads).equal(1);
+  });
+});
+
 describe('catalog install: a target is one place however it is spelled', () => {
   it('should remove a project skill installed through a root spelled with a trailing slash', async () => {
     const r = rig();
