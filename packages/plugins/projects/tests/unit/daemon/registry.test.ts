@@ -129,6 +129,19 @@ describe('ProjectRegistry failure paths', () => {
     expect(result.ok).toBe(false);
     expect(store.file.projects).toEqual([]);
   });
+
+  test('a new folder or a clone inside the fence is refused BEFORE anything is made there', async () => {
+    const machine = fakeMachine(['/home/me/.ferretry'], {}, ['/home/me/.ferretry']);
+    const { registry: projects, store } = registry(machine);
+
+    const made = await projects.register({ kind: 'new-folder', path: '/home/me/.ferretry/x', initializeGit: true });
+    const cloned = await projects.register({ kind: 'clone', url: 'https://host/r.git', path: '/home/me/.ferretry/r' });
+
+    expect(made.ok).toBe(false);
+    expect(cloned.ok).toBe(false);
+    expect(machine.calls.some(call => call.startsWith('mkdir') || call.startsWith('git '))).toBe(false);
+    expect(store.file.projects).toEqual([]);
+  });
 });
 
 describe('ProjectRegistry registrations at once', () => {

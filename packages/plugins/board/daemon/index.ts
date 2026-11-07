@@ -9,6 +9,7 @@ import {
   CardAskRefSchema,
   type Card,
   type CardActionRequest,
+  BoardProjectIdSchema,
   CardMoved,
   CardMoving,
   CardProgressToolInputSchema,
@@ -101,7 +102,7 @@ export default implementDaemon(manifest, {
       progress: async (by, id, parts) =>
         await settle(async () => (await acting.act(id, { action: 'edit', progress: parts }, callerOf(by))).card),
       heldBy: world.heldBy,
-      switchOf: async project => await world.switches.read(project as never),
+      switchOf: async project => await world.switches.read(BoardProjectIdSchema.parse(project)),
     };
 
     // ── jobs: the sweep, the gates' reconcile, the GitHub watch ─────────────────────────────────────────────────

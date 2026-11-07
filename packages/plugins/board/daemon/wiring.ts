@@ -1,5 +1,11 @@
 import type { AskAnswer, AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretsApi, FerretStartedPayload, SitrepLine } from '@ferretry/core-ferrets/contract';
+import {
+  FerretIdSchema,
+  type FerretsApi,
+  type FerretStartedPayload,
+  type SitrepLine,
+} from '@ferretry/core-ferrets/contract';
+import { ProjectIdSchema } from '@ferretry/plugin-projects/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { type ConfigFileDef, type KernelPorts, type StateFileDef } from '@ferretry/kernel/contract';
 import {
@@ -13,6 +19,7 @@ import {
   type CardView,
   type CountersFileSchema,
   type FocusFile,
+  BoardQuerySchema,
   parseGateReference,
   type SweepFile,
 } from '../contract/index.ts';
@@ -169,7 +176,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
 
   // ── state ─────────────────────────────────────────────────────────────────────────────────────────────────────
   const store = new KernelCardStore(kernel.state, { cards: defs.cards, counters: defs.counters }, serial, diagnostics);
-  const focus = new KernelFerretFocus(kernel.state, defs.focus, ferrets, serial);
+  const focus = new KernelFerretFocus(kernel.state, defs.focus, ferrets, serial, diagnostics);
   const sweepMemory = new KernelSweepMemory(kernel.state, defs.sweep, diagnostics);
 
   // ── ferrets ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -328,7 +335,10 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   const startResults = new Map<string, import('../contract/index.ts').CardStartResponse>();
   const startPorts: StartOnCardPorts = {
     card: async id => await service.card(id),
-    folderOf: async card => (await needs.projects()?.find(card.projectId as never))?.path,
+    folderOf: async card => {
+      const project = ProjectIdSchema.safeParse(card.projectId);
+      return project.success ? (await needs.projects()?.find(project.data))?.path : undefined;
+    },
     live: async () => {
       const all = await ferrets.list();
       const out = new Map<string, CardId | null>();
@@ -359,7 +369,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     },
     stop: async (ferret, reason) => {
       kernel.log.warn(`stopping ferret ${ferret}: ${reason}`);
-      await ferrets.stop(ferret as never, 'now');
+      await ferrets.stop(FerretIdSchema.parse(ferret), 'now');
     },
     bin: 'fy',
   };
@@ -406,7 +416,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
             id: project.id,
             name: project.name,
             path: project.path,
-          })) as never,
+          })),
       },
       copies: workingCopies,
       clock,
@@ -421,7 +431,10 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       gh: new GhSpawnRunner(kernel.spawn, kernel.clock),
       copies: workingCopies,
       sessions: {
-        cwdOf: async ferret => (await ferrets.get(ferret as never))?.folder ?? null,
+        cwdOf: async ferret => {
+          const id = FerretIdSchema.safeParse(ferret);
+          return id.success ? ((await ferrets.get(id.data))?.folder ?? null) : null;
+        },
       },
       projects: {
         projects: async () =>
@@ -429,7 +442,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
             id: project.id,
             name: project.name,
             path: project.path,
-          })) as never,
+          })),
       },
       transcripts: messages,
       version: needs.version,
@@ -486,7 +499,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       tail: tailEvents,
       // GAP: Asks' summary carries no card for a ferret's own ask, so a duplicate of a card's gate ask is not found.
       open: async ferret =>
-        (await asks.open({ ferret: ferret as never, state: 'open' })).map(
+        (await asks.open({ ferret: FerretIdSchema.parse(ferret), state: 'open' })).map(
           (ask): GateCheckItem => ({
             id: ask.id,
             raisedBy: ask.raisedBy.kind === 'owner' ? 'human' : ask.raisedBy.kind === 'ferret' ? 'agent' : 'daemon',
@@ -581,7 +594,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   };
 
   const heldBy = async (ferret: string): Promise<readonly CardView[]> =>
-    (await service.board({ ferret, state: 'open', limit: 100 } as never)).cards;
+    (await service.board(BoardQuerySchema.parse({ ferret, state: 'open', limit: 100 }))).cards;
 
   return {
     service,

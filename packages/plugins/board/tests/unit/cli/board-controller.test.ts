@@ -22,6 +22,7 @@ import {
 } from '../../../cli/lib/board-controller.ts';
 import type { BoardGateway, BoardOutput, FerretDirectoryEntry, TextFiles } from '../../../cli/lib/ports.ts';
 import { RelatedCheck } from '../../../cli/lib/related.ts';
+import { filesOf } from '../../../cli/lib/context.ts';
 import { askHit, CapturingOutput, cardHit, FakeRelatedGateway } from './related-fixtures.ts';
 import {
   card,
@@ -1501,5 +1502,31 @@ describe('fy card patch', () => {
       /^ok: # &F1 — read every part, update what is out of date, then: fy card patch F1 --file <this file>\n/u,
     );
     should(log[0]).match(/\nrevision: 1\ntitle: Rename the widget\n/u);
+  });
+});
+
+describe('finding 10: a verb that needs a shell facility the CLI context does not give yet (DECISIONS-1 #21)', () => {
+  it('should name the missing environment for --mine, not tell a ferret it is not one', async () => {
+    const controller = new BoardController({
+      gateway: new FakeGateway(),
+      output: { success: () => undefined, diagnostic: () => undefined },
+      files: new FakeFiles(),
+      binary: 'fy',
+      ownFerret: undefined,
+      environment: false,
+    });
+
+    should(await refusal(() => controller.board({ mine: true }))).match(
+      /no environment yet.*DECISIONS-1 #21.*--ferret/u,
+    );
+  });
+
+  it('should name the missing file reader for a file argument', async () => {
+    const files = filesOf({});
+
+    should(await refusal(() => files.readText('/card.yaml'))).match(
+      /no file reader yet.*DECISIONS-1 #21.*\/card\.yaml/u,
+    );
+    should(await refusal(() => files.readText('-'))).match(/standard input cannot be read/u);
   });
 });

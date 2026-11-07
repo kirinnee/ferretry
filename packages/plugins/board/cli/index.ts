@@ -56,6 +56,7 @@ export default implementCli(manifest, {
       files: filesOf(extras),
       binary: BINARY,
       ownFerret: own,
+      environment: extras.env !== undefined,
       related: new RelatedCheck(gateway, output, own),
     });
     const verb = (work: (invocation: VerbInvocation) => Promise<unknown>): VerbHandler => guarded(io, work);

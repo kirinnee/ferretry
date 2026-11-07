@@ -107,6 +107,9 @@ export class ProjectRegistry {
     if (!parsed.success) throw new RegistrationRefused('project path must be absolute');
     const requested = resolve(parsed.data);
     const { folders } = this.deps;
+    // The fence first: a new folder or a clone is made only where the owner may name a project at all.
+    if (request.kind !== 'existing-folder' && !(await folders.mayName(requested)))
+      throw new RegistrationRefused('project path is inside a folder Ferretry keeps for itself');
     if (request.kind === 'new-folder') {
       await folders.makeDirectory(requested);
       if (request.initializeGit) await folders.gitInit(requested);

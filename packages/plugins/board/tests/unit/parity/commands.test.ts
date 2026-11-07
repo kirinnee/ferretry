@@ -175,7 +175,9 @@ const ROWS: readonly Row[] = [
     id: 'V-0468',
     verb: 'card merge-gate',
     args: ['https://github.com/kirinnee/ferretry/pull/42'],
-    answers: { 'GET /v1/board/merge-gate': { pr: 'u', unit: [], waits: [], unreadable: [] } },
+    answers: {
+      'GET /v1/board/merge-gate': { pr: 'https://github.com/o/r/pull/1', unit: [], waits: [], unreadable: [] },
+    },
     route: 'GET /v1/board/merge-gate',
   },
   {

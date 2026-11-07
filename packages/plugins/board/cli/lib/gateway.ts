@@ -1,24 +1,25 @@
 /**
  * The board's routes as the plugin client speaks them: the only place the CLI half knows a route key. Everything
  * above depends on {@link BoardGateway} / {@link LaneGateway}. The client attaches the caller's own credential, so
- * the acting ferret is never a parameter.
+ * the acting ferret is never a parameter. Every answer is parsed with its contract schema before anything above reads
+ * it (today's gateways did the same), so a daemon that answers otherwise is an error, never a half-read value.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type {
-  BoardMergeGateResponse,
-  BoardProject,
-  BoardProjectId,
-  BoardProjectsResponse,
-  BoardQueryInput,
-  BoardResponse,
-  BoardSkipRequest,
-  BoardSkipResponse,
-  BoardSwitch,
-  CardActionRequestInput,
-  CardCreateRequestInput,
-  CardResponse,
-  LaneSetActionRequestInput,
-  LaneSetChangeResponse,
+import {
+  BoardMergeGateResponseSchema,
+  BoardProjectSchema,
+  type BoardProjectId,
+  BoardProjectsResponseSchema,
+  type BoardQueryInput,
+  BoardResponseSchema,
+  type BoardSkipRequest,
+  BoardSkipResponseSchema,
+  BoardSwitchSchema,
+  type CardActionRequestInput,
+  type CardCreateRequestInput,
+  CardResponseSchema,
+  type LaneSetActionRequestInput,
+  LaneSetChangeResponseSchema,
 } from '../../contract/index.ts';
 import type { BoardGateway, FerretDirectoryEntry, LaneGateway } from './ports.ts';
 import type { RelatedResponse } from './related.ts';
@@ -63,30 +64,34 @@ export class ClientBoardGateway implements BoardGateway {
   constructor(private readonly client: PluginClient) {}
 
   async board(query: BoardQueryInput) {
-    return await this.client.call<BoardResponse>('GET /v1/board', { query: queryOf(query) });
+    return BoardResponseSchema.parse(await this.client.call<unknown>('GET /v1/board', { query: queryOf(query) }));
   }
 
   async card(id: string) {
-    return await this.client.call<CardResponse>('GET /v1/board/cards/:cardId', { params: { cardId: id } });
+    return CardResponseSchema.parse(
+      await this.client.call<unknown>('GET /v1/board/cards/:cardId', { params: { cardId: id } }),
+    );
   }
 
   async create(request: CardCreateRequestInput) {
-    return await this.client.call<CardResponse>('POST /v1/board/cards', { body: request });
+    return CardResponseSchema.parse(await this.client.call<unknown>('POST /v1/board/cards', { body: request }));
   }
 
   async act(id: string, request: CardActionRequestInput) {
-    return await this.client.call<CardResponse>('POST /v1/board/cards/:cardId', {
-      params: { cardId: id },
-      body: request,
-    });
+    return CardResponseSchema.parse(
+      await this.client.call<unknown>('POST /v1/board/cards/:cardId', {
+        params: { cardId: id },
+        body: request,
+      }),
+    );
   }
 
   async skip(request: BoardSkipRequest) {
-    return await this.client.call<BoardSkipResponse>('POST /v1/board/skip', { body: request });
+    return BoardSkipResponseSchema.parse(await this.client.call<unknown>('POST /v1/board/skip', { body: request }));
   }
 
   async projects() {
-    return await this.client.call<BoardProjectsResponse>('GET /v1/board/projects');
+    return BoardProjectsResponseSchema.parse(await this.client.call<unknown>('GET /v1/board/projects'));
   }
 
   async ferrets(): Promise<readonly FerretDirectoryEntry[]> {
@@ -94,7 +99,9 @@ export class ClientBoardGateway implements BoardGateway {
   }
 
   async mergeGate(pr: string) {
-    return await this.client.call<BoardMergeGateResponse>('GET /v1/board/merge-gate', { query: { pr } });
+    return BoardMergeGateResponseSchema.parse(
+      await this.client.call<unknown>('GET /v1/board/merge-gate', { query: { pr } }),
+    );
   }
 
   async related(request: { kind: 'card'; title: string; ask?: string }) {
@@ -106,28 +113,36 @@ export class ClientLaneGateway implements LaneGateway {
   constructor(private readonly client: PluginClient) {}
 
   async projects() {
-    return await this.client.call<BoardProjectsResponse>('GET /v1/board/projects');
+    return BoardProjectsResponseSchema.parse(await this.client.call<unknown>('GET /v1/board/projects'));
   }
 
   async project(projectId: BoardProjectId) {
-    return await this.client.call<BoardProject>('GET /v1/board/projects/:projectId/lanes', { params: { projectId } });
+    return BoardProjectSchema.parse(
+      await this.client.call<unknown>('GET /v1/board/projects/:projectId/lanes', { params: { projectId } }),
+    );
   }
 
   async change(projectId: BoardProjectId, request: LaneSetActionRequestInput) {
-    return await this.client.call<LaneSetChangeResponse>('POST /v1/board/projects/:projectId/lanes', {
-      params: { projectId },
-      body: request,
-    });
+    return LaneSetChangeResponseSchema.parse(
+      await this.client.call<unknown>('POST /v1/board/projects/:projectId/lanes', {
+        params: { projectId },
+        body: request,
+      }),
+    );
   }
 
   async switchOf(projectId: BoardProjectId) {
-    return await this.client.call<BoardSwitch>('GET /v1/board/projects/:projectId/switch', { params: { projectId } });
+    return BoardSwitchSchema.parse(
+      await this.client.call<unknown>('GET /v1/board/projects/:projectId/switch', { params: { projectId } }),
+    );
   }
 
   async setSwitch(projectId: BoardProjectId, on: boolean) {
-    return await this.client.call<BoardSwitch>('PUT /v1/board/projects/:projectId/switch', {
-      params: { projectId },
-      body: { on },
-    });
+    return BoardSwitchSchema.parse(
+      await this.client.call<unknown>('PUT /v1/board/projects/:projectId/switch', {
+        params: { projectId },
+        body: { on },
+      }),
+    );
   }
 }

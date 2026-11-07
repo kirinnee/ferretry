@@ -39,8 +39,10 @@ export function kernelFolders(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Pro
         return false;
       }
     },
+    mayName: async path => kernel.roots.root('imports', { subfolder: path }).resolve('').ok,
     canonical: async path => {
-      // Git resolves links; a folder that is not a work tree is taken as given (no resolver is declared for it).
+      // Git resolves links; a folder that is not a work tree is taken as given. GAP: today resolved it with realpath;
+      // the kernel's root handle has no real-path read yet (kernel item N, `RootHandle.realPath`).
       const done = await git(['-C', path, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--show-prefix']);
       if (done?.exitCode !== 0) return path;
       const [top, prefix = ''] = done.stdout.split('\n');

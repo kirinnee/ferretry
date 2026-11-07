@@ -15,6 +15,7 @@
     "accounts",
     "conversation",
     "agenda",
+    "board",
     "packs",
     "warden",
     "usage",

@@ -1,8 +1,8 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import type { BoardSkip, CardRef, FocusFile } from '../../../contract/index.ts';
-import type { FerretFocus } from '../../lib/board/index.ts';
+import { BoardUnavailableError, type FerretFocus } from '../../lib/board/index.ts';
 import type { SerialRun } from '../../lib/lanes/serial.ts';
-import type { FerretsApi } from '@ferretry/core-ferrets/contract';
+import { FerretIdSchema, type FerretsApi } from '@ferretry/core-ferrets/contract';
 
 type Entry = FocusFile['ferrets'][string];
 const EMPTY: Entry = { card: null, anchor: null, skip: null };
@@ -12,6 +12,9 @@ const SECTION = 'board:focus';
  * Which card each ferret works on, the card its own delegations go under, and why its work has no card
  * (`state/board/focus.json`). Ferrets keeps none of it, so Board holds it. A ferret that does not exist cannot be
  * focused: `setFocus` and `skip` answer `false`, as today's did for a session that was gone.
+ *
+ * One file holds every ferret's focus (today kept one per ferret), so a damaged file is never read as "no focus" and a
+ * write that did not land is never reported done: each is warned about and refused as an unavailable board.
  */
 export class KernelFerretFocus implements FerretFocus {
   constructor(
@@ -19,6 +22,7 @@ export class KernelFerretFocus implements FerretFocus {
     private readonly file: StateFileDef<string, FocusFile>,
     private readonly ferrets: Pick<FerretsApi, 'get'>,
     private readonly serial: SerialRun,
+    private readonly diagnostics: { warn(message: string): void },
     private readonly titled: (ferret: string, title: string) => Promise<void> = async () => undefined,
   ) {}
 
@@ -58,20 +62,29 @@ export class KernelFerretFocus implements FerretFocus {
   }
 
   private async exists(ferret: string): Promise<boolean> {
-    return (await this.ferrets.get(ferret as never).catch(() => undefined)) !== undefined;
+    const id = FerretIdSchema.safeParse(ferret);
+    return id.success && (await this.ferrets.get(id.data).catch(() => undefined)) !== undefined;
   }
 
   private async entry(ferret: string): Promise<Entry> {
     const read = await this.state.read(this.file);
-    return (read.ok ? read.value?.ferrets[ferret] : undefined) ?? EMPTY;
+    if (!read.ok) throw this.damaged('read', ferret, read.error.sentence);
+    return read.value?.ferrets[ferret] ?? EMPTY;
+  }
+
+  private damaged(what: 'read' | 'written', ferret: string, sentence: string): BoardUnavailableError {
+    const message = `the board's focus file could not be ${what} for ${ferret}: ${sentence}`;
+    this.diagnostics.warn(message);
+    return new BoardUnavailableError(message);
   }
 
   private async change(ferret: string, edit: (entry: Entry) => Entry): Promise<void> {
     await this.serial.run(SECTION, async () => {
-      await this.state.update(this.file, current => ({
+      const updated = await this.state.update(this.file, current => ({
         format: 1 as const,
         ferrets: { ...(current?.ferrets ?? {}), [ferret]: edit(current?.ferrets[ferret] ?? EMPTY) },
       }));
+      if (!updated.ok) throw this.damaged('written', ferret, updated.error.sentence);
     });
   }
 }

@@ -84,10 +84,16 @@ export class ProjectController {
     const projects = await this.gateway.projects();
     const folded = wanted.toLowerCase();
     const absolute = isAbsolute(wanted) ? wanted : resolve(this.cwd, wanted);
-    const found =
-      projects.find(project => project.id === wanted) ??
-      projects.find(project => project.name.toLowerCase() === folded) ??
-      projects.find(project => project.path === absolute);
+    const named = projects.filter(project => project.name.toLowerCase() === folded);
+    const byId = projects.find(project => project.id === wanted);
+    // Two projects whose names differ only in case are never guessed between: removing is not undone.
+    if (byId === undefined && named.length > 1) {
+      refuse(
+        `more than one project is called "${wanted}" (${named.map(project => project.id).join(', ')}); say which by its id or folder`,
+      );
+      return;
+    }
+    const found = byId ?? named[0] ?? projects.find(project => project.path === absolute);
     if (found === undefined) {
       refuse(`no project "${wanted}"; see \`${this.binary} project list\``);
       return;

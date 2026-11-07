@@ -146,4 +146,14 @@ describe('fy project remove', () => {
     await should(controller.remove(' ', {})).be.rejectedWith(/say which project: fy project remove/u);
     should(gateway.removed).be.empty();
   });
+
+  it('should refuse a name two projects share in different case, naming both ids, and remove neither', async () => {
+    const twin = { ...DOTFILES, name: 'Ferretry', path: '/work/other' };
+    const { controller, gateway } = harness([FERRETRY, twin]);
+
+    await should(controller.remove('FERRETRY', {})).be.rejectedWith(/more than one project is called "FERRETRY"/u);
+    should(gateway.removed).be.empty();
+    await controller.remove(twin.id, {});
+    should(gateway.removed).eql([twin.id]);
+  });
 });

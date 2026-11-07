@@ -26,6 +26,13 @@ export function extrasOf(context: unknown, io: TerminalIo): ShellExtras {
   };
 }
 
+/**
+ * The refusal a verb gives when the shell lacks a facility it needs: the facility named, and why it is missing — the CLI
+ * context's environment and file reader are lead decision DECISIONS-1 #21, still pending on the kernel's `CliContext`.
+ */
+export const missingFacility = (facility: 'environment' | 'file reader', remedy: string): string =>
+  `this shell gives Board's verbs no ${facility} yet (the CLI context's ${facility}, DECISIONS-1 #21, is pending): ${remedy}`;
+
 /** The ferret this process runs inside (`FY_SESSION_ID`); blank is absent. */
 export function ownFerretOf(extras: ShellExtras): string | undefined {
   const value = extras.env?.FY_SESSION_ID?.trim() ?? '';
@@ -37,7 +44,10 @@ export function filesOf(extras: ShellExtras): TextFiles {
     async readText(path: string): Promise<string> {
       if (extras.readText === undefined) {
         return refuse(
-          `this build of the shell cannot read ${path === '-' ? 'standard input' : path} for a verb yet: pass the text on the command line instead`,
+          missingFacility(
+            'file reader',
+            `${path === '-' ? 'standard input' : path} cannot be read; pass the text on the command line instead`,
+          ),
         );
       }
       return await extras.readText(path);

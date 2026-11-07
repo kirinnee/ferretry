@@ -1,5 +1,6 @@
 import type { AskAnswer, AskDraft, AskId, AsksApi, AskSummary } from '@ferretry/core-asks/contract';
 import type { EntryId, SourceKey } from '@ferretry/core-asks/contract';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import { type CardId, parseGateReference } from '../../contract/index.ts';
 import {
   type AnsweredAsk,
@@ -59,7 +60,9 @@ export class AsksFerretReader implements FerretAsksReader {
   constructor(private readonly asks: Pick<AsksApi, 'open'>) {}
 
   async open(ferret: string): Promise<readonly OpenAskFacts[]> {
-    const open = await this.asks.open({ ferret: ferret as never, state: 'open' });
+    const id = FerretIdSchema.safeParse(ferret);
+    if (!id.success) return [];
+    const open = await this.asks.open({ ferret: id.data, state: 'open' });
     return open.map(ask => {
       const gate = ask.source === CARD_SOURCE ? cardOf(ask.entry) : undefined;
       return {

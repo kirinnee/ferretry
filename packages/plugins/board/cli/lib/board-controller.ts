@@ -52,6 +52,7 @@ import {
 import { cardPatchDocument, composeCardPatch, parseCardPatch } from './card-patch.ts';
 import { queuedLines } from './clash-notes.ts';
 import { refuse } from './errors.ts';
+import { missingFacility } from './context.ts';
 import { resolveBoardProject } from './lane-request.ts';
 import { patchYaml } from './patch-document.ts';
 import type { BoardGateway, BoardOutput, FerretDirectoryEntry, TextFiles } from './ports.ts';
@@ -137,6 +138,8 @@ export interface BoardControllerDependencies {
   readonly binary: string;
   /** The ferret this process is, when it is one (the shell's `FY_SESSION_ID`); `--mine` needs it. */
   readonly ownFerret: string | undefined;
+  /** Whether the shell gave this half an environment at all: without one, `FY_SESSION_ID` cannot be read. */
+  readonly environment?: boolean;
   /** Asks the daemon whether a new card duplicates one; absent, creates are never checked. */
   readonly related?: RelatedCheck | undefined;
 }
@@ -169,7 +172,14 @@ export class BoardController {
     const listing = await this.gateway.projects();
     if (options.mine === true && options.ferret !== undefined) refuse('pass --mine or --ferret, not both');
     if (options.mine === true && this.deps.ownFerret === undefined) {
-      refuse('--mine needs a ferret: run it inside a ferret');
+      refuse(
+        this.deps.environment === false
+          ? missingFacility(
+              'environment',
+              'the ferret this runs in cannot be read for --mine; pass --ferret <id> instead',
+            )
+          : '--mine needs a ferret: run it inside a ferret',
+      );
     }
     const projectFlag = options.project?.trim();
     const wholeFleet = projectFlag?.toLowerCase() === ALL_PROJECTS;

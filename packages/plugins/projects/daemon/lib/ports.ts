@@ -8,6 +8,11 @@ import type { ProjectInfo, ProjectsFile } from '../../contract/index.ts';
 export interface ProjectFolders {
   /** Whether `path` is an existing directory the owner may name (outside Ferretry's own home). */
   isDirectory(path: string): Promise<boolean>;
+  /**
+   * Whether `path` is a place the owner may name at all (the `imports` root's fence: never inside Ferretry's own home),
+   * asked BEFORE anything is created or cloned there, so a refused folder is never made.
+   */
+  mayName(path: string): Promise<boolean>;
   /** The resolved workspace root for `path`: symlinks followed where the machine can say (git does). */
   canonical(path: string): Promise<string>;
   /** Makes one new directory (the parent must exist); refuses an existing one. */

@@ -11,6 +11,7 @@ export interface FakeMachine extends ProjectFolders {
 export function fakeMachine(
   directories: readonly string[] = [],
   repositories: Record<string, string> = {},
+  fenced: readonly string[] = [],
 ): FakeMachine {
   const dirs = new Set(directories);
   const repos = new Map(Object.entries(repositories));
@@ -22,6 +23,10 @@ export function fakeMachine(
     isDirectory: async path => {
       calls.push(`isDirectory ${path}`);
       return dirs.has(path);
+    },
+    mayName: async path => {
+      calls.push(`mayName ${path}`);
+      return !fenced.some(inside => path === inside || path.startsWith(`${inside}/`));
     },
     canonical: async path => {
       calls.push(`canonical ${path}`);
