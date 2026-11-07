@@ -14,5 +14,5 @@ export function renderTable(header: readonly string[], rows: readonly (readonly 
     .join('\n');
 }
 
-export const plural = (count: number, one: string, many = `${one}s`): string =>
+const plural = (count: number, one: string, many = `${one}s`): string =>
   `${String(count)} ${count === 1 ? one : many}`;

@@ -2,32 +2,67 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/test/*.ts"],
-      "project": ["scripts/test/*.ts"]
+      "entry": [
+        "scripts/test/*.ts"
+      ],
+      "project": [
+        "scripts/test/*.ts"
+      ]
     },
     "packages/std": {
-      "entry": ["tests/**/*.test.ts"],
-      "project": ["**/*.ts"]
+      "entry": [
+        "tests/**/*.test.ts"
+      ],
+      "project": [
+        "**/*.ts"
+      ]
     },
     "packages/core/kernel": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
-      "project": ["**/*.{ts,tsx}"]
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/types/*.types.ts"
+      ],
+      "project": [
+        "**/*.{ts,tsx}"
+      ]
     },
     "packages/core/*": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
-      "project": ["**/*.{ts,tsx}"]
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/types/*.types.ts"
+      ],
+      "project": [
+        "**/*.{ts,tsx}"
+      ]
     },
     "packages/plugins/*": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
-      "project": ["**/*.{ts,tsx}"]
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/types/*.types.ts"
+      ],
+      "project": [
+        "**/*.{ts,tsx}"
+      ]
     },
     "packages/cli": {
-      "entry": ["bin/*.ts", "src/index.ts", "tests/**/*.test.ts"],
-      "project": ["**/*.ts"]
+      "entry": [
+        "bin/*.ts",
+        "src/index.ts",
+        "tests/**/*.test.ts"
+      ],
+      "project": [
+        "**/*.ts"
+      ]
     },
     "packages/app": {
-      "entry": ["src/index.ts", "src/main.tsx", "tests/**/*.test.{ts,tsx}"],
-      "project": ["**/*.{ts,tsx}"]
+      "entry": [
+        "src/index.ts",
+        "src/main.tsx",
+        "tests/**/*.test.{ts,tsx}"
+      ],
+      "project": [
+        "**/*.{ts,tsx}"
+      ]
     }
   },
   "rules": {
@@ -44,5 +79,10 @@
     "unresolved": "off",
     "binaries": "off",
     "enumMembers": "off"
+  },
+  "ignoreIssues": {
+    "packages/plugins/shells/contract/wire.ts": [
+      "duplicates"
+    ]
   }
 }

@@ -5,8 +5,8 @@ import { createStatePort, type StatePortOptions } from '../../../host/state/stat
 
 export const HOME = '/home/fy';
 
-export const Counter = z.strictObject({ count: z.number().int() });
-export type CounterShape = z.infer<typeof Counter>;
+const Counter = z.strictObject({ count: z.number().int() });
+type CounterShape = z.infer<typeof Counter>;
 
 export const counterFile = defineState({
   name: 'counter',

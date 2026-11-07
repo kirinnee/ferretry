@@ -1,7 +1,7 @@
 /** Who needs whom, read from the manifests' `needs` and `uses` tokens (§2.4). Pure. */
 import type { CommandRegistry } from './registry.ts';
 
-export interface PluginEdges {
+interface PluginEdges {
   /** Plugins whose port this plugin cannot run without. */
   readonly needs: readonly string[];
   /** Plugins whose port this one uses when present. */

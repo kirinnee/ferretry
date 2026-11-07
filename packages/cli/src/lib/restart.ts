@@ -6,7 +6,7 @@
  * Copied from today's `daemon-restart.ts`. Pure: clock, sleep and attempt are handed in.
  */
 
-export const DAEMON_RESTART_PATIENCE_MS = 60_000;
+const DAEMON_RESTART_PATIENCE_MS = 60_000;
 const MAX_BACKOFF_MS = 2_000;
 const FIRST_BACKOFF_MS = 250;
 

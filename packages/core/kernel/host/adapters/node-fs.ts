@@ -63,7 +63,7 @@ export function nodeFs(randomSuffix: () => string): HostFs {
 }
 
 /** `stat` that follows links, for the home probe. */
-export async function statKind(path: string): Promise<'missing' | 'file' | 'directory' | 'other'> {
+async function statKind(path: string): Promise<'missing' | 'file' | 'directory' | 'other'> {
   try {
     const info = await stat(path);
     return info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other';
@@ -73,4 +73,4 @@ export async function statKind(path: string): Promise<'missing' | 'file' | 'dire
   }
 }
 
-export { writeFile };
+;

@@ -39,7 +39,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Whether a thrown value is a missing-file fault. */
-export const isMissingFile = (error: unknown): boolean =>
+const isMissingFile = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && (error as { code?: string }).code === 'ENOENT';
 
 export const describeFault = (error: unknown): string =>

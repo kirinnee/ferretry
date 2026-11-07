@@ -19,7 +19,7 @@ import { buildVerbTable, expandAlias, renderHelp, resolveVerb, type VerbEntry } 
 import type { CliWorld } from './world.ts';
 
 /** The shell's own verb lines and their handlers. The line is the key, exactly as `SHELL_VERB_LINES` spells it. */
-export const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
+const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'plugin list': pluginList,
   'plugin show': pluginShow,
   'plugin on': pluginOn,

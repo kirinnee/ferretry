@@ -22,7 +22,7 @@ function addsSummary(entry: RegistryEntry): string {
   return named.length === 0 ? '-' : named.join(', ');
 }
 
-export function contractState(
+function contractState(
   inventory: PluginInventory,
   compiled: Readonly<Record<string, string>>,
   id: string,

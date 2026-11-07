@@ -64,7 +64,7 @@ export const boardManifest = definePlugin({
   },
 });
 
-export const wiringManifest = definePlugin({
+const wiringManifest = definePlugin({
   id: 'wiring',
   title: 'Wiring',
   version: '5.0.0',

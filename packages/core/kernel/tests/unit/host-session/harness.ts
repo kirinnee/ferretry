@@ -51,7 +51,7 @@ import {
 import { newDaemonIdentity, relayCrypto } from './identities.ts';
 
 /** A clock the test drives: `after` timers fire only on `advance`. */
-export class FakeClock {
+class FakeClock {
   #now = Date.parse('2026-11-07T09:00:00.000Z');
   readonly #timers = new Map<number, { at: number; fn: () => void }>();
   #next = 0;
@@ -104,7 +104,7 @@ export class FakeDeviceMode implements SessionMode {
 }
 
 /** A `pair` mode that records every attempt and runs the kernel's proof check. */
-export class FakePairMode implements SessionMode {
+class FakePairMode implements SessionMode {
   readonly principalKind = 'none' as const;
   readonly attempts: ModeRedemption[] = [];
   answer: 'paired' | 'refused' = 'paired';
@@ -181,7 +181,7 @@ export async function settle(rounds = 30): Promise<void> {
   for (let round = 0; round < rounds; round += 1) await new Promise(resolve => setImmediate(resolve));
 }
 
-export function freshSessionId(): SessionId {
+function freshSessionId(): SessionId {
   const id = sessionIdFromBytes(relayCrypto.randomBytes(16));
   if (id === null) throw new Error('fixture session id');
   return id;
@@ -368,4 +368,4 @@ export async function serving(fx: Fixture, carrier = 'relay', peer?: CarrierPeer
   return { client, device };
 }
 
-export { encodeHandshakeMessage, decodeFrame, encodeFrame, FRAME_KINDS };
+;

@@ -16,7 +16,7 @@ export const silentLog: Log = {
 };
 
 /** A driven clock: timers fire only when the test advances it. */
-export function drivenClock(startMs = Date.parse('2026-11-07T09:00:00Z')): Clock & { advance(ms: number): void } {
+function drivenClock(startMs = Date.parse('2026-11-07T09:00:00Z')): Clock & { advance(ms: number): void } {
   let now = startMs;
   let timers: { at: number; fn: () => void; every?: number; id: number }[] = [];
   let next = 0;
@@ -48,7 +48,7 @@ export function drivenClock(startMs = Date.parse('2026-11-07T09:00:00Z')): Clock
   };
 }
 
-export const ms = milliseconds;
+const ms = milliseconds;
 
 export function request(method: string, path: string, init: { local?: boolean; body?: string } = {}): ApiRequest {
   return {

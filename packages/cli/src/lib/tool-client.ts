@@ -1,4 +1,5 @@
 /**
+ * Not yet wired: `fy mcp serve` and the agent-tool ports land with the plugins that own tools (knip.json ignores this file).
  * The agent-tool client: what `fy mcp serve` and a ferret's tools call through. It is the same guard as a verb's
  * (§9.6): the owning plugin must be present, on and carry this build's contract hash, and a person-only tool is
  * refused in a pane before the daemon is contacted.
