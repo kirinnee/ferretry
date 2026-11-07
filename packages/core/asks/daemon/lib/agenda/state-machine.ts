@@ -576,7 +576,7 @@ function isCardAgendaItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'source
 }
 
 /** An item the daemon raised on behalf of the ferret whose board holds it: a gate's follow-up, or a card's agenda. */
-function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+export function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return isGateFollowupItem(item) || isCardAgendaItem(item);
 }
 

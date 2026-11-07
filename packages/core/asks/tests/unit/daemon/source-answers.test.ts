@@ -36,6 +36,11 @@ describe('source-raised answers', () => {
       expect((await half.call(POST, { ferretId: 'f1' }, { action: 'resolve', id: ref.id, response })).status).toBe(200);
       expect(applied).toHaveLength(1);
       expect(await half.asks.answers({ source: 'card' as never })).toMatchObject([{ id: applied[0]?.id }]);
+      expect(half.events.find(event => event.name === 'asks.answered')?.payload).toMatchObject({
+        answerId: applied[0]?.id,
+        source: 'card',
+        entry: 'entry1',
+      });
     } finally {
       await half.close();
     }

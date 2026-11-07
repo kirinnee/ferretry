@@ -19,6 +19,7 @@ import {
 } from '../../contract/index.ts';
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
+import { cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
 import { askForKind } from '../lib/protocol/agenda-card.ts';
 import type { AgendaItem, AgendaResponse, AgendaSnapshot, ResolvedAgendaItem } from '../lib/protocol/agenda.ts';
 
@@ -134,6 +135,50 @@ export function answerOf(ferret: string, item: ResolvedAgendaItem): AskAnswer | 
   };
 }
 
+/** Durable answers on a thread, including the owner's answer while it rests and answered card questions. */
+export function answersOn(ferret: string, item: AgendaItem | ResolvedAgendaItem): AskAnswer[] {
+  const out: AskAnswer[] = [];
+  if ('resolvedAt' in item) {
+    const answer = answerOf(ferret, item);
+    if (answer !== undefined) out.push(answer);
+  } else if (item.ownerAnswer !== undefined) {
+    const answer = item.ownerAnswer;
+    const receipt = createHash('sha256')
+      .update(JSON.stringify([ferret, item.id, answer.at, answer.request]))
+      .digest('hex');
+    const found = answerOf(ferret, {
+      ...item,
+      sourceRef: item.sourceRef ?? `ask:ferret:${item.id}`,
+      resolvedAt: answer.at,
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      disposition: 'done',
+      response: answer.response,
+      resolutionNote: answer.note ?? null,
+      answerReceipt: receipt,
+    });
+    if (found !== undefined) out.push(found);
+  }
+  for (const ask of item.cardAsks ?? []) {
+    if (ask.answer === undefined) continue;
+    const found = answerOf(ferret, {
+      ...item,
+      sourceRef: `ask:card:${cardAskReference(ask)}`,
+      resolvedAt: ask.answer.at,
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      disposition: 'done',
+      response: ask.answer.response,
+      resolutionNote: ask.answer.note ?? null,
+      answerReceipt: ask.answer.receipt,
+    });
+    if (found !== undefined) out.push(found);
+  }
+  return out;
+}
+
 function summaryOf(
   ferret: string,
   item: AgendaItem | ResolvedAgendaItem,
@@ -226,10 +271,7 @@ export function asksPort(
     answers: async (filter, since) =>
       (
         await everyBoard((ferret, board) =>
-          board.resolved.flatMap(item => {
-            const answer = answerOf(ferret, item);
-            return answer === undefined ? [] : [answer];
-          }),
+          [...board.items, ...board.resolved].flatMap(item => answersOn(ferret, item)),
         )
       ).filter(
         answer =>

@@ -73,7 +73,7 @@ export const needsInfoReplyKey = (id: AgendaId, request: number): ReplyKey => `$
 export const instructionsReplyKey = (digest: string): ReplyKey => `instructions~${digest}`;
 
 /** The item a key belongs to, or `undefined` for a key that is not about one. */
-const itemOfKey = (key: ReplyKey): AgendaId | undefined => AgendaIdSchema.safeParse(key.split('~')[0]).data;
+export const itemOfKey = (key: ReplyKey): AgendaId | undefined => AgendaIdSchema.safeParse(key.split('~')[0]).data;
 
 const PendingReplySchema = z.strictObject({
   /** A reply key (an item id for an answer); the field keeps its name so an outbox written before is read. */
@@ -252,7 +252,7 @@ interface AgendaReceipts {
 }
 
 /** Hands an answer that never arrived back to the owner, as an open card that says so. Total. */
-interface AgendaUndeliveredSink {
+export interface AgendaUndeliveredSink {
   undelivered(sessionId: string, key: ReplyKey, reason: string): Promise<void>;
 }
 
@@ -263,7 +263,7 @@ export interface AgendaReplyTimers {
 }
 
 /** Where an answer to a ferret's item is handed to be delivered. */
-interface AgendaReplyQueue {
+export interface AgendaReplyQueue {
   add(sessionId: string, key: ReplyKey, message: string): Promise<void>;
 }
 

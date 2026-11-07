@@ -18,10 +18,12 @@
  */
 import { randomUUID } from 'node:crypto';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
 import { AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { askDelivery } from './adapters/ask-delivery.ts';
 import { asksPort } from './adapters/asks-port.ts';
+import { AskEvents } from './adapters/ask-events.ts';
 import { sourceAnswers } from './adapters/source-answers.ts';
 import { CARD_SOURCE, cardAskAnswers } from './adapters/card-ask-answers.ts';
 import { FileAgendaLedgerRepository } from './adapters/agenda/file-agenda-ledger-repository.ts';
@@ -31,8 +33,10 @@ import { KeyedAgendaReplyTimers } from './adapters/agenda/keyed-agenda-reply-tim
 import { StateAgendaFiles } from './adapters/agenda/state-agenda-files.ts';
 import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agenda/index.ts';
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
+import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
 import { agendaClearRoutes } from './lib/routes/agenda-clear.ts';
+import { AgendaRepliesFiles, AgendaPendingChangesFiles, AgendaPendingVersionsFiles } from '../manifest.ts';
 import { AgendaLedgerFiles } from './lib/state.ts';
 
 export default implementDaemon(manifest, {
@@ -55,7 +59,10 @@ export default implementDaemon(manifest, {
       // Which ferrets exist is Ferrets' (no edge from Asks yet): a well-formed id has a board.
       { has: async ferret => isAgendaSessionId(ferret) },
       { raised: async () => undefined },
-      undefined,
+      new AgendaChangeFanout([
+        new AgendaReplyDelivery({ add: (sessionId, key, message) => replies.add(sessionId, key, message) }, 'fy'),
+        new AskEvents(kernel.events),
+      ]),
       undefined,
       undefined,
       undefined,
@@ -69,19 +76,44 @@ export default implementDaemon(manifest, {
 
     // Typing into a ferret is Conversation's (`ask.delivery:ferret`); unprovided, answers stay held.
     const delivery = askDelivery(key => hooks.provider(AskDeliveries, key));
+    const replyTimers = new KeyedAgendaReplyTimers(clock);
+    kernel.lifecycle.onStop(() => replyTimers.close());
     const replies = new AgendaReplyBatcher(
       new FileAgendaOutboxRepository(files, uniqueId),
       delivery.messenger,
-      new KeyedAgendaReplyTimers(clock),
+      replyTimers,
       new KeyedSerialQueue(),
       { now },
       undefined,
       undefined,
-      delivery.ports,
+      { ...delivery.ports, undelivered: new AgendaBoardUndelivered(agenda) },
     );
 
     const sources = (key: SourceKey) => hooks.provider(AskSources, key);
     const boards = { ferrets: async () => await state.list(AgendaLedgerFiles) };
+    const recover = async () => {
+      const ferrets = [
+        ...new Set(
+          (
+            await Promise.all(
+              [AgendaLedgerFiles, AgendaRepliesFiles, AgendaPendingChangesFiles, AgendaPendingVersionsFiles].map(file =>
+                state.list(file),
+              ),
+            )
+          ).flat(),
+        ),
+      ];
+      for (const ferret of ferrets) await agenda.list(ferret).catch(error => warn(String(error)));
+      await replies.resume(ferrets);
+    };
+    kernel.jobs.add({ id: 'recover', schedule: { onceAfterStart: true }, run: recover });
+    kernel.jobs.add({
+      id: 'changes',
+      schedule: { every: milliseconds(1_000) },
+      run: async () => {
+        for (const ferret of await boards.ferrets()) await agenda.list(ferret).catch(error => warn(String(error)));
+      },
+    });
 
     return {
       routes: {
