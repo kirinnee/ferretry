@@ -82,7 +82,8 @@ import {
   type V4StoredProposal as V4StoredProposalValue,
 } from '../v4/lessons.ts';
 import { configPath, v5ConfigProblem } from '../v5/write.ts';
-import { dropModeline, instructionsSource } from './settings.ts';
+import { dropModeline } from '../v4/config.ts';
+import { instructionsSource } from './settings.ts';
 import type { Step, StepContext } from './index.ts';
 
 const V5_DIR = 'state/lessons';

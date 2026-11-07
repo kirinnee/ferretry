@@ -18,7 +18,8 @@
  * | `account-defaults.yaml`                | `accounts.yaml`                                                     |
  * | `machine.yaml`                         | split: harness-claude-code/-codex, runtimes, limits, conversation,  |
  * |                                        | browsers, agenda, usage; the rest not carried (see below)           |
- * | `voice.yaml`, `pack.yaml`, `models-guide.yaml` | waits: Voice and Packs declare no config file yet           |
+ * | `voice.yaml`                           | waits: Voice declares no config file yet                            |
+ * | `pack.yaml`, `models-guide.yaml`       | the Packs step's (`packs.yaml`)                                     |
  * | `learning.yaml`                        | the Lessons step's                                                  |
  *
  * M7: v4's config names runtimes by NAME already; a name that is only a v4 `formerNames` alias in `fleet/ids.json`
@@ -47,6 +48,7 @@ import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { Document, isMap, isScalar, isSeq, type Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
+  dropModeline,
   listV4Config,
   rawSecretPaths,
   readV4Yaml,
@@ -109,9 +111,10 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   },
   { what: "v4's # yaml-language-server modeline", why: 'it points at v4 schema ids; v5 adds its own on the next edit' },
   { what: 'config/learning.yaml', why: 'read by the Lessons step, not this one' },
+  { what: 'config/pack.yaml, config/models-guide.yaml', why: 'read by the Packs step, not this one' },
   {
     what: 'config/daemon.json, config/routing.json',
-    why: 'JSON daemon documents, not YAML config kinds: the Daemon settings step splits their keys (Gate, Connections, the harness files, Agenda) and the Usage step takes the pricing',
+    why: 'JSON daemon documents, not YAML config kinds: the Daemon settings step splits daemon.json (Gate, Connections, the harness files, Agenda), the Usage step takes the pricing and the Packs step reads routing.json',
   },
   {
     what: 'instructions component harness and clonedFrom* fields',
@@ -182,20 +185,6 @@ const childMap = (map: YAMLMap, key: string): YAMLMap | undefined => {
 };
 
 const contents = (document: Document): YAMLMap => document.contents as YAMLMap;
-
-const withoutModeline = (comment: string | null | undefined): string | null => {
-  if (comment === null || comment === undefined) return null;
-  const kept = comment.split('\n').filter(line => !line.includes('yaml-language-server:'));
-  return kept.length === 0 || kept.every(line => line.trim() === '') ? null : kept.join('\n');
-};
-
-export function dropModeline(document: Document): void {
-  document.commentBefore = withoutModeline(document.commentBefore);
-  const map = contents(document);
-  map.commentBefore = withoutModeline(map.commentBefore);
-  const first = map.items[0];
-  if (first !== undefined && isScalar(first.key)) first.key.commentBefore = withoutModeline(first.key.commentBefore);
-}
 
 // ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -336,9 +325,9 @@ export async function instructionsSource(home: string, value: unknown): Promise<
 
 async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolve: Resolve): Promise<void> {
   const { address, label } = file;
-  if (address.kind === 'learning') return;
-  if (address.kind === 'voice' || address.kind === 'pack' || address.kind === 'modelsGuide') {
-    plan.waiting.push(`${label} (no ${address.kind === 'voice' ? 'Voice' : 'Packs'} config schema yet)`);
+  if (address.kind === 'learning' || address.kind === 'pack' || address.kind === 'modelsGuide') return;
+  if (address.kind === 'voice') {
+    plan.waiting.push(`${label} (no Voice config schema yet)`);
     return;
   }
   const document = await readV4Yaml(file);
@@ -458,7 +447,7 @@ export const settingsStep: Step = {
   ],
   reads: [
     'config/machine.yaml',
-    'config/{warden,limits,account-defaults,voice,pack,models-guide}.yaml',
+    'config/{warden,limits,account-defaults,voice}.yaml',
     'config/{logins,runtimes,profiles,presets,models}/*.yaml',
     'config/components/<kind>/*.yaml',
     'fleet/assets/** (the documents instructions components point at)',

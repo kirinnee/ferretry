@@ -7,14 +7,12 @@
  *   the fact the conversion needs (a default is v4's answer to silence, restated below where it matters).
  * - `state/security.json`: `{schemaVersion: 1, settings, updatedAt}` (`adapters/security/state-security-settings.ts`);
  *   a document that does not parse is read by v4 as its STRICTEST settings, never as the defaults.
- * - `config/routing.json`: `RoutingCatalogSchema` (`lib/core/catalog.ts:128`), operator-written, read-only by v4.
  * - `state/operator-password.json`: RETIRED in 4.291.5 (`bin/fyd.ts:13495` deletes it at boot). Only ever `lstat`ed.
  */
 import { z } from 'zod';
 import { V4_DAEMON_CONFIG } from './usage.ts';
 
 export const V4_DAEMON_JSON = V4_DAEMON_CONFIG;
-export const V4_ROUTING_JSON = 'config/routing.json';
 export const V4_SECURITY_JSON = 'state/security.json';
 export const V4_OPERATOR_PASSWORD = 'state/operator-password.json';
 

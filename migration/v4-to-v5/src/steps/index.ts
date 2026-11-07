@@ -20,6 +20,7 @@ import { harnessHomesStep } from './harness-homes.ts';
 import { lessonsStep } from './lessons.ts';
 import { loginsStep } from './logins.ts';
 import { mcpStep } from './mcp.ts';
+import { packsStep } from './packs.ts';
 import { projectsStep } from './projects.ts';
 import { settingsStep } from './settings.ts';
 import { terminalsStep } from './terminals.ts';
@@ -87,6 +88,8 @@ export const STEPS: readonly Step[] = [
   ),
   settingsStep,
   daemonSettingsStep,
+  // After Settings and Daemon settings: config/pack.yaml, models-guide.yaml and routing.json are this step's alone.
+  packsStep,
   loginsStep,
   vaultStep,
   // After the vault: MCP's sealed document is opened by the key the vault step moves (once).

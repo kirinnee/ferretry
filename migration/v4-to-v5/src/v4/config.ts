@@ -9,7 +9,7 @@
  */
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { type Document, isMap, LineCounter, parseDocument } from 'yaml';
+import { type Document, isMap, isScalar, LineCounter, parseDocument, type YAMLMap } from 'yaml';
 import { V4InputError } from './documents.ts';
 
 /** The singleton files at the top of `config/` (`SINGLETON_FILES`). */
@@ -227,4 +227,21 @@ export function rawSecretPaths(value: unknown): readonly string[] {
   };
   visit(value, []);
   return found;
+}
+
+// ── the modeline ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+const withoutModeline = (comment: string | null | undefined): string | null => {
+  if (comment === null || comment === undefined) return null;
+  const kept = comment.split('\n').filter(line => !line.includes('yaml-language-server:'));
+  return kept.length === 0 || kept.every(line => line.trim() === '') ? null : kept.join('\n');
+};
+
+/** Drops v4's `# yaml-language-server` modeline (it points at v4 schema ids; v5 adds its own on the next edit). */
+export function dropModeline(document: Document): void {
+  document.commentBefore = withoutModeline(document.commentBefore);
+  const map = document.contents as YAMLMap;
+  map.commentBefore = withoutModeline(map.commentBefore);
+  const first = map.items[0];
+  if (first !== undefined && isScalar(first.key)) first.key.commentBefore = withoutModeline(first.key.commentBefore);
 }
