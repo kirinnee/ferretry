@@ -435,57 +435,63 @@ describe('LoginChangeService: removing a login', () => {
     });
   }
 
-  it('should refuse a removal that would be held, naming both steps, and stage nothing (the port and the route)', async () => {
-    const budgeted = new Map<string, LoginFile>([
-      ['work', { harness: 'claude-code', store: 'ferretry', budget: { daily: { hard: 5 } } } as LoginFile],
-    ]);
-    const held = world({ files: () => budgeted });
+  const BUDGETED = new Map<string, LoginFile>([
+    ['work', { harness: 'claude-code', store: 'ferretry', budget: { daily: { hard: 5 } } } as LoginFile],
+  ]);
+  const WOULD_HOLD: ConfigWriteOutcome = {
+    kind: 'refused',
+    reason: 'would_hold',
+    issues: [],
+    sentences: ['login "work"\'s daily hard limit in dollars is removed (was 5)'],
+  };
+  const BUDGET_FIRST =
+    'This login has a budget, so it was not removed: first drop its budget (you confirm that), then remove the login.';
+
+  it('should remove a budgeted login in ONE step when the kernel lets the removal in (the owner)', async () => {
+    const { service, writes, events } = world({ files: () => BUDGETED });
+
+    const view = await service.stage({ kind: 'login.remove', id: 'work' });
+    const outcome = await service.apply(view.id);
+
+    should(outcome).deepEqual({ outcome: 'applied' });
+    should(writes).deepEqual([{ id: 'work', removed: true }]);
+    should(events).deepEqual([{ id: 'work', change: 'removed' }]);
+  });
+
+  it('should refuse a budgeted removal the kernel would hold, naming both steps, with nothing removed or held (the port and the route)', async () => {
+    const held = world({ files: () => BUDGETED, remove: async () => WOULD_HOLD });
     const port = loginChangesPort(held.service);
 
-    const viaPort = (await port
-      .stage({ kind: 'login.remove', id: 'work' })
-      .catch(caught => caught)) as LoginChangeError;
-    const viaRoute = await call(changeRoutes(held.service), 'POST /v1/logins/changes', {
-      body: { kind: 'login.remove', id: 'work' },
+    const staged = await port.stage({ kind: 'login.remove', id: 'work' });
+    const viaPort = (await port.apply(staged.id).catch(caught => caught)) as LoginChangeError;
+    const again = await port.stage({ kind: 'login.remove', id: 'work' });
+    const viaRoute = await call(changeRoutes(held.service), 'POST /v1/logins/changes/:changeId/apply', {
+      path: `/v1/logins/changes/${again.id}/apply`,
     }).catch(caught => caught);
-    // Nothing was held: the next change gets the first handle.
-    const next = await held.service.stage({ kind: 'login.label', id: 'work', label: 'Work' });
 
-    const sentence =
-      'This login has a budget, so it was not removed: first drop its budget (you confirm that), then remove the login.';
     should(viaPort.code).equal('login_change_refused');
-    should(viaPort.message).equal(sentence);
-    should(viaRoute).containDeep({ status: 409, code: 'login_change_refused', message: sentence });
-    should(next.id).equal('chg1');
+    should(viaPort.message).equal(BUDGET_FIRST);
+    should(viaRoute).containDeep({ status: 409, code: 'login_change_refused', message: BUDGET_FIRST });
+    should(held.events).deepEqual([]);
     should(held.writes).deepEqual([]);
   });
 
-  it('should ask what uses the login again once the budget is dropped, and refuse if a runtime moved onto it meanwhile', async () => {
+  it('should still ask what uses the login at apply, before the removal, when it has a budget', async () => {
     let users: readonly string[] = [];
-    let files = new Map<string, LoginFile>([
-      ['work', { harness: 'claude-code', store: 'ferretry', budget: { daily: { hard: 5 } } } as LoginFile],
-    ]);
     const asked: string[] = [];
     const { service, writes } = world({
-      files: () => files,
+      files: () => BUDGETED,
       usedBy: async id => {
         asked.push(id);
         return users;
       },
     });
-    const refused = (await service
-      .stage({ kind: 'login.remove', id: 'work' })
-      .catch(caught => caught)) as LoginChangeError;
-    // The owner confirms the budget drop (a separate, held loosening): the login now has no budget.
-    files = new Map([['work', { harness: 'claude-code', store: 'ferretry' } as LoginFile]]);
-    // A runtime moved onto the login in the meantime.
+    const view = await service.stage({ kind: 'login.remove', id: 'work' });
+    // A runtime moved onto the login after the review.
     users = ['claude-default'];
 
-    const again = (await service
-      .stage({ kind: 'login.remove', id: 'work' })
-      .catch(caught => caught)) as LoginChangeError;
+    const again = (await service.apply(view.id).catch(caught => caught)) as LoginChangeError;
 
-    should(refused.message).containEql('first drop its budget');
     should(asked).deepEqual(['work', 'work']);
     should(again.code).equal('login_change_refused');
     should(again.message).equal(IN_USE);

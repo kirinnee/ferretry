@@ -275,7 +275,7 @@ P85	kept	access	-	behaviour as written	pairing	P85
 P86	kept	access	-	behaviour as written	pairing	P86
 P87	kept	access	-	behaviour as written	pairing	P87
 P88	kept	connections	-	`advertisesForeignAddress`	pairing	P88
-P89	kept	kernel	-	`recordedBindAddress`, `declaredBind`	pairing	P89
+P89	kept	kernel	-	`recordedBindAddress`	pairing	P89
 P90	kept	gate	fy-shell	`FY_URL`, `FY_TOKEN`	pairing	P90
 P91	kept	access	-	`ApiRequest.loopback`	pairing	P91
 P92	kept	access	kernel	behaviour as written	pairing	P92
@@ -606,7 +606,7 @@ S36	kept	vault	-	`/v1/fleet/proposals/:id/apply`	secrets	S36
 S37	kept	mcp	-	behaviour as written	secrets	S37
 S38	kept	vault	-	`POST /v1/secrets/use`	secrets	S38
 S39	kept	access	-	`fy pair --limited`	secrets	S39
-S40	kept	kernel	-	`StateHomeFence` in `@ferretry/fleet`	secrets	S40
+S40	kept	kernel	-	`fenceOf`, `fencedReal`	secrets	S40
 S41	kept	kernel	-	behaviour as written	secrets	S41
 S42	kept	kernel	-	behaviour as written	secrets	S42
 S43	kept	kernel	-	provisioner; opening `<fleet>/assets`	secrets	S43
@@ -633,7 +633,7 @@ S63	kept	vault	-	`secretEnvironment`	secrets	S63
 S64	kept	vault	-	behaviour as written	secrets	S64
 S65	kept	vault	-	behaviour as written	secrets	S65
 S66	kept	vault	-	behaviour as written	secrets	S66
-S67	kept	kernel	vault	`packages/daemon/src/lib/fleet/publication.ts`	secrets	S67
+S67	kept	catalogs	kernel,vault	`packages/daemon/src/lib/fleet/publication.ts`	secrets	S67
 S68	kept	accounts	-	`packages/daemon/src/lib/secrets/accounts.ts`	secrets	S68
 S69	removed	accounts	-	-	secrets	-
 S70	split	accounts	vault	-	secrets	S70
@@ -780,10 +780,10 @@ R32	kept	connections	-	behaviour as written	relay-protocol	R32
 R33	kept	connections	kernel	behaviour as written	relay-protocol	R33
 R34	kept	connections	kernel	behaviour as written	relay-protocol	R34
 R35	kept	connections	kernel	behaviour as written	relay-protocol	R35
-R36	kept	kernel	-	behaviour as written	relay-protocol	R36
-R37	kept	kernel	-	behaviour as written	relay-protocol	R37
-R38	kept	kernel	-	behaviour as written	relay-protocol	R38
-R39	kept	kernel	-	behaviour as written	relay-protocol	R39
+R36	kept	connections	kernel	behaviour as written	relay-protocol	R36
+R37	kept	connections	kernel	behaviour as written	relay-protocol	R37
+R38	kept	connections	kernel	behaviour as written	relay-protocol	R38
+R39	kept	connections	kernel	behaviour as written	relay-protocol	R39
 R40	kept	kernel	-	behaviour as written	relay-protocol	R40
 R41	kept	kernel	-	behaviour as written	relay-protocol	R41
 R42	kept	connections	worker:relay	behaviour as written	relay-protocol	R42
@@ -830,10 +830,10 @@ R82	kept	kernel	-	behaviour as written	relay-protocol	R82
 R83	kept	kernel	-	behaviour as written	relay-protocol	R83
 R84	kept	kernel	-	behaviour as written	relay-protocol	R84
 R85	kept	kernel	-	behaviour as written	relay-protocol	R85
-R86	kept	kernel	-	behaviour as written	relay-protocol	R86
+R86	kept	connections	kernel	behaviour as written	relay-protocol	R86
 R87	kept	connections	worker:relay	Cloudflare WebSocket auto-responder	relay-protocol	R87
-R88	kept	kernel	-	behaviour as written	relay-protocol	R88
-R89	kept	kernel	-	behaviour as written	relay-protocol	R89
+R88	kept	app-shell	kernel	behaviour as written	relay-protocol	R88
+R89	kept	app-shell	kernel	behaviour as written	relay-protocol	R89
 R90	kept	connections	-	behaviour as written	relay-protocol	R90
 R91	kept	connections	-	behaviour as written	relay-protocol	R91
 R92	kept	connections	worker:relay	behaviour as written	relay-protocol	R92
@@ -856,7 +856,7 @@ R108	kept	connections	worker:relay	behaviour as written	relay-protocol	R108
 R109	kept	connections	worker:relay	behaviour as written	relay-protocol	R109
 R110	kept	connections	worker:relay	behaviour as written	relay-protocol	R110
 R111	kept	connections	worker:relay	behaviour as written	relay-protocol	R111
-R112	kept	kernel	-	send ledger	relay-protocol	R112
+R112	kept	conversation	kernel	send ledger	relay-protocol	R112
 R113	kept	connections	worker:relay	behaviour as written	relay-protocol	R113
 R114	kept	connections	worker:relay	behaviour as written	relay-protocol	R114
 R115	kept	connections	worker:relay	behaviour as written	relay-protocol	R115
@@ -1017,8 +1017,8 @@ R502	split	ferrets	kernel	-	relay-protocol	R502
 R503	kept	ferrets	kernel	behaviour as written	relay-protocol	R503
 R504	kept	kernel	-	`accept-encoding: gzip`	relay-protocol	R504
 R505	kept	kernel	-	`TUNNEL_*` in `@ferretry/protocol`	relay-protocol	R505
-R506	kept	kernel	-	`RelayClientSession.request`, `DecompressionStream`	relay-protocol	R506
-R507	kept	kernel	-	`RelayClientSession.request`	relay-protocol	R507
+R506	kept	app-shell	kernel	`RelayClientSession.request`, `DecompressionStream`	relay-protocol	R506
+R507	kept	app-shell	kernel	`RelayClientSession.request`	relay-protocol	R507
 R508	kept	kernel	-	dispatcher	relay-protocol	R508
 R509	kept	kernel	-	behaviour as written	relay-protocol	R509
 R510	kept	kernel	-	behaviour as written	relay-protocol	R510
@@ -1029,21 +1029,21 @@ R514	kept	kernel	-	behaviour as written	relay-protocol	R514
 R515	kept	kernel	-	`publishResponse`	relay-protocol	R515
 R516	kept	kernel	-	tunnel permits	relay-protocol	R516
 R517	kept	kernel	-	behaviour as written	relay-protocol	R517
-R518	split	kernel	-	-	relay-protocol	R518
-R519	kept	kernel	-	`shared-reads.ts`	relay-protocol	R519
-R520	kept	kernel	-	`idle` frame	relay-protocol	R520
-R521	kept	kernel	-	behaviour as written	relay-protocol	R521
-R522	kept	kernel	-	file-event hub	relay-protocol	R522
-R523	split	kernel	-	-	relay-protocol	R523
-R524	kept	kernel	-	behaviour as written	relay-protocol	R524
-R525	kept	kernel	-	`x-fy-version`	relay-protocol	R525
+R518	split	ferrets	kernel	`journalSequence` in `session-directory.ts`, the `after` cursor in `fleet-events.ts`	relay-protocol	R518
+R519	kept	app-shell	kernel	`shared-reads.ts`	relay-protocol	R519
+R520	kept	ferrets	kernel	`idle` frame (`FleetEventStreamService`)	relay-protocol	R520
+R521	kept	ferrets	kernel	`FyEventStreamFrameSchema` (strict)	relay-protocol	R521
+R522	kept	ferrets	kernel	`FileTranscriptChanges` (file-event hub, wiring pending)	relay-protocol	R522
+R523	split	ferrets	kernel	`eventStreamScope` (`transcript_needs_session`)	relay-protocol	R523
+R524	kept	ferrets	kernel	`watchTranscript` (only `scope.transcript`)	relay-protocol	R524
+R525	kept	ferrets	kernel	`eventStreamScope` (`tail`, `tail_needs_fleet`)	relay-protocol	R525
 R526	kept	kernel	-	`partitionTunnelBody` in `@ferretry/protocol`	relay-protocol	R526
 R527	kept	kernel	-	`req-more`, `res-more`	relay-protocol	R527
 R528	kept	kernel	-	behaviour as written	relay-protocol	R528
 R529	kept	kernel	-	behaviour as written	relay-protocol	R529
-R530	kept	kernel	-	`MAX_QUEUED_REQUESTS` in `packages/pwa/src/lib/relay-session.ts`	relay-protocol	R530
-R531	kept	kernel	-	behaviour as written	relay-protocol	R531
-R532	kept	kernel	-	behaviour as written	relay-protocol	R532
+R530	kept	app-shell	kernel	`MAX_QUEUED_REQUESTS` in `packages/pwa/src/lib/relay-session.ts`	relay-protocol	R530
+R531	kept	app-shell	kernel	behaviour as written	relay-protocol	R531
+R532	kept	app-shell	kernel	behaviour as written	relay-protocol	R532
 R533	kept	kernel	-	behaviour as written	relay-protocol	R533
 R534	kept	kernel	-	behaviour as written	relay-protocol	R534
 R535	kept	kernel	-	`MAX_CONCURRENT_REQUESTS` in `packages/daemon/src/lib/relay/link.ts`	relay-protocol	R535
@@ -1078,8 +1078,8 @@ R563	kept	terminals	-	`stream-close`	relay-protocol	R563
 R564	kept	connections	worker:relay	(§9 ref)	relay-protocol	R564
 R565	kept	kernel	-	behaviour as written	relay-protocol	R565
 R566	kept	terminals	-	`adapters/tmux/control-tmux-process.ts`	relay-protocol	R566
-R567	kept	kernel	-	`openStream`	relay-protocol	R567
-R568	kept	kernel	-	behaviour as written	relay-protocol	R568
+R567	kept	app-shell	kernel	`openStream`	relay-protocol	R567
+R568	kept	app-shell	kernel	behaviour as written	relay-protocol	R568
 R569	split	access	kernel	-	relay-protocol	R569
 R570	kept	connections	access,kernel	behaviour as written	relay-protocol	R570
 R571	kept	access	kernel	behaviour as written	relay-protocol	R571

@@ -1,6 +1,7 @@
 import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
+import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import {
   SKILLS_AUDIT,
   SKILLS_CONFIG,
@@ -32,6 +33,9 @@ export default definePlugin({
   words: SKILLS_WORDS,
 
   needs: { ferrets: FerretsPort },
+  // Optional (lead ruling 2026-11-07: a reference.catalog provider takes Conversation as optional `uses`). With Conversation
+  // off, Skills boots and nothing asks it for a menu.
+  uses: { conversation: ConversationPort },
   provides: { skills: SkillsPort },
 
   actions: {
@@ -157,7 +161,9 @@ export default definePlugin({
   },
 
   hooks: {
-    takes: [{ hook: LaunchParts }],
+    // `/` and `$` are one skill: Claude invokes `/name`, Codex `$name`. Conversation's composer asks for the menu entries
+    // of each prefix; Skills answers with the skill names the ferret can invoke.
+    takes: [{ hook: LaunchParts }, { hook: ReferenceCatalog, key: '/' }, { hook: ReferenceCatalog, key: '$' }],
   },
 
   permissions: {
