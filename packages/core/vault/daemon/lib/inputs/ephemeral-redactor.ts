@@ -34,13 +34,16 @@ export class EphemeralAwareRedactor implements TextRedactor {
   }
 
   async batch<T>(work: (scrub: Scrub) => T): Promise<T> {
-    return await this.inner.batch(scrub =>
-      work({
-        text: text => this.mask(scrub, text),
-        data: value => this.maskStrings(scrub, value),
-        cover: text => mergeRanges([...scrub.cover(text), ...this.values.coverAll(text)]),
-      }),
-    );
+    return await this.inner.batch(scrub => work(this.scope(scrub)));
+  }
+
+  /** Compose the same masks into the kernel's read-scoped redactor without opening a second vault. */
+  scope(scrub: Scrub): Scrub {
+    return {
+      text: text => this.mask(scrub, text),
+      data: value => this.maskStrings(scrub, value),
+      cover: text => mergeRanges([...scrub.cover(text), ...this.values.coverAll(text)]),
+    };
   }
 
   private mask(scrub: Scrub, text: string): string {

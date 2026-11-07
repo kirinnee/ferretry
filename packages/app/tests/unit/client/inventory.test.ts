@@ -25,7 +25,13 @@ describe('parseInventory', () => {
   });
 
   test('a duplicate id is damage', () => {
-    const body = { protocol: 1, plugins: [{ id: 'a', on: true, contract: 'x' }, { id: 'a', on: false, contract: 'x' }] };
+    const body = {
+      protocol: 1,
+      plugins: [
+        { id: 'a', on: true, contract: 'x' },
+        { id: 'a', on: false, contract: 'x' },
+      ],
+    };
     expect(parseInventory(body).kind).toBe('unreadable');
   });
 
@@ -48,9 +54,7 @@ describe('standings', () => {
   });
 
   test('missing, off and different are blocked', () => {
-    const inventory = parseInventory(
-      inventoryOf(compiled, { board: null, agenda: { on: false } }),
-    );
+    const inventory = parseInventory(inventoryOf(compiled, { board: null, agenda: { on: false } }));
     const result = standings(inventory, compiled);
     expect(result.get('board')).toEqual({ state: 'blocked', reason: 'missing' });
     expect(result.get('agenda')).toEqual({ state: 'blocked', reason: 'off' });
@@ -60,10 +64,12 @@ describe('standings', () => {
   });
 
   test('a consumer whose hash also changed names the consumed package', () => {
-    const inventory = parseInventory(
-      inventoryOf(compiled, { board: { contract: 'b2' }, agenda: { contract: 'a2' } }),
-    );
-    expect(standings(inventory, compiled).get('agenda')).toEqual({ state: 'blocked', reason: 'different', via: 'board' });
+    const inventory = parseInventory(inventoryOf(compiled, { board: { contract: 'b2' }, agenda: { contract: 'a2' } }));
+    expect(standings(inventory, compiled).get('agenda')).toEqual({
+      state: 'blocked',
+      reason: 'different',
+      via: 'board',
+    });
   });
 
   test('a core hash mismatch blocks everything', () => {
@@ -76,7 +82,10 @@ describe('standings', () => {
 
   test('a protocol mismatch and an unreadable answer block everything', () => {
     expect(wholeDaemonBlocked({ kind: 'protocol-mismatch', daemonProtocol: 2 }, compiled)).toBe(true);
-    expect(standings({ kind: 'unreadable' }, compiled).get('board')).toEqual({ state: 'blocked', reason: 'unreadable' });
+    expect(standings({ kind: 'unreadable' }, compiled).get('board')).toEqual({
+      state: 'blocked',
+      reason: 'unreadable',
+    });
     expect(wholeDaemonBlocked(undefined, compiled)).toBe(false);
   });
 });

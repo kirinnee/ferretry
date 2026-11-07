@@ -13,6 +13,7 @@
  * structural guarantee rather than a rule someone has to remember.
  */
 
+import type { ChildEnvironment } from '@ferretry/kernel/contract';
 import type { SecretName } from '../../../contract/index.ts';
 
 /** How the store failed. Each is a DIFFERENT operator action, so none of them collapses into one. */
@@ -63,7 +64,7 @@ export interface SealedSecret {
 
 /** The whole vault document, exactly as it rests on disk. */
 export interface SecretVaultDocument {
-  readonly v: 1;
+  readonly format: 1;
   /** The algorithm the entries were sealed with, so a future change can refuse rather than guess. */
   readonly cipher: string;
   readonly entries: Readonly<Record<string, SealedSecret>>;
@@ -115,18 +116,39 @@ export interface SecretReferenceSource {
 export interface SecretChildSpec {
   readonly command: readonly string[];
   readonly cwd: string;
-  /** The child's environment, INCLUDING the resolved secret values. It exists only here. */
-  readonly env: Readonly<Record<string, string>>;
+  /**
+   * The child's environment as an opaque Vault handle (lead decision 9): the resolved values sit behind it and are
+   * opened by the kernel's spawn adapter at exec time, so they never ride through the runner as data.
+   */
+  readonly env: ChildEnvironment;
+  /** The child's own `PATH`, when the request or a recipe set one: what a program lookup searches. Not a secret. */
+  readonly path?: string;
   readonly timeoutMs: number;
   readonly maxOutputBytes: number;
 }
+
+/**
+ * Where a use child's program is on disk (today's `Bun.which` / `realpath` lookup in the runner). A SEAM: the kernel's
+ * spawn port has no lookup, so the facts below are computed only where a locator is bound; the default answers
+ * nothing and the outcome then carries neither field (a declared parity gap, see the port report).
+ */
+export interface ProgramLocator {
+  locate(
+    program: string,
+    cwd: string,
+    path: string | undefined,
+  ): Promise<{ readonly program: string; readonly replaceable?: true } | undefined>;
+}
+
+/** No lookup bound: the outcome names no program. */
+export const NO_PROGRAM_LOCATOR: ProgramLocator = { locate: async () => undefined };
 
 /** What running one produced. Raw — redaction happens in the domain, above this boundary. */
 export interface SecretChildOutcome {
   readonly outcome: 'exited' | 'timeout' | 'spawn_failed';
   /**
    * The file that ran: the command's program as the runner found it on the CHILD's PATH (or as given, when it
-   * names a path), absolute. What was spawned, not what was asked for; absent when nothing ran.
+   * names a path), absolute. What was spawned, not what was asked for; absent when nothing ran or no locator is bound.
    */
   readonly program?: string;
   /** This account could change that file or put another in its place (it or its folder is writable). */

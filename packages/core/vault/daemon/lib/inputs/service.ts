@@ -342,6 +342,32 @@ export class InputRequestService {
 
   constructor(private readonly deps: InputRequestServiceDependencies) {}
 
+  /** Vault's port uses the request id; the agent tool's view uses its card id. */
+  async raiseForFerret(sessionId: string, raise: InputRaise): Promise<string> {
+    const view = await this.raise(sessionId, raise);
+    const held = this.byCard(sessionId, view.id);
+    if (held === undefined) throw new InputRequestError('not_found', 'no such input request');
+    return held.request.id;
+  }
+
+  /** The port exposes only the state, never the owner form or its binding facts. */
+  async requestState(requestId: string): Promise<InputRequest['state'] | undefined> {
+    await this.sweep();
+    return this.held.get(requestId)?.request.state;
+  }
+
+  /** A ferret may withdraw its own pending request; this never borrows an owner's authority. */
+  async cancelForFerret(sessionId: string, requestId: string): Promise<void> {
+    await this.sweep();
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId)
+      throw new InputRequestError('not_found', 'no such input request');
+    if (isFinal(held.request)) return;
+    if (held.request.state === 'delivering')
+      throw new InputRequestError('conflict', 'the value is being typed now', INPUT_ERROR_CODES.alreadyDelivered);
+    await this.finish(held, 'cancelled', 'agent_cancelled', undefined, { closeCard: true, tellAgent: false });
+  }
+
   /** The agent raises. Nothing in `raise` was observed; everything in the answer and the card was. */
   async raise(sessionId: string, raise: InputRaise): Promise<InputAgentView> {
     guardFields(raise.target, inputRaiseFields(raise));

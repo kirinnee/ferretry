@@ -43,7 +43,11 @@ export function useRuntimeVersion(runtime: ShellRuntime): number {
 
 /** The window seam the shell needs: media queries and the document root. Tests pass a fake. */
 export interface ShellWindow {
-  matchMedia(query: string): { matches: boolean; addEventListener(type: 'change', fn: () => void): void; removeEventListener(type: 'change', fn: () => void): void };
+  matchMedia(query: string): {
+    matches: boolean;
+    addEventListener(type: 'change', fn: () => void): void;
+    removeEventListener(type: 'change', fn: () => void): void;
+  };
   readonly document: { readonly documentElement: HTMLElement };
 }
 

@@ -52,6 +52,7 @@ export class QuarantineRegistry {
   constructor(
     private readonly clock: InputClock,
     private readonly window = INPUT_QUARANTINE_SECONDS * 1000,
+    private readonly changed: (names: readonly string[]) => void = () => undefined,
   ) {}
 
   /**
@@ -65,6 +66,7 @@ export class QuarantineRegistry {
       ...(this.held.get(sessionId) ?? []),
       { id: hold.id, names: hold.names, window: Math.min(Math.max(window, 0), this.window), until: 'in-flight' },
     ]);
+    this.changed(hold.names);
     return hold;
   }
 
@@ -73,7 +75,10 @@ export class QuarantineRegistry {
     const until = this.clock.now() + (this.entry(hold)?.window ?? this.window);
     const entry = this.entry(hold);
     if (entry === undefined) this.add(hold.sessionId, hold.names, until);
-    else entry.until = until;
+    else {
+      entry.until = until;
+      this.changed(hold.names);
+    }
     return until;
   }
 
@@ -104,17 +109,20 @@ export class QuarantineRegistry {
       ...(this.held.get(sessionId) ?? []),
       { id, names: hold.names, window: this.window, until },
     ]);
+    this.changed(hold.names);
     return hold;
   }
 
   /** Every terminal is held until {@link unlock}, or until `until` when given. */
   lock(until?: number): void {
     this.locked = until ?? true;
+    this.changed([EVERY_TERMINAL]);
   }
 
   unlock(): void {
     this.locked = undefined;
     this.minted.clear();
+    this.changed([EVERY_TERMINAL]);
   }
 
   /** Every terminal of one session is held for a window from now: its journal could not be replayed. */
@@ -176,7 +184,9 @@ export class QuarantineRegistry {
 
   /** Lets go of everything for a session that ended. */
   drop(sessionId: string): void {
+    const names = (this.held.get(sessionId) ?? []).flatMap(entry => entry.names);
     this.held.delete(sessionId);
+    if (names.length > 0) this.changed(names);
   }
 
   /** Lets go of every quarantine whose window has ended. */
@@ -209,6 +219,7 @@ export class QuarantineRegistry {
       ...(this.held.get(sessionId) ?? []),
       { id: this.mint('hold'), names: [...new Set(names)], window: this.window, until },
     ]);
+    this.changed(names);
   }
 
   private mint(owner: string): string {
@@ -223,8 +234,10 @@ export class QuarantineRegistry {
   }
 
   private store(sessionId: string, entries: Entry[]): void {
+    const removed = (this.held.get(sessionId) ?? []).filter(entry => !entries.includes(entry));
     if (entries.length === 0) this.held.delete(sessionId);
     else this.held.set(sessionId, entries);
+    if (removed.length > 0) this.changed(removed.flatMap(entry => entry.names));
   }
 }
 

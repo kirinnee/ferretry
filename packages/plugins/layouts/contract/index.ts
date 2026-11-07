@@ -14,6 +14,7 @@ import {
   ThemeSchema,
 } from './wire.ts';
 
+export * from './builtins.ts';
 export * from './wire.ts';
 
 export const LAYOUTS_WORDS: readonly Word[] = [
@@ -43,7 +44,7 @@ export const LAYOUTS_SELECTION = configDef(
   defineConfig({ file: 'layout.yaml', schema: LayoutSelectionSchema, axis: 'configure', loosens: neverLoosens }),
 );
 
-const ITEM_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const ITEM_NAME = /^[a-z][a-z0-9-]*$/;
 
 /** `config/layouts/<name>.yaml`. */
 export const LAYOUTS_ITEMS = configDef(

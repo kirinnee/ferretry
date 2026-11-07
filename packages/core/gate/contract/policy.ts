@@ -63,18 +63,6 @@ export const CapabilityGrantsSchema = z.strictObject(
 );
 export type CapabilityGrants = z.infer<typeof CapabilityGrantsSchema>;
 
-/**
- * A grant set as STORED: a capability the document does not name reads as not granted (today's
- * `ReadCapabilityGrantsSchema`), so a file written before a capability existed never grants it by silence.
- */
-export const ReadCapabilityGrantsSchema = z.preprocess(raw => {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
-  const given = raw as Record<string, unknown>;
-  return Object.fromEntries(
-    CAPABILITY_NAMES.map(name => [name, name in given ? given[name] : { use: false, configure: false }]),
-  );
-}, CapabilityGrantsSchema);
-
 const grantsWhere = (grant: (name: CapabilityName) => CapabilityGrant): CapabilityGrants =>
   Object.freeze(Object.fromEntries(CAPABILITY_NAMES.map(name => [name, grant(name)])) as CapabilityGrants);
 

@@ -205,11 +205,7 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
-  async #call<Answer>(
-    caller: string,
-    route: string,
-    init: Parameters<PluginClient['call']>[1] = {},
-  ): Promise<Answer> {
+  async #call<Answer>(caller: string, route: string, init: Parameters<PluginClient['call']>[1] = {}): Promise<Answer> {
     const owner = this.#routeOwner.get(route);
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
@@ -236,7 +232,10 @@ export class DaemonClient {
     });
   }
 
-  #subscribeInternal<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (p: Payload) => void): void {
+  #subscribeInternal<Name extends string, Payload>(
+    event: EventDef<Name, Payload>,
+    listener: (p: Payload) => void,
+  ): void {
     this.#register(event, listener as (payload: unknown) => void);
   }
 

@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 
-const DOC = readFileSync(join(import.meta.dir, '../../../../../../../docs/input-requests.md'), 'utf8');
+const DOC = await readFile(join(import.meta.dir, '../../../../../../../docs/input-requests.md'), 'utf8');
 const row = (cell: string): string => DOC.split('\n').find(line => line.startsWith(cell)) ?? '';
 
 describe('docs/input-requests.md says what the bridge does and does not promise', () => {
