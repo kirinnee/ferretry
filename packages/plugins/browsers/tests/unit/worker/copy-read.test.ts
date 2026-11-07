@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { COPY_VALUE_MAX_BYTES } from '@ferretry/protocol'; // PORT: unresolved
+import { COPY_VALUE_MAX_BYTES } from '../../../daemon/pages/copy-contracts.ts';
 import should from 'should';
 import {
   type CopyablePage,

@@ -3,8 +3,8 @@ import should from 'should';
 import * as browser from '../../../../daemon/pages/wire/browser.ts';
 import type { BrowserAction, BrowserActionResult, BrowserAgentPage, BrowserCapacity, BrowserInputEvent, BrowserLastActor, BrowserPageActionSnapshot, BrowserPageSnapshot, BrowserPageSummary, BrowserScreencastFrame, BrowserStatus, BrowserViewport } from '../../../../daemon/pages/wire/browser.ts';
 import type { BrowserProxySetting, BrowserProxyStatus } from '../../../../contract/index.ts';
-import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+import { INSTANT, LATER_INSTANT } from '../../../support/fixtures.ts';
+import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
 
 const viewport = { width: 1_280, height: 800 } satisfies BrowserViewport;
 

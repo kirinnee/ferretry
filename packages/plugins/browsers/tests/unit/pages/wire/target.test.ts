@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import * as target from '../../../../daemon/pages/wire/target.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
 
 const cases: SchemaCase[] = [
   { name: 'ref', schema: target.BrowserRefSchema, value: 'e12' },

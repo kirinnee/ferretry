@@ -9,7 +9,7 @@ import {
   pendingDialogOf,
 } from '../../../daemon/pages/service.ts';
 import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
-import { TypedIdentities } from '../../../../src/lib/input-requests/typed-identities.ts';
+import { TypedIdentities } from '../../support/typed-identities.ts';
 
 type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
 
@@ -168,9 +168,9 @@ function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIde
       get: async id =>
         known.has(id)
           ? id === 's1'
-            ? { config: { name: 'Fix the login page', teammate: 'hadi' } }
+            ? { name: 'Hadi' }
             : id === 's2'
-              ? { config: { name: 'Docs' } }
+              ? { name: 'Docs' }
               : {}
           : undefined,
     },

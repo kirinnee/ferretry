@@ -15,8 +15,8 @@ import {
   readLoopbackFirewallMarker,
   resolveBrowserPorts,
 } from '../../../../daemon/proxy/wire/ports.ts';
-import { INSTANT } from '../fixtures.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+import { INSTANT } from '../../../support/fixtures.ts';
+import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
 
 const EXPLICIT = { cdp: 9222, relay: 9223, vnc: 5901 };
 
@@ -328,7 +328,7 @@ describe('loopbackFirewallEntry', () => {
 });
 
 describe('perUserBrowserPorts against the root script fixture', () => {
-  const FIXTURE = `${import.meta.dir}/../../../../scripts/host/per-user-ports.fixtures.json`;
+  const FIXTURE = `${import.meta.dir}/../../../../../../../scripts/host/per-user-ports.fixtures.json`;
 
   it('should give the same ports as the bash derivation for every case', async () => {
     // Arrange

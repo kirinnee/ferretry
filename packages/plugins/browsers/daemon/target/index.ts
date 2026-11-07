@@ -6,7 +6,8 @@ import { toolHandler } from '../tools/index.ts';
 import type { BrowserTools } from '../tools/service.ts';
 
 /**
- * STUB (part a): the `page` input target, page holds and challenges are part b's (`rebuild/port-browsers-b`), which
+ * STUB (part a), in the SHAPE part b exports (`pageTarget(deps)` → `{ adapter, tools }`): the `page` input target,
+ * page holds and challenges are part b's (`rebuild/port-browsers-b`), which
  * replaces this file. Until then the four tools that type into a page or raise a card for one run the plain
  * part-a path (`browser_type`, `browser_fill_form` through the act runner, whose `InputHolds` still decides every
  * act), `browser_ask_owner` hands the page over, `browser_request_input` refuses, and the target refuses every
@@ -25,10 +26,11 @@ export interface PageTargetHalf {
     readonly browser_ask_owner: ToolHandler;
     readonly browser_request_input: ToolHandler;
   };
-  readonly target: InputTargetAdapter;
+  /** The value of `input.targets:page`. */
+  readonly adapter: InputTargetAdapter;
 }
 
-export function pageTargetHalf(deps: PageTargetDeps): PageTargetHalf {
+export function pageTarget(deps: PageTargetDeps): PageTargetHalf {
   return {
     tools: {
       browser_type: toolHandler(deps.tools, 'browser_type'),
@@ -39,7 +41,7 @@ export function pageTargetHalf(deps: PageTargetDeps): PageTargetHalf {
         isError: true,
       }),
     },
-    target: {
+    adapter: {
       masking: 'text',
       observe: async () => ({ ok: false, reason: 'unsupported' }),
       type: async () => 'guard_refused',

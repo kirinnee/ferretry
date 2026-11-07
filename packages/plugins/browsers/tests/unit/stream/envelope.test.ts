@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { FRAME_ENVELOPE_HEADER_BYTES, FRAME_ENVELOPE_VERSION, MAX_FRAME_BYTES, encodeFrameEnvelope } from '../../../daemon/stream/envelope.ts';
-import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
+import { decodeFrameEnvelope } from '../../support/frame-envelope.ts';
 
 const jpeg = (...bytes: number[]): Uint8Array => Uint8Array.from(bytes);
 

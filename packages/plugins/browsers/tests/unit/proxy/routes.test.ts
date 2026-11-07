@@ -1,23 +1,11 @@
 import { describe, it } from 'bun:test';
-import { BrowserProxyTestResultSchema, BrowserStateViewSchema } from '../../../contract/index.ts';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
+import { ApiError } from '@ferretry/kernel/contract';
 import should from 'should';
-import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
-import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
-import { ApiError } from '../../../../src/lib/api/error.ts';
-import type { RouteContext } from '../../../../src/lib/api/route.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { BrowserProxyTestResultSchema, BrowserStateViewSchema } from '../../../contract/index.ts';
 import { BrowserProxyTester } from '../../../daemon/proxy/index.ts';
-import { browserProxyRoutes } from '../../../daemon/proxy/routes.ts';
-import { jsonBody, request } from '../../api/support.ts';
-
-type Kind = 'host' | 'device' | 'agent';
-const CREDENTIAL: Record<Kind, AuthenticatedCredential> = {
-  host: { kind: 'authenticated', tokenClass: 'admin' },
-  device: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' },
-  agent: { kind: 'authenticated', tokenClass: 'admin' },
-};
-const ACTOR: Record<Kind, string> = { host: 'admin-cli', device: 'device:d1', agent: 'peer:s1' };
+import { proxyRoutes } from '../../../daemon/proxy/routes.ts';
+import { type CallerKind as Kind, callOf } from '../../support/call.ts';
 
 type FirewallReading = () => Promise<{ state: 'stale'; detail: string } | undefined>;
 
@@ -34,7 +22,7 @@ function subsystem(probed: string[], firewall?: FirewallReading) {
       },
       now: () => 0,
     }),
-    state: () => ({ state: 'running' as const, startedAt: '2026-10-30T09:00:00.000Z' }),
+    state: () => ({ state: 'running' as const, startedAt: '2026-10-30T09:00:00.000Z' }) as never,
     ...(firewall === undefined ? {} : { firewall }),
   };
 }
@@ -48,41 +36,16 @@ async function drive(
   fresh = false,
   firewall?: FirewallReading,
 ) {
-  const found = new ApiRouter(browserProxyRoutes(subsystem(probed, firewall))).lookup(method, path);
-  if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
-  let spent = 0;
-  const governance: CallerGovernance = {
-    governed: kind === 'device',
-    decide: () => ({ allowed: true, refusal: 'granted' }),
-  };
-  const context: RouteContext = {
-    request: request({
-      method,
-      path,
-      headers: { 'content-type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    }),
-    params: found.params,
-    actor: ACTOR[kind],
-    credential: CREDENTIAL[kind],
-    governance,
-    presentation: {
-      loopback: kind !== 'device',
-      adminToken: kind !== 'device',
-      actor: ACTOR[kind],
-      stepUp: fresh,
-      freshStepUp: fresh,
-    },
-    spendFreshStepUp: () => {
-      spent += 1;
-    },
-  };
+  const routes = proxyRoutes(subsystem(probed, firewall)) as Record<string, (call: never) => Promise<{ status: number; body: string }>>;
+  const handle = routes[`${method} ${path}`];
+  if (handle === undefined) throw new Error(`no route ${method} ${path}`);
+  const { call, spent } = callOf({ method, path, body, kind, fresh });
   try {
-    const response = await found.route.handle(context);
-    return { status: response.status, body: jsonBody(response) as Record<string, unknown>, spent };
+    const response = await handle(call as never);
+    return { status: response.status, body: JSON.parse(response.body) as Record<string, unknown>, spent: spent() };
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
-    return { status: error.status, body: { error: error.message, code: error.code }, spent };
+    return { status: error.status, body: { error: error.message, code: error.code }, spent: spent() };
   }
 }
 

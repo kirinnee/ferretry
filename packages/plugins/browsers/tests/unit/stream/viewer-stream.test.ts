@@ -5,7 +5,7 @@ import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../da
 import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
 import { type BrowserViewerHost, type ViewerAttachment, type ViewerDownstream, type ViewerStreamOptions, type ViewerTerminalSignal } from '../../../daemon/stream/viewer-contracts.ts';
 import { type FrameClock, type FrameTimer } from '../../../daemon/stream/contracts.ts';
-import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
+import { decodeFrameEnvelope } from '../../support/frame-envelope.ts';
 
 /** Every whole envelope a run of sent chunks carries, read exactly as a viewer reads the stream. */
 const envelopesIn = (sent: readonly Uint8Array[]): Uint8Array[] => {

@@ -12,7 +12,7 @@ import { KernelFrameClock } from './stream/frame-clock.ts';
 import { heldViewerHost } from './stream/held-host.ts';
 import { BrowserViewerStream } from './stream/viewer-stream.ts';
 // ── part b registers the `page` input target, its holds and challenges here (`../target/index.ts`) ──────────────
-import { pageTargetHalf } from './target/index.ts';
+import { pageTarget } from './target/index.ts';
 import { nodeStagedFiles } from './tools/adapters/staged-files.ts';
 import { SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
@@ -146,7 +146,8 @@ export default implementDaemon(manifest, {
       files: rootFiles(kernel.roots, nodeStagedFiles),
       binaryName: 'fy',
     });
-    const target = pageTargetHalf({ kernel, pages, tools });
+    // ── part b: `pageTarget` answers the `page` input target and its four tools; spread below. ──────────────────────
+    const target = pageTarget({ kernel, pages, tools });
 
     kernel.lifecycle.onStop(async () => {
       await pages.closeAll().catch(() => undefined);
@@ -174,7 +175,7 @@ export default implementDaemon(manifest, {
           },
         },
       },
-      hooks: { 'input.targets:page': target.target },
+      hooks: { 'input.targets:page': target.adapter },
     };
   },
 });

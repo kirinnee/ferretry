@@ -4,9 +4,10 @@ import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../da
 import should from 'should';
 import { SocketViewerDownstream, type ViewerSocket } from '../../../daemon/stream/socket-downstream.ts';
 import { KernelFrameClock } from '../../../daemon/stream/frame-clock.ts';
+import { wallClock } from '../../support/wall-clock.ts';
 import { type BrowserViewerHost, type ViewerAttachment } from '../../../daemon/stream/viewer-contracts.ts';
 import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
-import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
+import { decodeFrameEnvelope } from '../../support/frame-envelope.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 class FakeSocket implements ViewerSocket {
@@ -64,7 +65,7 @@ class RecordingHost implements BrowserViewerHost {
 describe('system frame clock', () => {
   it('should report wall-clock time and fire a scheduled callback', async () => {
     // Arrange
-    const clock = new KernelFrameClock();
+    const clock = new KernelFrameClock(wallClock());
     const before = Date.now();
     let fired = 0;
 
@@ -82,7 +83,7 @@ describe('system frame clock', () => {
 
   it('should not fire a cancelled timer', async () => {
     // Arrange
-    const clock = new KernelFrameClock();
+    const clock = new KernelFrameClock(wallClock());
     let fired = 0;
     let sentinel = false;
 
@@ -165,7 +166,7 @@ describe('viewer stream over a real socket adapter', () => {
       host,
       'session-1',
       new SocketViewerDownstream(socket),
-      new KernelFrameClock(),
+      new KernelFrameClock(wallClock()),
     );
 
     // Act
@@ -193,7 +194,7 @@ describe('viewer stream over a real socket adapter', () => {
     const socket = new FakeSocket();
     socket.buffered = 0;
     socket.result = 0;
-    await BrowserViewerStream.connect(host, 'session-1', new SocketViewerDownstream(socket), new KernelFrameClock(), {
+    await BrowserViewerStream.connect(host, 'session-1', new SocketViewerDownstream(socket), new KernelFrameClock(wallClock()), {
       recoveryPollMs: 5,
     });
 

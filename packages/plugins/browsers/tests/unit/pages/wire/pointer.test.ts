@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { BrowserActionSchema } from '../../../../daemon/pages/wire/browser.ts';
 import * as pointer from '../../../../daemon/pages/wire/pointer.ts';
-import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+import { BrowserToolCallSchema as AgentToolCallSchema } from '../../../../daemon/tools/wire.ts';
+import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
 
 const cases: SchemaCase[] = [
   { name: 'key chord', schema: pointer.BrowserKeyChordSchema, value: 'Control+Shift+K' },

@@ -469,7 +469,7 @@ describe('observeInputFields', () => {
   it('describes the page and each field from what the browser reports', async () => {
     const { world } = loginWorld();
     const facts = await observed(world, ['#user', '#pw']);
-    should(facts.kind).equal('browser');
+    should(facts.kind).equal('page');
     should(facts.pageId).equal('pg-1');
     should(facts.origin).equal('http://localhost:3000');
     should(facts.secure).equal(true);
@@ -1266,7 +1266,7 @@ describe('typeInputFields', () => {
 describe('shootInputFields', () => {
   const factsAt = (...boxes: { x: number; y: number; w: number; h: number }[]): BrowserInputFacts => {
     return {
-      kind: 'browser',
+      kind: 'page',
       pageId: 'pg-1',
       origin: 'http://localhost:3000',
       secure: true,
