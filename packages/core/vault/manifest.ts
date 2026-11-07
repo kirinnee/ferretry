@@ -2,6 +2,7 @@ import { AskSources, AsksChanged, AsksPort } from '@ferretry/core-asks/contract'
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
+import type { ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, route, tool } from '@ferretry/kernel/manifest';
 import {
   ChildEnvironmentPort,
@@ -15,7 +16,9 @@ import {
   RedactionPort,
   RedactionSources,
   SealedDocumentsPort,
+  SecretResolverPort,
   SecretsChanged,
+  VaultConfigFile,
   VaultFile,
   VaultKeyFile,
   VaultPort,
@@ -58,6 +61,12 @@ export default definePlugin({
     },
     { word: 'mask', means: 'hiding a secret in text', insteadOf: ['redact', 'scrub'] },
   ],
+  /**
+   * A run spawns the program the owner or a ferret named in a `${secret:NAME}` command, and an authorized fetch reaches
+   * whichever host a secret's own allowlist names, so neither can be listed here. `'*'` is the kernel's to admit and it
+   * admits it from a core piece alone: `effectivePermissions` drops it from any other manifest at run time.
+   */
+  permissions: { spawn: ['*'], network: ['*'] },
   needs: { gate: GatePort, asks: AsksPort },
   actions: {
     routes: [
@@ -168,8 +177,16 @@ export default definePlugin({
     childEnvironments: ChildEnvironmentPort,
     /** A daemon half's OWN sealed documents, scoped by its own state port (contract change C). Never a route. */
     sealedDocuments: SealedDocumentsPort,
+    /**
+     * The Vault's value for a secret NAME, for the KERNEL's own `${secret:NAME}` configuration references only
+     * (`kernel.secrets`, lead decision J). Kernel-only: no route, tool or other plugin can hold it, and the kernel
+     * asks it only after the plugin declared the name and its own configuration names it.
+     */
+    secretResolver: SecretResolverPort,
   },
   data: {
+    // biome-ignore lint/suspicious/noExplicitAny: the leaf cast Gate, Asks and Ferrets use for a typed config def
+    config: [VaultConfigFile as ConfigDef<any>],
     state: [VaultFile, VaultKeyFile, HoldsFile, InputRequestFiles],
     publishes: [SecretsChanged, HoldsChanged],
     subscribes: [AsksChanged, FerretsChanged],

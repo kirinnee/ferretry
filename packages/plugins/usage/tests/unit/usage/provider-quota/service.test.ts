@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import type { SecretName } from '@ferretry/core-vault/contract';
 import { ProviderQuotaReadingSchema } from '../../../../contract/index.ts';
 import { instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
@@ -33,7 +32,8 @@ const DEEPSEEK = login('ds', 'deepseek', {
 const ANTHROPIC = login('api', 'anthropic-api-key', { ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}' });
 
 interface SentCall {
-  readonly secretName: SecretName;
+  readonly loginId: string;
+  readonly variable: string;
   readonly hosts: readonly string[];
   readonly request: OutboundHttpRequest;
   readonly placement: CredentialPlacement | undefined;
@@ -50,12 +50,13 @@ class ScriptedAuthorizer implements Pick<OutboundAuthorizerPort, 'send'> {
     }),
   ) {}
   async send(
-    secretName: SecretName,
+    loginId: string,
+    variable: string,
     hosts: readonly string[],
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome> {
-    this.calls.push({ secretName, hosts, request, placement });
+    this.calls.push({ loginId, variable, hosts, request, placement });
     return await this.answer(request.url);
   }
 }
@@ -95,8 +96,8 @@ describe('ProviderQuotaService — when it reads', () => {
 
     // Assert
     should(before).be.undefined();
-    should(authorizer.calls.map(call => [call.secretName, call.hosts, call.request.url])).deepEqual([
-      ['ZAI_API_KEY', ['api.z.ai'], 'https://api.z.ai/api/monitor/usage/quota/limit'],
+    should(authorizer.calls.map(call => [call.loginId, call.variable, call.hosts, call.request.url])).deepEqual([
+      ['glm', 'ANTHROPIC_AUTH_TOKEN', ['api.z.ai'], 'https://api.z.ai/api/monitor/usage/quota/limit'],
     ]);
     const reading = ProviderQuotaReadingSchema.parse(service.peek('glm'));
     should(reading).containDeep({

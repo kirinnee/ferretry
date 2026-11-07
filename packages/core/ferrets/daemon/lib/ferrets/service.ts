@@ -29,9 +29,8 @@ import type {
   StartFailure,
   StartRequest,
 } from '../../../contract/index.ts';
-import { FerretRecordSchema, HARNESS_KEYS } from '../../../contract/index.ts';
+import { FerretRecordSchema, HARNESS_KEYS, type FerretDetails } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
-import type { FerretDetails } from '../state.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import {
   type AgentControl,

@@ -106,5 +106,6 @@
   },
   "ignoreIssues": {
     "packages/plugins/shells/contract/wire.ts": ["duplicates"]
-  }
+  },
+  "tags": ["-pending"]
 }

@@ -138,6 +138,24 @@ describe('config files: held loosening', () => {
     expect(await h.files.confirm('nothing@000')).toBe(false);
   });
 
+  test('R-0274 confirm and discard compare the FULL etag: a file swapped after the review for one with the same 12-character prefix is touched by neither', async () => {
+    // Two texts whose sha256 agree on the first 12 hex characters (found by a birthday search on 48 bits).
+    const reviewed = 'limit: 6\nnote: a2641039\n';
+    const unseen = 'limit: 999999\nnote: b896126\n';
+    const h = configHarness();
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    h.fs.seed(h.path('updates.yaml'), reviewed);
+    await h.files.reload();
+    const id = h.files.held()[0]?.id;
+    if (id === undefined) throw new Error('expected a held edit');
+    h.fs.seed(h.path('updates.yaml'), unseen);
+    expect(await h.files.confirm(id)).toBe(false);
+    expect(await h.files.discard(id)).toBe(false);
+    expect(limitOf(h)).toBe(5);
+    expect(h.fs.snapshot().get(h.path('updates.yaml'))).toBe(unseen);
+    expect(h.files.held()).toHaveLength(1);
+  });
+
   test('discarding a held edit puts the version in effect back on disk', async () => {
     const h = configHarness();
     await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');

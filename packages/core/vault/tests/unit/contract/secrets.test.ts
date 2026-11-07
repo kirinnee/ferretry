@@ -14,12 +14,12 @@ import {
   secretReferencePattern,
   secretReferencesIn,
 } from '../../../contract/index.ts';
-// The listing and the put body are wire shapes the frozen contract does not hold; they live in the daemon half.
+// The listing and the put body are wire shapes the contract holds beside the secret vocabulary.
 import {
   PutSecretBodySchema as PutSecretRequestSchema,
   SECRET_SCHEMA_VERSION,
   SecretListSchema,
-} from '../../../daemon/lib/secrets/wire.ts';
+} from '../../../contract/index.ts';
 
 const AT = '2026-08-05T10:00:00.000Z';
 

@@ -70,25 +70,25 @@ describe('settling a move whose relaunch did not come up', () => {
 
 describe('restoring the fields a move restamped', () => {
   it('should put back the restamped fields and keep every write made since', () => {
-    const before = { agent: 'claude-a', model: 'm1', name: 'old', sessionCapabilityHash: 'h1', launchFast: true };
+    const before = { agent: 'claude-a', model: 'm1', name: 'old', capabilityHash: 'h1', launchFast: true };
     const current = {
       agent: 'claude-b',
       model: 'm2',
       name: 'renamed',
-      sessionCapabilityHash: 'h2',
+      capabilityHash: 'h2',
       move: { from: 'claude-a' },
     };
     should(restoreRestamped(before, current)).eql({
       agent: 'claude-a',
       model: 'm1',
       name: 'renamed',
-      sessionCapabilityHash: 'h2',
+      capabilityHash: 'h2',
       launchFast: true,
     });
   });
 
   it('should only ever touch the keys the move restamps', () => {
-    should(RESTAMPED_RECORD_KEYS).containEql('agent').and.not.containEql('sessionCapabilityHash');
+    should(RESTAMPED_RECORD_KEYS).containEql('agent').and.not.containEql('capabilityHash');
     should(RESTAMPED_RECORD_KEYS).not.containEql('name');
   });
 });

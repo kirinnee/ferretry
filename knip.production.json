@@ -122,5 +122,6 @@
     "binaries": "off",
     "enumMembers": "off",
     "dependencies": "warn"
-  }
+  },
+  "tags": ["-pending"]
 }

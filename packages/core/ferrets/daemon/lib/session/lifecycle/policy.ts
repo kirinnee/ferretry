@@ -249,7 +249,7 @@ export function createSessionRecord(
       ...(prompt ? { prompt } : {}),
       ...(parent ? { parent } : {}),
       ...(context.projectId === undefined ? {} : { projectId: context.projectId }),
-      ...(request.sessionCapabilityHash ? { sessionCapabilityHash: request.sessionCapabilityHash } : {}),
+      ...(request.capabilityHash ? { capabilityHash: request.capabilityHash } : {}),
       createdAt: context.at,
       updatedAt: context.at,
       tmuxSession: sessionTmuxName(context.id, context.settings),

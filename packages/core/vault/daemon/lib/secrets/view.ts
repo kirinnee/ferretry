@@ -8,7 +8,7 @@
  * where the honest sentence about what the store can and cannot promise has to be true.
  */
 
-import { SECRET_SCHEMA_VERSION, type SecretList, type SecretReferenceView } from './wire.ts';
+import { SECRET_SCHEMA_VERSION, type SecretList, type SecretReferenceView } from '../../../contract/index.ts';
 import { SecretStoreError, type SecretReferenceSource } from './types.ts';
 import type { SecretDirectory } from './vault.ts';
 
