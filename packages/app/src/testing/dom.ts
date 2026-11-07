@@ -20,7 +20,7 @@ const registered = globalThis as typeof globalThis & {
   __ferretryNodeInspectPatched?: boolean;
 };
 /** Register a DOM only when mounting: connect-only test fakes keep the caller’s environment. */
-function ensureDom(): void {
+export function ensureDom(): void {
   if (!registered.__ferretryDomRegistered) {
     GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
     registered.__ferretryDomRegistered = true;

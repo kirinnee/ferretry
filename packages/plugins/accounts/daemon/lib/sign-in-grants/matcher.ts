@@ -18,8 +18,8 @@ import {
 import { terminalHides } from '../vault-inputs.ts';
 import { identityOf } from '../vault-inputs.ts';
 import { codeTargetProblem, type SavedListing } from '../vault-inputs.ts';
-import { type InputRequestField } from '../vault-inputs.ts';
-import { type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputRequestField } from '../vault-inputs.ts';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE SHARED MATCHER (docs/input-requests.md, "Task plan fills"): whether ONE permission to fill a sign-in without a tap

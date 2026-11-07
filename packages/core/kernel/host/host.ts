@@ -89,7 +89,7 @@ import {
 } from './permissions.ts';
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
-import { rootsPortFor } from './roots.ts';
+import { ensureInternalRootBases, rootsPortFor } from './roots.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
@@ -683,6 +683,19 @@ async function bootLocked(
       await failed(manifest.id, `${manifest.title} needs ${missing}, which is not running.`);
       continue;
     }
+    // Each declared internal root's base is made (0700) before any of the plugin's code can ask for it (§7.7).
+    const roots = await ensureInternalRootBases(
+      adapters.fs,
+      { home, plugin: manifest.id },
+      manifest.permissions?.roots ?? [],
+    );
+    for (const refused of roots)
+      log.warn('a root base was refused and left as it is', {
+        plugin: manifest.id,
+        root: refused.name,
+        refusal: refused.refusal,
+        ...(refused.code === undefined ? {} : { code: refused.code }),
+      });
     const uses: Record<string, { current(): unknown }> = {};
     for (const [key, token] of Object.entries(manifest.uses ?? {}))
       uses[key] = {

@@ -50,6 +50,7 @@ export const chosenFerretAccount = (chosen: ChosenRuntime | null): ChosenFerretA
       id: model.id,
       available: model.available,
       ...(model.label === undefined ? {} : { label: model.label }),
+      ...(model.fast === undefined ? {} : { fast: model.fast }),
     })),
     ...(account.modelCatalog === undefined
       ? {}

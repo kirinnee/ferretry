@@ -2,6 +2,7 @@ import { ApiError, decodeParameter, jsonResponse, type RouteHandler } from '@fer
 import {
   ProjectIdSchema,
   ProjectPathMustBeAbsoluteMessage,
+  type RegisterProjectRequest,
   RegisterProjectRequestSchema,
 } from '../../contract/index.ts';
 import { parseBody } from './body.ts';
@@ -21,7 +22,7 @@ export const listRoute =
 export const registerRoute =
   (registry: ProjectRegistry): RouteHandler =>
   async call => {
-    let request;
+    let request: RegisterProjectRequest;
     try {
       request = await parseBody(call.request, RegisterProjectRequestSchema);
     } catch (error) {

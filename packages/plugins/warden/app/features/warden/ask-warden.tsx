@@ -197,6 +197,7 @@ export function useAskWardenActions(
   const latest = useRef(connection);
   latest.current = connection;
   const [answer, setAnswer] = useState<{ readonly daemonId: string; readonly allowed: boolean } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the read is asked again when the client factory changes
   useEffect(() => {
     let live = true;
     void grantsOf(latest.current)

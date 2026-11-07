@@ -3,7 +3,10 @@ import { createHmac } from 'node:crypto';
 import type { FerretId, TranscriptEntry } from '@ferretry/core-ferrets/contract';
 import type { ApiRequest } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
+import { TranscriptImageDownloadSchema } from '../../../contract/index.ts';
 import { registerReader } from '../../../daemon/reader/index.ts';
+import { readerRoutes } from '../../../daemon/reader/routes.ts';
+import { claudeText, claudeUserImage, MemoryTranscript, pngBase64 } from '../../support/transcript-images.ts';
 
 const at = (n: number): Instant => `2026-02-01T09:00:0${n}.000Z` as Instant;
 
@@ -155,5 +158,22 @@ describe('the transcript routes', () => {
       Promise.resolve(routes['GET /v1/ferrets/:ferretId/transcript-images/:handle'](call({}, {}, { handle: 'nope' }))),
     );
     expect(bad).toMatchObject({ status: 400, code: 'invalid_image_handle' });
+  });
+});
+
+describe('the transcript image route with a real handle', () => {
+  test('G162 a dotted handle (offset.length.ordinal) is served and its answer passes the download schema', async () => {
+    const transcript = new MemoryTranscript([claudeText(1), claudeUserImage(2, [pngBase64()])]);
+    const handle = transcript.handle(1, 0);
+    expect(handle).toMatch(/^\d+\.\d+\.\d+$/u);
+    const routes = readerRoutes({
+      reads: {} as never,
+      images: transcript.reader(),
+      exists: async ferret => ferret === 'lead',
+    });
+    const served = await routes.transcriptImage(call({}, {}, { handle }));
+    expect(served.status).toBe(200);
+    const body = TranscriptImageDownloadSchema.parse(JSON.parse(served.body));
+    expect(body.image).toEqual({ handle, mediaType: 'image/png', byteLength: 32 });
   });
 });

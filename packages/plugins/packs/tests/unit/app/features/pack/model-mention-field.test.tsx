@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
 import { modelVocabulary, type PackFleetModel } from '../../../../../contract/index.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
 import { textOf, typeInto } from '../../../support/learning-dom.ts';
 import { FLEET_MODELS, OPUS } from '../../../support/pack.ts';
-import { uiDoubles } from '../../../support/ui-doubles.tsx';
+import { mockUi } from '../../../support/ui-doubles.tsx';
 
-mock.module('../../../../../app/ui.ts', () => uiDoubles);
+mockUi();
 const { completionKey, ModelMentionField } = await import('../../../../../app/features/pack/model-mention-field.tsx');
 
 const VOCABULARY = modelVocabulary(FLEET_MODELS);

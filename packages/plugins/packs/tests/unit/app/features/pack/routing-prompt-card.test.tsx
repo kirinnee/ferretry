@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import type { Instant } from '@ferretry/std';
 import {
   MAX_IDEA_CHARS,
@@ -21,9 +21,9 @@ import {
   WRITTEN_SUGGESTION,
 } from '../../../support/pack.ts';
 import { clockAt, steeredClock } from '../../../support/timers.ts';
-import { uiDoubles } from '../../../support/ui-doubles.tsx';
+import { mockUi } from '../../../support/ui-doubles.tsx';
 
-mock.module('../../../../../app/ui.ts', () => uiDoubles);
+mockUi();
 const { RoutingPromptCard } = await import('../../../../../app/features/pack/routing-prompt-card.tsx');
 
 let shown: Mounted | undefined;

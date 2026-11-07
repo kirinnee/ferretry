@@ -11,8 +11,8 @@ import {
 import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../vault-inputs.ts';
 import type { InputPasteRules } from '../vault-inputs.ts';
 import { SecureCopyError } from './errors.ts';
-import { type InputActor } from '../vault-inputs.ts';
-import { type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputActor } from '../vault-inputs.ts';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE OWNER'S PRE-APPROVAL RULES (docs/secure-copy.md): pastes allowed in advance, from a source to a destination.

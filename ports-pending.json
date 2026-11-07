@@ -30,11 +30,7 @@
     "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
-      "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
-    ],
-    "ferrets": [
-      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
     ],
     "warden": [
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
@@ -61,9 +57,10 @@
     ],
     "logins": [
       "GAP(kernel): a fresh home has no state/logins/credentials base, and the kernel's credentials root refuses every call until it exists, so no owned login can be read or signed in on a new machine until the kernel makes the base (sent to the kernel porter)",
-      "the cli half is a skeleton: fy login verbs are declared but not ported",
-      "the app half is a skeleton: the sign-in, add-login and local-models panels are declared but not ported",
-      "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported"
+      "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
+      "GAP(vault): `fy login add <provider>` does not prompt for, nor store, a provider's secret (store each with the Vault's own verbs and name it as `${secret:NAME}`), and `fy login add --from-env` preset detection is not ported; `fy login budget` is Usage's and `login models list --login` reads Runtimes",
+      "GAP(runtimes): `fy login rm` and the app's Remove cannot refuse a login a runtime still uses, because Logins cannot see runtime usage without a Logins-to-Runtimes edge; Runtimes' own change path must check its runtimes first, then call Logins' reviewed change routes (`POST /v1/logins/changes`, `GET /v1/logins/changes/:changeId`, `POST /v1/logins/changes/:changeId/apply`, kinds `login.*`)",
+      "the app's environment-variable editor (editing a login's `env` after it is made), the provider grid and one-click add, and the budget editor (Usage's) are not ported; the add panel makes a sign-in login or a provider login from a preset"
     ],
     "connections": [
       "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
@@ -77,6 +74,28 @@
       "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
       "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
       "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+    ],
+    "ferrets": [
+      "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
+      "Interrupt is not ported: it is Conversation's turn.interrupt, and Ferrets' Actions menu has no row for it until that route is bound",
+      "Actions rows still to port: add MCP server, compact-at, the context menu, the ferret row-actions and the Warden and learning actions; each needs the plugin that owns it to contribute a row",
+      "Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported: they read other plugins' facts (Board, Usage, Conversation, Surfaces, Warden) and wait for those contracts to be bound; only Overview and Runtime are drawn",
+      "Session search inside the files tab is not ported",
+      "The file-instance surface and the image viewer are not ported: the image viewer still lives in Conversation's app and composer, and the files tab opens an image through a plain preview until it is shared",
+      "Continue-conversation (resume a finished ferret's conversation as a new one) and the registered-projects picker on the new-ferret page are not ported",
+      "The files side tab is hidden until Layouts lists it in the ferret.side panel layout",
+      "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
+      "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
+      "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
+    ],
+    "conversation": [
+      "conversation app half: C1 landed (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app); the composer, chat and transcript, and the queue, questions, search and links bodies are still the one-line Pending surface until C2-C4 land",
+      "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
+      "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
+      "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
+      "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
     ]
   },
   "pendingHalves": {
@@ -89,7 +108,7 @@
     {
       "plugin": "conversation",
       "path": "packages/plugins/conversation/app",
-      "reason": "skeleton app half; the queue, stuck messages and links views port with item M"
+      "reason": "surfaces, client context, fy-render and the prose kit have landed; the composer, chat, transcript, queue, questions, search and links bodies are in flight (C2-C4)"
     },
     {
       "plugin": "agenda",

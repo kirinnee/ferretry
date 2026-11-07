@@ -43,7 +43,7 @@ class ViewBoundary extends Component<{ readonly title: string; readonly children
   }
 }
 
-type Section = 'screens' | 'panels' | 'settings';
+type Section = 'screens' | 'panels' | 'settings' | 'renderers';
 
 interface PluginViewProps {
   readonly daemon: string;

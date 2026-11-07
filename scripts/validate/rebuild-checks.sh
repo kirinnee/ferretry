@@ -11,4 +11,6 @@ root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 ./scripts/local/gen.sh
-exec bun scripts/gen/check.ts "$@"
+# This hook runs no tests, so it proves a guarantee test EXISTS; the test tiers' reports prove it PASSES
+# (`bun scripts/gen/check.ts guarantees --results coverage/unit`).
+exec bun scripts/gen/check.ts --existence-only "$@"

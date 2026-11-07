@@ -262,6 +262,11 @@ export default implementCli(manifest, {
       const timeout = count(invocation, 'timeout');
       const interval = count(invocation, 'interval');
       const marker = text(invocation, 'until-marker');
+      // `-` means standard input to the shell's reader, and a poll must never read it: a marker is a file's name.
+      if (marker === '-')
+        throw new SessionCommandError(
+          '--until-marker names a file, and - (standard input) is not one; give the file’s path (./- for a file named -)',
+        );
       // A wait needs a clock and a way to sleep, and a deliverable gate a way to read: the shell fills them in.
       if (clock === undefined || sleep === undefined)
         throw new SessionCommandError('wait needs the shell’s clock, which this fy does not give a verb yet', 1);

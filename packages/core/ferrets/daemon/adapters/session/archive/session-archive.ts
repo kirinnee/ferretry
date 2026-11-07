@@ -1,4 +1,4 @@
-import { type SessionView } from '../../../lib/protocol/session.ts';
+import type { SessionView } from '../../../lib/protocol/session.ts';
 import type { OpenCardStanding } from '../../../lib/session/peers/board.ts';
 import { createSessionPaths } from '../../../lib/paths.ts';
 import type { FoundationPaths } from '../../../lib/paths.ts';
