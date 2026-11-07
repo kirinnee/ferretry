@@ -50,13 +50,15 @@ export class FerretBudgetSessions {
   }
 }
 
-/** The pauses last published, kept so a restart starts from them. A damaged file reads as none; the first tick re-measures. */
+/** The pauses last published, kept so a restart starts from them. */
 export class PausesStore {
   constructor(private readonly state: StatePort) {}
 
   async read(): Promise<Readonly<Record<string, Pause>>> {
     const read = await this.state.read(PAUSES_STATE);
-    return read.ok && read.value !== undefined ? read.value.pauses : {};
+    // A damaged record THROWS: "none paused" would spend past a cap, so the caller must see that it does not know.
+    if (!read.ok) throw new Error('the record of pauses is damaged');
+    return read.value?.pauses ?? {};
   }
 
   async write(pauses: Readonly<Record<string, Pause>>): Promise<void> {

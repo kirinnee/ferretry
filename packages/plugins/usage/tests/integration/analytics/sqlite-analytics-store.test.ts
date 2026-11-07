@@ -11,7 +11,7 @@ import {
   type AnalyticsIndexStore,
   type AnalyticsStoredSession,
 } from '../../../daemon/lib/analytics/store.ts';
-import { refusedSession, storedSession } from '../support/analytics-fixtures.ts';
+import { refusedSession, storedSession } from '../../support/analytics-fixtures.ts';
 
 /**
  * The analytics materialization, against a real SQLite file on disk.
@@ -175,7 +175,7 @@ describe('the analytics store on disk', () => {
     // Arrange
     const paths = await temporaryPaths();
     const { store } = await open(paths);
-    const contradiction = { ...storedSession(), usageRefusal: 'transcript_damaged' as const };
+    const contradiction = { ...storedSession(), usageRefusal: 'transcript_unresolved' as const };
 
     // Act / Assert
     should(() => store.upsert([contradiction])).throw(/CHECK constraint failed/);
@@ -369,4 +369,5 @@ describe('the analytics store on disk', () => {
     // Assert
     should(second.rebuildRequired).be.true();
     should(second.store.rows()).be.empty();
+  });
 });

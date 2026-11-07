@@ -359,6 +359,7 @@
         "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "yaml": "2.9.0",
         "zod": "4.4.3",
       },
     },

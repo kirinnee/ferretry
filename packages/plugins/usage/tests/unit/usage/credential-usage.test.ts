@@ -1,14 +1,13 @@
 import { describe, it } from 'bun:test';
 import { instantFromEpochMs } from '@ferretry/std';
-import type { LoginView } from '../../../contract/index.ts';
+import { LoginIdSchema, type LoginView } from '../../../contract/index.ts';
 import should from 'should';
 import { CredentialUsageSource, credentialUsageRows } from '../../../daemon/lib/usage/credential-usage.ts';
 import { quotaFromUsage } from '../../../daemon/lib/usage/index.ts';
 
 const at = (iso: string) => instantFromEpochMs(Date.parse(iso));
 
-const login = (overrides: Partial<LoginView> = {}): LoginView => ({
-  id: 'work',
+const login = (overrides: Partial<Omit<LoginView, 'id'>> & { readonly id?: string } = {}): LoginView => ({
   harness: 'claude-code',
   harnesses: ['claude-code'],
   store: 'ferretry',
@@ -27,6 +26,7 @@ const login = (overrides: Partial<LoginView> = {}): LoginView => ({
   checkNow: { available: true },
   signOut: { available: true, sentence: 'Sign out?', runtimesAffected: 1, signsOutTerminal: false },
   ...overrides,
+  id: LoginIdSchema.parse(overrides.id ?? 'work'),
 });
 
 const status = (word: LoginView['status']['word']): LoginView['status'] => ({ ...login().status, word });
