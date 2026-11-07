@@ -23,6 +23,7 @@ import {
   parsePairingFragment,
 } from '../../../contract/index.ts';
 import should from 'should';
+import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const deviceId = `fy_device_id_${'b'.repeat(22)}`;
@@ -344,7 +345,7 @@ describe('pairing protocol', () => {
       createdAt: '2026-08-03T12:00:00.000Z',
       lastSeenAt: '2026-08-03T12:00:00.000Z',
       idleExpiresAt: '2026-09-03T12:00:00.000Z',
-      grants: {},
+      grants: FULL_DEVICE_GRANTS,
     };
     should(PairedDeviceSchema.safeParse(paired).success).be.true();
     for (const field of ['publicKey', 'deviceKey', 'proof', 'token', 'deviceToken', 'tokenHash'])
@@ -369,6 +370,23 @@ describe('pairing protocol', () => {
     should(
       PairingCodeMintResponseSchema.safeParse(invitation({ pairUrl: `${PAIR_APP}/7F3K-Q2ND${FRAGMENT}` })).success,
     ).be.false();
+    for (const exposed of ['7f3k-q2nd', '7F3KQ2ND', '%37F3K%2DQ2ND']) {
+      should(
+        PairingCodeMintResponseSchema.safeParse(invitation({ pairUrl: `${PAIR_APP}/${exposed}${FRAGMENT}` })).success,
+      ).be.false();
+      should(() => pairingLinkUrl(`${PAIR_APP}/${exposed}`, { ...minted, daemonUrl: DAEMON_URL })).throw(
+        /only in the link fragment/u,
+      );
+    }
+    should(
+      PairingCodeMintResponseSchema.safeParse(invitation({ pairUrl: `${PAIR_APP}?code=${minted.code}${FRAGMENT}` }))
+        .success,
+    ).be.false();
+    for (const daemonUrl of [`${DAEMON_URL}/${minted.code}`, `${DAEMON_URL}?code=${minted.code}`]) {
+      const pairUrl = `${PAIR_APP}#${formatPairingFragment({ ...minted, daemonUrl })}`;
+      should(PairingCodeMintResponseSchema.safeParse(invitation({ daemonUrl, pairUrl })).success).be.false();
+      should(() => pairingLinkUrl(PAIR_APP, { ...minted, daemonUrl })).throw(/only in the link fragment/u);
+    }
   });
 
   it('P76 should read no fragment that carries a pairing code beside a share or download key', () => {

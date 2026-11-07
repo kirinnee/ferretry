@@ -1,5 +1,6 @@
+import { MemoryStateFolder } from '../../../support/daemon/state-folder.ts';
 import { describe, it } from 'bun:test';
-import { MemoryStateFolder } from '@ferretry/kernel/testing';
+
 import should from 'should';
 import { DevicesFile, PushFile, PushKeysFile } from '../../../../contract/index.ts';
 import { NodePairingCryptography, StatePairingRepository } from '../../../../daemon/adapters/pairing/index.ts';
@@ -164,10 +165,7 @@ async function daemon() {
     clientName: 'fy',
   });
 
-  const routes = [
-    ...pairingRoutes(pairing, deviceGrants),
-    ...pushRoutes(push, guardOver(DEFAULT_CAPABILITY_GRANTS)),
-  ];
+  const routes = [...pairingRoutes(pairing, deviceGrants), ...pushRoutes(push, guardOver(DEFAULT_CAPABILITY_GRANTS))];
   /** One call as Gate admits it: a device carries its own record's grants and whether it has confirmed. */
   const dispatch = async (key: string, overrides: CallOverrides = {}) =>
     await respond(

@@ -1,9 +1,10 @@
 import { implementCli } from '@ferretry/kernel/manifest';
+import type { StatePort } from '@ferretry/kernel/contract';
 import manifest from '../manifest.ts';
 import { desktopBrowserOpener } from './adapters/pair/browser-opener.ts';
 import { QrCodeTerminal } from './adapters/pair/qr-terminal.ts';
 import { ProcessTerminalSize } from './adapters/pair/screen.ts';
-import { sweepPairingRedirects } from './adapters/pairing-redirect-sweep.ts';
+import { sweepPairingRedirectState } from './adapters/pairing-redirect-sweep.ts';
 import { IntlLocalTime } from './adapters/passkey/local-time.ts';
 import { deviceVerbs } from './lib/device/commands.ts';
 import { DeviceController } from './lib/device/controller.ts';
@@ -28,7 +29,10 @@ import { BINARY_NAME, ExitStatus, hostFacilities } from './shell.ts';
  * `fy daemon config` (`lib/grants`) is not wired: the manifest declares no such verb and its routes are Gate's.
  */
 export default implementCli(manifest, {
-  build({ client, io }) {
+  build(ctx) {
+    const { client, io } = ctx;
+    // TODO(kernel contract): the CLI receives this plugin's fenced StatePort, never the whole state home.
+    const state = (ctx as typeof ctx & { readonly state?: StatePort }).state;
     const host = hostFacilities(io);
     const exit = new ExitStatus();
     const out = {
@@ -48,8 +52,8 @@ export default implementCli(manifest, {
         clock: host.clock,
         qr: new QrCodeTerminal(),
         terminal: new ProcessTerminalSize(),
-        browser: desktopBrowserOpener(stateHome),
-        redirectSweeper: { sweep: async () => void (await sweepPairingRedirects(stateHome, host.clock.now())) },
+        browser: desktopBrowserOpener(stateHome, state),
+        redirectSweeper: { sweep: async () => void (await sweepPairingRedirectState(state, host.clock.now())) },
         binaryName: BINARY_NAME,
       });
     };

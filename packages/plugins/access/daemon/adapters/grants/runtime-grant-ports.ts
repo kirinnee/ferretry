@@ -47,12 +47,11 @@ export class JournalGrantAudit implements GrantAuditPort {
       throw new Error('the kernel does not provide bounded journal tail reads yet');
     const information = await state.version(GrantAuditFile);
     const { records, unreadable: damaged } = await state.tail(GrantAuditFile, { maxBytes: AUDIT_WINDOW_BYTES });
-    let unreadable = damaged;
     for (const line of records) {
-      if (line.kind !== this.kind) unreadable += 1;
-      else entries.push({ at: line.at, actor: line.actor, changes: line.changes });
+      // The kernel already validated each record: another journal's kind is healthy, not damaged bytes.
+      if (line.kind === this.kind) entries.push({ at: line.at, actor: line.actor, changes: line.changes });
     }
     const truncated = information !== undefined && information.size > AUDIT_WINDOW_BYTES;
-    return { entries: entries.reverse().slice(0, limit), unreadable, truncated };
+    return { entries: entries.reverse().slice(0, limit), unreadable: damaged, truncated };
   }
 }

@@ -1,10 +1,52 @@
 import { lstat, readdir, rmdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { StatePort } from '@ferretry/kernel/contract';
 import {
   isPairingRedirectDirectoryName,
   isPairingRedirectStale,
   PAIRING_REDIRECT_FILE_NAME,
+  PairingRedirectsFile,
 } from '../../contract/index.ts';
+
+/** TODO(kernel contract): same scoped metadata/empty-directory ports as the daemon's boot adapter. */
+interface RedirectState extends StatePort {
+  lstat(
+    file: typeof PairingRedirectsFile,
+    name: string,
+  ): Promise<
+    | {
+        readonly kind: 'file' | 'directory' | 'symlink' | 'other';
+        readonly modifiedMs: number;
+      }
+    | undefined
+  >;
+  removeEmptyDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
+}
+
+/** The CLI and daemon now share Access's declared opaque tree, rather than reading arbitrary home files. */
+export async function sweepPairingRedirectState(port: StatePort | undefined, nowMs: number): Promise<void> {
+  const pending = port as Partial<RedirectState> | undefined;
+  if (pending?.lstat === undefined || pending.removeEmptyDirectory === undefined) return;
+  const state = pending as RedirectState;
+  try {
+    for (const directory of await state.list(PairingRedirectsFile)) {
+      if (!isPairingRedirectDirectoryName(directory)) continue;
+      try {
+        const parent = await state.lstat(PairingRedirectsFile, directory);
+        if (parent?.kind !== 'directory') continue;
+        const page = `${directory}/${PAIRING_REDIRECT_FILE_NAME}`;
+        const details = await state.lstat(PairingRedirectsFile, page).catch(() => undefined);
+        if (!isPairingRedirectStale((details ?? parent).modifiedMs, nowMs)) continue;
+        if (details?.kind === 'file') await state.remove(PairingRedirectsFile, page);
+        await state.removeEmptyDirectory(PairingRedirectsFile, directory);
+      } catch {
+        /* A sweep never prevents a pairing. */
+      }
+    }
+  } catch {
+    /* An absent tree is the ordinary first-run state. */
+  }
+}
 
 /**
  * Removes the pairing redirect pages a killed `fy pair --open` left behind in a state home.

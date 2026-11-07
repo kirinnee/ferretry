@@ -277,7 +277,7 @@ describe('PushService.notify', () => {
     url: '/',
     count: 1,
     sessionId: 's1',
-    kind: 'attention' as const,
+    kind: 'agenda' as const,
   };
 
   it('should tell every enrolled device and report what got through', async () => {

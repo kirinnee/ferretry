@@ -11,6 +11,13 @@ const ENDPOINT_PREFIX = 'https://fcm.googleapis.com/send/';
 const ENDPOINT = `${ENDPOINT_PREFIX}aBc-123`;
 const DEVICE_ID = 'push-3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
+it('accepts agenda notifications and refuses the removed attention kind', () => {
+  should(push.PushNotificationKindSchema.safeParse('agenda').success).be.true();
+  should(push.PushNotificationKindSchema.safeParse('attention').success).be.false();
+  should(push.PushNotificationPayloadSchema.safeParse(sessionPayload).success).be.true();
+  should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, kind: 'attention' }).success).be.false();
+});
+
 const endpointOfLength = (length: number): string => `${ENDPOINT_PREFIX}${'a'.repeat(length - ENDPOINT_PREFIX.length)}`;
 
 const keys = { p256dh: P256DH, auth: AUTH };
@@ -32,7 +39,7 @@ const payloadBase = {
   url: '/sessions/session-1',
   count: 1,
 };
-const sessionPayload = { ...payloadBase, sessionId: 'session-1', kind: 'attention' };
+const sessionPayload = { ...payloadBase, sessionId: 'session-1', kind: 'agenda' };
 const devicePairedPayload = { ...payloadBase, kind: 'device-paired' };
 const clearPayload = {
   version: 1,
@@ -43,7 +50,7 @@ const clearPayload = {
 };
 
 const pushCases: SchemaCase[] = [
-  { name: 'notification kind', schema: push.PushNotificationKindSchema, value: 'attention' },
+  { name: 'notification kind', schema: push.PushNotificationKindSchema, value: 'agenda' },
   { name: 'browser subscription', schema: push.BrowserPushSubscriptionSchema, value: subscription },
   { name: 'register request', schema: push.RegisterPushDeviceRequestSchema, value: registration },
   { name: 'device view', schema: push.PushDeviceViewSchema, value: deviceView },
@@ -74,7 +81,7 @@ describe('push schemas', () => {
 
   it('should resolve every notification kind, error code, and payload variant', () => {
     // Arrange
-    const sessionKinds = ['attention', 'question', 'failed', 'completed'] as const;
+    const sessionKinds = ['agenda', 'question', 'failed', 'completed'] as const;
     const codes = ['invalid', 'corrupt_store', 'not_found'] as const;
     const payloads = [sessionPayload, payloadBase, devicePairedPayload];
 
@@ -385,7 +392,7 @@ describe('push schemas', () => {
       {
         name: 'kind without a session id',
         schema: push.PushNotificationPayloadSchema,
-        value: { ...payloadBase, kind: 'attention' },
+        value: { ...payloadBase, kind: 'agenda' },
       },
       {
         name: 'empty session id',

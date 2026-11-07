@@ -2,6 +2,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
+import { pairingRedirectBoot } from './adapters/pairing/boot-redirect-sweep.ts';
 
 /**
  * The facts no port gives Access yet (see {@link AccessHost}): the kernel's identity port is being added. Until they land, Access cannot open its device grants (they are bound to the
@@ -42,6 +43,7 @@ export default implementDaemon(manifest, {
     });
     const route = (key: string) => access.handler(key);
     return {
+      ...pairingRedirectBoot(),
       routes: {
         'POST /v1/pair/code': route('POST /v1/pair/code'),
         'DELETE /v1/pair/code/:pairingId': route('DELETE /v1/pair/code/:pairingId'),

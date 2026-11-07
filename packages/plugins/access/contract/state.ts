@@ -160,3 +160,13 @@ export const GrantAuditFile = defineState({
   schema: GrantAuditLineSchema,
   mode: 0o600,
 });
+
+/** Private, short-lived redirect pages shared by fy pair --open and the daemon's boot sweep (P106). */
+export const PairingRedirectsFile = defineState({
+  name: 'pairing-redirects',
+  path: 'pairing-redirects/*',
+  store: 'opaque',
+  format: 1,
+  schema: z.instanceof(Uint8Array),
+  mode: 0o600,
+});

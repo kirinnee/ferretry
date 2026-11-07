@@ -9,6 +9,7 @@ import {
   DevicesChanged,
   DevicesFile,
   GrantAuditFile,
+  PairingRedirectsFile,
   PasskeysFile,
   StepUpStages,
   PushFile,
@@ -212,6 +213,7 @@ export default definePlugin({
       PushKeysFile,
       /** Device-grant and security changes, one line per axis, attributed to the actor (G150). */
       GrantAuditFile,
+      PairingRedirectsFile,
     ],
     readModels: ['devices'],
     publishes: [DevicesChanged],

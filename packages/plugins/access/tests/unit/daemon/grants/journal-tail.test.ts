@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { journalState as fixture } from '../../../support/daemon/journal-state.ts';
+import { JournalGrantAudit } from '../../../../daemon/adapters/grants/runtime-grant-ports.ts';
 
 const record = (actor: string) => ({
   format: 1,
@@ -27,6 +28,20 @@ test('recent counts damaged tail lines while retaining healthy records on both s
   expect(result.entries.map(entry => entry.actor)).toEqual(['after', 'before']);
   expect(result.unreadable).toBe(2);
   expect(result.truncated).toBe(false);
+});
+
+test('healthy mixed grant and security records keep separate histories with unreadable:0', async () => {
+  const f = fixture();
+  const security = new JournalGrantAudit(f.state, 'security.changed');
+  const entry = { at: record('').at, actor: 'owner', changes: ['pairing.use=off'] };
+  await f.audit.record(entry);
+  await security.record({ ...entry, actor: 'security-owner' });
+  expect(await f.audit.recent(10)).toEqual({ entries: [entry], unreadable: 0, truncated: false });
+  expect(await security.recent(10)).toEqual({
+    entries: [{ ...entry, actor: 'security-owner' }],
+    unreadable: 0,
+    truncated: false,
+  });
 });
 
 test('old damage outside the tail cannot hide a healthy recent history or count as tail damage', async () => {

@@ -1,5 +1,6 @@
+import { MemoryStateFolder } from '../../../support/daemon/state-folder.ts';
 import { describe, it } from 'bun:test';
-import { MemoryStateFolder } from '@ferretry/kernel/testing';
+
 import should from 'should';
 import { PushKeysFile } from '../../../../contract/index.ts';
 import { StateVapidKeys } from '../../../../daemon/adapters/push/index.ts';

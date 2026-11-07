@@ -171,8 +171,23 @@ export function appOriginChoice(setting: string | undefined): AppOriginChoice {
 /** The full link a mint hands out: the pairing app's URL with the fragment where a code may live. */
 export function pairingLinkUrl(appUrl: string, seed: PairingLinkSeed): string {
   const url = new URL(appUrl);
+  if (carriesPairingCode(url, seed.code) || carriesPairingCode(new URL(seed.daemonUrl), seed.code))
+    throw new Error('pairing code must occur only in the link fragment');
   url.hash = formatPairingFragment(seed);
   return url.toString();
+}
+
+/** HTTP-visible URL parts must never carry the credential, including its encoded or compact spelling. */
+function carriesPairingCode(url: URL, code: string): boolean {
+  const visible = url.toString().split('#')[0] ?? '';
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(visible);
+  } catch {
+    // An unreadable address cannot establish that the credential is confined to its fragment.
+    return true;
+  }
+  return decoded.toUpperCase().replaceAll(/[\s-]/gu, '').includes(PairingCodeSchema.parse(code).replaceAll('-', ''));
 }
 
 /**
@@ -416,7 +431,13 @@ export const PairingCodeMintResponseSchema = mintedFields.superRefine((value, co
       code: value.code,
       daemonId: value.daemonId,
     })}`;
-    if (url.search === '' && url.hash === expectedFragment) return;
+    if (
+      url.search === '' &&
+      url.hash === expectedFragment &&
+      !carriesPairingCode(url, value.code) &&
+      !carriesPairingCode(new URL(value.daemonUrl), value.code)
+    )
+      return;
     context.addIssue({
       code: 'custom',
       path: ['pairUrl'],

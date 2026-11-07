@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { StatePort } from '@ferretry/kernel/contract';
 import {
   PAIRING_REDIRECT_DIRECTORY_PREFIX,
   PAIRING_REDIRECT_FILE_NAME,
   PAIRING_REDIRECT_LIFETIME_MS,
+  PairingRedirectsFile,
 } from '../../../contract/index.ts';
 import type { IBrowserOpener } from '../../lib/pair/ports.ts';
 import { renderPairingRedirectPage } from '../../lib/pair/redirect-page.ts';
@@ -63,6 +65,8 @@ const launcher = (platform: string): { readonly command: string; readonly leadin
 };
 
 export interface BrowserOpenerEnvironment {
+  /** The shipped adapter writes through the CLI's fenced Access state; direct host IO remains a test fixture. */
+  readonly createPage?: (page: string) => Promise<{ readonly file: string; discard(): Promise<void> }>;
   /** `process.platform`, injected so every branch is provable on one host. */
   readonly platform: string;
   /** `spawn`, injected so no suite ever launches a real browser. */
@@ -84,14 +88,22 @@ export class DesktopBrowserOpener implements IBrowserOpener {
     const target = launcher(this.environment.platform);
     if (target === undefined) return false;
     let directory: string | undefined;
+    let stored: Awaited<ReturnType<NonNullable<BrowserOpenerEnvironment['createPage']>>> | undefined;
     const discard = (): void => {
+      if (stored !== undefined) void stored.discard().catch(() => undefined);
       if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
     };
     try {
       const page = renderPairingRedirectPage(link);
-      directory = mkdtempSync(join(this.environment.stateHome, PAIRING_REDIRECT_DIRECTORY_PREFIX));
-      const file = join(directory, PAIRING_REDIRECT_FILE_NAME);
-      writeFileSync(file, page, { flag: 'wx', mode: 0o600 });
+      let file: string;
+      if (this.environment.createPage !== undefined) {
+        stored = await this.environment.createPage(page);
+        file = stored.file;
+      } else {
+        directory = mkdtempSync(join(this.environment.stateHome, PAIRING_REDIRECT_DIRECTORY_PREFIX));
+        file = join(directory, PAIRING_REDIRECT_FILE_NAME);
+        writeFileSync(file, page, { flag: 'wx', mode: 0o600 });
+      }
       // Registered before the launcher starts, so there is no window in which the page exists unguarded.
       this.environment.onExit(discard);
       this.environment.schedule(discard, this.environment.retentionMs);
@@ -147,13 +159,58 @@ export const holdProcessOpen = (run: () => void, ms: number): void => {
   setTimeout(run, ms);
 };
 
-/** The shipped opener, bound to this host and to the state home the daemon owns. */
-export const desktopBrowserOpener = (stateHome: string): IBrowserOpener =>
-  new DesktopBrowserOpener({
+/** TODO(kernel contract): CLI-side StatePort and opaque tree path, exclusive 0700 mkdir, plain rmdir. */
+export interface PairingRedirectCliStatePort extends StatePort {
+  pathOf(file: typeof PairingRedirectsFile, name: string): string;
+  createPrivateDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
+  removeEmptyDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
+}
+
+/** Creates only inside a fresh private directory of the declared tree, so a stale name is never overwritten. */
+export async function createPairingRedirectPage(
+  ready: PairingRedirectCliStatePort,
+  page: string,
+): Promise<{
+  readonly file: string;
+  discard(): Promise<void>;
+}> {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const suffix = Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => alphabet[byte % alphabet.length]).join(
+    '',
+  );
+  const directory = `${PAIRING_REDIRECT_DIRECTORY_PREFIX}${suffix}`;
+  const name = `${directory}/${PAIRING_REDIRECT_FILE_NAME}`;
+  await ready.createPrivateDirectory(PairingRedirectsFile, directory);
+  const discard = async () => {
+    await ready.remove(PairingRedirectsFile, name);
+    await ready.removeEmptyDirectory(PairingRedirectsFile, directory);
+  };
+  try {
+    await ready.write(PairingRedirectsFile, new TextEncoder().encode(page), name);
+    return { file: ready.pathOf(PairingRedirectsFile, name), discard };
+  } catch (error) {
+    await discard().catch(() => undefined);
+    throw error;
+  }
+}
+
+/** The shipped opener uses the same declared opaque tree as the daemon sweep; absent ports refuse --open. */
+export const desktopBrowserOpener = (stateHome: string, port?: StatePort): IBrowserOpener => {
+  const state = port as Partial<PairingRedirectCliStatePort> | undefined;
+  if (
+    state?.pathOf === undefined ||
+    state.createPrivateDirectory === undefined ||
+    state.removeEmptyDirectory === undefined
+  )
+    return { open: async () => false };
+  const ready = state as PairingRedirectCliStatePort;
+  return new DesktopBrowserOpener({
     platform: process.platform,
     spawn,
     stateHome,
+    createPage: page => createPairingRedirectPage(ready, page),
     retentionMs: PAIRING_REDIRECT_LIFETIME_MS,
     schedule: holdProcessOpen,
     onExit: onProcessExit.bind(undefined, process),
   });
+};

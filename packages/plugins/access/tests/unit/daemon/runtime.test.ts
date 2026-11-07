@@ -1,3 +1,4 @@
+import { MemoryStateFolder } from '../../support/daemon/state-folder.ts';
 /**
  * Access's composition (`daemon/runtime.ts`): the `device` and `pair` session modes, the `credentials:device`
  * provider and the Access port, wired to fake kernel ports (state in memory, a driven clock), a fake Gate and a
@@ -24,7 +25,7 @@ import type {
   ModeRedeemed,
   SessionId,
 } from '@ferretry/kernel/contract';
-import { type DrivenClock, fixedClock, MemoryStateFolder } from '@ferretry/kernel/testing';
+import { type DrivenClock, fixedClock } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import {
   DevicesChanged,
@@ -125,6 +126,22 @@ async function newDeviceKey(): Promise<string> {
   ])) as unknown as CryptoKeyPair;
   return toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
 }
+
+test('runtime wiring logs a damaged unlock ledger notice once and keeps devices locked', async () => {
+  const w = world();
+  w.folder.plant(UnlocksFile, '{broken');
+  const code = await mint(w);
+  const result = await redeem(w, { code, deviceKey: await newDeviceKey() });
+  expect(result).not.toBe('refused');
+  if (result === 'refused') throw new Error('expected paired device');
+  const response = PairingResponseSchema.parse(result.fields.response);
+  const standing = w.runtime.credentials.standing(response.deviceId as HolderId, w.clock.now());
+  expect(standing).not.toBe('unknown');
+  expect(Object.keys(standing as object)).not.toContain('unlockedUntil');
+  await Promise.all([w.runtime.ready(), w.runtime.ready()]);
+  expect(w.logged.filter(message => message.includes('the unlock ledger could not be read'))).toHaveLength(1);
+  expect(w.logged.some(message => message.includes('so every device is asked to unlock again'))).toBe(true);
+});
 
 /** Mints a code at the machine (the owner's `fy pair`) and hands it back; never printed. */
 async function mint(w: World, grants?: 'full' | 'limited'): Promise<string> {

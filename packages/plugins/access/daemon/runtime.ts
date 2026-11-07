@@ -276,7 +276,7 @@ export class AccessRuntime {
         this.#changed(deviceId, change);
       },
     );
-    await stepUp.restore();
+    const unlockNotice = await stepUp.restore();
     // Today's boot step: a grant unused for the idle period is removed before anything is served, and said once.
     const idleExpired = await pairing.expireIdleDevices();
     if (idleExpired > 0)
@@ -302,6 +302,7 @@ export class AccessRuntime {
       ...this.#stepUpRoutes(stepUp),
     ])
       routes.set(routeKey(route), route.handle);
+    if (unlockNotice !== undefined) kernel.log.warn(unlockNotice);
     return { pairing, registry, stepUp, passkeyStore, push, routes };
   }
 
