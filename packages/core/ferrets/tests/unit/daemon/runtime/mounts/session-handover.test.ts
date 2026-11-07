@@ -1,22 +1,22 @@
 import { describe, it } from 'bun:test';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
-  FY_REQUEST_ID_HEADER,
   type SessionHandoverFailure,
   type SessionHandoverReceipt,
   SessionHandoverReceiptSchema,
   type SessionHandoverRequest,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/handover.ts';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { HandoverError } from '../../../../src/lib/handover/types.ts';
+import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
 import {
   type SessionHandoverSubsystem,
   sessionHandoverRoutes,
-} from '../../../../src/lib/runtime/mounts/session-handover.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-handover.ts';
 import { bodyReads, request } from '../../api/support.ts';
-import { receiptAt } from '../../handover/support.ts';
+import { receiptAt } from '../../moves/handover/support.ts';
 import { agentIn, CREDENTIALS, FERRET_SESSION, fromFerret, human } from './support.ts';
 
 /**

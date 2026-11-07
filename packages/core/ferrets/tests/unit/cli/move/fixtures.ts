@@ -1,5 +1,5 @@
-import type { ConversionPreview, MigrationConversation, SessionView } from '@ferretry/protocol';
-import type { IMigrationGateway } from '../../../src/lib/migration/ports.ts';
+import type { ConversionPreview, MigrationConversation, SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import type { IMigrationGateway } from '../../../../cli/lib/move/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 import { sessionView } from '../session/session-fixtures.ts';
 

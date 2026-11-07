@@ -12,7 +12,7 @@
  * build can fill it without a wire change, and absence would otherwise read as "clean".
  */
 
-import type { WorkspaceFacet } from '@ferretry/protocol';
+import type { WorkspaceFacet } from '../../protocol/session-transfer.ts';
 import type {
   TransferFacetContribution,
   TransferFacetContributor,

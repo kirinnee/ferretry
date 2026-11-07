@@ -2,7 +2,10 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
-import { fsyncArtifactPath, TransferArtifactDurability } from '../../../src/adapters/transfer/durable-artifact.ts';
+import {
+  fsyncArtifactPath,
+  TransferArtifactDurability,
+} from '../../../../daemon/adapters/transfer/durable-artifact.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**

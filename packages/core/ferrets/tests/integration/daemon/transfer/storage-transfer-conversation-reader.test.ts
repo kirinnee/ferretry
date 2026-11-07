@@ -2,7 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ConversationMessagePoint, TranscriptProvenance } from '@ferretry/protocol';
+import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
@@ -14,13 +15,13 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
-import { StorageTransferConversationReader } from '../../../src/adapters/transfer/storage-transfer-conversation-reader.ts';
-import { StorageTransferSourceReader } from '../../../src/adapters/transfer/storage-transfer-source-reader.ts';
+import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
+import { StorageTransferConversationReader } from '../../../../daemon/adapters/transfer/storage-transfer-conversation-reader.ts';
+import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
 import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
 import { ConversationDigestError } from '../../../src/lib/session/transcript/digest.ts';
 import type { TranscriptDigestJournal } from '../../../src/lib/session/transcript/reader.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import type {
   TranscriptBatch,
   TranscriptEvent,
@@ -28,7 +29,7 @@ import type {
   TranscriptRawRecord,
   TranscriptSource,
 } from '../../../src/lib/transcript/types.ts';
-import { ConversationFacetContributor } from '../../../src/lib/transfer/facets/conversation.ts';
+import { ConversationFacetContributor } from '../../../../daemon/lib/transfer/facets/conversation.ts';
 
 const identityRedactor = NO_REDACTION;
 

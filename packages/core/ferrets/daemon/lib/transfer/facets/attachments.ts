@@ -14,7 +14,8 @@
  *    and the new session re-prompts.
  */
 
-import type { AttachmentFacet, AttachmentView, TransferOmission } from '@ferretry/protocol';
+import type { AttachmentView } from '@ferretry/protocol';
+import type { AttachmentFacet, TransferOmission } from '../../protocol/session-transfer.ts';
 import type {
   TransferAttachmentReader,
   TransferFacetContribution,

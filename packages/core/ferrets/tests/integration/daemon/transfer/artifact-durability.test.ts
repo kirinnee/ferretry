@@ -2,17 +2,18 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, parse, relative } from 'node:path';
-import type { SessionTransferPlan, TranscriptProvenance } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { FileSessionAttachmentCopier } from '../../../src/adapters/transfer/attachment-copier.ts';
-import { FileSessionTransferBriefWriter } from '../../../src/adapters/transfer/brief-writer.ts';
+import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
+import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
 import {
   type DurableArtifactIo,
   fsyncArtifactPath,
   TransferArtifactDurability,
-} from '../../../src/adapters/transfer/durable-artifact.ts';
-import { SessionTransferImporter } from '../../../src/lib/transfer/import.ts';
-import type { SessionTransferEnvelope } from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/adapters/transfer/durable-artifact.ts';
+import { SessionTransferImporter } from '../../../../daemon/lib/transfer/import.ts';
+import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**

@@ -1,31 +1,31 @@
 import { afterEach, describe, it } from 'bun:test';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { type ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import { type SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import {
-  type ConversationMessagePoint,
   type RuntimeControlRequest,
   type RuntimeModelChoice,
   SessionConfigSchema,
   SessionStateSchema,
-  type SessionTransferPlan,
   type SessionView,
-} from '@ferretry/protocol';
+} from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   FileSessionForkReceiptStore,
   forkReceiptFile,
-} from '../../../src/adapters/fork/file-session-fork-receipt-store.ts';
+} from '../../../../daemon/adapters/forks/file-session-fork-receipt-store.ts';
 import {
   SessionForkTargetBinder,
   SessionForkTargetBindingError,
   forkOpeningTurn,
   forkOpeningTurnRefusal,
-} from '../../../src/adapters/fork/session-fork-target-binder.ts';
+} from '../../../../daemon/adapters/forks/session-fork-target-binder.ts';
 import {
   type SessionForkTargetAccount,
   SessionForkTargetResolver,
-} from '../../../src/adapters/fork/session-fork-target-resolver.ts';
-import { BunGitRunner } from '../../../src/adapters/git/index.ts';
+} from '../../../../daemon/adapters/forks/session-fork-target-resolver.ts';
+import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -36,52 +36,52 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { FileSessionEffectLedger } from '../../../src/adapters/session/effects/file-session-effect-ledger.ts';
-import { FileSessionEnvironmentStore } from '../../../src/adapters/session/lifecycle/file-session-environment-store.ts';
-import { FileSessionTaskStore } from '../../../src/adapters/session/lifecycle/file-session-task-store.ts';
-import { NodeSessionCredentialIssuer } from '../../../src/adapters/session/lifecycle/node-session-credential-issuer.ts';
-import { NodeWorkingDirectoryResolver } from '../../../src/adapters/session/lifecycle/node-working-directory-resolver.ts';
+import { FileSessionEffectLedger } from '../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
+import { FileSessionEnvironmentStore } from '../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
+import { FileSessionTaskStore } from '../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
+import { NodeSessionCredentialIssuer } from '../../../../daemon/adapters/session/lifecycle/node-session-credential-issuer.ts';
+import { NodeWorkingDirectoryResolver } from '../../../../daemon/adapters/session/lifecycle/node-working-directory-resolver.ts';
 import {
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
-} from '../../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+} from '../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { FileHarnessWrapperSource } from '../../../src/adapters/session/transcript/file-harness-wrapper-source.ts';
 import {
   FileSessionTranscriptMessageTokenCodec,
   sessionMessageTokenKeyFile,
 } from '../../../src/adapters/session/transcript/file-message-token-codec.ts';
 import { StorageTranscriptDigestJournal } from '../../../src/adapters/session/transcript/storage-transcript-digest-journal.ts';
-import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
+import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import { NodeTranscriptSource } from '../../../src/adapters/transcript/index.ts';
-import { FileSessionAttachmentCopier } from '../../../src/adapters/transfer/attachment-copier.ts';
-import { FileSessionTransferBriefWriter } from '../../../src/adapters/transfer/brief-writer.ts';
-import { GitTransferWorkspaceProbe } from '../../../src/adapters/transfer/git-transfer-workspace-probe.ts';
-import { FileSessionTransferTargetPlanStore } from '../../../src/adapters/transfer/plan-store.ts';
-import { SessionAttachmentTransferReader } from '../../../src/adapters/transfer/session-attachment-reader.ts';
-import { StorageTransferConversationReader } from '../../../src/adapters/transfer/storage-transfer-conversation-reader.ts';
-import { StorageTransferEnvelopeWriter } from '../../../src/adapters/transfer/storage-transfer-envelope-writer.ts';
-import { StorageTransferSourceReader } from '../../../src/adapters/transfer/storage-transfer-source-reader.ts';
+import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
+import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
+import { GitTransferWorkspaceProbe } from '../../../../daemon/adapters/transfer/git-transfer-workspace-probe.ts';
+import { FileSessionTransferTargetPlanStore } from '../../../../daemon/adapters/transfer/plan-store.ts';
+import { SessionAttachmentTransferReader } from '../../../../daemon/adapters/transfer/session-attachment-reader.ts';
+import { StorageTransferConversationReader } from '../../../../daemon/adapters/transfer/storage-transfer-conversation-reader.ts';
+import { StorageTransferEnvelopeWriter } from '../../../../daemon/adapters/transfer/storage-transfer-envelope-writer.ts';
+import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
 import {
   GitWorktreeGateway,
   NodeWorktreeFileSystem,
   SystemWorktreeClock,
-} from '../../../src/adapters/worktrees/index.ts';
+} from '../../../../daemon/adapters/worktrees/index.ts';
 import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
 import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
 import { codexCorrelationArguments } from '../../../src/lib/session/transcript/codex-rollout.ts';
-import { SessionForkRequestConflictError } from '../../../src/lib/fork/failures.ts';
-import { type SessionForkCommand, type SessionForkKey, sessionForkKey } from '../../../src/lib/fork/identity.ts';
-import { SessionForkService } from '../../../src/lib/fork/service.ts';
-import type { SessionForkPorts, SessionForkResult } from '../../../src/lib/fork/types.ts';
+import { SessionForkRequestConflictError } from '../../../../daemon/lib/forks/failures.ts';
+import { type SessionForkCommand, type SessionForkKey, sessionForkKey } from '../../../../daemon/lib/forks/identity.ts';
+import { SessionForkService } from '../../../../daemon/lib/forks/service.ts';
+import type { SessionForkPorts, SessionForkResult } from '../../../../daemon/lib/forks/types.ts';
 import type { JsonValue } from '../../../src/lib/json.ts';
 import { type FoundationPaths, createSessionPaths, temporaryFilePath } from '../../../src/lib/paths.ts';
 import { CodexRuntimeCatalogCache } from '../../../src/lib/session/harness/codex-catalog-cache.ts';
 import { planRuntimeSwitch } from '../../../src/lib/session/harness/runtime-switch.ts';
 import { startupModelArguments } from '../../../src/lib/session/harness/startup.ts';
-import { assignedTaskDocument, sessionTmuxName } from '../../../src/lib/session/lifecycle/policy.ts';
-import { SessionLifecycleService } from '../../../src/lib/session/lifecycle/service.ts';
-import { defaultSessionLifecycleSettings } from '../../../src/lib/session/lifecycle/settings.ts';
-import { SessionRuntimeError } from '../../../src/lib/session/runtime-control/types.ts';
+import { assignedTaskDocument, sessionTmuxName } from '../../../../daemon/lib/session/lifecycle/policy.ts';
+import { SessionLifecycleService } from '../../../../daemon/lib/session/lifecycle/service.ts';
+import { defaultSessionLifecycleSettings } from '../../../../daemon/lib/session/lifecycle/settings.ts';
+import { SessionRuntimeError } from '../../../../daemon/lib/session/runtime-control/types.ts';
 import { claudeSessionArguments } from '../../../src/lib/session/transcript/claude-path.ts';
 import { sameConversationMessagePoint } from '../../../src/lib/session/transcript/digest.ts';
 import {
@@ -90,16 +90,16 @@ import {
   verifySessionTranscriptMessageToken,
 } from '../../../src/lib/session/transcript/message-token.ts';
 import { TranscriptProvenanceCapture } from '../../../src/lib/session/transcript/provenance.ts';
-import { type SessionId, parseSessionId } from '../../../src/lib/session-id.ts';
+import { type SessionId, parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
-import { AttachmentFacetContributor } from '../../../src/lib/transfer/facets/attachments.ts';
-import { ConversationFacetContributor } from '../../../src/lib/transfer/facets/conversation.ts';
-import { LineageFacetContributor } from '../../../src/lib/transfer/facets/lineage.ts';
-import { ReferenceFacetContributor } from '../../../src/lib/transfer/facets/references.ts';
-import { WorkspaceFacetContributor } from '../../../src/lib/transfer/facets/workspace.ts';
-import { SessionTransferPreparer } from '../../../src/lib/transfer/prepare.ts';
-import { TransferImportError, TransferPrepareError } from '../../../src/lib/transfer/types.ts';
+import { AttachmentFacetContributor } from '../../../../daemon/lib/transfer/facets/attachments.ts';
+import { ConversationFacetContributor } from '../../../../daemon/lib/transfer/facets/conversation.ts';
+import { LineageFacetContributor } from '../../../../daemon/lib/transfer/facets/lineage.ts';
+import { ReferenceFacetContributor } from '../../../../daemon/lib/transfer/facets/references.ts';
+import { WorkspaceFacetContributor } from '../../../../daemon/lib/transfer/facets/workspace.ts';
+import { SessionTransferPreparer } from '../../../../daemon/lib/transfer/prepare.ts';
+import { TransferImportError, TransferPrepareError } from '../../../../daemon/lib/transfer/types.ts';
 import { WARDEN_LABEL } from '../../../src/lib/warden/types.ts';
 import { AT, SOURCE_ID, account, cleanup, planner, realTemporaryDirectory } from './fixtures.ts';
 

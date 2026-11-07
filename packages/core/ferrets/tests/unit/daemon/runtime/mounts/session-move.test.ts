@@ -1,16 +1,16 @@
 import { describe, it } from 'bun:test';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
   AskToStopJobsResultSchema,
   type ConversionPreview,
   ConversionPreviewSchema,
-  FY_REQUEST_ID_HEADER,
   type MigrationRefusal,
   MigrationRefusedBodySchema,
   type SessionRelaunchSettings,
   SessionRelaunchSettingsSchema,
   type SessionView,
   SessionViewSchema,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -19,7 +19,7 @@ import {
   moverOf,
   SessionMigrateError,
   sessionMigrateRoutes,
-} from '../../../../src/lib/runtime/mounts/session-migrate.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-move.ts';
 import { request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FakeSessionMigrate, human } from './support.ts';
 

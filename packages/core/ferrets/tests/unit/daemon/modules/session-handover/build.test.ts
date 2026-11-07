@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionHandoverModule } from '../../../../bin/modules/session-handover.ts';
+import { sessionHandoverModule } from '../../../../../daemon/modules/session-handover.ts';
 import type { ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
 import { sessionHandoverNeedsForTest } from './fixture.ts';
 

@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SessionHandoverReceiptSchema } from '@ferretry/protocol';
-import { handoverPlanId, isTerminalHandoverPhase } from '../../lib/handover/policy.ts';
-import { SessionIdSchema } from '../../lib/session-id.ts';
+import { SessionHandoverReceiptSchema } from '../../../lib/protocol/handover.ts';
+import { handoverPlanId, isTerminalHandoverPhase } from '../../../lib/moves/handover/policy.ts';
+import { SessionIdSchema } from '../../../lib/session-id.ts';
 import {
   type HandoverReceipt,
   HandoverReceiptDamagedError,
   type HandoverReceiptStore,
-} from '../../lib/handover/types.ts';
+} from '../../../lib/moves/handover/types.ts';
 
 /** One receipt per session, owned by the PREDECESSOR — the party that exists in every phase. */
 const RECEIPT_FILE = 'handover.json';

@@ -16,7 +16,8 @@
  * computation that can disagree with it.
  */
 
-import type { SessionTransferEdge, SessionTransferPlan } from '@ferretry/protocol';
+import type { SessionTransferEdge } from '../protocol/session-transfer-edge.ts';
+import type { SessionTransferPlan } from '../protocol/session-transfer.ts';
 
 type TransferKind = SessionTransferEdge['kind'];
 

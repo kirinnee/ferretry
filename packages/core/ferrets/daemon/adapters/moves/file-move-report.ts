@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { MigrationReportStore } from '../../lib/migrate/report-store.ts';
+import type { MigrationReportStore } from '../../lib/moves/report-store.ts';
 import type { SessionId } from '../../lib/session-id.ts';
 
 /** The one report per session, beside the turn documents a revive writes into the same directory. */

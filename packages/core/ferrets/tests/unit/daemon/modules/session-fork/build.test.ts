@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionForkModule } from '../../../../bin/modules/session-fork.ts';
+import { sessionForkModule } from '../../../../../daemon/modules/session-fork.ts';
 import type { ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
 import { sessionForkNeedsForTest } from './fixture.ts';
 

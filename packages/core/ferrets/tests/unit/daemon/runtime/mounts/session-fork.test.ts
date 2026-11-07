@@ -1,17 +1,17 @@
 import { describe, it } from 'bun:test';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
   type ForkSessionFailure,
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
   type ForkSessionPlanSummary,
   type ForkSessionRequest,
-  FY_REQUEST_ID_HEADER,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/session-fork.ts';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { SessionForkRefusal, sessionForkRoutes } from '../../../../src/lib/runtime/mounts/session-fork.ts';
+import { SessionForkRefusal, sessionForkRoutes } from '../../../../../daemon/lib/runtime/mounts/session-fork.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, fromFerret, human } from './support.ts';
 

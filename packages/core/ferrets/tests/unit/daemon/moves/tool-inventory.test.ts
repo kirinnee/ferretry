@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { joinOpenTools, summarizeToolInput } from '../../../src/lib/migrate/tool-inventory.ts';
+import { joinOpenTools, summarizeToolInput } from '../../../../daemon/lib/moves/tool-inventory.ts';
 
 describe('migration tool inventory', () => {
   it('should join a Bash tool to its full command and interruption verdict', () => {

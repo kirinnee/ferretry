@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { harnessConversionRefusal, harnessMigrationRefusal } from '../../../src/lib/migrate/harness-compatibility.ts';
+import { harnessConversionRefusal, harnessMigrationRefusal } from '../../../../daemon/lib/moves/harness-fit.ts';
 
 /**
  * The same-kind constraint the CLI promised and the daemon did not check.

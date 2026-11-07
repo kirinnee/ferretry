@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerMigrationCommands } from '../../../src/lib/migration/commands.ts';
-import { MigrationController } from '../../../src/lib/migration/controller.ts';
+import { registerMigrationCommands } from '../../../../cli/lib/move/commands.ts';
+import { MigrationController } from '../../../../cli/lib/move/controller.ts';
 import { migrationHarness } from './fixtures.ts';
 
 function run(argv: string[]) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import * as transfer from '../../../src/lib/transfer/index.ts';
+import * as transfer from '../../../../daemon/lib/transfer/index.ts';
 
 describe('the transfer seam barrel', () => {
   it('exposes both halves and every facet contributor under one entry', () => {

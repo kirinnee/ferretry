@@ -37,7 +37,8 @@
  * refuses any target whose record disagrees with the plan before this writer is ever reached.
  */
 
-import type { LineageFacet, SessionTransferEdge } from '@ferretry/protocol';
+import type { SessionTransferEdge } from '../../lib/protocol/session-transfer-edge.ts';
+import type { LineageFacet } from '../../lib/protocol/session-transfer.ts';
 import type { JsonValue } from '../../lib/json.ts';
 import { type SessionProvenance, SessionProvenanceSchema } from '../../lib/session/provenance/types.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';

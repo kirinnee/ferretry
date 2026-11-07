@@ -10,10 +10,10 @@ import {
   PaneProcessInventory,
   ProjectMcpServers,
   TmuxPaneSnapshot,
-} from '../../../src/adapters/migrate/bun-process-inventory.ts';
-import type { ConfiguredServer } from '../../../src/lib/migrate/harness-provenance.ts';
-import type { ProcessProbePort, ProcessTableRead } from '../../../src/lib/migrate/process-inventory-port.ts';
-import { descendantsOf, type ProcRow, parseProcessTable } from '../../../src/lib/migrate/process-table.ts';
+} from '../../../../daemon/adapters/moves/bun-process-inventory.ts';
+import type { ConfiguredServer } from '../../../../daemon/lib/moves/harness-provenance.ts';
+import type { ProcessProbePort, ProcessTableRead } from '../../../../daemon/lib/moves/process-inventory-port.ts';
+import { descendantsOf, type ProcRow, parseProcessTable } from '../../../../daemon/lib/moves/process-table.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 import { PANE_PROOF_FORMAT } from '../../../src/lib/tmux/pane-proof.ts';
 import { waitFor } from '../support/wait-for.ts';

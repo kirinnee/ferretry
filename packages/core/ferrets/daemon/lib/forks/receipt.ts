@@ -29,7 +29,8 @@
  * start.
  */
 
-import { InstantSchema, type SessionTransferPlan, SessionTransferPlanSchema } from '@ferretry/protocol';
+import { InstantSchema } from '@ferretry/protocol';
+import { type SessionTransferPlan, SessionTransferPlanSchema } from '../protocol/session-transfer.ts';
 import { z } from 'zod';
 import { deriveTransferPlanId } from '../transfer/prepare.ts';
 import { SessionForkPhaseRegressionError, SessionForkReceiptInvalidError } from './failures.ts';

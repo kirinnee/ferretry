@@ -2,21 +2,24 @@ import { afterEach, describe, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SessionTransferPlan } from '@ferretry/protocol';
-import { SessionTransferPlanSchema } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import { SessionTransferPlanSchema } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import should from 'should';
 import {
   FileSessionForkReceiptStore,
   forkReceiptFile,
   NodeSessionForkReceiptFileOperations,
   type SessionForkReceiptFileOperations,
-} from '../../../src/adapters/fork/file-session-fork-receipt-store.ts';
-import { SessionForkPhaseRegressionError, SessionForkReceiptInvalidError } from '../../../src/lib/fork/failures.ts';
+} from '../../../../daemon/adapters/forks/file-session-fork-receipt-store.ts';
+import {
+  SessionForkPhaseRegressionError,
+  SessionForkReceiptInvalidError,
+} from '../../../../daemon/lib/forks/failures.ts';
 import {
   type SessionForkCommand,
   type SessionForkKey,
   sessionForkFingerprint,
-} from '../../../src/lib/fork/identity.ts';
+} from '../../../../daemon/lib/forks/identity.ts';
 import {
   advanceSessionForkReceipt,
   claimSessionForkReceipt,
@@ -25,8 +28,8 @@ import {
   type SessionForkImportReport,
   type SessionForkPhase,
   type SessionForkReceipt,
-} from '../../../src/lib/fork/receipt.ts';
-import { deriveTransferPlanId } from '../../../src/lib/transfer/prepare.ts';
+} from '../../../../daemon/lib/forks/receipt.ts';
+import { deriveTransferPlanId } from '../../../../daemon/lib/transfer/prepare.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**

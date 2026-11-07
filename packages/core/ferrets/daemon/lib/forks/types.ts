@@ -23,7 +23,8 @@
  * a reviewer, the thing that fails if one of them is ever introduced.
  */
 
-import type { SessionTransferPlan, SessionView } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../protocol/session-transfer.ts';
+import type { SessionView } from '../protocol/session.ts';
 import type { SessionTransferImportOutcome, TransferPrepareRequest, TransferTargetChoice } from '../transfer/types.ts';
 import type { SessionForkCommand, SessionForkKey } from './identity.ts';
 import type { SessionForkImportReport, SessionForkReceipt } from './receipt.ts';

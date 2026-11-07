@@ -1,27 +1,27 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HarnessKind } from '@ferretry/fleet';
+import { type Harness } from '../lib/protocol/session-base.ts';
 import {
   type AskToStopJobsResult,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
-  type Harness,
   type MigrationConversation,
   SessionConfigSchema,
   SessionStateSchema,
   type SessionView,
   type TranscriptProvenance,
-} from '@ferretry/protocol';
+} from '../lib/protocol/session.ts';
 import type { z } from 'zod';
 import { deliverStopSignal, KeyedSerialExecutor, type SystemClock, BunProcessProbe } from '../../src/adapters/index.ts';
-import { FileConversationFiles } from '../../src/adapters/migrate/file-conversation-files.ts';
-import { FileMigrationReportStore } from '../../src/adapters/migrate/file-migration-report.ts';
+import { FileConversationFiles } from '../adapters/moves/file-conversation-files.ts';
+import { FileMigrationReportStore } from '../adapters/moves/file-move-report.ts';
 import { readPersistedReasoningEffort } from '../../src/adapters/session/harness/index.ts';
-import { lifecycleConfigDocument } from '../../src/adapters/session/lifecycle/index.ts';
-import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import { lifecycleConfigDocument } from '../adapters/session/lifecycle/index.ts';
+import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../../src/adapters/transcript/conversion-check.ts';
 import { CliRolloutFormatProbe } from '../../src/adapters/transcript/rollout-format-probe.ts';
-import { resolveStartAccount } from '../../src/lib/fleet/start-resolution.ts';
+import { resolveStartAccount } from '../lib/fleet/start-resolution.ts';
 import {
   HANDOFF_READ_MAX_BYTES,
   type HandoffDocuments,
@@ -84,12 +84,12 @@ import {
   tryParseSessionId,
 } from '../../src/lib/index.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { sessionMigrateContribution } from '../../src/lib/runtime/mounts/session-migrate.ts';
+import { sessionMigrateContribution } from '../lib/runtime/mounts/session-move.ts';
 import {
   restoreRestamped,
   settleRejectedRelaunch,
   settleUnrevivedRelaunch,
-} from '../../src/lib/session/resume/unrevived-relaunch.ts';
+} from '../lib/session/resume/unrevived-relaunch.ts';
 
 /**
  * Moving a live session onto another account: `POST /v1/sessions/:sessionId/migrate`, its safety gate, the conversion

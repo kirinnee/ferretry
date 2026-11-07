@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'bun:test';
-import type { ConversationMessagePoint } from '@ferretry/protocol';
+import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
 import {
   type ConversationDigest,
   ConversationDigestError,
   type ConversationDigestFailure,
 } from '../../../src/lib/session/transcript/digest.ts';
 import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
-import { ConversationFacetContributor } from '../../../src/lib/transfer/facets/conversation.ts';
+import { ConversationFacetContributor } from '../../../../daemon/lib/transfer/facets/conversation.ts';
 import {
   type TransferConversationReadInput,
   type TransferConversationReader,
   TransferPrepareError,
-} from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/lib/transfer/types.ts';
 import { AT, request, sourceSession } from './fixtures.ts';
 
 const point = (byteOffset: number, blockIndex = 0): ConversationMessagePoint => ({

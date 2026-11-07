@@ -6,16 +6,16 @@ import {
   agentJobsMessageId,
   blockingAgentJobs,
   identifyAgentJobs,
-} from '../../../src/lib/migrate/agent-jobs.ts';
-import { identifyKnownProcesses } from '../../../src/lib/migrate/harness-provenance.ts';
-import { describeInflight } from '../../../src/lib/migrate/inflight-describe.ts';
-import { assembleInflightReport } from '../../../src/lib/migrate/inflight-report.ts';
+} from '../../../../daemon/lib/moves/agent-jobs.ts';
+import { identifyKnownProcesses } from '../../../../daemon/lib/moves/harness-provenance.ts';
+import { describeInflight } from '../../../../daemon/lib/moves/inflight-describe.ts';
+import { assembleInflightReport } from '../../../../daemon/lib/moves/inflight-report.ts';
 import {
   descendantsOf,
   inventoryProcesses,
   type ProcRow,
   parseProcessTable,
-} from '../../../src/lib/migrate/process-table.ts';
+} from '../../../../daemon/lib/moves/process-table.ts';
 
 const fixture = (name: string): string => readFileSync(`${import.meta.dir}/../../fixtures/ps/${name}`, 'utf8');
 

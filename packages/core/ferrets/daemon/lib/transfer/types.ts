@@ -28,21 +28,19 @@
  * handover stops its source afterwards, in a separate leg this code cannot reach.
  */
 
+import type { AttachmentView } from '@ferretry/protocol';
+import type { Harness } from '../protocol/session-base.ts';
+import type { ConversationMessagePoint, SessionTransferEdge } from '../protocol/session-transfer-edge.ts';
 import type {
   AttachmentFacet,
-  AttachmentView,
   ConversationFacet,
-  ConversationMessagePoint,
-  Harness,
-  InteractionMode,
   LineageFacet,
   ReferenceFacet,
-  SessionTransferEdge,
   SessionTransferPlan,
-  TranscriptProvenance,
   TransferOmission,
   WorkspaceFacet,
-} from '@ferretry/protocol';
+} from '../protocol/session-transfer.ts';
+import type { InteractionMode, TranscriptProvenance } from '../protocol/session.ts';
 import type { SessionProvenance } from '../session/provenance/types.ts';
 import type { ConversationDigest } from '../session/transcript/digest.ts';
 

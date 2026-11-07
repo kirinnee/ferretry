@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { describeInflight, refusalSentence } from '../../../src/lib/migrate/inflight-describe.ts';
+import { describeInflight, refusalSentence } from '../../../../daemon/lib/moves/inflight-describe.ts';
 import {
   assembleInflightReport,
   type AssembleInflightReportInput,
   type ProcessInfo,
-} from '../../../src/lib/migrate/inflight-report.ts';
+} from '../../../../daemon/lib/moves/inflight-report.ts';
 
 const report = (input: Partial<AssembleInflightReportInput>) =>
   assembleInflightReport({

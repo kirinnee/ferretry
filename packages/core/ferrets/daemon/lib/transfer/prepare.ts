@@ -12,7 +12,11 @@
  * same call. A preview computed by a second path is a preview that can lie.
  */
 
-import { type SessionTransferPlan, SessionTransferPlanSchema, type TransferOmission } from '@ferretry/protocol';
+import {
+  type SessionTransferPlan,
+  SessionTransferPlanSchema,
+  type TransferOmission,
+} from '../protocol/session-transfer.ts';
 import { createHash } from 'node:crypto';
 import {
   type SessionTransferPreparePorts,

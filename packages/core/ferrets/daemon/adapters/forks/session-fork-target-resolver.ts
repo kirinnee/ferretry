@@ -32,7 +32,8 @@
  * and what is performed cannot drift apart.
  */
 
-import type { ForkSessionFailure, RuntimeControlRequest, RuntimeModelChoice } from '@ferretry/protocol';
+import type { ForkSessionFailure } from '../../lib/protocol/session-fork.ts';
+import type { RuntimeControlRequest, RuntimeModelChoice } from '../../lib/protocol/session.ts';
 import type { CodexRuntimeCatalogCache } from '../../lib/session/harness/codex-catalog-cache.ts';
 import { codexSwitchContext } from '../../lib/session/harness/model-catalog.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
@@ -40,8 +41,8 @@ import type { HarnessRuntimeSwitchRequest } from '../../lib/session/harness/runt
 import type { HarnessQuirkService } from '../../lib/session/harness/service.ts';
 import type { CoreAccount, HarnessKind } from '../../lib/core/inventory.ts';
 import type { SessionPlanner } from '../../lib/core/session-planner.ts';
-import type { SessionForkCommand } from '../../lib/fork/identity.ts';
-import type { SessionForkTargetResolver as SessionForkTargetResolverPort } from '../../lib/fork/types.ts';
+import type { SessionForkCommand } from '../../lib/forks/identity.ts';
+import type { SessionForkTargetResolver as SessionForkTargetResolverPort } from '../../lib/forks/types.ts';
 import type { TransferTargetChoice } from '../../lib/transfer/types.ts';
 
 /**

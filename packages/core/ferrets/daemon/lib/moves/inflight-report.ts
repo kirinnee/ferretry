@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../protocol/session-base.ts';
 import type { KnownProcess } from './harness-provenance.ts';
 import { refusalSentence } from './inflight-describe.ts';
 import { type InflightVerdict, verdictBlocksMigration, worstVerdict } from './verdict.ts';

@@ -1,8 +1,8 @@
 import { afterEach, describe, it } from 'bun:test';
 import { type FileHandle, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { SessionTransferPlan } from '@ferretry/protocol';
-import { SessionTransferPlanSchema } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import { SessionTransferPlanSchema } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import should from 'should';
 import {
   FileSessionTransferTargetPlanStore,
@@ -10,9 +10,9 @@ import {
   fsyncTransferPlanFile,
   SessionTransferPlanConflictError,
   SessionTransferPlanCorruptError,
-} from '../../../src/adapters/transfer/plan-store.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
-import { deriveTransferPlanId } from '../../../src/lib/transfer/prepare.ts';
+} from '../../../../daemon/adapters/transfer/plan-store.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import { deriveTransferPlanId } from '../../../../daemon/lib/transfer/prepare.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**

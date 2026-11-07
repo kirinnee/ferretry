@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { InflightReport, ProcessInfo } from '../../../src/lib/migrate/inflight-report.ts';
-import type { ProcRow } from '../../../src/lib/migrate/process-table.ts';
+import type { InflightReport, ProcessInfo } from '../../../../daemon/lib/moves/inflight-report.ts';
+import type { ProcRow } from '../../../../daemon/lib/moves/process-table.ts';
 import {
   AgentJobStopper,
   jobProcesses,
   mayBeSameProcess,
   type StopSignal,
   sameProcess,
-} from '../../../src/lib/migrate/stop-jobs.ts';
+} from '../../../../daemon/lib/moves/stop-jobs.ts';
 
 const CLI = 100;
 

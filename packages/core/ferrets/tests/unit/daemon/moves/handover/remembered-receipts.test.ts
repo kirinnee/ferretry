@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { RememberedHandoverReceipts } from '../../../src/lib/handover/remembered-receipts.ts';
-import type { HandoverReceipt, HandoverReceiptStore } from '../../../src/lib/handover/types.ts';
+import { RememberedHandoverReceipts } from '../../../../../daemon/lib/moves/handover/remembered-receipts.ts';
+import type { HandoverReceipt, HandoverReceiptStore } from '../../../../../daemon/lib/moves/handover/types.ts';
 import { receiptAt } from './support.ts';
 
 /** The file store's behaviour, in memory: a full read lists every receipt not yet terminal. */

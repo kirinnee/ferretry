@@ -23,7 +23,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { HarnessSchema } from '@ferretry/protocol';
+import { HarnessSchema } from '../../protocol/session-base.ts';
 import { isTerminalStatus } from '../warden/types.ts';
 import type {
   HandoverBoardMembership,

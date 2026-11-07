@@ -36,7 +36,8 @@
  * lifecycle, against the executable it actually launches.
  */
 
-import { type SessionTransferEdge, SessionTransferEdgeSchema, type SessionTransferPlan } from '@ferretry/protocol';
+import { type SessionTransferEdge, SessionTransferEdgeSchema } from '../protocol/session-transfer-edge.ts';
+import { type SessionTransferPlan } from '../protocol/session-transfer.ts';
 import { ConversationDigestError } from '../session/transcript/digest.ts';
 import { renderTransferBrief } from './brief.ts';
 import { type SessionTransferImportOutcome, type SessionTransferImportPorts, TransferImportError } from './types.ts';

@@ -40,9 +40,8 @@ import {
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
   type ForkSessionRequest,
-  type SessionTransferPlan,
-  type TransferOmission,
-} from '@ferretry/protocol';
+} from '../protocol/session-fork.ts';
+import { type SessionTransferPlan, type TransferOmission } from '../protocol/session-transfer.ts';
 import { SessionForkRefusal, type SessionForkSubsystem } from '../runtime/mounts/session-fork.ts';
 import { tryParseSessionId } from '../session-id.ts';
 import {

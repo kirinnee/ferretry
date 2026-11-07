@@ -64,7 +64,7 @@
  * collision cannot make one session's migration answer for another's.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../protocol/session.ts';
 
 /** One logical migration, identified the way the route identifies it. */
 export interface MigrationReplayKey {

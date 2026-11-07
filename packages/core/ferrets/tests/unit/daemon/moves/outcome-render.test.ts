@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { renderMigrationOutcome, type MigrationOutcome } from '../../../src/lib/migrate/outcome-render.ts';
+import { renderMigrationOutcome, type MigrationOutcome } from '../../../../daemon/lib/moves/outcome-render.ts';
 
 const attempt: MigrationOutcome = {
   ok: false,

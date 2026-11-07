@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionHandoverService } from '../../../src/lib/handover/service.ts';
-import { HandoverError, type HandoverReceipt } from '../../../src/lib/handover/types.ts';
+import { SessionHandoverService } from '../../../../../daemon/lib/moves/handover/service.ts';
+import { HandoverError, type HandoverReceipt } from '../../../../../daemon/lib/moves/handover/types.ts';
 import {
   BOARD_ID,
   type HandoverHarness,

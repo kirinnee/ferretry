@@ -5,8 +5,8 @@ import {
   identifyKnownProcesses,
   type ConfiguredServer,
   type Provenance,
-} from '../../../src/lib/migrate/harness-provenance.ts';
-import { descendantsOf, inventoryProcesses, parseProcessTable } from '../../../src/lib/migrate/process-table.ts';
+} from '../../../../daemon/lib/moves/harness-provenance.ts';
+import { descendantsOf, inventoryProcesses, parseProcessTable } from '../../../../daemon/lib/moves/process-table.ts';
 
 const fixture = (name: string): string => readFileSync(`${import.meta.dir}/../../fixtures/ps/${name}`, 'utf8');
 

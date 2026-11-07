@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../lib/protocol/session.ts';
 import {
   FileSessionForkReceiptStore,
   forkOpeningTurnRefusal,
@@ -6,28 +6,25 @@ import {
   type SessionForkStartAccountResolver,
   SessionForkTargetBinder,
   SessionForkTargetResolver,
-} from '../../src/adapters/fork/index.ts';
+} from '../adapters/forks/index.ts';
 import { KeyedSerialExecutor } from '../../src/adapters/index.ts';
-import type {
-  FileSessionEnvironmentStore,
-  SessionProtocolEnvelope,
-} from '../../src/adapters/session/lifecycle/index.ts';
+import type { FileSessionEnvironmentStore, SessionProtocolEnvelope } from '../adapters/session/lifecycle/index.ts';
 import { StorageTranscriptDigestJournal } from '../../src/adapters/session/transcript/index.ts';
-import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import {
   GitTransferWorkspaceProbe,
   SessionAttachmentTransferReader,
   StorageTransferConversationReader,
   StorageTransferEnvelopeWriter,
   StorageTransferSourceReader,
-} from '../../src/adapters/transfer/index.ts';
-import type { GitWorktreeGateway } from '../../src/adapters/worktrees/index.ts';
+} from '../adapters/transfer/index.ts';
+import type { GitWorktreeGateway } from '../adapters/worktrees/index.ts';
 import {
   SessionForkFacade,
   type SessionForkIdFactory,
   SessionForkService,
   sessionForkKey,
-} from '../../src/lib/fork/index.ts';
+} from '../lib/forks/index.ts';
 import {
   type ClockPort,
   type CodexRuntimeCatalogCache,
@@ -49,8 +46,8 @@ import {
   verifySessionTranscriptMessageToken,
 } from '../../src/lib/index.ts';
 import type { TransferProvides } from './transfer.ts';
-import { type SessionForkSubsystem, sessionForkContribution } from '../../src/lib/runtime/mounts/session-fork.ts';
-import { sessionTmuxName } from '../../src/lib/session/lifecycle/policy.ts';
+import { type SessionForkSubsystem, sessionForkContribution } from '../lib/runtime/mounts/session-fork.ts';
+import { sessionTmuxName } from '../lib/session/lifecycle/policy.ts';
 import {
   AttachmentFacetContributor,
   ConversationFacetContributor,
@@ -59,7 +56,7 @@ import {
   SessionTransferPreparer,
   TransferPrepareError,
   WorkspaceFacetContributor,
-} from '../../src/lib/transfer/index.ts';
+} from '../lib/transfer/index.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
 
 /**

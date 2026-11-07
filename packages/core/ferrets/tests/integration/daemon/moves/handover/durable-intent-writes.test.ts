@@ -3,11 +3,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import should from 'should';
-import { FileHandoverReceiptStore } from '../../../src/adapters/handover/file-handover-receipt-store.ts';
-import { SessionHandoverService } from '../../../src/lib/handover/service.ts';
-import { HandoverError } from '../../../src/lib/handover/types.ts';
-import type { HandoverPorts, HandoverReceipt, HandoverReceiptStore } from '../../../src/lib/handover/types.ts';
-import { harness, observation, REQUEST_ID, request, sessionView, SOURCE_ID } from '../../unit/handover/support.ts';
+import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
+import { SessionHandoverService } from '../../../../../daemon/lib/moves/handover/service.ts';
+import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
+import type {
+  HandoverPorts,
+  HandoverReceipt,
+  HandoverReceiptStore,
+} from '../../../../../daemon/lib/moves/handover/types.ts';
+import {
+  harness,
+  observation,
+  REQUEST_ID,
+  request,
+  sessionView,
+  SOURCE_ID,
+} from '../../../../unit/daemon/moves/handover/support.ts';
 
 /**
  * The state machine driven against the REAL receipt store, which parses on the way out.

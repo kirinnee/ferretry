@@ -1,5 +1,6 @@
 import { isAbsolute, join, relative } from 'node:path';
-import type { Harness, TranscriptProvenance } from '@ferretry/protocol';
+import type { Harness } from '../protocol/session-base.ts';
+import type { TranscriptProvenance } from '../protocol/session.ts';
 import { claudeTranscriptFile } from '../session/transcript/claude-path.ts';
 
 /**

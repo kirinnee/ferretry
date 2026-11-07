@@ -1,17 +1,17 @@
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
-  FY_REQUEST_ID_HEADER,
   type SessionHandoverFailure,
   type SessionHandoverReceipt,
   type SessionHandoverRequest,
   SessionHandoverRequestSchema,
-} from '@ferretry/protocol';
+} from '../../protocol/handover.ts';
 import { agentSessionOf, isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse, BodyTooLargeError, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { HandoverError } from '../../handover/types.ts';
+import { HandoverError } from '../../moves/handover/types.ts';
 import type { ModuleContribution } from '../modules.ts';
 
 /**

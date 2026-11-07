@@ -18,7 +18,7 @@
  * would wedge that session's handover permanently the first time anything threw.
  */
 
-import type { SessionTransferPlan } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../../protocol/session-transfer.ts';
 import { isTerminalStatus } from '../warden/types.ts';
 import {
   derivedStepId,
@@ -33,7 +33,7 @@ import {
   nextPhase,
   receiptIsIrreversible,
 } from './policy.ts';
-import type { SessionHandoverEffectIntent as HandoverEffectIntent } from '@ferretry/protocol';
+import type { SessionHandoverEffectIntent as HandoverEffectIntent } from '../../protocol/handover.ts';
 import {
   DEFAULT_HANDOVER_SETTINGS,
   type HandoverFailure,

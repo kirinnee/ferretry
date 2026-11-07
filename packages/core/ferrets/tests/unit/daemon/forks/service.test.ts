@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionTransferPlan, SessionView } from '@ferretry/protocol';
-import { SessionForkRequestConflictError } from '../../../src/lib/fork/failures.ts';
-import { type SessionForkKey, sessionForkFingerprint, sessionForkKey } from '../../../src/lib/fork/identity.ts';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import { SessionForkRequestConflictError } from '../../../../daemon/lib/forks/failures.ts';
+import { type SessionForkKey, sessionForkFingerprint, sessionForkKey } from '../../../../daemon/lib/forks/identity.ts';
 import {
   advanceSessionForkReceipt,
   claimSessionForkReceipt,
@@ -11,8 +12,8 @@ import {
   type SessionForkPhase,
   type SessionForkReceipt,
   sessionForkPhaseRank,
-} from '../../../src/lib/fork/receipt.ts';
-import { SessionForkService } from '../../../src/lib/fork/service.ts';
+} from '../../../../daemon/lib/forks/receipt.ts';
+import { SessionForkService } from '../../../../daemon/lib/forks/service.ts';
 import {
   type ForbiddenForkCapability,
   SESSION_FORK_PORTS,
@@ -31,13 +32,13 @@ import {
   type SessionForkTargetPlanStore,
   type SessionForkOpeningTurn,
   type SessionForkTargetResolver,
-} from '../../../src/lib/fork/types.ts';
+} from '../../../../daemon/lib/forks/types.ts';
 import {
   type SessionTransferImportOutcome,
   TransferImportError,
   TransferPrepareError,
   type TransferPrepareRequest,
-} from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/lib/transfer/types.ts';
 import { AT, command, plan, report, target } from './fixtures.ts';
 
 const KEY: SessionForkKey = { sourceSessionId: 'source-a', requestId: 'req-1' };

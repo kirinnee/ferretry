@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { renderTransferBrief } from '../../../src/lib/transfer/brief.ts';
+import { renderTransferBrief } from '../../../../daemon/lib/transfer/brief.ts';
 import { AT, plan } from './fixtures.ts';
 
 describe('renderTransferBrief', () => {

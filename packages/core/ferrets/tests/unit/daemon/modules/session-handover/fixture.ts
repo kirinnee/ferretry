@@ -6,7 +6,7 @@ import {
   type SessionHandoverNeeds,
   type SessionHandoverProvides,
   sessionHandoverModule,
-} from '../../../../bin/modules/session-handover.ts';
+} from '../../../../../daemon/modules/session-handover.ts';
 
 /**
  * THE `session-handover` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).

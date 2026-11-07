@@ -1,5 +1,6 @@
-import type { SessionHandoverRequest, SessionTransferPlan } from '@ferretry/protocol';
-import { HandoverError } from '../../../src/lib/handover/types.ts';
+import type { SessionHandoverRequest } from '../../../../../daemon/lib/protocol/handover.ts';
+import type { SessionTransferPlan } from '../../../../../daemon/lib/protocol/session-transfer.ts';
+import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
 import type {
   HandoverAgendaRequest,
   HandoverFailure,
@@ -20,7 +21,7 @@ import type {
   HandoverRelinquishCommand,
   HandoverResolvedAccount,
   HandoverSessionView,
-} from '../../../src/lib/handover/types.ts';
+} from '../../../../../daemon/lib/moves/handover/types.ts';
 
 export const SOURCE_ID = 'source-1';
 export const BOARD_ID = 'board-1';

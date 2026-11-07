@@ -44,7 +44,7 @@
  * document can describe completely.
  */
 
-import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
+import { SessionConfigSchema, SessionStateSchema } from '../../lib/protocol/session.ts';
 import type { TransferSourceReader, TransferSourceSession } from '../../lib/transfer/types.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';

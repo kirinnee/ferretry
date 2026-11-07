@@ -1,16 +1,16 @@
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { identifyAgentJobs } from '../../lib/migrate/agent-jobs.ts';
-import { type ConfiguredServersPort, configuredServersOf } from '../../lib/migrate/configured-servers.ts';
-import { identifyKnownProcesses } from '../../lib/migrate/harness-provenance.ts';
-import type { ProcessObservation } from '../../lib/migrate/inflight-report.ts';
-import type { PaneSnapshotPort } from '../../lib/migrate/preflight-service.ts';
+import { identifyAgentJobs } from '../../lib/moves/agent-jobs.ts';
+import { type ConfiguredServersPort, configuredServersOf } from '../../lib/moves/configured-servers.ts';
+import { identifyKnownProcesses } from '../../lib/moves/harness-provenance.ts';
+import type { ProcessObservation } from '../../lib/moves/inflight-report.ts';
+import type { PaneSnapshotPort } from '../../lib/moves/preflight-service.ts';
 import type {
   ProcessInventoryPort,
   ProcessProbePort,
   ProcessTableRead,
-} from '../../lib/migrate/process-inventory-port.ts';
-import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } from '../../lib/migrate/process-table.ts';
+} from '../../lib/moves/process-inventory-port.ts';
+import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } from '../../lib/moves/process-table.ts';
 import { capturePaneArguments, hasSessionArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { paneProofArguments, parsePaneSighting } from '../../lib/tmux/pane-proof.ts';

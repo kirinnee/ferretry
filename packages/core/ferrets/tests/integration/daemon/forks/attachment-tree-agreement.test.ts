@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
-import { FileSessionAttachmentCopier } from '../../../src/adapters/transfer/attachment-copier.ts';
+import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
 import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
 import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';

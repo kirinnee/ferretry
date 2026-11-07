@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   MIGRATION_REPLAY_MAX_ENTRIES,
@@ -6,7 +6,7 @@ import {
   MigrationReplayGuard,
   MigrationReplayMismatchError,
   migrationReplayKey,
-} from '../../../src/lib/migrate/replay-guard.ts';
+} from '../../../../daemon/lib/moves/replay-guard.ts';
 
 /** Stands in for the taxonomy's `failed`: a failure raised past the point of no return. */
 class CommittedError extends Error {}

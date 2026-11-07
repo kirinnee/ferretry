@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { classifyCommand, classifyToolName } from '../../../src/lib/migrate/command-classifier.ts';
+import { classifyCommand, classifyToolName } from '../../../../daemon/lib/moves/command-classifier.ts';
 
 describe('migration command classifier', () => {
   it('should classify known read-only, repeatable, and mutating commands', () => {

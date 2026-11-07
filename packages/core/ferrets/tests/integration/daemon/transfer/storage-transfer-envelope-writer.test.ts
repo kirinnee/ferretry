@@ -1,19 +1,19 @@
 import { afterEach, describe, it } from 'bun:test';
-import type { SessionTransferEdge } from '@ferretry/protocol';
+import type { SessionTransferEdge } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
 import should from 'should';
 import {
   SessionTransferEnvelopeError,
   StorageTransferEnvelopeWriter,
-} from '../../../src/adapters/transfer/storage-transfer-envelope-writer.ts';
-import { StorageSessionProvenanceStore } from '../../../src/adapters/session/provenance/index.ts';
+} from '../../../../daemon/adapters/transfer/storage-transfer-envelope-writer.ts';
+import { StorageSessionProvenanceStore } from '../../../../daemon/adapters/session/provenance/index.ts';
 import {
   SessionProvenanceSchema,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
-} from '../../../src/lib/session/provenance/index.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
-import type { SessionTransferEnvelope } from '../../../src/lib/transfer/types.ts';
-import { AT, SOURCE_ID, TARGET_ID, cleanup, openStorage, plan } from '../fork/fixtures.ts';
+} from '../../../../daemon/lib/session/provenance/index.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
+import { AT, SOURCE_ID, TARGET_ID, cleanup, openStorage, plan } from '../forks/fixtures.ts';
 
 /**
  * The transfer envelope, against real session documents.

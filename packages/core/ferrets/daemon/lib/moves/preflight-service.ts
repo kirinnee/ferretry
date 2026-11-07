@@ -1,4 +1,5 @@
-import type { MigrationRefusal, SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../protocol/session-base.ts';
+import type { MigrationRefusal } from '../protocol/session.ts';
 import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import { backgroundTerminalCount } from './background-terminals.ts';
 import { describeInflight } from './inflight-describe.ts';

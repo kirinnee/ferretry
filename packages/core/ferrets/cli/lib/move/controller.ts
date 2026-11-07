@@ -1,4 +1,8 @@
-import { type ConversionPreview, type MigrationConversation, MigrationConversationSchema } from '@ferretry/protocol';
+import {
+  type ConversionPreview,
+  type MigrationConversation,
+  MigrationConversationSchema,
+} from '../../../daemon/lib/protocol/session.ts';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IMigrationGateway } from './ports.ts';

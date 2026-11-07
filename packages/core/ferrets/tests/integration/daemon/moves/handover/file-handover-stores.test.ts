@@ -2,11 +2,12 @@ import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import type { SessionHandoverReceipt, SessionTransferPlan } from '@ferretry/protocol';
+import type { SessionHandoverReceipt } from '../../../../../daemon/lib/protocol/handover.ts';
+import type { SessionTransferPlan } from '../../../../../daemon/lib/protocol/session-transfer.ts';
 import should from 'should';
-import { FileHandoverReceiptStore } from '../../../src/adapters/handover/file-handover-receipt-store.ts';
-import { handoverPlanId } from '../../../src/lib/handover/policy.ts';
-import { HandoverReceiptDamagedError } from '../../../src/lib/handover/types.ts';
+import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
+import { handoverPlanId } from '../../../../../daemon/lib/moves/handover/policy.ts';
+import { HandoverReceiptDamagedError } from '../../../../../daemon/lib/moves/handover/types.ts';
 
 const AT = '2026-02-01T00:00:00.000Z';
 const PLAN_ID = handoverPlanId('source-1', 'req-1');

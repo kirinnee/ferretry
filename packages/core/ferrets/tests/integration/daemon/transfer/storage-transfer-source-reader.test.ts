@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TranscriptProvenance } from '@ferretry/protocol';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
@@ -14,9 +14,9 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
-import { StorageTransferSourceReader } from '../../../src/adapters/transfer/storage-transfer-source-reader.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
+import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
+import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 
 /**
  * The complete source projection, off real session documents.

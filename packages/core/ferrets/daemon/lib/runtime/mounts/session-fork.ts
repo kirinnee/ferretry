@@ -1,11 +1,11 @@
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
   type ForkSessionFailure,
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
   type ForkSessionRequest,
   ForkSessionRequestSchema,
-  FY_REQUEST_ID_HEADER,
-} from '@ferretry/protocol';
+} from '../../protocol/session-fork.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';

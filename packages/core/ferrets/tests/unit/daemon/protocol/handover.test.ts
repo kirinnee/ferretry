@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as handover from '../../src/lib/handover.ts';
+import * as handover from '../../../../daemon/lib/protocol/handover.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const AT = '2026-08-06T07:00:00.000Z';

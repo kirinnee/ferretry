@@ -2,13 +2,13 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import type { AttachmentFacet } from '@ferretry/protocol';
+import type { AttachmentFacet } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import should from 'should';
 import {
   FileSessionAttachmentCopier,
   SessionAttachmentCopyError,
-} from '../../../src/adapters/transfer/attachment-copier.ts';
-import { type DurableArtifactIo, fsyncArtifactPath } from '../../../src/adapters/transfer/durable-artifact.ts';
+} from '../../../../daemon/adapters/transfer/attachment-copier.ts';
+import { type DurableArtifactIo, fsyncArtifactPath } from '../../../../daemon/adapters/transfer/durable-artifact.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**

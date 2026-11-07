@@ -1,7 +1,7 @@
-import { type SessionForkNeeds, sessionForkModule } from '../../../../bin/modules/session-fork.ts';
-import type { SessionForkSubsystem } from '../../../../src/lib/runtime/mounts/session-fork.ts';
+import { type SessionForkNeeds, sessionForkModule } from '../../../../../daemon/modules/session-fork.ts';
+import type { SessionForkSubsystem } from '../../../../../daemon/lib/runtime/mounts/session-fork.ts';
 import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
-import { transferModule } from '../../../../bin/modules/transfer.ts';
+import { transferModule } from '../../../../../daemon/modules/transfer.ts';
 
 /**
  * THE `session-fork` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).

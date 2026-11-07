@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SESSION_HANDOVER_PHASES, type SessionHandoverPhase } from '@ferretry/protocol';
+import { SESSION_HANDOVER_PHASES, type SessionHandoverPhase } from '../../../../../daemon/lib/protocol/handover.ts';
 import should from 'should';
 import {
   derivedStepId,
@@ -12,8 +12,8 @@ import {
   isPointOfNoReturn,
   isTerminalHandoverPhase,
   nextPhase,
-} from '../../../src/lib/handover/policy.ts';
-import type { HandoverReceipt, HandoverSessionView } from '../../../src/lib/handover/types.ts';
+} from '../../../../../daemon/lib/moves/handover/policy.ts';
+import type { HandoverReceipt, HandoverSessionView } from '../../../../../daemon/lib/moves/handover/types.ts';
 import {
   CODEX_ACCOUNT,
   CODEX_COORDINATOR,

@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { ProcessObservation } from '../../../src/lib/migrate/inflight-report.ts';
+import type { ProcessObservation } from '../../../../daemon/lib/moves/inflight-report.ts';
 import {
   type MigrateTargetView,
   MigrationPreflight,
   type PaneSnapshotPort,
-} from '../../../src/lib/migrate/preflight-service.ts';
-import type { ProcessInventoryPort } from '../../../src/lib/migrate/process-inventory-port.ts';
+} from '../../../../daemon/lib/moves/preflight-service.ts';
+import type { ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
 
 class StubInventory implements ProcessInventoryPort {
   readonly sessions: string[] = [];

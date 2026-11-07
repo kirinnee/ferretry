@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { verdictBlocksMigration, worstVerdict } from '../../../src/lib/migrate/verdict.ts';
+import { verdictBlocksMigration, worstVerdict } from '../../../../daemon/lib/moves/verdict.ts';
 
 describe('migration verdict policy', () => {
   it('should rank destructive work above unknown and safe work', () => {

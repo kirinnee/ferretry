@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { SessionAttachmentTransferReader } from '../../../src/adapters/transfer/session-attachment-reader.ts';
+import { SessionAttachmentTransferReader } from '../../../../daemon/adapters/transfer/session-attachment-reader.ts';
 import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
 import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
 

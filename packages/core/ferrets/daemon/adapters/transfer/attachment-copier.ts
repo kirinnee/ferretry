@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { type AttachmentFacet, AttachmentFacetSchema } from '@ferretry/protocol';
+import { type AttachmentFacet, AttachmentFacetSchema } from '../../lib/protocol/session-transfer.ts';
 import { parseStoredAttachmentManifest, type StoredAttachment } from '../../lib/attachments/index.ts';
 import type { TransferAttachmentCopier, TransferAttachmentCopyInput } from '../../lib/transfer/types.ts';
 import { type DurableArtifactIo, TransferArtifactDurability } from './durable-artifact.ts';

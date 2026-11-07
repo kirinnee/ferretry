@@ -6,8 +6,8 @@ import type {
   ReferenceFacet,
   TransferOmission,
   WorkspaceFacet,
-} from '@ferretry/protocol';
-import { deriveTransferPlanId, SessionTransferPreparer } from '../../../src/lib/transfer/prepare.ts';
+} from '../../../../daemon/lib/protocol/session-transfer.ts';
+import { deriveTransferPlanId, SessionTransferPreparer } from '../../../../daemon/lib/transfer/prepare.ts';
 import {
   SESSION_TRANSFER_PREPARE_PORTS,
   type TransferContributorSet,
@@ -19,7 +19,7 @@ import {
   type TransferSelectionBindingEvidence,
   type TransferSelectionBindingVerifier,
   type TransferSourceSession,
-} from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/lib/transfer/types.ts';
 import { request, sourceSession, target } from './fixtures.ts';
 import {
   verifySessionTranscriptMessageToken,

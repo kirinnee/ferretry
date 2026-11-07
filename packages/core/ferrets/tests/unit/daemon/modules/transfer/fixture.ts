@@ -1,4 +1,4 @@
-import { type TransferNeeds, transferModule, type TransferProvides } from '../../../../bin/modules/transfer.ts';
+import { type TransferNeeds, transferModule, type TransferProvides } from '../../../../../daemon/modules/transfer.ts';
 import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
 
 /**

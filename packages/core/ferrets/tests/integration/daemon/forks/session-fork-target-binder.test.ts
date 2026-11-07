@@ -2,53 +2,53 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFile, rm, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
+import { type SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import {
   type RuntimeControlRequest,
   SessionConfigSchema,
   SessionStateSchema,
-  type SessionTransferPlan,
   type SessionView,
-} from '@ferretry/protocol';
+} from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   SessionForkTargetBinder,
   type SessionForkTargetBinderPorts,
   SessionForkTargetBindingError,
   forkOpeningTurn,
-} from '../../../src/adapters/fork/session-fork-target-binder.ts';
+} from '../../../../daemon/adapters/forks/session-fork-target-binder.ts';
 import {
   SessionForkTargetResolutionError,
   type SessionForkTargetAccount,
-} from '../../../src/adapters/fork/session-fork-target-resolver.ts';
-import { FileSessionTaskStore } from '../../../src/adapters/session/lifecycle/file-session-task-store.ts';
-import { NodeWorkingDirectoryResolver } from '../../../src/adapters/session/lifecycle/node-working-directory-resolver.ts';
+} from '../../../../daemon/adapters/forks/session-fork-target-resolver.ts';
+import { FileSessionTaskStore } from '../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
+import { NodeWorkingDirectoryResolver } from '../../../../daemon/adapters/session/lifecycle/node-working-directory-resolver.ts';
 import {
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
-} from '../../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
-import { FileSessionAttachmentCopier } from '../../../src/adapters/transfer/attachment-copier.ts';
-import { FileSessionTransferBriefWriter } from '../../../src/adapters/transfer/brief-writer.ts';
-import { FileSessionTransferTargetPlanStore } from '../../../src/adapters/transfer/plan-store.ts';
-import { StorageTransferEnvelopeWriter } from '../../../src/adapters/transfer/storage-transfer-envelope-writer.ts';
+} from '../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
+import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
+import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
+import { FileSessionTransferTargetPlanStore } from '../../../../daemon/adapters/transfer/plan-store.ts';
+import { StorageTransferEnvelopeWriter } from '../../../../daemon/adapters/transfer/storage-transfer-envelope-writer.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/index.ts';
-import type { SessionForkBoundTarget } from '../../../src/lib/fork/types.ts';
-import type { SessionEffectKey, SessionEffectLedger } from '../../../src/lib/session/effects/index.ts';
-import { assignedTaskDocument } from '../../../src/lib/session/lifecycle/policy.ts';
-import { sessionTmuxName } from '../../../src/lib/session/lifecycle/policy.ts';
+import type { SessionForkBoundTarget } from '../../../../daemon/lib/forks/types.ts';
+import type { SessionEffectKey, SessionEffectLedger } from '../../../../daemon/lib/session/effects/index.ts';
+import { assignedTaskDocument } from '../../../../daemon/lib/session/lifecycle/policy.ts';
+import { sessionTmuxName } from '../../../../daemon/lib/session/lifecycle/policy.ts';
 import { startupModelArguments } from '../../../src/lib/session/harness/startup.ts';
 import { claudeSessionArguments, claudeTranscriptFile } from '../../../src/lib/session/transcript/claude-path.ts';
 import { codexCorrelationArguments } from '../../../src/lib/session/transcript/codex-rollout.ts';
-import { SessionLifecycleService } from '../../../src/lib/session/lifecycle/service.ts';
-import { defaultSessionLifecycleSettings } from '../../../src/lib/session/lifecycle/settings.ts';
+import { SessionLifecycleService } from '../../../../daemon/lib/session/lifecycle/service.ts';
+import { defaultSessionLifecycleSettings } from '../../../../daemon/lib/session/lifecycle/settings.ts';
 import {
   MAX_ASSIGNED_TASK_LENGTH,
   SESSION_BOARD_CAPABILITY_VARIABLE,
-} from '../../../src/lib/session/lifecycle/types.ts';
+} from '../../../../daemon/lib/session/lifecycle/types.ts';
 import type { JsonValue } from '../../../src/lib/json.ts';
-import type { SessionLifecycleRecord } from '../../../src/lib/session/lifecycle/types.ts';
-import { type SessionId, parseSessionId } from '../../../src/lib/session-id.ts';
-import type { TransferConversationValidator } from '../../../src/lib/transfer/types.ts';
+import type { SessionLifecycleRecord } from '../../../../daemon/lib/session/lifecycle/types.ts';
+import { type SessionId, parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import type { TransferConversationValidator } from '../../../../daemon/lib/transfer/types.ts';
 import {
   AT,
   SOURCE_ID,

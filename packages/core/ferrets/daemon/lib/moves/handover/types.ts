@@ -31,9 +31,9 @@ import type {
   SessionHandoverPhase,
   SessionHandoverReceipt,
   SessionHandoverRequest,
-  SessionStatus,
-  SessionTransferPlan,
-} from '@ferretry/protocol';
+} from '../../protocol/handover.ts';
+import type { SessionStatus } from '../../protocol/session-base.ts';
+import type { SessionTransferPlan } from '../../protocol/session-transfer.ts';
 
 /** The protocol's phase set, under the daemon's shorter name. There is no second enumeration. */
 export type HandoverPhase = SessionHandoverPhase;

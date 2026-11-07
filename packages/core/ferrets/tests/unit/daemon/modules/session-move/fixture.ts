@@ -4,12 +4,12 @@ import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/m
 import {
   type SessionMigrateSubsystem,
   sessionMigrateContribution,
-} from '../../../../src/lib/runtime/mounts/session-migrate.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-move.ts';
 import {
   type SessionMigrateNeeds,
   type SessionMigrateProvides,
   sessionMigrateModule,
-} from '../../../../bin/modules/session-migrate.ts';
+} from '../../../../../daemon/modules/session-move.ts';
 
 /**
  * THE `session-migrate` MODULE'S TEST CONSTRUCTION — a per-module fragment (see `../learning/fixture.ts`).

@@ -1,9 +1,10 @@
-import type { SessionTransferPlan, TranscriptProvenance } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import type {
   TransferPrepareRequest,
   TransferSourceSession,
   TransferTargetChoice,
-} from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/lib/transfer/types.ts';
 
 export const AT = '2026-08-06T07:00:00.000Z';
 

@@ -2,25 +2,25 @@ import {
   FORK_SESSION_FAILURE_CODES,
   type ForkSessionFailure,
   type ForkSessionRequest,
-  type SessionTransferPlan,
-  type SessionView,
-} from '@ferretry/protocol';
+} from '../../../../daemon/lib/protocol/session-fork.ts';
+import { type SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import { type SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   SessionForkPhaseRegressionError,
   SessionForkReceiptInvalidError,
   SessionForkRequestConflictError,
-} from '../../../src/lib/fork/failures.ts';
-import type { SessionForkCommand, SessionForkKey } from '../../../src/lib/fork/identity.ts';
+} from '../../../../daemon/lib/forks/failures.ts';
+import type { SessionForkCommand, SessionForkKey } from '../../../../daemon/lib/forks/identity.ts';
 import {
   forkRefusal,
   forkSessionFailure,
   SessionForkFacade,
   type SessionForkOperation,
-} from '../../../src/lib/fork/subsystem.ts';
-import type { SessionForkResult } from '../../../src/lib/fork/types.ts';
-import { SessionForkRefusal } from '../../../src/lib/runtime/mounts/session-fork.ts';
-import { TransferImportError, TransferPrepareError } from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/lib/forks/subsystem.ts';
+import type { SessionForkResult } from '../../../../daemon/lib/forks/types.ts';
+import { SessionForkRefusal } from '../../../../daemon/lib/runtime/mounts/session-fork.ts';
+import { TransferImportError, TransferPrepareError } from '../../../../daemon/lib/transfer/types.ts';
 import { plan, report } from './fixtures.ts';
 
 const KEY: SessionForkKey = { sourceSessionId: 'source-a', requestId: 'req-1' };

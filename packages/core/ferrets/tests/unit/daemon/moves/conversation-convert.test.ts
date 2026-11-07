@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { TranscriptProvenance } from '@ferretry/protocol';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   type ConversationConvertRequest,
   codexModelProvider,
   needsRolloutFormatProbe,
   planConversationConvert,
-} from '../../../src/lib/migrate/conversation-convert.ts';
+} from '../../../../daemon/lib/moves/conversation-convert.ts';
 
 /**
  * The plan for a cross-harness move: what is written where, under which id, and every refusal that

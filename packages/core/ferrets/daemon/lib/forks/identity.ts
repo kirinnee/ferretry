@@ -25,7 +25,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { ConversationMessagePoint, SessionTransferPlan } from '@ferretry/protocol';
+import type { ConversationMessagePoint } from '../protocol/session-transfer-edge.ts';
+import type { SessionTransferPlan } from '../protocol/session-transfer.ts';
 
 /**
  * The caller's already-parsed decision.

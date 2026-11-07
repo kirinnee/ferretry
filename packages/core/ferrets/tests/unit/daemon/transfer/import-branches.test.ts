@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { SessionTransferImporter } from '../../../src/lib/transfer/import.ts';
-import { TransferImportError } from '../../../src/lib/transfer/types.ts';
+import { SessionTransferImporter } from '../../../../daemon/lib/transfer/import.ts';
+import { TransferImportError } from '../../../../daemon/lib/transfer/types.ts';
 import { plan } from './fixtures.ts';
 
 describe('SessionTransferImporter cut provenance', () => {

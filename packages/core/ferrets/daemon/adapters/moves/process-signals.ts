@@ -1,4 +1,4 @@
-import type { StopSignal } from '../../lib/migrate/stop-jobs.ts';
+import type { StopSignal } from '../../lib/moves/stop-jobs.ts';
 
 /**
  * One signal to one pid, for `AgentJobStopper` — which chose the pid from this session's own pane tree and

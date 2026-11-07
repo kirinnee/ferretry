@@ -4,7 +4,7 @@ import {
   HANDOVER_BOARD_PORT_METHODS,
   HandoverError,
   HandoverReceiptDamagedError,
-} from '../../../src/lib/handover/types.ts';
+} from '../../../../../daemon/lib/moves/handover/types.ts';
 
 /**
  * The port key set is the security property, so it is asserted rather than assumed.

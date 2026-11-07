@@ -31,7 +31,8 @@
  * instead, and the two answers stay distinct all the way to the caller.
  */
 
-import type { ConversationMessagePoint, Harness } from '@ferretry/protocol';
+import type { Harness } from '../../lib/protocol/session-base.ts';
+import type { ConversationMessagePoint } from '../../lib/protocol/session-transfer-edge.ts';
 import type { ConversationDigest } from '../../lib/session/transcript/digest.ts';
 import { SessionTranscriptReader } from '../../lib/session/transcript/reader.ts';
 import type { TranscriptDigestJournal } from '../../lib/session/transcript/reader.ts';

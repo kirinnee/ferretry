@@ -30,7 +30,7 @@
  * Once a receipt exists, every retry applies that same decision rather than preparing again.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../protocol/session.ts';
 import { SessionForkRequestConflictError } from './failures.ts';
 import { type SessionForkCommand, type SessionForkKey, sessionForkFingerprint } from './identity.ts';
 import {

@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { TranscriptProvenance } from '@ferretry/protocol';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   type ConversationCarryRequest,
   planConversationCarry,
   previousConversation,
-} from '../../../src/lib/migrate/conversation-carry.ts';
+} from '../../../../daemon/lib/moves/conversation-carry.ts';
 
 const CWD = '/work/repo';
 const ID = 'cc4c82a7-0000-4000-8000-000000000001';

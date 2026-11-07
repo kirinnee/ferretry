@@ -5,7 +5,7 @@ import {
   inventoryProcesses,
   parseElapsed,
   parseProcessTable,
-} from '../../../src/lib/migrate/process-table.ts';
+} from '../../../../daemon/lib/moves/process-table.ts';
 
 const table = [
   '  100     1   999 /bin/harness',

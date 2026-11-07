@@ -2,8 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
-import { FileMigrationReportStore } from '../../../src/adapters/migrate/file-migration-report.ts';
-import { parseSessionId } from '../../../src/lib/session-id.ts';
+import { FileMigrationReportStore } from '../../../../daemon/adapters/moves/file-move-report.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**

@@ -4,7 +4,7 @@ import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
   FileSessionTransferTargetPlanStore,
-} from '../../../../src/adapters/transfer/index.ts';
+} from '../../../../../daemon/adapters/transfer/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../../src/lib/index.ts';
 import { builtTransfer } from './fixture.ts';
 

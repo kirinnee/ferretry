@@ -4,7 +4,7 @@ import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
   FileSessionTransferTargetPlanStore,
-} from '../../src/adapters/transfer/index.ts';
+} from '../adapters/transfer/index.ts';
 import {
   attachmentDirectory,
   createSessionPaths,

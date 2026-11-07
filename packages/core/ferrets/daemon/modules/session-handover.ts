@@ -1,6 +1,6 @@
 import { asActivity, KeyedSerialExecutor, type SystemClock } from '../../src/adapters/index.ts';
-import { FileHandoverReceiptStore } from '../../src/adapters/handover/file-handover-receipt-store.ts';
-import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
+import { FileHandoverReceiptStore } from '../adapters/moves/handover/file-handover-receipt-store.ts';
+import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import {
   type AccountInventoryPort,
   type ActivityLedger,
@@ -18,9 +18,9 @@ import {
   type SessionPlanner,
   tryParseSessionId,
 } from '../../src/lib/index.ts';
-import { resolveStartAccount } from '../../src/lib/fleet/start-resolution.ts';
+import { resolveStartAccount } from '../lib/fleet/start-resolution.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { sessionHandoverContribution } from '../../src/lib/runtime/mounts/session-handover.ts';
+import { sessionHandoverContribution } from '../lib/runtime/mounts/session-handover.ts';
 
 /**
  * The cross-harness handover: the three routes under `/v1/sessions/:sessionId/handover`, the durable receipt store, the

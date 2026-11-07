@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { deliverStopSignal } from '../../../src/adapters/migrate/process-signals.ts';
+import { deliverStopSignal } from '../../../../daemon/adapters/moves/process-signals.ts';
 
 /**
  * The one OS edge the Warden's job stopper signals through, against a real child it started itself — never

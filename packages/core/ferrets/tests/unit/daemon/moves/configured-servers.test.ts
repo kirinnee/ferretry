@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { configuredServersOf } from '../../../src/lib/migrate/configured-servers.ts';
+import { configuredServersOf } from '../../../../daemon/lib/moves/configured-servers.ts';
 
 describe('the servers a project configures', () => {
   it('should read command servers and skip url servers and malformed entries', () => {

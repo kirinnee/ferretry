@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { SessionHandoverPhase } from '@ferretry/protocol';
+import type { SessionHandoverPhase } from '../../../../../daemon/lib/protocol/handover.ts';
 import should from 'should';
-import { type HandoverWorld, nextPhase } from '../../../src/lib/handover/policy.ts';
+import { type HandoverWorld, nextPhase } from '../../../../../daemon/lib/moves/handover/policy.ts';
 import { observation, receiptAt, sessionView } from './support.ts';
 
 function world(overrides: Partial<HandoverWorld> = {}): HandoverWorld {

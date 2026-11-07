@@ -1,16 +1,16 @@
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
   AskToStopJobsRequestSchema,
   type AskToStopJobsResult,
   type ContextDowngrade,
   type ConversionPreview,
   ConversionPreviewRequestSchema,
-  FY_REQUEST_ID_HEADER,
   MigrateSessionRequestSchema,
   type MigrationConversation,
   type MigrationRefusal,
   type SessionRelaunchSettings,
   type SessionView,
-} from '@ferretry/protocol';
+} from '../../protocol/session.ts';
 import type { AuditedRouteRule } from '../../audit/routes.ts';
 import { parseActor } from '../../api/actor.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
@@ -23,7 +23,7 @@ import {
   MigrationReplayCapacityError,
   MigrationReplayGuard,
   MigrationReplayMismatchError,
-} from '../../migrate/replay-guard.ts';
+} from '../../moves/replay-guard.ts';
 import type { ModuleContribution } from '../modules.ts';
 
 /**

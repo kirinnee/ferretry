@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BunProcessProbe } from '../../../src/adapters/migrate/bun-process-inventory.ts';
-import { parseProcessTable } from '../../../src/lib/migrate/process-table.ts';
+import { BunProcessProbe } from '../../../../daemon/adapters/moves/bun-process-inventory.ts';
+import { parseProcessTable } from '../../../../daemon/lib/moves/process-table.ts';
 
 /**
  * The host's own `ps`, read and PARSED. Linux (procps) and macOS (BSD) disagree on keywords —

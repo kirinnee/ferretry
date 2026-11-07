@@ -1,8 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { createSessionHandoverSubsystem } from '../../../bin/modules/session-handover.ts';
-import type { HandoverPorts, HandoverReceipt, HandoverReceiptStore } from '../../../src/lib/handover/types.ts';
-import { type SessionDirectorySubsystem, SessionReadError } from '../../../src/lib/runtime/mounts/sessions.ts';
+import { createSessionHandoverSubsystem } from '../../../../../daemon/modules/session-handover.ts';
+import type {
+  HandoverPorts,
+  HandoverReceipt,
+  HandoverReceiptStore,
+} from '../../../../../daemon/lib/moves/handover/types.ts';
+import { type SessionDirectorySubsystem, SessionReadError } from '../../../../../daemon/lib/runtime/mounts/sessions.ts';
 import { sessionView } from '../../unit/runtime/mounts/support.ts';
 
 /**

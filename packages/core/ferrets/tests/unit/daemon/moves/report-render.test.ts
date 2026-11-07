@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { assembleInflightReport, type InflightReport } from '../../../src/lib/migrate/inflight-report.ts';
-import { renderInflightCli, renderInflightReport } from '../../../src/lib/migrate/report-render.ts';
+import { assembleInflightReport, type InflightReport } from '../../../../daemon/lib/moves/inflight-report.ts';
+import { renderInflightCli, renderInflightReport } from '../../../../daemon/lib/moves/report-render.ts';
 
 const meta = {
   sessionId: 'session-1',

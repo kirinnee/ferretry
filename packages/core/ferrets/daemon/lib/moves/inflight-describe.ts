@@ -1,4 +1,4 @@
-import type { InflightItem, MigrationRefusal } from '@ferretry/protocol';
+import type { InflightItem, MigrationRefusal } from '../protocol/session.ts';
 import type { InflightReport } from './inflight-report.ts';
 import { age, truncate } from './render-text.ts';
 import { type InflightVerdict, verdictBlocksMigration } from './verdict.ts';

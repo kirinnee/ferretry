@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { Harness, TranscriptProvenance } from '@ferretry/protocol';
+import type { Harness } from '../protocol/session-base.ts';
+import type { TranscriptProvenance } from '../protocol/session.ts';
 import type { HandoffDocuments } from '../imports/conversation-text.ts';
 import { claudeTranscriptFile } from '../session/transcript/claude-path.ts';
 import { codexCorrelationArguments } from '../session/transcript/codex-rollout.ts';

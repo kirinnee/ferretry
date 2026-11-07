@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { ConversationMessagePoint, SessionTransferPlan } from '@ferretry/protocol';
+import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import {
   SessionForkError,
   type SessionForkFailure,
   SessionForkPhaseRegressionError,
   SessionForkReceiptInvalidError,
   SessionForkRequestConflictError,
-} from '../../../src/lib/fork/failures.ts';
+} from '../../../../daemon/lib/forks/failures.ts';
 import {
   canonicalSessionForkDecision,
   canonicalSessionForkPayload,
@@ -14,7 +15,7 @@ import {
   sessionForkDecisionFingerprint,
   sessionForkFingerprint,
   sessionForkKey,
-} from '../../../src/lib/fork/identity.ts';
+} from '../../../../daemon/lib/forks/identity.ts';
 import {
   advanceSessionForkReceipt,
   claimSessionForkReceipt,
@@ -24,7 +25,7 @@ import {
   type SessionForkReceipt,
   sessionForkPhaseRank,
   sessionForkReport,
-} from '../../../src/lib/fork/receipt.ts';
+} from '../../../../daemon/lib/forks/receipt.ts';
 import { AT, command, conversationlessPlan, plan, report } from './fixtures.ts';
 
 const KEY: SessionForkKey = { sourceSessionId: 'source-a', requestId: 'req-1' };

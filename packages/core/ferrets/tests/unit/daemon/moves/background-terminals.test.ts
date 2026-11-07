@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { backgroundTerminalCount } from '../../../src/lib/migrate/background-terminals.ts';
+import { backgroundTerminalCount } from '../../../../daemon/lib/moves/background-terminals.ts';
 
 describe('codex background terminal count', () => {
   it('should read the count out of a pane footer regardless of case or plurality', () => {

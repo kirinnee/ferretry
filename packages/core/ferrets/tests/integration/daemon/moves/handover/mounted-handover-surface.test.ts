@@ -2,16 +2,25 @@ import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type SessionHandoverReceipt, SessionHandoverReceiptSchema } from '@ferretry/protocol';
+import {
+  type SessionHandoverReceipt,
+  SessionHandoverReceiptSchema,
+} from '../../../../../daemon/lib/protocol/handover.ts';
 import should from 'should';
-import { FileHandoverReceiptStore } from '../../../src/adapters/handover/file-handover-receipt-store.ts';
+import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { HandoverReconcileLoop, RememberedHandoverReceipts } from '../../../src/lib/handover/index.ts';
-import { sessionHandoverRoutes } from '../../../src/lib/runtime/mounts/session-handover.ts';
+import { HandoverReconcileLoop, RememberedHandoverReceipts } from '../../../../../daemon/lib/moves/handover/index.ts';
+import { sessionHandoverRoutes } from '../../../../../daemon/lib/runtime/mounts/session-handover.ts';
 import { request } from '../../unit/api/support.ts';
-import { CODEX_ACCOUNT, planIdFor, REQUEST_ID, receiptAt, transferPlan } from '../../unit/handover/support.ts';
+import {
+  CODEX_ACCOUNT,
+  planIdFor,
+  REQUEST_ID,
+  receiptAt,
+  transferPlan,
+} from '../../../../unit/daemon/moves/handover/support.ts';
 
 /**
  * The handover as the daemon actually mounts it: the real receipt store over a real directory, the

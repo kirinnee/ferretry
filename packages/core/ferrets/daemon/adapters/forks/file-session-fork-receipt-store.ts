@@ -64,10 +64,10 @@
 import { randomUUID } from 'node:crypto';
 import { type FileHandle, link, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { SessionForkPhaseRegressionError, SessionForkReceiptInvalidError } from '../../lib/fork/failures.ts';
-import type { SessionForkKey } from '../../lib/fork/identity.ts';
-import { parseSessionForkReceipt, type SessionForkReceipt, sessionForkPhaseRank } from '../../lib/fork/receipt.ts';
-import type { SessionForkReceiptStore } from '../../lib/fork/types.ts';
+import { SessionForkPhaseRegressionError, SessionForkReceiptInvalidError } from '../../lib/forks/failures.ts';
+import type { SessionForkKey } from '../../lib/forks/identity.ts';
+import { parseSessionForkReceipt, type SessionForkReceipt, sessionForkPhaseRank } from '../../lib/forks/receipt.ts';
+import type { SessionForkReceiptStore } from '../../lib/forks/types.ts';
 import { deriveTransferPlanId } from '../../lib/transfer/prepare.ts';
 
 const RECEIPT_FILE_SUFFIX = '.json';

@@ -5,7 +5,7 @@ import type {
   HandoverChildGrantApproval,
   HandoverCoordinatorReplacement,
   HandoverInvitationStepCommand,
-} from '../../../src/lib/handover/types.ts';
+} from '../../../../../daemon/lib/moves/handover/types.ts';
 
 /**
  * What a handover's board leg must survive: a crash AFTER the board committed and BEFORE the

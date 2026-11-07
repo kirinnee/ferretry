@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { age, escapeCell, truncate, verdictLabels } from '../../../src/lib/migrate/render-text.ts';
+import { age, escapeCell, truncate, verdictLabels } from '../../../../daemon/lib/moves/render-text.ts';
 
 describe('migration report text helpers', () => {
   it('should scale an age to the unit a reader can act on', () => {

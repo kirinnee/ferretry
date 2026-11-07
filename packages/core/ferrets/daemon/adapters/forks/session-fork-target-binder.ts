@@ -39,19 +39,19 @@
  */
 
 import { createHash } from 'node:crypto';
+import { type SessionTransferPlan } from '../../lib/protocol/session-transfer.ts';
 import {
   type SessionConfig,
   SessionConfigSchema,
-  type SessionTransferPlan,
   type SessionView,
   type TranscriptProvenance,
-} from '@ferretry/protocol';
+} from '../../lib/protocol/session.ts';
 import type { CoreAccount } from '../../lib/core/inventory.ts';
 import type { SessionPlanner } from '../../lib/core/session-planner.ts';
 import type {
   SessionForkBoundTarget,
   SessionForkTargetBinder as SessionForkTargetBinderPort,
-} from '../../lib/fork/types.ts';
+} from '../../lib/forks/types.ts';
 import type { ClockPort } from '../../lib/ports.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import { startupModelArguments } from '../../lib/session/harness/startup.ts';

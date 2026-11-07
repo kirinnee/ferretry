@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { MigrationController, renderConversionPreview } from '../../../src/lib/migration/controller.ts';
+import { MigrationController, renderConversionPreview } from '../../../../cli/lib/move/controller.ts';
 import { RecordingProgress } from '../progress/fixtures.ts';
 import { migrationHarness, READY_PREVIEW, RecordingMigrationGateway } from './fixtures.ts';
 

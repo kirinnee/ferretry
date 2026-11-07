@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, copyFile, type FileHandle, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { Harness } from '@ferretry/protocol';
-import type { ConversationFilesPort, PriorConversation } from '../../lib/migrate/conversation-carry.ts';
+import type { Harness } from '../../lib/protocol/session-base.ts';
+import type { ConversationFilesPort, PriorConversation } from '../../lib/moves/conversation-carry.ts';
 import { claudeProjectDirectory } from '../../lib/session/transcript/claude-path.ts';
 import type { CodexRolloutIndex } from '../../lib/session/transcript/index.ts';
 

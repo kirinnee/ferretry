@@ -1,19 +1,19 @@
 import { afterEach, describe, it } from 'bun:test';
-import type { RuntimeModelChoice } from '@ferretry/protocol';
+import type { RuntimeModelChoice } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   SessionForkTargetResolutionError,
   SessionForkTargetResolver,
   type SessionForkTargetAccount,
   forkStartupRuntimeRequest,
-} from '../../../src/adapters/fork/session-fork-target-resolver.ts';
+} from '../../../../daemon/adapters/forks/session-fork-target-resolver.ts';
 import { CodexRuntimeCatalogCache } from '../../../src/lib/session/harness/codex-catalog-cache.ts';
 import {
   type HarnessRuntimeSwitchContext,
   type HarnessRuntimeSwitchRequest,
   planRuntimeSwitch,
 } from '../../../src/lib/session/harness/runtime-switch.ts';
-import type { TransferTargetChoice } from '../../../src/lib/transfer/types.ts';
+import type { TransferTargetChoice } from '../../../../daemon/lib/transfer/types.ts';
 import { account, cleanup, planner } from './fixtures.ts';
 
 /**

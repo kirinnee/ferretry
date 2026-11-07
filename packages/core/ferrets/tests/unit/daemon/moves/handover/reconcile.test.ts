@@ -7,7 +7,7 @@ import {
   HandoverReconcileLoop,
   type HandoverScheduler,
   type RememberedHandoverRoster,
-} from '../../../src/lib/handover/reconcile.ts';
+} from '../../../../../daemon/lib/moves/handover/reconcile.ts';
 
 class FakeRoster implements RememberedHandoverRoster {
   pending: readonly string[] = [];

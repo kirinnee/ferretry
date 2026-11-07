@@ -9,7 +9,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { SessionTransferPlan } from '@ferretry/protocol';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -20,7 +20,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
+import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
 import { SessionPlanner } from '../../../src/lib/core/session-planner.ts';
 import { defaultStartWaitPolicy } from '../../../src/lib/core/display-model.ts';

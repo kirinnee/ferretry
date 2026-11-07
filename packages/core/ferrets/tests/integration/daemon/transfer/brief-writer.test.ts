@@ -2,8 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import should from 'should';
-import { FileSessionTransferBriefWriter } from '../../../src/adapters/transfer/brief-writer.ts';
-import { type DurableArtifactIo, fsyncArtifactPath } from '../../../src/adapters/transfer/durable-artifact.ts';
+import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
+import { type DurableArtifactIo, fsyncArtifactPath } from '../../../../daemon/adapters/transfer/durable-artifact.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const TARGET = 'target-session';

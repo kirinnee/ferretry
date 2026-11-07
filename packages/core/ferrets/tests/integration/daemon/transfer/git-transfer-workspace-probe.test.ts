@@ -1,14 +1,14 @@
 import { afterEach, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../src/adapters/git/index.ts';
-import { GitTransferWorkspaceProbe } from '../../../src/adapters/transfer/git-transfer-workspace-probe.ts';
+import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
+import { GitTransferWorkspaceProbe } from '../../../../daemon/adapters/transfer/git-transfer-workspace-probe.ts';
 import {
   GitWorktreeGateway,
   NodeWorktreeFileSystem,
   SystemWorktreeClock,
-} from '../../../src/adapters/worktrees/index.ts';
-import type { GitExecution, GitInvocation, GitRunner } from '../../../src/lib/worktrees/ports.ts';
+} from '../../../../daemon/adapters/worktrees/index.ts';
+import type { GitExecution, GitInvocation, GitRunner } from '../../../../daemon/lib/worktrees/ports.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRepository } from '../support/repository.ts';
 
 /**

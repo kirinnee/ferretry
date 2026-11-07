@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionMigrateModule } from '../../../../bin/modules/session-migrate.ts';
+import { sessionMigrateModule } from '../../../../../daemon/modules/session-move.ts';
 import type { ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
 import { sessionMigrateNeedsForTest } from './fixture.ts';
 

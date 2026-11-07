@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdir, readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import should from 'should';
-import { FileConversationFiles } from '../../../src/adapters/migrate/file-conversation-files.ts';
+import { FileConversationFiles } from '../../../../daemon/adapters/moves/file-conversation-files.ts';
 import { NodeCodexRolloutIndex } from '../../../src/adapters/session/transcript/node-codex-rollout-index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 

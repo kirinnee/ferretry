@@ -1,4 +1,4 @@
-import { HarnessSchema } from '@ferretry/protocol';
+import { HarnessSchema } from '../protocol/session-base.ts';
 
 /**
  * Whether a migration may move a session onto a given account.

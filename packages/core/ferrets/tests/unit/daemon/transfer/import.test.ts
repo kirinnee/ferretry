@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import type { ConversationDigest } from '../../../src/lib/session/transcript/digest.ts';
 import { ConversationDigestError } from '../../../src/lib/session/transcript/digest.ts';
-import { SessionTransferImporter } from '../../../src/lib/transfer/import.ts';
+import { SessionTransferImporter } from '../../../../daemon/lib/transfer/import.ts';
 import type {
   SessionTransferEnvelope,
   TransferAttachmentCopyInput,
   TransferConversationValidationInput,
   TransferConversationValidator,
   TransferImportCapabilityLeak,
-} from '../../../src/lib/transfer/types.ts';
-import { SESSION_TRANSFER_IMPORT_PORTS, TransferImportError } from '../../../src/lib/transfer/types.ts';
+} from '../../../../daemon/lib/transfer/types.ts';
+import { SESSION_TRANSFER_IMPORT_PORTS, TransferImportError } from '../../../../daemon/lib/transfer/types.ts';
 import { AT, plan } from './fixtures.ts';
 
 interface Recorder {

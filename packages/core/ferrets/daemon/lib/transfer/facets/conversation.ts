@@ -12,7 +12,7 @@
  * shorter conversation with no explanation is lost history pretending to be a short one.
  */
 
-import type { ConversationFacet, TransferOmission } from '@ferretry/protocol';
+import type { ConversationFacet, TransferOmission } from '../../protocol/session-transfer.ts';
 import type { TextRedactor } from '../../secrets/redaction.ts';
 import {
   type ConversationDigest,

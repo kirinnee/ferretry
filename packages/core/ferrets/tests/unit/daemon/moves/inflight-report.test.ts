@@ -6,7 +6,7 @@ import {
   type OpenToolInfo,
   type ProcessInfo,
   type ProcessObservation,
-} from '../../../src/lib/migrate/inflight-report.ts';
+} from '../../../../daemon/lib/moves/inflight-report.ts';
 
 const tool = (verdict: OpenToolInfo['verdict']): OpenToolInfo => ({
   toolUseId: 'tool-1',

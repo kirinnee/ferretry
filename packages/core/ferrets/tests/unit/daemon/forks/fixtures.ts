@@ -1,8 +1,9 @@
-import type { SessionTransferPlan, TranscriptProvenance } from '@ferretry/protocol';
-import type { SessionForkCommand } from '../../../src/lib/fork/identity.ts';
-import type { SessionForkImportReport } from '../../../src/lib/fork/receipt.ts';
-import { deriveTransferPlanId } from '../../../src/lib/transfer/prepare.ts';
-import type { TransferTargetChoice } from '../../../src/lib/transfer/types.ts';
+import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
+import type { SessionForkCommand } from '../../../../daemon/lib/forks/identity.ts';
+import type { SessionForkImportReport } from '../../../../daemon/lib/forks/receipt.ts';
+import { deriveTransferPlanId } from '../../../../daemon/lib/transfer/prepare.ts';
+import type { TransferTargetChoice } from '../../../../daemon/lib/transfer/types.ts';
 
 export const AT = '2026-08-06T07:00:00.000Z';
 
