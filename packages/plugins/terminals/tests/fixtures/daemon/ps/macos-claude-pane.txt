@@ -1,0 +1,9 @@
+  412     1    1-03:12:10 /bin/bash /Users/user/bin/claude-auto-example --model opus --permission-mode auto
+  413   412    1-03:12:09 node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js --model opus --permission-mode auto
+  431   413    1-03:12:08 /opt/homebrew/bin/fy mcp serve
+  455   413    1-03:11:50 npm exec @acme/search-mcp@latest
+  460   455    1-03:11:49 node /Users/user/.npm/_npx/9f2c/node_modules/.bin/search-mcp
+  611   413          14:02 /bin/zsh -c eval 'sleep 1800'
+  612   611           14:02 sleep 1800
+  620   413          02:11 /bin/zsh -c eval 'some-vendor-tool --watch'
+  621   620           02:11 some-vendor-tool --watch
