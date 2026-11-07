@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BrowserAction, BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import type { BrowserAction, BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import {
   type BrowserIdlePolicy,

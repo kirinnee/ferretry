@@ -5,7 +5,7 @@ import { hostname as osHostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../pages/wire/browser.ts';
+import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../../contract/wire/browser.ts';
 import { type ResolvedBrowserPorts } from '../../../proxy/wire/ports.ts';
 import {
   BrowserControlError,

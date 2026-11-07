@@ -192,6 +192,22 @@ describe('the browsers daemon half', () => {
     );
   });
 
+  it('SF3 should publish PageChanged driving when a ferret acts on a page, so the typing chip shows at once', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+
+    // Act
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    const drivings = host.published
+      .filter(entry => entry.event === 'browsers.page-changed')
+      .map(entry => entry.payload as { change: string; page: string; ferret: string })
+      .filter(change => change.change === 'driving');
+
+    // Assert
+    should(drivings).deepEqual([{ ferret: 'f1', page: 'p1', change: 'driving' }]);
+  });
+
   it('should publish PageChanged closed when a ferret closes its page, and for every page its session ends with', async () => {
     // Arrange
     const world = await built();

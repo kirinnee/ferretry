@@ -92,6 +92,8 @@ export class DaemonClient {
   #settle: () => void = () => {};
   #reading: Promise<void> | undefined;
   #stopEvents: (() => void) | undefined;
+  #feedLive = false;
+  readonly #liveListeners = new Set<(live: boolean) => void>();
   #stopReconnect: (() => void) | undefined;
   #stopped = false;
 
@@ -117,6 +119,7 @@ export class DaemonClient {
     this.#stopped = true;
     this.#stopEvents?.();
     this.#stopEvents = undefined;
+    this.#setFeedLive(false);
     this.#stopReconnect?.();
     for (const open of this.#sockets) open.socket.close();
     this.#sockets.clear();
@@ -160,7 +163,20 @@ export class DaemonClient {
       call: (route, init) => this.#call(caller, route, init),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
       socket: (key, params, listeners) => this.#socket(caller, key, params, listeners),
+      feed: {
+        isLive: () => this.#feedLive,
+        subscribeLive: listener => {
+          this.#liveListeners.add(listener);
+          return () => this.#liveListeners.delete(listener);
+        },
+      },
     };
+  }
+
+  #setFeedLive(live: boolean): void {
+    if (this.#feedLive === live) return;
+    this.#feedLive = live;
+    for (const listener of [...this.#liveListeners]) listener(live);
   }
 
   // ─── internals ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -273,7 +289,9 @@ export class DaemonClient {
       },
       () => {
         this.#stopEvents = undefined;
+        this.#setFeedLive(false);
       },
+      () => this.#setFeedLive(true),
     );
   }
 
@@ -290,19 +308,20 @@ export class DaemonClient {
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};
     const socket = this.#transport.socket(fillPath(path, params), {
+      ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
       onFrame: listeners.onFrame,
-      onClose: reason => {
+      onClose: (reason, code) => {
         if (entry.open !== undefined) this.#sockets.delete(entry.open);
-        listeners.onClose(reason);
+        listeners.onClose(reason, code);
       },
     });
     entry.open = { ids: [caller, owner], socket, listeners };
     this.#sockets.add(entry.open);
     return {
       send: frame => socket.send(frame),
-      close: () => {
+      close: (code, reason) => {
         if (entry.open !== undefined) this.#sockets.delete(entry.open);
-        socket.close();
+        socket.close(code, reason);
       },
     };
   }
