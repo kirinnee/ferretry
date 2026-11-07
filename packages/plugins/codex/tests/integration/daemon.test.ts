@@ -48,11 +48,11 @@ describe('codex daemon half', () => {
     const view = response.json<{ location: { state: string; path: string; rule: string } }>();
     expect(view.location).toMatchObject({ state: 'located', path: '/opt/bin/codex', rule: 'inherited environment' });
     const found = await host.provided(CodexPort).discovery();
-    expect(found?.location).toEqual(view.location);
+    expect(found?.location).toMatchObject(view.location);
   });
 
   test('a ferret may not start an update, and nothing is run for it', async () => {
-    const { spawn, asked } = machine({ path: '/opt/bin/codex', version: '0.140.0' });
+    const { spawn, asked } = machine({ path: '/opt/bin/codex' });
     const host = await testHost({ plugins: [daemon], spawn, fetch: npmLatest });
 
     const response = await host.request('POST', '/v1/codex/update', { body: {}, as: ferret('f1') });

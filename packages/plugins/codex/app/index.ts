@@ -1,5 +1,15 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { codexSettings } from './codex-settings.ts';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+/**
+ * Codex's app half: the `codex` Settings tab. Thin: the tab's controller is `codex-settings.ts` and its words are
+ * `lib/model.ts`; the React view that draws them needs the app shell. The model-catalog and fast-mode choices ride on
+ * Runtimes' picker, which reads Codex's read models, so they have no screen of their own here.
+ */
+export default implementApp(manifest, {
+  build: ({ client }) => {
+    const settings = codexSettings(client);
+    return { settings: { codex: () => settings } };
+  },
+});
