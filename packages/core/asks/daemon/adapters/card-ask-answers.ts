@@ -9,7 +9,7 @@ import type {
   SourceKey,
 } from '../../contract/index.ts';
 import type { AgendaService } from '../lib/agenda/index.ts';
-import { cardAskReference, openCardAsks } from '../lib/protocol/agenda-card-asks.ts';
+import { cardAskOf, cardAskReference, openCardAsks } from '../lib/protocol/agenda-card-asks.ts';
 import { gateChoice, gateReopenOption } from '../lib/protocol/agenda-gate.ts';
 import type { AgendaResponse } from '../lib/protocol/agenda.ts';
 import type { AgendaGatePort, GateAnswer, GateAnswerOutcome } from '../lib/routes/agenda-gates.ts';
@@ -41,10 +41,10 @@ export function cardAskAnswers(
   const askOn = async (sessionId: string, id: string, reference?: string) => {
     const listed = await agenda.list(sessionId);
     if (!listed.ok) return undefined;
-    const item = listed.value.items.find(each => each.id === id);
+    const item = [...listed.value.items, ...listed.value.resolved].find(each => each.id === id);
     if (item === undefined) return undefined;
     const open = openCardAsks(item);
-    return reference === undefined ? open[0] : (open.find(ask => cardAskReference(ask) === reference) ?? undefined);
+    return reference === undefined ? open[0] : cardAskOf(item, reference);
   };
   return {
     isGate: async (sessionId, id) => (await askOn(sessionId, id)) !== undefined,
@@ -52,7 +52,7 @@ export function cardAskAnswers(
       // Only an explicitly addressed card answer acts on its source. Plain words answer the item's own question.
       if (answer.cardAsk === undefined && answer.gate !== true) return { handled: false };
       const ask = await askOn(answer.sessionId, answer.id, answer.cardAsk);
-      if (ask === undefined) return { handled: false };
+      if (ask === undefined) return refused('moved-on', `${answer.id} no longer carries that question; read it again`);
       if (answer.actor.kind !== 'human')
         return refused(
           'forbidden',
@@ -81,14 +81,25 @@ export function cardAskAnswers(
       )
         return refused('invalid', 'say what is not good so the ferret can fix it');
       if (text.length > 2_048) return refused('invalid', 'keep your answer within 2048 characters');
-      const spec = source();
-      if (spec === 'unavailable' || spec.apply === undefined)
-        return refused('not-moved', `the board cannot move the card right now, so ${answer.id} stays open`);
       const reference = cardAskReference(ask);
       const at = now();
       const receipt = createHash('sha256')
         .update(JSON.stringify([answer.sessionId, answer.id, reference, response, note]))
         .digest('hex');
+      if (ask.answer !== undefined) {
+        if (ask.answer.receipt !== receipt) return refused('moved-on', `${answer.id}'s question is already answered`);
+        return {
+          handled: true,
+          mutation: await agenda.cardAsk(answer.sessionId, answer.id, {
+            kind: 'answered',
+            reference,
+            answer: ask.answer,
+          }),
+        };
+      }
+      const spec = source();
+      if (spec === 'unavailable' || spec.apply === undefined)
+        return refused('not-moved', `the board cannot move the card right now, so ${answer.id} stays open`);
       const asked: AskAnswer = {
         id: `an_${receipt.slice(0, 24)}` as AnswerId,
         ferret: answer.sessionId,
