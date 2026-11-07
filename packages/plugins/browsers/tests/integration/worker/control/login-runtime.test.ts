@@ -520,7 +520,7 @@ describe('NodeBrowserLoginRuntime', () => {
   it("should prefer the operator's Chrome and otherwise this platform's candidates", async () => {
     // Arrange
     const root = await workspace();
-    const override = join(root, 'my-chrome');
+    const override = join(root, 'chrome');
     await writeFile(override, '');
     const base = { display: fakeDisplay(), secretsDirectory: root, platform: 'linux' as const };
 
@@ -548,7 +548,7 @@ describe('NodeBrowserLoginRuntime', () => {
     should(chosen).equal(override);
     should(discovered).equal('/usr/bin/chromium');
     should(missing).throw(
-      'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to its path.',
+      'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to the path of a Chrome or Chromium program named one of "chrome", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "Google Chrome", "Chromium".',
     );
   });
 

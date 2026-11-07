@@ -1,6 +1,25 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AUTOMATION_SWITCH_PATTERN, CDP_PIPE_SWITCH, defaultCdpTransport, agentBrowserArguments, BrowserControlError, browserEnvironment, browserLoginChromeArguments, chromeExecutableCandidates, chromeInstallCommand, chromeLaunchArguments, generateVncPassword, loginWindowMinutes, selectChromeExecutable, vncSupervisorArguments, x11vncLaunchArguments, xvfbInstallCommand, xvfbMissingMessage } from '../../../../daemon/worker/control/policy.ts';
+import {
+  AUTOMATION_SWITCH_PATTERN,
+  CDP_PIPE_SWITCH,
+  defaultCdpTransport,
+  agentBrowserArguments,
+  BrowserControlError,
+  browserEnvironment,
+  CHROME_EXECUTABLE_NAMES,
+  browserLoginChromeArguments,
+  chromeExecutableCandidates,
+  chromeInstallCommand,
+  chromeLaunchArguments,
+  generateVncPassword,
+  loginWindowMinutes,
+  selectChromeExecutable,
+  vncSupervisorArguments,
+  x11vncLaunchArguments,
+  xvfbInstallCommand,
+  xvfbMissingMessage,
+} from '../../../../daemon/worker/control/policy.ts';
 
 /** The default transport, on a fixed number so an assertion can name it. */
 const PORT = { kind: 'port', port: 9222 } as const;
@@ -122,16 +141,44 @@ describe('browser control policy', () => {
         selectChromeExecutable('linux', undefined, () => false, { available: command => command === 'apt-get' }),
       ),
     ).equal(
-      'Chrome is not installed on this machine: install it with `sudo apt-get install -y chromium`, or set FY_CHROME_BIN to its path.',
+      'Chrome is not installed on this machine: install it with `sudo apt-get install -y chromium`, or set FY_CHROME_BIN to the path of a Chrome or Chromium program named one of "chrome", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "Google Chrome", "Chromium".',
     );
     should(refusal(() => selectChromeExecutable('darwin', undefined, () => false))).containEql(
       '`brew install --cask google-chrome`',
     );
     should(refusal(() => selectChromeExecutable('linux', undefined, () => false))).equal(
-      'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to its path.',
+      'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to the path of a Chrome or Chromium program named one of "chrome", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "Google Chrome", "Chromium".',
     );
     should(refusal(() => selectChromeExecutable('linux', '/nope/chrome', () => false))).equal(
       'FY_CHROME_BIN points at /nope/chrome, which does not exist.',
+    );
+  });
+
+  it('should refuse an FY_CHROME_BIN whose program name permissions.spawn does not declare, naming the allowed ones', async () => {
+    // Arrange
+    const manifest = (await import('../../../../manifest.ts')).default;
+    const spawn: readonly string[] = manifest.permissions?.spawn ?? [];
+    const refused = (override: string): string => {
+      try {
+        selectChromeExecutable('linux', override, () => true);
+      } catch (error) {
+        should(error).instanceOf(BrowserControlError);
+        return (error as BrowserControlError).message;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    // Act + Assert: the names the sentence offers are exactly the browser names the manifest lets Browsers start.
+    for (const name of CHROME_EXECUTABLE_NAMES) should(spawn).containEql(name);
+    should(refused('/usr/bin/brave-browser')).equal(
+      'FY_CHROME_BIN points at /usr/bin/brave-browser, which Ferretry may not start: set FY_CHROME_BIN to the path of a Chrome or Chromium program named one of "chrome", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "Google Chrome", "Chromium".',
+    );
+    should(refused('/home/me/bin/chrome-wrapper')).containEql('which Ferretry may not start');
+    should(selectChromeExecutable('darwin', '/Applications/Chromium.app/Contents/MacOS/Chromium', () => true)).equal(
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    );
+    should(selectChromeExecutable('linux', '/opt/google/chrome/google-chrome', () => true)).equal(
+      '/opt/google/chrome/google-chrome',
     );
   });
 

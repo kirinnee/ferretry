@@ -63,6 +63,23 @@ export interface ChromeSearch {
   readonly available?: (command: string) => boolean;
 }
 
+/**
+ * The only program names Browsers may start a browser under, so the only names `FY_CHROME_BIN` may end in: the
+ * manifest's `permissions.spawn` declares exactly these (spawn permissions, §3.7), and the kernel refuses any other.
+ * Today `FY_CHROME_BIN` could name any program; the 5.0 port accepts that narrowing (lead ruling, port-browsers r2).
+ */
+export const CHROME_EXECUTABLE_NAMES = [
+  'chrome',
+  'chromium',
+  'chromium-browser',
+  'google-chrome',
+  'google-chrome-stable',
+  'Google Chrome',
+  'Chromium',
+] as const;
+const CHROME_NAMES_LIST = CHROME_EXECUTABLE_NAMES.map(name => `"${name}"`).join(', ');
+const CHROME_OVERRIDE_HINT = `set FY_CHROME_BIN to the path of a Chrome or Chromium program named one of ${CHROME_NAMES_LIST}`;
+
 const LINUX_CHROME_NAMES = ['google-chrome', 'google-chrome-stable'] as const;
 const LINUX_CHROMIUM_NAMES = ['chromium', 'chromium-browser'] as const;
 
@@ -129,6 +146,16 @@ export function selectChromeExecutable(
   exists: (candidate: string) => boolean,
   search: ChromeSearch = {},
 ): string {
+  const named = override?.trim();
+  if (named) {
+    const program = named.slice(named.lastIndexOf('/') + 1);
+    if (!(CHROME_EXECUTABLE_NAMES as readonly string[]).includes(program)) {
+      throw new BrowserControlError(
+        'launch_failed',
+        `FY_CHROME_BIN points at ${named}, which Ferretry may not start: ${CHROME_OVERRIDE_HINT}.`,
+      );
+    }
+  }
   const selected = chromeExecutableCandidates(platform, override, search).find(exists);
   if (selected) return selected;
   if (override?.trim()) {
@@ -138,8 +165,8 @@ export function selectChromeExecutable(
   throw new BrowserControlError(
     'launch_failed',
     command === undefined
-      ? 'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to its path.'
-      : `Chrome is not installed on this machine: install it with \`${command}\`, or set FY_CHROME_BIN to its path.`,
+      ? `Chrome is not installed on this machine: install Google Chrome or Chromium, or ${CHROME_OVERRIDE_HINT}.`
+      : `Chrome is not installed on this machine: install it with \`${command}\`, or ${CHROME_OVERRIDE_HINT}.`,
   );
 }
 
