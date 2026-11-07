@@ -151,7 +151,10 @@ export function walk(root: AstNode, visit: (node: AstNode, parents: readonly Ast
 export function nameOf(node: unknown): string | undefined {
   if (node === null || typeof node !== 'object') return undefined;
   const n = node as { type?: string; name?: unknown; value?: unknown };
-  if ((n.type === 'Identifier' || n.type === 'IdentifierName' || n.type === 'IdentifierReference') && typeof n.name === 'string')
+  if (
+    (n.type === 'Identifier' || n.type === 'IdentifierName' || n.type === 'IdentifierReference') &&
+    typeof n.name === 'string'
+  )
     return n.name;
   if (n.type === 'Literal' && typeof n.value === 'string') return n.value;
   return undefined;

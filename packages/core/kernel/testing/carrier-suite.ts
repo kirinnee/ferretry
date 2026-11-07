@@ -75,9 +75,16 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
  * last word), writes nothing when `next()` answers nothing, ends the peer on `'ended'`, and closes every link when
  * stopped or when the peer goes. Every carrier plugin runs this against its own harness.
  */
-export function carrierConformance(name: string, make: (layer: RecordingSessionLayer) => Promise<CarrierHarness>): void {
+export function carrierConformance(
+  name: string,
+  make: (layer: RecordingSessionLayer) => Promise<CarrierHarness>,
+): void {
   describe(`carrier conformance: ${name}`, () => {
-    const started = async (): Promise<{ layer: RecordingSessionLayer; harness: CarrierHarness; abort: AbortController }> => {
+    const started = async (): Promise<{
+      layer: RecordingSessionLayer;
+      harness: CarrierHarness;
+      abort: AbortController;
+    }> => {
       const layer = new RecordingSessionLayer();
       const harness = await make(layer);
       const abort = new AbortController();

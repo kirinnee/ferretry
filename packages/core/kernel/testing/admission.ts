@@ -70,11 +70,20 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
     if (d.minimum === 'none') return admitted;
     if (caller.kind === 'anonymous' || caller.kind === 'member') return refuse(401, 'Sign in first.', 'unauthorized');
     if (d.caller === 'person' && caller.kind === 'ferret')
-      return refuse(403, `Only the owner may do this.${d.ferretDoor === undefined ? '' : ` ${d.ferretDoor}`}`, 'owner_only');
+      return refuse(
+        403,
+        `Only the owner may do this.${d.ferretDoor === undefined ? '' : ` ${d.ferretDoor}`}`,
+        'owner_only',
+      );
     if (d.minimum === 'admin-token' && caller.kind !== 'owner')
       return refuse(403, 'Only the owner at the machine may do this.', 'forbidden');
-    if (d.minimum === 'operator' && caller.kind === 'ferret') return refuse(403, 'Only the operator may do this.', 'forbidden');
-    if (d.privilegedOnly === true && !(request.arrival.kind === 'local' && request.arrival.privileged) && caller.kind !== 'owner')
+    if (d.minimum === 'operator' && caller.kind === 'ferret')
+      return refuse(403, 'Only the operator may do this.', 'forbidden');
+    if (
+      d.privilegedOnly === true &&
+      !(request.arrival.kind === 'local' && request.arrival.privileged) &&
+      caller.kind !== 'owner'
+    )
       return refuse(403, 'This is only served on the privileged local listener.', 'forbidden');
     if (caller.kind === 'device' && d.capability !== undefined && caller.capabilities !== undefined) {
       const needed = `${d.capability.capability}.${d.capability.axis}`;
@@ -84,10 +93,12 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
     return admitted;
   };
   return {
-    admit: (input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }) => decide(input.request, input.descriptor),
+    admit: (input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }) =>
+      decide(input.request, input.descriptor),
     admitMember: (input: AdmissionInput & { readonly table: 'member' }) => {
       const caller = callerOf(input.request);
-      if (caller.kind !== 'member') return refuse(403, 'Member routes are for members.', 'forbidden') as AdmissionDecision<MemberStanding>;
+      if (caller.kind !== 'member')
+        return refuse(403, 'Member routes are for members.', 'forbidden') as AdmissionDecision<MemberStanding>;
       return { outcome: 'admitted', standing: { caller } as MemberStanding };
     },
     readmit: (request, descriptor) => decide(request, descriptor).outcome === 'admitted',

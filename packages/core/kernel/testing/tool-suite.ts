@@ -24,7 +24,11 @@ export interface ToolCase {
  */
 export function toolConformance(
   name: string,
-  setup: { readonly plugin: DaemonImplementation<any>; readonly host?: Omit<TestHostOptions, 'plugins'>; readonly cases: readonly ToolCase[] },
+  setup: {
+    readonly plugin: DaemonImplementation<any>;
+    readonly host?: Omit<TestHostOptions, 'plugins'>;
+    readonly cases: readonly ToolCase[];
+  },
 ): void {
   const manifest = setup.plugin.manifest as Manifest;
   const declared = new Map((manifest.actions?.agentTools ?? []).map(tool => [tool.name, tool] as const));

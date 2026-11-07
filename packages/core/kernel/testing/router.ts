@@ -95,7 +95,10 @@ export class RouteTable<TRoute extends RoutePattern> {
     const verb = method.toUpperCase();
     const matched = pathMatches.find(entry => entry.route.method.toUpperCase() === verb);
     if (matched === undefined)
-      return { kind: 'method-not-allowed', allowed: [...new Set(pathMatches.map(e => e.route.method.toUpperCase()))].sort() };
+      return {
+        kind: 'method-not-allowed',
+        allowed: [...new Set(pathMatches.map(e => e.route.method.toUpperCase()))].sort(),
+      };
     return { kind: 'matched', route: matched.route, params: match(matched.segments, segments) ?? new Map() };
   }
 }

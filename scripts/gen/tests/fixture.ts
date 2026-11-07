@@ -40,7 +40,10 @@ export interface Fixture {
 export const skeletonHalf = (half: 'Daemon' | 'App' | 'Cli'): string =>
   `import { skeleton${half} } from '${SDK}';\nimport manifest from '../manifest.ts';\nexport default skeleton${half}(manifest);\n`;
 
-export function fixture(packages: readonly FixturePackage[], options: { readonly pending?: readonly string[] } = {}): Fixture {
+export function fixture(
+  packages: readonly FixturePackage[],
+  options: { readonly pending?: readonly string[] } = {},
+): Fixture {
   const root = join(TMP, `w${process.pid}-${++counter}`);
   rmSync(root, { recursive: true, force: true });
   const write = (rel: string, text: string): void => {
@@ -50,7 +53,11 @@ export function fixture(packages: readonly FixturePackage[], options: { readonly
   };
   write(
     'package.json',
-    JSON.stringify({ name: 'fixture', private: true, workspaces: ['packages/*', 'packages/core/*', 'packages/plugins/*'] }),
+    JSON.stringify({
+      name: 'fixture',
+      private: true,
+      workspaces: ['packages/*', 'packages/core/*', 'packages/plugins/*'],
+    }),
   );
   write('ports-pending.json', JSON.stringify({ format: 1, pending: options.pending ?? [] }));
   for (const pkg of packages) {

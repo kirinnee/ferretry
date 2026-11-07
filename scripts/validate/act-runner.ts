@@ -48,7 +48,8 @@ export const check: Check = {
       const tools = s.manifest.actions?.agentTools ?? [];
       for (const tool of tools) {
         if (tool.op === undefined) findings.push({ check, where: s.id, message: `tool ${tool.name} declares no Op` });
-        else if (!ops.has(tool.op)) findings.push({ check, where: s.id, message: `tool ${tool.name} declares unknown Op "${tool.op}"` });
+        else if (!ops.has(tool.op))
+          findings.push({ check, where: s.id, message: `tool ${tool.name} declares unknown Op "${tool.op}"` });
       }
       if (tools.length === 0) continue;
       const daemon = await loadHalf(s.pkg, 'daemon').catch(() => undefined);

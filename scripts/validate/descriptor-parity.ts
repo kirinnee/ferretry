@@ -7,7 +7,8 @@
  *
  * Compared fields are today's descriptor, field for field: `minimum`, `caller`, `ferretDoor` (presence),
  * `privilegedOnly`, `unlockExempt`, `capability` (name, axis, narrowing), `consultsGrants`, `wardenRemedy`,
- * `noStore`, `compress`, `precedence`, `available` (presence), and for member routes `member` and `catalog`. The new
+ * `noStore`, `compress`, `precedence`, `available` (presence), and for member routes `member` and `catalog`. An agent
+ * tool is compared by presence only: today it is an MCP wrapper in `fy` with no descriptor of its own. The new
  * `audit` and `guard` fields have no counterpart today and are not compared. A field today's extractor could not
  * resolve (`unresolved:…`) is not compared and is counted in the output.
  *
@@ -28,7 +29,13 @@ export function readChanges(text: string): Map<string, { change: string; reason:
   for (const line of text.split('\n')) {
     if (line.trim() === '' || line.startsWith('#')) continue;
     const [table, key, change, reason] = line.split('\t');
-    if (table === undefined || key === undefined || change === undefined || reason === undefined || reason.trim() === '')
+    if (
+      table === undefined ||
+      key === undefined ||
+      change === undefined ||
+      reason === undefined ||
+      reason.trim() === ''
+    )
       throw new Error(`${PARITY_CHANGES}: "${line}" is not table<TAB>key<TAB>change<TAB>reason`);
     out.set(`${table}\t${key}`, { change, reason });
   }
@@ -41,14 +48,21 @@ export const check: Check = {
   async run(ctx) {
     const fixture = join(ctx.root, TODAY_ROUTES);
     if (!existsSync(fixture))
-      return [{ check: 'descriptor-parity', where: TODAY_ROUTES, message: "today's table is missing; run scripts/gen/today/extract.ts" }];
+      return [
+        {
+          check: 'descriptor-parity',
+          where: TODAY_ROUTES,
+          message: "today's table is missing; run scripts/gen/today/extract.ts",
+        },
+      ];
     const today = (JSON.parse(readFileSync(fixture, 'utf8')) as { rows: DescriptorRow[] }).rows;
     const changesFile = join(ctx.root, PARITY_CHANGES);
     const changes = existsSync(changesFile) ? readChanges(readFileSync(changesFile, 'utf8')) : new Map();
     const model = await ctx.model();
     const next = model.loaded.flatMap(s => rowsOf(s.manifest));
     const result = parity(today, next, changes);
-    if (result.unresolved > 0) console.error(`descriptor-parity: ${result.unresolved} unresolved field(s) in today's table were not compared`);
+    if (result.unresolved > 0)
+      console.error(`descriptor-parity: ${result.unresolved} unresolved field(s) in today's table were not compared`);
     if (process.argv.includes('--report')) {
       for (const finding of result.findings) console.log(`${finding.where}\t${finding.message}`);
       return [];
@@ -57,4 +71,8 @@ export const check: Check = {
   },
 };
 
-if (import.meta.main) await runMain(check, process.argv.slice(2).filter(arg => arg !== '--report'));
+if (import.meta.main)
+  await runMain(
+    check,
+    process.argv.slice(2).filter(arg => arg !== '--report'),
+  );

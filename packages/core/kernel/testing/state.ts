@@ -96,13 +96,17 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   const chains = new Map<string, Promise<unknown>>();
   const serial = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
     const run = (chains.get(key) ?? Promise.resolve()).then(fn, fn);
-    chains.set(key, run.catch(() => undefined));
+    chains.set(
+      key,
+      run.catch(() => undefined),
+    );
     return run;
   };
   const read = async <Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> => {
     guard(file);
     const text = folder.files.get(pathOf(file, name));
-    if (text === undefined) return file.required === true ? err(damage(file, 'missing', 'it is missing')) : ok(undefined);
+    if (text === undefined)
+      return file.required === true ? err(damage(file, 'missing', 'it is missing')) : ok(undefined);
     return parseDocument(file, text);
   };
   const write = async <Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> => {
@@ -163,7 +167,8 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       }
       const handle = db;
       return {
-        query: <Row>(sql: string, params: readonly unknown[] = []) => handle.query(sql).all(...(params as never[])) as Row[],
+        query: <Row>(sql: string, params: readonly unknown[] = []) =>
+          handle.query(sql).all(...(params as never[])) as Row[],
         run: (sql, params = []) => ({ changes: handle.run(sql, params as never[]).changes }),
         transaction: fn => handle.transaction(fn)(),
         close: () => undefined,
@@ -172,7 +177,14 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     damaged() {
       const out: StateDamage[] = [];
       for (const file of declared) {
-        if (file.path.includes('*') || file.store === 'sqlite' || file.store === 'sqlite-cache' || file.store === 'opaque' || file.store === 'secret' || file.store === 'jsonl')
+        if (
+          file.path.includes('*') ||
+          file.store === 'sqlite' ||
+          file.store === 'sqlite-cache' ||
+          file.store === 'opaque' ||
+          file.store === 'secret' ||
+          file.store === 'jsonl'
+        )
           continue;
         const text = folder.files.get(file.path);
         if (text === undefined) {

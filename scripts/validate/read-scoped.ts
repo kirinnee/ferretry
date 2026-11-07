@@ -17,7 +17,10 @@ function functionNode(node: AstNode): { readonly name: string; readonly fn: AstN
     const name = nameOf(node.id);
     return name === undefined ? undefined : { name, fn: node };
   }
-  if ((node.type === 'MethodDefinition' || node.type === 'TSAbstractMethodDefinition' || node.type === 'Property') && node.computed !== true) {
+  if (
+    (node.type === 'MethodDefinition' || node.type === 'TSAbstractMethodDefinition' || node.type === 'Property') &&
+    node.computed !== true
+  ) {
     const value = node.value as AstNode | undefined;
     const name = nameOf(node.key);
     if (name === undefined || value === undefined) return undefined;
@@ -27,7 +30,11 @@ function functionNode(node: AstNode): { readonly name: string; readonly fn: AstN
   if (node.type === 'VariableDeclarator') {
     const init = node.init as AstNode | null;
     const name = nameOf(node.id);
-    if (name !== undefined && init !== null && (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression'))
+    if (
+      name !== undefined &&
+      init !== null &&
+      (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression')
+    )
       return { name, fn: init };
   }
   return undefined;
@@ -48,7 +55,11 @@ export function readScopedIn(file: string, where = file): Finding[] {
       return /\bRedactionScope\b/.test(text);
     });
     if (!typed)
-      findings.push({ check: 'read-scoped', where: `${where}:${line}`, message: `${found.name} reads without a RedactionScope parameter` });
+      findings.push({
+        check: 'read-scoped',
+        where: `${where}:${line}`,
+        message: `${found.name} reads without a RedactionScope parameter`,
+      });
   });
   return findings;
 }
@@ -63,7 +74,8 @@ export const check: Check = {
       if (pkg.id === 'vault' || pkg.id === 'kernel') continue;
       if (ctx.packageId !== undefined && pkg.id !== ctx.packageId) continue;
       for (const file of sourceFiles(pkg, { tests: false }))
-        if (areaOf(pkg, file) === 'daemon') findings.push(...readScopedIn(file, relative(ws.root, file).split(sep).join('/')));
+        if (areaOf(pkg, file) === 'daemon')
+          findings.push(...readScopedIn(file, relative(ws.root, file).split(sep).join('/')));
     }
     return findings;
   },

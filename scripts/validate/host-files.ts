@@ -34,7 +34,11 @@ export function hostFileFindings(ws: Workspace, file: string): Finding[] {
     const target = edge.toPkg;
     if (target === undefined || edge.toArea === 'generated') continue;
     if (target.id !== undefined && target.id !== 'kernel')
-      findings.push({ check, where: `${rel}:${edge.line}`, message: `imports ${edge.specifier}; a host names no subsystem` });
+      findings.push({
+        check,
+        where: `${rel}:${edge.line}`,
+        message: `imports ${edge.specifier}; a host names no subsystem`,
+      });
   }
   walk(parsed.program, node => {
     if (node.type !== 'Literal' || typeof node.value !== 'string') return;

@@ -61,7 +61,8 @@ export const check: Check = {
     if (base !== undefined) {
       const before = new Set(base.pending);
       for (const id of current.pending)
-        if (!before.has(id)) findings.push({ check, where: 'ports-pending.json', message: `${id} was added; the list may only shrink` });
+        if (!before.has(id))
+          findings.push({ check, where: 'ports-pending.json', message: `${id} was added; the list may only shrink` });
     }
     const model = await ctx.model();
     for (const id of current.pending) {
@@ -80,7 +81,11 @@ export const check: Check = {
         }
       }
       if (!anySkeleton)
-        findings.push({ check, where: 'ports-pending.json', message: `${id} has no skeleton half left; remove its line` });
+        findings.push({
+          check,
+          where: 'ports-pending.json',
+          message: `${id} has no skeleton half left; remove its line`,
+        });
     }
     return findings;
   },

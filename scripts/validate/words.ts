@@ -13,7 +13,8 @@ export const check: Check = {
       }
     const findings: Finding[] = [];
     for (const [word, ids] of owners)
-      if (ids.length > 1) findings.push({ check: 'words', where: ids.join(', '), message: `"${word}" is owned ${ids.length} times` });
+      if (ids.length > 1)
+        findings.push({ check: 'words', where: ids.join(', '), message: `"${word}" is owned ${ids.length} times` });
     return findings;
   },
 };

@@ -23,14 +23,22 @@ export const check: Check = {
       for (const half of HALVES) {
         const where = `${subsystem.pkg.rel}/${half}`;
         if (halfPath(subsystem.pkg, half) === undefined) {
-          findings.push({ check: 'manifest-match', where, message: `no ./${half} export (every subsystem ships three halves)` });
+          findings.push({
+            check: 'manifest-match',
+            where,
+            message: `no ./${half} export (every subsystem ships three halves)`,
+          });
           continue;
         }
         let impl;
         try {
           impl = await loadHalf(subsystem.pkg, half);
         } catch (error) {
-          findings.push({ check: 'manifest-match', where, message: `failed to load: ${error instanceof Error ? error.message : String(error)}` });
+          findings.push({
+            check: 'manifest-match',
+            where,
+            message: `failed to load: ${error instanceof Error ? error.message : String(error)}`,
+          });
           continue;
         }
         findings.push(...halfFindings(where, subsystem.manifest, half, impl, pending.has(subsystem.id)));

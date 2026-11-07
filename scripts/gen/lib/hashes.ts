@@ -76,11 +76,7 @@ export function toStableJson(value: unknown, toJsonSchema: ToJsonSchema, depth =
 }
 
 /** The published surface of one package, as stable JSON (the canonical hash input). */
-export async function surfaceOf(
-  _ws: Workspace,
-  subsystem: LoadedSubsystem,
-  toJsonSchema: ToJsonSchema,
-): Promise<Json> {
+export async function surfaceOf(_ws: Workspace, subsystem: LoadedSubsystem, toJsonSchema: ToJsonSchema): Promise<Json> {
   const m: Manifest = subsystem.manifest;
   const stable = (value: unknown): Json => toStableJson(value, toJsonSchema);
   const contractFile = contractPath(subsystem.pkg);
@@ -119,10 +115,7 @@ export async function surfaceOf(
  * Which packages each package consumes (§9.6): providers of its needs and uses, offerers of hooks it takes, the
  * registrar of each ask source it renders, and every contract its own files import.
  */
-export function consumedBy(
-  graph: StartGraph,
-  edges: readonly ImportEdge[],
-): ReadonlyMap<string, ReadonlySet<string>> {
+export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): ReadonlyMap<string, ReadonlySet<string>> {
   const consumed = new Map<string, Set<string>>(graph.ids.map(id => [id, new Set<string>()]));
   const askRegistrar = new Map<string, string>();
   for (const id of graph.ids)
@@ -135,7 +128,8 @@ export function consumedBy(
     };
     for (const token of [...Object.values(m.needs ?? {}), ...Object.values(m.uses ?? {})])
       for (const provider of graph.providers.get(token.name) ?? []) add(provider);
-    for (const take of m.hooks?.takes ?? []) for (const offerer of graph.offerers.get(take.hook.name) ?? []) add(offerer);
+    for (const take of m.hooks?.takes ?? [])
+      for (const offerer of graph.offerers.get(take.hook.name) ?? []) add(offerer);
     for (const entry of m.ui?.renderers ?? []) if (entry.kind === 'ask') add(askRegistrar.get(entry.source));
   }
   for (const edge of edges) {

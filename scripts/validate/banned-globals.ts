@@ -48,16 +48,30 @@ export function bannedIn(file: string, where = file): Finding[] {
   };
   walk(parsed.program, (node, parents) => {
     const parent = parents[parents.length - 1];
-    if (parents.some(p => p.type.startsWith('TS') && p.type !== 'TSAsExpression' && p.type !== 'TSNonNullExpression' && p.type !== 'TSSatisfiesExpression'))
+    if (
+      parents.some(
+        p =>
+          p.type.startsWith('TS') &&
+          p.type !== 'TSAsExpression' &&
+          p.type !== 'TSNonNullExpression' &&
+          p.type !== 'TSSatisfiesExpression',
+      )
+    )
       return;
-    if (node.type === 'ImportDeclaration' || node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') {
+    if (
+      node.type === 'ImportDeclaration' ||
+      node.type === 'ExportNamedDeclaration' ||
+      node.type === 'ExportAllDeclaration'
+    ) {
       const source = (node.source as { value?: string } | null)?.value;
       if (source === undefined) return;
       const fix = BANNED_MODULES.get(bareModule(source));
-      if (fix !== undefined && node.importKind !== 'type' && node.exportKind !== 'type') add(node, `imports ${source}`, fix);
+      if (fix !== undefined && node.importKind !== 'type' && node.exportKind !== 'type')
+        add(node, `imports ${source}`, fix);
       if (bareModule(source) === 'os')
         for (const spec of (node.specifiers as readonly AstNode[] | undefined) ?? [])
-          if ((spec.imported as { name?: string } | undefined)?.name === 'homedir') add(spec, 'imports homedir', 'use a declared root');
+          if ((spec.imported as { name?: string } | undefined)?.name === 'homedir')
+            add(spec, 'imports homedir', 'use a declared root');
       return;
     }
     if (node.type === 'MemberExpression') {

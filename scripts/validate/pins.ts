@@ -40,7 +40,10 @@ export function mcpPinned(doc: Doc): boolean {
   if (payload === undefined) return str(doc.url) !== undefined && str(doc.command) === undefined;
   if (str(payload.url) !== undefined) return true;
   if ((str(payload.npm) ?? str(payload.pypi)) !== undefined)
-    return /^sha(256|384|512)-/.test(str(payload.integrity) ?? '') && !/@latest$|@\^|@~/.test(str(payload.npm) ?? str(payload.pypi) ?? '');
+    return (
+      /^sha(256|384|512)-/.test(str(payload.integrity) ?? '') &&
+      !/@latest$|@\^|@~/.test(str(payload.npm) ?? str(payload.pypi) ?? '')
+    );
   if (str(payload.binary) !== undefined) return /^[0-9a-f]{64}$/.test(str(payload.sha256) ?? '');
   if (str(payload.image) !== undefined) return /@sha256:[0-9a-f]{64}$/.test(str(payload.image) ?? '');
   return false;
@@ -49,9 +52,23 @@ export function mcpPinned(doc: Doc): boolean {
 export function pinFindings(kind: string, doc: Doc, where: string): Finding[] {
   if (doc.floating === true) return [];
   if (kind === 'shell' && !shellPinned(doc))
-    return [{ check: 'pins', where, message: 'shell is not pinned: a flake needs rev and narHash, a package list a nixpkgs rev (or `floating: true`)' }];
+    return [
+      {
+        check: 'pins',
+        where,
+        message:
+          'shell is not pinned: a flake needs rev and narHash, a package list a nixpkgs rev (or `floating: true`)',
+      },
+    ];
   if (kind === 'mcp' && !mcpPinned(doc))
-    return [{ check: 'pins', where, message: 'MCP server is not pinned: a payload with integrity, sha256, an image digest or a remote url (or `floating: true`)' }];
+    return [
+      {
+        check: 'pins',
+        where,
+        message:
+          'MCP server is not pinned: a payload with integrity, sha256, an image digest or a remote url (or `floating: true`)',
+      },
+    ];
   return [];
 }
 
@@ -89,4 +106,8 @@ export const check: Check = {
   },
 };
 
-if (import.meta.main) await runMain(check, process.argv.slice(2).filter((arg, i, all) => arg !== '--path' && all[i - 1] !== '--path'));
+if (import.meta.main)
+  await runMain(
+    check,
+    process.argv.slice(2).filter((arg, i, all) => arg !== '--path' && all[i - 1] !== '--path'),
+  );

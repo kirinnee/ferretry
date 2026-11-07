@@ -20,7 +20,6 @@ export interface DescriptorRow {
   readonly [field: string]: unknown;
 }
 
-
 export const COMPARED = [
   'minimum',
   'caller',
@@ -56,7 +55,8 @@ export function rowsOf(manifest: Manifest): DescriptorRow[] {
   };
   for (const r of manifest.actions?.routes ?? []) rows.push({ table: 'route', key: r.key, ...common(r as never) });
   for (const s of manifest.actions?.sockets ?? []) rows.push({ table: 'socket', key: s.key, ...common(s as never) });
-  for (const m of manifest.actions?.memberRoutes ?? []) rows.push({ table: 'member', key: m.key, ...common(m as never) });
+  for (const m of manifest.actions?.memberRoutes ?? [])
+    rows.push({ table: 'member', key: m.key, ...common(m as never) });
   for (const t of manifest.actions?.agentTools ?? []) rows.push({ table: 'tool', key: t.name, ...common(t as never) });
   return rows;
 }
@@ -89,10 +89,13 @@ export function parity(
     const now = nextBy.get(key);
     const where = `${was.table} ${was.key}`;
     if (now === undefined) {
-      if (!recorded(key, 'removed')) findings.push({ check, where, message: `today has it; 5.0 declares no ${was.table} ${was.key}` });
+      if (!recorded(key, 'removed'))
+        findings.push({ check, where, message: `today has it; 5.0 declares no ${was.table} ${was.key}` });
       continue;
     }
     const diffs: string[] = [];
+    // Today an agent tool is an MCP wrapper in `fy` with no descriptor of its own: only its presence is compared.
+    if (was.table === 'tool') continue;
     for (const field of COMPARED) {
       const before = was[field];
       if (typeof before === 'string' && before.startsWith('unresolved:')) {
@@ -110,9 +113,16 @@ export function parity(
   for (const [key, { change }] of changes) {
     const inToday = todayBy.has(key);
     const inNext = nextBy.has(key);
-    const stale = (change === 'removed' && (inNext || !inToday)) || (change === 'added' && (inToday || !inNext)) || (change === 'changed' && !(inToday && inNext));
-    if (stale) findings.push({ check, where: key.replace('\t', ' '), message: `recorded as ${change} but that no longer holds; remove the line` });
+    const stale =
+      (change === 'removed' && (inNext || !inToday)) ||
+      (change === 'added' && (inToday || !inNext)) ||
+      (change === 'changed' && !(inToday && inNext));
+    if (stale)
+      findings.push({
+        check,
+        where: key.replace('\t', ' '),
+        message: `recorded as ${change} but that no longer holds; remove the line`,
+      });
   }
   return { findings, unresolved };
 }
-

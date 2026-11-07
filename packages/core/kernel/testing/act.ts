@@ -73,7 +73,10 @@ export function testActRunner(options: {
       return ok(showsSomething(op) ? raw : closeAck(raw, options.minted));
     };
     const queued = (queues.get(key) ?? Promise.resolve()).then(run, run);
-    queues.set(key, queued.catch(() => undefined));
+    queues.set(
+      key,
+      queued.catch(() => undefined),
+    );
     return queued;
   };
   return runner as ActRunner;

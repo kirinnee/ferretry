@@ -28,7 +28,14 @@ export {
   carrierConformance,
 } from './carrier-suite.ts';
 export { type DrivenClock, fixedClock } from './clock.ts';
-export { type OpenSocket, type RequestInit2 as TestRequestInit, type TestHost, type TestHostOptions, type TestResponse, testHost } from './host.ts';
+export {
+  type OpenSocket,
+  type RequestInit2 as TestRequestInit,
+  type TestHost,
+  type TestHostOptions,
+  type TestResponse,
+  testHost,
+} from './host.ts';
 export { COMPARED, type DescriptorRow, type ParityResult, type Table, parity, rowsOf } from './parity.ts';
 export { RouteTable, compareRouteSpecificity, orderRoutesBySpecificity } from './router.ts';
 export { MemoryStateFolder, SimulatedCrash, parseDocument } from './state.ts';

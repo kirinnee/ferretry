@@ -33,7 +33,11 @@ export const check: Check = {
       for (const action of s.manifest.actions?.app ?? []) {
         const owner = routeOwner.get(action.calls);
         if (owner === undefined)
-          findings.push({ check, where: s.id, message: `app action ${action.id} calls ${action.calls}, which no package declares` });
+          findings.push({
+            check,
+            where: s.id,
+            message: `app action ${action.id} calls ${action.calls}, which no package declares`,
+          });
         else allowed.add(owner);
       }
       for (const edge of model.edges) {
@@ -60,14 +64,23 @@ export const check: Check = {
                 (parent.type === 'Property' && parent.key === node && parent.computed !== true));
             const isType = parents.some(p => typeof p.type === 'string' && p.type.startsWith('TS'));
             if (!isProperty && !isType)
-              findings.push({ check, where: `${rel}:${parsed.line(node.start)}`, message: `${node.name as string} bypasses the generated client` });
+              findings.push({
+                check,
+                where: `${rel}:${parsed.line(node.start)}`,
+                message: `${node.name as string} bypasses the generated client`,
+              });
           }
           if (node.type === 'CallExpression') {
             const callee = node.callee as { type: string };
             const path = callee.type === 'MemberExpression' ? memberPath(callee as never) : undefined;
             const args = node.arguments as readonly { type: string; value?: unknown }[];
             const first = args[0];
-            if (path?.[path.length - 1] === 'call' && first?.type === 'Literal' && typeof first.value === 'string' && ROUTE_KEY.test(first.value)) {
+            if (
+              path?.[path.length - 1] === 'call' &&
+              first?.type === 'Literal' &&
+              typeof first.value === 'string' &&
+              ROUTE_KEY.test(first.value)
+            ) {
               const owner = routeOwner.get(first.value);
               if (owner === undefined || !allowed.has(owner))
                 findings.push({

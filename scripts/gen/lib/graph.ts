@@ -53,7 +53,8 @@ export function buildGraph(subsystems: readonly LoadedSubsystem[]): StartGraph {
   const hooks = new Map<string, HookDef>();
   for (const id of ids) {
     const manifest = manifests.get(id) as Manifest;
-    for (const token of tokens(manifest.provides)) providers.set(token.name, [...(providers.get(token.name) ?? []), id]);
+    for (const token of tokens(manifest.provides))
+      providers.set(token.name, [...(providers.get(token.name) ?? []), id]);
     for (const offer of manifest.hooks?.offers ?? []) {
       offerers.set(offer.hook.name, [...(offerers.get(offer.hook.name) ?? []), id]);
       if (!hooks.has(offer.hook.name)) hooks.set(offer.hook.name, offer.hook);
@@ -65,7 +66,8 @@ export function buildGraph(subsystems: readonly LoadedSubsystem[]): StartGraph {
   };
   for (const id of ids) {
     const manifest = manifests.get(id) as Manifest;
-    for (const token of tokens(manifest.needs)) for (const provider of providers.get(token.name) ?? []) edge(provider, id);
+    for (const token of tokens(manifest.needs))
+      for (const provider of providers.get(token.name) ?? []) edge(provider, id);
     for (const take of manifest.hooks?.takes ?? [])
       for (const offerer of offerers.get(take.hook.name) ?? []) edge(offerer, id);
     for (const after of manifest.order?.after ?? []) edge(after, id);
@@ -224,9 +226,7 @@ export function hookOrder(graph: StartGraph): ReadonlyMap<string, readonly { id:
   for (const list of result.values())
     list.sort(
       (a, b) =>
-        b.priority - a.priority ||
-        (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0) ||
-        a.id.localeCompare(b.id),
+        b.priority - a.priority || (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0) || a.id.localeCompare(b.id),
     );
   return result;
 }

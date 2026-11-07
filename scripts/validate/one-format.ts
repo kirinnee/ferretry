@@ -5,7 +5,16 @@
  * literals. The kernel store checks exactly the declared `format`; a second accepted number is a converter.
  */
 import { relative, sep } from 'node:path';
-import { type AstNode, type Check, type Finding, memberPath, nameOf, parseFile, runMain, walk } from '../gen/lib/check.ts';
+import {
+  type AstNode,
+  type Check,
+  type Finding,
+  memberPath,
+  nameOf,
+  parseFile,
+  runMain,
+  walk,
+} from '../gen/lib/check.ts';
 import { areaOf } from '../gen/lib/imports.ts';
 import { loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 
@@ -50,7 +59,11 @@ export function formatsIn(file: string, where = file): Finding[] {
       const left = node.left as AstNode;
       const right = node.right as AstNode;
       const operator = node.operator as string;
-      const [ref, other] = isFormatRef(left) ? [left, right] : isFormatRef(right) ? [right, left] : [undefined, undefined];
+      const [ref, other] = isFormatRef(left)
+        ? [left, right]
+        : isFormatRef(right)
+          ? [right, left]
+          : [undefined, undefined];
       if (ref === undefined || other === undefined) return;
       const n = numberOf(other);
       if (n === undefined) return;
@@ -60,16 +73,30 @@ export function formatsIn(file: string, where = file): Finding[] {
       const strict = operator === '<' || operator === '>';
       const admitsOne = upper && (strict ? n <= 2 : n <= 1);
       if (RANGE.has(operator) && !admitsOne)
-        findings.push({ check, where: `${where}:${parsed.line(node.start)}`, message: `format compared with ${operator} ${n}: a reader accepts exactly one format` });
+        findings.push({
+          check,
+          where: `${where}:${parsed.line(node.start)}`,
+          message: `format compared with ${operator} ${n}: a reader accepts exactly one format`,
+        });
       else if (EQUALITY.has(operator) && !compared.has(n)) compared.set(n, node.start);
     } else if (node.type === 'SwitchStatement' && isFormatRef(node.discriminant as AstNode)) {
-      const cases = (node.cases as readonly AstNode[]).map(c => (c.test === null ? undefined : numberOf(c.test as AstNode))).filter(n => n !== undefined);
+      const cases = (node.cases as readonly AstNode[])
+        .map(c => (c.test === null ? undefined : numberOf(c.test as AstNode)))
+        .filter(n => n !== undefined);
       if (new Set(cases).size > 1)
-        findings.push({ check, where: `${where}:${parsed.line(node.start)}`, message: `switch on format accepts ${[...new Set(cases)].join(', ')}` });
+        findings.push({
+          check,
+          where: `${where}:${parsed.line(node.start)}`,
+          message: `switch on format accepts ${[...new Set(cases)].join(', ')}`,
+        });
     } else if (node.type === 'Property' && nameOf(node.key) === 'format') {
       const numbers = new Set(literalNumbers(node.value as AstNode));
       if (numbers.size > 1)
-        findings.push({ check, where: `${where}:${parsed.line(node.start)}`, message: `format schema accepts ${[...numbers].join(', ')}` });
+        findings.push({
+          check,
+          where: `${where}:${parsed.line(node.start)}`,
+          message: `format schema accepts ${[...numbers].join(', ')}`,
+        });
     }
   });
   if (compared.size > 1) {
@@ -93,7 +120,8 @@ export const check: Check = {
       if (pkg.kind !== 'core' && pkg.kind !== 'plugin') continue;
       if (ctx.packageId !== undefined && pkg.id !== ctx.packageId) continue;
       for (const file of sourceFiles(pkg, { tests: false }))
-        if (areaOf(pkg, file) !== 'generated') findings.push(...formatsIn(file, relative(ws.root, file).split(sep).join('/')));
+        if (areaOf(pkg, file) !== 'generated')
+          findings.push(...formatsIn(file, relative(ws.root, file).split(sep).join('/')));
     }
     return findings;
   },

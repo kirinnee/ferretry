@@ -31,7 +31,11 @@ export function contractGraphFindings(edges: readonly ImportEdge[]): Finding[] {
       if (isCore(from) && !isCore(to))
         findings.push({ check, where: from, message: `core contract imports plugin contract ${to}` });
       else if (!isCore(from) && !isCore(to) && !ALLOWED_PLUGIN_EDGES.has(`${from}→${to}`))
-        findings.push({ check, where: from, message: `plugin contract imports plugin contract ${to}; only ${[...ALLOWED_PLUGIN_EDGES].join(', ')} are allowed (ask the lead)` });
+        findings.push({
+          check,
+          where: from,
+          message: `plugin contract imports plugin contract ${to}; only ${[...ALLOWED_PLUGIN_EDGES].join(', ')} are allowed (ask the lead)`,
+        });
     }
   const state = new Map<string, 'visiting' | 'done'>();
   const stack: string[] = [];

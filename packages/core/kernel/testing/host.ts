@@ -1,9 +1,24 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { hours, instantFromEpochMs } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
-import type { Admission, GuardStamp, InputHolds, OutputGuard, Redaction, RedactionScope, WorkFolders } from '../contract/bound.ts';
+import type {
+  Admission,
+  GuardStamp,
+  InputHolds,
+  OutputGuard,
+  Redaction,
+  RedactionScope,
+  WorkFolders,
+} from '../contract/bound.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
-import type { ConfigCollectionDef, ConfigFileDef, Contribution, EventDef, HookDecision, PortToken } from '../contract/define.ts';
+import type {
+  ConfigCollectionDef,
+  ConfigFileDef,
+  Contribution,
+  EventDef,
+  HookDecision,
+  PortToken,
+} from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
@@ -48,7 +63,11 @@ export interface TestHostOptions {
   /** Config values by `file` or `collection` (a collection is `{ name: value }`). Parsed with the declared schema. */
   readonly config?: Readonly<Record<string, unknown>>;
   /** Answers `kernel.spawn.run` for declared programs. Without it a spawn fails. */
-  readonly spawn?: (program: string, args: readonly string[], options?: SpawnOptions) => SpawnResult | Promise<SpawnResult>;
+  readonly spawn?: (
+    program: string,
+    args: readonly string[],
+    options?: SpawnOptions,
+  ) => SpawnResult | Promise<SpawnResult>;
   /** Answers `kernel.fetch.request` for declared hosts. Without it a fetch fails. */
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Text the stand-in redaction masks (same-width `*`). */
@@ -83,7 +102,12 @@ export interface TestHost {
   readonly acts: readonly ActRecord[];
   /** Every event a half published, in order. */
   readonly published: readonly { readonly event: string; readonly payload: unknown }[];
-  readonly logs: readonly { readonly level: string; readonly scope: string; readonly message: string; readonly fields?: LogFields }[];
+  readonly logs: readonly {
+    readonly level: string;
+    readonly scope: string;
+    readonly message: string;
+    readonly fields?: LogFields;
+  }[];
   request(method: string, path: string, init?: RequestInit2): Promise<TestResponse>;
   tool(name: string, input: unknown, init?: { readonly as?: TestCaller }): Promise<ToolResult>;
   socket(path: string, init?: { readonly as?: TestCaller; readonly method?: string }): Promise<OpenSocket>;
@@ -135,7 +159,8 @@ function targetKey(target: TargetRef): string {
 }
 
 function maskScope(secrets: readonly string[]): RedactionScope {
-  const text = (s: string): string => secrets.reduce((out, secret) => (secret === '' ? out : out.split(secret).join('*'.repeat(secret.length))), s);
+  const text = (s: string): string =>
+    secrets.reduce((out, secret) => (secret === '' ? out : out.split(secret).join('*'.repeat(secret.length))), s);
   return {
     text,
     lines: lines => lines.map(text),
@@ -188,7 +213,11 @@ async function start(world: World): Promise<TestHost> {
   const pending = new Set<Promise<unknown>>();
   const track = (promise: Promise<unknown>): void => {
     const tracked = promise.catch(error => {
-      logs.push({ level: 'error', scope: 'test-host', message: error instanceof Error ? error.message : String(error) });
+      logs.push({
+        level: 'error',
+        scope: 'test-host',
+        message: error instanceof Error ? error.message : String(error),
+      });
     });
     pending.add(tracked);
     void tracked.finally(() => pending.delete(tracked));
@@ -228,13 +257,16 @@ async function start(world: World): Promise<TestHost> {
     for (const fn of subscribersOf(name)) track(Promise.resolve().then(() => fn(payload)));
   };
 
-  const hookTakers = (hookName: string): { id: string; key?: string; impl: unknown; priority: number; index: number }[] =>
+  const hookTakers = (
+    hookName: string,
+  ): { id: string; key?: string; impl: unknown; priority: number; index: number }[] =>
     built
       .flatMap((b, index) =>
         (b.manifest.hooks?.takes ?? [])
           .filter(take => take.hook.name === hookName)
           .map(take => {
-            const implKey = take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name;
+            const implKey =
+              take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name;
             return {
               id: b.manifest.id,
               ...(take.key === undefined ? {} : { key: take.key }),
@@ -262,14 +294,18 @@ async function start(world: World): Promise<TestHost> {
       observe(hook, payload) {
         own(hook.name);
         for (const taker of hookTakers(hook.name))
-          if (typeof taker.impl === 'function') track(Promise.resolve().then(() => (taker.impl as (p: unknown) => unknown)(payload)));
+          if (typeof taker.impl === 'function')
+            track(Promise.resolve().then(() => (taker.impl as (p: unknown) => unknown)(payload)));
       },
       async decide(hook, input): Promise<HookDecision> {
         own(hook.name);
         for (const taker of hookTakers(hook.name)) {
           if (typeof taker.impl !== 'function') continue; // a skeleton take is a no-op
           try {
-            const answer = await timed((taker.impl as (i: unknown) => HookDecision | Promise<HookDecision>)(input), hook.timeoutMs);
+            const answer = await timed(
+              (taker.impl as (i: unknown) => HookDecision | Promise<HookDecision>)(input),
+              hook.timeoutMs,
+            );
             if (!answer.allow) return answer;
           } catch (error) {
             return { allow: false, reason: `${taker.id}: ${error instanceof Error ? error.message : String(error)}` };
@@ -283,7 +319,10 @@ async function start(world: World): Promise<TestHost> {
         for (const taker of hookTakers(hook.name)) {
           if (typeof taker.impl !== 'function') continue;
           try {
-            current = await timed((taker.impl as (v: typeof value) => typeof value | Promise<typeof value>)(current), hook.timeoutMs);
+            current = await timed(
+              (taker.impl as (v: typeof value) => typeof value | Promise<typeof value>)(current),
+              hook.timeoutMs,
+            );
           } catch (error) {
             return { ok: false, error: `${taker.id}: ${error instanceof Error ? error.message : String(error)}` };
           }
@@ -298,14 +337,16 @@ async function start(world: World): Promise<TestHost> {
       providers(hook) {
         own(hook.name);
         const out = new Map();
-        for (const taker of hookTakers(hook.name)) if (taker.key !== undefined && taker.impl !== undefined) out.set(taker.key, taker.impl);
+        for (const taker of hookTakers(hook.name))
+          if (taker.key !== undefined && taker.impl !== undefined) out.set(taker.key, taker.impl);
         return out;
       },
       contributions<I>(hook: { readonly name: string }): readonly Contribution<I>[] {
         own(hook.name);
         const items: Contribution<I>[] = [];
         for (const taker of hookTakers(hook.name))
-          if (typeof taker.impl === 'function') items.push(...((taker.impl as () => readonly Contribution<I>[])() ?? []));
+          if (typeof taker.impl === 'function')
+            items.push(...((taker.impl as () => readonly Contribution<I>[])() ?? []));
         const ids = new Set<string>();
         for (const item of items) {
           if (ids.has(item.id)) throw new Error(`hook ${hook.name}: contribution id "${item.id}" twice`);
@@ -320,12 +361,19 @@ async function start(world: World): Promise<TestHost> {
     const at = (level: string) => (message: string, fields?: LogFields) => {
       logs.push({ level, scope, message, ...(fields === undefined ? {} : { fields }) });
     };
-    return { debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error'), child: sub => logFor(`${scope}.${sub}`) };
+    return {
+      debug: at('debug'),
+      info: at('info'),
+      warn: at('warn'),
+      error: at('error'),
+      child: sub => logFor(`${scope}.${sub}`),
+    };
   };
 
   const configPort = (manifest: Manifest): ConfigPort => {
     const declared = manifest.data?.config ?? [];
-    const keyOf = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): string => (def.shape === 'file' ? def.file : def.collection);
+    const keyOf = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): string =>
+      def.shape === 'file' ? def.file : def.collection;
     const assertDeclared = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): void => {
       if (!declared.includes(def)) throw new Error(`${manifest.id}: config ${keyOf(def)} is not declared`);
     };
@@ -339,7 +387,8 @@ async function start(world: World): Promise<TestHost> {
         assertDeclared(def);
         const raw = (world.config.get(def.collection) ?? {}) as Record<string, unknown>;
         const out = new Map();
-        for (const [name, value] of Object.entries(raw)) if (def.name.test(name)) out.set(name, def.schema.parse(value));
+        for (const [name, value] of Object.entries(raw))
+          if (def.name.test(name)) out.set(name, def.schema.parse(value));
         return out;
       },
       watch(def, listener) {
@@ -355,7 +404,8 @@ async function start(world: World): Promise<TestHost> {
 
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name) {
-      if (!(manifest.permissions?.roots ?? []).includes(name)) throw new Error(`${manifest.id}: root ${name} is not declared`);
+      if (!(manifest.permissions?.roots ?? []).includes(name))
+        throw new Error(`${manifest.id}: root ${name} is not declared`);
       const handle: RootHandle = {
         name,
         resolve(relative) {
@@ -371,8 +421,12 @@ async function start(world: World): Promise<TestHost> {
         writeText: async (path, text) => {
           world.roots.set(path, text);
         },
-        list: async path => [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-        stat: async path => (world.roots.has(path) ? { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() } : undefined),
+        list: async path =>
+          [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
+        stat: async path =>
+          world.roots.has(path)
+            ? { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() }
+            : undefined,
         remove: async path => {
           world.roots.delete(path);
         },
@@ -418,18 +472,22 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
-          if (!(manifest.permissions?.spawn ?? []).includes(program)) throw new Error(`${manifest.id}: spawn ${program} is not declared`);
+          if (!(manifest.permissions?.spawn ?? []).includes(program))
+            throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           if (options.spawn === undefined) throw new Error(`${manifest.id}: spawn ${program} with no spawn fake`);
           return options.spawn(program, args, spawnOptions);
         },
         start(program): ChildHandle {
-          throw new Error(`${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`);
+          throw new Error(
+            `${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`,
+          );
         },
       },
       fetch: {
         async request(url, init) {
           const parsed = new URL(url);
-          if (!(manifest.permissions?.network ?? []).includes(parsed.host)) throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
           return options.fetch(parsed, init);
         },
@@ -480,8 +538,15 @@ async function start(world: World): Promise<TestHost> {
           return lookup(options.uses ?? {}, field, token) ?? providedBy.get(token.name);
         },
       };
-    const half = impl.build({ manifest, needs, uses, kernel: kernelFor(manifest), hooks: hooksFor(manifest) } as never) as Record<string, any>;
-    for (const [field, token] of Object.entries(manifest.provides ?? {})) providedBy.set(token.name, half.provides?.[field]);
+    const half = impl.build({
+      manifest,
+      needs,
+      uses,
+      kernel: kernelFor(manifest),
+      hooks: hooksFor(manifest),
+    } as never) as Record<string, any>;
+    for (const [field, token] of Object.entries(manifest.provides ?? {}))
+      providedBy.set(token.name, half.provides?.[field]);
     built.push({ impl, manifest, half });
   }
   usesBound.done = true;
@@ -489,7 +554,19 @@ async function start(world: World): Promise<TestHost> {
     instructions: [],
     words: built.flatMap(b => (b.manifest.words ?? []).map(word => ({ ...word, plugin: b.manifest.id as never }))),
     nav: built.flatMap(b =>
-      (b.manifest.ui?.screens ?? []).flatMap(s => (s.nav === undefined ? [] : [{ plugin: b.manifest.id as never, screen: s.id, label: s.nav.label, order: s.nav.order, ...(s.nav.icon === undefined ? {} : { icon: s.nav.icon }) }])),
+      (b.manifest.ui?.screens ?? []).flatMap(s =>
+        s.nav === undefined
+          ? []
+          : [
+              {
+                plugin: b.manifest.id as never,
+                screen: s.id,
+                label: s.nav.label,
+                order: s.nav.order,
+                ...(s.nav.icon === undefined ? {} : { icon: s.nav.icon }),
+              },
+            ],
+      ),
     ),
     doctor: built.flatMap(b => (b.manifest.doctor ?? []).map(id => ({ plugin: b.manifest.id as never, id }))),
     onboarding: built.flatMap(b => (b.manifest.onboarding ?? []).map(o => ({ plugin: b.manifest.id as never, ...o }))),
@@ -500,19 +577,32 @@ async function start(world: World): Promise<TestHost> {
     readonly plugin: Built;
     readonly key: string;
   }
-  const routeTable = new RouteTable<Mounted>(built.flatMap(b => (b.manifest.actions?.routes ?? []).map(r => ({ ...r, plugin: b }))));
-  const socketTable = new RouteTable<Mounted>(built.flatMap(b => (b.manifest.actions?.sockets ?? []).map(r => ({ ...r, plugin: b }))));
-  const memberTable = new RouteTable(built.flatMap(b => (b.manifest.actions?.memberRoutes ?? []).map(r => ({ ...r, plugin: b }))));
+  const routeTable = new RouteTable<Mounted>(
+    built.flatMap(b => (b.manifest.actions?.routes ?? []).map(r => ({ ...r, plugin: b }))),
+  );
+  const socketTable = new RouteTable<Mounted>(
+    built.flatMap(b => (b.manifest.actions?.sockets ?? []).map(r => ({ ...r, plugin: b }))),
+  );
+  const memberTable = new RouteTable(
+    built.flatMap(b => (b.manifest.actions?.memberRoutes ?? []).map(r => ({ ...r, plugin: b }))),
+  );
   const tools = new Map<string, { decl: ToolDecl; plugin: Built }>();
-  for (const b of built) for (const decl of b.manifest.actions?.agentTools ?? []) tools.set(decl.name, { decl, plugin: b });
+  for (const b of built)
+    for (const decl of b.manifest.actions?.agentTools ?? []) tools.set(decl.name, { decl, plugin: b });
 
   const unavailable = (b: Built): ApiResponse =>
-    errorResponse(KERNEL_REFUSALS.pluginUnavailable.status, skeletonSentence(b.manifest.title), KERNEL_REFUSALS.pluginUnavailable.code);
+    errorResponse(
+      KERNEL_REFUSALS.pluginUnavailable.status,
+      skeletonSentence(b.manifest.title),
+      KERNEL_REFUSALS.pluginUnavailable.code,
+    );
 
   const makeRequest = (method: string, path: string, init: RequestInit2): ApiRequest => {
     const caller = init.as ?? owner();
     const query = queryFrom(
-      Object.entries(init.query ?? {}).flatMap(([k, v]) => (typeof v === 'string' ? [[k, v] as const] : (v as readonly string[]).map(x => [k, x] as const))),
+      Object.entries(init.query ?? {}).flatMap(([k, v]) =>
+        typeof v === 'string' ? [[k, v] as const] : (v as readonly string[]).map(x => [k, x] as const),
+      ),
     );
     const body = init.body === undefined ? '' : typeof init.body === 'string' ? init.body : JSON.stringify(init.body);
     const principal = testPrincipal(caller, instantFromEpochMs(clock.nowMs() + hours(8)));
@@ -520,11 +610,15 @@ async function start(world: World): Promise<TestHost> {
       method: method.toUpperCase(),
       path,
       query,
-      headers: headersFrom({ ...(init.body === undefined ? {} : { 'content-type': 'application/json' }), ...(init.headers ?? {}) }),
+      headers: headersFrom({
+        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(init.headers ?? {}),
+      }),
       arrival: testArrival(caller),
       ...(principal === undefined ? {} : { principal }),
       text: async limit => {
-        if (limit !== undefined && body.length > limit) throw new ApiError(413, 'The request body is too large.', 'too_large');
+        if (limit !== undefined && body.length > limit)
+          throw new ApiError(413, 'The request body is too large.', 'too_large');
         return body;
       },
     };
@@ -532,16 +626,24 @@ async function start(world: World): Promise<TestHost> {
     return request;
   };
 
-  const runHandler = async (handler: () => Promise<ApiResponse>, guard: RouteDescriptor['guard'], noStore: boolean | undefined): Promise<ApiResponse> => {
+  const runHandler = async (
+    handler: () => Promise<ApiResponse>,
+    guard: RouteDescriptor['guard'],
+    noStore: boolean | undefined,
+  ): Promise<ApiResponse> => {
     const stamp = guard === 'secrets' ? outputGuard.stamp() : undefined;
     let response: ApiResponse;
     try {
       response = await handler();
     } catch (error) {
       if (error instanceof SimulatedCrash) throw error;
-      response = error instanceof ApiError ? errorResponse(error.status, error.message, error.code, error.extra) : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
+      response =
+        error instanceof ApiError
+          ? errorResponse(error.status, error.message, error.code, error.extra)
+          : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
     }
-    if (noStore === true) response = { ...response, headers: new Map([...response.headers, ['cache-control', 'no-store']]) };
+    if (noStore === true)
+      response = { ...response, headers: new Map([...response.headers, ['cache-control', 'no-store']]) };
     if (stamp === undefined) return response;
     const built = response;
     const late = () => {
@@ -568,19 +670,31 @@ async function start(world: World): Promise<TestHost> {
       if (found.kind === 'not-found') {
         const member = memberTable.lookup(request.method, path);
         if (member.kind === 'matched') {
-          const decision = admission.admitMember({ table: 'member', descriptor: member.route, request, params: member.params });
+          const decision = admission.admitMember({
+            table: 'member',
+            descriptor: member.route,
+            request,
+            params: member.params,
+          });
           if (decision.outcome === 'refused') return toTestResponse(decision.response);
           const b = member.route.plugin;
           if (b.half === undefined) return toTestResponse(unavailable(b));
           const handler = b.half.memberRoutes?.[member.route.key] as MemberRouteHandler | undefined;
           return toTestResponse(
-            await runHandler(() => (handler as MemberRouteHandler)({ request, params: member.params, ...decision.standing } as never), member.route.guard, true),
+            await runHandler(
+              () => (handler as MemberRouteHandler)({ request, params: member.params, ...decision.standing } as never),
+              member.route.guard,
+              true,
+            ),
           );
         }
         return toTestResponse(errorResponse(404, `There is no ${request.method} ${path}.`, 'not_found'));
       }
       if (found.kind === 'method-not-allowed')
-        return toTestResponse({ ...errorResponse(405, `${path} does not answer ${request.method}.`, 'method_not_allowed'), headers: new Map([['allow', found.allowed.join(', ')]]) });
+        return toTestResponse({
+          ...errorResponse(405, `${path} does not answer ${request.method}.`, 'method_not_allowed'),
+          headers: new Map([['allow', found.allowed.join(', ')]]),
+        });
       const route = found.route;
       let decision: ReturnType<Admission['admit']>;
       try {
@@ -594,10 +708,13 @@ async function start(world: World): Promise<TestHost> {
       const b = route.plugin;
       if (b.half === undefined) return toTestResponse(unavailable(b));
       const handler = b.half.routes?.[route.key] as RouteHandler | undefined;
-      if (handler === undefined) return toTestResponse(errorResponse(500, `no handler for ${route.key}`, 'internal_error'));
+      if (handler === undefined)
+        return toTestResponse(errorResponse(500, `no handler for ${route.key}`, 'internal_error'));
       const call = { request, params: found.params, ...decision.standing } as CallContext;
       const caller = callers.get(request) ?? owner();
-      return toTestResponse(await actorScope.run(actorOf(caller), () => runHandler(() => handler(call), route.guard, route.noStore)));
+      return toTestResponse(
+        await actorScope.run(actorOf(caller), () => runHandler(() => handler(call), route.guard, route.noStore)),
+      );
     },
     async tool(name, input, init = {}) {
       const entry = tools.get(name);
@@ -607,7 +724,8 @@ async function start(world: World): Promise<TestHost> {
       const descriptor = { ...entry.decl, method: 'POST', path: `/v1/tools/${name}` };
       const decision = admission.admit({ table: 'tool', descriptor, request, params: new Map() });
       if (decision.outcome === 'refused') return { text: finalised(decision.response).body, isError: true };
-      if (entry.plugin.half === undefined) return { text: skeletonSentence(entry.plugin.manifest.title), isError: true };
+      if (entry.plugin.half === undefined)
+        return { text: skeletonSentence(entry.plugin.manifest.title), isError: true };
       const handler = entry.plugin.half.tools?.[name] as ToolHandler;
       const call = { request, params: new Map(), ...decision.standing } as CallContext;
       return actorScope.run(actorOf(caller), () => handler(call, input));
@@ -615,7 +733,12 @@ async function start(world: World): Promise<TestHost> {
     async socket(path, init = {}) {
       const request = makeRequest(init.method ?? 'GET', path, { as: init.as ?? owner() });
       const found = socketTable.lookup(request.method, path);
-      const result: { response?: TestResponse; frames: (string | Uint8Array)[]; closed: { code: number; reason: string } | undefined; handler?: SocketHandler } = { frames: [], closed: undefined };
+      const result: {
+        response?: TestResponse;
+        frames: (string | Uint8Array)[];
+        closed: { code: number; reason: string } | undefined;
+        handler?: SocketHandler;
+      } = { frames: [], closed: undefined };
       if (found.kind !== 'matched') {
         result.response = toTestResponse(errorResponse(404, `There is no socket at ${path}.`, 'not_found'));
         return result;
@@ -708,6 +831,5 @@ async function start(world: World): Promise<TestHost> {
   };
   return host;
 }
-
 
 export type { TestCaller };

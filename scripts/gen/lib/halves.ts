@@ -59,7 +59,15 @@ export function implementedSections(
   const build = (impl as { build?: (ctx: unknown) => unknown }).build;
   if (build === undefined) return { sections: {} };
   try {
-    const ctx = { manifest: impl.manifest, needs: inert(), uses: inert(), kernel: inert(), hooks: inert(), client: inert(), io: inert() };
+    const ctx = {
+      manifest: impl.manifest,
+      needs: inert(),
+      uses: inert(),
+      kernel: inert(),
+      hooks: inert(),
+      client: inert(),
+      io: inert(),
+    };
     const half = build(ctx) as Record<string, unknown> | undefined;
     if (half === undefined || half === null || typeof half !== 'object') return { error: 'build returned no object' };
     const sections: Record<string, readonly string[]> = {};
@@ -91,7 +99,11 @@ export function halfFindings(
     findings.push({ check, where, message: `${half} half is built from another manifest (${impl.manifest?.id})` });
   if (isSkeleton(impl)) {
     if (!pending)
-      findings.push({ check, where, message: `${half} half is a skeleton but ${manifest.id} is not in ports-pending.json` });
+      findings.push({
+        check,
+        where,
+        message: `${half} half is a skeleton but ${manifest.id} is not in ports-pending.json`,
+      });
     return findings;
   }
   const inspected = implementedSections(impl);

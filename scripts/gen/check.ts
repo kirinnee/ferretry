@@ -110,7 +110,11 @@ async function main(argv: readonly string[]): Promise<number> {
   let status = report('fy check', findings);
   if (status === 0 && args.packageId !== undefined && argv.includes('--tests')) {
     const pkg = (await ctx.model()).ws.byId(args.packageId);
-    const tests = spawnSync('bun', ['test', join(pkg?.rel ?? '.', 'tests')], { cwd: args.root, stdio: 'inherit', timeout: 300_000 });
+    const tests = spawnSync('bun', ['test', join(pkg?.rel ?? '.', 'tests')], {
+      cwd: args.root,
+      stdio: 'inherit',
+      timeout: 300_000,
+    });
     status = tests.status === 0 ? 0 : 1;
   }
   return status;

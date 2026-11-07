@@ -38,8 +38,11 @@ const ws = (packages: readonly FixturePackage[], options?: { pending?: readonly 
   return f;
 };
 const NO_BASE = { base: 'file:/nonexistent/ports-pending.json' };
-const run = async (check: { run: (ctx: ReturnType<typeof contextFor>) => Promise<readonly Finding[]> }, f: Fixture, extra = {}) =>
-  check.run(contextFor(f.root, { ...NO_BASE, ...extra }));
+const run = async (
+  check: { run: (ctx: ReturnType<typeof contextFor>) => Promise<readonly Finding[]> },
+  f: Fixture,
+  extra = {},
+) => check.run(contextFor(f.root, { ...NO_BASE, ...extra }));
 const messages = (findings: readonly Finding[]): string => findings.map(x => `${x.where}: ${x.message}`).join('\n');
 
 const implementedDaemon = (routes: readonly string[]): string =>
@@ -58,11 +61,15 @@ const withRoute = (id: string, extra: Partial<FixturePackage> = {}): FixturePack
 
 describe('manifest-match', () => {
   test('a half that implements exactly its manifest passes; a skeleton passes while pending', async () => {
-    const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/alpha']) }), withRoute('beta')], { pending: ['alpha', 'beta'] });
+    const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/alpha']) }), withRoute('beta')], {
+      pending: ['alpha', 'beta'],
+    });
     expect(messages(await run(manifestMatch, f))).toBe('');
   });
   test('planted: an undeclared route, a missing route, and a skeleton not in ports-pending', async () => {
-    const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/extra']) }), withRoute('beta')], { pending: ['alpha'] });
+    const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/extra']) }), withRoute('beta')], {
+      pending: ['alpha'],
+    });
     const found = messages(await run(manifestMatch, f));
     expect(found).toContain('implements undeclared routes "GET /v1/extra"');
     expect(found).toContain('misses routes "GET /v1/alpha"');
@@ -100,14 +107,21 @@ describe('ports-pending', () => {
 
 // ─── graph checks ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-const portContract = (name: string): string => `import { definePort } from '${LEAF}';\nexport const ${name}Port = definePort<{ ping(): void }>('${name}');\n`;
+const portContract = (name: string): string =>
+  `import { definePort } from '${LEAF}';\nexport const ${name}Port = definePort<{ ping(): void }>('${name}');\n`;
 
 describe('plugin-graph', () => {
   test('planted: a missing provider, a start-order cycle, a security-path taker and two takers of one key', async () => {
     const hookContract = `import { z } from '${ZOD}';\nimport { defineHook } from '${LEAF}';\nexport const Keys = defineHook('gate.keys', { mode: 'provide', key: z.enum(['a', 'b']), takers: ['beta'] });\n`;
     const f = ws(
       [
-        { id: 'gate', core: true, contract: hookContract, manifestImports: `import { Keys } from '../../core/gate/contract/index.ts';`, manifest: '  hooks: { offers: [{ hook: Keys }] },' },
+        {
+          id: 'gate',
+          core: true,
+          contract: hookContract,
+          manifestImports: `import { Keys } from '../../core/gate/contract/index.ts';`,
+          manifest: '  hooks: { offers: [{ hook: Keys }] },',
+        },
         {
           id: 'alpha',
           contract: portContract('alpha'),
@@ -137,8 +151,18 @@ describe('core-closed', () => {
   test('planted: a core manifest needs a port a plugin provides', async () => {
     const f = ws(
       [
-        { id: 'gate', core: true, manifestImports: `import { alphaPort } from '../../plugins/alpha/contract/index.ts';`, manifest: '  needs: { alpha: alphaPort },' },
-        { id: 'alpha', contract: portContract('alpha'), manifestImports: `import { alphaPort } from './contract/index.ts';`, manifest: '  provides: { alpha: alphaPort },' },
+        {
+          id: 'gate',
+          core: true,
+          manifestImports: `import { alphaPort } from '../../plugins/alpha/contract/index.ts';`,
+          manifest: '  needs: { alpha: alphaPort },',
+        },
+        {
+          id: 'alpha',
+          contract: portContract('alpha'),
+          manifestImports: `import { alphaPort } from './contract/index.ts';`,
+          manifest: '  provides: { alpha: alphaPort },',
+        },
       ],
       { pending: ['gate', 'alpha'] },
     );
@@ -160,7 +184,9 @@ describe('context-imports', () => {
           id: 'alpha',
           manifestImports: `import beta from '@ferretry/plugin-beta/daemon';`,
           contract: `import { readFileSync } from 'node:fs';\nexport const x = readFileSync;\n`,
-          files: { 'daemon/lib/x.ts': `import type { Y } from '@ferretry/plugin-beta/daemon';\nimport { z } from '@ferretry/plugin-beta/contract';\nexport type X = Y | typeof z;\n` },
+          files: {
+            'daemon/lib/x.ts': `import type { Y } from '@ferretry/plugin-beta/daemon';\nimport { z } from '@ferretry/plugin-beta/contract';\nexport type X = Y | typeof z;\n`,
+          },
         },
         { id: 'beta' },
       ],
@@ -178,7 +204,11 @@ describe('contract-graph', () => {
   test('planted: a core contract imports a plugin contract; a plugin contract edge not on the allowed list; a cycle', async () => {
     const f = ws(
       [
-        { id: 'gate', core: true, contract: `export * from '@ferretry/core-vault/contract';\nimport '@ferretry/plugin-alpha/contract';\n` },
+        {
+          id: 'gate',
+          core: true,
+          contract: `export * from '@ferretry/core-vault/contract';\nimport '@ferretry/plugin-alpha/contract';\n`,
+        },
         { id: 'vault', core: true, contract: `export * from '@ferretry/core-gate/contract';\n` },
         { id: 'alpha', contract: `import '@ferretry/plugin-beta/contract';\nexport {};\n` },
         { id: 'beta' },
@@ -262,7 +292,17 @@ describe('source scans', () => {
         ),
       ),
     );
-    for (const what of ['imports node:fs', 'imports homedir', 'Date.now', 'new Date()', 'setTimeout', 'process.env', 'process.platform', 'fetch', 'Bun.spawn'])
+    for (const what of [
+      'imports node:fs',
+      'imports homedir',
+      'Date.now',
+      'new Date()',
+      'setTimeout',
+      'process.env',
+      'process.platform',
+      'fetch',
+      'Bun.spawn',
+    ])
       expect(found).toContain(what);
   });
   test('banned-globals clean: kernel ports, a fetch property, a typed Date', () => {
@@ -274,14 +314,25 @@ describe('source scans', () => {
   });
 
   test('no-compat planted: an identifier and a string; "compatible" stays', () => {
-    const found = compatIn(file('compat.ts', `export const legacyHome = 'run the migration first';\nexport const byteCompatible = 'compatible';\nexport const compatMode = 1;\n`));
+    const found = compatIn(
+      file(
+        'compat.ts',
+        `export const legacyHome = 'run the migration first';\nexport const byteCompatible = 'compatible';\nexport const compatMode = 1;\n`,
+      ),
+    );
     expect(found.length).toBe(3);
     expect(messages(found)).not.toContain('byteCompatible');
   });
 
   test('no-compat allowlist: only the CARRY_OVER_PROMPT text in the kernel home contract is exempt', () => {
-    f.write('packages/core/kernel/contract/home.ts', "export const CARRY_OVER_PROMPT = 'follow docs/migration/clean-slate-prompt.md';\nexport const OTHER = 'docs/migration';\n");
-    const found = compatIn(join(f.root, 'packages/core/kernel/contract/home.ts'), 'packages/core/kernel/contract/home.ts');
+    f.write(
+      'packages/core/kernel/contract/home.ts',
+      "export const CARRY_OVER_PROMPT = 'follow docs/migration/clean-slate-prompt.md';\nexport const OTHER = 'docs/migration';\n",
+    );
+    const found = compatIn(
+      join(f.root, 'packages/core/kernel/contract/home.ts'),
+      'packages/core/kernel/contract/home.ts',
+    );
     expect(found.length).toBe(1);
     expect(found[0]?.where).toBe('packages/core/kernel/contract/home.ts:2');
   });
@@ -346,7 +397,13 @@ describe('words and glossary', () => {
   const owned = (word: string, insteadOf: readonly string[] = []): string =>
     `  words: [{ word: '${word}', means: 'a thing', insteadOf: ${JSON.stringify(insteadOf)} }],`;
   test('words planted: one word owned twice', async () => {
-    const f = ws([{ id: 'alpha', manifest: owned('card') }, { id: 'beta', manifest: owned('Card') }], { pending: ['alpha', 'beta'] });
+    const f = ws(
+      [
+        { id: 'alpha', manifest: owned('card') },
+        { id: 'beta', manifest: owned('Card') },
+      ],
+      { pending: ['alpha', 'beta'] },
+    );
     expect(messages(await run(words, f))).toContain('"card" is owned 2 times');
   });
   test('glossary planted: a verb summary and an instruction use an "instead of" word', async () => {
@@ -389,15 +446,27 @@ describe('pins', () => {
 
 describe('descriptor-parity', () => {
   const today = [
-    { table: 'route' as const, key: 'GET /v1/a', minimum: 'authenticated', caller: 'any' },
+    {
+      table: 'route' as const,
+      key: 'GET /v1/a',
+      minimum: 'authenticated',
+      caller: 'any',
+      capability: 'unresolved:CAP',
+    },
     { table: 'route' as const, key: 'GET /v1/gone', minimum: 'authenticated', caller: 'any' },
-    { table: 'tool' as const, key: 'x_read', minimum: 'authenticated', caller: 'any', capability: 'unresolved:CAP' },
+    { table: 'tool' as const, key: 'x_read' },
   ];
   test('planted: a changed field, a missing route, a new route, a stale recorded change', () => {
     const next = [
       { table: 'route' as const, key: 'GET /v1/a', minimum: 'operator', caller: 'any' },
       { table: 'route' as const, key: 'GET /v1/new', minimum: 'authenticated', caller: 'any' },
-      { table: 'tool' as const, key: 'x_read', minimum: 'authenticated', caller: 'any', capability: { capability: 'terminal', axis: 'use' } },
+      {
+        table: 'tool' as const,
+        key: 'x_read',
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: { capability: 'terminal', axis: 'use' },
+      },
     ];
     const changes = readChanges('route\tGET /v1/x\tremoved\tnever existed\n');
     const result = parity(today, next, changes);
@@ -420,9 +489,27 @@ describe('descriptor-parity', () => {
 
 describe('guarantees', () => {
   test('reads the one table: id status owner with enforcer doc test, dashes as empty', () => {
-    const rows = parseTsv('id\tstatus\towner\twith\tenforcer\tdoc\ttest\nG1\tkept\tgate\taccess,vault\t`arrivedOnHost`\tgrants\tG1\nG69\tremoved\taccess\t-\t-\tgrants\t-\n');
-    expect(rows[0]).toEqual({ id: 'G1', status: 'kept', owner: 'gate', with: ['access', 'vault'], enforcer: '`arrivedOnHost`', doc: 'grants', test: 'G1' });
-    expect(rows[1]).toEqual({ id: 'G69', status: 'removed', owner: 'access', with: [], enforcer: '', doc: 'grants', test: '' });
+    const rows = parseTsv(
+      'id\tstatus\towner\twith\tenforcer\tdoc\ttest\nG1\tkept\tgate\taccess,vault\t`arrivedOnHost`\tgrants\tG1\nG69\tremoved\taccess\t-\t-\tgrants\t-\n',
+    );
+    expect(rows[0]).toEqual({
+      id: 'G1',
+      status: 'kept',
+      owner: 'gate',
+      with: ['access', 'vault'],
+      enforcer: '`arrivedOnHost`',
+      doc: 'grants',
+      test: 'G1',
+    });
+    expect(rows[1]).toEqual({
+      id: 'G69',
+      status: 'removed',
+      owner: 'access',
+      with: [],
+      enforcer: '',
+      doc: 'grants',
+      test: '',
+    });
     expect(() => parseTsv('id\tnope\n')).toThrow();
   });
   test('planted: a kept row with no test, a removed row that still has one; pending owners are skipped', () => {
@@ -432,7 +519,10 @@ describe('guarantees', () => {
       { id: 'G3', status: 'removed' as const, owner: '', with: [], enforcer: '', doc: 'grants', test: '' },
       { id: 'G4', status: 'kept' as const, owner: 'gate', with: [], enforcer: '', doc: 'grants', test: '' },
     ];
-    const tests = new Map([['G3', ['x.test.ts']], ['G4', ['packages/core/gate/tests/unit/g4.test.ts']]]);
+    const tests = new Map([
+      ['G3', ['x.test.ts']],
+      ['G4', ['packages/core/gate/tests/unit/g4.test.ts']],
+    ]);
     const found = messages(guaranteeFindings(rows, tests, new Set(['board']), undefined, false));
     expect(found).toContain('G1: kept row owned by gate has no test');
     expect(found).not.toContain('G2');
@@ -454,7 +544,11 @@ describe('registry generator', () => {
       manifest: '  provides: { alpha: alphaPort },',
       testing: 'export const fakeAlpha = () => ({ ping() {} });\n',
     },
-    { id: 'beta', manifestImports: `import { alphaPort } from '../alpha/contract/index.ts';`, manifest: '  needs: { alpha: alphaPort },' },
+    {
+      id: 'beta',
+      manifestImports: `import { alphaPort } from '../alpha/contract/index.ts';`,
+      manifest: '  needs: { alpha: alphaPort },',
+    },
     { id: 'gamma' },
   ];
 
