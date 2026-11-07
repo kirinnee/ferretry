@@ -320,14 +320,14 @@ describe('ClaudeHarness', () => {
       expect(now.hasCompletedOnboarding).toBe(true);
       expect(now.projects['/work']).toEqual({ allowedTools: ['Bash'], hasTrustDialogAccepted: true });
       expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
-      expect(plan.files).toContain(claudeJson());
+      expect(plan.files as readonly string[]).toContain(claudeJson());
     });
 
     test('an already-seeded document is not rewritten', async () => {
       const { harness } = build();
       await harness.prepareHome(spec());
       const plan = await harness.prepareHome(spec());
-      expect(plan.files).not.toContain(claudeJson());
+      expect(plan.files as readonly string[]).not.toContain(claudeJson());
       expect(plan.files.length).toBe(4);
     });
 
@@ -340,7 +340,7 @@ describe('ClaudeHarness', () => {
       expect(await readFile(claudeJson(), 'utf8')).toBe(
         '{"projects": {"/work": {"disabledMcpjsonServers": ["tracker"]',
       );
-      expect(plan.files).not.toContain(claudeJson());
+      expect(plan.files as readonly string[]).not.toContain(claudeJson());
       const answer = await approvals(roots).approvedProjectServers({
         ferret: FERRET,
         root: '/work',
