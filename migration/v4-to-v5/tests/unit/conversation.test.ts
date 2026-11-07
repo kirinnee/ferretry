@@ -1,19 +1,41 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { DraftSnapshotSchema, LinksFileSchema } from '@ferretry/plugin-conversation/contract';
-import { chmod, mkdir, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import {
+  DraftSnapshotSchema,
+  LinksFileSchema,
+  QuestionSchema,
+  SendRecordSchema,
+  StoredRenderMetaSchema,
+} from '@ferretry/plugin-conversation/contract';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, readdir, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  CONVERSATION_PORT,
   conversationStep,
   DraftsDocumentSchema,
   V5_LINKS_FILE,
   V5_MESSAGE_TOKEN_KEY_FILE,
+  V5AnswerLineSchema,
+  v5AnswersFile,
+  v5AttachmentManifest,
+  v5AttachmentOriginal,
   v5DraftsFile,
+  V5InboxLineSchema,
+  v5InboxFile,
+  V5OutboxLineSchema,
+  v5OutboxFile,
+  v5QuestionFile,
+  V5QueueLineSchema,
+  v5QueueFile,
+  v5RenderMeta,
+  v5RenderPayload,
+  V5SendLineSchema,
+  v5SendView,
+  v5SendsFile,
   v5TurnsFolder,
 } from '../../src/steps/conversation.ts';
 import { STEPS } from '../../src/steps/index.ts';
 import { foldV4Queue, latestV4Sends, V4SendLine } from '../../src/v4/conversation.ts';
-import { AT, fixture } from './ferret-fixture.ts';
+import { AT, fixture, RUNTIME } from './ferret-fixture.ts';
 
 // A FAKE key: 32 fixed printable bytes, so a test can prove they are copied unchanged and never reach a report.
 const FAKE_KEY = Buffer.from('FAKE-MESSAGE-TOKEN-KEY-0123456789'.slice(0, 32), 'utf8');
@@ -34,6 +56,19 @@ const raw = async (path: string, content: string | Buffer, mode = 0o600) => {
   await chmod(target, mode);
 };
 const jsonl = (lines: readonly unknown[]) => `${lines.map(line => JSON.stringify(line)).join('\n')}\n`;
+const exists = async (path: string) => (await stat(join(f.to, path)).catch(() => undefined)) !== undefined;
+/** Every line of a written v5 log, each checked to start with the kernel's `"format":1` stamp. */
+const lines = async (path: string) => {
+  const text = await readFile(join(f.to, path), 'utf8');
+  expect(text.endsWith('\n')).toBe(true);
+  return text
+    .trimEnd()
+    .split('\n')
+    .map(line => {
+      expect(line.startsWith('{"format":1,')).toBe(true);
+      return JSON.parse(line) as Record<string, unknown>;
+    });
+};
 
 const draft = (sessionId: string, extra: Record<string, unknown> = {}) => ({
   v: 1,
@@ -47,18 +82,18 @@ const draft = (sessionId: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-const queued = (id: string) => ({
+const queued = (id: string, text = 'FAKE queued') => ({
   v: 1,
   id,
   sender: 'human',
-  text: 'FAKE queued',
+  text,
   attachmentIds: [],
   enqueuedAt: AT,
   state: 'queued',
   stateAt: AT,
   revision: 1,
 });
-const send = (sendId: string, fate: string) => ({
+const send = (sendId: string, fate: string, extra: Record<string, unknown> = {}) => ({
   sendId,
   acceptedAt: AT,
   acceptedTurn: 1,
@@ -67,6 +102,61 @@ const send = (sendId: string, fate: string) => ({
   matchText: 'FAKE match',
   fate,
   at: AT,
+  ...extra,
+});
+const live = async (id = 'f1', extra: Record<string, unknown> = {}) => {
+  await f.session(id, extra);
+  await f.put(`state/sessions/${id}/state.json`, { id, status: 'awaiting_question' });
+};
+
+/** A claude ferret whose transcript is in a runtime home the converter can place in the new home. */
+const homeOf = () => join(f.from, 'fleet/homes', RUNTIME);
+const transcriptFile = () => join(homeOf(), 'projects/p/c.jsonl');
+const claudeFerret = (id = 'f1') =>
+  live(id, {
+    harness: 'claude',
+    transcript: { v: 1, home: homeOf(), identity: 'minted', harnessSessionId: 'c', file: transcriptFile() },
+  });
+const asked = (questions: readonly unknown[], path = transcriptFile()) => ({
+  hook_event_name: 'PreToolUse',
+  tool_name: 'AskUserQuestion',
+  tool_use_id: 'toolu_1',
+  transcript_path: path,
+  tool_input: { questions },
+});
+
+/** A content-addressed attachment, as v4 and v5 both name one. */
+const attachment = (bytes: Buffer, extra: Record<string, unknown> = {}) => {
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  return {
+    id: `att_${sha256}`,
+    manifest: {
+      id: `att_${sha256}`,
+      filename: 'a.png',
+      mime: 'image/png',
+      size: bytes.length,
+      sha256,
+      createdAt: AT,
+      ...extra,
+    },
+  };
+};
+const putAttachment = async (daemon: string, ferret: string, bytes: Buffer, extra: Record<string, unknown> = {}) => {
+  const { id, manifest } = attachment(bytes, extra);
+  await f.put(`state/attachments/${daemon}/${ferret}/${id}/manifest.json`, manifest);
+  await raw(`state/attachments/${daemon}/${ferret}/${id}/original`, bytes);
+  return id;
+};
+const renderMeta = (id: string, extra: Record<string, unknown> = {}) => ({
+  v: 1,
+  id,
+  kind: 'svg',
+  alt: 'FAKE alt',
+  bytes: 6,
+  sha256: 'c'.repeat(64),
+  createdAt: AT,
+  author: { sessionId: 'f1' },
+  ...extra,
 });
 
 describe('conversation step', () => {
@@ -75,13 +165,17 @@ describe('conversation step', () => {
     expect(conversationStep.sealed).toEqual(['state/session-message-token.key']);
   });
 
+  test('pins are not listed here: the ferrets step carries them', () => {
+    expect(JSON.stringify(conversationStep.notCarried)).not.toContain('pins');
+  });
+
   test('moves the message-token key byte for byte and never puts it in the report', async () => {
     await raw('state/session-message-token.key', FAKE_KEY);
     const time = new Date('2026-10-01T00:00:00.000Z');
     await utimes(join(f.from, 'state/session-message-token.key'), time, time);
     const report = await conversationStep.run(f.ctx());
 
-    expect(report.status).toBe('pending');
+    expect(report.status).toBe('converted');
     const moved = join(f.to, V5_MESSAGE_TOKEN_KEY_FILE);
     expect(V5_MESSAGE_TOKEN_KEY_FILE).toBe('state/conversation/message-token.key');
     expect(Buffer.compare(await readFile(moved), FAKE_KEY)).toBe(0);
@@ -99,7 +193,7 @@ describe('conversation step', () => {
     const report = await conversationStep.run(f.ctx());
     expect(report.status).toBe('failed');
     expect(report.note).toBe('sealed key is not mode 0600: state/session-message-token.key');
-    expect(await stat(join(f.to, V5_MESSAGE_TOKEN_KEY_FILE)).catch(() => undefined)).toBeUndefined();
+    expect(await exists(V5_MESSAGE_TOKEN_KEY_FILE)).toBe(false);
   });
 
   test('copies turns byte for byte with modes and times, and omits links', async () => {
@@ -142,7 +236,7 @@ describe('conversation step', () => {
     expect(report.kept).toContainEqual({ what: 'chat drafts', count: 1 });
     expect(report.kept).toContainEqual({ what: 'agenda reply drafts', count: 1 });
     expect(report.note).toContain('1 orphan draft(s) omitted');
-    expect(await stat(join(f.to, v5DraftsFile('gone'))).catch(() => undefined)).toBeUndefined();
+    expect(await exists(v5DraftsFile('gone'))).toBe(false);
   });
 
   test('a draft that names another session fails, naming the file only', async () => {
@@ -176,90 +270,137 @@ describe('conversation step', () => {
     expect(report.kept).toContainEqual({ what: 'conversation links', count: 1 });
   });
 
-  test('reads and checks the files whose v5 shape is the port’s, and writes none of them', async () => {
+  test('the queue keeps its own events, line for line, each stamped and parsed by the v5 line shape', async () => {
     await f.session('f1');
-    await f.put('state/sessions/f1/state.json', { id: 'f1', status: 'awaiting_question' });
-    await raw(
-      'state/sessions/f1/channel/queue.jsonl',
-      jsonl([
-        { v: 1, kind: 'enqueued', at: AT, message: queued('q1') },
-        { v: 1, kind: 'enqueued', at: AT, message: queued('q2') },
-        { v: 1, kind: 'moved', at: AT, id: 'q1', state: 'typing' },
-        { v: 1, kind: 'moved', at: AT, id: 'nobody', state: 'typing' },
-      ]),
-    );
-    // Two lines for s1 (last wins), and a crash-truncated final line, which v4 skipped.
+    const events = [
+      { v: 1, kind: 'enqueued', at: AT, message: queued('q1') },
+      { v: 1, kind: 'enqueued', at: AT, message: queued('q2') },
+      { v: 1, kind: 'edited', at: AT, id: 'q2', text: 'FAKE edited', revision: 2 },
+      { v: 1, kind: 'waiting', at: AT, id: 'q2', reason: 'busy' },
+      { v: 1, kind: 'moved', at: AT, id: 'q1', state: 'typing', batch: 'q1' },
+      { v: 1, kind: 'moved', at: AT, id: 'nobody', state: 'typing' },
+    ];
+    await raw('state/sessions/f1/channel/queue.jsonl', jsonl(events));
+    const report = await conversationStep.run(f.ctx());
+
+    expect(report.status).toBe('converted');
+    expect(v5QueueFile('f1')).toBe('state/conversation/f1/queue.jsonl');
+    const written = await lines(v5QueueFile('f1'));
+    expect(written.map(line => V5QueueLineSchema.parse(line))).toEqual(events.map(e => ({ format: 1, ...e })) as never);
+    expect((await stat(join(f.to, v5QueueFile('f1')))).mode & 0o777).toBe(0o600);
+    expect(report.kept).toContainEqual({ what: 'queue events', count: 6 });
+    expect(report.kept).toContainEqual({ what: 'queued messages (folded)', count: 2 });
+  });
+
+  test('the send ledger keeps every line in v5’s words: ferret_ended, no payload pointer, no v4 timers', async () => {
+    await f.session('f1');
+    const payload = join(f.from, 'state/sessions/f1/channel/queued-s2.md');
+    await raw('state/sessions/f1/channel/queued-s2.md', `${FAKE_VALUE}\n`);
     await raw(
       'state/sessions/f1/channel/sends.jsonl',
-      `${jsonl([send('s1', 'accepted'), send('s1', 'delivered'), send('s2', 'withdrawn')])}{"sendId":"s3",`,
+      `${jsonl([
+        send('s1', 'accepted'),
+        send('s1', 'unaccounted', { unaccountedReason: 'session_ended', hardDeadline: AT, opportunityAt: AT }),
+        send('s2', 'queued', { path: 'native-file', payloadFile: payload, batch: [{ queueId: 'q1', from: 'f2' }] }),
+        send('s3', 'withdrawn', { reason: 'refused' }),
+      ])}{"sendId":"s4",`,
     );
-    await raw(
-      'state/sessions/f1/channel/answers.jsonl',
-      jsonl([
-        { requestId: 'r1', toolUseId: 't1', fingerprint: 'fp', acceptedAt: AT, outcome: 'accepted', at: AT },
-        { requestId: 'r1', toolUseId: 't1', fingerprint: 'fp', acceptedAt: AT, outcome: 'confirmed', at: AT },
-      ]),
-    );
-    await raw('state/sessions/f1/channel/inbox.jsonl', jsonl([{ at: AT, type: 'message', message: 'FAKE in' }]));
+    const report = await conversationStep.run(f.ctx());
+
+    expect(report.status).toBe('converted');
+    const written = (await lines(v5SendsFile('f1'))).map(line => V5SendLineSchema.parse(line));
+    expect(written.map(line => [line.sendId, line.fate])).toEqual([
+      ['s1', 'accepted'],
+      ['s1', 'unaccounted'],
+      ['s2', 'queued'],
+      ['s3', 'withdrawn'],
+    ]);
+    expect(written[1]).toMatchObject({ unaccountedReason: 'ferret_ended', matchText: 'FAKE match', at: AT });
+    expect(written[1]).not.toHaveProperty('hardDeadline');
+    expect(written[1]).not.toHaveProperty('opportunityAt');
+    expect(written[2]).not.toHaveProperty('payloadFile');
+    expect(written[2]?.batch).toEqual([{ queueId: 'q1', from: 'f2' }]);
+    expect(written[3]).toMatchObject({ fate: 'withdrawn', reason: 'refused' });
+    // Every line is servable: v5's wire projection parses with the contract's SendRecordSchema.
+    for (const line of written) SendRecordSchema.parse(v5SendView(line));
+    expect(SendRecordSchema.parse(v5SendView(written[3]!))).toMatchObject({ fate: 'accepted', withdrawn: true });
+    // The queued payload file has no v5 place and is not copied.
+    expect((await readdir(join(f.to, 'state/conversation/f1'))).sort()).toEqual(['sends.jsonl']);
+    expect(report.kept).toContainEqual({ what: 'send ledger lines', count: 4 });
+    expect(report.kept).toContainEqual({ what: 'sends (latest per send)', count: 3 });
+    expect(report.note).toContain('1 send payloadFile pointer(s) dropped');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
+  });
+
+  test('answer receipts, inbox and outbox are copied line for line; the outbox’s question lines are not', async () => {
+    await f.session('f1');
+    const receipts = [
+      { requestId: 'r1', toolUseId: 't1', fingerprint: 'fp', acceptedAt: AT, outcome: 'accepted', at: AT },
+      { requestId: 'r1', toolUseId: 't1', fingerprint: 'fp', acceptedAt: AT, outcome: 'confirmed', at: AT },
+      {
+        requestId: 'r2',
+        toolUseId: 't2',
+        fingerprint: 'fp',
+        acceptedAt: AT,
+        outcome: 'accepted',
+        resolution: 'failed',
+        reason: 'FAKE',
+      },
+    ];
+    await raw('state/sessions/f1/channel/answers.jsonl', jsonl(receipts));
+    const inbox = [
+      { at: AT, type: 'message', message: 'FAKE in', turn: 2, from: 'f2', fromName: 'arleen' },
+      { at: AT, type: 'message', message: 'FAKE queued in', queued: true, queueId: 's9' },
+    ];
+    await raw('state/sessions/f1/channel/inbox.jsonl', jsonl(inbox));
+    const message = { at: AT, type: 'message', from: 'f1', to: 'owner', disposition: 'delivered', message: 'FAKE out' };
     await raw(
       'state/sessions/f1/channel/outbox.jsonl',
-      jsonl([{ at: AT, type: 'message', from: 'f1', to: 'owner', disposition: 'delivered', message: 'FAKE out' }]),
+      jsonl([message, { at: AT, type: 'question', message: 'FAKE help?' }]),
     );
-    await f.put('state/sessions/f1/question-asked.json', {
-      hook_event_name: 'PreToolUse',
-      tool_name: 'AskUserQuestion',
-      tool_use_id: 'toolu_1',
-      transcript_path: '/fake/t.jsonl',
-      tool_input: { questions: [{ question: 'FAKE?', options: [{ label: 'Yes' }] }] },
-    });
-    await f.put('state/attachments/daemon1/f1/att_1/manifest.json', {
-      id: 'att_1',
-      filename: 'a.png',
-      mime: 'image/png',
-      size: 4,
-      sha256: 'b'.repeat(64),
-      createdAt: AT,
-    });
-    await raw('state/attachments/daemon1/f1/att_1/original', Buffer.from([0, 1, 2, 3]));
-    await f.put('state/renders/ab/abcdef.json', {
-      v: 1,
-      id: 'abcdef',
-      kind: 'svg',
-      alt: 'FAKE',
-      bytes: 5,
-      sha256: 'c'.repeat(64),
-      createdAt: AT,
-      author: { sessionId: 'f1' },
-    });
-    await raw('state/renders/ab/abcdef.payload', '<svg/>');
     const report = await conversationStep.run(f.ctx());
 
-    expect(report.status).toBe('pending');
-    expect(report.note).toContain(CONVERSATION_PORT);
-    expect(report.note).toContain(
-      'queue messages 2, sends 2, answer receipts 1, inbox lines 1, outbox lines 1, open questions 1, attachments 1, renders 1',
+    expect(report.status).toBe('converted');
+    const answers = (await lines(v5AnswersFile('f1'))).map(line => V5AnswerLineSchema.parse(line));
+    expect(answers).toEqual(receipts.map(r => ({ format: 1, ...r })) as never);
+    expect((await lines(v5InboxFile('f1'))).map(line => V5InboxLineSchema.parse(line))).toEqual(
+      inbox.map(line => ({ format: 1, ...line })) as never,
     );
-    for (const absent of [
-      'state/conversation/f1/queue.jsonl',
-      'state/conversation/f1/sends.jsonl',
-      'state/conversation/f1/answers.jsonl',
-      'state/conversation/f1/question.json',
-      'state/conversation/f1/attachments',
-      'state/conversation/renders',
-    ])
-      expect(await stat(join(f.to, absent)).catch(() => undefined)).toBeUndefined();
+    expect((await lines(v5OutboxFile('f1'))).map(line => V5OutboxLineSchema.parse(line))).toEqual([
+      { format: 1, ...message },
+    ] as never);
+    expect(report.kept).toContainEqual({ what: 'answer receipt lines', count: 3 });
+    expect(report.kept).toContainEqual({ what: 'answer receipts (latest per request)', count: 2 });
+    expect(report.kept).toContainEqual({ what: 'inbox lines', count: 2 });
+    expect(report.kept).toContainEqual({ what: 'outbox lines', count: 1 });
+    expect(report.note).toContain('1 outbox question line(s) left to Ferrets');
   });
 
-  test('an ended ferret’s question is not counted as open', async () => {
+  test('a line v5 refuses fails the step by file and line, never by value', async () => {
     await f.session('f1');
-    await f.put('state/sessions/f1/state.json', { id: 'f1', status: 'completed' });
-    await f.put('state/sessions/f1/question-asked.json', { not: 'checked for an ended ferret' });
+    await raw(
+      'state/sessions/f1/channel/outbox.jsonl',
+      jsonl([
+        { at: AT, type: 'message', from: 'f1', to: 'owner', disposition: 'delivered', message: 'FAKE ok' },
+        { at: AT, type: 'message', from: 'f1', to: 'owner', disposition: FAKE_VALUE, message: FAKE_VALUE },
+      ]),
+    );
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('pending');
-    expect(report.note).toContain('open questions 0');
+    expect(report.status).toBe('failed');
+    expect(report.note).toBe('v4 log line 2 has no v5 form: state/sessions/f1/channel/outbox.jsonl');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
-  test('a bad line in the middle of a log fails, naming the file and line, never the value', async () => {
+  test('a line longer than the kernel’s line bound fails by file and line', async () => {
+    await f.session('f1');
+    const long = 'x'.repeat((1 << 20) + 1);
+    await raw('state/sessions/f1/channel/inbox.jsonl', jsonl([{ at: AT, type: 'message', message: long }]));
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toBe('v4 log line 1 is longer than a v5 line may be: state/sessions/f1/channel/inbox.jsonl');
+  });
+
+  test('a bad line in the middle of a v4 log fails, naming the file and line, never the value', async () => {
     await f.session('f1');
     await raw('state/sessions/f1/channel/sends.jsonl', jsonl([{ sendId: FAKE_VALUE }, send('s1', 'accepted')]));
     const report = await conversationStep.run(f.ctx());
@@ -268,34 +409,192 @@ describe('conversation step', () => {
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
-  test('an attachment without its original fails', async () => {
+  test('a live ferret’s open question is stored parsed, against its transcript in the new home', async () => {
+    await claudeFerret('f1');
+    await f.put(
+      'state/sessions/f1/question-asked.json',
+      asked([
+        {
+          question: 'FAKE which?',
+          header: 'Pick',
+          options: [{ label: 'Yes', description: 'FAKE yes' }, { label: 'No' }],
+          multiSelect: true,
+        },
+      ]),
+    );
+    const time = new Date('2026-10-03T04:05:06.000Z');
+    await utimes(join(f.from, 'state/sessions/f1/question-asked.json'), time, time);
+    const report = await conversationStep.run(f.ctx());
+
+    expect(report.status).toBe('converted');
+    expect(v5QuestionFile('f1')).toBe('state/conversation/f1/question.json');
+    const question = QuestionSchema.parse(JSON.parse(await readFile(join(f.to, v5QuestionFile('f1')), 'utf8')));
+    expect(question).toMatchObject({
+      format: 1,
+      toolUseId: 'toolu_1',
+      header: 'Pick',
+      text: 'FAKE which?',
+      options: [{ label: 'Yes', description: 'FAKE yes' }, { label: 'No' }],
+      multiple: true,
+      askedAt: time.toISOString(),
+    });
+    expect(question.transcript?.startsWith(f.to)).toBe(true);
+    expect(question.transcript?.endsWith(join('_shared', 'projects/p/c.jsonl'))).toBe(true);
+    expect(report.kept).toContainEqual({ what: 'open questions', count: 1 });
+  });
+
+  test('a question v5’s writer would not store is left to the transcript, and an ended ferret’s is not read', async () => {
+    await claudeFerret('several');
+    await f.put(
+      'state/sessions/several/question-asked.json',
+      asked([{ question: 'FAKE a?' }, { question: 'FAKE b?' }]),
+    );
+    await claudeFerret('elsewhere');
+    await f.put('state/sessions/elsewhere/question-asked.json', asked([{ question: 'FAKE?' }], '/fake/subagent.jsonl'));
+    await f.session('ended');
+    await f.put('state/sessions/ended/state.json', { id: 'ended', status: 'completed' });
+    await f.put('state/sessions/ended/question-asked.json', { not: 'checked for an ended ferret' });
+    const report = await conversationStep.run(f.ctx());
+
+    expect(report.status).toBe('converted');
+    for (const ferret of ['several', 'elsewhere', 'ended']) expect(await exists(v5QuestionFile(ferret))).toBe(false);
+    expect(report.kept).toContainEqual({ what: 'open questions', count: 0 });
+    expect(report.note).toContain('2 open question(s) v5 would not store');
+  });
+
+  test('attachments: the original byte for byte, the manifest as v5’s store writes it, no <daemonId>', async () => {
+    await f.session('f1');
+    const bytes = Buffer.from(`\u0000\u0001${FAKE_VALUE}ÿ`, 'latin1');
+    const id = await putAttachment('daemon1', 'f1', bytes, { encrypted: { kind: 'pdf' } });
+    // The same content under an older daemon identity is the same attachment (the first in name order is kept).
+    await putAttachment('daemon0', 'f1', bytes, { encrypted: { kind: 'pdf' } });
+    const time = new Date('2026-10-04T00:00:00.000Z');
+    for (const daemon of ['daemon0', 'daemon1'])
+      await utimes(join(f.from, `state/attachments/${daemon}/f1/${id}/original`), time, time);
+    // A ferret v4 no longer knows, and an upload cut short before its manifest.
+    await putAttachment('daemon1', 'gone', Buffer.from('FAKE orphan'));
+    await raw('state/attachments/daemon1/f1/att_torn/original', Buffer.from('FAKE torn'));
+    const report = await conversationStep.run(f.ctx());
+
+    expect(report.status).toBe('converted');
+    expect(v5AttachmentOriginal('f1', id)).toBe(`state/conversation/attachments/f1~${id}.original`);
+    const original = join(f.to, v5AttachmentOriginal('f1', id));
+    expect(Buffer.compare(await readFile(original), bytes)).toBe(0);
+    expect((await stat(original)).mode & 0o777).toBe(0o600);
+    expect((await stat(original)).mtime.toISOString()).toBe(time.toISOString());
+    const manifest = await readFile(join(f.to, v5AttachmentManifest('f1', id)), 'utf8');
+    expect(manifest).toBe(`${JSON.stringify({ ...attachment(bytes).manifest, encrypted: { kind: 'pdf' } })}\n`);
+    expect((await readdir(join(f.to, 'state/conversation/attachments'))).sort()).toEqual(
+      [`f1~${id}.manifest`, `f1~${id}.original`].sort(),
+    );
+    expect(report.kept).toContainEqual({ what: 'attachments (original moved unopened)', count: 1 });
+    expect(report.note).toContain('1 attachment(s) of no ferret omitted');
+    expect(report.note).toContain('1 attachment original(s) with no manifest omitted');
+    expect(report.note).toContain('1 duplicate attachment(s) under another daemon id omitted');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
+  });
+
+  test('an attachment v5 would read as corrupt fails, naming the attachment only', async () => {
+    await f.session('f1');
     await f.put('state/attachments/daemon1/f1/att_1/manifest.json', {
       id: 'att_1',
-      filename: 'a.png',
+      filename: FAKE_VALUE,
       mime: 'image/png',
       size: 4,
       sha256: 'b'.repeat(64),
       createdAt: AT,
     });
+    await raw('state/attachments/daemon1/f1/att_1/original', Buffer.from([0, 1, 2, 3]));
     const report = await conversationStep.run(f.ctx());
     expect(report.status).toBe('failed');
-    expect(report.note).toBe('attachment has no original file: state/attachments/<daemonId>/f1/att_1');
+    expect(report.note).toBe('attachment manifest has no v5 form: state/attachments/<daemonId>/f1/att_1');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
-  test('a dry run reports the key size and writes nothing', async () => {
-    await raw('state/session-message-token.key', FAKE_KEY);
+  test('an attachment without its original fails', async () => {
     await f.session('f1');
+    const { id, manifest } = attachment(Buffer.from('FAKE'));
+    await f.put(`state/attachments/daemon1/f1/${id}/manifest.json`, manifest);
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toBe(`attachment has no original file: state/attachments/<daemonId>/f1/${id}`);
+  });
+
+  test('renders: the meta through StoredRenderMetaSchema with author.ferret, the payload byte for byte, unsharded', async () => {
+    await f.session('f1');
+    await f.put('state/renders/ab/abcdef.json', renderMeta('abcdef', { supersedes: 'abzzzz' }));
+    await raw('state/renders/ab/abcdef.payload', `<svg>${FAKE_VALUE}</svg>`);
+    await raw('state/renders/zz/zzzzzz.payload', 'FAKE torn save');
+    const report = await conversationStep.run(f.ctx());
+
+    expect(report.status).toBe('converted');
+    expect(v5RenderMeta('abcdef')).toBe('state/conversation/renders/abcdef.json');
+    const text = await readFile(join(f.to, v5RenderMeta('abcdef')), 'utf8');
+    expect(text.startsWith('{\n  "format": 1,')).toBe(true);
+    const { format, ...meta } = JSON.parse(text) as Record<string, unknown>;
+    expect(format).toBe(1);
+    expect(StoredRenderMetaSchema.parse(meta)).toEqual({
+      ...renderMeta('abcdef', { supersedes: 'abzzzz' }),
+      author: { ferret: 'f1' },
+    } as never);
+    expect(await readFile(join(f.to, v5RenderPayload('abcdef')), 'utf8')).toBe(`<svg>${FAKE_VALUE}</svg>`);
+    expect((await readdir(join(f.to, 'state/conversation/renders'))).sort()).toEqual(['abcdef.json', 'abcdef.payload']);
+    expect(report.kept).toContainEqual({ what: 'renders (payload moved unopened)', count: 1 });
+    expect(report.note).toContain('1 render payload(s) with no meta omitted');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
+  });
+
+  test('a render with no author stays authorless', async () => {
+    await f.put('state/renders/ab/abcdef.json', renderMeta('abcdef', { author: {} }));
+    await raw('state/renders/ab/abcdef.payload', '<svg/>');
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('converted');
+    expect(JSON.parse(await readFile(join(f.to, v5RenderMeta('abcdef')), 'utf8')).author).toEqual({});
+  });
+
+  test('nothing of a message, payload or attachment reaches the report', async () => {
+    await live('f1');
+    await raw(
+      'state/sessions/f1/channel/queue.jsonl',
+      jsonl([{ v: 1, kind: 'enqueued', at: AT, message: queued('q1', FAKE_VALUE) }]),
+    );
+    await raw('state/sessions/f1/channel/sends.jsonl', jsonl([send('s1', 'delivered', { message: FAKE_VALUE })]));
+    await raw('state/sessions/f1/channel/inbox.jsonl', jsonl([{ at: AT, type: 'message', message: FAKE_VALUE }]));
+    await raw(
+      'state/sessions/f1/channel/outbox.jsonl',
+      jsonl([{ at: AT, type: 'message', from: 'f1', to: 'owner', disposition: 'sent', message: FAKE_VALUE }]),
+    );
+    await raw('state/sessions/f1/turns/turn-001.md', FAKE_VALUE);
+    await putAttachment('daemon1', 'f1', Buffer.from(FAKE_VALUE));
+    await f.put('state/renders/ab/abcdef.json', renderMeta('abcdef', { alt: FAKE_VALUE }));
+    await raw('state/renders/ab/abcdef.payload', FAKE_VALUE);
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('converted');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
+  });
+
+  test('a dry run reports what it would carry and writes nothing', async () => {
+    await raw('state/session-message-token.key', FAKE_KEY);
+    await live('f1');
     await raw('state/sessions/f1/turns/turn-001.md', '# FAKE\n');
     await f.put('state/shared-drafts/f1.json', draft('f1'));
+    await raw('state/sessions/f1/channel/sends.jsonl', jsonl([send('s1', 'delivered')]));
+    await putAttachment('daemon1', 'f1', Buffer.from('FAKE'));
+    await f.put('state/renders/ab/abcdef.json', renderMeta('abcdef'));
+    await raw('state/renders/ab/abcdef.payload', '<svg/>');
     const report = await conversationStep.run(f.ctx(true));
     expect(report.sealed).toEqual([{ file: V5_MESSAGE_TOKEN_KEY_FILE, bytes: 32 }]);
+    expect(report.kept).toContainEqual({ what: 'send ledger lines', count: 1 });
+    expect(report.kept).toContainEqual({ what: 'attachments (original moved unopened)', count: 1 });
+    expect(report.kept).toContainEqual({ what: 'renders (payload moved unopened)', count: 1 });
     expect(report.note).toContain('dry run: nothing written');
     expect(await stat(join(f.to, 'state')).catch(() => undefined)).toBeUndefined();
   });
 
-  test('an empty home is pending with nothing kept', async () => {
+  test('an empty home is converted with nothing kept', async () => {
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('pending');
+    expect(report.status).toBe('converted');
+    expect(report.note).toBeUndefined();
     expect(report.sealed).toEqual([]);
     expect(report.kept.every(item => item.count === 0)).toBe(true);
   });

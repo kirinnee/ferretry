@@ -3,8 +3,7 @@
  *
  * LOCAL COPIES ON PURPOSE: the product has no v4 reader. Each schema below is the v4 writer's own shape, named after
  * the file it came from, and is lenient exactly where the v4 reader was (a plain `z.object` keeps unknown keys out of
- * the result instead of refusing them). Nothing here maps to v5: the files whose v5 shape is still moving on the
- * Conversation port are only read and checked, and their mapping is written once that port lands.
+ * the result instead of refusing them). Nothing here maps to v5: the mapping is `src/steps/conversation.ts`.
  *
  * Errors name a file relative to the v4 home and never carry a value from it (no zod message is ever passed on: a zod
  * issue can quote the input). A sealed file is never opened here.
@@ -74,13 +73,22 @@ export async function readJsonl<Shape>(
   path: string,
   schema: z.ZodType<Shape>,
 ): Promise<readonly Shape[]> {
+  return (await readJsonlLines(reader, path, schema)).map(line => line.value);
+}
+
+/** {@link readJsonl} with each value's 1-based line number, so a later refusal can name the line (never its value). */
+export async function readJsonlLines<Shape>(
+  reader: V4Reader,
+  path: string,
+  schema: z.ZodType<Shape>,
+): Promise<readonly { readonly line: number; readonly value: Shape }[]> {
   const source = await entry(path);
   if (source === undefined) return [];
   if (!source.isFile()) throw new V4InputError('v4 log is not a regular file', named(reader, path));
   const text = await readFile(path, 'utf8');
   const lines = text.split('\n');
   const complete = text.endsWith('\n');
-  const result: Shape[] = [];
+  const result: { line: number; value: Shape }[] = [];
   for (const [index, raw] of lines.entries()) {
     if (raw.trim() === '') continue;
     const last = index === lines.length - 1;
@@ -93,7 +101,7 @@ export async function readJsonl<Shape>(
     }
     const parsed = ok ? schema.safeParse(value) : undefined;
     if (parsed?.success === true) {
-      result.push(parsed.data);
+      result.push({ line: index + 1, value: parsed.data });
       continue;
     }
     if (last && !complete) continue;
@@ -363,7 +371,12 @@ export const V4InboxLine = z.object({
 });
 export type V4InboxLine = z.infer<typeof V4InboxLine>;
 
-export const V4OutboxLine = z.object({
+/**
+ * Two writers append here: the send channel (`file-send-channel.ts`, a message to a peer or the owner) and the signal
+ * artifacts (`file-signal-artifacts.ts` `raiseQuestion`, `{at, type: 'question', message}` with no sender or receiver).
+ */
+export const V4OutboxQuestionLine = z.object({ at: Instant, type: z.literal('question'), message: z.string() });
+export const V4OutboxMessageLine = z.object({
   at: Instant,
   type: z.string().min(1),
   from: z.string(),
@@ -372,6 +385,7 @@ export const V4OutboxLine = z.object({
   disposition: z.string(),
   message: z.string(),
 });
+export const V4OutboxLine = z.union([V4OutboxMessageLine, V4OutboxQuestionLine]);
 export type V4OutboxLine = z.infer<typeof V4OutboxLine>;
 
 // ── question-asked.json: the raw Claude PreToolUse hook payload (lib/session/question/asked.ts) ────────────────────
