@@ -4,3 +4,4 @@ export * from './clone.ts';
 export * from './recommend.ts';
 export * from './setup.ts';
 export * from './shared.ts';
+export * from './ferret-runtime.ts';
