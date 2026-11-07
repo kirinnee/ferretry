@@ -38,6 +38,8 @@ export const API_KEY_TAIL_LENGTH = 20;
 const APPROVED = `(.customApiKeyResponses.approved // [])`;
 
 export const API_KEY_SEED_SCRIPT = [
+  // A shell trace (SHELLOPTS=xtrace imported by a bash /bin/sh) would print the key into the pane: switch it off first.
+  'set +x',
   'if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -d "$CLAUDE_CONFIG_DIR" ]; then',
   '  if command -v jq >/dev/null 2>&1; then',
   '    _seed_cfg="$CLAUDE_CONFIG_DIR/.claude.json"',

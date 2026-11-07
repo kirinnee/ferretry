@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -202,7 +202,29 @@ describe('the seed, run in a real shell', () => {
     execedClaude((await seed({ key: FAKE_KEY })).recorded);
 
     expect(await readFile(outside, 'utf8')).toBe('{"outside":true}');
+    expect((await lstat(claudeJson())).isSymbolicLink()).toBe(true);
     expect(await leftovers()).toEqual([]);
+  });
+
+  test('a shell trace imported from the environment (SHELLOPTS=xtrace, bash as sh) never prints the key or its tail', async () => {
+    const bash = Bun.which('bash');
+    if (bash === null) return;
+    const child = Bun.spawn([bash, '-c', API_KEY_SEED_SCRIPT, API_KEY_SEED_NAME, claude, '--session-id', 'c-1'], {
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        CLAUDE_CONFIG_DIR: home,
+        FAKE_RECORD: record,
+        ANTHROPIC_API_KEY: FAKE_KEY,
+        SHELLOPTS: 'xtrace',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    await child.exited;
+    const stderr = await new Response(child.stderr).text();
+    const stdout = await new Response(child.stdout).text();
+    // Count, never print: a failure message must not carry the key either.
+    expect([stderr, stdout].filter(text => text.includes(FAKE_KEY) || text.includes(FAKE_TAIL)).length).toBe(0);
   });
 
   test('no key in the environment changes nothing and still execs claude', async () => {
