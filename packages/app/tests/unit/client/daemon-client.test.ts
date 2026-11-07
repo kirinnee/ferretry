@@ -119,6 +119,80 @@ describe('the guard', () => {
   });
 });
 
+describe('what a half learns about its socket and its daemon', () => {
+  test('a socket tells its half when it opened and how it ended, and the detail survives the guard', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    const told: string[] = [];
+    client.forPackage('board').socket(
+      'GET /v1/board/stream',
+      {},
+      {
+        onFrame: () => {},
+        onOpen: () => told.push('open'),
+        onClose: (reason, detail) => told.push(`${reason} ${JSON.stringify(detail)}`),
+      },
+    );
+    const open = transport.sockets[0]?.listeners;
+    open?.onOpen?.();
+    open?.onClose('invalid terminal input', { code: 1008 });
+    expect(told).toEqual(['open', 'invalid terminal input {"code":1008}']);
+  });
+
+  test('a socket whose half does not listen for the open is opened without one', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    client.forPackage('board').socket('GET /v1/board/stream', {}, { onFrame: () => {}, onClose: () => {} });
+    expect(transport.sockets[0]?.listeners.onOpen).toBeUndefined();
+  });
+
+  test('a half hears that its daemon is reachable again, and can stop listening', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    let heard = 0;
+    const stop = client.forPackage('board').onReconnect(() => {
+      heard += 1;
+    });
+    transport.reconnect();
+    stop();
+    transport.reconnect();
+    expect(heard).toBe(1);
+  });
+
+  test('a text read asks for the body undecoded and hands it back exactly as the daemon sent it', async () => {
+    const { transport, client } = daemon();
+    const asked: TransportRequest[] = [];
+    const answer = transport.answer;
+    transport.answer = request => {
+      if (request.path === '/v1/board') {
+        asked.push(request);
+        return json('  42\n');
+      }
+      return answer(request);
+    };
+    await client.start();
+    expect(await client.forPackage('board').callText('GET /v1/board')).toBe('  42\n');
+    expect(asked[0]?.raw).toBe(true);
+    expect(await client.forPackage('board').call('GET /v1/board')).toBe('  42\n');
+    expect(asked[1]?.raw).toBeUndefined();
+  });
+
+  test('a refused text read still carries the daemon sentence and code', async () => {
+    const { transport, client } = daemon();
+    const answer = transport.answer;
+    transport.answer = request =>
+      request.path === '/v1/board'
+        ? json(JSON.stringify({ error: 'No such pane.', code: 'gone' }), 404)
+        : answer(request);
+    await client.start();
+    await expect(client.forPackage('board').callText('GET /v1/board')).rejects.toMatchObject({
+      status: 404,
+      code: 'gone',
+      message: 'No such pane.',
+    });
+  });
+});
+
 describe('events', () => {
   test('heard only for subscribed, allowed packages; a bad payload is dropped', async () => {
     const { transport, client } = daemon(inventoryOf(compiled, { agenda: { contract: 'x' } }));

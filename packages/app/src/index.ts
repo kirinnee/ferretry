@@ -63,6 +63,7 @@ export type { BlockReason, InventoryEntry, Standing } from './client/inventory.t
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
 export {
   DaemonCallError,
+  type SocketCloseDetail,
   type SocketListeners,
   type TransportSocket,
 } from './client/transport.ts';

@@ -128,6 +128,21 @@ describe('the generated client over a sealed session', () => {
   });
 });
 
+describe('a read that asks for text', () => {
+  test('is handed the body undecoded, where an ordinary read is handed it parsed', async () => {
+    const daemon = await scriptedDaemon(() => ({ status: 200, body: 42 }));
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    expect((await transport.request({ method: 'GET', path: '/v1/health' })).body).toBe(42);
+    expect((await transport.request({ method: 'GET', path: '/v1/health', raw: true })).body).toBe('42');
+    transport.close();
+  });
+});
+
 describe('R244 the app session lease retry', () => {
   const transportFor = async (closes: readonly number[]) => {
     const daemon = await scriptedDaemon(() => ({ status: 200, body: { read: true } }), { closes });

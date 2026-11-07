@@ -15,6 +15,8 @@ function layoutsClient(answer: () => unknown) {
   const calls: string[] = [];
   const listeners = new Set<(payload: unknown) => void>();
   const client: ShellPluginClient = {
+    callText: async () => '',
+    onReconnect: () => () => {},
     call: async <A>(route: string) => {
       calls.push(route);
       return answer() as A;

@@ -1,6 +1,7 @@
 import type {
   DaemonTransport,
   RawEvent,
+  SocketCloseDetail,
   SocketListeners,
   TransportAnswer,
   TransportRequest,
@@ -9,6 +10,7 @@ import type {
 import {
   RelayClientSession,
   RelaySessionError,
+  RelayStreamRefusedError,
   type RelayClientSessionDependencies,
   type RelayClientSocket,
   type RelayStreamFrame,
@@ -151,7 +153,11 @@ export class SessionTransport implements DaemonTransport {
       const fresh = await this.#requestSession();
       answer = await fresh.request(record, request.signal);
     }
-    return { status: answer.status, headers: answer.headers, body: decodeBody(answer.body) };
+    return {
+      status: answer.status,
+      headers: answer.headers,
+      body: request.raw === true ? answer.body : decodeBody(answer.body),
+    };
   }
 
   events(listener: (event: RawEvent) => void, onClose: (reason: string) => void): () => void {
@@ -188,13 +194,22 @@ export class SessionTransport implements DaemonTransport {
       },
       frame => listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes),
     );
-    const end = (reason: string): void => {
+    const end = (reason: string, detail?: SocketCloseDetail): void => {
       if (closed) return;
       closed = true;
-      listeners.onClose(reason);
+      listeners.onClose(reason, detail);
     };
-    session.onStreamClosed(closedWith => end(closedWith.reason));
-    session.ready().catch((error: unknown) => end(error instanceof Error ? error.message : String(error)));
+    session.onStreamClosed(closedWith => end(closedWith.reason, { code: closedWith.code }));
+    session.ready().then(
+      () => {
+        if (!closed) listeners.onOpen?.();
+      },
+      (error: unknown) =>
+        end(
+          error instanceof Error ? error.message : String(error),
+          error instanceof RelayStreamRefusedError ? { refusedStatus: error.status, body: error.body } : undefined,
+        ),
+    );
     return {
       send: frame =>
         session.sendStream(typeof frame === 'string' ? { kind: 'text', text: frame } : { kind: 'bytes', bytes: frame }),

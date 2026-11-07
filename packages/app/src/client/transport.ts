@@ -16,6 +16,8 @@ export interface TransportRequest {
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: unknown;
   readonly signal?: AbortSignal;
+  /** Answer with the body exactly as the daemon sent it — text, never decoded as JSON — for a route that carries a capture. */
+  readonly raw?: boolean;
 }
 
 export interface TransportAnswer {
@@ -37,9 +39,24 @@ export interface TransportSocket {
   close(): void;
 }
 
+/**
+ * What a carrier knows about how a socket ended, beyond the words. Every field is optional: a socket that never
+ * reached the daemon (a paused plugin, a carrier that could not dial) carries none.
+ */
+export interface SocketCloseDetail {
+  /** The stream's OWN close code (`1000` a deliberate end, `1008`/`1009` the daemon's verdict on this viewer), never the session's. */
+  readonly code?: number;
+  /** The status the daemon refused the open with: final for this attempt, never a reason to reconnect. */
+  readonly refusedStatus?: number;
+  /** The refusal's body, as the daemon sent it. */
+  readonly body?: string;
+}
+
 export interface SocketListeners {
   readonly onFrame: (frame: string | Uint8Array) => void;
-  readonly onClose: (reason: string) => void;
+  /** Fires once the daemon has accepted the stream, and not before; a socket that never opens never calls it. */
+  readonly onOpen?: () => void;
+  readonly onClose: (reason: string, detail?: SocketCloseDetail) => void;
 }
 
 export interface DaemonTransport {

@@ -41,6 +41,22 @@ export interface DaemonClientOptions {
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
 export interface ShellPluginClient extends PluginClient {
   socket(key: string, params: Readonly<Record<string, string>>, listeners: SocketListeners): TransportSocket;
+  /**
+   * A read whose answer is text: the body exactly as the daemon sent it, never decoded as JSON. For a route that
+   * carries a capture of someone's screen, where a capture that happens to parse as JSON must still read as typed.
+   */
+  callText(
+    route: string,
+    init?: {
+      readonly params?: Readonly<Record<string, string>>;
+      readonly query?: Readonly<Record<string, string>>;
+    },
+  ): Promise<string>;
+  /**
+   * Fires when this daemon is reachable again after a drop, so a half waiting out a backoff can reopen at once.
+   * Returns how to stop listening.
+   */
+  onReconnect(listener: () => void): () => void;
 }
 
 interface Subscription {
@@ -74,6 +90,16 @@ function refusal(answer: TransportAnswer): DaemonCallError {
   const code = typeof body.code === 'string' ? body.code : `http_${answer.status}`;
   const message = typeof body.error === 'string' ? body.error : `The daemon answered ${answer.status}.`;
   return new DaemonCallError(answer.status, code, message);
+}
+
+/** A refusal's body when the call asked for text: the daemon's JSON error, if that is what it sent. */
+function refusalBody(body: unknown): unknown {
+  if (typeof body !== 'string') return body;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
 }
 
 export class DaemonClient {
@@ -158,8 +184,10 @@ export class DaemonClient {
   forPackage(caller: string): ShellPluginClient {
     return {
       call: (route, init) => this.#call(caller, route, init),
+      callText: async (route, init) => String(await this.#call<unknown>(caller, route, init, true)),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
       socket: (key, params, listeners) => this.#socket(caller, key, params, listeners),
+      onReconnect: listener => this.#transport.onReconnect(listener),
     };
   }
 
@@ -205,7 +233,12 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
-  async #call<Answer>(caller: string, route: string, init: Parameters<PluginClient['call']>[1] = {}): Promise<Answer> {
+  async #call<Answer>(
+    caller: string,
+    route: string,
+    init: Parameters<PluginClient['call']>[1] = {},
+    raw = false,
+  ): Promise<Answer> {
     const owner = this.#routeOwner.get(route);
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
@@ -215,8 +248,9 @@ export class DaemonClient {
       path: fillPath(path, init.params),
       ...(init.query === undefined ? {} : { query: init.query }),
       ...(init.body === undefined ? {} : { body: init.body }),
+      ...(raw ? { raw } : {}),
     });
-    if (answer.status >= 400) throw refusal(answer);
+    if (answer.status >= 400) throw refusal(raw ? { ...answer, body: refusalBody(answer.body) } : answer);
     return answer.body as Answer;
   }
 
@@ -288,9 +322,10 @@ export class DaemonClient {
     const entry: { open?: OpenSocket } = {};
     const socket = this.#transport.socket(fillPath(path, params), {
       onFrame: listeners.onFrame,
-      onClose: reason => {
+      ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
+      onClose: (reason, detail) => {
         if (entry.open !== undefined) this.#sockets.delete(entry.open);
-        listeners.onClose(reason);
+        listeners.onClose(reason, detail);
       },
     });
     entry.open = { ids: [caller, owner], socket, listeners };
