@@ -1,13 +1,5 @@
-import {
-  InstantSchema,
-  type QueuedMessage,
-  QueuedMessageIdSchema,
-  QueuedMessageSchema,
-  type QueuedMessageState,
-  QueuedMessageStateSchema,
-  QueueWaitReasonSchema,
-} from '../../seams/protocol.ts';
-import { z } from 'zod';
+import { type QueueEvent, QueueEventSchema } from '../../../contract/index.ts';
+import type { QueuedMessage, QueuedMessageState } from '../../seams/protocol.ts';
 
 /**
  * A session's queue as a LOG OF WHAT HAPPENED, folded into the messages it holds.
@@ -19,45 +11,8 @@ import { z } from 'zod';
  * nothing it should not. The fold is total: whatever the file holds, it answers a queue.
  */
 
-/** One line of a session's queue file. */
-export const QueueEventSchema = z.discriminatedUnion('kind', [
-  /** A message was accepted into the queue, whole, exactly as it was first sent. */
-  z.object({ v: z.literal(1), kind: z.literal('enqueued'), at: InstantSchema, message: QueuedMessageSchema }),
-  /** Its text was replaced while it was still waiting; `revision` is the one it becomes. */
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('edited'),
-    at: InstantSchema,
-    id: QueuedMessageIdSchema,
-    text: z.string(),
-    revision: z.number().int().min(2),
-  }),
-  /** It moved to `state`. */
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('moved'),
-    at: InstantSchema,
-    id: QueuedMessageIdSchema,
-    state: QueuedMessageStateSchema,
-    failure: z.string().optional(),
-    /**
-     * Beside a move to `typing`: this message goes out inside the combined turn sent under that id (the
-     * oldest member's own id, so the lead carries its own). Absent: it is sent alone, under its own id.
-     */
-    batch: z.string().min(1).optional(),
-  }),
-  /** Why it is still waiting changed; no `reason` means nothing but its turn is in its way. */
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('waiting'),
-    at: InstantSchema,
-    id: QueuedMessageIdSchema,
-    reason: QueueWaitReasonSchema.optional(),
-    /** The send of this session's own whose unsubmitted text holds the box (B144); only beside `draft`. */
-    behind: z.string().min(1).optional(),
-  }),
-]);
-export type QueueEvent = z.infer<typeof QueueEventSchema>;
+/** One line of a session's queue file: the contract's `QueueEventSchema`, the one definition of what the store writes. */
+export { type QueueEvent, QueueEventSchema };
 
 /**
  * Where a message may go next. A key is typed only in `typing`; a typing the pane refused before any key

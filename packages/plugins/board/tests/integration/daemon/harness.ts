@@ -75,7 +75,9 @@ export const boot = async (
   /** Calls one of the half's observe hooks as the kernel would (`turn.ended`, `ferret.started`). */
   const observe = async (hook: string, payload: unknown) =>
     await (taken.half?.hooks[hook] as ((payload: unknown) => Promise<void>) | undefined)?.(payload);
-  return { asks, ferrets, host, apply, observe };
+  /** What one of the half's contribute hooks answers (`search.sources`, `sitrep.lines`). */
+  const contribution = (hook: string): unknown => (taken.half?.hooks[hook] as (() => unknown) | undefined)?.();
+  return { asks, ferrets, host, apply, observe, contribution };
 };
 
 /** Makes a card as the owner; a refusal fails the test with the daemon's own words. */

@@ -26,6 +26,8 @@ interface Job {
   firstRun: Promise<void>;
   markFirst: () => void;
   controller: AbortController;
+  /** The latest repair waiting on an aborted run; an older one that settles later does nothing. */
+  resuming?: object;
 }
 
 const BACKOFF_MS = [1_000, 5_000, 30_000, 120_000, 600_000] as const;
@@ -280,9 +282,17 @@ export class JobRunner {
     if (!this.paused.delete(plugin)) return;
     for (const job of this.jobs.values()) {
       if (job.plugin !== plugin) continue;
+      // Damage and repair can repeat while one aborted run is still settling: only the latest repair arms the job,
+      // and any timer already armed is cancelled first, so the job never runs on two timers.
+      const token = {};
+      job.resuming = token;
       const resume = (): void => {
+        if (job.resuming !== token) return;
+        job.resuming = undefined;
         if (this.paused.has(plugin) || this.controller.signal.aborted) return;
         job.controller = new AbortController();
+        job.cancel?.();
+        job.cancel = undefined;
         if (this.started) this.arm(job);
       };
       if (job.running === undefined) resume();

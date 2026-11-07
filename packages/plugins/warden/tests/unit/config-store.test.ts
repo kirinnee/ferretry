@@ -21,7 +21,8 @@ function portWithDoor(): {
       }),
     remove: async (): Promise<DoorResult> => ({ kind: 'applied' }),
   };
-  return { port: door, answer: (index, result) => pending[index]?.(result) };
+  // The fake answers in the warden door's own result shape, which the store reads the same way.
+  return { port: door as unknown as ConfigPort, answer: (index, result) => pending[index]?.(result) };
 }
 
 const anyConfig = {} as WardenConfig;
