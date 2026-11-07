@@ -2,7 +2,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { closeSync, openSync, realpathSync } from 'node:fs';
 import { rmdir } from 'node:fs/promises';
 import should from 'should';
-import { loadDirectorySyscalls } from '../../../../../daemon/adapters/session/filesystem/index.ts';
+import { loadDirectorySyscalls } from '../../../../support/daemon/session-filesystem/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../support/repository.ts';
 
 /**

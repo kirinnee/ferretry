@@ -1,6 +1,3 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import {
   type DiffSide,
   EMPTY_TREE_OID,
@@ -57,7 +54,24 @@ const DIFF_SAFETY: readonly string[] = [
 ];
 
 const NUL = String.fromCharCode(0);
-const SYMLINK_MODE = 0o120000;
+export const SYMLINK_MODE = 0o120000;
+
+/**
+ * The private scratch directory `diffSnapshots` stages both sides in (today: `mkdtemp` under the temp dir, removed
+ * after). It is host IO, so it is the kernel's capability (asked for with the session root pinner); tests provide
+ * today's (`tests/support/daemon/session-filesystem/`).
+ */
+export interface DiffScratch {
+  /**
+   * Makes a fresh private directory, runs `use` with its path and a stager, and removes the directory afterwards
+   * whatever `use` did. `stage(relative, side)` writes one side at `relative` inside it: a symlink when the side's
+   * mode is {@link SYMLINK_MODE} (its bytes are the target, never followed), else a file with exactly the side's
+   * permission bits (not subject to umask).
+   */
+  withScratch<T>(
+    use: (directory: string, stage: (relative: string, side: DiffSide) => Promise<void>) => Promise<T>,
+  ): Promise<T>;
+}
 
 interface TextExecution {
   readonly execution: GitExecution;
@@ -76,7 +90,10 @@ function spawnBound(budget: SpawnBudget | undefined): { timeoutMs?: number } {
 }
 
 export class RunnerSessionGit implements SessionGit {
-  constructor(private readonly runner: GitRunner) {}
+  constructor(
+    private readonly runner: GitRunner,
+    private readonly scratch: DiffScratch,
+  ) {}
 
   /**
    * Two commands under ONE budget, which is why the budget rather than a timeout comes in.
@@ -286,17 +303,14 @@ export class RunnerSessionGit implements SessionGit {
   ): Promise<RenderedDiff> {
     if (!oldSide && !newSide) return { diff: '', truncated: false };
 
-    const scratch = await mkdtemp(path.join(tmpdir(), 'ferretry-diff-'));
-    try {
-      const left = oldSide ? await stageSide(scratch, rel, 'a', oldSide) : '/dev/null';
-      const right = newSide ? await stageSide(scratch, rel, 'b', newSide) : '/dev/null';
+    return await this.scratch.withScratch(async (scratch, stage) => {
+      const left = oldSide ? await stageSide(stage, rel, 'a', oldSide) : '/dev/null';
+      const right = newSide ? await stageSide(stage, rel, 'b', newSide) : '/dev/null';
       const args = [...DIFF_SAFETY, '--no-index', '--src-prefix=', '--dst-prefix=', '--', left, right];
       // `--no-index` exits 1 for "they differ", which is the normal case here.
       const rendered = await this.text('git diff', args, scratch, [0, 1]);
       return { diff: relabelDiffHeaders(rendered.stdout, rel), truncated: rendered.execution.stdoutTruncated };
-    } finally {
-      await rm(scratch, { recursive: true, force: true });
-    }
+    });
   }
 
   /**
@@ -344,18 +358,13 @@ export class RunnerSessionGit implements SessionGit {
  * afterwards — and rewriting them would be a real hazard, because a body line `-- a/x` renders as `--- a/x`,
  * indistinguishable from a header by prefix alone.
  */
-async function stageSide(scratch: string, rel: string, prefix: 'a' | 'b', side: DiffSide): Promise<string> {
+async function stageSide(
+  stage: (relative: string, side: DiffSide) => Promise<void>,
+  rel: string,
+  prefix: 'a' | 'b',
+  side: DiffSide,
+): Promise<string> {
   const relative = `${prefix}/${rel}`;
-  const absolute = path.join(scratch, relative);
-  await mkdir(path.dirname(absolute), { recursive: true });
-  if (side.mode === SYMLINK_MODE) {
-    // Recreate it as a symlink so Git reports the type natively. Git reads this with `readlink` and never
-    // opens it, so the target is never followed — whether or not it still exists, or ever did.
-    await symlink(new TextDecoder().decode(side.bytes), absolute);
-    return relative;
-  }
-  await writeFile(absolute, side.bytes, { mode: side.mode & 0o777 });
-  // `writeFile`'s mode is subject to umask; `chmod` is not.
-  await chmod(absolute, side.mode & 0o777);
+  await stage(relative, side);
   return relative;
 }

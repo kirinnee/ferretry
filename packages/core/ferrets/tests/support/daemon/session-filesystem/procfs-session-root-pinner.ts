@@ -17,7 +17,7 @@ import {
   type SessionRootPinner,
   unsupportedPlatform,
   type WorkBudget,
-} from '../../../lib/session/filesystem/index.ts';
+} from '../../../../daemon/lib/session/filesystem/index.ts';
 import {
   canonicalRel,
   componentIdentity,

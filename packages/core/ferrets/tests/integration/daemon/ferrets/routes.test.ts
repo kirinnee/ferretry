@@ -269,3 +269,32 @@ describe('starting, tokens and attach', () => {
   });
 });
 
+
+describe('managed worktrees and the file browser before the kernel host IO is bound', () => {
+  test('the worktree list answers with no managed root, and a create or removal says why it cannot', async () => {
+    const h = await host();
+    const list = await h.request('GET', '/v1/worktrees');
+    expect(list.status).toBe(200);
+    expect(list.json<{ worktrees: unknown[]; managedRoot?: string }>()).toEqual({ worktrees: [] });
+    const created = await h.request('POST', '/v1/worktrees', {
+      body: { cwd: '/work/project', branch: 'feat/one' },
+    });
+    expect([400, 409]).toContain(created.status);
+  });
+
+  test('S47 the file browser refuses an agent another ferret’s folder before it answers anything', async () => {
+    const h = await host([record('lead'), record('stranger')]);
+    const refused = await h.request('GET', '/v1/ferrets/stranger/fs', as('lead'));
+    expect(refused.status).toBe(403);
+    expect(refused.json<{ code: string }>().code).toBe('not_own_session');
+  });
+
+  test('the file browser answers 503 not built yet until the kernel root walk lands', async () => {
+    const h = await host([record('lead')]);
+    for (const path of ['fs', 'fs/index', 'fs/changes', 'fs/diff']) {
+      const answer = await h.request('GET', `/v1/ferrets/lead/${path}`, { query: { path: 'a.txt' } });
+      expect(answer.status).toBe(503);
+      expect(answer.json<{ code: string }>().code).toBe('plugin_unavailable');
+    }
+  });
+});

@@ -102,23 +102,14 @@ describe('the managed-worktree registry document', () => {
     });
   });
 
-  it('should read a document written before intents existed as a settled registry', () => {
-    // Act — the field is defaulted, so an older daemon's file is not damage
-    const actual = parseManagedWorktreeRegistry({ version: 1, worktrees: [record()] });
-
-    // Assert
-    should(actual.intents).eql([]);
-    should(isRegistrySettled(actual)).be.true();
-  });
-
   it('should refuse a document it cannot interpret rather than reporting an empty fleet', () => {
-    // Arrange — a truncated write, a hand edit, and a version this build does not serve
+    // Arrange — a truncated write, a hand edit, and a document with no intents (format 1 has them; nothing is defaulted)
     const cases: unknown[] = [
-      { version: 1, worktrees: [{ ...record(), branch: undefined }] },
-      { version: 2, worktrees: [] },
+      { worktrees: [{ ...record(), branch: undefined }], intents: [] },
+      { version: 2, worktrees: [], intents: [] },
       { worktrees: [] },
-      { version: 1, worktrees: [{ ...record(), unexpected: true }] },
-      { version: 1, worktrees: [], intents: [{ ...intent(), initialHead: undefined }] },
+      { worktrees: [{ ...record(), unexpected: true }], intents: [] },
+      { worktrees: [], intents: [{ ...intent(), initialHead: undefined }] },
       'not a document at all',
     ];
 

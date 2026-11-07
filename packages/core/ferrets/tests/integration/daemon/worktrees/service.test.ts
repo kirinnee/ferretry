@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { mkdir, rename, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import { PosixSessionRootPinner, ProcfsSessionRootPinner } from '../../../../daemon/adapters/session/filesystem/index.ts';
+import { PosixSessionRootPinner, ProcfsSessionRootPinner } from '../../../support/daemon/session-filesystem/index.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,

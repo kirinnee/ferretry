@@ -4,6 +4,7 @@ import path from 'node:path';
 import should from 'should';
 import { GitCommandError } from '../../../../../daemon/adapters/git/index.ts';
 import { RunnerSessionGit } from '../../../../../daemon/adapters/session/filesystem/index.ts';
+import { testDiffScratch } from '../../../../support/daemon/session-filesystem/index.ts';
 import { MAX_DIFF_SIDE_BYTES } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import type { GitInvocation, GitRunner } from '../../../../../daemon/lib/worktrees/ports.ts';
 import {
@@ -23,14 +24,14 @@ import { testGitRunner } from '../../../../support/daemon/host-io.ts';
  * verdict and every rendered diff below comes from a throwaway repository built by the fixture helpers.
  */
 
-const git = new RunnerSessionGit(testGitRunner());
+const git = new RunnerSessionGit(testGitRunner(), testDiffScratch);
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 const NUL = String.fromCharCode(0);
 
 /** A runner whose `git` is a script, for the failure paths a real Git will not produce on demand. */
 const gitOnPath = async (script: string): Promise<RunnerSessionGit> => {
   const directory = await stubGitDirectory(script);
-  return new RunnerSessionGit(testGitRunner(() => ({ PATH: directory })));
+  return new RunnerSessionGit(testGitRunner(() => ({ PATH: directory })), testDiffScratch);
 };
 
 afterAll(async () => {
@@ -712,7 +713,7 @@ describe('the hardened runner as this viewer needs it', () => {
     }));
 
     // Act
-    const info = await new RunnerSessionGit(runner).repoInfo(root);
+    const info = await new RunnerSessionGit(runner, testDiffScratch).repoInfo(root);
 
     // Assert
     should(info.root).eql(root);
@@ -879,7 +880,7 @@ describe('RunnerSessionGit.listFiles', () => {
         });
       },
     };
-    const subject = new RunnerSessionGit(runner);
+    const subject = new RunnerSessionGit(runner, testDiffScratch);
 
     // Act
     const failure = await subject.listFiles('/pinned/session', 128).catch((error: unknown) => error);
@@ -922,7 +923,7 @@ describe('RunnerSessionGit under a budget', () => {
   it('should start no command for a budget that was already spent', async () => {
     // Arrange
     const invocations: GitInvocation[] = [];
-    const subject = new RunnerSessionGit(counting(invocations));
+    const subject = new RunnerSessionGit(counting(invocations), testDiffScratch);
     const spent = { expired: () => true, remainingMs: () => 0 };
 
     // Act
@@ -952,7 +953,7 @@ describe('RunnerSessionGit under a budget', () => {
     };
 
     // Act
-    const info = await new RunnerSessionGit(counted).repoInfo('/pinned/session', budget);
+    const info = await new RunnerSessionGit(counted, testDiffScratch).repoInfo('/pinned/session', budget);
 
     // Assert: the shape the first command established, and nothing spawned to complete it.
     should(invocations).have.length(1);
@@ -980,7 +981,7 @@ describe('RunnerSessionGit under a budget', () => {
     };
 
     // Act
-    const info = await new RunnerSessionGit(aborting).repoInfo('/pinned/session', budget);
+    const info = await new RunnerSessionGit(aborting, testDiffScratch).repoInfo('/pinned/session', budget);
 
     // Assert
     should(invocations).have.length(1);
@@ -1002,7 +1003,7 @@ describe('RunnerSessionGit under a budget', () => {
     const budget = { expired: () => remaining <= 0, remainingMs: () => Math.max(0, remaining) };
 
     // Act
-    await new RunnerSessionGit(draining).repoInfo('/pinned/session', budget);
+    await new RunnerSessionGit(draining, testDiffScratch).repoInfo('/pinned/session', budget);
 
     // Assert
     should(invocations).have.length(2);
@@ -1016,7 +1017,7 @@ describe('RunnerSessionGit under a budget', () => {
     const invocations: GitInvocation[] = [];
 
     // Act
-    await new RunnerSessionGit(counting(invocations)).repoInfo('/pinned/session');
+    await new RunnerSessionGit(counting(invocations), testDiffScratch).repoInfo('/pinned/session');
 
     // Assert
     should(invocations).have.length(2);

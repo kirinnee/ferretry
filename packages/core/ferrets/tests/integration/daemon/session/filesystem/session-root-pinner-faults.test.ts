@@ -1,5 +1,4 @@
 import { afterAll, describe, it } from 'bun:test';
-import { WorkingDirectory } from '@ferretry/fleet/adapters';
 import { unlinkSync } from 'node:fs';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +9,8 @@ import {
   type PinFileCalls,
   PosixSessionRootPinner,
   ProcfsSessionRootPinner,
-} from '../../../../../daemon/adapters/session/filesystem/index.ts';
+  WorkingDirectory,
+} from '../../../../support/daemon/session-filesystem/index.ts';
 import type { FsError, WorkBudget } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../support/repository.ts';
 

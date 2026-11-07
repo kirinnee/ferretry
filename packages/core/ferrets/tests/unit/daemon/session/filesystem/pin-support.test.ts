@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { BigIntStats } from 'node:fs';
 import should from 'should';
-import { componentIdentity } from '../../../../../daemon/adapters/session/filesystem/pin-support.ts';
+import { componentIdentity } from '../../../../support/daemon/session-filesystem/pin-support.ts';
 
 /**
  * A walked component's identity keeps everything the `bigint` stat recorded.

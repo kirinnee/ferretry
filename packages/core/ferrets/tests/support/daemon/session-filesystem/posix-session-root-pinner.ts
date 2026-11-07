@@ -29,9 +29,9 @@ import {
   type SessionRootPinner,
   unsupportedPlatform,
   type WorkBudget,
-} from '../../../lib/session/filesystem/index.ts';
-import type { PinnedWorkingDirectory } from '../../../lib/worktrees/ports.ts';
-import { PROCESS_WORKING_DIRECTORY, type WorkingDirectory } from '@ferretry/fleet/adapters';
+} from '../../../../daemon/lib/session/filesystem/index.ts';
+import type { PinnedWorkingDirectory } from '../../../../daemon/lib/worktrees/ports.ts';
+import { PROCESS_WORKING_DIRECTORY, type WorkingDirectory } from './working-directory.ts';
 import { type DirectorySyscalls, loadDirectorySyscalls } from './directory-syscalls.ts';
 import {
   canonicalRel,

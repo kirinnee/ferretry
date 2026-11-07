@@ -37,6 +37,7 @@ import { isDeniedPath, normalizeRelativePath } from './lib/session/filesystem/pa
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
+import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -186,6 +187,27 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${target} is neither`, 'forbidden');
   };
 
+  // The file browser's listing, index, changes and diff (today's session-filesystem mount). The service runs on the
+  // kernel's identity-returning root walk, which is not bound yet, so these answer 503 until it is.
+  const fileBrowser = sessionFilesystemRoutes({
+    filesystem: undefined,
+    reach: async call => {
+      const id = await pathFerret(call);
+      agentMayReach(call, id);
+      const folder = registry.get(id)?.folder;
+      if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
+      // An agent's read sits behind the state-home fence, which the host resolves; with none resolved an agent is
+      // refused, exactly as today's daemon refused it when it could not resolve its own home.
+      if (callerIsAgent(call))
+        throw new ApiError(
+          503,
+          'this daemon cannot resolve its own state home, so it does nothing for an agent that could reach it',
+          'state_home_unresolved',
+        );
+      return { id, cwd: folder };
+    },
+  });
+
   const body = async (call: CallContext): Promise<unknown> => {
     const text = await call.request.text();
     if (text.trim() === '') return {};
@@ -211,6 +233,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     routes: {
       ...worktrees.routes,
+      ...fileBrowser,
       'GET /v1/ferrets': async call => {
         await ready();
         return fleetList.answer(registry.list(), headerValue(call.request, 'if-none-match'));

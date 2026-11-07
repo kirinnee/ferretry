@@ -7,7 +7,7 @@ import {
   type FsErrorCode,
   type PinnedFileKind,
   type PinnedMetadata,
-} from '../../../lib/session/filesystem/index.ts';
+} from '../../../../daemon/lib/session/filesystem/index.ts';
 
 /**
  * The judgements every descriptor-backed pinner makes IDENTICALLY, kept in one place so two platforms

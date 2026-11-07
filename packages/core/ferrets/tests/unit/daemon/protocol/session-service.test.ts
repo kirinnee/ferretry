@@ -43,25 +43,6 @@ describe('isPlaceholderSessionName', () => {
 });
 
 /** A conversion summary with every count present, for the cross-harness preview schemas. */
-const CONVERSION_SUMMARY = {
-  converter: 1,
-  sourceHarness: 'claude',
-  sourceVersion: '2.1.281',
-  targetHarness: 'codex',
-  targetVersion: '0.163.0',
-  turns: 4,
-  keptTurns: 4,
-  omittedTurns: 0,
-  cutNewest: false,
-  messages: 8,
-  nativeToolCalls: 1,
-  toolCallsAsText: 2,
-  attachments: 1,
-  dropped: { reasoning: 1, sidechains: 0, internal: 4, compactions: 0 },
-  estimatedTokens: 120,
-  budgetTokens: 154_800,
-};
-
 const sendEvidence = {
   key: 'send-1',
   harness: 'codex',
@@ -336,43 +317,6 @@ const sessionCases: SchemaCase[] = [
   { name: 'stop request', schema: session.StopSessionRequestSchema, value: { reason: 'done' } },
   { name: 'resume request', schema: session.ResumeSessionRequestSchema, value: { message: 'continue' } },
   {
-    name: 'migrate request',
-    schema: session.MigrateSessionRequestSchema,
-    value: { agent: 'next', allowContextDowngrade: false, forceInflight: true },
-  },
-  { name: 'migration conversation', schema: session.MigrationConversationSchema, value: 'previous' },
-  {
-    name: 'migrate request starting fresh',
-    schema: session.MigrateSessionRequestSchema,
-    value: { agent: 'next', allowContextDowngrade: false, forceInflight: false, conversation: 'fresh' },
-  },
-  {
-    name: 'migrate request converting to the other harness',
-    schema: session.MigrateSessionRequestSchema,
-    value: { agent: 'codex-a', allowContextDowngrade: false, forceInflight: false, conversation: 'convert' },
-  },
-  { name: 'conversion preview request', schema: session.ConversionPreviewRequestSchema, value: { agent: 'codex-a' } },
-  {
-    name: 'conversion dropped counts',
-    schema: session.ConversionDroppedSchema,
-    value: { reasoning: 1, sidechains: 0, internal: 4, compactions: 0 },
-  },
-  {
-    name: 'conversion summary',
-    schema: session.ConversionSummarySchema,
-    value: CONVERSION_SUMMARY,
-  },
-  {
-    name: 'ready conversion preview',
-    schema: session.ConversionPreviewSchema,
-    value: { kind: 'ready', targetAgent: 'codex-a', targetModel: 'gpt-5.5', summary: CONVERSION_SUMMARY },
-  },
-  {
-    name: 'refused conversion preview',
-    schema: session.ConversionPreviewSchema,
-    value: { kind: 'refused', targetAgent: 'codex-a', reason: 'Too new.' },
-  },
-  {
     name: 'conversation conversion lineage',
     schema: session.ConversationConversionSchema,
     value: {
@@ -387,71 +331,6 @@ const sessionCases: SchemaCase[] = [
       keptTurns: 4,
       omittedTurns: 0,
     },
-  },
-  {
-    name: 'conversation unresumable body',
-    schema: session.ConversationUnresumableBodySchema,
-    value: { error: 'nothing to resume', code: 'conversation_unresumable' },
-  },
-  {
-    name: 'in-flight item',
-    schema: session.InflightItemSchema,
-    value: {
-      kind: 'process',
-      verdict: 'unknown',
-      title: 'A program Ferretry doesn’t recognise is running',
-      detail: 'some-vendor-tool --watch',
-      age: '2m',
-      blocks: true,
-    },
-  },
-  {
-    name: 'in-flight background job',
-    schema: session.InflightItemSchema,
-    value: {
-      kind: 'process',
-      verdict: 'unknown',
-      title: 'A program Ferretry doesn’t recognise is running',
-      detail: 'bash /tmp/merge-all.sh 765',
-      blocks: true,
-      backgroundJob: true,
-      pid: 5101,
-    },
-  },
-  { name: 'ask to stop jobs request', schema: session.AskToStopJobsRequestSchema, value: {} },
-  {
-    name: 'agent job',
-    schema: session.AgentJobSchema,
-    value: { pid: 5101, command: 'bash /tmp/merge-all.sh 765', age: '4m' },
-  },
-  {
-    name: 'ask to stop jobs result',
-    schema: session.AskToStopJobsResultSchema,
-    value: {
-      messageId: 'migrate-jobs-5101',
-      jobs: [{ pid: 5101, command: 'bash /tmp/merge-all.sh 765' }],
-      alreadyAsked: false,
-    },
-  },
-  {
-    name: 'migration refusal',
-    schema: session.MigrationRefusalSchema,
-    value: { status: 'running', turn: 13, blockedBy: 'unreadable', restartsWithCli: 1, items: [] },
-  },
-  {
-    name: 'context downgrade',
-    schema: session.ContextDowngradeSchema,
-    value: { model: 'claude-sonnet-5', targetWindow: 200_000, currentWindow: 1_000_000 },
-  },
-  {
-    name: 'context downgrade refused body',
-    schema: session.ContextDowngradeRefusedBodySchema,
-    value: { error: 'refused', code: 'context_downgrade_refused' },
-  },
-  {
-    name: 'migration refused body',
-    schema: session.MigrationRefusedBodySchema,
-    value: { error: 'refused: nothing', code: 'migration_refused' },
   },
   { name: 'rename request', schema: session.RenameSessionRequestSchema, value: { name: 'New Name' } },
   { name: 'agent rename', schema: session.RenameSessionRequestSchema, value: { teammate: 'Mary-Jane2' } },

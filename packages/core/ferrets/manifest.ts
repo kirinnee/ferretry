@@ -127,6 +127,80 @@ export default definePlugin({
         audit: { skip: 'a file read records nothing, as today' },
         guard: 'secrets',
       }),
+      // The file browser (today's `mounts/session-filesystem.ts`). They answer 503 until the kernel's root walk lands.
+      // R-0152
+      route('GET /v1/ferrets/:ferretId/fs/index', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        audit: { skip: 'a file index read records nothing, as today' },
+        guard: 'secrets',
+      }),
+      // R-0149
+      route('GET /v1/ferrets/:ferretId/fs/changes', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        audit: { skip: 'a change list read records nothing, as today' },
+        guard: 'secrets',
+      }),
+      // R-0150
+      route('GET /v1/ferrets/:ferretId/fs/diff', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        audit: { skip: 'a diff read records nothing, as today' },
+        guard: 'secrets',
+      }),
+      // R-0148
+      route('GET /v1/ferrets/:ferretId/fs', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        audit: { skip: 'a folder listing records nothing, as today' },
+        guard: 'secrets',
+      }),
+      // Managed worktrees (today's `mounts/worktrees.ts`); the removal check is a deeper literal than the collection.
+      // R-0211
+      route('GET /v1/worktrees/removal', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        noStore: true,
+        audit: { skip: 'a removal check records nothing, as today' },
+        guard: { none: 'a removal verdict: paths, branch names and blocker codes, no file contents' },
+      }),
+      // R-0411
+      route('POST /v1/worktrees/remove', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: { capability: CAPABILITIES.filesystem, axis: 'configure' },
+        noStore: true,
+        audit: { record: AUDIT_KINDS['worktree.removed'] },
+        guard: { none: 'answers the removed checkout: its path and branch' },
+      }),
+      // R-0210
+      route('GET /v1/worktrees', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        noStore: true,
+        audit: { skip: 'a worktree list records nothing, as today' },
+        guard: { none: 'managed checkouts: paths, branches, heads and occupancy, no file contents' },
+      }),
+      // R-0410
+      route('POST /v1/worktrees', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: { capability: CAPABILITIES.filesystem, axis: 'configure' },
+        noStore: true,
+        audit: { skip: 'creating a checkout is not kept in the security log, as today' },
+        guard: { none: 'answers the new checkout and the folder to start work in' },
+      }),
     ],
   },
   data: {

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { constants } from 'node:fs';
 import should from 'should';
-import { NODE_PIN_FILE_CALLS } from '../../../../../daemon/adapters/session/filesystem/posix-session-root-pinner.ts';
+import { NODE_PIN_FILE_CALLS } from '../../../../support/daemon/session-filesystem/posix-session-root-pinner.ts';
 
 /**
  * The runtime's own pin calls must describe one object the same way whichever call asked.

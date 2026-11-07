@@ -1,5 +1,5 @@
 import { isAbsolute, posix, relative, sep } from 'node:path';
-import { type StateHomes, stateHomeByName } from '@ferretry/fleet';
+import { type StateHomes, stateHomeByName } from './home-fence.ts';
 import {
   type SessionFileIndex,
   type SessionFileIndexCoverage,
