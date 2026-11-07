@@ -15,6 +15,7 @@
  */
 
 import type { CardId } from '../../contract/index.ts';
+import { useNow } from '@ferretry/app/ui';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
 import {
@@ -83,6 +84,7 @@ export const useBoard = (
   const connections = useMemo(() => machines.map(machine => machine.connection), [machines]);
   const query = useMemo(() => toServerQuery(filters), [filters]);
   const key = boardViewKey(query, connections);
+  const now = useNow();
   // biome-ignore lint/correctness/useExhaustiveDependencies: the view key is the deliberate dependency
   useEffect(() => store.watch(query, connections, options).release, [store, key]);
   const view = useSyncExternalStore(
@@ -115,7 +117,7 @@ export const useBoard = (
         quarantined: slice.quarantined,
       });
     }
-    const model = mergeBoard(data, filters);
+    const model = mergeBoard(data, filters, now);
     return {
       model,
       status: summarise(statuses, model.cards.length > 0),

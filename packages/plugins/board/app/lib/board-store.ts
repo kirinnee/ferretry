@@ -112,7 +112,7 @@ export interface BoardEnvironment {
 }
 
 const browserBoardEnvironment: BoardEnvironment = {
-  now: () => Date.now(),
+  now: () => performance.now(),
   setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
   clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
   visible: () => (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState !== 'hidden',

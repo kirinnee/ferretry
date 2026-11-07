@@ -496,7 +496,7 @@ const compareCards = (left: BoardCard, right: BoardCard): number => {
 export const mergeBoard = (
   machines: readonly BoardMachineData[],
   filters: BoardFilters,
-  now: number = Date.now(),
+  now: number,
 ): BoardModel => {
   const versions = machines.map(({ daemonId, machine, version }) => ({ daemonId, machine, version }));
   const showAgents = showsAgents(filters);

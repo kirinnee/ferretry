@@ -5,7 +5,7 @@
  * owner answers in the Agenda; the ask renderer draws that answer row's one plain reference to the card.
  */
 
-import { useLayoutMode } from '@ferretry/app/ui';
+import { RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
 import type { AppComponent, PanelProps, PluginClient, RendererProps, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { CARD_ID_PATTERN, type CardAskRef, formatCardRef, writtenProgressParts } from '../../contract/index.ts';
@@ -22,7 +22,6 @@ import { BoardDetail } from './detail/board-detail.tsx';
 import { useLocationSearch } from './location.ts';
 import { cardProse } from './prose.tsx';
 import { type BoardRuntime, createBoardRuntime, type FerretRow } from './runtime.ts';
-import { RouteLink } from '@ferretry/app/ui';
 
 const MACHINE = { connection: THIS_MACHINE, name: 'This machine' } as const;
 const MACHINES = [MACHINE] as const;
@@ -98,7 +97,7 @@ const cardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
     const callsigns = useCallsigns(useFerrets(runtime));
     const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
     const projectName = useProjectNames(runtime);
-    const [now] = useState(() => Date.now());
+    const now = useNow();
     return (
       <BoardDetail
         machine={MACHINE}
@@ -120,7 +119,7 @@ const cardsOfFerret = (runtime: BoardRuntime): AppComponent<PanelProps> =>
   function CardsOfFerret({ subject }: PanelProps): ReactNode {
     const rows = useFerrets(runtime);
     const callsigns = useCallsigns(rows);
-    const [now] = useState(() => Date.now());
+    const now = useNow();
     const [agents, setAgents] = useState(() => readChatTasksUrl(globalThis.location?.search ?? '').agents);
     const [expanded, setExpanded] = useState(() => readChatTasksUrl(globalThis.location?.search ?? '').expanded);
     const ferret = subject ?? '';
