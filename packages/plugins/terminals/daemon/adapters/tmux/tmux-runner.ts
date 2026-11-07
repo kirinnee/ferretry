@@ -1,20 +1,26 @@
 import type {
   AttachRefusal,
+  DeliveryOutcome,
   Runner,
+  RunnerDelivery,
   RunnerHandle,
   RunningFerret,
   RunSpec,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
 import type { RunnerKey } from '@ferretry/core-ferrets/contract';
-import type { SpawnPort } from '@ferretry/kernel/contract';
+import { type ActRunner, REFUSAL_SENTENCES, type SpawnPort } from '@ferretry/kernel/contract';
+import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
 import { killSessionArguments, remainOnExitArguments } from '../../lib/tmux/commands.ts';
-import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
+import { TmuxController } from '../../lib/tmux/controller.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
+import type { DeliverySleep } from './composer-fill.ts';
+import { PaneDeliveryError, PaneNotReadyError, TmuxPaneDelivery } from './pane-delivery.ts';
 
 /**
  * The `runners:tmux` provider (§2.3): a ferret's harness runs in its own tmux session, `fy-<ferret>`, on Terminals'
@@ -85,6 +91,8 @@ export interface TmuxRunnerOptions {
   readonly wrap?: (ferret: string, command: readonly string[]) => Promise<readonly string[]>;
   /** Told of every pane this runner started or adopted, with the ferret it runs (the processes and attach proof). */
   readonly remember?: (ferret: string, running: RunningFerret) => Promise<void>;
+  /** The kernel guards every delivery write; sleeps use its clock. Absent: delivery refuses before any keys. */
+  readonly delivery?: { readonly act: ActRunner; readonly sleep: DeliverySleep };
 }
 
 export class TmuxRunner implements Runner {
@@ -124,6 +132,55 @@ export class TmuxRunner implements Runner {
     if (!PANE_ID.test(handle)) return false;
     const facts = await this.facts(handle);
     return facts !== undefined && !facts.dead;
+  }
+
+  async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+    const gone = (): PaneNotReadyError => new PaneNotReadyError('the ferret pane is no longer live', 'exited');
+    if (!PANE_ID.test(handle)) throw gone();
+    const original = await this.facts(handle);
+    if (original === undefined || original.dead || !isFerretSession(original.session)) throw gone();
+    const guard = this.options.delivery;
+    if (guard === undefined) throw new PaneDeliveryError('terminal delivery is not configured');
+    // Reuse today's delivery unchanged. Its commands use a validated session name, but every target is rebound to
+    // this exact live handle, so a changed active pane or a replacement session cannot receive the message.
+    const bound: TmuxCommandPort = {
+      execute: async (args, stdin) => {
+        const run = async (): Promise<TmuxCommandResult> => {
+          // Cleanup must still work after a disappearing pane or a refused paste.
+          if (args[0] === 'delete-buffer') return await this.options.tmux.execute(args, stdin);
+          const current = await this.facts(handle);
+          if (
+            current === undefined ||
+            current.dead ||
+            current.session !== original.session ||
+            current.pid !== original.pid ||
+            current.created !== original.created
+          )
+            return { code: 1, stdout: '', stderr: 'the ferret pane is no longer live' };
+          if (args[0] === 'has-session') return { code: 0, stdout: '', stderr: '' };
+          return await this.options.tmux.execute(
+            args.map((arg, i) => (args[i - 1] === '-t' ? handle : arg)),
+            stdin,
+          );
+        };
+        if (!['load-buffer', 'paste-buffer', 'send-keys'].includes(args[0] ?? '')) return await run();
+        let result: TmuxCommandResult | undefined;
+        const acted = await guard.act(targetRef('terminal', handle), 'keys', async () => {
+          result = await run();
+          return { status: 'done' };
+        });
+        if (!acted.ok) return { code: 1, stdout: '', stderr: REFUSAL_SENTENCES[acted.error.refused] };
+        if (result === undefined) throw new PaneDeliveryError('terminal delivery did not run');
+        return result;
+      },
+    };
+    // In particular, ComposerUnconfirmedError and PaneStrandedError propagate without a retry: typed is not lost.
+    return await new TmuxPaneDelivery(new TmuxController(bound), guard.sleep).deliver(
+      original.session,
+      delivery.text,
+      { resumeMenuChoice: delivery.resumeMenuChoice },
+      delivery.beforeWrite,
+    );
   }
 
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {

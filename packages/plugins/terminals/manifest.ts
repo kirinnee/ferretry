@@ -318,7 +318,19 @@ export default definePlugin({
      * tmux (the server and its control client); systemd-run, systemctl, ionice, taskpolicy, nice (ferret limits); ps (process trees and
      * incarnations on macOS); stty (a terminal's echo and line mode, for an input card); getent (the login shell).
      */
-    spawn: ['tmux', 'systemd-run', 'systemctl', 'ionice', 'taskpolicy', 'nice', 'ps', 'stty', 'getent'],
+    spawn: [
+      'tmux',
+      'systemd-run',
+      'systemctl',
+      'ionice',
+      'taskpolicy',
+      'nice',
+      'ps',
+      'stty',
+      'getent',
+      'lsof',
+      '/usr/bin/dscl',
+    ],
     /** `downloads`: only to locate Terminals' state folder for tmux's socket (no kernel port names it). */
     roots: ['downloads'],
   },

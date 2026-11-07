@@ -275,6 +275,21 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       return control;
     })();
 
+  const [, stateFile] = manifest.data.state;
+  const terminalsState: TerminalsStateFile = stateFile;
+  const panes = new StateTerminalPanes(kernel.state, terminalsState);
+  const effectiveLimits = ferrets.effectiveLimits?.bind(ferrets);
+  const processes = buildProcesses({
+    kernel,
+    tmux,
+    socketPath,
+    ferrets,
+    ...(effectiveLimits === undefined ? {} : { limits: effectiveLimits }),
+    paneOf: async ferret => await panes.of(ferret),
+    refusedOutputRoots: [socketPath.slice(0, socketPath.lastIndexOf('/state/'))],
+    binaryName: BINARY_NAME,
+  });
+
   // ─── terminals ──────────────────────────────────────────────────────────────────────────────────────────────────
   const loginShell = systemLoginShell(
     async () => undefined,
@@ -282,7 +297,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     message => log.warn(message),
   );
   const config = terminalsConfig(kernel);
-  const runtime: TerminalRuntimePort = overrides.runtime ?? new TmuxTerminalRuntime(tmux, nowMs, loginShell);
+  const runtime: TerminalRuntimePort =
+    overrides.runtime ?? new TmuxTerminalRuntime(tmux, nowMs, loginShell, processes.limits);
   const service = new ManagedTerminalService(
     runtime,
     {
@@ -390,8 +406,6 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   };
 
   // ─── the terminal tools ─────────────────────────────────────────────────────────────────────────────────────────
-  const [, stateFile] = manifest.data.state;
-  const terminalsState: TerminalsStateFile = stateFile;
   const control = new SurfaceControl(new StateSurfaceEvents(kernel.state, terminalsState), { now: nowMs });
   const tools = new TerminalToolService({
     terminals: subsystem,
@@ -480,7 +494,6 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
    * The pane each ferret runs in, as the runner started or adopted it, registered in `terminals.json` as today's durable
    * pane registration was (Ferrets persists the handle; this keeps the incarnation the proofs need after a restart).
    */
-  const panes = new StateTerminalPanes(kernel.state, terminalsState);
   const remember = async (ferret: string, paneId: string, pid: number | undefined): Promise<void> => {
     if (pid === undefined) return;
     const start = await incarnation.startOf(pid).catch(() => undefined);
@@ -488,15 +501,6 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     const pane: RunnerPane = { tmuxSession: ferretTmuxSession(ferret), paneId, pid, processStartTicks: start };
     await panes.register(ferret, pane);
   };
-  const processes = buildProcesses({
-    kernel,
-    tmux,
-    socketPath,
-    ferrets,
-    paneOf: async ferret => await panes.of(ferret),
-    refusedOutputRoots: [socketPath.slice(0, socketPath.lastIndexOf('/state/'))],
-    binaryName: BINARY_NAME,
-  });
   const runner = new TmuxRunner({
     tmux,
     spawn: kernel.spawn,
@@ -505,6 +509,10 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     now: () => kernel.clock.now(),
     wrap: async (ferret, command) => await processes.limits.command(ferret, command),
     remember: async (ferret, running) => await remember(ferret, running.handle, running.pid),
+    delivery: {
+      act: kernel.act.bind(kernel),
+      sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+    },
   });
 
   // ─── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────

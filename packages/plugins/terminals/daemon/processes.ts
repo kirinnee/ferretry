@@ -77,7 +77,7 @@ export interface ProcessesDeps {
   readonly refusedOutputRoots: readonly string[];
   /** The CLI's binary name (`fy`), so the tools server and status line are recognised as the agent's own. */
   readonly binaryName: string;
-  /** `limits.yaml` in effect (Ferrets' config). Absent: the computed defaults (a declared gap until it is wired). */
+  /** `limits.yaml` in effect (Ferrets' config). Absent: the computed defaults, disclosed in the status view. */
   readonly limits?: () => Promise<LimitsConfig>;
   /** The ferret's recent conversation, for what the harness recorded about its commands. Absent: none is read. */
   readonly transcript?: SessionTranscriptTailPort;
@@ -236,7 +236,17 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
       'POST /v1/ferrets/:ferretId/processes/:processId/stop': handlers.stop,
       'POST /v1/ferrets/:ferretId/console/input': consoleInputHandler(console, deps.ferrets),
       'GET /v1/ferrets/:ferretId/attach': attachHandler(attach, deps.ferrets),
-      'GET /v1/cgroups/config': limitsHandler({ view: async () => await (await built).service.view() }),
+      'GET /v1/cgroups/config': limitsHandler({
+        view: async () => {
+          const view = await (await built).service.view();
+          return deps.limits === undefined
+            ? {
+                ...view,
+                warnings: [...view.warnings, 'Ferrets does not provide effective limits; using built-in defaults.'],
+              }
+            : view;
+        },
+      }),
     },
     limits: {
       command: async (ferret, command, kind) => await (await built).planner.command(ferret, command, kind),

@@ -11,8 +11,13 @@ export class FerretTerminalOwnerDirectory implements TerminalOwnerDirectory {
   constructor(private readonly ferrets: Pick<FerretsApi, 'get'>) {}
 
   async standing(ownerId: string): Promise<TerminalOwnerStanding> {
-    const ferret = await this.ferrets.get(ownerId as FerretId).catch(() => undefined);
-    if (ferret === undefined) return { ...standingOfSessionStatus(undefined), label: ownerId };
-    return { ...standingOfSessionStatus(ferret.state), label: ferret.name };
+    // Unreadable state is live/unknown: only a successful lookup can prove that an owner is gone.
+    try {
+      const ferret = await this.ferrets.get(ownerId as FerretId);
+      if (ferret === undefined) return { ...standingOfSessionStatus(undefined), label: ownerId };
+      return { ...standingOfSessionStatus(ferret.state), label: ferret.name };
+    } catch {
+      return { standing: 'live', status: 'unknown', label: ownerId };
+    }
   }
 }

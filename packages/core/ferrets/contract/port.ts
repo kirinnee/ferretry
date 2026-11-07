@@ -12,7 +12,7 @@ import {
   type PackId,
 } from './ids.ts';
 import type { RunnerHandle, SitrepLine } from './kinds.ts';
-import type { AgentControl } from './state.ts';
+import type { AgentControl, LimitsFile } from './state.ts';
 
 /**
  * The most free-form harness flags one start may carry, and the longest one may be (today's `protocol/src/lib/
@@ -120,6 +120,8 @@ export interface Sitrep {
  * nowhere else.
  */
 export interface FerretsApi {
+  /** The effective `limits.yaml` settings, read fresh; absent until Ferrets supplies this configuration read. */
+  effectiveLimits?(): Promise<LimitsFile>;
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
   list(filter?: {
     readonly state?: FerretState;

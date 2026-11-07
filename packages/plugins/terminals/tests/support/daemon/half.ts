@@ -1,4 +1,9 @@
-import type { FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
+import {
+  DEFAULT_AGENT_CONTROL,
+  NO_AGENT_CONTROL,
+  type FerretsApi,
+  type FerretSummary,
+} from '@ferretry/core-ferrets/contract';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type {
   InputRaise,
@@ -118,6 +123,12 @@ export function fakeFerrets(known: readonly FerretSummary[] = [ferretSummary()])
     stop: async () => undefined,
     resume: async () => ({ ok: false, error: { code: 'failed', reason: 'not in this test' } }),
     attach: async () => ({ ok: false, error: { code: 'failed', reason: 'not in this test' } }),
+    handle: async () => undefined,
+    workFolder: async id => {
+      const ferret = known.find(ferret => ferret.id === id);
+      return ferret === undefined ? undefined : { folder: ferret.folder };
+    },
+    agentControl: async id => (known.some(ferret => ferret.id === id) ? DEFAULT_AGENT_CONTROL : NO_AGENT_CONTROL),
     sitrep: async () => undefined,
   };
 }
