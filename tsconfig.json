@@ -37,6 +37,9 @@
     "packages/plugins/onboarding/app/landing-geometry.ts",
     "packages/plugins/onboarding/app/setup-qr.ts",
     "packages/plugins/onboarding/tests/unit/app/get-started-script.test.ts",
-    "packages/plugins/onboarding/tests/unit/app/setup-qr.test.ts"
+    "packages/plugins/onboarding/tests/unit/app/setup-qr.test.ts",
+    "packages/plugins/terminals/app",
+    "packages/plugins/terminals/tests/unit/app",
+    "packages/plugins/terminals/tests/support/app"
   ]
 }

@@ -44,7 +44,7 @@ export const MEMBER_RENEW_LABEL = 'ferretry-member-renew-v1' as const;
 export const MEMBER_JOIN_OPTIONS_LABEL = 'ferretry-member-join-options-v1' as const;
 
 /** The `t` a member proof signs, so the label and the record agree on what the session is for. */
-export const MEMBER_SESSION_KIND = 'member' as const;
+const MEMBER_SESSION_KIND = 'member' as const;
 
 const labelled = (label: string, transcriptHash: Uint8Array, fields: readonly string[]): Uint8Array =>
   concatBytes([
@@ -77,7 +77,7 @@ export function memberRenewMessage(transcriptHash: Uint8Array, nonce: string): U
 /** A member key on the wire: an Ed25519 SPKI, base64url — the same shape and checks as a device key. */
 export const MemberKeySchema = DeviceKeySchema;
 /** One Ed25519 signature by a member key. */
-export const MemberProofSchema = DeviceProofSchema;
+const MemberProofSchema = DeviceProofSchema;
 
 /**
  * The browser's X25519 BOX key, raw 32 bytes, base64url. Filed at join and used by phase 6 to wrap a
@@ -118,6 +118,7 @@ export const MemberJoinRecordSchema = z.strictObject({
    */
   passkey: OwnerPayloadSchema.optional(),
 });
+/** @public The member session mode's record (Catalogs provides the `member` mode, §4.13); its app half builds it. */
 export type MemberJoinRecord = z.infer<typeof MemberJoinRecordSchema>;
 
 /**
@@ -135,6 +136,7 @@ export const MemberJoinOptionsRecordSchema = z.strictObject({
   origin: z.string().min(1).max(256),
   proof: z.string().min(1).max(128),
 });
+/** @public The member session mode's record (Catalogs provides the `member` mode, §4.13); its app half builds it. */
 export type MemberJoinOptionsRecord = z.infer<typeof MemberJoinOptionsRecordSchema>;
 
 /** `member`: open a request session on the member route table, proving the member key filed at join. */
@@ -145,6 +147,7 @@ export const MemberAuthRecordSchema = z.strictObject({
   appSession: AppSessionSchema,
   proof: MemberProofSchema,
 });
+/** @public The member session mode's record (Catalogs provides the `member` mode, §4.13); its app half builds it. */
 export type MemberAuthRecord = z.infer<typeof MemberAuthRecordSchema>;
 
 /** The member's answer to a `renew`: the same key, over this session's transcript and the nonce. */
@@ -207,7 +210,7 @@ export const MemberJoinOutcomeSchema = z.discriminatedUnion('t', [
     pad: JoinPadSchema,
   }),
 ]);
-export type MemberJoinOutcome = z.infer<typeof MemberJoinOutcomeSchema>;
+type MemberJoinOutcome = z.infer<typeof MemberJoinOutcomeSchema>;
 
 /** An outcome before it is padded: what the publisher decided, without its `pad`. */
 export type MemberJoinOutcomeContent = MemberJoinOutcome extends infer Outcome

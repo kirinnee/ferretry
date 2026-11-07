@@ -60,7 +60,7 @@ function recordNonce(sequence: number): Uint8Array {
   return nonce;
 }
 
-export type ChannelFailure = { readonly ok: false; readonly code: RelayCloseCode; readonly reason: string };
+type ChannelFailure = { readonly ok: false; readonly code: RelayCloseCode; readonly reason: string };
 
 export type SealResult =
   | { readonly ok: true; readonly state: ChannelState; readonly frame: RelayFrame }
