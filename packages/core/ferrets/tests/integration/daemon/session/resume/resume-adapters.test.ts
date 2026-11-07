@@ -11,13 +11,13 @@ import {
   type ResumeLaunchSpec,
   TmuxResumeLauncher,
 } from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
-import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import type { SessionCredentialRotator } from '../../../../../daemon/lib/session/lifecycle/types.ts';
 import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { FakePaneDelivery, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
+import { FerretStateFile } from '../../../../../contract/index.ts';
 
 const homes = new Set<string>();
 const ID = parseSessionId('session-1');
@@ -151,11 +151,7 @@ describe('storage resume repository', () => {
     const other = parseSessionId('session-2');
     await opened.storage.writeConfig(other, config('session-2'));
     await opened.storage.writeState(other, sessionState('session-2'));
-    opened.folder.plant(
-      SessionStateFiles,
-      JSON.stringify(sessionState('session-2', { status: 'transcending' })),
-      other,
-    );
+    opened.folder.plant(FerretStateFile, JSON.stringify(sessionState('session-2', { status: 'transcending' })), other);
     const repository = new StorageResumeRepository(opened.storage);
 
     // Act
@@ -196,7 +192,7 @@ describe('storage resume repository', () => {
     const broken = parseSessionId('session-2');
     await opened.storage.writeConfig(broken, config('session-2'));
     await opened.storage.writeState(broken, sessionState('session-2'));
-    opened.folder.plant(SessionStateFiles, JSON.stringify(sessionState('session-2', { status: 'nonsense' })), broken);
+    opened.folder.plant(FerretStateFile, JSON.stringify(sessionState('session-2', { status: 'nonsense' })), broken);
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).list();

@@ -14,8 +14,8 @@ import {
   type PinnedTranscriptDigests,
 } from '../../../../daemon/lib/transfer/ports.ts';
 import type { Harness } from '../../../../daemon/lib/protocol/session-base.ts';
-import { SessionConfigFiles } from '../../../../daemon/lib/state.ts';
 import { memoryStorage } from '../../../support/daemon/storage.ts';
+import { FerretConfigFile } from '../../../../contract/index.ts';
 
 /**
  * The one conversation cut, over the file a plan PINS rather than the file a session currently points at.
@@ -115,13 +115,13 @@ describe('StorageTransferConversationReader', () => {
       transcript: provenance('/home/agent/.claude/projects/source.jsonl'),
       retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
     } as const;
-    folder.plant(SessionConfigFiles, JSON.stringify(configA), id);
+    folder.plant(FerretConfigFile, JSON.stringify(configA), id);
     const source = await new StorageTransferSourceReader(storage).read(id);
     if (source === undefined) throw new Error('the source fixture must be readable');
 
     // The live configuration then moves to B before the conversation contributor runs.
     folder.plant(
-      SessionConfigFiles,
+      FerretConfigFile,
       JSON.stringify({
         ...configA,
         harness: 'codex',

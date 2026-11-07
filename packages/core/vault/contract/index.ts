@@ -46,6 +46,7 @@ export {
   type TargetRef,
   WITHHELD_SENTENCE,
 } from '@ferretry/kernel/contract';
+export * from './config.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
 export * from './port.ts';
