@@ -29,11 +29,16 @@ describe('conversation manifest', () => {
       [...routes, ...manifest.actions.sockets].filter(route => route.path === path).map(route => route.guard);
     for (const path of ['/v1/ferrets/:ferretId/messages', '/v1/ferrets/:ferretId/logs'])
       expect(secrets(path).every(guard => guard === 'secrets')).toBe(true);
-    expect(secrets('/v1/ferrets/:ferretId/shared-draft/stream')).toEqual(['secrets']);
   });
-  test("the shared draft's GET and POST are the owner's own draft, served raw: an edit's positions are the raw text's", () => {
-    const draft = routes.filter(route => route.path === '/v1/ferrets/:ferretId/shared-draft');
-    expect(draft.map(route => route.method).sort()).toEqual(['GET', 'POST']);
+  test("the shared draft's GET, POST and stream are the owner's own draft, served raw: an edit's positions are the raw text's", () => {
+    const draft = [...routes, ...manifest.actions.sockets].filter(route =>
+      /^\/v1\/ferrets\/:ferretId\/shared-draft(\/stream)?$/.test(route.path),
+    );
+    expect(draft.map(route => `${route.method} ${route.path}`).sort()).toEqual([
+      'GET /v1/ferrets/:ferretId/shared-draft',
+      'GET /v1/ferrets/:ferretId/shared-draft/stream',
+      'POST /v1/ferrets/:ferretId/shared-draft',
+    ]);
     for (const route of draft) {
       expect(route.caller).toBe('person');
       expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });

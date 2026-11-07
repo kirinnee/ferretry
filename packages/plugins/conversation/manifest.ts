@@ -226,12 +226,13 @@ export default definePlugin({
       }),
     ],
     sockets: [
-      // The live stream of one ferret's draft, every open composer kept in step.
+      // The live stream of one ferret's draft, every open composer kept in step. It carries the same raw text as the
+      // two shared-draft routes, never built inside a `Redaction.read`, so it declares what they declare.
       socket('GET /v1/ferrets/:ferretId/shared-draft/stream', {
         minimum: 'operator',
         caller: 'person',
         audit: { skip: 'a stream; the edits it carries are audited as drafts' },
-        guard: 'secrets',
+        ...OWN_DRAFT,
       }),
     ],
     cli: [
