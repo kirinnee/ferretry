@@ -1,5 +1,11 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { DevicesTab, NotificationsPanel, UnlockPanel } from './surfaces.tsx';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+/** Access's app half (§2.3): Devices settings, the unlock nudge and this device's notification permission. */
+export default implementApp(manifest, {
+  build: () => ({
+    settings: { devices: DevicesTab },
+    panels: { unlock: UnlockPanel, notifications: NotificationsPanel },
+  }),
+});
