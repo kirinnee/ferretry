@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, board, asks/agenda, projects, warden and logins have real conversions; conversation is partial
+terminals, harness-homes, board, asks/agenda, projects, usage, warden, MCP, logins and Gate have real conversions; conversation is partial
 (below). The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
@@ -114,6 +114,27 @@ The `rebuild/migration-ferrets-b` development branch contains a local merge of t
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
 rebase the converter commits onto `rebuild/migration` without that port merge. The independent first pass remains
 on `rebuild/migration-ferrets`.
+
+Usage (`src/steps/usage.ts`): `budget-holds.json` → `state/usage/pauses.json`, `budget-told.json` → `pause-told.json`
+(the told keys are spelled the same in both), and `daemon.json`'s `analyticsPricing`/`analyticsPricingSources` →
+`pricing.json`; a rate row in v4's older `ratesUsdMicrosPerMillion` spelling is converted with v4's own transform,
+vendored in `src/v4/usage.ts`. These v5 schemas describe the body without `format`, so `V5Writer.stamped` writes it
+first, as the kernel does. The passive `fleet/credentials/<login>/usage.json` readings are only `lstat`ed and not
+carried: v5's `quotas/<login>.json` holds a provider-endpoint reading with no statusline source. None of these files
+holds a runtime uuid; the analytics index that does is a cache.
+
+MCP (`src/steps/mcp.ts`): `mcp-oauth.json` → `state/mcp/oauth.json`, envelope only (`v` → `format`); the records are
+the same in both. The access tokens are vault secrets kept by name (the Vault step). The sealed
+`mcp-oauth-secrets.json` (refresh tokens, client secrets) is not carried and never opened, because MCP declares no
+`store: 'secret'` document yet: until it does, an OAuth MCP server must be signed in to again when its token expires.
+
+Gate (`src/steps/gate.ts`): `api-token` and `api-warden-token` (home root) move byte for byte to
+`state/gate/admin-token` and `warden-token` (`0600`; v5's CLI reads the same raw text). All six audit files — the
+general and kept stores with their rotated halves, `grant-audit.jsonl` and `security-audit.jsonl` — become one
+`audit.jsonl` of v5 `AuditRecordSchema` lines, oldest first. Four kinds are renamed (`input.quarantine_*` →
+`input.hold-*`, `session.credential-*` → `ferret.credential-*`); journal records take v5's actor
+(`admin-*` → host) and keep their change strings in bounded `detail` keys. A record by a ferret's own credential has
+no v5 actor kind and is counted, not carried.
 
 ## Tests
 
