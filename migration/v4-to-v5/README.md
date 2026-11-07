@@ -70,7 +70,7 @@ step by name. `notifications.jsonl` yields only what v5 can meet again: an ask's
 
 Board cards keep their ids exactly (`&F1792` names the same card); counters continue after the highest id; parent,
 dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed cards
-are ordinary cards. History, clarifications, terms and links are carried whole in their v4 shape, since v5 declares them
+are ordinary cards. Every actor in history and clarifications takes v5's card actor shape; the rest of them, terms and links are carried whole, since v5 declares them
 as loose records. Lane sets and the switch become one `boards/<project>.json` each. The ask's `source`, `legacyRef`,
 the session an owner or the daemon acted from, the sweep's nudge memory and the switch's `migratedAt` have no v5 field
 and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).
