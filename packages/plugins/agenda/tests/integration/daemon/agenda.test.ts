@@ -4,7 +4,8 @@ import { AsksChanged } from '@ferretry/core-asks/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { owner, type TestCaller, testHost } from '@ferretry/kernel/testing';
 import { as, gateLikeAdmission } from '../../support/gate.ts';
-import { AgendaPort } from '../../../contract/index.ts';
+import { type AgendaApi, AgendaPort } from '../../../contract/index.ts';
+import { agendaConformance } from '../../../contract/testing/index.ts';
 import type { AccessBuzzApi } from '../../../contract/others.ts';
 import agenda from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
@@ -202,22 +203,22 @@ describe('agenda mode', () => {
     ).toBe(403);
   });
 
-  test('reads off until switched, says a running ferret needs a restart, and refuses an unknown ferret', async () => {
+  test('reads on for a ferret that recorded nothing (the machine default), says a running ferret needs a restart, and refuses an unknown ferret', async () => {
     const { host } = await world();
     expect((await host.request('GET', '/v1/ferrets/f1/agenda-mode', { ...as(owner()) })).json()).toEqual({
-      enabled: false,
+      enabled: true,
       restartRequired: false,
-      note: 'Agenda mode is off.',
+      note: 'Agenda mode is on.',
     });
     const switched = await host.request('PATCH', '/v1/ferrets/f1/agenda-mode', {
-      body: { enabled: true },
+      body: { enabled: false },
       ...as(owner()),
     });
-    expect(switched.json()).toMatchObject({ ferret: 'f1', enabled: true, restartRequired: true });
+    expect(switched.json()).toMatchObject({ ferret: 'f1', enabled: false, restartRequired: true });
     expect(
       (await host.request('GET', '/v1/ferrets/f1/agenda-mode', { ...as(owner()) })).json<{ enabled: boolean }>()
         .enabled,
-    ).toBe(true);
+    ).toBe(false);
     expect(host.published.some(each => each.event === 'agenda.mode-changed')).toBe(true);
     expect((await host.request('GET', '/v1/ferrets/ghost/agenda-mode', { ...as(owner()) })).status).toBe(404);
     expect(
@@ -255,3 +256,18 @@ describe('the daemon agenda', () => {
     expect((await host.request('GET', '/v1/machine/agenda', { ...as({ kind: 'ferret', id: 'f1' }) })).status).toBe(403);
   });
 });
+
+/** The real half behind the synchronous `make` the conformance suite wants: each call waits for the host. */
+function lazyAgenda(): AgendaApi {
+  const ready = world().then(w => w.host.provided(AgendaPort));
+  return {
+    open: async query => (await ready).open(query),
+    daemonAgenda: async () => (await ready).daemonAgenda(),
+    mode: async ferret => (await ready).mode(ferret),
+    setMode: async (ferret, enabled) => (await ready).setMode(ferret, enabled),
+    clearAgents: async options => (await ready).clearAgents(options),
+    buzz: async (key, kind, message) => (await ready).buzz(key, kind, message),
+  };
+}
+
+agendaConformance('daemon half', lazyAgenda);

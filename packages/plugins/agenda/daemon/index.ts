@@ -84,7 +84,7 @@ export default implementDaemon(manifest, {
         const summary = await ferrets.get(ferret as FerretId);
         if (summary === undefined) return undefined;
         return {
-          enabled: (await modeStore.recorded(ferret)) ?? false,
+          enabled: (await modeStore.recorded(ferret)) ?? config().agendaMode,
           running: summary.state !== 'stopped',
         };
       },
