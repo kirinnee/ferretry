@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { FileAgendaOutboxRepository } from '../../../../daemon/adapters/agenda/file-agenda-outbox-repository.ts';
 import { AgendaReplyBatcher, type AgendaReplyTimers } from '../../../../daemon/lib/agenda/index.ts';
+import { agendaFilesAt } from '../../../support/daemon/agenda-state.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const homes: string[] = [];
@@ -54,7 +55,7 @@ async function world() {
   const sent: Array<{ message: string }> = [];
   const ferret = { busy: false };
   const batcher = new AgendaReplyBatcher(
-    new FileAgendaOutboxRepository(sessionId => join(home, 'sessions', sessionId)),
+    new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'id'),
     {
       send: async (_sessionId: string, message: string) => {
         sent.push({ message });

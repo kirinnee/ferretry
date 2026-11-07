@@ -1,6 +1,13 @@
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
-import { AskAnswered, AskSources, AsksChanged, AsksPort, AskVersionsFiles } from './contract/index.ts';
+import {
+  AskAnswered,
+  AskDeliveries,
+  AskSources,
+  AsksChanged,
+  AsksPort,
+  AskVersionsFiles,
+} from './contract/index.ts';
 import { ASKS_STATE } from './daemon/lib/state.ts';
 
 /**
@@ -36,7 +43,7 @@ export default definePlugin({
     state: [...ASKS_STATE, AskVersionsFiles],
     publishes: [AskAnswered, AsksChanged],
   },
-  hooks: { offers: [{ hook: AskSources }] },
+  hooks: { offers: [{ hook: AskSources }, { hook: AskDeliveries }] },
   actions: {
     routes: [
       route('GET /v1/ferrets/:ferretId/agenda/:id', read),

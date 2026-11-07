@@ -61,12 +61,11 @@ function boardOf(draft: Pick<AskDraft, 'ferret' | 'raisedBy'>): string {
   return ferret;
 }
 
-const actorOf = (draft: Pick<AskDraft, 'raisedBy'>): AgendaActor =>
-  draft.raisedBy.kind === 'ferret'
-    ? { kind: 'agent', sessionId: draft.raisedBy.ferret, name: null }
-    : draft.raisedBy.kind === 'owner'
-      ? { kind: 'human' }
-      : { kind: 'daemon', cause: 'system' };
+/**
+ * A port raise is a plugin's, on the daemon's side of the boundary: the engine takes a stable source reference only from
+ * the daemon, so every port raise is the daemon's. Who it is for is the draft's `ferret`.
+ */
+const PORT_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
 
 const kindOf = (item: Pick<AgendaItem, 'kind'>): AskKind =>
   item.kind === undefined ? 'task' : item.kind === 'info' ? 'notice' : item.kind;
@@ -190,7 +189,7 @@ export function asksPort(
     const kind = parsed.kind === 'notice' ? 'info' : parsed.kind;
     const ask = askForKind(kind, parsed.options ?? []);
     const request: RaiseAgendaRequest = {
-      source: parsed.raisedBy.kind === 'ferret' ? 'agent-raised' : 'question',
+      source: 'question',
       sourceRef,
       subject: parsed.subject,
       why: parsed.why,
@@ -201,7 +200,7 @@ export function asksPort(
       ...(notice ? { notice: true as const } : {}),
       ...(notice && parsed.blocking === true ? { ping: true as const } : {}),
     };
-    const mutation = await agenda.raise(ferret, request, actorOf(parsed));
+    const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
     if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
     const id = mutation.item?.id;
     if (id === undefined) throw new AskRefusedError('the board took the ask but named no item for it');

@@ -250,6 +250,52 @@ export const AskSources = defineHook('ask.sources', {
   value: z.custom<AskSourceSpec>(),
 });
 
+// ─── delivery ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Thrown by a delivery when NOTHING was typed and the same batch may simply be tried again later: the ferret's
+ * composer held a person's draft, could not be read, or the ferret is still starting (today's `AgendaNotTyped`).
+ */
+export class AskNotTypedError extends Error {
+  override readonly name = 'AskNotTypedError';
+}
+
+/** What a ferret's composer holds: nothing (a dim ghost suggestion is nothing), text, or no reading. */
+export type AskComposerState = 'empty' | 'occupied' | 'unreadable';
+
+/** What the send ledger can prove about a batch it accepted. */
+export type AskReceipt =
+  | { readonly state: 'delivered' }
+  | { readonly state: 'pending' }
+  | { readonly state: 'failed'; readonly reason: string };
+
+/**
+ * How the owner's answers reach a ferret (today's `AgendaMessenger`, `AgendaComposer` and `AgendaReceipts`): a queued,
+ * non-interrupting message into the ferret's own terminal, idempotent under its send id. Typing into a ferret is
+ * Conversation's, so Conversation provides it under `ask.delivery:ferret`. Unprovided, answers stay held in the
+ * ferret's outbox exactly as when nothing could be typed.
+ */
+export interface AskDelivery {
+  /**
+   * Resolves once the send path has ACCEPTED the message — not once it arrived. Rejects with {@link AskNotTypedError}
+   * when nothing was typed and it may be tried again, and with any other error when the send was refused outright.
+   */
+  send(ferret: string, message: string, sendId: string): Promise<void>;
+  /** Read before anything is typed; absent, the composer is taken as empty. */
+  composer?(ferret: string): Promise<AskComposerState>;
+  /** Delivered only when the transcript holds it; absent, an accepted send counts as delivered. */
+  receipt?(ferret: string, sendId: string): Promise<AskReceipt>;
+}
+
+/** The one key `ask.delivery` is provided under. */
+export const ASK_DELIVERY_KEY = 'ferret' as const;
+
+export const AskDeliveries = defineHook('ask.delivery', {
+  mode: 'provide',
+  key: z.literal(ASK_DELIVERY_KEY),
+  value: z.custom<AskDelivery>(),
+});
+
 /** An answer landed. A wake-up: the source reads `answers` and applies each once. */
 export const AskAnswered = defineEvent(
   'asks.answered',
