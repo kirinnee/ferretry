@@ -1,10 +1,9 @@
-import { CLAUDE_CODE_AGENT_HOMES } from '@ferretry/plugin-claude-code/contract';
-import { CODEX_AGENT_HOMES } from '@ferretry/plugin-codex/contract';
 import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
 import { configs, info, json, runtimeIds, runtimeName } from '../v4/ferrets.ts';
+import { agentHomesRoot as targetRoot } from '../v5/harness-paths.ts';
 import type { Step } from './index.ts';
 
 const Harness = z.enum(['claude', 'codex']);
@@ -19,12 +18,6 @@ const Manifest = z.object({
   ),
   runtimes: z.array(z.object({ id: z.uuid(), name: z.string().min(1), harness: Harness })).optional(),
 });
-
-/** These are opaque owner-declared folders; no transcript or sign-in bytes become a JS value. */
-function targetRoot(harness: 'claude' | 'codex') {
-  const declaration = harness === 'claude' ? CLAUDE_CODE_AGENT_HOMES : CODEX_AGENT_HOMES;
-  return join('state', harness === 'claude' ? 'claude-code' : 'codex', declaration.path.replace(/\/\*$/u, ''));
-}
 
 export const harnessHomesStep: Step = {
   id: 'harness-homes',

@@ -47,17 +47,27 @@ terminals and harness-homes have real conversions. The other steps remain `pendi
 still exits 3. Each step names what it waits for. Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
-Ferret records keep ids, parent edges, names, runtime, work folder, resume ids, pane handles and credential hashes.
-Declared files without a v5 schema are **not written**: history, names (including former runtime names), archive,
-worktrees, forks, moves, auto-resume, restarts and terminals.json. Other missing fields are listed in `notCarried`.
-In particular, there are no v5 record fields for provenance, transfer edges, project/card references or rewritten
-transcript home/file pointers.
+Ferret records keep ids, parent edges, spawn provenance, transfer edges, project ids, names, runtime, work folder,
+resume ids, pane handles and credential hashes. Transcript home/file metadata points into the copied agent homes
+and shared pools; the transcript bytes are never parsed. Journals become history, callsign claims become names,
+and archive entries, worktree records/intents and fork receipts retain their schema-backed fields. The kernel's
+declared `format: 1` stamp is added to document bodies; fork receipts also retain their original `v: 1`.
+
+Declared files without a v5 schema are **not written**: moves, auto-resume, restarts and terminals.json. Runtime
+`formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. Card references,
+name counters, extra history artifacts and remaining config/state omissions are listed in `notCarried`. Frozen
+fork plans keep their original paths and fingerprints; changing their decision would invalidate replay checks.
 
 Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
 runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
 opaque files are preserved. Links are omitted, never followed or re-made: the contracts do not yet declare a link
 policy or a runtime-to-ferret home mapping. Those are explicit gaps; these copies alone do not make resume ready.
 Sign-in files and `fleet/credentials/` belong to the pending Logins step.
+
+The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
+`rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
+rebase the converter commits onto `rebuild/migration` without that port merge. The independent first pass remains
+on `rebuild/migration-ferrets`.
 
 ## Tests
 

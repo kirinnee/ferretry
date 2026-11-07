@@ -143,7 +143,16 @@ describe('start options (today’s start fields)', () => {
     expect(ok({ agent: 'claude-alpha' })).toBe(false);
   });
   test('the timers keep today’s floors: interval and snapshots at least 1, the rest at least 0, whole numbers', () => {
-    expect(ok({ intervalSeconds: 1, maxSnapshots: 1, timeoutSeconds: 0, nudgeAfterSeconds: 0, killAfterSeconds: 0, directSendMaxChars: 0 })).toBe(true);
+    expect(
+      ok({
+        intervalSeconds: 1,
+        maxSnapshots: 1,
+        timeoutSeconds: 0,
+        nudgeAfterSeconds: 0,
+        killAfterSeconds: 0,
+        directSendMaxChars: 0,
+      }),
+    ).toBe(true);
     for (const bad of [
       { intervalSeconds: 0 },
       { maxSnapshots: 0 },
