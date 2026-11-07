@@ -1,0 +1,4 @@
+# The built-in theme. PLACEHOLDER: the token names belong to the app shell (spine slice 5, "theme tokens"); this file
+# is valid and empty until it fills them, so `fy theme use default` works from day one.
+id: default
+tokens: {}
