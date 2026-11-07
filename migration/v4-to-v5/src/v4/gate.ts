@@ -7,13 +7,8 @@
  *   `audit-kept.1.jsonl` (the kept store) (`adapters/audit/file-audit-journal.ts:19-24`): one `AuditRecord` per line,
  *   `{at, event, actor, subject?, outcome, detail?}`, NO version (`packages/protocol/src/lib/audit.ts:238`). Names and
  *   ids only. A line that does not parse is counted as unreadable by v4, never shown.
- * - `state/grant-audit.jsonl`, `state/security-audit.jsonl` (`adapters/grants/runtime-grant-ports.ts:72-100`,
- *   `JournalGrantAudit`, never rotated): `{kind, at, actor, changes}`, `kind` `grant.changed` / `security.changed`
- *   (and `device.key-rotated` in the security journal, `bin/fyd.ts:8628`); `actor` a string — `admin-cli`, `admin-ui`,
- *   `device:<id>`, `device`, `warden[:<sid>]` or `peer:<sid>` (`lib/api/actor.ts`) — and `changes` a list of
- *   `capability.axis=on|off` / `setting=value` strings.
+ * - `state/grant-audit.jsonl`, `state/security-audit.jsonl` are Access's in v5 (`src/v4/access.ts`).
  */
-import { z } from 'zod';
 import { isRecord } from './documents.ts';
 
 export const V4_ADMIN_TOKEN = 'api-token';
@@ -25,8 +20,6 @@ export const V4_AUDIT_FILES = [
   'state/audit-kept.1.jsonl',
   'state/audit-kept.jsonl',
 ] as const;
-export const V4_GRANT_JOURNAL = 'state/grant-audit.jsonl';
-export const V4_SECURITY_JOURNAL = 'state/security-audit.jsonl';
 
 /** v4's closed `AUDIT_EVENTS` (bb89d054d `packages/protocol/src/lib/audit.ts`), verbatim. */
 export const V4_AUDIT_EVENTS = [
@@ -113,35 +106,6 @@ export const V4_AUDIT_RENAMES: Readonly<Record<string, string>> = {
 export function v5AuditKind(event: unknown): string | undefined {
   if (typeof event !== 'string' || !(V4_AUDIT_EVENTS as readonly string[]).includes(event)) return undefined;
   return V4_AUDIT_RENAMES[event] ?? event;
-}
-
-/** v4's `readAuditLine`: a journal line, or `undefined` when it is not a record v4 would have read. */
-export const V4JournalLine = z.object({
-  kind: z.string().min(1),
-  at: z.string().min(1),
-  actor: z.string().min(1),
-  changes: z.array(z.string()),
-});
-export type V4JournalLine = z.infer<typeof V4JournalLine>;
-
-/** Each journal's kinds, and the v5 audit kind each becomes (`grant.changed` was always v4's `grants.changed`). */
-export const V4_JOURNAL_KINDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  [V4_GRANT_JOURNAL]: { 'grant.changed': 'grants.changed' },
-  [V4_SECURITY_JOURNAL]: { 'security.changed': 'security.changed', 'device.key-rotated': 'device.key-rotated' },
-};
-
-/**
- * A journal's actor string as v5's audit actor: the admin token (CLI or app) is someone at the machine (`host`), a
- * device keeps its id, a warden is a warden. A ferret's own credential (`peer:<sid>`) and anything else has no v5
- * actor kind: `undefined`.
- */
-export function v5JournalActor(actor: string): { kind: 'host' | 'device' | 'warden'; deviceId?: string } | undefined {
-  if (actor === 'admin-cli' || actor === 'admin-ui') return { kind: 'host' };
-  if (actor === 'device') return { kind: 'device' };
-  if (actor.startsWith('device:') && actor.length > 'device:'.length)
-    return { kind: 'device', deviceId: actor.slice('device:'.length) };
-  if (actor === 'warden' || actor.startsWith('warden:')) return { kind: 'warden' };
-  return undefined;
 }
 
 /** One line of a JSONL file as a JSON object, or `undefined` for a torn or foreign line. */
