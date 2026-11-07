@@ -7,8 +7,8 @@
  * ferretry" in the owner's name. The two doors in this class are the owner's own acts, so they are written as the
  * owner's own amendment and are in effect at once (S79).
  *
- * The lines are READ through the kernel's config port. The owner's own amendment is the kernel's config write, which
- * `@ferretry/kernel/contract` does not offer yet: it is the {@link AccountDefaultsWriter} injected here.
+ * The lines are READ through the kernel's config port. The owner's own amendment is the kernel's config write
+ * (`ConfigPort.write`), behind the {@link AccountDefaultsWriter} injected here.
  */
 import {
   type AccountDefaultLine,

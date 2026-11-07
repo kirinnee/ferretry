@@ -59,6 +59,7 @@ import {
   type TwoFactorStageId,
   TwoFactorStageIdSchema,
 } from '../../contract/routes/index.ts';
+import { AccountDefaultsNotWritten } from '../adapters/kernel-defaults-writer.ts';
 import { AccountDefaultNotUsable, type AccountDefaults, AccountDefaultsFileBroken } from '../lib/account-defaults.ts';
 import { type AccountDirectory, type AccountListing, type AccountVault, LoginEntryError } from '../lib/accounts.ts';
 import { parseBody } from '../lib/body.ts';
@@ -408,6 +409,8 @@ export function accountRoutes(deps: AccountRoutesDeps) {
               if (error instanceof AccountDefaultsFileBroken)
                 throw new ApiError(409, error.message, 'defaults_file_invalid');
               if (error instanceof AccountDefaultNotUsable) throw new ApiError(409, error.message, 'no_sign_in_here');
+              if (error instanceof AccountDefaultsNotWritten)
+                throw new ApiError(409, error.message, error.outcome === 'held' ? 'held_for_owner' : 'conflict');
               return reraise(error);
             }
           }) satisfies Handler),

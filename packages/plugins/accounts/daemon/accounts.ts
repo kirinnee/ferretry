@@ -4,13 +4,14 @@
  * `account_hint` tool and the `accounts` port. Half b (rules, plans, recipes, phone approval, secure copy) is
  * `./rules.ts`, built after this one and handed {@link AccountsCore}.
  */
-import { ApiError, type StateFileDef } from '@ferretry/kernel/contract';
+import { ApiError, type ConfigFileDef, type StateFileDef } from '@ferretry/kernel/contract';
 import type { DaemonContext, ToolHandler } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import { type AccountsApi, type AccountsConfig, AccountsConfigSchema, type PlaceKey } from '../contract/index.ts';
 import type manifest from '../manifest.ts';
 import { accountHintSummary, placeHosts } from '../contract/routes/index.ts';
 import { machineName } from './adapters/host.ts';
+import { KernelAccountDefaultsWriter } from './adapters/kernel-defaults-writer.ts';
 import { StateAccountIndexStore } from './adapters/state-account-index-store.ts';
 import { UNBUILT_CIPHER, UNBUILT_SEALED_STORE } from './adapters/unbuilt-seal.ts';
 import { AccountDefaults } from './lib/account-defaults.ts';
@@ -60,22 +61,19 @@ export function buildAccounts(
   const lock = new LoginStoreLock();
   const vault = options.sealed === undefined ? undefined : new AccountVault(index, sealed, cipher);
   const narrowed = vault === undefined ? undefined : narrowAccountVault(vault);
-  const configDef = ctx.manifest.data.config[0];
+  const declared = ctx.manifest.data.config[0];
+  if (declared?.shape !== 'file') throw new Error('accounts declares accounts.yaml as its one config file');
+  const configDef = declared as ConfigFileDef<AccountsConfig>;
   const inEffect = (): AccountsConfig | undefined => {
-    if (configDef?.shape !== 'file') return undefined;
     const file = kernel.config.file(configDef);
     const parsed = AccountsConfigSchema.safeParse(file);
     return parsed.success ? parsed.data : undefined;
   };
-  // The kernel offers no config write yet: an owner's line is refused with a sentence, and a repoint after an account
-  // act is reported in the status warnings (the act itself stands).
+  // The owner's own lines go through the kernel's one config writer; a repoint after an account act that cannot be
+  // written is reported in the status warnings (the act itself stands).
   const defaults: AccountDefaults = new AccountDefaults({
     inEffect,
-    writer: {
-      amend: async () => {
-        throw new ApiError(503, 'this daemon cannot write accounts.yaml yet; edit the file by hand', 'unavailable');
-      },
-    },
+    writer: new KernelAccountDefaultsWriter(kernel.config, configDef),
     listing: async () => await logins.accounts.list(),
   });
   const logins: LoginDirectory = new LoginDirectory(index, sealed, cipher, kernel.clock, {

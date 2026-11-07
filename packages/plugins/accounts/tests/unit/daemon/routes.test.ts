@@ -88,16 +88,40 @@ describe('the account routes through the kernel', () => {
     should((await h.tool('account_hint', { name: 'app' }, { as: ferret('F1') })).isError).be.true();
   });
 
-  it('S80 should refuse a ferret choosing a default before the body, and say the owner’s write is not built yet', async () => {
+  it('S80 should refuse a ferret choosing a default before the body, and a line no sign-in could use', async () => {
     const h = await host();
     const refused = await h.request('PUT', '/v1/accounts/defaults', { body: 'nonsense', as: ferret('F1') });
     should(refused.status).equal(403);
     should(refused.json<{ code: string }>().code).equal('owner_only');
-    const owners = await h.request('PUT', '/v1/accounts/defaults', {
+    await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
+    const unusable = await h.request('PUT', '/v1/accounts/defaults', {
       body: { scope: 'sites', key: 'github.com', account: 'GITHUB' },
-      as: owner(),
     });
-    should(owners.status).equal(503);
+    should(unusable.status).equal(409);
+    should(unusable.json<{ code: string }>().code).equal('no_sign_in_here');
+  });
+
+  it('S79 S81 should write the owner’s line through the kernel, take it away again, and move it with a rename', async () => {
+    const h = await host();
+    await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
+    await h.request('POST', '/v1/accounts/GITHUB/sign-ins', {
+      body: { place: { kind: 'site', domains: ['github.com'], match: ['github.com'] } },
+    });
+    const set = await h.request('PUT', '/v1/accounts/defaults', {
+      body: { scope: 'sites', key: 'github.com', account: 'GITHUB' },
+    });
+    should(set.status).equal(200);
+    should(set.json<{ defaults: unknown }>().defaults).eql({ sites: { 'github.com': 'GITHUB' } });
+    should((await h.request('POST', '/v1/accounts/GITHUB/rename', { body: { to: 'GITHUB_HOME' } })).status).equal(200);
+    const moved = await h.request('PUT', '/v1/accounts/defaults', {
+      body: { scope: 'sites', key: 'gitlab.com', account: null },
+    });
+    should(moved.json<{ defaults: unknown }>().defaults).eql({ sites: { 'github.com': 'GITHUB_HOME' } });
+    const removed = await h.request('PUT', '/v1/accounts/defaults', {
+      body: { scope: 'sites', key: 'github.com', account: null },
+    });
+    should(removed.status).equal(200);
+    should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
   it('should answer the seed routes 503 while the Vault holds no sealed store, and half b’s routes as not built', async () => {
