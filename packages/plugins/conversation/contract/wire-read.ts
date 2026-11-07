@@ -1,5 +1,5 @@
 /** Reading a ferret's conversation: transcript pages, logs, search inside one, images (today's `session-transcript.ts`). */
-import { InstantSchema, JsonValueSchema, NonNegativeIntegerSchema } from '@ferretry/std';
+import { InstantSchema, JsonValueSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
@@ -275,73 +275,3 @@ export const TranscriptImageDownloadSchema = z.strictObject({
   base64: z.string().min(4),
 });
 export type TranscriptImageDownload = z.infer<typeof TranscriptImageDownloadSchema>;
-
-/** `GET /v1/ferrets/:ferretId/handoffs/:name`: a turn's hand-off note (today's `SessionHandoff`, reduced to its text). */
-export const HandoffSchema = z.strictObject({
-  v: z.literal(1),
-  ferret: FerretIdSchema,
-  name: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/u),
-  text: z.string(),
-});
-export type Handoff = z.infer<typeof HandoffSchema>;
-
-/**
- * A CONTEXT COMPACTION, running or just finished — the second thing a `live` frame can carry.
- *
- * CLAUDE CODE REPORTS HOW FAR IT HAS GOT; CODEX DOES NOT. Current Claude Code paints a progress bar with a
- * whole percentage under its `Compacting conversation…` line, and a `↓ 37.4k tokens` figure in the clock's
- * parenthetical. When the daemon read them they ride on the frame as `percent` (0–100, the harness's
- * own reading) and `tokensWritten`. Older Claude Code and Codex paint only a clock, so both are ABSENT
- * and a reader shows a spinner, the clock and the usual duration (`expectedMs`, with the `basis` it came
- * from) — it NEVER derives a percentage of its own, because a made-up bar is a lie about a measurement.
- *
- * Every running compaction also carries FACTS the daemon measured: when it began and the context size it
- * began from.
- *
- * `done` is read back off the transcript (the harness's own boundary record), so it survives a
- * reload and a reconnect for as long as the record is inside the tail the daemon reads. `tokensAfter`
- * is optional because a harness only states the post-compaction context on its NEXT model call.
- */
-export const FerretCompactionBasisSchema = z.enum(['history', 'typical']);
-export type FerretCompactionBasis = z.infer<typeof FerretCompactionBasisSchema>;
-
-export const FerretCompactionRunningSchema = z.strictObject({
-  phase: z.literal('running'),
-  /** When the daemon first saw the harness compacting. */
-  startedAt: InstantSchema,
-  /** The context size the compaction began from, when the transcript stated one. */
-  tokensBefore: NonNegativeIntegerSchema.optional(),
-  /** How far along the harness itself says it is, whole percent 0–100. Absent when the harness paints no bar. */
-  percent: z.number().int().min(0).max(100).optional(),
-  /** Tokens the harness says the compaction has written so far (↓). Absent when it paints no counter. */
-  tokensWritten: NonNegativeIntegerSchema.optional(),
-  /** How long a compaction usually takes here, in milliseconds — shown only when no real percent exists. */
-  expectedMs: z.number().int().positive(),
-  /** `history`: this daemon's own past compactions. `typical`: no history yet; a fixed prior. */
-  basis: FerretCompactionBasisSchema,
-});
-export type FerretCompactionRunning = z.infer<typeof FerretCompactionRunningSchema>;
-
-export const FerretCompactionDoneSchema = z.strictObject({
-  phase: z.literal('done'),
-  /** Who asked: the harness's own record says; absent when it did not. */
-  trigger: z.enum(['manual', 'auto']).optional(),
-  /** When the daemon saw it begin; absent when it only ever saw the end. */
-  startedAt: InstantSchema.optional(),
-  endedAt: InstantSchema,
-  tokensBefore: NonNegativeIntegerSchema.optional(),
-  tokensAfter: NonNegativeIntegerSchema.optional(),
-});
-export type FerretCompactionDone = z.infer<typeof FerretCompactionDoneSchema>;
-
-export const FerretCompactionSchema = z.discriminatedUnion('phase', [
-  FerretCompactionRunningSchema,
-  FerretCompactionDoneSchema,
-]);
-export type FerretCompaction = z.infer<typeof FerretCompactionSchema>;
-
-/** Tokens a finished compaction freed, when both ends are known and the context did shrink. */
-export const compactionFreed = (done: FerretCompactionDone): number | undefined =>
-  done.tokensBefore === undefined || done.tokensAfter === undefined || done.tokensAfter > done.tokensBefore
-    ? undefined
-    : done.tokensBefore - done.tokensAfter;

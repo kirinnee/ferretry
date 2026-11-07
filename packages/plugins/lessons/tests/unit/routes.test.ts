@@ -29,6 +29,7 @@ import {
   LESSONS_CONFIG,
   drive,
   lessonsSubsystem,
+  oneProof,
 } from './routes-support.ts';
 import {
   AT,
@@ -743,11 +744,11 @@ describe('the lessons mount', () => {
 
       // Assert
       should([answer.status, answer.body.code]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
-      should(answer.spent).equal(0);
+      should(answer.taken).equal(0);
       should(subject.world.files.writes).be.empty();
     });
 
-    it('should write a repo lesson for a fresh step-up and spend it exactly once', async () => {
+    it('should write a repo lesson for a fresh step-up and take that proof exactly once', async () => {
       // Arrange
       const subject = lessons([REPO_ACCEPTED]);
       const etag = await etagOf(subject, 'repo_a');
@@ -758,12 +759,89 @@ describe('the lessons mount', () => {
       // Assert
       should(answer.status).equal(200);
       should(ProposalViewSchema.parse(answer.body).state).equal('applied');
-      should(answer.spent).equal(1);
+      should(answer.taken).equal(1);
       should(subject.world.files.writes).have.length(1);
       should(subject.world.files.writes[0]?.path.startsWith(`${PROJECT}/`)).be.true();
     });
 
-    it('should write a global lesson for a governed device without spending a step-up', async () => {
+    describe('one proof, one apply into a project file: the proof is claimed before anything is written', () => {
+      const REPO_B = { ...REPO_ACCEPTED, id: 'repo_b', identity: 'repo-lesson-b' } as const;
+      /** Both callers were admitted with `freshStepUp` true (the snapshot) and share ONE proof. */
+      const onProof = (proof: ReturnType<typeof oneProof>) => ({ ...FRESH_DEVICE, proof });
+
+      it('should let exactly one of two applies admitted on one fresh proof write, and write nothing for the other', async () => {
+        // Arrange
+        const subject = lessons([REPO_ACCEPTED, REPO_B]);
+        const proof = oneProof();
+        const etagA = await etagOf(subject, 'repo_a');
+        const etagB = await etagOf(subject, 'repo_b');
+
+        // Act
+        const answers = await Promise.all([
+          drive(subject.subsystem, applyCall('repo_a', etagA), onProof(proof)),
+          drive(subject.subsystem, applyCall('repo_b', etagB), onProof(proof)),
+        ]);
+
+        // Assert
+        should(answers.map(answer => answer.status).sort()).deepEqual([200, 403]);
+        const refused = answers.find(answer => answer.status === 403);
+        should(refused?.body).have.property('code', STEP_UP_REQUIRED_CODE);
+        should(subject.world.files.writes).have.length(1);
+        should(proof.taken()).equal(1);
+      });
+
+      it('should let exactly one act when a config loosening claims the same proof first', async () => {
+        // Arrange — the other act takes the proof through the claim every admitted call carries, as Gate's judge does.
+        const subject = lessons([REPO_ACCEPTED]);
+        const proof = oneProof();
+        const etag = await etagOf(subject, 'repo_a');
+
+        // Act
+        const loosening = proof.claim() ? 'apply' : 'hold';
+        const answer = await drive(subject.subsystem, applyCall('repo_a', etag), onProof(proof));
+
+        // Assert
+        should([loosening, answer.status]).deepEqual(['apply', 403]);
+        should(subject.world.files.writes).be.empty();
+        should(proof.taken()).equal(1);
+      });
+
+      it('should write on one fresh proof and leave the proof gone', async () => {
+        // Arrange
+        const subject = lessons([REPO_ACCEPTED, REPO_B]);
+        const proof = oneProof();
+        const etagA = await etagOf(subject, 'repo_a');
+        const etagB = await etagOf(subject, 'repo_b');
+
+        // Act — the next lesson, admitted on the same (now taken) proof, asks again.
+        const answer = await drive(subject.subsystem, applyCall('repo_a', etagA), onProof(proof));
+        const again = await drive(subject.subsystem, applyCall('repo_b', etagB), onProof(proof));
+
+        // Assert
+        should(answer.status).equal(200);
+        should(again.status).equal(403);
+        should(subject.world.files.writes).have.length(1);
+        should(proof.taken()).equal(1);
+      });
+
+      it('should claim nothing for the owner at the machine, and for a global lesson from a governed device', async () => {
+        // Arrange
+        const subject = lessons([REPO_ACCEPTED, GLOBAL_ACCEPTED]);
+        const proof = oneProof();
+        const repoEtag = await etagOf(subject, 'repo_a');
+        const globalEtag = await etagOf(subject, 'global_a');
+
+        // Act
+        const host = await drive(subject.subsystem, applyCall('repo_a', repoEtag), { ...HOST, proof });
+        const global = await drive(subject.subsystem, applyCall('global_a', globalEtag), { ...DEVICE, proof });
+
+        // Assert
+        should([host.status, global.status]).deepEqual([200, 200]);
+        should(proof.taken()).equal(0);
+      });
+    });
+
+    it('should write a global lesson for a governed device without claiming a step-up', async () => {
       // Arrange
       const subject = lessons([GLOBAL_ACCEPTED]);
       const etag = await etagOf(subject, 'global_a');
@@ -774,7 +852,7 @@ describe('the lessons mount', () => {
       // Assert
       should(answer.status).equal(200);
       should(ProposalViewSchema.parse(answer.body).applied?.path).equal(subject.world.global.path);
-      should(answer.spent).equal(0);
+      should(answer.taken).equal(0);
       should(subject.world.global.ensured).equal(1);
       should(subject.store.proposals.map(entry => entry.state)).deepEqual(['applied']);
     });

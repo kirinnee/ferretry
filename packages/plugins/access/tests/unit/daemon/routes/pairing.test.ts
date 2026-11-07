@@ -22,7 +22,7 @@ import {
   type PairingId,
 } from '../../../../daemon/lib/wire.ts';
 import manifest from '../../../../manifest.ts';
-import { type CallOverrides, call, jsonBody, respond } from '../../../support/daemon/call.ts';
+import { type CallOverrides, call, jsonBody, oneFreshProof, respond } from '../../../support/daemon/call.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const pairingId = `fy_pair_${'c'.repeat(22)}` as PairingId;
@@ -161,7 +161,13 @@ const atHost: CallOverrides = { host: true };
 const fromDevice = (
   own: CapabilityGrants = DEFAULT_CAPABILITY_GRANTS,
   presentation: CallOverrides['presentation'] = {},
-): CallOverrides => ({ device: browser, deviceGrants: own, presentation });
+): CallOverrides => ({
+  device: browser,
+  deviceGrants: own,
+  presentation,
+  // A device that holds a fresh proof holds ONE, which the route must TAKE (a claim), not read off the snapshot.
+  standing: { claimFreshStepUp: presentation.freshStepUp === true ? oneFreshProof().claim : ((() => false) as never) },
+});
 
 const declared = (key: string) => {
   const route = manifest.actions.routes.find(candidate => candidate.key === key);
@@ -693,25 +699,84 @@ describe('adding a device always wants a passkey proved for it', () => {
     should(subject.mints).equal(0);
   });
 
-  it('P60 mints once the device has confirmed with a passkey, and spends that proof on the one code', async () => {
+  it('P60 mints once the device has confirmed with a passkey, and the proof is gone (claimed, not spent after)', async () => {
     // Arrange
     const subject = new FakePairing();
-    let spent = 0;
+    const proof = oneFreshProof();
+    const confirmed = { ...fromDevice(undefined, PASSKEY_CONFIRMED), standing: { claimFreshStepUp: proof.claim } };
 
     // Act
-    const response = await respond(mount(subject), 'POST /v1/pair/code', {
+    const first = await respond(mount(subject), 'POST /v1/pair/code', confirmed);
+    const again = await respond(mount(subject), 'POST /v1/pair/code', confirmed);
+
+    // Assert
+    should(first.status).equal(201);
+    should(proof.taken()).equal(1);
+    should(again.status).equal(403);
+    should(subject.mints).equal(1);
+  });
+
+  it('P60 two mints admitted on ONE fresh proof, both snapshotted fresh before either runs: exactly one mints, nothing is minted for the other', async () => {
+    // Arrange — both calls carry `freshStepUp: true` (the snapshot) and share the one proof a claim takes.
+    const subject = new FakePairing();
+    const proof = oneFreshProof();
+    const routes = mount(subject);
+    const onTheProof = {
       ...fromDevice(undefined, PASSKEY_CONFIRMED),
-      standing: {
-        spendFreshStepUp: () => {
-          spent += 1;
-        },
-      },
+      standing: { claimFreshStepUp: proof.claim },
+    };
+
+    // Act
+    const responses = await Promise.all([
+      respond(routes, 'POST /v1/pair/code', onTheProof),
+      respond(routes, 'POST /v1/pair/code', onTheProof),
+    ]);
+
+    // Assert
+    should(responses.map(response => response.status).sort()).deepEqual([201, 403]);
+    const refused = responses.find(response => response.status === 403);
+    should(jsonBody(refused as never).code).equal('grant_step_up_required');
+    should(subject.mints).equal(1);
+    should(proof.taken()).equal(1);
+  });
+
+  it('P60 a mint and another act claiming the same fresh proof (a config loosening, judged first): exactly one acts', async () => {
+    // Arrange — the other act takes the proof through the claim every admitted call carries, as Gate's judge does.
+    const subject = new FakePairing();
+    const proof = oneFreshProof();
+    const onTheProof = { ...fromDevice(undefined, PASSKEY_CONFIRMED), standing: { claimFreshStepUp: proof.claim } };
+
+    // Act
+    const loosening = proof.claim?.() === true ? 'apply' : 'hold';
+    const mint = await respond(mount(subject), 'POST /v1/pair/code', onTheProof);
+
+    // Assert
+    should([loosening, mint.status]).deepEqual(['apply', 403]);
+    should(subject.mints).equal(0);
+    should(proof.taken()).equal(1);
+  });
+
+  it('P60 a refused mint (a remote full mint by a device that does not hold everything) takes no proof, and the proof still serves a limited one', async () => {
+    // Arrange
+    const subject = new FakePairing();
+    const proof = oneFreshProof();
+    const pairsOnly: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, pairing: { use: true, configure: true } };
+    const own = { ...fromDevice(pairsOnly, PASSKEY_CONFIRMED), standing: { claimFreshStepUp: proof.claim } };
+
+    // Act
+    const full = await respond(mount(subject), 'POST /v1/pair/code', {
+      ...own,
+      body: JSON.stringify({ grants: 'full' }),
+    });
+    const limited = await respond(mount(subject), 'POST /v1/pair/code', {
+      ...own,
+      body: JSON.stringify({ grants: 'limited' }),
     });
 
     // Assert
-    should(response.status).equal(201);
-    should(subject.mints).equal(1);
-    should(spent).equal(1);
+    should([full.status, limited.status]).deepEqual([403, 201]);
+    should(proof.taken()).equal(1);
+    should(subject.grantSets).deepEqual(['limited']);
   });
 
   it('P59 never asks the machine itself for a secret or a step-up', async () => {
@@ -724,6 +789,22 @@ describe('adding a device always wants a passkey proved for it', () => {
     // Assert
     should(response.status).equal(201);
     should(subject.mints).equal(1);
+  });
+
+  it('P59 the machine itself claims no proof at all', async () => {
+    // Arrange
+    const subject = new FakePairing();
+    const proof = oneFreshProof();
+
+    // Act
+    const response = await respond(mount(subject), 'POST /v1/pair/code', {
+      ...atHost,
+      standing: { claimFreshStepUp: proof.claim },
+    });
+
+    // Assert
+    should(response.status).equal(201);
+    should(proof.taken()).equal(0);
   });
 
   it('P65 an unpaired machine mints at the machine with no device and no setup', async () => {

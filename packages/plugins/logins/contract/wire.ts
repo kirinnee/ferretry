@@ -441,7 +441,7 @@ export type LoginCheckRequest = z.infer<typeof LoginCheckRequestSchema>;
 // ── Login changes (today's `credential.*` account changes, owned here) ─────────────────────────────────────────────
 //
 // A caller names ONE intent and the daemon derives the login file it means, holds it for review, and applies exactly
-// what was previewed. The six intents are the ones a person makes of a single login; a runtime's switch or removal
+// what was previewed. The seven intents are the ones a person makes of a single login; a runtime's switch or removal
 // along with it (today's `switchRuntimes`/`removeRuntimes`) is Runtimes' to carry out before it asks for the removal.
 
 const ChangeLabelSchema = NonEmptyStringSchema.max(200);
@@ -461,6 +461,17 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
     env: z.record(z.string().max(128), z.string().max(4096)).optional(),
     /** `store: environment` only: `aws-profile:<name>`, `gcloud-adc[:<path>]` or `azure-cli`. */
     cloudCredential: NonEmptyStringSchema.max(512).optional(),
+  }),
+  z.strictObject({
+    /**
+     * Change an environment login's variables (today's `credential.env`). A variable the list shows as hidden is
+     * kept with `{ keep: true }`; a secret is only ever a `${secret:NAME}` reference. `cloudCredential: null` removes
+     * the reference.
+     */
+    kind: z.literal('login.env'),
+    id: NonEmptyStringSchema,
+    env: z.record(z.string().max(128), z.union([z.string().max(4096), z.strictObject({ keep: z.literal(true) })])),
+    cloudCredential: NonEmptyStringSchema.max(512).nullable().optional(),
   }),
   z.strictObject({ kind: z.literal('login.label'), id: NonEmptyStringSchema, label: ChangeLabelSchema.nullable() }),
   z.strictObject({ kind: z.literal('login.remove'), id: NonEmptyStringSchema }),

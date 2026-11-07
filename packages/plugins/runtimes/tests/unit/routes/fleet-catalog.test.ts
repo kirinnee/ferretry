@@ -260,7 +260,7 @@ describe('the fleet catalogue mount', () => {
     await post(hosted, '/v1/runtimes/proposals', { change: { kind: 'setup.import' } });
 
     should(calls.callers).have.length(1);
-    should(calls.callers[0]).containDeep({ freshStepUp: false, agent: false });
+    should(calls.callers[0]).containDeep({ agent: false });
     should(calls.callers[0]?.governance).containDeep({ governed: false });
   });
 
@@ -303,9 +303,9 @@ describe('the fleet catalogue mount', () => {
     });
   });
 
-  it('should pass this request’s presentation and a spend callback into apply', async () => {
+  it('should pass this request’s fresh-proof claim into apply, which answers false for a caller with no proof to take', async () => {
     // Arrange
-    let seen: { presentation: unknown; spend: () => void } | undefined;
+    let seen: { claim: () => boolean; agent: boolean } | undefined;
     const { assembly } = stub({
       apply: async (_id, _governance, freshStepUp) => {
         seen = freshStepUp as never;
@@ -317,9 +317,10 @@ describe('the fleet catalogue mount', () => {
     // Act
     await host.request('POST', `/v1/runtimes/proposals/${ID}/apply`);
 
-    // Assert — a handler with no proven device still gets a callable, harmless spend.
+    // Assert — a handler with no proven device still gets a callable claim, and it takes nothing.
     should(seen).not.be.undefined();
-    should(() => seen?.spend()).not.throw();
+    should(seen?.claim()).be.false();
+    should(seen?.agent).be.false();
   });
 
   it('should refuse an apply body that names a field, before the service runs', async () => {

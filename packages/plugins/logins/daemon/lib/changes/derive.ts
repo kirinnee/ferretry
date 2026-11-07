@@ -11,7 +11,7 @@
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { LOGIN_NAME, LoginFileSchema, type LoginChange, type LoginFile } from '../../../contract/index.ts';
 import { credentialIssues, credentialOf, type Credential } from '../shared/credential.ts';
-import { credentialHarnesses, credentialVariables } from '../shared/halves.ts';
+import { credentialHarnesses, credentialVariables, hasHalves } from '../shared/halves.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
 import { looksLikeRawSecret, looksSecret } from '../shared/secret-shape.ts';
 import { credentialFromPreset, presetLoginRefusal } from '../presets/login.ts';
@@ -196,6 +196,122 @@ function addLogin(
   return { writes: [{ id: change.id, patch: candidate }], summary, consequences, orphanedSecrets: [] };
 }
 
+/** The environment an edit asks for, with every "keep" resolved against what the login has. */
+function resolvedEnv(
+  input: Readonly<Record<string, string | { readonly keep: true }>>,
+  existing: Readonly<Record<string, string>>,
+  owner: string,
+): Record<string, string> {
+  assertNoRawSecrets(
+    Object.fromEntries(Object.entries(input).filter(([, value]) => typeof value === 'string')) as Record<
+      string,
+      string
+    >,
+    owner,
+  );
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(input)) {
+    if (typeof value === 'string') {
+      env[name] = value;
+      continue;
+    }
+    const kept = existing[name];
+    if (kept === undefined) refuse(`${owner} has no value for ${name} to keep; type one`);
+    env[name] = kept as string;
+  }
+  return env;
+}
+
+/** A two-CLI login's variables, put back where each belongs. */
+interface SplitVariables {
+  readonly shared: Record<string, string>;
+  readonly claude?: Record<string, string>;
+  readonly codex?: Record<string, string>;
+}
+
+/**
+ * A login with halves, its edited variables put back: a name it shares stays shared, a name a half sets stays in that
+ * half (in both, when both set it), a new name goes to the half its preset declares it in, and anything else is shared
+ * by both.
+ */
+function splitHalves(
+  credential: Credential,
+  preset: ProviderPreset | undefined,
+  env: Readonly<Record<string, string>>,
+): SplitVariables {
+  const harnesses = credentialHarnesses(credential);
+  const halves: Partial<Record<HarnessKind, Record<string, string>>> = Object.fromEntries(
+    harnesses.map(harness => [harness, {}]),
+  );
+  const shared: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    const owners = harnesses.filter(harness => credential[harness]?.env?.[name] !== undefined);
+    const declared = harnesses.filter(harness => preset?.halves[harness]?.env[name] !== undefined);
+    const into = credential.env?.[name] !== undefined ? [] : owners.length > 0 ? owners : declared;
+    if (into.length === 0) shared[name] = value;
+    for (const harness of into) (halves[harness] as Record<string, string>)[name] = value;
+  }
+  return { shared, ...halves };
+}
+
+/** `login.env`: an environment login's variables and cloud credential reference, changed (today's `credential.env`). */
+function changeEnvironment(
+  file: LoginFile,
+  change: Extract<LoginChange, { kind: 'login.env' }>,
+  facts: LoginChangeFacts,
+): LoginEdit {
+  const credential = credentialOf(file);
+  if (credential.store !== 'environment') {
+    refuse(`login ${change.id} is signed in, not made from environment variables — it has no variables to change`);
+  }
+  const owner = `login ${change.id}`;
+  // A login that drives both CLIs is edited as one set of variables and put back half by half.
+  const env = resolvedEnv(change.env, credentialVariables(credential), owner);
+  const cloudCredential =
+    change.cloudCredential === undefined ? credential.cloudCredential : (change.cloudCredential ?? undefined);
+  const preset =
+    credential.preset === undefined ? undefined : facts.presets.find(candidate => candidate.id === credential.preset);
+  const harnesses = credentialHarnesses(credential);
+  if (preset !== undefined) {
+    const refusal = presetLoginRefusal(preset, {
+      env,
+      halves: harnesses,
+      ...(cloudCredential === undefined ? {} : { cloudCredential }),
+    });
+    if (refusal !== undefined) refuse(refusal);
+  }
+  const split = hasHalves(credential) ? splitHalves(credential, preset, env) : { shared: env };
+  const patch: Record<string, unknown> = {
+    env: Object.keys(split.shared).length === 0 ? undefined : split.shared,
+    cloudCredential,
+  };
+  for (const harness of harnesses) {
+    const half = split[harness];
+    if (half === undefined) continue;
+    const written = { ...credential[harness] } as Record<string, unknown>;
+    if (Object.keys(half).length === 0) delete written.env;
+    else written.env = half;
+    patch[harness === 'claude' ? 'claude' : 'codex'] = written;
+  }
+  const users = facts.usedBy(change.id);
+  const candidate: Record<string, unknown> = { ...lowered(credential) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete candidate[key];
+    else candidate[key] = value;
+  }
+  checked(change.id, candidate);
+  return {
+    writes: [{ id: change.id, patch }],
+    summary: `Change the variables of login ${change.id}`,
+    consequences: [
+      users.length === 0
+        ? ENVIRONMENT_CONSEQUENCE
+        : `${listed(users)} ${users.length === 1 ? 'starts' : 'start'} with the new variables next launch. Running sessions keep the old ones until restarted.`,
+    ],
+    orphanedSecrets: [],
+  };
+}
+
 /** Derive the edit one change stands for from the logins in effect. Signing out is not an edit: see the service. */
 export function deriveLoginChange(
   files: ReadonlyMap<string, LoginFile>,
@@ -206,6 +322,8 @@ export function deriveLoginChange(
   const file = files.get(change.id);
   if (file === undefined) return refuse(`no login ${change.id} exists on this machine`);
   switch (change.kind) {
+    case 'login.env':
+      return changeEnvironment(file, change, facts);
     case 'login.label': {
       if (change.label !== null) assertLabelFree(files, change.id, credentialOf(file).harness, change.label);
       return {

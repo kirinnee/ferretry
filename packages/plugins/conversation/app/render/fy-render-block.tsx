@@ -75,7 +75,7 @@ import { fyRenderHeightKey, recallFyRenderHeight, rememberFyRenderHeight } from 
 import { FY_RENDER_HTML_PAGE_TOKENS, FY_RENDER_HTML_TOKENS } from './fy-render-html-kit.ts';
 import { flowsDown, isNarrowColumn, verticalizeMermaid } from './fy-render-mermaid-layout.ts';
 import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from './fy-render-palette.ts';
-import { MERMAID_LEGIBLE_SCALE, svgNaturalSize, viewBoxSize } from './fy-render-viewport.ts';
+import { MERMAID_LEGIBLE_SCALE, svgNaturalSize, viewBoxSize } from './fy-render-viewport-model.ts';
 import { FyRenderChart, type FyRenderChartModules } from './fy-render-chart.tsx';
 import { FyRenderFragment } from './fy-render-fragment.tsx';
 import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from './fy-render-html-frame.tsx';

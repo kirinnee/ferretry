@@ -27,7 +27,7 @@
 
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { MAP_DEFAULT_ZOOM, MAP_MAX_ZOOM, type MapColor, type MapPoint, type MapSpec } from './fy-render-map.ts';
+import { MAP_DEFAULT_ZOOM, MAP_MAX_ZOOM, type MapColor, type MapPoint, type MapSpec } from './fy-render-map-model.ts';
 import { MAP_ATTRIBUTION, MAP_TILE_URL } from './fy-render-map-tiles.ts';
 
 export interface MapHandle {

@@ -159,8 +159,7 @@ function claimPasskey(context: RouteContext, scope: CatalogInstallScope): ApiRes
 }
 
 const freshStepUpOf = (context: RouteContext): FreshStepUpContext => ({
-  presentation: context.presentation,
-  spend: () => context.spendFreshStepUp?.(),
+  claim: () => context.claimFreshStepUp?.() === true,
   agent: isAgentCaller(context),
 });
 

@@ -73,12 +73,19 @@ export const sitEnvironment = (extra: Record<string, string>): Record<string, st
   ...extra,
 });
 
-/** Every plugin's contract hash as this `fy` was generated with it, read from the generated registry's text. */
+/**
+ * Every package's contract hash as this `fy` was generated with it, read from the generated registry's text: the
+ * kernel's own `kernel:` line first (it is not in the `plugins` array, but the guard requires it before any call),
+ * then every plugin line, in the registry's order.
+ */
 const inventory = (): readonly { readonly id: string; readonly on: true; readonly contract: string }[] => {
   const generated = readFileSync(join(cliPackage, 'src', 'generated', 'commands.ts'), 'utf8');
-  return [...generated.matchAll(/\{ id: "([^"]+)", manifest: \w+, contract: "([0-9a-f]+)"/gu)].map(
-    ([, id, contract]) => ({ id: id as string, on: true, contract: contract as string }),
+  const kernel = /^\s*kernel: \{ manifest: \w+, contract: "([0-9a-f]+)" \}/mu.exec(generated)?.[1];
+  if (kernel === undefined) throw new Error('the generated registry has no kernel line: regenerate it');
+  const plugins = [...generated.matchAll(/\{ id: "([^"]+)", manifest: \w+, contract: "([0-9a-f]+)"/gu)].map(
+    ([, id, contract]) => ({ id: id as string, on: true as const, contract: contract as string }),
   );
+  return [{ id: 'kernel', on: true, contract: kernel }, ...plugins];
 };
 
 /** The kernel's two bootstrap reads, or `undefined` for any other route. */
