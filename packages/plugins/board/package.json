@@ -19,7 +19,8 @@
   "dependencies": {
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ferretry/plugin-projects": "workspace:*"
   },
   "sideEffects": false
 }

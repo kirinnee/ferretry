@@ -1,10 +1,391 @@
-import { definePlugin } from '@ferretry/kernel/manifest';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import {
+  appAction,
+  definePlugin,
+  panel,
+  renderer,
+  route,
+  screen,
+  settingsTab,
+  tool,
+  verb,
+} from '@ferretry/kernel/manifest';
+import { AskAnswered, AsksPort, AskSources, FerretsPort, SitrepLines, StartDecide } from './contract/core.ts';
+import {
+  BOARD_SKIPPED_AUDIT,
+  BOARD_SWITCHED_AUDIT,
+  BoardChanged,
+  BoardConfigSchema,
+  BoardFileSchema,
+  BoardPort,
+  CARD_ACTED_AUDIT,
+  CARD_CREATED_AUDIT,
+  CARD_STARTED_AUDIT,
+  CardAskRefSchema,
+  CardMoved,
+  CardMoving,
+  CardSchema,
+  CountersFileSchema,
+  cap,
+  GithubFileSchema,
+  LANES_CHANGED_AUDIT,
+  narrowing,
+  PLAN_COMMITTED_AUDIT,
+  PLAN_CONFIRMED_AUDIT,
+  PLAN_REVOKED_AUDIT,
+  PLAN_STAGE_DROPPED_AUDIT,
+  PLAN_STAGED_AUDIT,
+  PlanToolInputSchema,
+  SweepFileSchema,
+} from './contract/index.ts';
 
+// state/board/ (§9.2). A card is one file; a collection path holds one `*`.
+const CARDS = defineState({ name: 'cards', path: 'cards/*.json', store: 'json', format: 1, schema: CardSchema });
+const COUNTERS = defineState({
+  name: 'counters',
+  path: 'counters.json',
+  store: 'json',
+  format: 1,
+  schema: CountersFileSchema,
+});
+/** One file per project: its lane set and whether it uses the board. Damaged = the board fails closed. */
+const BOARDS = defineState({
+  name: 'boards',
+  path: 'boards/*.json',
+  store: 'json',
+  format: 1,
+  schema: BoardFileSchema,
+});
+const SWEEP = defineState({ name: 'sweep', path: 'sweep.json', store: 'json', format: 1, schema: SweepFileSchema });
+const GITHUB = defineState({ name: 'github', path: 'github.json', store: 'json', format: 1, schema: GithubFileSchema });
+
+const BOARD_CONFIG = defineConfig({
+  file: 'board.yaml',
+  schema: BoardConfigSchema,
+  axis: 'configure',
+  loosens: neverLoosens,
+}) as ConfigDef;
+
+const fleetUse = cap('fleet', 'use');
+const fleetConfigure = cap('fleet', 'configure');
+const terminalUse = cap('terminal', 'use');
+const terminalConfigure = cap('terminal', 'configure');
+const read = { skip: 'a read of cards and lanes' } as const;
+const cardText = { none: 'cards are authored text; no pane, page or vault text' } as const;
+const planText = {
+  none: 'plan lines name accounts by name only, and only to a device that may read accounts',
+} as const;
+
+/**
+ * Board (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
+ *
+ * #1552 (docs/rebuild/inflight.md §2): a card is READ-ONLY STATUS. It never asks and has no answer route, verb or
+ * button. Its asks are `card` obligations the Agenda shows (one answer row); answering one moves its cards.
+ *
+ * Ownership calls (skeletons-work):
+ *  - Board owns the lane-set and switch routes of today's `board-projects` mount (`/v1/board/projects/…`): they live in
+ *    `state/board/boards/<project>.json`. Projects owns only the `/v1/projects` registry.
+ *  - Task plans (`task_plan` and the owner's approval routes) are Board's per §2.3 `Today: … task-plans`; the plan's
+ *    approval ask is Accounts' `sign-in-approval` source.
+ *  - Deleted as compatibility: `/v1/tasks`, `/v1/sessions/:id/tasks` (legacy-tasks), `POST /v1/board/import`, `fy board import`.
+ *  - There is no GitHub route today: the watch is a job over `state/board/github.json` and `gh`.
+ *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferret/…`; `tasks` are `cards`; the plan routes say `plans`.
+ */
 export default definePlugin({
   id: 'board',
   title: 'Board',
   version: '5.0.0',
   api: 5,
   core: false,
-  kinds: ['view', 'command'],
+  kinds: ['view', 'command', 'tool', 'instruction'],
+  words: [
+    { word: 'card', means: 'one piece of work you asked for', insteadOf: ['task', 'ticket'] },
+    { word: 'lane', means: 'a column a card moves through', insteadOf: ['phase', 'column'] },
+    {
+      word: 'progress',
+      means: 'one card’s now, done and next, written by its ferret',
+      insteadOf: ['status', 'sitrep (for a card)'],
+    },
+  ],
+
+  needs: { asks: AsksPort, ferrets: FerretsPort },
+  uses: { projects: ProjectsPort },
+  provides: { board: BoardPort },
+
+  actions: {
+    routes: [
+      route('GET /v1/board', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        compress: true,
+        audit: read,
+        guard: cardText,
+      }),
+      route('GET /v1/board/ids', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        compress: true,
+        audit: read,
+        guard: cardText,
+      }),
+      route('GET /v1/board/merge-gate', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        audit: read,
+        guard: cardText,
+      }),
+      route('GET /v1/board/cards', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        audit: read,
+        guard: cardText,
+      }),
+      route('POST /v1/board/cards', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        audit: { record: CARD_CREATED_AUDIT },
+        guard: cardText,
+      }),
+      route('GET /v1/board/cards/:id', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        audit: read,
+        guard: cardText,
+      }),
+      route('POST /v1/board/cards/:id', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        audit: { record: CARD_ACTED_AUDIT },
+        guard: cardText,
+      }),
+      route('POST /v1/board/cards/:id/start', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: fleetUse,
+        noStore: true,
+        audit: { record: CARD_STARTED_AUDIT },
+        guard: cardText,
+      }),
+      route('POST /v1/board/skip', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetUse,
+        noStore: true,
+        audit: { record: BOARD_SKIPPED_AUDIT },
+        guard: cardText,
+      }),
+
+      route('GET /v1/board/projects', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: read,
+        guard: { none: 'project names, paths and lanes only' },
+      }),
+      route('GET /v1/board/projects/:project/lanes', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: read,
+        guard: { none: 'lanes only' },
+      }),
+      route('POST /v1/board/projects/:project/lanes', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: fleetConfigure,
+        noStore: true,
+        audit: { record: LANES_CHANGED_AUDIT },
+        guard: { none: 'lanes only' },
+      }),
+      route('GET /v1/board/projects/:project/switch', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: read,
+        guard: { none: 'a boolean' },
+      }),
+      route('PUT /v1/board/projects/:project/switch', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: fleetConfigure,
+        noStore: true,
+        audit: { record: BOARD_SWITCHED_AUDIT },
+        guard: { none: 'a boolean' },
+      }),
+
+      route('GET /v1/plans', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalUse,
+        noStore: true,
+        audit: read,
+        guard: planText,
+      }),
+      route('GET /v1/ferrets/:ferret/plans/:plan', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalUse,
+        noStore: true,
+        audit: read,
+        guard: planText,
+      }),
+      route('POST /v1/ferrets/:ferret/plans/:plan/approval', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalConfigure,
+        noStore: true,
+        audit: { record: PLAN_STAGED_AUDIT },
+        guard: planText,
+      }),
+      route('GET /v1/ferrets/:ferret/plans/:plan/approval/:stage', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalUse,
+        noStore: true,
+        audit: read,
+        guard: planText,
+      }),
+      route('POST /v1/ferrets/:ferret/plans/:plan/approval/:stage/commit', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalConfigure,
+        noStore: true,
+        audit: { record: PLAN_COMMITTED_AUDIT },
+        guard: planText,
+      }),
+      route('POST /v1/ferrets/:ferret/plans/:plan/approval/:stage/confirm-in-app', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalConfigure,
+        noStore: true,
+        audit: { record: PLAN_CONFIRMED_AUDIT },
+        guard: planText,
+      }),
+      route('DELETE /v1/ferrets/:ferret/plans/:plan/approval/:stage', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: terminalUse,
+        noStore: true,
+        audit: { record: PLAN_STAGE_DROPPED_AUDIT },
+        guard: planText,
+      }),
+      route('POST /v1/ferrets/:ferret/plans/:plan/revoke', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: narrowing(terminalUse),
+        noStore: true,
+        audit: { record: PLAN_REVOKED_AUDIT },
+        guard: planText,
+      }),
+    ],
+    agentTools: [
+      // NEW name (§3.3): writes one card's progress; the same act as `POST /v1/board/cards/:id` with action `edit`.
+      tool('card_progress', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: fleetUse,
+        audit: { record: CARD_ACTED_AUDIT },
+        guard: cardText,
+        summary: 'Rewrite one card’s progress (now, doneSoFar, next).',
+      }),
+      // Today's `task_plan` (`task.plan`): before a task, ask the owner once to pre-approve its sign-ins and pastes.
+      tool('task_plan', {
+        minimum: 'authenticated',
+        caller: 'any',
+        audit: { record: PLAN_STAGED_AUDIT },
+        guard: planText,
+        summary: 'Before a task, ask the owner once to pre-approve its sign-ins and pastes.',
+        input: PlanToolInputSchema,
+      }),
+    ],
+    cli: [
+      verb('board', { summary: 'the project board' }),
+      verb('board status', { summary: 'whether this project uses the board' }),
+      verb('board lanes propose', { summary: 'propose a lane set from a template' }),
+      verb('board lanes show', { summary: 'a project’s lanes' }),
+      verb('board lanes edit', { summary: 'edit a project’s lanes; the owner confirms' }),
+      verb('board workflow show', { summary: 'which lanes each workflow walks' }),
+      verb('board workflow edit', { summary: 'edit which lanes each workflow walks' }),
+      verb('card new', { summary: 'make a card' }),
+      verb('card show', { summary: 'one card; --yaml for the whole of it' }),
+      verb('card move', { summary: 'move a card to a lane, with a reason' }),
+      verb('card progress', { summary: 'write a card’s progress: now, done so far, next' }),
+      verb('card trigger', { summary: 'report an outside event that moves a card' }),
+      verb('card focus', { summary: 'make this ferret’s card the one it works on' }),
+      verb('card skip', { summary: 'say this ferret needs no card, with a reason' }),
+      verb('card block', { summary: 'block a card on something outside' }),
+      verb('card unblock', { summary: 'clear a block' }),
+      verb('card depend', { summary: 'a card waits on another until it ships or is released' }),
+      verb('card undepend', { summary: 'remove a dependency' }),
+      verb('card drop', { summary: 'drop a card, with a reason' }),
+      verb('card reopen', { summary: 'send a card back to a lane with the owner’s words' }),
+      verb('card clarify', { summary: 'add a clarification to a card' }),
+      verb('card link', { summary: 'link a PR, branch, commit or doc' }),
+      verb('card assign', { summary: 'give a card to a ferret' }),
+      verb('card claim', { summary: 'take a card for this ferret' }),
+      verb('card adopt', { summary: 'take over a card whose ferret is gone' }),
+      verb('card note', { summary: 'add a note to a card’s history' }),
+      verb('card order', { summary: 'place a card in its lane' }),
+      verb('card reparent', { summary: 'move a card under another card' }),
+      verb('card file', { summary: 'claim a file for a card' }),
+      verb('card merge-gate', { summary: 'what a PR waits on before it may merge' }),
+      verb('card edit', { summary: 'edit a card’s text fields' }),
+      verb('card patch', { summary: 'edit a card from a file' }),
+      verb('card refile', { summary: 'move a card to another project’s board' }),
+    ],
+    app: [
+      appAction('card.move', { on: 'card', label: 'Move', calls: 'POST /v1/board/cards/:id' }),
+      appAction('card.start', { on: 'card', label: 'Start a ferret', calls: 'POST /v1/board/cards/:id/start' }),
+    ],
+  },
+
+  ui: {
+    screens: [
+      screen('board', { path: '/board/:project?', nav: { label: 'Board', icon: 'columns', order: 30 } }),
+      screen('card', { path: '/card/:id' }),
+    ],
+    panels: [
+      panel('ferret.side', { id: 'cards-of-ferret', order: 20 }),
+      panel('card.detail', { id: 'card-progress', order: 10 }),
+    ],
+    settings: [settingsTab('board', { label: 'Board', order: 40 })],
+    renderers: [renderer('ask', { source: 'card' }), renderer('reference', { prefix: '&' })],
+  },
+
+  data: {
+    state: [CARDS, COUNTERS, BOARDS, SWEEP, GITHUB],
+    config: [BOARD_CONFIG],
+    readModels: ['cards', 'progress', 'lanes'],
+    publishes: [CardMoved, BoardChanged],
+    subscribes: [AskAnswered],
+  },
+
+  hooks: {
+    takes: [
+      // The `card` ask source: a card's gate entry is an obligation `{ source: 'card', ref, entry }` Asks holds.
+      { hook: AskSources, key: 'card', schema: CardAskRefSchema },
+      { hook: StartDecide, priority: 60 },
+      { hook: SitrepLines, priority: 50 },
+    ],
+    offers: [{ hook: CardMoving, timeoutMs: 200 }],
+  },
+
+  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'any' } }],
+  doctor: ['board-store'],
+  permissions: { roots: [], network: ['api.github.com'], spawn: ['gh'], secrets: [] },
 });
