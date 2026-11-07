@@ -2,13 +2,14 @@
  * The conversions, in the owner's order of importance (brief item 5). Each step reads v4 files with this tool's own
  * parsers and writes v5 files through `V5Writer` with the schema its v5 owner declares.
  *
- * Phase A: no v5 plugin has landed a state schema yet, so every step is `pending` and names what it waits for. A
- * step becomes real by replacing its `run` — the table, the order and the not-carried list stay. While any step is
+ * A step whose v5 owner has not landed its state schema yet is `pending` and names what it waits for. A step
+ * becomes real by replacing its `run` (the Vault and identity steps are real: `./secrets.ts`) — the table, the order and the not-carried list stay. While any step is
  * pending, `home.json` is not written and v5 refuses the folder: an incomplete conversion cannot be booted.
  */
 import type { V4Paths } from '../v4/layout.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
+import { identityStep, vaultStep } from './secrets.ts';
 
 export interface StepContext {
   readonly v4: V4Paths;
@@ -208,7 +209,7 @@ export const STEPS: readonly Step[] = [
       title: 'Catalogs and shares (published catalogs, links, members, installs)',
       owner: ['plugin-catalogs', 'plugin-skills', 'plugin-mcp'],
       reads: ['state/catalogs/**', 'state/catalog-installs.json', 'state/local-skill-installs.json'],
-      sealed: ['state/catalogs/link-keys.json'],
+      sealed: ['state/catalogs/link-keys.json', 'state/mcp-oauth-secrets.json'],
       notCarried: [
         { what: 'catalogs.v1.json, catalogs.v2.json, members.before-unique-names.json', why: 'v4 upgrade backups' },
       ],
@@ -248,16 +249,18 @@ export const STEPS: readonly Step[] = [
     },
     'the Logins config schema and credentials location',
   ),
+  vaultStep,
+  identityStep,
   pending(
     {
-      id: 'vault',
-      title: 'Secrets (sealed vault and key, moved unopened)',
-      owner: ['core-vault'],
-      reads: [],
-      sealed: ['state/secrets.key', 'state/secrets.json', 'state/login-secrets.json', 'state/mcp-oauth-secrets.json'],
-      notCarried: [{ what: 'live input requests', why: 'they belong to a moment that has passed' }],
+      id: 'accounts',
+      title: 'Website accounts (index, sign-in and copy rules; sealed values moved unopened)',
+      owner: ['plugin-accounts'],
+      reads: ['state/login-entries.json', 'state/accounts/sign-in-rules.json', 'state/secure-copy/rules.json'],
+      sealed: ['state/login-secrets.json'],
+      notCarried: [{ what: 'login-entries.v1.json', why: 'a v4 upgrade backup, never read' }],
     },
-    'the Vault sealed-store paths (spine D16: byte-compatible)',
+    'the Accounts state schema and its sealed-document declaration',
   ),
   pending(
     {
@@ -265,7 +268,7 @@ export const STEPS: readonly Step[] = [
       title: 'Paired devices and passkeys (public keys, grants, unlock settings)',
       owner: ['plugin-access', 'kernel'],
       reads: ['state/devices.json', 'state/passkeys.json', 'state/security.json', 'config/daemon.json (grants key)'],
-      sealed: ['state/daemon-identity.json', 'state/push-vapid.json', 'state/push.json'],
+      sealed: ['state/push-vapid.json', 'state/push.json'],
       notCarried: [
         { what: 'pairing codes', why: 'single-use and two minutes long; none survives a stop' },
         { what: 'live unlocks', why: 'each device unlocks again with its passkey' },
