@@ -10,11 +10,18 @@ import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaInbox } from '../hooks/use-agenda-inbox.ts';
-import { useAgendaItemOpened, useAppStore, useLayoutMode, usePairedMachineNotifications, useRouter } from '../shell.ts';
+import {
+  daemonAgendaPath,
+  useAgendaItemOpened,
+  useAppStore,
+  useLayoutMode,
+  usePairedMachineNotifications,
+  useRouter,
+} from '../shell.ts';
 
 export function createAgendaScreen(client: PluginClient) {
   return function AgendaScreen(_props: ScreenProps) {
-    const { navigate } = useRouter();
+    const { navigate, route } = useRouter();
     const store = useAppStore();
     const inbox = useAgendaInbox();
     const phone = useLayoutMode() === 'drawer';
@@ -29,7 +36,7 @@ export function createAgendaScreen(client: PluginClient) {
           clearPort={store.clearPort}
           onNavigate={navigate}
           from={inboxSourceFromSearch(window.location.search)}
-          onClearFrom={() => navigate('/agenda')}
+          onClearFrom={() => navigate(daemonAgendaPath(route.daemon))}
           onItemOpened={(card: { daemonId: string; view: { config: { id: string } }; item: { id: string } }) => {
             const target = inbox.connectionFor(card.daemonId);
             if (target !== undefined) void itemOpened(target, card.view.config.id, card.item.id);

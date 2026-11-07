@@ -4,7 +4,15 @@
  * environment in `state/shells/cache/`. In memory it keeps only the builds in flight (so two asks for one build run
  * it once) and the last failure of each shell.
  */
-import type { Clock, ConfigCollectionDef, ConfigPort, EventsPort, Log, StatePort } from '@ferretry/kernel/contract';
+import type {
+  Clock,
+  ConfigCollectionDef,
+  ConfigPort,
+  ConfigWriteOutcome,
+  EventsPort,
+  Log,
+  StatePort,
+} from '@ferretry/kernel/contract';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import type { Instant, Result } from '@ferretry/std';
 import type { NixTool } from './nix-tool.ts';
@@ -29,7 +37,6 @@ import {
   ShellBuilt,
   ShellsChanged,
 } from '../../contract/index.ts';
-import type { ConfigDoor } from './config-door.ts';
 import {
   buildKey,
   cacheName,
@@ -46,7 +53,7 @@ import {
 const SHELLS_CONFIG = SHELLS_CONFIG_DEF as ConfigCollectionDef<ShellItem>;
 
 export type Refusal = {
-  readonly status: 404 | 409 | 422 | 500 | 503;
+  readonly status: 404 | 409 | 422 | 500;
   readonly code: string;
   readonly sentence: string;
 };
@@ -59,7 +66,6 @@ const refuse = (status: Refusal['status'], code: string, sentence: string): Outc
 
 export interface ShellsDeps {
   readonly config: ConfigPort;
-  readonly door: ConfigDoor | undefined;
   readonly state: StatePort;
   readonly nix: NixTool;
   readonly clock: Pick<Clock, 'now'>;
@@ -91,7 +97,7 @@ export const shellNamedBy = (runtime: string | undefined, names: ReadonlySet<str
   runtime !== undefined && names.has(runtime) ? runtime : undefined;
 
 export function createShellsService(deps: ShellsDeps): ShellsService {
-  const { config, door, state, nix, clock, events, log } = deps;
+  const { config, state, nix, clock, events, log } = deps;
   const building = new Map<string, Promise<Result<Readonly<Record<string, string>>, string>>>();
   const failed = new Map<string, string>();
 
@@ -181,12 +187,21 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
   const changedFrom = (before: ShellLock | undefined, after: ShellLock): NarHash | undefined =>
     before !== undefined && narHashOf(before) !== narHashOf(after) ? narHashOf(before) : undefined;
 
-  const unavailable = (): Outcome<never> =>
-    refuse(
-      503,
-      SHELL_CODES.noConfigDoor,
-      'this daemon cannot change its configuration files from here, so shells can be shown but not changed',
-    );
+  /**
+   * What the kernel's writer said when the change did not go in: a refusal names its own issues (never a value), and a
+   * file that moved since it was read asks the caller to start again. `written` and `held` are the caller's to answer.
+   */
+  const notWritten = (name: string, written: ConfigWriteOutcome): Outcome<never> | undefined => {
+    if (written.kind === 'refused')
+      return refuse(422, SHELL_CODES.invalid, written.issues.map(issue => issue.message).join('; ') || written.reason);
+    if (written.kind === 'conflict')
+      return refuse(
+        409,
+        SHELL_CODES.hashChanged,
+        `the configuration of ${name} changed while it was being saved; preview it again. Nothing was changed.`,
+      );
+    return undefined;
+  };
 
   const runBuild = (lock: ShellLock): Promise<Result<Readonly<Record<string, string>>, string>> => {
     const key = buildKey(lock);
@@ -250,7 +265,6 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
     },
 
     async add(request) {
-      if (door === undefined) return unavailable();
       if (items().has(request.name))
         return refuse(
           409,
@@ -261,7 +275,7 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
       if (!nixReady.ok) return nixReady;
       const resolved = await resolve(request.name, request.item);
       if (!resolved.ok) return resolved;
-      const written = await door.write(
+      const written = await config.write(
         SHELLS_CONFIG,
         request.name,
         Bun.YAML.stringify(
@@ -273,13 +287,9 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
           2,
         ),
       );
-      if (written.kind === 'refused')
-        return refuse(
-          422,
-          SHELL_CODES.invalid,
-          written.issues.map(issue => issue.message).join('; ') || 'the shell did not check',
-        );
-      if (written.kind === 'applied') await state.write(SHELLS_LOCKS, resolved.value.lock, request.name);
+      const notAdded = notWritten(request.name, written);
+      if (notAdded !== undefined) return notAdded;
+      if (written.kind === 'written') await state.write(SHELLS_LOCKS, resolved.value.lock, request.name);
       events.publish(ShellsChanged, { name: request.name });
       return done({ lock: resolved.value.lock, held: written.kind === 'held' ? written.sentences : undefined });
     },
@@ -309,18 +319,13 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
         );
       // Only effective config authorizes a different payload. A CLI --yes cannot bypass the owner door.
       if ((before === undefined || moved !== undefined) && item.approvedHash !== hash) {
-        if (door === undefined) return unavailable();
-        const written = await door.write(
+        const written = await config.write(
           SHELLS_CONFIG,
           name,
           Bun.YAML.stringify({ ...item, approvedHash: hash }, null, 2),
         );
-        if (written.kind === 'refused')
-          return refuse(
-            422,
-            SHELL_CODES.invalid,
-            written.issues.map(issue => issue.message).join('; ') || written.reason,
-          );
+        const notChanged = notWritten(name, written);
+        if (notChanged !== undefined) return notChanged;
         if (written.kind === 'held')
           return done({
             name,
@@ -353,8 +358,14 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
     async remove(name) {
       const had = items().has(name) || (await lockOfName(name)) !== undefined;
       if (!had) return refuse(404, SHELL_CODES.unknown, `there is no shell called ${name}`);
-      if (door === undefined) return unavailable();
-      if (items().has(name)) await door.remove(SHELLS_CONFIG, name);
+      if (items().has(name)) {
+        const removed = await config.remove(SHELLS_CONFIG, name);
+        const notRemoved = notWritten(name, removed);
+        if (notRemoved !== undefined) return notRemoved;
+        // A removal the kernel holds for the owner has not happened yet: the lock stays with the shell that stays.
+        if (removed.kind === 'held')
+          return refuse(409, SHELL_CODES.hashChanged, `held for the owner: ${removed.sentences.join('; ')}`);
+      }
       await state.remove(SHELLS_LOCKS, name);
       failed.delete(name);
       events.publish(ShellsChanged, { name });

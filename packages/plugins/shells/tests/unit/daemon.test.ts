@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { device, ferret, testHost } from '@ferretry/kernel/testing';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import type { LaunchPartSource } from '@ferretry/core-ferrets/contract';
-import { NixFactsSchema, SHELL_CODES, ShellsPort, ShellListSchema } from '../../contract/index.ts';
+import { NixFactsSchema, ShellsPort, ShellListSchema } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import { shellsRoutes } from '../../daemon/lib/routes.ts';
 import manifest from '../../manifest.ts';
@@ -48,13 +48,29 @@ describe('shells on the test host', () => {
     await host.stop();
   });
 
-  test('a ferret cannot add a shell or build one (person acts); without a config door the owner is told why', async () => {
-    const host = await testHost({ plugins: [daemon], spawn: (_p, args) => nixPresent(args) });
+  test('a ferret cannot add a shell or build one (person acts); the owner’s add goes through the kernel’s writer and is held for them', async () => {
+    const spawn = (_program: string, args: readonly string[]) =>
+      args.includes('metadata')
+        ? {
+            exitCode: 0,
+            signal: null,
+            stderr: '',
+            stdout: JSON.stringify({
+              url: `github:me/shells/${REV_A}`,
+              locked: { rev: REV_A, narHash: HASH_A },
+            }),
+          }
+        : nixPresent(args);
+    const host = await testHost({ plugins: [daemon], spawn });
     const body = { name: 'web', item: { flake: `github:me/shells/${REV_A}#web` } };
     expect((await host.request('POST', '/v1/shells', { body, as: ferret('F1') })).status).toBe(403);
     expect((await host.request('POST', '/v1/shells/web/build', { as: ferret('F1') })).status).toBe(403);
-    const noDoor = await host.request('POST', '/v1/shells', { body });
-    expect([noDoor.status, noDoor.json<{ code: string }>().code]).toEqual([503, SHELL_CODES.noConfigDoor]);
+    expect((await host.request('GET', '/v1/shells/web')).status).toBe(404);
+    const added = await host.request('POST', '/v1/shells', { body });
+    // the kernel judges a new shell loosening: it is held for the owner, and nothing is in effect yet
+    expect(added.status).toBe(202);
+    expect(added.json<{ held: string[] }>().held.length).toBeGreaterThan(0);
+    expect((await host.request('GET', '/v1/shells/web')).status).toBe(404);
     await host.stop();
   });
 

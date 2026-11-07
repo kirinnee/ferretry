@@ -283,8 +283,8 @@ export default definePlugin({
       // The chat offers two slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row and
       // `conversation.row-actions` in a row's actions, each with `{ entry }` and the ferret as subject — Packs' tool
       // card and Voice's read-aloud draw there. It mounts `ferret.toolbar` and `ferret.side` with the ferret as subject.
-      screen('chat', { path: '/ferrets/:ferret/chat' }),
-      screen('links', { path: '/links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
+      screen('chat', { path: 'ferrets/:ferret/chat' }),
+      screen('links', { path: 'links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
     ],
     panels: [
       panel('composer.tools', { id: 'attachments', order: 10 }),

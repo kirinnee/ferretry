@@ -221,7 +221,7 @@ export default definePlugin({
   },
 
   ui: {
-    screens: [screen('lessons', { path: '/lessons', nav: { label: 'Lessons', icon: 'graduation-cap', order: 70 } })],
+    screens: [screen('lessons', { path: 'lessons', nav: { label: 'Lessons', icon: 'graduation-cap', order: 70 } })],
     panels: [panel('ferret.toolbar', { id: 'ferret-lessons', order: 70 })],
     settings: [settingsTab('lessons', { label: 'Lessons', order: 70 })],
   },

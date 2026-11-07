@@ -24,6 +24,7 @@ import { check as pluginGraph } from '../../validate/plugin-graph.ts';
 import { check as portsPending } from '../../validate/ports-pending.ts';
 import { readScopedIn } from '../../validate/read-scoped.ts';
 import { check as registriesFresh } from '../../validate/registries-fresh.ts';
+import { check as screenPaths, screenPathFindings } from '../../validate/screen-paths.ts';
 import { check as words } from '../../validate/words.ts';
 import { buildModel, generateGlobal, generatePackage, packageRegistryPath, writeFiles } from '../registries.ts';
 import { type Fixture, type FixturePackage, LEAF, SDK, ZOD, fixture, routeDecl } from './fixture.ts';
@@ -620,6 +621,38 @@ describe('glossary phrase exceptions', () => {
   test('the phrase covers only itself: a second bare use beside it still fails', () => {
     expect(glossaryFindings('x', 'the browser proxy, not a plain proxy', index).length).toBe(1);
     expect(glossaryFindings('x', 'the firewall timer and a second timer', index).length).toBe(1);
+  });
+});
+
+describe('screen-paths', () => {
+  const screens = (body: string): FixturePackage => ({
+    id: 'sample',
+    manifestImports: `import { screen } from '${SDK}';`,
+    manifest: `  ui: { screens: [${body}] },`,
+  });
+  test('planted: an absolute path without the marker is a finding', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('board', { path: '/board' })")]);
+    const found = messages(await run(screenPaths, f));
+    expect(found).toContain('sample');
+    expect(found).toContain('"/board"');
+  });
+  test('a relative path is per daemon and passes', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('board', { path: 'board/:project?' })")]);
+    expect(messages(await run(screenPaths, f))).toBe('');
+  });
+  test('an absolute path that declares itself daemonless passes', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('join', { path: '/join', daemonless: true })")]);
+    expect(messages(await run(screenPaths, f))).toBe('');
+  });
+  test('the marker on a relative path contradicts itself', () => {
+    expect(screenPathFindings('x', [{ id: 'a', path: 'a', daemonless: true }]).length).toBe(1);
+    expect(screenPathFindings('x', [{ id: 'a', path: '/a' }]).length).toBe(1);
+    expect(
+      screenPathFindings('x', [
+        { id: 'a', path: '/a', daemonless: true },
+        { id: 'b', path: 'b' },
+      ]),
+    ).toEqual([]);
   });
 });
 
