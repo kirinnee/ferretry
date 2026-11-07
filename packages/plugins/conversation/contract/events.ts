@@ -1,6 +1,6 @@
 import { defineEvent } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import { QueueChangeSchema } from './wire-send.ts';
 
 /** Wake-ups, published after the write landed (§7.4). The truth is `ConversationApi`; none is relied on. */

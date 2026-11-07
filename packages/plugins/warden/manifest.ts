@@ -1,7 +1,8 @@
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, route, screen, settingsTab } from '@ferretry/kernel/manifest';
-import { AsksPort, FerretChanged, FerretsPort } from './contract/core.ts';
+import { AsksPort } from '@ferretry/core-asks/contract';
+import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { UsagePort } from './contract/others.ts';
 import {
   cap,

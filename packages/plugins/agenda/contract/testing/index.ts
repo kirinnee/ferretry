@@ -1,6 +1,6 @@
 /** @ferretry/plugin-agenda/contract/testing — the contract's fake and conformance suite (§7.8). */
 import { describe, expect, test } from 'bun:test';
-import type { FerretId } from '../core.ts';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { AgendaApi } from '../port.ts';
 
 /** In-memory `AgendaApi`: mode switches (default on), buzz once per key, an empty roll-up. */

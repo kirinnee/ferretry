@@ -4,7 +4,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 export const CONVERSATION_NAME_MAX = 120;
 export const CONVERSATION_PREVIEW_MAX = 300;

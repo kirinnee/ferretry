@@ -1,7 +1,7 @@
 import { definePort, defineEvent } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import type { FerretId } from './core.ts';
-import { FerretIdSchema } from './core.ts';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import type {
   WardenBlessingView,
   WardenConfig,

@@ -20,7 +20,9 @@
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
-    "@ferretry/plugin-conversation": "workspace:*"
+    "@ferretry/plugin-conversation": "workspace:*",
+    "@ferretry/core-asks": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*"
   },
   "sideEffects": false
 }

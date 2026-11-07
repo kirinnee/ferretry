@@ -8,7 +8,7 @@ export const StructuredQuestionAnswerSchema = z.discriminatedUnion('kind', [
 ]);
 export type StructuredQuestionAnswer = z.infer<typeof StructuredQuestionAnswerSchema>;
 
-/** `POST /v1/ferrets/:ferret/answer` body. Owner-only (`caller: 'person'`): a ferret never answers itself. */
+/** `POST /v1/ferrets/:ferretId/answer` body. Owner-only (`caller: 'person'`): a ferret never answers itself. */
 export const AnswerRequestSchema = z.strictObject({
   toolUseId: z.string().min(1),
   labels: z.array(z.string().min(1)),

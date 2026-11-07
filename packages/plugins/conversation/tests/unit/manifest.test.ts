@@ -27,9 +27,13 @@ describe('conversation manifest', () => {
   test('a body that can show a transcript, pane or draft is built under the secrets guard', () => {
     const secrets = (path: string) =>
       [...routes, ...manifest.actions.sockets].filter(route => route.path === path).map(route => route.guard);
-    for (const path of ['/v1/ferrets/:ferret/messages', '/v1/ferrets/:ferret/logs', '/v1/ferrets/:ferret/shared-draft'])
+    for (const path of [
+      '/v1/ferrets/:ferretId/messages',
+      '/v1/ferrets/:ferretId/logs',
+      '/v1/ferrets/:ferretId/shared-draft',
+    ])
       expect(secrets(path).every(guard => guard === 'secrets')).toBe(true);
-    expect(secrets('/v1/ferrets/:ferret/shared-draft/stream')).toEqual(['secrets']);
+    expect(secrets('/v1/ferrets/:ferretId/shared-draft/stream')).toEqual(['secrets']);
   });
   test('takes the question source and sitrep lines, offers message.before-send and turn.ended', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ask.sources', 'sitrep.lines']);

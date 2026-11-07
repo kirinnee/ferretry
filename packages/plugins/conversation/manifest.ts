@@ -11,9 +11,6 @@ import {
   verb,
 } from '@ferretry/kernel/manifest';
 import {
-  AsksPort,
-  AskAnswered,
-  AskSources,
   ATTACHMENT_ADDED_AUDIT,
   ATTACHMENT_RELOCKED_AUDIT,
   ATTACHMENT_UNLOCKED_AUDIT,
@@ -25,7 +22,6 @@ import {
   ConversationPort,
   DRAFT_EDITED_AUDIT,
   DraftChanged,
-  FerretsPort,
   HYPERMEDIA_CHANGED_AUDIT,
   LINKS_ADOPTED_AUDIT,
   LinkKept,
@@ -45,10 +41,11 @@ import {
   SEND_ENTERED_AUDIT,
   SEND_RETRIED_AUDIT,
   SearchWorkToolInputSchema,
-  SitrepLines,
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
+import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import { FerretsPort, SitrepLines } from '@ferretry/core-ferrets/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -62,7 +59,7 @@ const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault
  * Conversation (§2.3): what you say to a ferret and what it says back. Descriptors are today's mounts
  * (session-send, session-reads, session-answer, session-attachments, session-compact-at, session-hypermedia, renders,
  * shared-drafts, conversation-import, foreign-history, work-search), with `/v1/sessions/:sessionId/…` now
- * `/v1/ferrets/:ferret/…` and `/v1/imports/…` now `/v1/links/…`. Gate's per-route `capability` is copied unchanged.
+ * `/v1/ferrets/:ferretId/…` and `/v1/imports/…` now `/v1/links/…`. Gate's per-route `capability` is copied unchanged.
  */
 export default definePlugin({
   id: 'conversation',
@@ -88,38 +85,38 @@ export default definePlugin({
   actions: {
     routes: [
       // ── send, queue, ledger (session-send) ────────────────────────────────────────────────────
-      route('POST /v1/ferrets/:ferret/send', { ...FERRET, audit: { record: MESSAGE_SENT_AUDIT }, ...ACK }),
-      route('POST /v1/ferrets/:ferret/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
-      route('GET /v1/ferrets/:ferret/sends', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferret/queue', { ...FERRET, ...READ, ...SECRETS }),
-      route('PATCH /v1/ferrets/:ferret/queue/:message', {
+      route('POST /v1/ferrets/:ferretId/send', { ...FERRET, audit: { record: MESSAGE_SENT_AUDIT }, ...ACK }),
+      route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
+      route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...READ, ...SECRETS }),
+      route('PATCH /v1/ferrets/:ferretId/queue/:messageId', {
         ...FERRET,
         audit: { record: QUEUE_EDITED_AUDIT },
         ...SECRETS,
       }),
-      route('DELETE /v1/ferrets/:ferret/queue/:message', {
+      route('DELETE /v1/ferrets/:ferretId/queue/:messageId', {
         ...FERRET,
         audit: { record: QUEUE_CANCELLED_AUDIT },
         ...SECRETS,
       }),
-      route('GET /v1/ferrets/:ferret/sends/:sendId', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferret/handoffs/:name', { ...FERRET, ...READ, ...SECRETS }),
-      route('POST /v1/ferrets/:ferret/sends/:sendId/retry', {
+      route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...READ, ...SECRETS }),
+      route('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
         ...FERRET,
         audit: { record: SEND_RETRIED_AUDIT },
         ...ACK,
       }),
-      route('POST /v1/ferrets/:ferret/sends/:sendId/cancel', {
+      route('POST /v1/ferrets/:ferretId/sends/:sendId/cancel', {
         ...FERRET,
         audit: { record: SEND_CANCELLED_AUDIT },
         ...ACK,
       }),
-      route('POST /v1/ferrets/:ferret/sends/:sendId/enter', {
+      route('POST /v1/ferrets/:ferretId/sends/:sendId/enter', {
         ...FERRET,
         audit: { record: SEND_ENTERED_AUDIT },
         ...ACK,
       }),
-      route('POST /v1/ferrets/:ferret/composer', {
+      route('POST /v1/ferrets/:ferretId/composer', {
         ...PERSON,
         capability: cap('terminal', 'use'),
         audit: { record: COMPOSER_ACTED_AUDIT },
@@ -128,14 +125,14 @@ export default definePlugin({
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferret/events', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferret/snapshot', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferret/logs', { ...FERRET, ...READ, ...SECRETS }), // R265: strong etag over redacted text
-      route('GET /v1/ferrets/:ferret/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
-      route('GET /v1/ferrets/:ferret/log-search', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferret/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
+      route('GET /v1/ferrets/:ferretId/events', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/snapshot', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...READ, ...SECRETS }), // R265: strong etag over redacted text
+      route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
+      route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
       // R267 / G162: an image handle never changes for an append-only transcript, so no `noStore`.
-      route('GET /v1/ferrets/:ferret/transcript-images/:handle', {
+      route('GET /v1/ferrets/:ferretId/transcript-images/:handle', {
         minimum: 'operator',
         caller: 'any',
         ...READ,
@@ -143,36 +140,36 @@ export default definePlugin({
       }),
 
       // ── questions, compaction, hypermedia ─────────────────────────────────────────────────────
-      route('POST /v1/ferrets/:ferret/answer', {
+      route('POST /v1/ferrets/:ferretId/answer', {
         ...PERSON,
         audit: { record: QUESTION_ANSWERED_AUDIT },
         ...ACK,
       }),
-      route('GET /v1/ferrets/:ferret/compact-at', { ...FERRET, ...READ, ...ACK }),
-      route('PATCH /v1/ferrets/:ferret/compact-at', {
+      route('GET /v1/ferrets/:ferretId/compact-at', { ...FERRET, ...READ, ...ACK }),
+      route('PATCH /v1/ferrets/:ferretId/compact-at', {
         ...FERRET,
         audit: { record: COMPACT_AT_CHANGED_AUDIT },
         ...ACK,
       }),
-      route('PATCH /v1/ferrets/:ferret/hypermedia', {
+      route('PATCH /v1/ferrets/:ferretId/hypermedia', {
         ...FERRET,
         audit: { record: HYPERMEDIA_CHANGED_AUDIT },
         ...ACK,
       }),
 
       // ── attachments (session-attachments) ─────────────────────────────────────────────────────
-      route('POST /v1/ferrets/:ferret/attachments', {
+      route('POST /v1/ferrets/:ferretId/attachments', {
         ...FERRET,
         audit: { record: ATTACHMENT_ADDED_AUDIT },
         ...SECRETS,
       }),
-      route('GET /v1/ferrets/:ferret/attachments/:attachment', { ...FERRET, ...READ, ...SECRETS }),
-      route('POST /v1/ferrets/:ferret/attachments/:attachment/unlock', {
+      route('GET /v1/ferrets/:ferretId/attachments/:attachmentId', { ...FERRET, ...READ, ...SECRETS }),
+      route('POST /v1/ferrets/:ferretId/attachments/:attachmentId/unlock', {
         ...FERRET,
         audit: { record: ATTACHMENT_UNLOCKED_AUDIT },
         ...SECRETS,
       }),
-      route('DELETE /v1/ferrets/:ferret/attachments/:attachment/unlock', {
+      route('DELETE /v1/ferrets/:ferretId/attachments/:attachmentId/unlock', {
         ...FERRET,
         audit: { record: ATTACHMENT_RELOCKED_AUDIT },
         ...SECRETS,
@@ -185,8 +182,8 @@ export default definePlugin({
       route('GET /v1/renders/:id', { minimum: 'operator', caller: 'any', ...READ, ...SECRETS }),
 
       // ── shared drafts: owner-only, twice (`operator` and `person`) ────────────────────────────
-      route('GET /v1/ferrets/:ferret/shared-draft', { ...PERSON, ...READ, ...SECRETS }),
-      route('POST /v1/ferrets/:ferret/shared-draft', {
+      route('GET /v1/ferrets/:ferretId/shared-draft', { ...PERSON, ...READ, ...SECRETS }),
+      route('POST /v1/ferrets/:ferretId/shared-draft', {
         ...PERSON,
         audit: { record: DRAFT_EDITED_AUDIT },
         ...SECRETS,
@@ -199,7 +196,7 @@ export default definePlugin({
         ...READ,
         ...SECRETS,
       }),
-      route('GET /v1/links/conversations/:harness/:conversation/preview', {
+      route('GET /v1/links/conversations/:harness/:conversationId/preview', {
         ...FERRET,
         capability: cap('fleet', 'configure'),
         ...READ,
@@ -212,7 +209,7 @@ export default definePlugin({
         ...ACK,
       }),
       route('GET /v1/links/history', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/links/history/:entry', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/links/history/:entryId', { ...FERRET, ...READ, ...SECRETS }),
 
       // ── search (work-search) ──────────────────────────────────────────────────────────────────
       route('GET /v1/search', { ...FERRET, capability: cap('fleet', 'use'), ...READ, ...SECRETS }),
@@ -225,7 +222,7 @@ export default definePlugin({
     ],
     sockets: [
       // The live stream of one ferret's draft, every open composer kept in step.
-      socket('GET /v1/ferrets/:ferret/shared-draft/stream', {
+      socket('GET /v1/ferrets/:ferretId/shared-draft/stream', {
         minimum: 'operator',
         caller: 'person',
         audit: { skip: 'a stream; the edits it carries are audited as drafts' },
@@ -250,7 +247,7 @@ export default definePlugin({
       verb('link', { summary: 'list conversations the harnesses hold, to keep as ferrets' }),
       verb('link preview', { summary: 'the first words of a conversation' }),
       verb('link keep', { summary: 'keep conversations as ferrets, read from the harness file' }),
-      verb('history', { summary: 'the conversation history every runtime of a harness shares' }),
+      verb('transcript', { summary: 'the conversation transcript every runtime of a harness shares' }),
     ],
     agentTools: [
       tool('search_work', {
@@ -264,13 +261,13 @@ export default definePlugin({
       }),
     ],
     app: [
-      appAction('turn.interrupt', { on: 'ferret', label: 'Stop turn', calls: 'POST /v1/ferrets/:ferret/interrupt' }),
+      appAction('turn.interrupt', { on: 'ferret', label: 'Stop turn', calls: 'POST /v1/ferrets/:ferretId/interrupt' }),
       appAction('queue.cancel', {
         on: 'ferret',
         label: 'Withdraw',
-        calls: 'DELETE /v1/ferrets/:ferret/queue/:message',
+        calls: 'DELETE /v1/ferrets/:ferretId/queue/:messageId',
       }),
-      appAction('question.answer', { on: 'ask', label: 'Answer', calls: 'POST /v1/ferrets/:ferret/answer' }),
+      appAction('question.answer', { on: 'ask', label: 'Answer', calls: 'POST /v1/ferrets/:ferretId/answer' }),
     ],
   },
 

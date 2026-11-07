@@ -1,7 +1,7 @@
 /** Sending, the queue and the send ledger (today's `session.ts`, `session-queue.ts`, `session-queue-wait.ts`). */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 const NonNegativeInteger = z.number().int().nonnegative();
 const PositiveInteger = z.number().int().positive();
@@ -115,7 +115,7 @@ export const SendRetryRequestSchema = z.strictObject({ force: z.boolean().option
 export const SendCancelRequestSchema = z.strictObject({});
 export const SendEnterRequestSchema = z.strictObject({});
 
-/** `POST /v1/ferrets/:ferret/send` body (today's `SendRequestSchema`; `sharedDraft` is `SharedDraftSentSchema`). */
+/** `POST /v1/ferrets/:ferretId/send` body (today's `SendRequestSchema`; `sharedDraft` is `SharedDraftSentSchema`). */
 export const SendRequestSchema = z.strictObject({
   message: z.string().min(1),
   attachmentIds: z.array(z.string()).optional(),
@@ -207,7 +207,7 @@ export const ComposerResultSchema = z.strictObject({
 });
 export type ComposerResult = z.infer<typeof ComposerResultSchema>;
 
-/** `PATCH /v1/ferrets/:ferret/hypermedia`: whether the ferret may emit renders (today's route; body is a switch). */
+/** `PATCH /v1/ferrets/:ferretId/hypermedia`: whether the ferret may emit renders (today's route; body is a switch). */
 export const HypermediaRequestSchema = z.strictObject({ enabled: z.boolean() });
 export type HypermediaRequest = z.infer<typeof HypermediaRequestSchema>;
 

@@ -9,7 +9,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 export const MAX_CARD_SUMMARY_LENGTH = 140;
 export const MAX_CARD_TITLE_LENGTH = 200;
@@ -89,7 +89,7 @@ export const LaneSetSchema = z.looseObject({
 });
 export type LaneSet = z.infer<typeof LaneSetSchema>;
 
-/** `POST /v1/board/projects/:project/lanes`. Edits wait for the owner's confirmation: the owner's gate is on the lanes. */
+/** `POST /v1/board/projects/:projectId/lanes`. Edits wait for the owner's confirmation: the owner's gate is on the lanes. */
 export const LaneSetActionRequestSchema = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('propose'),
@@ -305,7 +305,7 @@ export const CardCreateRequestSchema = z.strictObject({
 export type CardCreateRequest = z.infer<typeof CardCreateRequestSchema>;
 
 const reason = z.string().trim().min(1).max(MAX_CARD_NOTE_LENGTH);
-/** `POST /v1/board/cards/:id`. One route, one discriminated union, as today. There is no `answer` action: a card never asks. */
+/** `POST /v1/board/cards/:cardId`. One route, one discriminated union, as today. There is no `answer` action: a card never asks. */
 export const CardActionRequestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('move'), to: LaneIdSchema, reason: reason.optional() }),
   z.strictObject({ action: z.literal('trigger'), event: ExternalLaneTriggerSchema, reason: reason.optional() }),
@@ -411,7 +411,7 @@ export const CardAskRefSchema = z.strictObject({
 });
 export type CardAskRef = z.infer<typeof CardAskRefSchema>;
 
-// ─── plans (the `task_plan` tool) ────────────────────────────────────────────────────────────────────────────────
+// ─── plans (the `card_plan` tool) ────────────────────────────────────────────────────────────────────────────────
 /** A plan a ferret asks the owner to pre-approve once: sign-ins and pastes on one card. Lines are Accounts' kinds. */
 export const PlanLineSchema = z.looseObject({
   kind: z.enum(['sign-in', 'terminal-sign-in', 'paste']),

@@ -20,7 +20,7 @@ describe('board manifest', () => {
     const person = new Set<string>(
       manifest.actions.routes.filter(route => route.caller === 'person').map(route => route.key),
     );
-    for (const key of ['PUT /v1/board/projects/:project/switch', 'POST /v1/board/cards/:id/start'])
+    for (const key of ['PUT /v1/board/projects/:projectId/switch', 'POST /v1/board/cards/:cardId/start'])
       expect(person.has(key)).toBe(true);
     expect([...person].filter(key => key.includes('/plans')).length).toBe(8);
   });

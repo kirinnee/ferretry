@@ -1,7 +1,7 @@
 /** @ferretry/plugin-warden/contract/testing — the contract's fake and conformance suite (§7.8). */
 import { describe, expect, test } from 'bun:test';
 import type { Instant } from '@ferretry/std';
-import type { FerretId } from '../core.ts';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { WardenApi } from '../port.ts';
 import { DEFAULT_WARDEN_CONFIG, effectiveWardenConfig, type WardenBlessingView, type WardenFile } from '../wire.ts';
 

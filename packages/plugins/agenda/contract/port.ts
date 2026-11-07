@@ -1,8 +1,8 @@
 import { defineEvent, definePort } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
-import type { FerretId } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type {
   AgendaClearAgentsResult,
   AgendaMode,

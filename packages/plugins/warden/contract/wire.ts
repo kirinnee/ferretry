@@ -8,7 +8,7 @@
  */
 import { InstantSchema, NonNegativeFiniteSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema, FerretStateSchema } from './core.ts';
+import { FerretIdSchema, FerretStateSchema } from '@ferretry/core-ferrets/contract';
 
 const Positive = z.number().int().positive();
 const NonNegative = z.number().int().nonnegative();
@@ -80,17 +80,17 @@ export const DEFAULT_WARDEN_REVIVE = {
   waveGapSeconds: 10,
   breakerMinutes: 30,
 } as const;
-export const WARDEN_AUTO_MIGRATE_TRIGGERS = ['rate_limited', 'budget_exceeded'] as const;
-export const WardenAutoMigrateConfigSchema = z.strictObject({
+export const WARDEN_AUTO_MOVE_TRIGGERS = ['rate_limited', 'budget_exceeded'] as const;
+export const WardenAutoMoveConfigSchema = z.strictObject({
   enabled: z.boolean(),
-  when: z.array(z.enum(WARDEN_AUTO_MIGRATE_TRIGGERS)),
+  when: z.array(z.enum(WARDEN_AUTO_MOVE_TRIGGERS)),
   targets: z.array(z.string().trim().min(1)),
   forceStopBackground: z.boolean(),
   waitMinutes: z.number().int().min(1).max(60),
   maxMovesPerHour: z.number().int().min(1).max(6),
   minHeadroomPercent: z.number().int().min(0).max(90),
 });
-export const DEFAULT_WARDEN_AUTO_MIGRATE = {
+export const DEFAULT_WARDEN_AUTO_MOVE = {
   enabled: false,
   when: ['rate_limited', 'budget_exceeded'],
   targets: [],
@@ -103,7 +103,7 @@ export const DEFAULT_WARDEN_AUTO_MIGRATE = {
 const ConfigShape = {
   enabled: z.boolean(),
   revive: WardenReviveConfigSchema,
-  autoMigrate: WardenAutoMigrateConfigSchema,
+  autoMove: WardenAutoMoveConfigSchema,
   layers: WardenLayersSchema,
   guard: WardenGuardConfigSchema,
   caps: WardenCapsSchema,
@@ -130,7 +130,7 @@ export type WardenConfig = z.infer<typeof WardenConfigSchema>;
 export const WardenFileSchema = z.strictObject({
   enabled: z.boolean().optional(),
   revive: WardenReviveConfigSchema.partial().optional(),
-  autoMigrate: WardenAutoMigrateConfigSchema.partial().optional(),
+  autoMove: WardenAutoMoveConfigSchema.partial().optional(),
   layers: WardenLayersSchema.partial().optional(),
   guard: WardenGuardConfigSchema.partial().optional(),
   caps: WardenCapsSchema.partial().optional(),
@@ -162,7 +162,7 @@ export const WardenConfigPatchSchema = WardenFileSchema;
 export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   enabled: true,
   revive: DEFAULT_WARDEN_REVIVE,
-  autoMigrate: { ...DEFAULT_WARDEN_AUTO_MIGRATE, when: [...DEFAULT_WARDEN_AUTO_MIGRATE.when], targets: [] },
+  autoMove: { ...DEFAULT_WARDEN_AUTO_MOVE, when: [...DEFAULT_WARDEN_AUTO_MOVE.when], targets: [] },
   layers: { jev: false, llm: false },
   guard: { threshold: 0.7, model: 'jev-latest', usdPerMillionInputTokens: 0.042 },
   caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
@@ -188,7 +188,7 @@ export function effectiveWardenConfig(file: WardenFile): WardenConfig {
   const merged: Record<string, unknown> = { ...DEFAULT_WARDEN_CONFIG, ...file };
   for (const section of [
     'revive',
-    'autoMigrate',
+    'autoMove',
     'layers',
     'guard',
     'caps',
@@ -221,8 +221,8 @@ export function wardenLoosens(before: WardenFile | undefined, after: WardenFile)
   for (const act of Object.keys(now.jevActs) as (keyof WardenConfig['jevActs'])[])
     if (now.jevActs[act] < was.jevActs[act]) out.push(`the confidence needed to ${act} is lowered`);
   if (now.guard.threshold < was.guard.threshold) out.push('the guard threshold is lowered');
-  if (!was.autoMigrate.enabled && now.autoMigrate.enabled) out.push('the warden may move ferrets between logins');
-  if (now.autoMigrate.maxMovesPerHour > was.autoMigrate.maxMovesPerHour) out.push('more moves per hour are allowed');
+  if (!was.autoMove.enabled && now.autoMove.enabled) out.push('the warden may move ferrets between logins');
+  if (now.autoMove.maxMovesPerHour > was.autoMove.maxMovesPerHour) out.push('more moves per hour are allowed');
   if (now.maxAssignedWardens > was.maxAssignedWardens) out.push('more wardens may run at once');
   if (
     now.accounts.some(
@@ -287,7 +287,7 @@ export type WardenFlag = z.infer<typeof WardenFlagSchema>;
 
 // ─── judging ─────────────────────────────────────────────────────────────────────────────────────────────────────
 export const WardenVerdictKindSchema = z.enum(['killed', 'revived', 'nudged', 'cleared', 'needs_human', 'unknown']);
-export const WardenRecommendedActionSchema = z.enum(['nudge', 'stop', 'resume', 'restart', 'migrate', 'leave']);
+export const WardenRecommendedActionSchema = z.enum(['nudge', 'stop', 'resume', 'restart', 'move', 'leave']);
 export const WardenRecommendationSchema = z.strictObject({
   action: WardenRecommendedActionSchema,
   reason: z.string(),

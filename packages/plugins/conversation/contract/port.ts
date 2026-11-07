@@ -1,6 +1,6 @@
 import { definePort } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
-import type { FerretId } from './core.ts';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { AnswerRequest } from './wire-question.ts';
 import type {
   AttachmentDownload,

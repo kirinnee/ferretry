@@ -1,14 +1,8 @@
 /** @ferretry/plugin-conversation/contract/testing — the contract's fake and conformance suite (§7.8). */
 import { describe, expect, test } from 'bun:test';
 import { err, type Instant, ok } from '@ferretry/std';
-import {
-  type ConversationApi,
-  type FerretId,
-  type KeepResult,
-  type QueuedMessage,
-  type SendRecord,
-  type WorkHit,
-} from '../index.ts';
+import { type ConversationApi, type KeepResult, type QueuedMessage, type SendRecord, type WorkHit } from '../index.ts';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 
 const refuse = (code: string, message: string) => err({ code, message });
 const NOW = '2026-11-07T09:00:00.000Z' as Instant;

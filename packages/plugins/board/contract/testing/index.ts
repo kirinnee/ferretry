@@ -1,7 +1,7 @@
 /** @ferretry/plugin-board/contract/testing — the contract's fake and conformance suite (§7.8). */
 import { describe, expect, test } from 'bun:test';
 import { err, type Instant, ok } from '@ferretry/std';
-import type { FerretId } from '../core.ts';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { BoardApi } from '../port.ts';
 import { type Card, CARD_KIND_PREFIX, type CardId, CardSchema, type CardView, type Progress } from '../wire.ts';
 

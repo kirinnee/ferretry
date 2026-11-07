@@ -1,6 +1,7 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { AskSchema, FerretIdSchema } from './core.ts';
+import { AskSummarySchema } from '@ferretry/core-asks/contract';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /** The id the daemon agenda goes by: the daemon's own ledger for notices that belong to no ferret. */
 export const DAEMON_AGENDA_ID = 'machine-agenda';
@@ -39,7 +40,7 @@ export type AgendaOpenQuery = z.infer<typeof AgendaOpenQuerySchema>;
 /** One ferret's asks in the roll-up: every ask still open or parked (snoozed or replied). */
 export const AgendaOpenFerretSchema = z.strictObject({
   ferret: FerretIdSchema,
-  asks: z.array(AskSchema).min(1),
+  asks: z.array(AskSummarySchema).min(1),
 });
 export type AgendaOpenFerret = z.infer<typeof AgendaOpenFerretSchema>;
 
@@ -62,7 +63,10 @@ export const AgendaClearAgentsResultSchema = z.strictObject({
 export type AgendaClearAgentsResult = z.infer<typeof AgendaClearAgentsResultSchema>;
 
 // ─── the daemon agenda ───────────────────────────────────────────────────────────────────────────────────────────
-export const DaemonAgendaSchema = z.strictObject({ asks: z.array(AskSchema), resolved: z.array(AskSchema) });
+export const DaemonAgendaSchema = z.strictObject({
+  asks: z.array(AskSummarySchema),
+  resolved: z.array(AskSummarySchema),
+});
 export type DaemonAgenda = z.infer<typeof DaemonAgendaSchema>;
 /** The owner's few verbs on the daemon agenda: dismiss, snooze, unsnooze, resolve. Raising and editing are the daemon's. */
 export const DaemonAgendaActionSchema = z.discriminatedUnion('action', [

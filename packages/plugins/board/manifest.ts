@@ -11,7 +11,8 @@ import {
   tool,
   verb,
 } from '@ferretry/kernel/manifest';
-import { AskAnswered, AsksPort, AskSources, FerretsPort, SitrepLines, StartDecide } from './contract/core.ts';
+import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import { FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
 import {
   BOARD_SKIPPED_AUDIT,
   BOARD_SWITCHED_AUDIT,
@@ -86,11 +87,11 @@ const planText = {
  * Ownership calls (skeletons-work):
  *  - Board owns the lane-set and switch routes of today's `board-projects` mount (`/v1/board/projects/…`): they live in
  *    `state/board/boards/<project>.json`. Projects owns only the `/v1/projects` registry.
- *  - Task plans (`task_plan` and the owner's approval routes) are Board's per §2.3 `Today: … task-plans`; the plan's
+ *  - Task plans (`card_plan` and the owner's approval routes) are Board's per §2.3 `Today: … task-plans`; the plan's
  *    approval ask is Accounts' `sign-in-approval` source.
  *  - Deleted as compatibility: `/v1/tasks`, `/v1/sessions/:id/tasks` (legacy-tasks), `POST /v1/board/import`, `fy board import`.
  *  - There is no GitHub route today: the watch is a job over `state/board/github.json` and `gh`.
- *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferret/…`; `tasks` are `cards`; the plan routes say `plans`.
+ *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferretId/…`; `tasks` are `cards`; the plan routes say `plans`.
  */
 export default definePlugin({
   id: 'board',
@@ -98,7 +99,7 @@ export default definePlugin({
   version: '5.0.0',
   api: 5,
   core: false,
-  kinds: ['view', 'command', 'tool', 'instruction'],
+  kinds: ['view', 'command', 'instruction'],
   words: [
     { word: 'card', means: 'one piece of work you asked for', insteadOf: ['task', 'ticket'] },
     { word: 'lane', means: 'a column a card moves through', insteadOf: ['phase', 'column'] },
@@ -157,7 +158,7 @@ export default definePlugin({
         audit: { record: CARD_CREATED_AUDIT },
         guard: cardText,
       }),
-      route('GET /v1/board/cards/:id', {
+      route('GET /v1/board/cards/:cardId', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
@@ -165,7 +166,7 @@ export default definePlugin({
         audit: read,
         guard: cardText,
       }),
-      route('POST /v1/board/cards/:id', {
+      route('POST /v1/board/cards/:cardId', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
@@ -173,7 +174,7 @@ export default definePlugin({
         audit: { record: CARD_ACTED_AUDIT },
         guard: cardText,
       }),
-      route('POST /v1/board/cards/:id/start', {
+      route('POST /v1/board/cards/:cardId/start', {
         minimum: 'operator',
         caller: 'person',
         capability: fleetUse,
@@ -197,14 +198,14 @@ export default definePlugin({
         audit: read,
         guard: { none: 'project names, paths and lanes only' },
       }),
-      route('GET /v1/board/projects/:project/lanes', {
+      route('GET /v1/board/projects/:projectId/lanes', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,
         audit: read,
         guard: { none: 'lanes only' },
       }),
-      route('POST /v1/board/projects/:project/lanes', {
+      route('POST /v1/board/projects/:projectId/lanes', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetConfigure,
@@ -212,14 +213,14 @@ export default definePlugin({
         audit: { record: LANES_CHANGED_AUDIT },
         guard: { none: 'lanes only' },
       }),
-      route('GET /v1/board/projects/:project/switch', {
+      route('GET /v1/board/projects/:projectId/switch', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,
         audit: read,
         guard: { none: 'a boolean' },
       }),
-      route('PUT /v1/board/projects/:project/switch', {
+      route('PUT /v1/board/projects/:projectId/switch', {
         minimum: 'operator',
         caller: 'person',
         capability: fleetConfigure,
@@ -236,7 +237,7 @@ export default definePlugin({
         audit: read,
         guard: planText,
       }),
-      route('GET /v1/ferrets/:ferret/plans/:plan', {
+      route('GET /v1/ferrets/:ferretId/plans/:plan', {
         minimum: 'operator',
         caller: 'person',
         capability: terminalUse,
@@ -244,7 +245,7 @@ export default definePlugin({
         audit: read,
         guard: planText,
       }),
-      route('POST /v1/ferrets/:ferret/plans/:plan/approval', {
+      route('POST /v1/ferrets/:ferretId/plans/:plan/approval', {
         minimum: 'operator',
         caller: 'person',
         capability: terminalConfigure,
@@ -252,7 +253,7 @@ export default definePlugin({
         audit: { record: PLAN_STAGED_AUDIT },
         guard: planText,
       }),
-      route('GET /v1/ferrets/:ferret/plans/:plan/approval/:stage', {
+      route('GET /v1/ferrets/:ferretId/plans/:plan/approval/:stage', {
         minimum: 'operator',
         caller: 'person',
         capability: terminalUse,
@@ -260,7 +261,7 @@ export default definePlugin({
         audit: read,
         guard: planText,
       }),
-      route('POST /v1/ferrets/:ferret/plans/:plan/approval/:stage/commit', {
+      route('POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/commit', {
         minimum: 'operator',
         caller: 'person',
         capability: terminalConfigure,
@@ -268,7 +269,7 @@ export default definePlugin({
         audit: { record: PLAN_COMMITTED_AUDIT },
         guard: planText,
       }),
-      route('POST /v1/ferrets/:ferret/plans/:plan/approval/:stage/confirm-in-app', {
+      route('POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/confirm-in-app', {
         minimum: 'operator',
         caller: 'person',
         capability: terminalConfigure,
@@ -276,7 +277,7 @@ export default definePlugin({
         audit: { record: PLAN_CONFIRMED_AUDIT },
         guard: planText,
       }),
-      route('DELETE /v1/ferrets/:ferret/plans/:plan/approval/:stage', {
+      route('DELETE /v1/ferrets/:ferretId/plans/:plan/approval/:stage', {
         minimum: 'operator',
         caller: 'person',
         capability: terminalUse,
@@ -284,7 +285,7 @@ export default definePlugin({
         audit: { record: PLAN_STAGE_DROPPED_AUDIT },
         guard: planText,
       }),
-      route('POST /v1/ferrets/:ferret/plans/:plan/revoke', {
+      route('POST /v1/ferrets/:ferretId/plans/:plan/revoke', {
         minimum: 'operator',
         caller: 'person',
         capability: narrowing(terminalUse),
@@ -294,7 +295,7 @@ export default definePlugin({
       }),
     ],
     agentTools: [
-      // NEW name (§3.3): writes one card's progress; the same act as `POST /v1/board/cards/:id` with action `edit`.
+      // NEW name (§3.3): writes one card's progress; the same act as `POST /v1/board/cards/:cardId` with action `edit`.
       tool('card_progress', {
         minimum: 'authenticated',
         caller: 'any',
@@ -303,13 +304,13 @@ export default definePlugin({
         guard: cardText,
         summary: 'Rewrite one card’s progress (now, doneSoFar, next).',
       }),
-      // Today's `task_plan` (`task.plan`): before a task, ask the owner once to pre-approve its sign-ins and pastes.
-      tool('task_plan', {
+      // Today's `card_plan` (`task.plan`): before a card, ask the owner once to pre-approve its sign-ins and pastes.
+      tool('card_plan', {
         minimum: 'authenticated',
         caller: 'any',
         audit: { record: PLAN_STAGED_AUDIT },
         guard: planText,
-        summary: 'Before a task, ask the owner once to pre-approve its sign-ins and pastes.',
+        summary: 'Before a card, ask the owner once to pre-approve its sign-ins and pastes.',
         input: PlanToolInputSchema,
       }),
     ],
@@ -339,7 +340,7 @@ export default definePlugin({
       verb('card assign', { summary: 'give a card to a ferret' }),
       verb('card claim', { summary: 'take a card for this ferret' }),
       verb('card adopt', { summary: 'take over a card whose ferret is gone' }),
-      verb('card note', { summary: 'add a note to a card’s history' }),
+      verb('card note', { summary: 'add a note to a card’s transcript' }),
       verb('card order', { summary: 'place a card in its lane' }),
       verb('card reparent', { summary: 'move a card under another card' }),
       verb('card file', { summary: 'claim a file for a card' }),
@@ -349,8 +350,8 @@ export default definePlugin({
       verb('card refile', { summary: 'move a card to another project’s board' }),
     ],
     app: [
-      appAction('card.move', { on: 'card', label: 'Move', calls: 'POST /v1/board/cards/:id' }),
-      appAction('card.start', { on: 'card', label: 'Start a ferret', calls: 'POST /v1/board/cards/:id/start' }),
+      appAction('card.move', { on: 'card', label: 'Move', calls: 'POST /v1/board/cards/:cardId' }),
+      appAction('card.start', { on: 'card', label: 'Start a ferret', calls: 'POST /v1/board/cards/:cardId/start' }),
     ],
   },
 

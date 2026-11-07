@@ -1,7 +1,7 @@
 /** Reading a ferret's conversation: transcript pages, logs, search inside one, images (today's `session-transcript.ts`). */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /**
  * One transcript message. `point` and `selectionBinding` are opaque strings the harness's `TranscriptReader` mints
@@ -87,7 +87,7 @@ export const TranscriptImageDownloadSchema = z.strictObject({
 });
 export type TranscriptImageDownload = z.infer<typeof TranscriptImageDownloadSchema>;
 
-/** `GET /v1/ferrets/:ferret/handoffs/:name`: a turn's hand-off note (today's `SessionHandoff`, reduced to its text). */
+/** `GET /v1/ferrets/:ferretId/handoffs/:name`: a turn's hand-off note (today's `SessionHandoff`, reduced to its text). */
 export const HandoffSchema = z.strictObject({
   v: z.literal(1),
   ferret: FerretIdSchema,
@@ -96,6 +96,6 @@ export const HandoffSchema = z.strictObject({
 });
 export type Handoff = z.infer<typeof HandoffSchema>;
 
-/** `GET /v1/ferrets/:ferret/events` is a server-sent feed; each event is an opaque control record the app reads by name. */
+/** `GET /v1/ferrets/:ferretId/events` is a server-sent feed; each event is an opaque control record the app reads by name. */
 export const FerretEventSchema = z.strictObject({ name: z.string().min(1), data: z.unknown() });
 export type FerretEvent = z.infer<typeof FerretEventSchema>;

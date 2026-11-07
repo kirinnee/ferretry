@@ -11,7 +11,7 @@ import {
   MACHINE_AGENDA_ACTED_AUDIT,
   SeenFileSchema,
 } from './contract/index.ts';
-import { AskAnswered, AsksPort } from './contract/core.ts';
+import { AskAnswered, AsksPort } from '@ferretry/core-asks/contract';
 import { AccessPort } from './contract/others.ts';
 
 const SEEN = defineState({ name: 'seen', path: 'seen.json', store: 'json', format: 1, schema: SeenFileSchema });
@@ -36,12 +36,12 @@ const AGENDA_CONFIG = defineConfig({
  * (core); this is the view, the tabs, the modes and the buzz policy, and the daemon's own agenda.
  *
  * Ownership calls (skeletons-work):
- *  - The per-ferret item routes (`/v1/ferrets/:ferret/agenda…`: raise, patch, reply, versions, conversation, seen) are
+ *  - The per-ferret item routes (`/v1/ferrets/:ferretId/agenda…`: raise, patch, reply, versions, conversation, seen) are
  *    ASKS', not declared here: answering is a security act (§2.2). So are the `fy agenda add|answer|…` item verbs, which
  *    become `fy ask`. Agenda keeps `fy notify` (it raises a notice through the Asks port) and the owner-only views.
  *  - The push routes (`/v1/push/*`) are ACCESS': `push.json` and `push-keys.json` are Access state (§9.2). Agenda sends a
  *    buzz through Access's port (`uses`).
- *  - `GET|PATCH /v1/ferrets/:ferret/agenda-mode` is Agenda's (ports/agenda.md lists session/agenda-mode with it).
+ *  - `GET|PATCH /v1/ferrets/:ferretId/agenda-mode` is Agenda's (ports/agenda.md lists session/agenda-mode with it).
  */
 export default definePlugin({
   id: 'agenda',
@@ -75,14 +75,14 @@ export default definePlugin({
         audit: { record: AGENDA_CLEARED_AUDIT },
         guard: { none: 'answers two counts' },
       }),
-      route('GET /v1/ferrets/:ferret/agenda-mode', {
+      route('GET /v1/ferrets/:ferretId/agenda-mode', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,
         audit: { skip: 'a read of one switch' },
         guard: { none: 'a boolean and a sentence' },
       }),
-      route('PATCH /v1/ferrets/:ferret/agenda-mode', {
+      route('PATCH /v1/ferrets/:ferretId/agenda-mode', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,

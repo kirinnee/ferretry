@@ -1,6 +1,4 @@
 /** @ferretry/plugin-conversation/contract — wire schemas, port + token, events, hook types, ids, policy refs (§2.1). */
-export { AskAnswered, AskSources, AsksPort, type AsksApi, FerretsPort, type FerretsApi, SitrepLines } from './core.ts';
-export { type FerretId, FerretIdSchema } from './core.ts';
 export * from './events.ts';
 export * from './hooks.ts';
 export * from './ids.ts';

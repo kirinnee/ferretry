@@ -1,7 +1,7 @@
 /** The shared draft: one composer text kept in step across every open screen (today's `shared-draft.ts`). */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 const NonNegativeInteger = z.number().int().nonnegative();
 

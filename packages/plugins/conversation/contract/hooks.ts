@@ -1,7 +1,7 @@
 import { defineHook } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from './core.ts';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /** Takers change a message on its way to a ferret (§3.5). Taken by none yet. */
 export const MessageBeforeSend = defineHook('message.before-send', {
