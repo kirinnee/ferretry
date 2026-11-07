@@ -216,7 +216,7 @@ export interface CatalogsFixtureOptions {
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
   readonly sealed?: SealedDocumentsApi;
   /** The effective contract hash the host answers each package; absent = `unhashed`. */
-  readonly contractHash?: (id: string) => string;
+  readonly contractHash?: (id: string, surface?: 'member') => string;
 }
 
 /**
