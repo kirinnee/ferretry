@@ -29,3 +29,4 @@
 4 packages/core/kernel/host/state/sqlite-store.ts  # boot: opens a plugin's database (directory, mode, existence, removal of a refused file) while plugins start, before the daemon serves; bun:sqlite itself is synchronous
 9 packages/core/kernel/host/adapters/pinned/posix-session-root-pinner.ts  # bracket: pins a session root by descriptor
 2 packages/core/kernel/host/adapters/pinned/working-directory.ts  # bracket: the descriptor of / the bracket falls back to
+2 packages/core/kernel/host/adapters/update-host.ts  # gap: the update child's log file, when an update is applied
