@@ -12,7 +12,7 @@ import type { CliWorld, Connection, Identity } from '../lib/world.ts';
 import { SessionCredentialGateway } from './agent-tools/session-credential-gateway.ts';
 import { readDaemonConfigDocument } from './daemon/config-file.ts';
 import { HttpTransport, type RestartWaiting } from './daemon/http-transport.ts';
-import { launchDaemon } from './daemon/launcher.ts';
+import { type LaunchPorts, launchDaemon } from './daemon/launcher.ts';
 import { assertOwnLoopbackListener } from './daemon/listener-guard.ts';
 import { probeHealth } from './daemon/probe.ts';
 import { readAdminToken } from './daemon/token-file.ts';
@@ -27,6 +27,8 @@ export interface WorldInputs {
   readonly registry: CommandRegistry;
   /** Where this program lives; the daemon binary is looked for beside it. */
   readonly selfPath: string;
+  /** The process ports the daemon launcher uses. Production leaves this out; tests must pass fakes so no test starts a real daemon. */
+  readonly process?: Partial<Pick<LaunchPorts, 'exists' | 'which' | 'spawnDetached'>>;
 }
 
 export function createWorld(inputs: WorldInputs): CliWorld {
@@ -40,11 +42,13 @@ export function createWorld(inputs: WorldInputs): CliWorld {
   const launch = async () =>
     launchDaemon({
       selfPath: inputs.selfPath,
-      exists: existsSync,
-      which: name => Bun.which(name),
-      spawnDetached: (command, env) => {
-        Bun.spawn([...command], { env: { ...env }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' }).unref();
-      },
+      exists: inputs.process?.exists ?? existsSync,
+      which: inputs.process?.which ?? (name => Bun.which(name)),
+      spawnDetached:
+        inputs.process?.spawnDetached ??
+        ((command, env) => {
+          Bun.spawn([...command], { env: { ...env }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' }).unref();
+        }),
       probe,
       sleep: milliseconds => Bun.sleep(milliseconds),
       nowMs: () => Date.now(),
