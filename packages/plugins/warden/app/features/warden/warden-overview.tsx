@@ -15,10 +15,10 @@ import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal 
 import type { WardenReadState } from '../../hooks/use-warden-poll.ts';
 import { readView } from '../../hooks/use-warden-poll.ts';
 import { cn } from '../../ui.ts';
-import type { DaemonConnection } from '../../shell.ts';
-import type { FerretView } from '../../shell.ts';
-import { daemonAgendaPath } from '../../shell.ts';
-import { INSIGHTS_COLUMN_CLASS } from '../../shell.ts';
+import { useScreenHref } from '@ferretry/app';
+import type { FerretView } from '../../lib/callsign.ts';
+import { INSIGHTS_COLUMN_CLASS } from '../../lib/layout.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
 import { Badge } from '../../ui.ts';
 import { RouteLink } from '../../ui.ts';
 import { RecentTriggers } from './warden-trigger-rows.tsx';
@@ -230,6 +230,8 @@ function InboxLine({
   readonly onNavigate: ((to: string) => void) | undefined;
 }) {
   const line = wardenInboxLine(agenda);
+  // The Agenda is a screen of its own plugin, addressed by the shell; with none installed the line is plain text.
+  const to = useScreenHref()(connection.daemonId, 'agenda', 'agenda');
   if (line.kind === 'hidden') return null;
   if (line.kind === 'warning')
     return (
@@ -245,14 +247,17 @@ function InboxLine({
     );
   return (
     <p className="m-0 text-meta leading-base" data-warden-inbox="link">
-      <RouteLink
-        // TODO(inbox-filter): switch to `/inbox?from=warden` once the Inbox filters by sender.
-        to={daemonAgendaPath(connection.daemonId)}
-        {...(onNavigate === undefined ? {} : { onNavigate })}
-        className="inline-flex !min-h-8 !min-w-0 items-center font-semibold text-accent no-underline sm:!min-h-0"
-      >
-        {line.text} ›
-      </RouteLink>
+      {to === undefined ? (
+        <span className="font-semibold">{line.text}</span>
+      ) : (
+        <RouteLink
+          to={to}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
+          className="inline-flex !min-h-8 !min-w-0 items-center font-semibold text-accent no-underline sm:!min-h-0"
+        >
+          {line.text} ›
+        </RouteLink>
+      )}
       {line.stale && (
         // The last good count, never an all-clear: the owner may have been told about more since.
         <span role="status" className="ml-sm text-warn">

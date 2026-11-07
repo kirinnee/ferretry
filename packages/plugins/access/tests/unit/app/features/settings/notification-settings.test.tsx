@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { PushDeviceView } from '../../../../../app/lib/push-delivery.ts';
+import { InstantSchema } from '@ferretry/std';
+import type { PushDeviceView } from '../../../../../contract/index.ts';
 
 import {
   NOTIFICATION_DENIED_NOTE,
@@ -9,13 +10,13 @@ import {
   NotificationSettingsView,
   type NotificationSettingsViewProps,
 } from '../../../../../app/features/settings/notification-settings.tsx';
-import { render, run } from '@ferretry/app/testing';
+import { render, run } from '../../../../support/app/react.ts';
 
 const device: PushDeviceView = {
   id: 'push-5b2b54ad-e4a3-4f96-923f-95bd960ef61b',
   deviceName: 'iPhone',
-  createdAt: '2026-07-31T12:00:00.000Z',
-  updatedAt: '2026-07-31T12:00:00.000Z',
+  createdAt: InstantSchema.parse('2026-07-31T12:00:00.000Z'),
+  updatedAt: InstantSchema.parse('2026-07-31T12:00:00.000Z'),
   expirationTime: null,
 };
 
@@ -37,7 +38,7 @@ describe('NotificationSettingsView', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_UNSUPPORTED_NOTE);
   });
 
-  it('carries no enrol switch of its own: every machine is switched in the machine list', () => {
+  it('carries no enrol switch of its own: the machine is switched in the machine list', () => {
     const { renderer } = view({ permission: 'default' });
     expect(renderer.root.findAllByProps({ role: 'switch' })).toHaveLength(0);
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_SCOPE_NOTE);

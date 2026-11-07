@@ -9,7 +9,7 @@
  * rather than as an empty page, and one paired daemon needs no filter at all.
  */
 
-import type { DaemonConnection, DaemonId } from '../../shell.ts';
+import type { DaemonConnection, DaemonId } from '../../lib/machine.ts';
 
 export interface WardenMachine {
   readonly connection: DaemonConnection;

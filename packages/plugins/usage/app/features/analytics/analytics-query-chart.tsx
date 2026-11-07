@@ -5,7 +5,7 @@
  */
 
 import type { AnalyticsMetric } from '../../../contract/index.ts';
-import { AnalyticsMetricChart, type MetricChartPoint } from './analytics-metric-chart.tsx';
+import { AnalyticsMetricChart, type MetricChartPoint } from '@ferretry/app/ui';
 import { isTrend, trendChartModel } from './analytics-trend-points.ts';
 import { durationAxisTicks, formatAxisDuration } from './analytics-overview.ts';
 import {

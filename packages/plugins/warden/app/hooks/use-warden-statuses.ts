@@ -6,7 +6,8 @@
 
 import type { WardenStatusView } from '../wire.ts';
 import { useEffect, useState } from 'react';
-import { type DaemonConnection, type DaemonId, shellClock } from '../shell.ts';
+import { every as repeatEvery } from '../lib/every.ts';
+import type { DaemonConnection, DaemonId } from '../lib/machine.ts';
 import { nextStateOnFailure, type WardenPollOptions, type WardenReadState } from './use-warden-poll.ts';
 
 const POLL_MS = 30_000;
@@ -17,7 +18,7 @@ export function useWardenStatuses(
   read: (daemon: DaemonConnection) => Promise<WardenStatusView>,
   options: Omit<WardenPollOptions, 'revision'> = {},
 ): ReadonlyMap<DaemonId, WardenReadState<WardenStatusView>> {
-  const { pollMs = POLL_MS, isHidden = documentHidden, every = shellClock.every } = options;
+  const { pollMs = POLL_MS, isHidden = documentHidden, every = repeatEvery } = options;
   const [held, setHeld] = useState<ReadonlyMap<DaemonId, WardenReadState<WardenStatusView>>>(new Map());
 
   useEffect(() => {

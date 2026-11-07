@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { LocalModelsNote } from '../../../app/components/local-models-note.tsx';
-import { interact, mount, must } from '../support/dom.ts';
-import { localModelsFixture, PULL } from './support/local-models.ts';
+import { LocalModelsNote } from '../../../src/ui/local-models-note.tsx';
+import { interact, mount, must } from '../../support/dom.ts';
+import { localModelsFixture, PULL } from '../../support/local-models.ts';
 
 describe('LocalModelsNote', () => {
   test('renders nothing before a read and when models were found', async () => {

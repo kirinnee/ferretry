@@ -150,28 +150,27 @@ export class DaemonPushDevices {
 
 /* ---------- the daemon push API, as a port -------------------------------- */
 
+/** The machine a push call is about: its identity for the device memory and the push scope, never an address. */
+export type PushTarget = Pick<DaemonConnection, 'daemonId'>;
+
 /**
  * The four daemon calls enrolment makes. A port rather than direct imports so a
  * suite can drive every failure path without a fetch stub, and so no caller can
  * accidentally reach one daemon's push API with another's connection.
  */
 export interface DaemonPushService {
-  vapidKey(connection: DaemonConnection): Promise<string>;
-  list(connection: DaemonConnection): Promise<readonly PushDeviceView[]>;
-  register(
-    connection: DaemonConnection,
-    subscription: PushSubscriptionLike,
-    deviceName: string,
-  ): Promise<PushDeviceView>;
-  revoke(connection: DaemonConnection, deviceId: string): Promise<PushDeviceView>;
+  vapidKey(connection: PushTarget): Promise<string>;
+  list(connection: PushTarget): Promise<readonly PushDeviceView[]>;
+  register(connection: PushTarget, subscription: PushSubscriptionLike, deviceName: string): Promise<PushDeviceView>;
+  revoke(connection: PushTarget, deviceId: string): Promise<PushDeviceView>;
 }
 
 export const daemonPushService = (fetcher: DaemonFetch = browserFetch): DaemonPushService => ({
-  vapidKey: connection => fetchDaemonVapidKey(connection, fetcher),
-  list: connection => listDaemonPushDevices(connection, fetcher),
-  register: (connection, subscription, deviceName) =>
+  vapidKey: (connection: DaemonConnection) => fetchDaemonVapidKey(connection, fetcher),
+  list: (connection: DaemonConnection) => listDaemonPushDevices(connection, fetcher),
+  register: (connection: DaemonConnection, subscription, deviceName) =>
     registerDaemonPushDevice(connection, subscription, deviceName, fetcher),
-  revoke: (connection, deviceId) => revokeDaemonPushDevice(connection, deviceId, fetcher),
+  revoke: (connection: DaemonConnection, deviceId) => revokeDaemonPushDevice(connection, deviceId, fetcher),
 });
 
 /* ---------- the browser subscription surface ------------------------------ */
@@ -213,7 +212,7 @@ export interface PushEnrolment {
 /* ---------- enrolment ------------------------------------------------------ */
 
 export interface PushEnrolmentContext {
-  readonly connection: DaemonConnection;
+  readonly connection: PushTarget;
   readonly service: DaemonPushService;
   readonly devices: DaemonPushDevices;
   readonly preferences: DaemonNotificationPreferences;

@@ -1,6 +1,6 @@
 import { HARNESS_KEYS, type HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { RuntimesClient } from './client.ts';
-import { asModelTier, type ModelTier } from './model-tiers.ts';
+import { asModelTier, type ModelTier } from '@ferretry/app/ui';
 
 interface RuntimeReasoningChoice {
   readonly value: string;

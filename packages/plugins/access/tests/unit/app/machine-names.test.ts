@@ -1,11 +1,7 @@
 import { describe, it } from 'bun:test';
+import { distinctDaemonName, type PairedDaemon, replacedPairing } from '@ferretry/app';
 import should from 'should';
-import {
-  daemonConnection,
-  daemonDisplayName,
-  distinctDaemonName,
-  replacedPairing,
-} from '../../../app/shell-pairing.ts';
+import { daemonConnection, daemonDisplayName } from '../../../app/shell-pairing.ts';
 
 /**
  * G95 (last clause): same-named machines are told apart by address, so a prompt naming one says WHICH machine wants the
@@ -32,14 +28,14 @@ describe('G95 telling paired machines with one name apart', () => {
   /** Noon UTC, so the day is the same in every timezone a test runner is in. */
   const OCT_3 = Date.parse('2026-10-03T12:00:00.000Z');
   const OCT_9 = Date.parse('2026-10-09T12:00:00.000Z');
-  const pairing = (daemonId: string, baseUrl: string, pairedAt?: number) => ({
-    ...daemonConnection({
-      daemonId: `fy_daemon_${daemonId}`,
-      baseUrl,
-      deviceId: `device-${daemonId}`,
-      daemonName: 'kirin-box',
-    }),
-    ...(pairedAt === undefined ? {} : { pairedAt }),
+  const pairing = (daemonId: string, address: string, pairedAt: number): PairedDaemon => ({
+    daemon: `fy_daemon_${daemonId}`,
+    machine: 'kirin-box',
+    deviceId: `device-${daemonId}`,
+    address,
+    carriers: [],
+    pairedAt,
+    lastSelectedAt: pairedAt,
   });
 
   it('G95 should leave a machine with a name of its own alone', () => {
@@ -68,12 +64,14 @@ describe('G95 telling paired machines with one name apart', () => {
   it('G95 should fall back to the day each was paired when even the address is shared and neither is newer', () => {
     const a = pairing('aaaa', 'http://10.0.0.5:9000', OCT_3);
     const b = pairing('bbbb', 'http://10.0.0.5:9000', OCT_3);
-    const undated = pairing('cccc', 'http://10.0.0.5:9000');
-    const alsoUndated = pairing('dddd', 'http://10.0.0.5:9000');
 
     should(distinctDaemonName(a, [a, b])).equal('kirin-box (paired 3 Oct)');
-    should(distinctDaemonName(undated, [undated, alsoUndated])).equal('kirin-box (another pairing)');
-    for (const name of [distinctDaemonName(a, [a, b]), distinctDaemonName(undated, [undated, alsoUndated])])
-      should(name).not.containEql('fy_daemon');
+    should(distinctDaemonName(a, [a, b])).not.containEql('fy_daemon');
+  });
+
+  it('G95 should add the day when the name IS the address and another machine shares it', () => {
+    const a = { ...pairing('aaaa', 'http://10.0.0.5:9000', OCT_3), machine: 'http://10.0.0.5:9000' };
+    const b = { ...pairing('bbbb', 'http://10.0.0.6:9000', OCT_3), machine: 'http://10.0.0.5:9000' };
+    should(distinctDaemonName(a, [a, b])).equal('http://10.0.0.5:9000 (paired 3 Oct)');
   });
 });

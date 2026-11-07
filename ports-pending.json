@@ -37,7 +37,9 @@
       "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
-      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel"
+      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel",
+      "the Ask the Warden to investigate now row (app/features/warden/ask-warden.tsx) is built and tested but has no mount: an app half has no action section and the Ferrets Actions menu takes no contributed rows yet",
+      "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
@@ -94,7 +96,8 @@
       "Launch settings file (the relaunch 'launch' need of the moves module) is ported but not built by any 5.0 route until the Ferrets daemon half wires relaunch (daemon/adapters/session/launch/index.ts, daemon/adapters/session/launch/file-launch-settings.ts)",
       "GAP(deliver): the Ferrets deliver seam (turn documents, queued payloads, completion markers) is ported but not built: Conversation passes NO_TURN_DOCUMENTS until it lands (daemon/adapters/session/resume/file-resume-turn-store.ts, daemon/adapters/session/resume/storage-resume-repository.ts)",
       "daemon health: health.jsonl / self-check / self-restart / wedge / incoherence not ported; health.jsonl+self-restart.json are the Kernel's (§9.2), wedge/incoherence owner decided at that port; F-0203 F-0209 R-0097 open (daemon/lib/session/health/exit.ts, daemon/lib/session/health/incoherence.ts, daemon/lib/session/health/report.ts, daemon/lib/session/health/self-check.ts, daemon/lib/session/health/self-restart.ts, daemon/lib/session/health/service.ts, daemon/lib/session/health/settings.ts, daemon/lib/session/health/sweep.ts, daemon/lib/session/health/types.ts, daemon/lib/session/health/wedge.ts)",
-      "Last-screen snapshot (last-snapshot.txt) is not ported: the store is not built, so LastSnapshotWriter stays an optional port of the launchers and lastSnapshotAt a view field with no writer; F-0326 open (daemon/lib/session/snapshot/index.ts, daemon/lib/session/snapshot/types.ts)"
+      "Last-screen snapshot (last-snapshot.txt) is not ported: the store is not built, so LastSnapshotWriter stays an optional port of the launchers and lastSnapshotAt a view field with no writer; F-0326 open (daemon/lib/session/snapshot/index.ts, daemon/lib/session/snapshot/types.ts)",
+      "GAP(names): the callsign claim ledger is declared (`names.json`, NamesFile; the converter carries today's callsigns.json into it) but not wired: today a start and a rename take their callsign through it (FileNameClaimStore) and GET /v1/names suggests free names; port today's names module onto NamesFile"
     ],
     "conversation": [
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
@@ -119,7 +122,6 @@
       "GAP(ferrets): the chat's reference surface proves neither :agent nor @file (app/chat/reference-surface.ts), so the fy-render media read that goes through the same proof waits: app/render/fy-render-workspace-media.ts and app/render/workspace-path.ts",
       "GAP(app-shell): no other surface calls Conversation's Add to chat yet (Board's side tab carries its own copy), so app/composer/composer-references.ts waits for the shared Add to chat action",
       "GAP(app-shell): Settings › Appearance › Message marks (S-0509) has no settings slot to mount in, so app/chat/message-marks-legend.tsx waits for it",
-      "GAP(chat-composer-preferences): the chat page does not pass the person's Enter-key, Vim and suggestion settings to its Composer (app/chat/session-chat-page.tsx), so app/composer/use-composer-preferences.ts waits for that wire in Conversation's app",
       "GAP(attachments): the initial-attachments path (daemon/attachments/lib/initial-attachments.ts) is not composed into the daemon yet, so its bounded inflate adapter daemon/attachments/adapters/raw-deflate.ts waits for it"
     ],
     "accounts": [
@@ -140,7 +142,6 @@
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap",
       "knip.production.json keeps these app files out of its unused-file report until their wire lands (app/NEEDS-APP-SHELL.txt names each gap): app/components/agenda-message.tsx (GAP(agenda): Agenda's card drawn in Conversation's conversation.row slot); app/hooks/use-agenda-deep-link.ts and app/lib/agenda-deep-link.ts (the shell root reads the fragment); app/hooks/use-agenda-replies.ts and app/features/agenda/agenda-replies-notice.tsx (the held-replies notice waits for the conversation surface); app/features/agenda/agenda.tsx, app/hooks/use-agenda.ts, app/features/agenda/agenda-line.tsx and app/lib/agenda-chat.ts (GAP(agenda-drawer): the in-chat agenda line and drawer have no mount); app/hooks/use-answered-suggestion-sweep.ts (GAP(sign-in-rule-sweep)); app/hooks/use-notifications.ts, app/hooks/use-notification-open.ts, app/lib/notification-ledger.ts, app/lib/notification-open.ts, app/lib/notification-preferences.ts and app/lib/notify.ts (GAP(notification-open)); app/lib/push-delivery.ts (GAP(push-delivery)); app/lib/notification-tap.ts (GAP(agenda-push-tap)); app/lib/item-conversation.ts (GAP(agenda-history-conversation)); app/features/agenda/agenda-inbox-composer.tsx and app/lib/answer-chip.ts (GAP(agenda-composer)); app/features/agenda/agenda-nav.tsx (GAP(agenda-nav)); app/features/permission-request/approval-card.tsx and app/lib/permission-request.ts (a copy of Claude Code's approval card, unmounted until the lead decides who keeps it)",
-      "GAP(access-push-ui): the per-machine Web Push switch, the \"Notifications are off\" banner and the registered-device list (app/features/settings/notification-settings.tsx, app/features/settings/notification-machines.tsx, app/lib/machine-notifications.ts) are not drawn: Access's device.settings › notifications panel draws browser permissions only and nothing calls Access's push enrolment, so these wait for the screen that does",
       "GAP(agenda-harness-prompt): the harness-prompt asks read and type into a ferret's transcript and stay unported until Conversation provides those seams (daemon/index.ts), so the reserved sourceRef grammar they need, app/lib/agenda-source-refs.ts, waits for them"
     ],
     "skills": [
@@ -158,15 +159,8 @@
       "GAP(access): the update dot asks locked machines too: today it skipped them (rebuild-ref App.tsx:1099 useLockedMachines); useLockedDaemons() from @ferretry/app has no consumer yet, so the settings machine rows and the machine switcher (App.tsx:1961, :2637) do not mark a locked machine either (G95)"
     ]
   },
-  "pendingHalves": {
-    "warden": ["app"]
-  },
+  "pendingHalves": {},
   "pendingAppPorts": [
-    {
-      "plugin": "warden",
-      "path": "packages/plugins/warden/app",
-      "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
-    },
     {
       "plugin": "packs",
       "path": "packages/plugins/packs/app/components/pack-call.tsx",

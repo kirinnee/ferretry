@@ -6,14 +6,10 @@
 import type { WardenActor } from '../../wire.ts';
 import { FileText, LoaderCircle } from 'lucide-react';
 
-import { ferretDisplayName } from '../../shell.ts';
-import type { FerretView } from '../../shell.ts';
-import { displayCallsign, shortFerretId } from '../../shell.ts';
-import { cn } from '../../ui.ts';
-import type { DaemonConnection } from '../../shell.ts';
-import { daemonFerretPath } from '../../shell.ts';
-import { Badge } from '../../ui.ts';
-import { RouteLink } from '../../ui.ts';
+import { useScreenHref } from '@ferretry/app';
+import { displayCallsign, type FerretView, ferretDisplayName, shortFerretId } from '../../lib/callsign.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
+import { Badge, cn, RouteLink } from '../../ui.ts';
 import { ACTOR_DOT, type WardenChip } from './warden-vocabulary.ts';
 
 export function WardenChipBadge({
@@ -88,15 +84,20 @@ export function FerretLink({
   readonly onNavigate: ((to: string) => void) | undefined;
   readonly className?: string;
 }) {
+  // The ferret's chat is Conversation's screen, addressed by the shell; with no such screen the name stays plain text.
+  const to = useScreenHref()(connection.daemonId, 'conversation', 'chat', { ferret });
+  const classes = cn(
+    'flex min-w-0 items-center !min-h-0 !min-w-0 text-cell font-semibold leading-base text-fg no-underline hover:underline',
+    className,
+  );
+  if (to === undefined)
+    return (
+      <span className={classes}>
+        <span className="truncate">{name}</span>
+      </span>
+    );
   return (
-    <RouteLink
-      to={daemonFerretPath(connection.daemonId, ferret)}
-      {...(onNavigate === undefined ? {} : { onNavigate })}
-      className={cn(
-        'flex min-w-0 items-center !min-h-0 !min-w-0 text-cell font-semibold leading-base text-fg no-underline hover:underline',
-        className,
-      )}
-    >
+    <RouteLink to={to} {...(onNavigate === undefined ? {} : { onNavigate })} className={classes}>
       <span className="truncate">{name}</span>
     </RouteLink>
   );

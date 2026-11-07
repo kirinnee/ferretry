@@ -1,17 +1,14 @@
 /**
- * ONE ROW PER PAIRED MACHINE: the model behind Settings › Notifications and the "notifications are off"
- * banner.
+ * ONE ROW PER MACHINE: the model behind the Notifications switch and the "notifications are off" banner.
  *
  * A Web Push subscription is enrolled WITH one daemon, so "are notifications on?" has a separate answer for
  * every machine. That answer is read from the machine itself (its own device list), never guessed from a
- * local switch: a machine whose list is empty has nobody to push to, and an Agenda push there goes
- * nowhere — which is the silent failure this model exists to name.
+ * local switch: a machine whose list is empty has nobody to push to, and a push there goes nowhere — which is
+ * the silent failure this model exists to name.
  *
- * Pure and total: facts in, rows out. Copied from today's PWA `lib/machine-notifications.ts`; the reads are push delivery's (`push-delivery.ts`).
+ * Pure and total: facts in, rows out. Copied from today's PWA `lib/machine-notifications.ts`.
  */
-
-import type { PushDeviceView } from './push-delivery.ts';
-import { DaemonResponseError } from './agenda-call.ts';
+import type { PushDeviceView } from '../../contract/index.ts';
 
 /** What one machine's push device list said, or why it said nothing. */
 export type MachinePushReading =
@@ -22,11 +19,16 @@ export type MachinePushReading =
 /** A daemon that predates push answers the push routes with one of these: "no such route". */
 const MISSING_ROUTE_STATUSES: ReadonlySet<number> = new Set([404, 405, 501]);
 
+const statusOf = (error: unknown): number | undefined =>
+  typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+    ? error.status
+    : undefined;
+
 /** A failed device-list read as a reading: a missing route is an old daemon; anything else, an absent one. */
-export const readingFromFailure = (error: unknown): MachinePushReading =>
-  error instanceof DaemonResponseError && MISSING_ROUTE_STATUSES.has(error.status)
-    ? { kind: 'needs-update' }
-    : { kind: 'offline' };
+export const readingFromFailure = (error: unknown): MachinePushReading => {
+  const status = statusOf(error);
+  return status !== undefined && MISSING_ROUTE_STATUSES.has(status) ? { kind: 'needs-update' } : { kind: 'offline' };
+};
 
 export type MachineNotificationStatus = 'checking' | 'on' | 'off' | 'offline' | 'needs-update';
 
@@ -46,7 +48,7 @@ export interface MachineNotificationFact {
   readonly reading: MachinePushReading | null;
   /** The device id THIS browser answers to for this machine, if it has enrolled. */
   readonly thisDeviceId: string | null;
-  /** The reader's local mute for this machine (`notification-filter.ts`). */
+  /** The reader's local mute for this machine. */
   readonly muted: boolean;
 }
 
@@ -61,7 +63,7 @@ export interface MachineNotificationRow {
   readonly shown: boolean;
 }
 
-const statusOf = (fact: MachineNotificationFact): MachineNotificationStatus => {
+const rowStatus = (fact: MachineNotificationFact): MachineNotificationStatus => {
   const { reading } = fact;
   if (reading === null) return 'checking';
   if (reading.kind !== 'devices') return reading.kind;
@@ -69,10 +71,10 @@ const statusOf = (fact: MachineNotificationFact): MachineNotificationStatus => {
   return here ? 'on' : 'off';
 };
 
-/** Every machine, in the order given, active one included. */
+/** Every machine, in the order given. */
 export const machineNotificationRows = (facts: readonly MachineNotificationFact[]): readonly MachineNotificationRow[] =>
   facts.map(fact => {
-    const status = statusOf(fact);
+    const status = rowStatus(fact);
     return {
       daemonId: fact.daemonId,
       label: fact.label,

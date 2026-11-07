@@ -20,7 +20,7 @@ import {
   type WardenStatusView,
 } from '../../wire.ts';
 
-import type { MetricChartPoint } from '../../shell.ts';
+import type { MetricChartPoint } from '@ferretry/app/ui';
 import { type ActorCount, actorSplit, utcDay, wholeNumberTicks } from './warden-stats-model.ts';
 import { ACTOR_LABEL } from './warden-vocabulary.ts';
 
