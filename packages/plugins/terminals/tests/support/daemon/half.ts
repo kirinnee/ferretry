@@ -103,7 +103,7 @@ export const ferretSummary = (id: FerretId = FERRET): FerretSummary =>
   ({
     id,
     name: 'Hadi',
-    role: 'worker',
+    role: 'lead',
     harness: 'claude-code',
     runner: 'tmux',
     folder: '/work/hadi',
