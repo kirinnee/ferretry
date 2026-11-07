@@ -14,11 +14,7 @@
  * and calls {@link serveSessionWorker} with its own `self`.
  */
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
-import {
-  type SessionWorkerDeps,
-  SessionWorkerRuntime,
-} from '../adapters/session/observer/session-worker-runtime.ts';
+import { type SessionWorkerDeps, SessionWorkerRuntime } from '../adapters/session/observer/session-worker-runtime.ts';
 import { countWorkerChildren } from '../adapters/session/observer/worker-children.ts';
 import { SessionObserver } from '../lib/session/observer/observer.ts';
 import type { FromSessionWorker, ToSessionWorker } from '../lib/session/observer/protocol.ts';
@@ -33,10 +29,14 @@ export interface SessionWorkerScope {
  * The parts of a session worker other owners supply. `tmux` builds the session's own ATTACHED, REFUSING control
  * client: anything that is not an allowlisted read is refused without running — that refusal is what keeps a worker
  * from typing; `no-output`, so the pane's bytes are never streamed, only a subscription to its
- * `#{pane_dead} #{window_activity}` says when it drew.
+ * `#{pane_dead} #{window_activity}` says when it drew. `stat` is the host-provided confined metadata lookup;
+ * the worker never opens an arbitrary host path itself.
  */
 export interface SessionWorkerPeers
-  extends Pick<SessionWorkerDeps, 'tmux' | 'transcripts' | 'asked' | 'frames' | 'tail' | 'sendEvidence' | 'paneParsers'> {
+  extends Pick<
+    SessionWorkerDeps,
+    'tmux' | 'transcripts' | 'stat' | 'asked' | 'frames' | 'tail' | 'sendEvidence' | 'paneParsers'
+  > {
   readonly questions: QuestionStepPolicy;
 }
 
@@ -53,10 +53,7 @@ export function serveSessionWorker(
     post,
     tmux: peers.tmux,
     transcripts: peers.transcripts,
-    stat: async file => {
-      const info = await stat(file);
-      return { size: info.size, mtimeMs: info.mtimeMs };
-    },
+    stat: peers.stat,
     ...(peers.asked === undefined ? {} : { asked: peers.asked }),
     clock: { now: () => new Date().toISOString() },
     nowMs,
