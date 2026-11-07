@@ -284,6 +284,8 @@ export default definePlugin({
       panel('composer.tools', { id: 'attachments', order: 10 }),
       panel('ferret.side', { id: 'queue', order: 10 }),
       panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
+      // Lead decision Q2: today's Actions-menu switch, a toolbar panel of its own (listed before Compact memory at, as today).
+      panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
     ],
     settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],

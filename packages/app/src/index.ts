@@ -24,11 +24,7 @@ export {
   type ShellAppImplementation,
   type ShellProvides,
 } from './connect/provides.ts';
-export {
-  CONTROL_UNREACHABLE,
-  type DirectDial,
-  PairingOutcomeUnknownError,
-} from './connect/connector.ts';
+export { CONTROL_UNREACHABLE, type DirectDial, PairingOutcomeUnknownError } from './connect/connector.ts';
 export { daemonOfClient } from './connect/daemon-of.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
@@ -77,11 +73,7 @@ export {
 export { fillPath, HEALTH_ROUTE, INVENTORY_ROUTE, type ShellPluginClient } from './client/daemon-client.ts';
 export type { BlockReason, InventoryEntry, Standing } from './client/inventory.ts';
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
-export {
-  DaemonCallError,
-  type SocketListeners,
-  type TransportSocket,
-} from './client/transport.ts';
+export { DaemonCallError, type SocketListeners, type TransportSocket } from './client/transport.ts';
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
 
@@ -102,6 +94,8 @@ export {
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot } from './shell/views.tsx';
+/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar. */
+export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,
