@@ -12,10 +12,12 @@ import type { CliWorld, Connection, Identity } from '../lib/world.ts';
 import { SessionCredentialGateway } from './agent-tools/session-credential-gateway.ts';
 import { readDaemonConfigDocument } from './daemon/config-file.ts';
 import { HttpTransport, type RestartWaiting } from './daemon/http-transport.ts';
-import { type LaunchPorts, launchDaemon } from './daemon/launcher.ts';
+import { DAEMON_BINARY, type LaunchPorts, launchDaemon } from './daemon/launcher.ts';
 import { assertOwnLoopbackListener } from './daemon/listener-guard.ts';
 import { probeHealth } from './daemon/probe.ts';
 import { readAdminToken } from './daemon/token-file.ts';
+import { buildUpdateMachine } from './update/machine.ts';
+import { DaemonUpdater } from '../lib/update/updater.ts';
 
 export interface WorldInputs {
   readonly io: TerminalIo;
@@ -80,6 +82,24 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     registry,
     probe,
     launch,
+    async update(options, updateView) {
+      const machine = buildUpdateMachine(
+        {
+          environment,
+          io,
+          home,
+          userHome: inputs.userHome,
+          product: inputs.product,
+          clientName: identity.binary,
+          daemonName: DAEMON_BINARY,
+          binaries: [identity.binary, DAEMON_BINARY],
+          selfPath: inputs.selfPath,
+        },
+        updateView,
+      );
+      await new DaemonUpdater(machine.deps).update(options);
+      return machine.exitCode();
+    },
     async connect({ asOwner }): Promise<Connection> {
       const plan = credentialPlan(environment, { asOwner });
       if (plan.kind === 'admin' && plan.why === 'as-owner') io.err(`${identity.binary}: ${AS_OWNER_NOTE}\n`);
