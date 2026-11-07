@@ -694,6 +694,7 @@ async function bootLocked(
         plugin: manifest.id,
         root: refused.name,
         refusal: refused.refusal,
+        ...(refused.code === undefined ? {} : { code: refused.code }),
       });
     const uses: Record<string, { current(): unknown }> = {};
     for (const [key, token] of Object.entries(manifest.uses ?? {}))

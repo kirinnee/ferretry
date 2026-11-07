@@ -316,6 +316,8 @@ async function ensureScopedBase(
       parent = join(parent, segment);
       const problem = await folderProblem(scope, parent, made.identity);
       if (problem !== undefined) refuse(problem);
+      // `0700` exactly, through the descriptor just proven (the umask filtered the mkdir mode): today's provisioner.
+      await made.chmod(0o700).catch(() => refuse('changed'));
     }
   } finally {
     await folder.close();
@@ -959,13 +961,34 @@ function rootHandle(setup: HandleSetup): RootHandle {
   return handle;
 }
 
-/** The internal roots whose base is `<home>/state/<plugin>/<name>`: the only bases the kernel makes. */
-const HOME_ROOT_BASES: readonly RootName[] = ['agent-homes', 'downloads', 'credentials'];
+/**
+ * The one place the base of an internal root under the home is named: `<home>/state/<plugin>/<name>` for the roots
+ * the kernel makes (`agent-homes`, `downloads`, `credentials`), nothing for any other root. Both the folder the kernel
+ * makes at boot and the base the roots port serves are this fact.
+ */
+function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
+  switch (name) {
+    case 'agent-homes':
+    case 'downloads':
+    case 'credentials':
+      return `${home}/state/${plugin}/${name}`;
+    default:
+      return undefined;
+  }
+}
 
 /** One declared internal root whose base the kernel would not make or accept, and why. */
 export interface RootBaseRefusal {
   readonly name: RootName;
   readonly refusal: RootRefusal;
+  /** The errno code (`EACCES`) when the disk, not a rule, refused. Never the message: it carries the path. */
+  readonly code?: string;
+}
+
+/** The errno code of a failure, and only that: a message names the path it failed on. */
+function errnoCode(error: unknown): string | undefined {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  return typeof code === 'string' && /^E[A-Z0-9]{1,15}$/.test(code) ? code : undefined;
 }
 
 /**
@@ -973,26 +996,29 @@ export interface RootBaseRefusal {
  * `credentials`), `0700`, before the plugin is built, so a fresh `FY_HOME` serves its first use. A root outside the
  * home (`worktrees`) and an owner's root are never made here. Each missing folder is made through its checked,
  * no-follow-opened parent ({@link ensureScopedBase}); each folder already there — from the home down to the base —
- * must be a real folder (never a link), owned by the home's owner, exactly where the home says. One that is not is
- * refused and left exactly as it is: nothing is followed, replaced or repaired, and every later use of that root is
- * refused by the base check as before.
+ * must be a real folder, never a link, exactly where the home says. One that is not is refused and left exactly as it
+ * is: nothing is followed, replaced or repaired, and every later use of that root is refused by the base check as
+ * before. The folders of a base already there are only held to `0700` through their own descriptor (a mode fix). A
+ * disk that cannot answer for one base (an unreadable folder) refuses that base the same way and never escapes: the
+ * next base, and the plugin's build, go on.
  */
 export async function ensureInternalRootBases(
   fs: HostFs,
   layout: Pick<RootLayout, 'home' | 'plugin'>,
   declared: readonly RootName[],
 ): Promise<readonly RootBaseRefusal[]> {
-  const home = absolute(layout.home, 'the home');
   const refusals: RootBaseRefusal[] = [];
-  for (const name of HOME_ROOT_BASES) {
-    if (!declared.includes(name)) continue;
-    const owner = ROOT_OWNERS[name];
-    if (owner !== undefined && owner !== layout.plugin) continue;
+  for (const name of new Set(declared)) {
     try {
-      await ensureHomeRootBase(fs, home, absolute(`${home}/state/${layout.plugin}/${name}`, 'a root'));
+      const owner = ROOT_OWNERS[name];
+      if (owner !== undefined && owner !== layout.plugin) continue;
+      const home = absolute(layout.home, 'the home');
+      const base = internalRootBase(home, layout.plugin, name);
+      if (base === undefined) continue;
+      await ensureHomeRootBase(fs, home, absolute(base, 'a root'));
     } catch (error) {
-      if (!(error instanceof RootError)) throw error;
-      refusals.push({ name, refusal: error.refusal });
+      if (error instanceof RootError) refusals.push({ name, refusal: error.refusal });
+      else refusals.push({ name, refusal: 'changed', code: errnoCode(error) });
     }
   }
   return refusals;
@@ -1002,7 +1028,7 @@ async function ensureHomeRootBase(fs: HostFs, home: string, base: string): Promi
   if (!within(home, base) || base === home) refuse('outside');
   const homeEntry = await fs.identity(home);
   if (homeEntry?.kind !== 'directory') return refuse('outside');
-  // Every folder already there, from the home down: a folder, never a link, the home's owner's.
+  // Every folder already there, from the home down: a folder, never a link.
   let at = home;
   for (const segment of relative(home, base).split('/')) {
     at = join(at, segment);
@@ -1010,12 +1036,19 @@ async function ensureHomeRootBase(fs: HostFs, home: string, base: string): Promi
     if (found === undefined) break;
     if (found.kind === 'link') refuse('link_escape');
     if (found.kind !== 'directory') refuse('not_a_file');
-    if (found.owner !== homeEntry.owner) refuse('outside');
   }
   await ensureScopedBase(fs, home, base, home, home);
   // What is at the base now must be exactly where the home says, whoever made it.
   const checked = await checkBase(fs, home, base, false, home);
-  if (!checked.ok) refuse(checked.error);
+  if (!checked.ok) return refuse(checked.error);
+  // Held to 0700 through the descriptor that was just proven to be that folder.
+  const scope: Scope = { fs, base: checked.value, ownerRoot: false, immutable: async () => [] };
+  const folder = await openCheckedFolder(scope, checked.value.real);
+  try {
+    await folder.chmod(0o700).catch(() => refuse('changed'));
+  } finally {
+    await folder.close();
+  }
 }
 
 export interface RootsOptions {
@@ -1054,30 +1087,22 @@ export function rootsPortFor(
           return undefined;
         return subfolder;
       };
+      const internal = internalRootBase(home, layout.plugin, name);
       const anchor = ((): string | undefined => {
-        switch (name) {
-          case 'agent-homes':
-          case 'downloads':
-          case 'credentials':
-            return home;
-          case 'worktrees':
-            return dirname(absolute(layout.worktrees, 'the worktrees folder'));
-          default:
-            return undefined;
-        }
+        if (internal !== undefined) return home;
+        return name === 'worktrees' ? dirname(absolute(layout.worktrees, 'the worktrees folder')) : undefined;
       })();
       const base = (): string | undefined => {
         switch (name) {
           case 'agent-homes': {
             const below = internalSubfolder();
-            return below === undefined
+            return below === undefined || internal === undefined
               ? undefined
-              : absolute(join(`${home}/state/${layout.plugin}/agent-homes`, below), 'a root');
+              : absolute(join(internal, below), 'a root');
           }
           case 'downloads':
-            return `${home}/state/${layout.plugin}/downloads`;
           case 'credentials':
-            return `${home}/state/${layout.plugin}/credentials`;
+            return internal;
           case 'worktrees':
             return absolute(layout.worktrees, 'the worktrees folder');
           case 'work':
@@ -1094,10 +1119,7 @@ export function rootsPortFor(
         if (name !== 'work' || scope?.ferret === undefined) return undefined;
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
-      const scopedParent =
-        name === 'agent-homes' && subfolder !== undefined && subfolder !== ''
-          ? `${home}/state/${layout.plugin}/agent-homes`
-          : undefined;
+      const scopedParent = name === 'agent-homes' && subfolder !== undefined && subfolder !== '' ? internal : undefined;
       return rootHandle({
         fs,
         home,
