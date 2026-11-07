@@ -117,7 +117,7 @@ const Made = z.object({
       }),
     )
     .optional(),
-  agenda: z.array(z.object({ id: z.string(), state: z.enum(['answered', 'open']) })).optional(),
+  agenda: z.array(z.object({ id: z.string(), state: z.enum(['resolved', 'open']) })).optional(),
 });
 type Made = z.infer<typeof Made>;
 
@@ -486,8 +486,8 @@ async function checkAgenda(url: string, bearer: string): Promise<void> {
       const resolved = snapshot.resolved.some(entry => entry.id === item.id);
       if (!open && !resolved) fail(`agenda item ${item.id} of ferret ${owner.id} is not on its v5 agenda`);
       else if (item.state === 'open' && !open) fail(`agenda item ${item.id} was open in v4; v5 has it resolved`);
-      else if (item.state === 'answered' && !resolved)
-        fail(`agenda item ${item.id} was answered in v4; v5 has it open`);
+      else if (item.state === 'resolved' && !resolved)
+        fail(`agenda item ${item.id} was resolved in v4; v5 has it open`);
       else say(`agenda item ${item.id} of ${owner.id}: ${open ? 'open' : 'resolved'}`);
     }
   });
