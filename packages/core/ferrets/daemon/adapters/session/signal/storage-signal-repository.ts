@@ -1,4 +1,4 @@
-import { type FrozenJsonValue, type JsonValue, jsonObject } from '../../../lib/json.ts';
+import { type FrozenJsonValue, type JsonValue, jsonObject } from '@ferretry/std';
 import { resolveSessionReference } from '../../../lib/names/policy.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import {

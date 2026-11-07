@@ -36,7 +36,7 @@ import {
   findAccountByAgent,
   servableModels,
 } from '../../core/inventory.ts';
-import { type FrozenJsonValue, jsonObject } from '../../json.ts';
+import { type FrozenJsonValue, jsonObject } from '@ferretry/std';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionEffectAdmission, SessionEffectKey, SessionEffectLedger } from '../effects/types.ts';

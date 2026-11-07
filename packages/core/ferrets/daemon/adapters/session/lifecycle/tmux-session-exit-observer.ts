@@ -1,4 +1,4 @@
-import { type FrozenJsonValue, jsonObject } from '../../../lib/json.ts';
+import { type FrozenJsonValue, jsonObject } from '@ferretry/std';
 import type { ClockPort } from '../../../lib/ports.ts';
 import {
   claimsRunningAgent,

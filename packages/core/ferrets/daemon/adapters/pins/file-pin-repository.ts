@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { PIN_SCHEMA_VERSION, PinSnapshotSchema, type Pin, type PinSnapshot } from '../../lib/protocol/pins.ts';
-import type { FileSystemPort, FoundationPaths, SerialExecutor } from '../../lib/index.ts';
+import type { FileSystemPort, SerialExecutor } from '../../lib/ports.ts';
+import type { FoundationPaths } from '../../lib/paths.ts';
 import { normalizedPins, type PinClock, type PinRepository, type PinSessionDirectory } from '../../lib/pins/index.ts';
 
 function pinFile(paths: FoundationPaths, sessionId: string): string {

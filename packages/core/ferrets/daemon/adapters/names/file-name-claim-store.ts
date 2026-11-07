@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { FileSystemPort, SerialExecutor } from '../../lib/index.ts';
+import type { FileSystemPort, SerialExecutor } from '../../lib/ports.ts';
 import {
   type NameClaim,
   type NameClaimAttempt,

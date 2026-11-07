@@ -24,7 +24,7 @@
 import { randomUUID } from 'node:crypto';
 import { type FileHandle, mkdir, open, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { SessionId } from '../../../lib/index.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionTaskStore } from '../../../lib/session/lifecycle/index.ts';
 
 /** The directory a session's turn documents live in, beneath the session's own directory. */

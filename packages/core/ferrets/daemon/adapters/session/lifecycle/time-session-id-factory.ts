@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { parseSessionId, type SessionId } from '../../../lib/index.ts';
+import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import type { SessionIdFactory } from '../../../lib/session/lifecycle/index.ts';
 
 /**

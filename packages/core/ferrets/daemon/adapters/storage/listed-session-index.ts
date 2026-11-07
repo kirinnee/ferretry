@@ -1,4 +1,6 @@
-import type { EventPointer, IndexedSession, RebuildPlan, SessionId, SessionIndex } from '../../lib/index.ts';
+import type { EventPointer, IndexedSession, RebuildPlan } from '../../lib/storage-types.ts';
+import type { SessionId } from '../../lib/session-id.ts';
+import type { SessionIndex } from '../../lib/ports.ts';
 
 /**
  * The session index with `listSessions` answered from a snapshot the index's own writes keep current.

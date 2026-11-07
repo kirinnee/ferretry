@@ -28,7 +28,7 @@
  */
 
 import { z } from 'zod';
-import { InstantSchema } from '../../instant.ts';
+import { InstantSchema } from '../../protocol/common.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';
 
 /**

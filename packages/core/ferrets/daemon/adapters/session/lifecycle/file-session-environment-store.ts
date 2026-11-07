@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type FileHandle, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import type { SessionId } from '../../../lib/index.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionEnvironmentStore } from '../../../lib/session/lifecycle/index.ts';
 
 /**

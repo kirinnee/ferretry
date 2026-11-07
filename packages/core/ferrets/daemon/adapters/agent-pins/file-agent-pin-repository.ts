@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { type AgentPin, AgentPinFileSchema, type AgentPinRepository } from '../../lib/agent-pins/index.ts';
-import type { FileSystemPort, FoundationPaths } from '../../lib/index.ts';
+import type { FileSystemPort } from '../../lib/ports.ts';
+import type { FoundationPaths } from '../../lib/paths.ts';
 
 /**
  * The owner's pinned ferrets in one small file, `state/agent-pins.json`, written atomically and

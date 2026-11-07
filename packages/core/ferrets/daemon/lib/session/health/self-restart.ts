@@ -1,5 +1,5 @@
 import type { SessionHealthSettings } from './settings.ts';
-import { instantMs } from '../../warden/time.ts';
+import { instantMs } from '../../time.ts';
 import type { SelfRestartHandler, SelfRestartStamp, SelfRestartStampStore, SessionHealthEvent } from './types.ts';
 
 /** Why a restart was withheld, so the operator-facing line can say which of them applied. */

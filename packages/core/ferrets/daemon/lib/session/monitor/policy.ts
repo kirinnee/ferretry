@@ -2,7 +2,7 @@ import { parkedSeconds } from '../signal/policy.ts';
 import type { DeclaredWait } from '../signal/types.ts';
 import { PROTECTED_SIGNAL_STATUSES } from '../signal/types.ts';
 import { declaredWaitDeadlineMs } from '../../warden/detect.ts';
-import { instantMs, isoFromMs } from '../../warden/time.ts';
+import { instantMs, isoFromMs } from '../../time.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionMonitorSettings } from './settings.ts';
 import type { ParkedSession, WaitDeadline, WaitExpiry, WaitHeartbeat, WaitTickPlan } from './types.ts';

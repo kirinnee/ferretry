@@ -41,7 +41,7 @@ import {
   type YieldingSerialExecutor,
 } from '../../lib/index.ts';
 import { KeyedSerialExecutor } from '../system/keyed-serial-executor.ts';
-import { jsonObject } from '../../lib/json.ts';
+import { jsonObject } from '@ferretry/std';
 
 export class InvalidStateDocumentError extends Error {
   constructor(

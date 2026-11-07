@@ -1,7 +1,8 @@
 import { type FileHandle, open } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { SessionConfig } from '../../../lib/protocol/session.ts';
-import { createSessionPaths, parseSessionId, type SessionId } from '../../../lib/index.ts';
+import { createSessionPaths } from '../../../lib/paths.ts';
+import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import type {
   SessionLifecycleEvent,
   SessionLifecycleRecord,

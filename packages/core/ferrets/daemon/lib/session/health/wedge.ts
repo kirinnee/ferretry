@@ -1,4 +1,4 @@
-import { instantMs, isoFromMs } from '../../warden/time.ts';
+import { instantMs, isoFromMs } from '../../time.ts';
 import type { SessionHealthSettings } from './settings.ts';
 import type {
   RunningSelfCheck,

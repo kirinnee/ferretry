@@ -6,7 +6,7 @@ import {
   type SessionArchivePorts,
   unknownLineageBlocks,
 } from '../../../lib/session/archive/index.ts';
-import { jsonObject } from '../../../lib/json.ts';
+import { jsonObject } from '@ferretry/std';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import type { ArchiveVerdict, DaemonStorage } from '../../storage/session-storage.ts';
 

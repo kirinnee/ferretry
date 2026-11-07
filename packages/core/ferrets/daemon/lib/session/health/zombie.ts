@@ -1,4 +1,4 @@
-import { instantMs } from '../../warden/time.ts';
+import { instantMs } from '../../time.ts';
 import type { SessionHealthSettings } from './settings.ts';
 
 /** What can be observed about a session that has already been declared finished. */

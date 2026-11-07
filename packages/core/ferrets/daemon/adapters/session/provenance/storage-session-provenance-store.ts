@@ -12,7 +12,7 @@
  */
 
 import { SessionConfigSchema } from '../../../lib/protocol/session.ts';
-import { type SessionId, tryParseSessionId } from '../../../lib/index.ts';
+import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
 import type { SessionProvenanceRecord, SessionProvenanceStore } from '../../../lib/session/provenance/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 
