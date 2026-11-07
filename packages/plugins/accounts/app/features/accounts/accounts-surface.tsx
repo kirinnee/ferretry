@@ -52,7 +52,10 @@ async function readAll(client: AccountsClient): Promise<Loaded> {
       () => [],
     ),
     readDefaults(client).catch(
-      (): DefaultsRead => ({ kind: 'unreadable', why: 'This daemon would not show accounts.yaml' }),
+      (): DefaultsRead => ({
+        kind: 'unreadable',
+        why: 'This daemon would not show accounts.yaml',
+      }),
     ),
   ]);
   return { list, lookAlike, defaults };
@@ -174,8 +177,8 @@ export function AccountsSurface({
       onNavigate={() => setError(null)}
       onRefresh={() => void refresh()}
       ops={ops}
-      // ACCOUNTS-B: the standing-rule binding (`sign-in-rules-slot.tsx`) is not built, so no rule views are drawn.
-      rules={undefined}
+      // The passkey ceremony is Access's and not on this base: no widening can be approved here (today's no-passkey path).
+      rules={{ client, askPasskey: undefined }}
     />
   );
 }

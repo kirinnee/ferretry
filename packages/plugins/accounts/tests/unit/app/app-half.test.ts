@@ -1,10 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import * as api from '../../../app/features/accounts/accounts-api.ts';
+import { CopyPlanHost } from '../../../app/features/secure-copy/copy-plan-host.tsx';
+import { SignInRuleSuggestionHost } from '../../../app/features/secure-copy/sign-in-rule-suggestion-host.tsx';
+import { TaskPlanHost } from '../../../app/features/secure-copy/task-plan-host.tsx';
+import { PhoneApprovalHost } from '../../../app/features/sign-in-approval/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../../../app/features/two-factor/two-factor-seed-host.tsx';
 import { grantRefusalNotice } from '../../../app/shell.tsx';
 import { signInApprovalRenderer } from '../../../app/surfaces.tsx';
 import manifest from '../../../manifest.ts';
+import { RULE_ID } from '../../support/app/sign-in-rule-fixtures.ts';
 
 /** A client that records the route key and init of every call, answering what the caller's schema reads. */
 function recording(answer: unknown) {
@@ -68,7 +73,7 @@ describe('the app half', () => {
     should(grantRefusalNotice({ status: 403, code: 'passkey_required' })).be.null();
   });
 
-  it('should draw a staged 2FA seed ask as the seed card, and any other sign-in approval as its own words', () => {
+  it('S101 should draw a staged 2FA seed ask as the seed card, from the daemon-set ref alone', () => {
     const { client } = recording({});
     const Renderer = signInApprovalRenderer(client);
     const seed = Renderer({
@@ -76,10 +81,44 @@ describe('the app half', () => {
     }) as { type: unknown; props: { item: { twoFactorSeed?: { stage: string } } } };
     should(seed.type).equal(TwoFactorSeedHost);
     should(seed.props.item.twoFactorSeed?.stage).equal(STAGE);
-    const other = Renderer({ value: { ref: { kind: 'sign-in-rule' }, subject: 'Approve a rule?' } }) as {
-      type: unknown;
-    };
-    should(other.type).equal('section');
     should(Renderer({ value: 'not an ask' })).be.null();
+  });
+
+  it('should draw each other sign-in approval kind as its own card, read from the daemon by id, for the ask’s ferret', () => {
+    const { client } = recording({});
+    const Renderer = signInApprovalRenderer(client);
+    const PLAN = 'a'.repeat(32);
+    const drawn = (ref: unknown, ferret: string | undefined = 'sess-1') =>
+      Renderer({ value: { ref, ferret, subject: 's', why: 'w' } }) as { type: unknown; props: Record<string, unknown> };
+    const task = drawn({ kind: 'task-plan', planId: PLAN });
+    should(task.type).equal(TaskPlanHost);
+    should(task.props).match({ ferret: 'sess-1', planId: PLAN });
+    should(drawn({ kind: 'copy-plan', planId: PLAN }).type).equal(CopyPlanHost);
+    const suggestion = drawn({ kind: 'rule-suggestion', suggestion: 'srg_dddddddddddddddd' });
+    should(suggestion.type).equal(SignInRuleSuggestionHost);
+    should(suggestion.props).match({ suggestionId: 'srg_dddddddddddddddd', ferret: 'sess-1' });
+    const phone = drawn({ kind: 'phone-approval', id: `pa_${'0'.repeat(23)}1` });
+    should(phone.type).equal(PhoneApprovalHost);
+    should(phone.props).match({ approvalId: `pa_${'0'.repeat(23)}1`, ferret: 'sess-1' });
+  });
+
+  it('should draw a ref it cannot read a card for, a suspended rule and a recipe proposal as the daemon’s words and where to act', () => {
+    const { client } = recording({});
+    const Renderer = signInApprovalRenderer(client);
+    const plain = (ref: unknown, ferret?: string) =>
+      Renderer({ value: { ref, ferret, subject: 'Approve a rule?', why: 'because' } }) as {
+        type: unknown;
+        props: { children: unknown[] };
+      };
+    // No ferret named: a card that needs one is not drawn from a guess.
+    should(plain({ kind: 'task-plan', planId: 'a'.repeat(32) }).type).equal('section');
+    should(plain({ kind: 'sign-in-rule' }, 'sess-1').type).equal('section');
+    const text = (node: unknown): string => JSON.stringify(node);
+    should(text(plain({ kind: 'rule-suspended', rule: RULE_ID }, 'sess-1'))).containEql('Standing sign-in rules');
+    should(
+      text(
+        plain({ kind: 'recipe-proposal', signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' }, 'sess-1'),
+      ),
+    ).containEql('Settings › Accounts');
   });
 });
