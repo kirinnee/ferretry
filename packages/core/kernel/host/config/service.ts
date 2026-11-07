@@ -27,7 +27,7 @@
  * Every load and every write runs one at a time, so two of them can never each decide against a record the other is
  * about to replace.
  */
-import { secretReferencesIn } from '../secrets.ts';
+import { addedSecretReferenceSentences, secretReferencesIn } from '../secrets.ts';
 import { createHash } from 'node:crypto';
 import { type Duration, milliseconds } from '@ferretry/std';
 import type {
@@ -104,6 +104,11 @@ export interface ConfigWriteOptions {
   readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
   /** The etag the editor read; a file that moved since is refused `conflict`. */
   readonly ifMatch?: string;
+  /**
+   * The plugin's OWN write (`kernel.config.write`): an edit that adds a `${secret:NAME}` reference is held for the
+   * owner, and neither Gate's judge nor anything else confirms it (NN2). The owner's writer never sets it.
+   */
+  readonly byPlugin?: true;
 }
 
 export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
@@ -531,6 +536,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(
           await write(pluginId, def as ConfigDef, name, edit, {
+            byPlugin: true,
             judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
             ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
           }),
@@ -633,10 +639,13 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         };
       const etag = digest(text);
       const before = settled.get(slot.path)?.evaluated.value;
-      const loosens =
-        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : judgeLoosening(def, before, checked.value);
+      const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
+      const added =
+        unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, checked.value);
+      const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
       const confirmed =
-        writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false));
+        added.length === 0 &&
+        (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
       if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
       await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
       await load();

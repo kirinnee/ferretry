@@ -197,3 +197,53 @@ describe('EE a deletion with no schema defaults is judged too (K5)', () => {
     expect(await port.remove(quiet, undefined)).toMatchObject({ kind: 'written' });
   });
 });
+
+describe('NN2 only the OWNER adds a ${secret:NAME} reference', () => {
+  test('a plugin self-write adding a reference is held even when Gate would allow it, and names nothing yet', async () => {
+    const h = judged(true);
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    const result = await h.files
+      .port('updates')
+      .write(updatesDef, undefined, 'limit: 5\napiKey: ${secret:UPDATES_KEY}\n');
+    expect(result.kind).toBe('held');
+    expect(result.kind === 'held' && result.sentences).toEqual([
+      'names the secret UPDATES_KEY, which only the owner may add to a configuration',
+    ]);
+    expect(h.files.secretReferences('updates').has('UPDATES_KEY')).toBe(false);
+    // a restart does not apply it either: the reference is judged against what is in effect, not remembered
+    const again = createConfigFiles({
+      home: HOME,
+      fs: h.fs,
+      clock: manualClock(),
+      log: captureLog(),
+      binary: 'fy',
+      defs: [{ plugin: 'updates', def: updatesDef }],
+      judge: () => true,
+    });
+    await again.reload();
+    expect(again.secretReferences('updates').has('UPDATES_KEY')).toBe(false);
+  });
+
+  test('the same edit by the owner is written, and the reference counts', async () => {
+    const h = judged(false);
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    const result = await h.files
+      .writer()
+      .write(
+        { plugin: 'updates', def: updatesDef, name: undefined } as never,
+        'limit: 5\napiKey: ${secret:UPDATES_KEY}\n',
+      );
+    expect(result.kind).toBe('written');
+    expect(h.files.secretReferences('updates').has('UPDATES_KEY')).toBe(true);
+  });
+
+  test('a plugin self-write that keeps a reference already in effect is written', async () => {
+    const h = judged(false);
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\napiKey: ${secret:UPDATES_KEY}\n');
+    const result = await h.files
+      .port('updates')
+      .write(updatesDef, undefined, 'limit: 3\napiKey: ${secret:UPDATES_KEY}\n');
+    expect(result.kind).toBe('written');
+    expect(h.files.secretReferences('updates').has('UPDATES_KEY')).toBe(true);
+  });
+});

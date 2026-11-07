@@ -1,4 +1,4 @@
-import { ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
+import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { hours, instantFromEpochMs } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
@@ -502,9 +502,12 @@ async function start(world: World): Promise<TestHost> {
         if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
-        const sentences = judgeLoosening(def, prior?.success === true ? prior.data : undefined, checked.data);
+        const priorValue = prior?.success === true ? prior.data : undefined;
+        // as the real port: a plugin's own write that adds a secret reference is held for the owner, judge or not
+        const added = addedSecretReferenceSentences(priorValue, checked.data);
+        const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-        if (sentences.length > 0 && !judged(manifest.id, path, false, sentences))
+        if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences)))
           return { kind: 'held', etag, id: `${path}@held`, sentences };
         world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
         for (const listener of configListeners.get(key) ?? []) listener();

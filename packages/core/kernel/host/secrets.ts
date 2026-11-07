@@ -20,6 +20,18 @@ export function secretReferencesIn(value: unknown, into = new Set<string>()): Se
   return into;
 }
 
+/**
+ * The sentence for each `${secret:NAME}` that `after` names and `before` (what is in effect) does not: adding one is
+ * the OWNER's to do, so an edit that adds one waits for the owner (NN2), whatever the file's own `loosens` says.
+ */
+export function addedSecretReferenceSentences(before: unknown, after: unknown): readonly string[] {
+  const had = secretReferencesIn(before);
+  return [...secretReferencesIn(after)]
+    .filter(name => !had.has(name))
+    .sort()
+    .map(name => `names the secret ${name}, which only the owner may add to a configuration`);
+}
+
 export function ownSecretsPort(
   declared: readonly string[],
   references: () => ReadonlySet<string> | Promise<ReadonlySet<string>>,
