@@ -22,10 +22,15 @@
  * burst of concurrent upgrades all pass the check before any of them was counted. A reserved slot whose
  * socket never attaches — the upgrade failed after the answer — is handed back after ten seconds, the
  * same window an attached socket gets to prove itself.
+ *
+ * EVERY CARRIER HAS ITS OWN BOUNDS (R661). A session opens on the carrier its ARRIVAL names — `direct` for a socket
+ * on the network, `tunnel` for one that came through `cloudflared` — and each carrier is admitted against its own
+ * counters, as today's fyd built a fresh direct carrier per tunnel listener: an internet caller through the tunnel
+ * can fill the tunnel's caps and never refuse, evict or spend the budget of a session on the network, and the reverse.
  */
 
 import { ApiError } from '@ferretry/kernel/contract';
-import type { SocketRoute } from '@ferretry/kernel/contract';
+import type { Arrival, CarrierKey, SocketRoute } from '@ferretry/kernel/contract';
 import {
   DIRECT_UPGRADE_WINDOW_MS,
   DIRECT_UPGRADES_PER_PEER,
@@ -60,8 +65,38 @@ interface Reservation {
   session: DirectSession | undefined;
 }
 
-/** The socket route a browser dials for a direct session. */
+/** The carrier an arrival opens its session on: the one the listener stamped, else the network's own. */
+export const arrivalCarrier = (arrival: Arrival): CarrierKey =>
+  arrival.kind === 'carried' ? arrival.carrier : ('direct' as CarrierKey);
+
+/** The socket route a browser dials for a session: one set of bounds per arrival carrier. */
 export function directCarrierSocketRoute(deps: DirectCarrierDependencies): SocketRoute & { stop(): void } {
+  const routes = new Map<CarrierKey, SocketRoute & { stop(): void }>();
+  let stopped = false;
+  const routeFor = (carrier: CarrierKey): SocketRoute & { stop(): void } => {
+    let route = routes.get(carrier);
+    if (route === undefined) {
+      route = boundedRoute(deps, carrier);
+      routes.set(carrier, route);
+    }
+    return route;
+  };
+  const declared = routeFor('direct' as CarrierKey);
+  return {
+    ...declared,
+    stop: () => {
+      stopped = true;
+      for (const route of routes.values()) route.stop();
+    },
+    accept: async call => {
+      if (stopped) throw new ApiError(503, 'the direct carrier is stopped', 'plugin_unavailable');
+      return await routeFor(arrivalCarrier(call.request.arrival)).accept(call);
+    },
+  };
+}
+
+/** One carrier's route: its own counters, its own reservations. */
+function boundedRoute(deps: DirectCarrierDependencies, carrier: CarrierKey): SocketRoute & { stop(): void } {
   let live = 0;
   let stopped = false;
   const reservations = new Set<Reservation>();
@@ -199,7 +234,14 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
             close: () => undefined,
           };
         }
-        const session = new DirectSession(deps, request.clientAddress, downstream, () => release(reservation), prove);
+        const session = new DirectSession(
+          deps,
+          carrier,
+          request.clientAddress,
+          downstream,
+          () => release(reservation),
+          prove,
+        );
         reservation.session = session;
         return session;
       };

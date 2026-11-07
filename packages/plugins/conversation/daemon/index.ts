@@ -4,6 +4,7 @@ import { type ConversationApi, LinkKept, QuestionSchema, ReferenceCatalog, Searc
 import manifest from '../manifest.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
+import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
 import { maskedBody } from './seams/masked-body.ts';
 import { referenceCatalogRoute } from './references/catalog.ts';
@@ -111,6 +112,17 @@ export default implementDaemon(manifest, {
       provides: { conversation: api },
       hooks: {
         'ask.sources:question': { schema: QuestionSchema, title: 'Question', form: true },
+        // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
+        'launch.parts': () => [
+          {
+            id: 'conversation-hypermedia',
+            item: {
+              parts: async spec => [
+                { kind: 'env' as const, env: hypermediaLaunchEnvironment(await a.hypermediaRecorded(spec.ferret)) },
+              ],
+            },
+          },
+        ],
         'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
         // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
         'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),

@@ -27,7 +27,7 @@ export * from './move-state.ts';
 
 /**
  * The ferret view (today's session view, moved here whole): what `GET /v1/ferrets/:ferretId` describes for a reader,
- * the live line while a turn runs, how full the context is, and the in-ferret search query. The daemon builds them;
+ * the live line while a turn runs, how full the context is, the in-ferret search query, and the file index the search reads (its schemas, limits and matching helpers). The daemon builds them;
  * the app's chat parses the same shapes.
  */
 export {
@@ -43,6 +43,6 @@ export {
   type FerretLiveActivity,
   FerretLiveActivitySchema,
 } from './view/session-live.ts';
-export { type FerretSearchQuery, FerretSearchQuerySchema } from './view/session-search.ts';
+export * from './view/session-search.ts';
 export * from './pins.ts';
 export * from './ferret-files.ts';

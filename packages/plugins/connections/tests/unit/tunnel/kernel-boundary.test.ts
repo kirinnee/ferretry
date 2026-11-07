@@ -1,105 +1,111 @@
 /**
- * The tunnel listener's boundary over the REAL kernel session layer: what an arrival through `cloudflared` is
- * opened as. The listener is production code; the socket route behind it is a fixture of the direct carrier's
- * (Connections A's) — it opens the kernel session on the carrier the ARRIVAL names, as that route does — so a
- * listener that let a tunnel socket reach a `direct` session would show here as a pairing that went through.
+ * The tunnel listener's boundary over the REAL kernel session layer: what an arrival through `cloudflared` is opened as.
+ *
+ * Everything on the path is production code: the kernel's own carrier listener (`carrierListenerPort`), dialled over a
+ * real loopback WebSocket as `cloudflared` would, serving Connections' REAL `directCarrierSocketRoute` through the
+ * kernel's real `Dispatcher`, which opens the kernel's real session layer. The only stand-ins are the ones the kernel
+ * fixture has always had (an in-memory device table, a pair mode that RECORDS every attempt) and an admission that
+ * admits, because the sealed session proves the device itself. The one wrapper is `openSession`, which records the
+ * carrier key it was handed and passes the call straight to `openKernelSession`. A route that opened a tunnel socket as
+ * a `direct` session therefore shows here as a pairing that went through.
  */
 
-import { expect, it } from 'bun:test';
-import {
-  type ApiRequest,
-  type CarrierKey,
-  headersFrom,
-  isSessionEnd,
-  queryFrom,
-  type SocketDownstream,
-  type SocketHandler,
-} from '@ferretry/kernel/contract';
-import { owner, testArrival } from '@ferretry/kernel/testing';
-import { tunnelListenerSurface } from '../../../daemon/lib/tunnel/listener.ts';
-import {
-  encodeControlMessage,
-  encodeFrame,
-  FRAME_KINDS,
-  RELAY_LIMITS,
-  RELAY_PROTOCOL_ID,
-  SESSION_ID_BYTES,
-  type SessionId,
-  sessionIdFromBytes,
-} from '../../../worker/src/lib/index.ts';
-import { BrowserEnd, type KernelFixture, kernelCrypto, kernelFixture } from '../../support/kernel-session.ts';
+import { afterEach, expect, it } from 'bun:test';
+import type { CallStanding, CarrierKey } from '@ferretry/kernel/contract';
+import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
+import { Dispatcher } from '../../../../../core/kernel/host/dispatch.ts';
+import { openKernelSession } from '../../../daemon/index.ts';
+import { directCarrierSocketRoute } from '../../../daemon/lib/runtime/mounts/direct-carrier.ts';
+import { tunnelPeer } from '../../../daemon/lib/tunnel/listener.ts';
+import manifest from '../../../manifest.ts';
+import type { SessionId } from '../../../worker/src/lib/index.ts';
+import { BrowserEnd, type KernelFixture, kernelFixture } from '../../support/kernel-session.ts';
 
-/** The direct carrier's session route, as a fixture: one socket, one kernel session, on the arrival's carrier. */
-function directSessionRoute(fx: KernelFixture, opened: string[]) {
-  return (request: ApiRequest) =>
-    async (downstream: SocketDownstream): Promise<SocketHandler> => {
-      const sessionId = sessionIdFromBytes(kernelCrypto.randomBytes(SESSION_ID_BYTES)) as SessionId;
-      const carrier = request.arrival.kind === 'carried' ? request.arrival.carrier : ('local' as CarrierKey);
-      opened.push(`${String(carrier)} ${String(request.clientAddress)}`);
-      const link = fx.layer.open(carrier, { address: String(request.clientAddress) });
-      const pump = () => {
-        for (let next = link.outbound.next(); next !== undefined; next = link.outbound.next()) {
-          if (isSessionEnd(next)) {
-            downstream.close(next.code, next.reason);
-            return;
-          }
-          downstream.send(next.bytes);
-        }
-      };
-      return {
-        open: async () => {
-          downstream.send(
-            encodeFrame({
-              kind: FRAME_KINDS.control,
-              sessionId,
-              sequence: 0,
-              payload: encodeControlMessage({ t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS }),
-            }),
-          );
-          link.outbound.onReady(pump);
-          pump();
-        },
-        fromClient: frame => {
-          if (typeof frame !== 'string')
-            link.inbound(
-              frame instanceof ArrayBuffer
-                ? new Uint8Array(frame)
-                : new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength),
-            );
-        },
-        close: () => link.closed('the socket closed'),
-      };
-    };
+/** A browser end over a real socket: every round waits for the network as well as for the layer. */
+class NetworkBrowser extends BrowserEnd {
+  override async settled(): Promise<void> {
+    for (let round = 0; round < 3; round += 1) {
+      await Bun.sleep(20);
+      await super.settled();
+    }
+  }
 }
 
+const cleanups: (() => void | Promise<void>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
+/** Opens one session as `cloudflared` would deliver it; `opened` collects `<carrier key> <peer address>` per session. */
 async function throughTheTunnel(fx: KernelFixture, opened: string[]) {
-  const path = `/v1/rendezvous/${fx.daemonId}/client`;
-  const route = directSessionRoute(fx, opened);
-  const surface = tunnelListenerSurface({
-    sockets: {
-      claims: request => request.path === path,
-      upgrade: async request => ({ outcome: 'accepted', attach: route(request) }),
+  const route = directCarrierSocketRoute({
+    identity: { daemonId: fx.daemonId },
+    clock: { now: () => Date.now() },
+    scheduler: { after: () => ({ cancel: () => undefined }) },
+    randomBytes: length => crypto.getRandomValues(new Uint8Array(length)),
+    sessions: () => fx.layer,
+    openSession: (layer, key, peer, proved) => {
+      opened.push(`${String(key)} ${String(peer.address)}`);
+      return openKernelSession(layer, key, peer, proved);
     },
-    corsOrigins: [],
   });
+  cleanups.push(() => route.stop());
+  // The kernel's dispatcher over the one declared socket, admitting what the sealed session itself will prove.
+  const declared = manifest.actions.sockets[0] as NonNullable<typeof manifest.actions.sockets>[number];
+  const dispatcher = new Dispatcher(
+    {
+      admission: () => ({
+        admit: () => ({ outcome: 'admitted', standing: {} as unknown as CallStanding, actor: 'owner-tools' }),
+        admitMember: () => {
+          throw new Error('no member call');
+        },
+        readmit: () => true,
+        inventory: (_request, entries) => entries,
+      }),
+      outputGuard: () => undefined,
+      version: '5.0.0',
+    },
+    {
+      routes: [],
+      sockets: [
+        {
+          ...declared,
+          owner: { plugin: 'connections' as never, title: 'Connections', serving: () => ({ kind: 'serving' }) },
+          accept: route.accept,
+        },
+      ],
+      memberRoutes: [],
+    },
+  );
+  const listener = await carrierListenerPort({
+    manifest: manifest as never,
+    dispatcher: () => dispatcher,
+    daemonId: fx.daemonId,
+    onStop: () => {},
+    stopping: () => false,
+  }).open({ carrier: 'tunnel' as CarrierKey, surface: { socket: declared.key, peer: tunnelPeer } });
+  cleanups.push(() => listener.close());
   // What `cloudflared` forwards: a loopback upgrade, carrying the address Cloudflare's edge saw.
-  const decision = await surface.sockets.upgrade({
-    method: 'GET',
-    path,
-    query: queryFrom([]),
-    headers: headersFrom({ 'cf-connecting-ip': '203.0.113.9' }),
-    arrival: testArrival(owner()),
-    text: async () => '',
+  const socketClient = new WebSocket(`ws://127.0.0.1:${String(listener.port)}/v1/rendezvous/${fx.daemonId}/client`, {
+    headers: { 'cf-connecting-ip': '203.0.113.9' },
+  } as never);
+  socketClient.binaryType = 'arraybuffer';
+  cleanups.push(() => socketClient.close());
+  const browser = new NetworkBrowser(bytes => socketClient.send(bytes as BufferSource));
+  socketClient.onmessage = event => {
+    if (event.data instanceof ArrayBuffer) browser.receive(new Uint8Array(event.data));
+  };
+  socketClient.onclose = event => {
+    browser.end ??= { code: event.code, reason: event.reason };
+  };
+  await new Promise<void>((resolve, reject) => {
+    socketClient.onopen = () => resolve();
+    socketClient.onerror = () => reject(new Error('the listener refused its own session route'));
   });
-  if (decision.outcome !== 'accepted') throw new Error('the listener refused its own session route');
-  let handler: SocketHandler | undefined;
-  const browser = new BrowserEnd(bytes => handler?.fromClient(bytes));
-  handler = await decision.attach(browser.downstream());
-  await handler.open();
   await browser.settled();
   const ready = browser.controls[0];
   if (ready?.message.t !== 'ready') throw new Error('no ready');
-  return { browser, sessionId: ready.sessionId };
+  return { browser, sessionId: ready.sessionId as SessionId };
 }
 
 it('G118 every tunnel session is the §6 handshake against the pinned identity, opened as a remote tunnel arrival', async () => {
@@ -130,14 +136,17 @@ for (const row of ['G118', 'R662'])
   it(`${row} a pairing through the tunnel listener gets the uniform pair-refused, spends no budget and records no grant`, async () => {
     // Arrange
     const fx = await kernelFixture();
-    const { browser, sessionId } = await throughTheTunnel(fx, []);
+    const opened: string[] = [];
+    const { browser, sessionId } = await throughTheTunnel(fx, opened);
     expect(await browser.handshake(sessionId, fx.daemonId)).toBe(true);
 
     // Act — a well-formed first contact, its proof bound to this session's own transcript.
     await browser.pair();
     await browser.settled();
 
-    // Assert — the pair mode (which owns the guess budget and the grant) was never asked.
+    // Assert — the session is a tunnel one, so the layer refuses before the pair mode (which owns the guess budget and
+    // records the grant) is ever asked: no attempt, therefore no budget spent and no grant.
+    expect(opened).toEqual(['tunnel 203.0.113.9']);
     expect(browser.last('pair-refused')).toMatchObject({ reason: 'pairing_refused' });
     expect(browser.last('paired')).toBeUndefined();
     expect(browser.end?.code).toBe(4440);

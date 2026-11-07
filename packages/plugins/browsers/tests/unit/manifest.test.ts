@@ -25,7 +25,10 @@ describe('browsers manifest', () => {
   test('a ferret may never test the proxy (it dials out with stored credentials)', () => {
     expect(routes.find(route => route.key === 'POST /v1/browser/proxy/test')?.caller).toBe('person');
   });
-  test('takes only the page input target', () => {
-    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual(['input.targets:page']);
+  test('takes the page input target and the %browser reference menu', () => {
+    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
+      'input.targets:page',
+      'reference.catalog:%browser',
+    ]);
   });
 });

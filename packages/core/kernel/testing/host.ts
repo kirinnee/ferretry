@@ -47,6 +47,7 @@ import type {
   SpawnResult,
   IdentityPort,
   WebSocketClient,
+  CarrierListenerPort,
 } from '../contract/ports.ts';
 import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
@@ -113,6 +114,8 @@ export interface TestHostOptions {
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
   readonly websocket?: (url: URL) => WebSocketClient;
+  /** Answers `kernel.carrierListener.open` (the test host binds no listener of its own). Without it an open fails. */
+  readonly carrierListener?: CarrierListenerPort;
   /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
   readonly pinner?: SessionRootPinner;
   /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
@@ -813,7 +816,8 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
                 )?.[name],
               parsed.host,
             )
@@ -837,7 +841,8 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
                 )?.[name],
               parsed.host,
             )
@@ -846,6 +851,11 @@ async function start(world: World): Promise<TestHost> {
           if (options.websocket === undefined)
             throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
           return options.websocket(parsed);
+        },
+      },
+      carrierListener: options.carrierListener ?? {
+        open: async () => {
+          throw new Error(`${manifest.id}: open a carrier listener with no carrierListener fake`);
         },
       },
       identity,
