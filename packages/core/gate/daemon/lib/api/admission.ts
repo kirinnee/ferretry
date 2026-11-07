@@ -9,10 +9,13 @@ import {
   arrivedOnHost,
   arrivedPrivileged,
   type CallStanding,
+  type ConfigAccessJudgement,
+  type ConfigAccessVerdict,
   type ConfigWriteJudgement,
   errorResponse,
   headerValue,
   type InventoryEntry,
+  type InventorySurfaces,
   jsonResponse,
   type MemberStanding,
   type PluginInventory,
@@ -62,6 +65,7 @@ import {
 } from '../../../contract/index.ts';
 import { recordedCallDraft } from '../audit/recorder.ts';
 import { judgeLooseningWrite } from '../policy/config-judge.ts';
+import { judgeConfigAccess } from '../policy/config-access.ts';
 import type { FailClosedStepUps } from '../step-up/witness.ts';
 import { resolveApiActor } from './actor.ts';
 import {
@@ -179,6 +183,7 @@ export class GateAdmission implements Admission {
   }
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
+    // No path parameters on a re-ask: only a warden remedy reads them, and readmit re-asks the descriptor, not one call.
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
   }
 
@@ -215,6 +220,11 @@ export class GateAdmission implements Admission {
     } catch {
       // The audit log reports its own failures; the answer is already decided.
     }
+  }
+
+  /** The kernel's config routes, asked per file: today's grants by file kind (`policy/config-access.ts`). */
+  judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVerdict {
+    return judgeConfigAccess(input);
   }
 
   /** A plugin's own loosening config write (`kernel.config.write`/`remove`): today's held-loosening rule. */
@@ -257,8 +267,12 @@ export class GateAdmission implements Admission {
     };
   }
 
-  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] {
-    return this.project(request, { protocol: PROTOCOL, plugins: [...entries] }, new Map()).plugins;
+  inventory(
+    request: ApiRequest,
+    entries: readonly InventoryEntry[],
+    surfaces: InventorySurfaces,
+  ): readonly InventoryEntry[] {
+    return this.project(request, { protocol: PROTOCOL, plugins: [...entries] }, surfaces).plugins;
   }
 
   /** §9.6: the inventory as this caller may see it. A refused caller sees nothing. */

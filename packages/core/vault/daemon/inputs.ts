@@ -8,11 +8,11 @@ import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from '.
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
-import { PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
+import { LoginProbeThroughHook, PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
 import type { SignInGrantSource } from './lib/inputs/borrowed-grants.ts';
 import { MachineScripts } from './lib/inputs/machine-scripts.ts';
 import type { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
-import { type LoginFactSink, LoginObserver, type LoginProbePort } from './lib/inputs/login-observer.ts';
+import { type LoginFactSink, LoginObserver } from './lib/inputs/login-observer.ts';
 import type { InputChoicePort, InputLoginPort, InputPasteRules, InputSealedPort } from './lib/inputs/ports.ts';
 import type { QuarantineRegistry } from './lib/inputs/quarantine.ts';
 import { type SecretStoreDirectory, SecretStoreTarget } from './lib/inputs/secret-store-target.ts';
@@ -88,16 +88,10 @@ export const INPUT_ASK_SOURCE_SPEC: AskSourceSpec = {
 
 /** The part of `build(ctx)` the input bridge reads. */
 export interface InputsContext {
-  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs'>;
+  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs' | 'identity'>;
   readonly needs: { readonly asks: AsksApi; readonly gate: Pick<GateApi, 'audit'> };
   readonly hooks: Pick<HookInvoker, 'provider'>;
 }
-
-/** The login observer's looks, where nothing can be told yet: every answer is "cannot tell". */
-const UNTOLD: LoginProbePort = {
-  where: async () => undefined,
-  shows: async () => undefined,
-};
 
 export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   const { clock, state, jobs } = ctx.kernel;
@@ -118,11 +112,11 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   const identities = new TypedIdentities(() => clock.nowMs());
   const accounts = deps.accounts ?? {};
   // The sign-in lock's ears: the acts the kernel tells `InputHolds.observed` after each completed act (HeardActs).
-  // Its own looks after a submit need the page's host and text, which `input.targets` does not carry: each answers
-  // "cannot tell", so no sign-in fact is kept until a target can say them.
+  // Its own looks after a submit go through the targets' own reads (`where`, `text`, `promptLine`); a target that
+  // offers none answers "cannot tell", so no sign-in fact is kept for it.
   const observer = new LoginObserver({
     sink: accounts.loginFacts ?? { observeSignIn: async () => undefined },
-    probe: UNTOLD,
+    probe: new LoginProbeThroughHook(provider),
     now: () => clock.nowMs(),
     sleep: async ms => await clock.sleep(milliseconds(ms)),
   });
@@ -159,7 +153,8 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     ...(accounts.sealed === undefined ? {} : { sealed: accounts.sealed }),
     ...(accounts.rules === undefined ? {} : { rules: accounts.rules }),
     ...(accounts.grants === undefined ? {} : { grants: accounts.grants }),
-    ...(deps.hostName === undefined ? {} : { hostName: deps.hostName }),
+    // A terminal's saved-login key names this machine (`program@host`): today's `hostname()`, the kernel's daemon name.
+    hostName: deps.hostName ?? ctx.kernel.identity.daemonName,
   });
   // Every hold comes back before any request does (I82); then the sweep runs on its own interval.
   jobs.add({ id: 'inputs-restore', schedule: { onceAfterStart: true }, run: async () => await service.restore() });

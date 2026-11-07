@@ -62,7 +62,7 @@ import {
   type SecretImportId,
   type SecretImportOffer,
   type SecretImportResult,
-} from './wire.ts';
+} from '../../../contract/index.ts';
 
 /** Domain separation: an offer signature can never be replayed as a relay claim, or the reverse. */
 const OFFER_SIGNATURE_LABEL = 'ferretry-secret-import-offer-v1';

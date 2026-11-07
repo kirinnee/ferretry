@@ -136,15 +136,7 @@ export interface LayoutDecl {
 // data ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type ItemKind =
-  | 'mcp'
-  | 'skill'
-  | 'shell'
-  | 'recipe'
-  | 'instruction'
-  | 'layout'
-  | 'theme'
-  | 'runtime'
-  | 'endpoint';
+  'mcp' | 'skill' | 'shell' | 'recipe' | 'instruction' | 'layout' | 'theme' | 'runtime' | 'endpoint';
 
 export interface ItemDecl {
   readonly kind: ItemKind;
@@ -223,10 +215,40 @@ export interface Permissions {
   readonly spawn?: readonly SpawnEntry[];
   /** Vault secret names it may use by name (never read). */
   readonly secrets?: readonly string[];
+  /**
+   * The names of Vault secrets this plugin MINTS itself (an OAuth sign-in's access token), each a pattern the whole
+   * name must match (written without anchors). The Vault lets the plugin put, remove and list a name matching one, and
+   * nothing else it was not already given by `secrets` or a credential record of its own.
+   */
+  readonly mintedSecrets?: readonly string[];
+  /**
+   * It offers the person a PICKER over the names of the secrets this machine holds (Catalogs' install mapping of a
+   * `${secret:NAME}` placeholder). The Vault lists it every secret NAME (never a value) and writes it nothing; every
+   * other non-core plugin lists only the names it may use or mints.
+   */
+  readonly secretNamePicker?: true;
   /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
   readonly hostFacts?: true;
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
+}
+
+/**
+ * The plugin a per-needer `provides` entry is built for (§3.7): its id and its EFFECTIVE permissions, the ones the
+ * kernel's own ports enforce for it (`effectivePermissions`: a `'*'` in `spawn` or `network` survives for a core id
+ * alone). A provider that acts on a caller's behalf narrows what it does to these, so a needer reaches nothing through
+ * the provider that its own manifest does not declare. The kernel itself, binding a kernel-bound port, is `kernel`.
+ */
+export interface Needer {
+  readonly id: string;
+  readonly permissions: Permissions;
+  /**
+   * Every `${secret:NAME}` the needer's OWN credential records name (config defs marked `credentialRecords`), as they are IN EFFECT now (asked at each call): a
+   * reference added by a plugin or a hand edit is held for the owner and names nothing until the owner confirms it,
+   * so only an owner-written reference is here. The needer's records are the needer's to write; a provider may count
+   * these names as the needer's own, beside `permissions.secrets`.
+   */
+  readonly ownedSecretReferences: () => ReadonlySet<string>;
 }
 
 // the manifest ─────────────────────────────────────────────────────────────────────────────────────────────────────

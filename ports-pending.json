@@ -160,16 +160,6 @@
       "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
     },
     {
-      "plugin": "voice",
-      "path": "packages/plugins/voice/app/features/settings/use-machine-voice-cleanup.ts",
-      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
-    },
-    {
-      "plugin": "voice",
-      "path": "packages/plugins/voice/app/features/fleet/setup/voice-default.ts",
-      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
-    },
-    {
       "plugin": "packs",
       "path": "packages/plugins/packs/app/components/pack-call.tsx",
       "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"

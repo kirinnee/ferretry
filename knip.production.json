@@ -18,17 +18,65 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/*": {
-      "entry": ["app/views/*.tsx"],
+      "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/cli": {
-      "entry": ["bin/*.ts", "src/index.ts"],
+      "entry": ["bin/*.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts"],
       "ignore": ["src/lib/tool-client.ts"]
     },
     "packages/app": {
-      "entry": ["src/index.ts", "src/main.tsx"],
-      "project": ["src/**/*.{ts,tsx}"]
+      "entry": ["src/main.tsx"],
+      "project": ["src/**/*.{ts,tsx,css}"]
+    },
+    "packages/core/ferrets": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/agenda": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/board": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/claude-code": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/packs": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/projects": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/runtimes": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/updates": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/warden": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/connections": {
+      "entry": ["worker/src/adapters/worker.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/catalogs": {
+      "entry": ["worker/src/adapters/link-store-worker.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/conversation": {
+      "entry": ["app/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     }
   },
   "bun": false,
@@ -48,5 +96,6 @@
     "binaries": "off",
     "enumMembers": "off",
     "dependencies": "warn"
-  }
+  },
+  "tags": ["-pending"]
 }

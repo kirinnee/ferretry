@@ -1,22 +1,27 @@
-import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
+import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { implementDaemon, type Needer, perNeeder } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import {
   type AuthorizedOutcome,
   type CredentialPlacement,
+  CredentialPlacementSchema,
   type OutboundHttpRequest,
+  OutboundHttpRequestSchema,
   HoldsChanged,
   RedactionSources,
   SecretsChanged,
   type SecretName,
+  SecretUseRequestSchema,
   type SecretUseCommand,
   type SecretUseRefusal,
   type SecretUseResult,
   type VaultApi,
+  VaultConfigFile,
 } from '../contract/index.ts';
 import { KernelOutboundTransport } from './adapters/secrets/kernel-outbound-transport.ts';
+import { ConfigSecretRecipes } from './adapters/secrets/config-secret-recipes.ts';
 import { KernelSealedDocuments } from './adapters/secrets/kernel-sealed-documents.ts';
 import { kernelSealedFiles } from './adapters/secrets/kernel-sealed-files.ts';
 import { KernelSecretChildRunner } from './adapters/secrets/kernel-secret-child-runner.ts';
@@ -33,6 +38,18 @@ import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
+import {
+  isCoreNeeder,
+  isMintedSecret,
+  mayRunProgram,
+  mayTouchSecret,
+  mayUseSecret,
+  namesAreNarrowed,
+  reachableHosts,
+  secretsNamedBy,
+  UndeclaredProgramError,
+  UndeclaredSecretError,
+} from './lib/secrets/reach.ts';
 import { ChildEnvironments } from './lib/secrets/child-environments.ts';
 import { type SecretCloneIdentitySource, SecretExportService, SecretImportService } from './lib/secrets/clone.ts';
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
@@ -41,9 +58,8 @@ import { VaultRedaction } from './lib/secrets/read-scope.ts';
 import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
-import { NO_RECIPES, SecretUseError, SecretUseService } from './lib/secrets/use.ts';
+import { SecretUseError, SecretUseService } from './lib/secrets/use.ts';
 import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
-import { NO_REFERENCES } from './lib/secrets/view.ts';
 
 /**
  * The machine's own identity, for copying secrets between machines. GAP (for the lead): the kernel holds the
@@ -57,7 +73,8 @@ const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => unde
  * authorized fetch, the read-scoped redaction and the output guard. Every value-holder is built HERE and nowhere
  * else, so the list of things that can open the vault is this function (S7):
  *
- *   redaction · use · child environments (the fleet launch's, now `childEnvironment`) · authorized fetch · export.
+ *   redaction · use · child environments (the fleet launch's, now `childEnvironment`) · authorized fetch · export ·
+ *   the kernel's own `${secret:NAME}` lookup (`secretResolver`, kernel-bound: no route, tool or half is handed it).
  *
  * The vault KEY has one more holder, as today (the MCP sign-in's and the accounts' second documents, the link keys):
  * `sealedDocuments`, which opens only the calling plugin's own documents and never `vault.json`.
@@ -102,14 +119,16 @@ export default implementDaemon(manifest, {
       return state === 'stopped' || state === 'gone';
     };
     const inputs = buildInputs(ctx, { values, quarantine, redact, secretStore, ferretEnded });
-    // GAP (for the lead): today's operator `secretEnvironment` recipes and the reference sources (recipes, fleet
-    // accounts) were composed here from Accounts' and Logins' code; until those ports offer them, a use gets exactly
-    // the secrets it named and the listing shows no configured references.
+    // The operator's `secretEnvironment` recipes are `config/vault.yaml` (`VaultConfigFile`), read on every use so an
+    // edit lands without a restart; the one adapter is both the recipe source and the listing's references, so the two
+    // never disagree. GAP (for the lead): the fleet accounts' references (Accounts' and Logins' code) are not offered
+    // by those ports yet, so the listing shows the recipes' only.
+    const recipes = new ConfigSecretRecipes(() => kernel.config.file(VaultConfigFile)?.secretEnvironment ?? {});
     const uses = new SecretUseService(
       vault,
       new KernelSecretChildRunner(kernel.spawn, kernel.clock),
       environments,
-      NO_RECIPES,
+      recipes,
       masks,
     );
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
@@ -150,7 +169,16 @@ export default implementDaemon(manifest, {
       return ok(environments.mint(resolved.value));
     };
 
-    const api: VaultApi = {
+    /**
+     * The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): the value for a NAME, as today's consumers took it
+     * (`(await secretVault.values()).get(name)`). A store that cannot be opened raises, which the kernel answers as
+     * `unknown`. Held by the kernel alone: no route, tool or other plugin is handed it.
+     */
+    const secretResolver: SecretResolver = {
+      resolve: async name => (await vault.values()).get(name as SecretName),
+    };
+
+    const full: VaultApi = {
       names: async () => await directory.list(),
       has: async name => (await directory.list()).some(secret => secret.name === name),
       put: async (name, value) => {
@@ -195,20 +223,84 @@ export default implementDaemon(manifest, {
         }),
     };
 
+    /**
+     * THE PORT EACH PLUGIN IS HANDED (§3.7), built once per needing plugin by the kernel. A core caller gets the
+     * Vault's own reach; any other plugin gets the same port with the three calls that spend something narrowed to
+     * what it is already allowed: a host its manifest's `network` names, a secret its manifest or its own records
+     * name ({@link mayUseSecret}), a program its manifest's `spawn` names. A request outside is refused the way
+     * today's Vault refuses a host, secret or program it does not allow.
+     */
+    const apiFor = (needer: Needer): VaultApi => {
+      if (isCoreNeeder(needer)) return full;
+      return {
+        ...full,
+        // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
+        // plugin cannot overwrite or delete a secret it merely uses (an owner's GITHUB_TOKEN named in its records), nor see
+        // the owner's others (credential substitution, S12).
+        names: async () =>
+          namesAreNarrowed(needer)
+            ? (await full.names()).filter(secret => mayTouchSecret(needer, secret.name))
+            : await full.names(),
+        has: async name => mayTouchSecret(needer, String(name)) && (await full.has(name)),
+        put: async (name, value) => {
+          const secret = String(name);
+          if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');
+          await full.put(secret as SecretName, value);
+        },
+        remove: async name => {
+          const secret = String(name);
+          if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');
+          return await full.remove(secret as SecretName);
+        },
+        // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses
+        // only that copy: a getter on the caller's object cannot show a declared value to the check and another to the use.
+        run: async (asked, ferret) => {
+          const command = SecretUseRequestSchema.parse(asked);
+          const program = command.command[0];
+          if (program === undefined || !mayRunProgram(needer, program))
+            throw new UndeclaredProgramError(needer, program ?? '');
+          if (!secretsNamedBy(command).every(name => mayUseSecret(needer, name))) return err('unknown_secret');
+          return await full.run(command, ferret);
+        },
+        authorizeFetch: async (name, hostAllowlist, request, placement) => {
+          const secret = String(name);
+          const hosts = [...hostAllowlist].map(String);
+          // The request and the placement are PARSED once into plain data; only that copy is checked and sent (S162).
+          const copy = OutboundHttpRequestSchema.safeParse(request);
+          const placed = placement === undefined ? undefined : CredentialPlacementSchema.safeParse(placement);
+          if (!copy.success || (placed !== undefined && !placed.success)) return { kind: 'refused' };
+          if (!mayUseSecret(needer, secret)) return { kind: 'refused' };
+          return await full.authorizeFetch(
+            secret as SecretName,
+            reachableHosts(needer, hosts),
+            copy.data,
+            placed?.data,
+          );
+        },
+        childEnvironment: async (ferret, asked) => {
+          const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
+          const refused = secretsNamedBy({ secrets: [], env }).filter(name => !mayUseSecret(needer, name));
+          if (refused.length > 0) return err({ unknown: refused });
+          return await full.childEnvironment(ferret, env);
+        },
+      };
+    };
+
     return {
       routes: {
-        ...secretRouteHandlers({ directory, references: NO_REFERENCES, uses, imports, exports, changed }),
+        ...secretRouteHandlers({ directory, references: recipes, uses, imports, exports, changed }),
         ...inputs.routes,
       },
       tools: { ...inputs.tools },
       provides: {
-        vault: api,
+        vault: perNeeder(apiFor),
         outputGuard: holds,
         inputHolds: inputs.holds,
         redaction,
         childEnvironments: environments,
         // Each plugin's OWN sealed documents, over the state port the kernel rooted at its folder (change C).
         sealedDocuments: new KernelSealedDocuments(key, kernel.clock),
+        secretResolver,
       },
       hooks: { 'ask.sources:input': inputs.askSource },
       subscribers: {
