@@ -14,8 +14,10 @@
  *    from has no v5 field.
  *  - `approval {sessionId, id}` → `{ferret, ask}`: the same agenda item `A<n>` on the same ferret's board. Asks keeps
  *    per-ferret ask ids, so the link resolves unchanged.
+ *  - Every actor inside `history` and `clarifications` (`actor`, `reportedBy`, `by`) takes the `createdBy` shape,
+ *    its `…Via` folded into the owner's `via` (lead decision 2026-11-07: Board actors become strict).
  *  - `history`, `clarifications`, `terms`, `links` (with the PR cache), `blocked` and the extra fields of each
- *    dependency (the owner's `override`) are carried whole, in their v4 shape: v5 declares them as loose records
+ *    dependency (the owner's `override`) are otherwise carried whole: v5 declares them as loose records
  *    (the port replaces each with today's strict schema when it ports the code that reads it).
  *  - Dropped cards and cards in a closed lane are ordinary cards and are all kept.
  *
@@ -52,6 +54,7 @@ import {
   KNOWN_CARD_FIELDS,
   readDocument,
   unknownCardFields,
+  V4Actor,
   V4Card,
   type V4ActorValue,
   type V4CardValue,
@@ -78,7 +81,7 @@ const BOARD_NOT_CARRIED: readonly NotCarried[] = [
     why: 'CardSchema has no legacyRef (dropped as compatibility); the card id and its `migrated` history event are kept',
   },
   {
-    what: 'the session an owner or the daemon created a card from (createdBy.sessionId)',
+    what: 'the session an owner or the daemon acted from (createdBy, history and clarification actors)',
     why: 'CardActorSchema owner and daemon members have no ferret field',
   },
   {
@@ -141,6 +144,38 @@ async function actorOf(
   return { kind: 'daemon' };
 }
 
+/** v4's actor-and-via pairs inside a history event or a clarification: `<actor>` beside `<via>`. */
+const ACTOR_FIELDS = [
+  ['actor', 'actorVia'],
+  ['reportedBy', 'reportedVia'],
+  ['by', 'byVia'],
+] as const;
+const Via = z.literal('admin-token').optional();
+
+/**
+ * One history event or clarification with every v4 actor in v5's `CardActorSchema` shape (lead decision 2026-11-07:
+ * Board's actors become strict). The `…Via` beside an actor folds into the owner actor's `via`, as `createdByVia` does.
+ */
+async function withV5Actors(
+  ctx: StepContext,
+  record: Record<string, unknown>,
+  facts: CardFacts,
+): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { ...record };
+  for (const [field, viaField] of ACTOR_FIELDS) {
+    if (!(field in record)) {
+      if (viaField in record) throw new BoardInputError(`a ${viaField} with no ${field}`);
+      continue;
+    }
+    const actor = V4Actor.safeParse(record[field]);
+    const via = Via.safeParse(record[viaField]);
+    if (!actor.success || !via.success) throw new BoardInputError(`an unreadable ${field}`);
+    out[field] = await actorOf(ctx, actor.data, via.data, facts);
+    delete out[viaField];
+  }
+  return out;
+}
+
 async function mapCard(ctx: StepContext, card: V4CardValue, facts: CardFacts): Promise<Card> {
   const {
     v: _v,
@@ -174,6 +209,8 @@ async function mapCard(ctx: StepContext, card: V4CardValue, facts: CardFacts): P
       ? {}
       : { snoozed: snoozed === null ? null : { until: snoozed.until, lane: snoozed.laneId } }),
     createdBy: await actorOf(ctx, createdBy, createdByVia, facts),
+    history: await Promise.all(card.history.map(event => withV5Actors(ctx, event, facts))),
+    clarifications: await Promise.all(card.clarifications.map(item => withV5Actors(ctx, item, facts))),
     ...(approval === undefined ? {} : { approval: { ferret: approval.sessionId, ask: approval.id } }),
   });
 }
@@ -248,10 +285,9 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
     { what: 'cards (ids unchanged; dropped and closed cards included)', count: cards },
     { what: 'dropped cards', count: dropped },
     { what: 'card approvals linked to their ferret’s ask', count: approvals },
-    { what: 'card history events (v4 shape, whole)', count: events },
+    { what: 'card history events (actors in v5 shape)', count: events },
   );
-  if (facts.namedById > 0)
-    kept.push({ what: 'ferret creators named by id (no v4 config left)', count: facts.namedById });
+  if (facts.namedById > 0) kept.push({ what: 'ferret actors named by id (no v4 config left)', count: facts.namedById });
   if (ignored > 0) kept.push({ what: 'non-card files in state/board/tasks ignored (as v4 does)', count: ignored });
   if (unknownFields.size > 0)
     notCarried.push({
