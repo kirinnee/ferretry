@@ -1,3 +1,13 @@
+member	DELETE /v1/shared/me/keys/self	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
+member	GET /v1/shared/catalogs/:catalogId/items/:itemId/:version	changed	today's member dispatcher wraps every response in no-store and the handler reads the catalog from the path (requireCatalog) with no descriptor field; 5.0 declares noStore and catalog: path on the route; behaviour unchanged
+member	GET /v1/shared/catalogs/:catalogId/items/:itemId/versions	changed	today's member dispatcher wraps every response in no-store and the handler reads the catalog from the path (requireCatalog) with no descriptor field; 5.0 declares noStore and catalog: path on the route; behaviour unchanged
+member	GET /v1/shared/catalogs/:catalogId/manifest	changed	today's member dispatcher wraps every response in no-store and the handler reads the catalog from the path (requireCatalog) with no descriptor field; 5.0 declares noStore and catalog: path on the route; behaviour unchanged
+member	GET /v1/shared/me	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
+member	POST /v1/shared/passkeys	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
+member	POST /v1/shared/passkeys/options	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
+member	POST /v1/shared/redeem	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
+member	POST /v1/shared/unlock	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
+member	POST /v1/shared/unlock/options	changed	today's member dispatcher wraps every response in no-store with no descriptor field; 5.0 declares noStore on the route; behaviour unchanged
 route	DELETE /v1/fleet/login/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/:component	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/flows/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged

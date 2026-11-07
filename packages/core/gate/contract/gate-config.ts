@@ -1,12 +1,7 @@
 import { defineConfig, defineState } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import {
-  CAPABILITY_NAMES,
-  type CapabilityGrants,
-  DEFAULT_CAPABILITY_GRANTS,
-  ReadCapabilityGrantsSchema,
-} from './policy.ts';
+import { CAPABILITY_NAMES, type CapabilityGrants, type CapabilityName, DEFAULT_CAPABILITY_GRANTS } from './policy.ts';
 
 /**
  * `config/gate.yaml` (§7.1, §9.2): the daemon-wide half of the grants, the security settings and the remote warden.
@@ -114,9 +109,40 @@ export const RemoteWardenSchema = z.strictObject({
 });
 export type RemoteWarden = z.infer<typeof RemoteWardenSchema>;
 
+/**
+ * One capability as the operator writes it (today's `grantSchemaFor`, daemon/src/lib/runtime/config.ts). SILENCE AND
+ * DAMAGE ARE DIFFERENT THINGS: an omitted capability or axis means "the operator did not say" and reads as the product
+ * default (docs/grants.md, permissive by default); a misspelled key or a non-boolean is a parse failure, so the file is
+ * refused and the last good version stays in effect. Unknown is never permitted and never discarded.
+ */
+const grantSchemaFor = (name: CapabilityName) =>
+  z
+    .strictObject({
+      use: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[name].use),
+      configure: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[name].configure),
+    })
+    .prefault({});
+
+/** The literal shape, proved complete against `CAPABILITY_NAMES`: a capability added there is a compile error here. */
+type CapabilityGrantFields = { readonly [K in CapabilityName]: ReturnType<typeof grantSchemaFor> };
+
+const CAPABILITY_GRANT_FIELDS = {
+  fleet: grantSchemaFor('fleet'),
+  terminal: grantSchemaFor('terminal'),
+  browser: grantSchemaFor('browser'),
+  filesystem: grantSchemaFor('filesystem'),
+  warden: grantSchemaFor('warden'),
+  pairing: grantSchemaFor('pairing'),
+  secrets: grantSchemaFor('secrets'),
+  sharing: grantSchemaFor('sharing'),
+} as const satisfies CapabilityGrantFields;
+
+/** The `grants` block of `gate.yaml` (today's `CapabilityGrantsDocumentSchema`): strict, unknown keys refused. */
+const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FIELDS).prefault({});
+
 export const GateConfigSchema = z.strictObject({
-  /** The daemon-wide half: what any governed caller may do at most. A capability left out is not granted. */
-  grants: ReadCapabilityGrantsSchema.default(DEFAULT_CAPABILITY_GRANTS),
+  /** The daemon-wide half: what any governed caller may do at most. An omitted capability is the product default. */
+  grants: CapabilityGrantsDocumentSchema,
   security: SecuritySettingsSchema.default(DEFAULT_SECURITY_SETTINGS),
   warden: RemoteWardenSchema.default({ remote: false }),
 });

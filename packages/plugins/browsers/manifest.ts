@@ -186,7 +186,7 @@ export default definePlugin({
       verb('browser login stop', { summary: 'close it' }),
       verb('browser proxy test', {
         summary:
-          'check the saved proxy, or one given here without saving it; reports reachable, error class, ms, egress IP',
+          'check the saved browser proxy, or one given here without saving it; reports reachable, error class, ms, egress IP',
       }),
       verb('browser firewall entry', {
         summary: 'print the line to add to /etc/ferretry/loopback-firewall.conf for this user, from browserPorts',
@@ -202,8 +202,7 @@ export default definePlugin({
           'print the systemd unit that verifies it (/etc/systemd/system/ferretry-loopback-firewall-verify.service)',
       }),
       verb('browser firewall timer', {
-        summary:
-          'print the systemd timer that runs the verify unit (/etc/systemd/system/ferretry-loopback-firewall-verify.timer)',
+        summary: 'print the firewall timer that runs the verify unit',
       }),
       verb('browser page list', { summary: 'list the browser pages in the session' }),
       verb('browser page open', { summary: 'open a named page, starting the browser if it is not running' }),

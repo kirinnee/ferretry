@@ -16,7 +16,6 @@ import {
   LIMITED_DEVICE_GRANTS,
   PLUGIN_INVENTORY_DESCRIPTOR,
   projectInventory,
-  ReadCapabilityGrantsSchema,
   STEP_UP_ACTS,
   StepUpActSchema,
   STEP_UP_SUBJECTS,
@@ -78,10 +77,6 @@ describe('policy vocabulary', () => {
   test('refusal codes are spelled as today', () => {
     expect(grantRefusalCode('device-not-granted')).toBe('grant_device_not_granted');
   });
-  test('a stored grant set reads a capability it does not name as not granted', () => {
-    const read = ReadCapabilityGrantsSchema.parse({ fleet: { use: true, configure: false } });
-    expect(read.secrets).toEqual({ use: false, configure: false });
-  });
   test('the closed step-up lists are today’s', () => {
     expect(stepUpSkippableAtMachine(STEP_UP_ACTS.addDevice)).toBe(true);
     expect(stepUpSkippableAtMachine(STEP_UP_ACTS.addTwoFactorKey)).toBe(false);
@@ -125,6 +120,19 @@ describe('standing', () => {
 describe('gate.yaml', () => {
   test('an empty file reads as today’s defaults', () => {
     expect(GateConfigSchema.parse({})).toEqual(DEFAULT_GATE_CONFIG);
+  });
+  test('a misspelled capability in grants is refused, never discarded', () => {
+    const grants = { ...DEFAULT_GATE_CONFIG.grants, termnial: { use: false, configure: false } };
+    expect(GateConfigSchema.safeParse({ grants }).success).toBe(false);
+    expect(
+      GateConfigSchema.safeParse({ grants: { terminal: { use: true, configure: true, usee: false } } }).success,
+    ).toBe(false);
+    expect(GateConfigSchema.safeParse({ grants: { terminal: { use: 'no', configure: false } } }).success).toBe(false);
+  });
+  test('an omitted capability or axis in grants reads as the product default; a written one wins', () => {
+    const read = GateConfigSchema.parse({ grants: { terminal: { use: false } } });
+    expect(read.grants.terminal).toEqual({ use: false, configure: DEFAULT_GATE_CONFIG.grants.terminal.configure });
+    expect(read.grants.secrets).toEqual(DEFAULT_GATE_CONFIG.grants.secrets);
   });
   test('widening a grant, turning the unlock off and honouring a remote warden loosen; narrowing does not', () => {
     const before = DEFAULT_GATE_CONFIG;

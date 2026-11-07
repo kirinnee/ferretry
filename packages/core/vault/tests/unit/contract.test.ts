@@ -16,10 +16,11 @@ import {
   FakeOutputGuard,
   FakeRedaction,
   FakeVault,
+  FakeInputTarget,
   fakeChildEnvironmentValues,
-  goneTargetAdapter,
   inputHoldsConformance,
   inputTargetConformance,
+  liveTargetFailure,
   outputGuardConformance,
   redactionConformance,
   vaultConformance,
@@ -35,16 +36,62 @@ redactionConformance('FakeRedaction', () => {
 vaultConformance('FakeVault', () => ({
   vault: new FakeVault((_, env) => ({ stdout: env.API_KEY ?? '', stderr: '' })),
 }));
-inputTargetConformance('goneTargetAdapter (terminal)', () => ({
-  adapter: goneTargetAdapter,
-  unknownKey: 'nope',
-  kind: 'terminal',
-}));
-inputTargetConformance('goneTargetAdapter (page)', () => ({
-  adapter: goneTargetAdapter,
-  unknownKey: 'nope',
-  kind: 'page',
-}));
+for (const kind of ['terminal', 'page'] as const)
+  inputTargetConformance(`FakeInputTarget (${kind})`, () => {
+    const adapter = new FakeInputTarget(kind);
+    return { adapter, unknownKey: 'nope', kind, live: adapter.live };
+  });
+
+describe('input target conformance catches an adapter that ignores its bindings', () => {
+  /** The unsafe mutant: finds the target, then types whatever changed and whatever `proceed` says. */
+  const unbound = (kind: 'terminal' | 'page') => {
+    const real = new FakeInputTarget(kind);
+    let writes = 0;
+    const adapter = {
+      masking: real.masking,
+      observe: real.observe.bind(real),
+      type: async () => {
+        writes += 1;
+        return 'typed' as const;
+      },
+    };
+    return {
+      adapter,
+      unknownKey: 'nope',
+      kind,
+      live: { key: real.key, change: real.live.change, writes: () => writes },
+    };
+  };
+  for (const which of ['pane', 'foreground', 'echo', 'prompt', 'proceed-refused'] as const)
+    test(`a terminal written after ${which} is refused by the suite`, async () => {
+      expect(await liveTargetFailure(unbound('terminal'), which)).toBe(
+        `a terminal with ${which} answered typed and was written 1 times`,
+      );
+    });
+  for (const which of ['document', 'element', 'proceed-refused'] as const)
+    test(`a page written after ${which} is refused by the suite`, async () => {
+      expect(await liveTargetFailure(unbound('page'), which)).toBe(
+        `a page with ${which} answered typed and was written 1 times`,
+      );
+    });
+  test('an adapter that never writes a live target is refused by the suite', async () => {
+    const real = new FakeInputTarget('terminal');
+    const subject = {
+      adapter: {
+        ...real,
+        masking: real.masking,
+        observe: real.observe.bind(real),
+        type: async () => 'target_changed' as const,
+      },
+      unknownKey: 'nope',
+      kind: 'terminal' as const,
+      live: real.live,
+    };
+    expect(await liveTargetFailure(subject, 'unchanged')).toBe(
+      'an unchanged terminal answered target_changed and was written 0 times',
+    );
+  });
+});
 
 const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 
