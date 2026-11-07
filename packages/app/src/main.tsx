@@ -12,7 +12,8 @@
  */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { connector, type DirectDial, pairOverDirect } from './connect/connector.ts';
+import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';
+import { directoryFetch } from './connect/directory.ts';
 import { registeredConnect } from './connect/provides.ts';
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
@@ -61,6 +62,10 @@ function databases(): IDBFactory | null {
   }
 }
 
+/** The build-time relay directory origin (`vite.config.ts`), the same value the daemon discovers from. */
+declare const __FY_RELAY_DIRECTORY__: string | undefined;
+const directory = directoryFetch(typeof __FY_RELAY_DIRECTORY__ === 'string' ? __FY_RELAY_DIRECTORY__ : undefined);
+
 const storage = localStore();
 const crypto = new WebCryptoRelayCrypto();
 const now = (): number => Date.now();
@@ -85,6 +90,9 @@ const registered = registeredConnect(generated.surfaces, {
   now,
   daemons,
   pairDirect: pairOverDirect(crypto, direct),
+  // Direct first, then the one discovered rendezvous (R582): Connections' walk, read per call.
+  pair: pairOverCarriers(crypto, direct, after, () => registered.pairing),
+  ...(directory === undefined ? {} : { directory }),
 });
 for (const failure of registered.failures)
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
