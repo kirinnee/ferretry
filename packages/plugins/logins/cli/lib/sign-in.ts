@@ -1,4 +1,5 @@
 import type { HarnessLoginCodexMethod, HarnessLoginFlow } from '../../contract/index.ts';
+import { requireMayApply } from './authority.ts';
 import { type LoginsCommandDeps, LoginsCommandError } from './ports.ts';
 
 /** How often a sign-in in progress is read back. */
@@ -37,6 +38,7 @@ export async function runSignIn(
   loginId: string,
   options: { readonly force?: boolean } = {},
 ): Promise<boolean> {
+  await requireMayApply(deps);
   let attempt = await attemptSignIn(deps, loginId, undefined, options.force === true);
   // A harness that FINISHED but left nothing to find did not fail at its device code: look again instead.
   if (attempt.kind === 'failed' && attempt.flow.recheck === true && deps.prompt !== undefined)

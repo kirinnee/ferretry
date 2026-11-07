@@ -1,7 +1,11 @@
+import type { ChangeAuthority } from './authority.ts';
 import type {
   HarnessLoginCodexMethod,
   HarnessLoginFlow,
   HarnessLoginSubmission,
+  LoginChange,
+  LoginChangeOutcome,
+  LoginChangeView,
   LoginList,
   LoginTestResult,
   LoginView,
@@ -35,6 +39,12 @@ export interface ILoginsGateway {
   /** Look in the store of a sign-in that ended `recheck` again, launching nothing. */
   recheckSignIn(flowId: string): Promise<HarnessLoginSubmission>;
   cancelSignIn(flowId: string): Promise<HarnessLoginFlow>;
+  /** What this caller may do to the machine: Gate's grants for the fleet's `configure` axis. */
+  authority(): Promise<ChangeAuthority>;
+  /** Hold one change and say what applying it would do. Nothing is written. */
+  stage(change: LoginChange): Promise<LoginChangeView>;
+  /** Apply exactly the change that was staged. */
+  apply(changeId: string): Promise<LoginChangeOutcome>;
 }
 
 /** The slice of the terminal these verbs print through; the shell's `TerminalIo` is adapted onto it. */

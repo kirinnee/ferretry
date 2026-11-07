@@ -365,3 +365,15 @@ describe('runSignIn', () => {
     });
   });
 });
+
+describe('runSignIn — who may change the machine', () => {
+  it('should refuse a caller that needs a passkey confirmation, before any sign-in starts', async () => {
+    const world = fakeWorld({
+      gateway: { authority: () => ({ mayApply: false, applyRefusal: 'step-up-required' }) },
+    });
+
+    await should(runSignIn(world.deps, 'claude-you')).be.rejectedWith(/passkey confirmation/);
+
+    should(world.gateway.called('startSignIn')).be.empty();
+  });
+});

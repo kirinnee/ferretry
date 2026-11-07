@@ -1,6 +1,9 @@
 import type {
   HarnessLoginFlow,
   HarnessLoginSubmission,
+  LoginChange,
+  LoginChangeOutcome,
+  LoginChangeView,
   LoginList,
   LoginTestResult,
   LoginView,
@@ -8,6 +11,7 @@ import type {
   ModelCatalogsView,
   ProviderPresetCatalog,
 } from '../../../contract/index.ts';
+import type { ChangeAuthority } from '../../../cli/lib/authority.ts';
 import type { ILoginsGateway, LoginsCommandDeps } from '../../../cli/lib/ports.ts';
 
 export const AT = '2026-11-01T10:00:00.000Z';
@@ -66,6 +70,9 @@ export interface FakeAnswers {
   submitSignInCode: () => HarnessLoginSubmission;
   recheckSignIn: () => HarnessLoginSubmission;
   cancelSignIn: () => HarnessLoginFlow;
+  authority: () => ChangeAuthority;
+  stage: () => LoginChangeView;
+  apply: () => LoginChangeOutcome;
 }
 
 export interface Call {
@@ -78,7 +85,11 @@ export class FakeGateway implements ILoginsGateway {
   readonly #answers: Partial<FakeAnswers>;
 
   constructor(answers: Partial<FakeAnswers> = {}) {
-    this.#answers = { recheckSignIn: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }), ...answers };
+    this.#answers = {
+      recheckSignIn: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
+      authority: () => ({ mayApply: true, applyRefusal: 'granted' }),
+      ...answers,
+    };
   }
 
   called(name: string): Call[] {
@@ -124,6 +135,15 @@ export class FakeGateway implements ILoginsGateway {
   }
   async cancelSignIn(flowId: string) {
     return this.#answer('cancelSignIn', [flowId]);
+  }
+  async authority() {
+    return this.#answer('authority', []);
+  }
+  async stage(change: LoginChange) {
+    return this.#answer('stage', [change]);
+  }
+  async apply(changeId: string) {
+    return this.#answer('apply', [changeId]);
   }
 }
 

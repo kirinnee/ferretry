@@ -2,11 +2,14 @@ import { describe, it } from 'bun:test';
 import type { CliContext, PluginClient, TerminalIo } from '@ferretry/kernel/manifest';
 import should from 'should';
 import cli from '../../../cli/index.ts';
+import { GRANTS_ROUTE } from '../../../cli/lib/authority.ts';
 import { ROUTES } from '../../../cli/lib/gateway.ts';
 import manifest from '../../../manifest.ts';
-import { AT, flow, login, loginList } from './fakes.ts';
+import { AT, flow, LATER, login, loginList } from './fakes.ts';
 
 const declaredVerbs = manifest.actions.cli.map(declared => declared.verb);
+
+const OPEN = { capabilities: [{ capability: 'fleet', use: true, configure: true, configureRefusal: 'granted' }] };
 
 const clock = { now: () => AT as never, nowMs: () => Date.parse(AT) };
 
@@ -56,10 +59,10 @@ describe('the logins cli half', () => {
   });
 
   it('should start a sign-in by login id and route key, then finish when the daemon says so', async () => {
-    const { ctx, out, calls } = context({ [ROUTES.signInStart]: flow({ state: 'complete' }) });
+    const { ctx, out, calls } = context({ [GRANTS_ROUTE]: OPEN, [ROUTES.signInStart]: flow({ state: 'complete' }) });
     const code = await cli.build?.(ctx).verbs['login signin']({ args: ['claude-you'], options: { force: true } });
     should(code).equal(0);
-    should(calls[0]).match({
+    should(calls[1]).match({
       route: 'POST /v1/logins/sign-in',
       init: { body: { loginId: 'claude-you', restart: true } },
     });
@@ -68,17 +71,55 @@ describe('the logins cli half', () => {
 
   it('should refuse a Claude sign-in off a terminal in words, with exit 1 and the flow stopped', async () => {
     const { ctx, err, calls } = context({
+      [GRANTS_ROUTE]: OPEN,
       [ROUTES.signInStart]: flow({ state: 'awaiting-code', verificationUrl: 'https://claude.ai/oauth/authorize?x=1' }),
       [ROUTES.signInCancel]: flow({ state: 'failed', reason: 'stopped', remedy: 'again' }),
     });
     const code = await cli.build?.(ctx).verbs['login signin']({ args: ['claude-you'], options: {} });
     should(code).equal(1);
     should(err.join('')).match(/needs a person to paste a code/);
-    should(calls.map(call => call.route)).eql(['POST /v1/logins/sign-in', 'DELETE /v1/logins/sign-in/:flowId']);
+    should(calls.map(call => call.route)).eql([
+      'GET /v1/grants',
+      'POST /v1/logins/sign-in',
+      'DELETE /v1/logins/sign-in/:flowId',
+    ]);
   });
 
-  it('should say a login change is not reachable yet, change nothing, and exit 69', async () => {
-    const { ctx, err, calls } = context();
+  it('should stage and apply a login change at Logins’ own routes, after the grants say this caller may', async () => {
+    const staged = {
+      id: 'chg1',
+      change: { kind: 'login.enable', id: 'work' },
+      summary: 'Enable login work',
+      consequences: [],
+      expiresAt: LATER,
+      state: 'pending',
+    };
+    const { ctx, out, calls } = context({
+      [GRANTS_ROUTE]: OPEN,
+      [ROUTES.stage]: staged,
+      [ROUTES.apply]: { outcome: 'applied' },
+    });
+
+    const code = await cli.build?.(ctx).verbs['login enable']({ args: ['work'], options: {} });
+
+    should(code).equal(0);
+    should(calls.map(call => call.route)).eql([
+      'GET /v1/grants',
+      'POST /v1/logins/changes',
+      'POST /v1/logins/changes/:changeId/apply',
+    ]);
+    should(calls[1]?.init).match({ body: { kind: 'login.enable', id: 'work' } });
+    should(calls[2]?.init).match({ params: { changeId: 'chg1' } });
+    should(out.join('')).match(/Done\./);
+  });
+
+  it('should change nothing for a caller the grants refuse, and exit 1 with the sentence', async () => {
+    const { ctx, err, calls } = context({
+      [GRANTS_ROUTE]: {
+        capabilities: [{ capability: 'fleet', use: true, configure: false, configureRefusal: 'not-granted' }],
+      },
+    });
+
     for (const verb of [
       'login add',
       'login signout',
@@ -87,16 +128,18 @@ describe('the logins cli half', () => {
       'login label',
       'login rm',
     ] as const) {
-      should(await cli.build?.(ctx).verbs[verb]({ args: ['x'], options: {} })).equal(69);
+      should(await cli.build?.(ctx).verbs[verb]({ args: ['claude', 'x'], options: {} })).equal(1);
     }
-    should(err.join('')).match(/nothing was changed/);
-    should(calls).have.length(0);
+
+    should(err.join('')).match(/the operator has not granted it/);
+    should(calls.every(call => call.route === 'GET /v1/grants')).be.true();
   });
 });
 
 describe('the logins cli half without a timer', () => {
   it('should refuse to wait on a sign-in in words rather than poll in a loop, and exit 1', async () => {
     const { ctx, err } = context({
+      [GRANTS_ROUTE]: OPEN,
       [ROUTES.signInStart]: flow({
         harness: 'codex',
         state: 'awaiting-approval',

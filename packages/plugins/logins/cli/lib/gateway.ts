@@ -7,6 +7,12 @@ import {
   type HarnessLoginSubmission,
   HarnessLoginSubmissionSchema,
   HarnessLoginSubmitRequestSchema,
+  type LoginChange,
+  type LoginChangeOutcome,
+  LoginChangeOutcomeSchema,
+  LoginChangeSchema,
+  type LoginChangeView,
+  LoginChangeViewSchema,
   LoginCheckRequestSchema,
   type LoginList,
   LoginListSchema,
@@ -22,6 +28,7 @@ import {
   type ProviderPresetCatalog,
   ProviderPresetCatalogSchema,
 } from '../../contract/index.ts';
+import { authorityOf, type ChangeAuthority, GRANTS_ROUTE } from './authority.ts';
 import type { ILoginsGateway } from './ports.ts';
 
 /** The route keys the manifest declares; a typo here is a missing route, not a 404 at run time. */
@@ -36,6 +43,8 @@ export const ROUTES = {
   signInStatus: 'GET /v1/logins/sign-in/:flowId',
   signInSubmit: 'POST /v1/logins/sign-in/:flowId',
   signInCancel: 'DELETE /v1/logins/sign-in/:flowId',
+  stage: 'POST /v1/logins/changes',
+  apply: 'POST /v1/logins/changes/:changeId/apply',
 } as const;
 
 /**
@@ -102,5 +111,19 @@ export class ClientLoginsGateway implements ILoginsGateway {
 
   async cancelSignIn(flowId: string): Promise<HarnessLoginFlow> {
     return HarnessLoginFlowSchema.parse(await this.client.call(ROUTES.signInCancel, { params: { flowId } }));
+  }
+
+  /** An answer this build cannot read is the stricter reading (`undetermined`); a failed read is the caller's to see. */
+  async authority(): Promise<ChangeAuthority> {
+    return authorityOf(await this.client.call(GRANTS_ROUTE));
+  }
+
+  async stage(change: LoginChange): Promise<LoginChangeView> {
+    const body = LoginChangeSchema.parse(change);
+    return LoginChangeViewSchema.parse(await this.client.call(ROUTES.stage, { body }));
+  }
+
+  async apply(changeId: string): Promise<LoginChangeOutcome> {
+    return LoginChangeOutcomeSchema.parse(await this.client.call(ROUTES.apply, { params: { changeId } }));
   }
 }

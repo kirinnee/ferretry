@@ -4,7 +4,12 @@ import manifest from '../manifest.ts';
 import { ClientLoginsGateway } from './lib/gateway.ts';
 import {
   loginCheck,
-  loginChangeUnavailable,
+  loginAdd,
+  loginDisable,
+  loginEnable,
+  loginLabel,
+  loginRm,
+  loginSignout,
   loginLs,
   loginModelsList,
   loginModelsRefresh,
@@ -39,16 +44,16 @@ function outputOver(io: TerminalIo): ILoginsOutput & { readonly exitCode: () => 
 /** Every verb the manifest declares, by its exact verb line. A verb the manifest adds is a type error here. */
 const VERB_BODIES = {
   'login ls': loginLs,
-  'login add': loginChangeUnavailable('login add'),
+  'login add': loginAdd,
   'login check': loginCheck,
   'login test': loginTest,
   'login presets': loginPresets,
   'login signin': loginSignin,
-  'login signout': loginChangeUnavailable('login signout'),
-  'login disable': loginChangeUnavailable('login disable'),
-  'login enable': loginChangeUnavailable('login enable'),
-  'login label': loginChangeUnavailable('login label'),
-  'login rm': loginChangeUnavailable('login rm'),
+  'login signout': loginSignout,
+  'login disable': loginDisable,
+  'login enable': loginEnable,
+  'login label': loginLabel,
+  'login rm': loginRm,
   'login models list': loginModelsList,
   'login models refresh': loginModelsRefresh,
 } as const satisfies Record<string, VerbBody>;
