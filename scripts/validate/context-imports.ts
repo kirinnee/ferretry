@@ -1,0 +1,102 @@
+/**
+ * `context-imports` (§2.1, §7.9, spine §4): a package imports another's non-contract files; a contract imports anything
+ * but `zod`, `@ferretry/std`, `@ferretry/kernel/contract` and other contracts; a manifest imports anything but the
+ * kernel's manifest SDK, the kernel contract and contracts. `./daemon`, `./app`, `./cli`, `./manifest` are imported
+ * only by the generated registries. Type-only imports count: a type edge is still an edge.
+ */
+import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+import type { Area, ImportEdge } from '../gen/lib/imports.ts';
+
+const CONTRACT_EXTERNALS = new Set(['zod']);
+const MANIFEST_EXTERNALS = new Set(['zod']);
+
+/** Why an edge is refused, or undefined when it is allowed. Pure; the planted-violation tests drive it. */
+export function refusal(edge: ImportEdge): string | undefined {
+  const from = edge.fromArea;
+  if (from === 'generated') return undefined;
+  if (edge.external !== undefined) {
+    if ((from === 'contract' || from === 'kernel-contract') && !CONTRACT_EXTERNALS.has(edge.external))
+      return `a contract imports only zod, @ferretry/std, @ferretry/kernel/contract and contracts, not ${edge.external}`;
+    if (from === 'manifest' && !MANIFEST_EXTERNALS.has(edge.external))
+      return `a manifest imports only the kernel SDK, the kernel contract and contracts, not ${edge.external}`;
+    return undefined;
+  }
+  const to = edge.toArea as Area | undefined;
+  const toPkg = edge.toPkg;
+  if (to === undefined || toPkg === undefined) return undefined;
+  const same = toPkg === edge.fromPkg;
+  const toStd = toPkg.kind === 'shared';
+  const name = `${toPkg.name}${to === 'root' ? '' : ` (${to})`}`;
+
+  // Rule 2: a contract's imports.
+  if (from === 'contract' || from === 'kernel-contract') {
+    if (toStd || to === 'kernel-contract' || to === 'contract') return undefined;
+    return `a contract imports only zod, @ferretry/std, @ferretry/kernel/contract and contracts, not ${name}`;
+  }
+  // Rule 4: a manifest's imports.
+  if (from === 'manifest' || from === 'kernel-plugin') {
+    if (to === 'kernel-manifest' || to === 'kernel-contract' || to === 'contract' || toStd) return undefined;
+    return `a manifest imports only @ferretry/kernel/manifest, @ferretry/kernel/contract and contracts, not ${name}`;
+  }
+  if (toStd) return undefined;
+
+  if (same) {
+    if (from === 'tests' || from === 'other' || from === 'root') return undefined;
+    if (from.startsWith('kernel-')) {
+      if (from === 'kernel-manifest' && (to === 'kernel-host' || to === 'kernel-testing'))
+        return `the manifest SDK imports only the kernel contract, not ${to}`;
+      return undefined;
+    }
+    if (from === 'contract-testing') {
+      if (to === 'contract' || to === 'contract-testing') return undefined;
+      return `contract/testing imports only its contract and other contracts' testing, not ${to}`;
+    }
+    // A half: its own area, its manifest and its contract.
+    if (to === from || to === 'manifest' || to === 'contract') return undefined;
+    return `the ${from} half imports its own ${to} files; halves share only the manifest and the contract`;
+  }
+
+  // Another package.
+  switch (to) {
+    case 'kernel-contract':
+    case 'contract':
+      return undefined;
+    case 'kernel-manifest':
+      return from === 'contract-testing' || ['daemon', 'app', 'cli', 'tests', 'root', 'other'].includes(from)
+        ? undefined
+        : `${from} may not import the manifest SDK`;
+    case 'kernel-testing':
+    case 'contract-testing':
+      return from === 'tests' || from === 'contract-testing' || from === 'kernel-testing'
+        ? undefined
+        : `${to === 'kernel-testing' ? '@ferretry/kernel/testing' : `${toPkg.name}/contract/testing`} is for tests only`;
+    case 'kernel-host':
+      return edge.fromPkg.kind === 'shell' || from === 'tests' || from === 'kernel-testing'
+        ? undefined
+        : '@ferretry/kernel/host is imported only by the shells and the test host';
+    default:
+      return `imports ${name}; another package is reached only through its contract (the generated registries load halves)`;
+  }
+}
+
+export const check: Check = {
+  name: 'context-imports',
+  summary: 'packages meet only through contracts',
+  async run(ctx) {
+    const model = await ctx.model();
+    const findings: Finding[] = [];
+    for (const edge of model.edges) {
+      if (ctx.packageId !== undefined && edge.fromPkg.id !== ctx.packageId) continue;
+      const why = refusal(edge);
+      if (why !== undefined)
+        findings.push({
+          check: 'context-imports',
+          where: `${edge.from.slice(model.ws.root.length + 1)}:${edge.line}`,
+          message: `${edge.specifier}: ${why}`,
+        });
+    }
+    return findings;
+  },
+};
+
+if (import.meta.main) await runMain(check, process.argv.slice(2));
