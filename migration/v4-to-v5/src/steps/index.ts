@@ -14,6 +14,7 @@ import { accountsStep } from './accounts.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
 import { catalogsStep } from './catalogs.ts';
+import { skillFoldersStep } from './skill-folders.ts';
 import { conversationStep } from './conversation.ts';
 import { daemonSettingsStep } from './daemon-settings.ts';
 import { ferretsStep } from './ferrets.ts';
@@ -49,7 +50,8 @@ export interface Step {
   readonly run: (ctx: StepContext) => Promise<StepReport>;
 }
 
-function pending(step: Omit<Step, 'run'>, waitsFor: string): Step {
+/** A step whose v5 schema has not landed: it reports `pending`, so the run exits 3 and writes no `home.json`. */
+export function pending(step: Omit<Step, 'run'>, waitsFor: string): Step {
   return {
     ...step,
     run: async () => ({
@@ -76,6 +78,8 @@ export const STEPS: readonly Step[] = [
   usageStep,
   wardenStep,
   catalogsStep,
+  // The folders the install records carried by Catalogs name.
+  skillFoldersStep,
   settingsStep,
   daemonSettingsStep,
   // After Settings and Daemon settings: config/pack.yaml, models-guide.yaml and routing.json are this step's alone.
