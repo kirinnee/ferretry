@@ -20,6 +20,7 @@ describe('waiting out a restart', () => {
     should(classifyUnreachable(Object.assign(new Error('x'), { code: 'ECONNREFUSED' }))).equal('refused');
     should(classifyUnreachable({ cause: { code: 'ECONNRESET' } })).equal('dropped');
     should(classifyUnreachable(new Error('timeout'))).be.undefined();
+    should(classifyUnreachable(Object.assign(new Error('x'), { code: 'EACCES' }))).be.undefined();
   });
 
   it('should read the still-starting answer as a refusal, and leave every other response unread', async () => {

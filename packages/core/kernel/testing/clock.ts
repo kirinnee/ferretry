@@ -61,4 +61,5 @@ export function fixedClock(start: string | Instant = '2026-11-06T09:00:00.000Z')
   return clock;
 }
 
+/** @public Fake-time helper for ports to come. */
 export { milliseconds };

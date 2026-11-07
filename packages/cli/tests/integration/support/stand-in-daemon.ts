@@ -1,6 +1,6 @@
 import { afterEach } from 'bun:test';
 
-export interface SeenRequest {
+interface SeenRequest {
   readonly method: string;
   readonly path: string;
   readonly headers: Readonly<Record<string, string>>;

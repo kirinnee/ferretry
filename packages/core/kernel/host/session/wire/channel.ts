@@ -66,7 +66,11 @@ export type SealResult =
   | { readonly ok: true; readonly state: ChannelState; readonly frame: SessionFrame }
   | ChannelFailure;
 
-export async function sealRecord(crypto: SessionCrypto, state: ChannelState, plaintext: Uint8Array): Promise<SealResult> {
+export async function sealRecord(
+  crypto: SessionCrypto,
+  state: ChannelState,
+  plaintext: Uint8Array,
+): Promise<SealResult> {
   if (plaintext.length > MAX_PLAINTEXT_BYTES) {
     return { ok: false, code: SESSION_CLOSE_CODES.frameTooLarge, reason: 'payload exceeds one record' };
   }

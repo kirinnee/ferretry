@@ -1,6 +1,6 @@
 import type { Duration, Instant, Result } from '@ferretry/std';
-import type { ActRunner } from './act.ts';
-import type { FencedPath, FolderRefusal, Redaction } from './bound.ts';
+import type { ActRunner, OpaqueId } from './act.ts';
+import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
@@ -21,9 +21,17 @@ export interface KernelPorts {
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
   readonly act: ActRunner;
+  readonly ids: IdsPort;
   readonly redaction: Redaction;
   readonly snapshot: SnapshotPort;
   readonly lifecycle: LifecyclePort;
+}
+
+// ids ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The kernel's id factory (§4.7): the only source of an `OpaqueId` a write-only act may hand back. */
+export interface IdsPort {
+  mint(prefix: string): OpaqueId;
 }
 
 // clock ────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -99,7 +107,7 @@ export interface StatePort {
 export interface ConfigPort {
   file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined;
   collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape>;
-  watch(def: ConfigFileDef | ConfigCollectionDef, listener: () => void): Cancel;
+  watch(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: () => void): Cancel;
 }
 
 // roots ────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -180,8 +188,11 @@ export interface WorkersPort {
 
 export interface SpawnOptions {
   readonly cwd?: FencedPath;
-  /** Names only; values never pass through a plugin. A secret goes through Vault's `run`. */
-  readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Plain values the half owns, or a Vault {@link ChildEnvironment} (secrets resolved for this child). A handle is
+   * opened inside the kernel's adapter at exec time; its values never pass through the plugin (lead decision 9).
+   */
+  readonly env?: Readonly<Record<string, string>> | ChildEnvironment;
   readonly stdin?: string | Uint8Array;
   readonly timeout?: Duration;
   readonly signal?: AbortSignal;

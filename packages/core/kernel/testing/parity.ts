@@ -1,6 +1,7 @@
 import type { Manifest } from '../manifest/types.ts';
 
 /** One difference: where (`route GET /v1/x`) and what differs. */
+/** @public Parity finding shape, consumed by the ports to come. */
 export interface Finding {
   readonly check: string;
   readonly where: string;

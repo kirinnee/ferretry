@@ -19,7 +19,7 @@ set -euo pipefail
 # and so is the README Wrangler writes into the output, which is stamped with the build time.
 #
 # The default mode needs the relay package's dependencies installed (`bun install --frozen-lockfile`
-# in packages/relay) and reads no credentials and no network. `--deployed` reads Cloudflare with the
+# in the Connections plugin's Worker, packages/plugins/connections/worker) and reads no credentials and no network. `--deployed` reads Cloudflare with the
 # CLOUDFLARE_* environment and prints NOTHING whenever it cannot tell — the first deploy, an API
 # change, a version published by hand — because the caller treats unknown as "deploy": skipping on a
 # guess would leave a stale Worker serving, which is the worse mistake.
@@ -27,7 +27,7 @@ set -euo pipefail
 # Output: one line, `bundle-` and 16 hex characters — short enough for a Worker version tag.
 
 root_dir="$(git rev-parse --show-toplevel)"
-relay_dir="${root_dir}/packages/relay"
+relay_dir="${root_dir}/packages/plugins/connections/worker"
 config="wrangler.hosted.json"
 cd "${relay_dir}"
 

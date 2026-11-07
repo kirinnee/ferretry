@@ -4,6 +4,9 @@
   "private": true,
   "description": "The core host and the plugin SDK: the contract leaf, the manifest SDK, the test host and the daemon host",
   "type": "module",
+  "bin": {
+    "fyd": "host/fyd.ts"
+  },
   "ferretry": {
     "id": "kernel",
     "manifest": "./plugin.ts"
@@ -17,6 +20,7 @@
   },
   "dependencies": {
     "@ferretry/std": "workspace:*",
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "sideEffects": false

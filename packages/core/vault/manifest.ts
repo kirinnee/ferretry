@@ -2,6 +2,7 @@ import { AskSources, AsksPort } from '@ferretry/core-asks/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import {
+  ChildEnvironmentPort,
   HoldsChanged,
   HoldsFile,
   InputAskRefSchema,
@@ -44,6 +45,7 @@ export default definePlugin({
     outputGuard: OutputGuardPort,
     inputHolds: InputHoldsPort,
     redaction: RedactionPort,
+    childEnvironments: ChildEnvironmentPort,
   },
   data: {
     state: [VaultFile, VaultKeyFile, HoldsFile, InputRequestFiles],

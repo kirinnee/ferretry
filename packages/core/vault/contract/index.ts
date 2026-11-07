@@ -25,6 +25,8 @@ export {
   type OpaqueId,
   type Op,
   OPS,
+  type ChildEnvironmentOpener,
+  ChildEnvironmentPort,
   type OutputGuard,
   OutputGuardPort,
   type Picture,

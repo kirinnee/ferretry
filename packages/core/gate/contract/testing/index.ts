@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import {
+  type Actor,
   type Admission,
   type AdmissionDecision,
   type AdmissionInput,
@@ -13,6 +14,7 @@ import {
   errorResponse,
   type FerretId,
   type HolderId,
+  type InventoryEntry,
   type MemberStanding,
   type PolicyRef,
   type ScopedRoute,
@@ -362,7 +364,7 @@ export class StandInAdmission implements Admission {
     const standing = this.standingFor(request);
     if (standing === undefined)
       return descriptor.minimum === 'none' && descriptor.wardenRemedy === undefined
-        ? { outcome: 'admitted', standing: {} }
+        ? { outcome: 'admitted', standing: {}, actor: 'ferret' }
         : { outcome: 'refused', response: errorResponse(401, 'this call needs a credential', 'unauthorized') };
     if (descriptor.caller === 'person' && callerIsAgent(standing.credential, standing.actor))
       return {
@@ -413,7 +415,13 @@ export class StandInAdmission implements Admission {
           response: errorResponse(403, 'needs a passkey confirmation', STEP_UP_REQUIRED_CODE),
         };
     }
-    return { outcome: 'admitted', standing };
+    const actor: Actor =
+      standing.credential?.tokenClass === 'warden'
+        ? 'warden'
+        : callerIsAgent(standing.credential, standing.actor)
+          ? 'ferret'
+          : 'owner-tools';
+    return { outcome: 'admitted', standing, actor };
   }
 
   admitMember(): AdmissionDecision<MemberStanding> {
@@ -425,5 +433,10 @@ export class StandInAdmission implements Admission {
 
   readmit(): boolean {
     return true;
+  }
+
+  /** Every package: the stand-in does not project (Gate's real §9.6 projection does). */
+  inventory(_request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] {
+    return entries;
   }
 }

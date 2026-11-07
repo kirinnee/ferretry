@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { closeAck, decideHome, insideFence, type MintedIds, type OpaqueId } from '../../contract/index.ts';
+import {
+  CARRY_OVER_PROMPT,
+  closeAck,
+  decideHome,
+  insideFence,
+  type MintedIds,
+  type OpaqueId,
+} from '../../contract/index.ts';
 
 const minted = (ids: readonly string[]): MintedIds => {
   const set = new Set(ids);
@@ -48,7 +55,7 @@ describe('decideHome (§9.3)', () => {
   test('a non-empty folder with no home.json is refused, naming the carry-over prompt', () => {
     const decision = decideHome('/h', { kind: 'no-home-json' });
     expect(decision.kind).toBe('refuse');
-    expect(decision.kind === 'refuse' && decision.sentence).toContain('clean-slate-prompt.md');
+    expect(decision.kind === 'refuse' && decision.sentence).toContain(CARRY_OVER_PROMPT);
   });
   test('a lower, higher or unreadable home.json is refused', () => {
     const at = '2026-11-06T09:00:00Z';

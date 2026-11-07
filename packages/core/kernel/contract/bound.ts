@@ -31,7 +31,8 @@ export type AdmissionInput =
     };
 
 export type AdmissionDecision<Standing extends object = CallStanding> =
-  | { readonly outcome: 'admitted'; readonly standing: Standing }
+  /** `actor` is who an act runs as (§4.7), stamped by Gate from the credential; the kernel carries it to `kernel.act`. */
+  | { readonly outcome: 'admitted'; readonly standing: Standing; readonly actor: Actor }
   | { readonly outcome: 'refused'; readonly response: ApiResponse };
 
 /**
@@ -44,6 +45,19 @@ export interface Admission<Standing extends object = CallStanding, Member extend
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<Member>;
   /** Re-admits an open stream after a provider's `generation()` moved; false closes it (`4401`). */
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean;
+  /**
+   * Projects `GET /v1/plugins` for this caller (§9.6): every package for the owner on the host and a ferret; for a
+   * device, core, Access and each plugin with a route, tool or event its grants admit; core and Warden for the remote
+   * warden. Anything not returned is omitted, so a limited device cannot discover it.
+   */
+  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+}
+
+/** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */
+export interface InventoryEntry {
+  readonly id: string;
+  readonly on: boolean;
+  readonly contract: string;
 }
 
 export const AdmissionPort = defineBoundPort<Admission>('admission', 'gate');
@@ -117,10 +131,37 @@ export interface WorkFolders {
 
 export const WorkFoldersPort = defineBoundPort<WorkFolders>('work-folders', 'ferrets');
 
+// ─── Child environments (Vault) ───────────────────────────────────────────────────────────────────────────────────
+
+declare const childEnvironmentBrand: unique symbol;
+
+/**
+ * An environment whose `${secret:NAME}` references the Vault resolved for ONE child process (lead decision 9).
+ * Opaque: no field, no enumeration, no JSON (it serialises as names only). A half hands it to `kernel.spawn`, and the
+ * kernel's adapter opens it at exec time, so the values are in that child's environment and in no plugin's data
+ * (secrets.md "use, never read"). Vault's contract re-exports this type.
+ */
+export interface ChildEnvironment {
+  readonly [childEnvironmentBrand]: true;
+  /** The variable names it sets, for the launch record. Never a value. */
+  readonly names: readonly string[];
+}
+
+/**
+ * Opens a {@link ChildEnvironment} into its values, for the kernel's spawn adapter only: bound by the kernel, never
+ * handed to a half. `undefined` = not a handle this Vault minted (or already spent).
+ */
+export interface ChildEnvironmentOpener {
+  open(env: ChildEnvironment): Readonly<Record<string, string>> | undefined;
+}
+
+export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');
+
 export const KERNEL_BOUND_PORTS = [
   AdmissionPort,
   OutputGuardPort,
   InputHoldsPort,
   RedactionPort,
   WorkFoldersPort,
+  ChildEnvironmentPort,
 ] as const;
