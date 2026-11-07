@@ -3,6 +3,7 @@ import { HarnessConfigSchema as ClaudeHarnessSchema } from '@ferretry/plugin-cla
 import { HarnessConfigSchema as CodexHarnessSchema } from '@ferretry/plugin-codex/contract';
 import { AgendaConfigSchema } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
+import { CatalogsConfigSchema } from '@ferretry/plugin-catalogs/contract';
 import { CAPABILITY_NAMES, DEFAULT_SECURITY_SETTINGS, GateConfigSchema } from '@ferretry/core-gate/contract';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -264,12 +265,29 @@ test('a shorter member unlock carries into gate.yaml security', async () => {
   expect(report.kept).toContainEqual({ what: 'member unlock days (from daemon.json catalogs)', count: 1 });
 });
 
-test('a restriction v5 cannot express yet (catalog links off) leaves the step pending; the rest is written', async () => {
-  await daemon({ catalogs: { linkStore: { enabled: false } }, grants: { sharing: { use: false } } });
+test('daemon.json catalogs becomes catalogs.yaml: download links off stay off, the member unlock is v4’s', async () => {
+  await daemon({
+    catalogs: { linkStore: { enabled: false }, memberUnlockDays: 7 },
+    grants: { sharing: { use: false } },
+  });
   const report = await daemonSettingsStep.run(f.ctx());
-  expect(report.status).toBe('pending');
-  expect(report.note).toContain('catalogs.linkStore');
+  expect(report.status).toBe('converted');
+  expect(await read('catalogs.yaml', CatalogsConfigSchema)).toEqual({
+    linkStore: { enabled: false },
+    memberUnlockDays: 7,
+  });
+  expect((await read('gate.yaml', GateConfigSchema)).security.memberUnlockDays).toBe(7);
   expect((await read('gate.yaml', GateConfigSchema)).grants.sharing).toEqual({ use: false, configure: false });
+  expect(report.kept).toContainEqual({ what: 'catalog settings', count: 2 });
+});
+
+test('the owner’s own link store is carried, with v4’s default member unlock written out', async () => {
+  await daemon({ catalogs: { linkStore: { url: 'https://links.example.com' } } });
+  expect((await daemonSettingsStep.run(f.ctx())).status).toBe('converted');
+  expect(await read('catalogs.yaml', CatalogsConfigSchema)).toEqual({
+    linkStore: { url: 'https://links.example.com' },
+    memberUnlockDays: 30,
+  });
 });
 
 test('a dry run writes nothing and still reports what it would carry', async () => {

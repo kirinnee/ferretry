@@ -7,7 +7,7 @@
  * | ---------------------------------------------------- | ----------------------------------------------------------------- |
  * | `daemon.json` `grants`                               | `gate.yaml` `grants`: all eight capabilities, both axes, EXPLICIT |
  * | `state/security.json` `settings`                     | `gate.yaml` `security`, explicit (v4's default or strictest)      |
-| `daemon.json` `catalogs.memberUnlockDays`            | `gate.yaml` `security.memberUnlockDays` (v4's effective value)    |
+ * | `daemon.json` `catalogs`                             | `catalogs.yaml` `linkStore`, `memberUnlockDays` (also in `gate.yaml`) |
  * | `daemon.json` `carriers` bind, else `host` + `port`  | `connections.yaml` `direct`                                       |
  * | `daemon.json` `carriers` relays, else `relay`        | `connections.yaml` `relay` (the same ordered list, up to four)    |
  * | `daemon.json` `carriers` tunnel                      | `connections.yaml` `tunnel`                                       |
@@ -22,8 +22,7 @@
  * (`configure` only where `use` is on, v4's rule), so no v5 default is ever relied on; the parsed v5 file is then
  * compared axis by axis and setting by setting with what v4 enforced, and any widening fails the step. A capability
  * v5 cannot name fails the step by name. A carrier the owner switched off stays `enabled: false`. A restriction v5
- * has no field for yet (the catalog link store turned off or the owner's own) leaves the step `pending` rather than
- * being dropped. Nothing here is a credential (v4's grants doc keeps the password verifier out of daemon.json, and
+ * has no field for yet would leave the step `pending` rather than be dropped. Nothing here is a credential (v4's grants doc keeps the password verifier out of daemon.json, and
  * 4.291.5 retired the operator password): `secretEnvironment` and `usage.url` are not carried and never echoed, and
  * every value written passes the raw-secret rule. The report names keys, never values.
  *
@@ -35,6 +34,7 @@ import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
 import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
 import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
+import { CatalogsConfigFile, CatalogsConfigSchema, catalogConfigLoosens } from '@ferretry/plugin-catalogs/contract';
 import {
   CAPABILITY_NAMES,
   GateConfigFile,
@@ -75,6 +75,7 @@ export const CONNECTIONS_CONFIG: V5ConfigTarget = {
   schema: ConnectionsConfigSchema,
 };
 const GATE_CONFIG = GateConfigFile as V5ConfigTarget;
+const CATALOGS_CONFIG = CatalogsConfigFile as V5ConfigTarget;
 
 /** `daemon.json` keys v5 declares no field for, and why (listed only when the document wrote them). */
 const KEY_NOT_CARRIED: Readonly<Record<string, string>> = {
@@ -128,6 +129,7 @@ interface Plan {
   security?: V4SecuritySettings;
   carriers?: { relay: boolean; tunnel: boolean; webrtc: boolean };
   memberUnlockDays?: number;
+  catalogs?: { linkStore: unknown; memberUnlockDays: number };
 }
 
 const count = (plan: Plan, what: string, n = 1): void => {
@@ -287,21 +289,25 @@ function planAgenda(plan: Plan, document: V4DaemonDocument): void {
     });
 }
 
-/** The link store: a restriction v5 has no field for yet waits; discovery (the default) needs no field. */
+/**
+ * `daemon.json` `catalogs` → `catalogs.yaml` (Catalogs reads both keys live): the link store as written (discovery,
+ * the owner's own store, or download links off) and v4's effective member unlock. Gate keeps its own copy of the
+ * member unlock in `gate.yaml` `security`, written with the security settings.
+ */
 function planCatalogs(plan: Plan, document: V4DaemonDocument): void {
   const catalogs = document.catalogs;
   if (catalogs === undefined) return;
-  const store = catalogs.linkStore;
-  if (store !== undefined && !('source' in store))
-    plan.waiting.push(
-      `${V4_DAEMON_JSON} catalogs.linkStore (${'url' in store ? 'the owner’s own link store' : 'download links turned off'}: v5 Catalogs declares no config schema yet)`,
-    );
-  // memberUnlockDays is Gate's in v5 (`gate.yaml` `security`), written with the security settings.
-  if (store !== undefined && 'source' in store)
-    plan.dropped.push({
-      what: `${V4_DAEMON_JSON} catalogs.linkStore`,
-      why: 'the hosted link store found by discovery, which is v5 Catalogs’ own default reading',
-    });
+  const from = `${V4_DAEMON_JSON} catalogs`;
+  const linkStore = catalogs.linkStore ?? { source: 'discovery' as const };
+  const memberUnlockDays = catalogs.memberUnlockDays ?? V4_MEMBER_UNLOCK_DAYS_DEFAULT;
+  add(plan, CATALOGS_CONFIG, 'linkStore', { ...linkStore }, from);
+  add(plan, CATALOGS_CONFIG, 'memberUnlockDays', memberUnlockDays, from);
+  plan.catalogs = { linkStore, memberUnlockDays };
+  count(
+    plan,
+    'catalog settings',
+    (catalogs.linkStore === undefined ? 0 : 1) + (catalogs.memberUnlockDays === undefined ? 0 : 1),
+  );
 }
 
 function planGrants(plan: Plan, document: V4DaemonDocument): void {
@@ -392,8 +398,19 @@ function textOf(ctx: StepContext, planned: Planned): string {
 const readBack = (text: string): unknown => parseDocument(text, YAML_OPTIONS).toJS() ?? {};
 
 /** What v5 will enforce, compared with what v4 enforced: anything wider fails the step, naming the key. */
-function widened(plan: Plan, gateText: string | undefined, connectionsText: string | undefined): string[] {
+function widened(
+  plan: Plan,
+  gateText: string | undefined,
+  connectionsText: string | undefined,
+  catalogsText: string | undefined,
+): string[] {
   const found: string[] = [];
+  if (catalogsText !== undefined && plan.catalogs !== undefined) {
+    // The contract's own rule: what would loosen against what v4 enforced.
+    const was = CatalogsConfigSchema.parse(plan.catalogs);
+    for (const sentence of catalogConfigLoosens(was, CatalogsConfigSchema.parse(readBack(catalogsText))))
+      found.push(`catalogs (${sentence})`);
+  }
   if (gateText !== undefined && plan.grants !== undefined && plan.security !== undefined) {
     const gate = GateConfigSchema.parse(readBack(gateText));
     for (const name of CAPABILITY_NAMES) {
@@ -448,6 +465,7 @@ export const daemonSettingsStep: Step = {
         plan,
         texts.get(configPath(GATE_CONFIG))?.text,
         texts.get(configPath(CONNECTIONS_CONFIG))?.text,
+        texts.get(configPath(CATALOGS_CONFIG))?.text,
       );
       if (wider.length > 0)
         throw new V4InputError(
