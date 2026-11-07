@@ -5,8 +5,8 @@ import {
   reconcileHostedRelayReservations,
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
-} from '../../src/adapters/index.ts';
-import { HostedRelayControlDurableObject } from '../../src/adapters/worker.ts';
+} from '../../../worker/src/adapters/index.ts';
+import { HostedRelayControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
   DEFAULT_HOSTED_RELAY_LIMITS,
   HOSTED_RELAY_DAY_MILLISECONDS,
@@ -19,8 +19,8 @@ import {
   MAX_FRAME_BYTES,
   SESSION_CLOSE_CODES,
   SUPERSEDED_HOSTED_RELAY_LIMITS,
-} from '../../src/lib/index.ts';
-import { FakeHostedRelayControlStorage } from '../support/hosted-control-fakes.ts';
+} from '../../../worker/src/lib/index.ts';
+import { FakeHostedRelayControlStorage } from '../../support/worker/hosted-control-fakes.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const otherDaemonId = `fy_daemon_${'b'.repeat(43)}`;

@@ -24,7 +24,7 @@
  * {@link start} because the carrier's listener serves the dispatcher the boot builds later.
  */
 
-import { TUNNEL_OFF_SENTENCE, type TunnelStatusView, TunnelStatusViewSchema } from '../../../shared/tunnel-wire.ts';
+import { TUNNEL_OFF_SENTENCE, type TunnelStatusView, TunnelStatusViewSchema } from '../../../contract/index.ts';
 import type { DaemonTunnelCarrierEntry } from './entry.ts';
 import type { TunnelCarrierStatus } from './carrier.ts';
 

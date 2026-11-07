@@ -21,7 +21,7 @@ import type {
   CloudflareTunnelApi,
   TunnelAccount,
   TunnelIngressRule,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 
 export const FAKE_CONNECTOR_TOKEN_PREFIX = 'fake-connector-token-';
 

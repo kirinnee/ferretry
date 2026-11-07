@@ -15,10 +15,10 @@
  * simply has not been given a tunnel yet.
  */
 
-import { TUNNEL_SERVICE_PATH, TunnelServiceAdvertisementSchema } from '../../worker/src/lib/index.ts';
+import { TUNNEL_SERVICE_PATH, TunnelServiceAdvertisementSchema } from '../../contract/index.ts';
 const HOSTED_RELAY_TIMEOUT_MS = 4_000;
 type HostedRelayFetch = (url: string, init?: RequestInit) => Promise<Response>;
-import { SocketEndpointSchema } from '../../worker/src/lib/index.ts';
+import { TunnelServiceEndpointSchema as SocketEndpointSchema } from '../../contract/index.ts';
 
 /** What this document knows about the hosted tunnel service. */
 export type TunnelServiceState = 'available' | 'unavailable';

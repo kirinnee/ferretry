@@ -25,7 +25,20 @@ export const processes: SpawnPort = {
     throw new Error('test does not use run');
   },
   start: (program, args, options) => {
-    const child = Bun.spawn([program, ...args], { env: options?.env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+    const child = Bun.spawn([program, ...args], {
+      env:
+        options?.env === undefined
+          ? undefined
+          : Object.fromEntries(
+              Object.entries(options.env).map(([key, value]) => {
+                if (typeof value !== 'string') throw new Error('test spawn cannot open a secret environment handle');
+                return [key, value];
+              }),
+            ),
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     return {
       pid: child.pid,
       stdout: child.stdout,

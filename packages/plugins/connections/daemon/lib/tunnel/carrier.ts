@@ -27,8 +27,8 @@
  * provisioned would be a worse product than one that says so and serves.
  */
 
-import type { TunnelState } from '../../../shared/tunnel-wire.ts';
-import type { SessionCrypto, TunnelProvision, TunnelRelease } from '../../../worker/src/lib/index.ts';
+import type { TunnelState } from '../../../contract/index.ts';
+import type { TunnelProvision, TunnelRelease } from '../../../contract/index.ts';
 import type { DaemonTunnelCarrierEntry } from './entry.ts';
 import { type CloudflaredLocatorPort, cloudflaredRemedy } from './connector.ts';
 import {
@@ -101,7 +101,6 @@ export interface TunnelCarrierDependencies {
   readonly service: TunnelServicePort;
   readonly holding: TunnelHoldingPort;
   readonly identity: () => Promise<TunnelIdentity>;
-  readonly crypto: SessionCrypto;
   /** The provisioner bound to one origin. Asked only with an origin this daemon discovered. */
   readonly provisioner: (origin: string) => TunnelProvisionerPort;
   readonly openListener: () => Promise<TunnelListenerHandle>;
@@ -226,7 +225,6 @@ export class TunnelCarrier {
     this.#client = new TunnelProvisioningClient({
       origin: availability.origin,
       provisioner: this.deps.provisioner(availability.origin),
-      crypto: this.deps.crypto,
       identity: identity.identity,
     });
     const listener = await this.deps.openListener();
@@ -357,7 +355,6 @@ export class TunnelCarrier {
     const client = new TunnelProvisioningClient({
       origin: held.origin,
       provisioner: this.deps.provisioner(held.origin),
-      crypto: this.deps.crypto,
       identity: identity.identity,
     });
     const outcome: ProvisioningOutcome<TunnelRelease> = await client.release();

@@ -26,11 +26,11 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": [
-        "RendezvousDurableObject",
-        "HostedRelayControlDurableObject",
-        "HostedTunnelControlDurableObject"
-      ]
+      "new_sqlite_classes": ["RendezvousDurableObject", "HostedRelayControlDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["HostedTunnelControlDurableObject"]
     }
   ],
   "observability": {

@@ -29,7 +29,7 @@ import {
   WEBRTC_SESSION_CHANNEL_LABEL,
   WebRtcOfferAnswerSchema,
   WebRtcOfferRequestSchema,
-} from '../../shared/tunnel-wire.ts';
+} from '../../contract/index.ts';
 export interface RelayCarrierSocket {
   send(bytes: Uint8Array): void;
   sendText(text: string): void;

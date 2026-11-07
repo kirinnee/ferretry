@@ -35,7 +35,7 @@ import {
   tunnelServiceAvailable,
   tunnelZoneCheck,
   tunnelZoneMatches,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 
 const SECRET = 'cf-api-token-that-must-never-appear';

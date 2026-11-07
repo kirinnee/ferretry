@@ -20,7 +20,7 @@ import { milliseconds } from '@ferretry/std';
  * no peer needs them — see `WebRtcPeerEngine` for what holding them cost.
  */
 
-import { WEBRTC_GATHER_CAP_MS, WEBRTC_GATHER_REFLEXIVE_GRACE_MS } from '../../shared/tunnel-wire.ts';
+import { WEBRTC_GATHER_CAP_MS, WEBRTC_GATHER_REFLEXIVE_GRACE_MS } from '../../contract/index.ts';
 import {
   WEBRTC_SELF_TEST_CHANNEL,
   WEBRTC_SELF_TEST_TIMEOUT_MS,

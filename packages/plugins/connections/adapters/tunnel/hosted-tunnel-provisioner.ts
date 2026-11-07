@@ -18,7 +18,7 @@ import {
   TunnelProvisionSchema,
   TunnelRefusalSchema,
   TunnelReleaseSchema,
-} from '../../worker/src/lib/index.ts';
+} from '../../contract/index.ts';
 import type { z } from 'zod';
 import type { ProvisionerAnswer, TunnelProvisionerPort } from '../../daemon/lib/tunnel/index.ts';
 

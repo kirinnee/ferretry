@@ -12,7 +12,7 @@ import {
   parseRendezvousPath,
   publishedConnectionMethods,
   SocketEndpointSchema,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;

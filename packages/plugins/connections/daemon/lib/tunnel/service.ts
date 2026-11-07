@@ -13,10 +13,10 @@
  */
 
 import {
-  SocketEndpointSchema,
+  TunnelServiceEndpointSchema as SocketEndpointSchema,
   TUNNEL_SERVICE_PATH,
   TunnelServiceAdvertisementSchema,
-} from '../../../worker/src/lib/index.ts';
+} from '../../../contract/index.ts';
 
 /** How long a boot waits before treating silence from the service as "not available". */
 export const TUNNEL_SERVICE_TIMEOUT_MS = 4_000;

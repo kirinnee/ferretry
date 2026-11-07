@@ -8,7 +8,7 @@
  */
 
 import { describe, it } from 'bun:test';
-import { WEBRTC_SESSION_CHANNEL_LABEL } from '../../../shared/tunnel-wire.ts';
+import { WEBRTC_SESSION_CHANNEL_LABEL } from '../../../contract/index.ts';
 import {
   decodeControlMessage,
   decodeFrame,

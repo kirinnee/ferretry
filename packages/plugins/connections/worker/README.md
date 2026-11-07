@@ -1,8 +1,8 @@
-# `@ferretry/relay`
+# Connections relay Worker
 
-The carrier-agnostic end-to-end session protocol, and the Cloudflare rendezvous that can carry it.
+The standalone Cloudflare rendezvous and tunnel control owned by Connections. The Kernel owns the end-to-end session protocol.
 
-The wire contract lives in **[docs/relay-protocol.md](../../docs/relay-protocol.md)** — that
+The wire contract lives in **[docs/relay-protocol.md](../../../../docs/relay-protocol.md)** — that
 document, not this code, is the thing to implement against.
 
 ## Why this package exists
@@ -18,8 +18,8 @@ may instead choose, per device and machine, **Auto** (direct, then WebRTC, then 
 relay), or WebRTC, tunnel or relay only. First-run onboarding asks no carrier question, and the
 machine's Connection panel names the live carrier and holds that preference, so nothing degrades
 silently. Running a relay of your own remains supported as an **expert opt-in path** with its own
-runbook — [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md). The
-carrier rules are in [docs/relay-protocol.md](../../docs/relay-protocol.md) §1 and §15.
+runbook — [`docs/cloudflare-relay-self-hosting.md`](../../../../docs/cloudflare-relay-self-hosting.md). The
+carrier rules are in [docs/relay-protocol.md](../../../../docs/relay-protocol.md) §1 and §15.
 
 No **carrier** address is compiled into this package. The client build does carry one address — the
 **discovery origin** it reads the advertisement from, because the relay has its own hostname and the
@@ -70,7 +70,7 @@ shipping it never restarts the relay's rendezvous objects.
 (a self-hosted relay has no binding and answers 404). Publishing that is a relay deploy and drops every live
 session once; what it drops, for how long and in what order to deploy are `docs/relay-protocol.md` §13 ("The
 link-store binding"). The contract, the limits and the honest gaps are `docs/relay-protocol.md` §17; running your own is
-"Your own link store" in [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md).
+"Your own link store" in [`docs/cloudflare-relay-self-hosting.md`](../../../../docs/cloudflare-relay-self-hosting.md).
 
 ## Deploying one of your own (expert)
 
@@ -80,7 +80,7 @@ link-store binding"). The contract, the limits and the honest gaps are `docs/rel
 3. task relay:deploy
 ```
 
-**[docs/cloudflare-relay-self-hosting.md](../../docs/cloudflare-relay-self-hosting.md) is the
+**[docs/cloudflare-relay-self-hosting.md](../../../../docs/cloudflare-relay-self-hosting.md) is the
 runbook** — plan requirements, the narrowest API token that works, verification, teardown and what it
 costs. Read **"Running your own relay"** in the protocol document for what you are taking on: you
 will be operating a relay, and it bills to your account.
@@ -109,7 +109,7 @@ until you do, every runtime control operation answers `401`.
 Its pool of Cloudflare accounts is the Worker secret `TUNNEL_ACCOUNTS`, installed from the GitHub
 secret `HOSTED_TUNNEL_ACCOUNTS` by a publishing `deploy` or, without a deploy, by the `tunnel-accounts`
 operation; the `tunnels` operation reads its status and sets `reclaim_after_days`. The runbook is
-[docs/cloudflare-tunnel-pool.md](../../docs/cloudflare-tunnel-pool.md).
+[docs/cloudflare-tunnel-pool.md](../../../../docs/cloudflare-tunnel-pool.md).
 
 The metrics **API** is daemon-keyed: connection requests and refusals, exact encoded bytes forwarded,
 current/peak concurrent connections, first/last activity and current minute/day windows, globally and
@@ -131,7 +131,7 @@ request/response route and the live event, terminal and remote-browser streams. 
 the hosted rendezvous works even when the daemon's direct address is unreachable; a daemon whose
 only relay is one you run needs a directly reachable first contact.
 
-What is still open is listed in [docs/relay-protocol.md §13](../../docs/relay-protocol.md): there is no
+What is still open is listed in [docs/relay-protocol.md §13](../../../../docs/relay-protocol.md): there is no
 `fy` verb to edit the daemon's `carriers` list (an operator writes it into
 `<state home>/config/daemon.json` by hand), a fresh device can discover only the hosted rendezvous,
 and no surface yet renders the session-ceiling refusal (`4429`).

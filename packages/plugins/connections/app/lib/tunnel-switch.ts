@@ -20,7 +20,7 @@ import {
   type TunnelStatusView,
   TunnelStatusViewSchema,
   TunnelOriginSchema,
-} from '../../shared/tunnel-wire.ts';
+} from '../../contract/index.ts';
 export interface DaemonConnection {
   readonly daemonId: string;
 }

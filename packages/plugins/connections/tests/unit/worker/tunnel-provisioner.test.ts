@@ -16,11 +16,11 @@ import {
   TunnelReleaseSchema,
   TunnelStateDamagedError,
   tunnelIngress,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
-import { FAKE_CONNECTOR_TOKEN_PREFIX, FakeCloudflare } from '../support/fake-cloudflare.ts';
-import { newDaemonIdentity, relayCrypto } from '../support/identities.ts';
-import { MemoryTunnelStore } from '../support/memory-tunnel-store.ts';
+import { FAKE_CONNECTOR_TOKEN_PREFIX, FakeCloudflare } from '../../support/worker/fake-cloudflare.ts';
+import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
+import { MemoryTunnelStore } from '../../support/worker/memory-tunnel-store.ts';
 
 const HOST = 'tunnels.example.test';
 const MINUTE = 60_000;

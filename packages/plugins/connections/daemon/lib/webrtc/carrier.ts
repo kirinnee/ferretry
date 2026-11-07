@@ -30,7 +30,7 @@
  * phone that reloads or changes networks offers again inside the linger without paying a start.
  */
 
-import { WEBRTC_SESSION_CHANNEL_LABEL, type WebRtcRefusalCode } from '../../../shared/tunnel-wire.ts';
+import { WEBRTC_SESSION_CHANNEL_LABEL, type WebRtcRefusalCode } from '../../../contract/index.ts';
 import {
   decodeControlMessage,
   decodeFrame,

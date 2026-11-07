@@ -1,4 +1,4 @@
-import type { TunnelStatusView } from '../../shared/tunnel-wire.ts';
+import type { TunnelStatusView } from '../../contract/index.ts';
 
 /** What a switch reports: the daemon's own sentence, and that it took effect while the daemon ran. */
 export function renderTunnelChange(view: TunnelStatusView): string {

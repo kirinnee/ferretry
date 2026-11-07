@@ -9,7 +9,7 @@ import {
   requestedRelayFeatures,
   toBase64Url,
   utf8Bytes,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 
 const nonce = toBase64Url(new Uint8Array(32).fill(1));

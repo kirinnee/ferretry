@@ -9,7 +9,7 @@ import {
   RendezvousDurableObject,
   relayFetch,
   workersRuntime,
-} from '../../src/adapters/index.ts';
+} from '../../../worker/src/adapters/index.ts';
 import {
   type ControlMessage,
   claimContextForChallenge,
@@ -34,10 +34,10 @@ import {
   sessionIdFromBytes,
   signRendezvousClaim,
   signingKey,
-} from '../../src/lib/index.ts';
-import { FakeHostedRelayControlStorage } from '../support/hosted-control-fakes.ts';
-import { newDaemonIdentity, relayCrypto, stubbedCrypto } from '../support/identities.ts';
-import { FakeObjectState, FakeSocket, testRuntime } from '../support/workers-fakes.ts';
+} from '../../../worker/src/lib/index.ts';
+import { FakeHostedRelayControlStorage } from '../../support/worker/hosted-control-fakes.ts';
+import { newDaemonIdentity, relayCrypto, stubbedCrypto } from '../../support/worker/identities.ts';
+import { FakeObjectState, FakeSocket, testRuntime } from '../../support/worker/workers-fakes.ts';
 
 const host = 'relay.example';
 

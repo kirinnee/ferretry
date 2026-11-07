@@ -6,9 +6,14 @@ import {
   type LinkStoreBinding,
   type RelayEnvironment,
   relayFetch,
-} from '../../src/adapters/index.ts';
-import relayWorker from '../../src/adapters/worker.ts';
-import { LinkStoreAdvertisementSchema, linkBundlePath, linkFetchPath, linkPeekPath } from '../../src/lib/index.ts';
+} from '../../../worker/src/adapters/index.ts';
+import relayWorker from '../../../worker/src/adapters/worker.ts';
+import {
+  LinkStoreAdvertisementSchema,
+  linkBundlePath,
+  linkFetchPath,
+  linkPeekPath,
+} from '../../../worker/src/lib/index.ts';
 
 const HOST = 'https://relay.example';
 const bundleId = `lnk_${'A'.repeat(22)}`;
@@ -263,7 +268,7 @@ describe('the hosted relay without a LINK_STORE binding', () => {
 
 describe('a relay that is not hosted', () => {
   for (const mode of [undefined, 'self-hosted'] as const) {
-    it(`should leave a relay with RELAY_MODE ${mode === undefined ? 'unset' : `"${mode}"`} byte-identical: the store paths are the same 404 as any unknown path, the binding never read`, async () => {
+    it(`R139 should leave a relay with RELAY_MODE ${mode === undefined ? 'unset' : `"${mode}"`} byte-identical: the store paths are the same 404 as any unknown path, the binding never read`, async () => {
       const selfHosted = unreadableBinding(mode);
       for (const [method, path] of STORE_PATHS) {
         const expected = await relayFetch(request(method, '/v1/something-else'), selfHosted);

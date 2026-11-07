@@ -4,7 +4,7 @@
  */
 
 import { describe, it } from 'bun:test';
-import { TUNNEL_OFF_SENTENCE, type TunnelStatusView } from '../../../shared/tunnel-wire.ts';
+import { TUNNEL_OFF_SENTENCE, type TunnelStatusView } from '../../../contract/index.ts';
 import should from 'should';
 import {
   TunnelResponseError as DaemonResponseError,

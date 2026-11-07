@@ -20,9 +20,9 @@ import {
   tunnelTranscript,
   utf8Text,
   verifyTunnelRequest,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
-import { newDaemonIdentity, relayCrypto } from '../support/identities.ts';
+import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
 
 const host = 'tunnels.example.test';
 const account = {

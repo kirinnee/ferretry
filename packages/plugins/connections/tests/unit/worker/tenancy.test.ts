@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { parseRelayTenancy, servesDaemon } from '../../src/lib/index.ts';
+import { parseRelayTenancy, servesDaemon } from '../../../worker/src/lib/index.ts';
 import should from 'should';
 
 const first = `fy_daemon_${'a'.repeat(43)}`;

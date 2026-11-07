@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type HostedRelayControlNamespace, type RelayEnvironment, relayFetch } from '../../src/adapters/index.ts';
-import relayWorker, { HostedRelayControlDurableObject } from '../../src/adapters/worker.ts';
+import {
+  type HostedRelayControlNamespace,
+  type RelayEnvironment,
+  relayFetch,
+} from '../../../worker/src/adapters/index.ts';
+import relayWorker, { HostedRelayControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
   type ControlMessage,
   decodeControlMessage,
@@ -9,9 +13,9 @@ import {
   SESSION_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   type SessionFrame,
-} from '../../src/lib/index.ts';
-import { FakeHostedRelayControlStorage } from '../support/hosted-control-fakes.ts';
-import { type TestRuntime, testRuntime } from '../support/workers-fakes.ts';
+} from '../../../worker/src/lib/index.ts';
+import { FakeHostedRelayControlStorage } from '../../support/worker/hosted-control-fakes.ts';
+import { type TestRuntime, testRuntime } from '../../support/worker/workers-fakes.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const stranger = `fy_daemon_${'b'.repeat(43)}`;

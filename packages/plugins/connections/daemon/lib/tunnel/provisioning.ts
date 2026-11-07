@@ -16,20 +16,17 @@
  * a slot one could be put into.
  */
 
-import {
-  fromBase64UrlFixed,
-  NONCE_BYTES,
-  type SessionCrypto,
-  type TunnelChallenge,
-  type TunnelChallengeRequest,
-  type TunnelProvision,
-  type TunnelProvisionRequest,
-  type TunnelRefusalCode,
-  type TunnelRelease,
-  type TunnelReleaseRequest,
-  type TunnelRequestContext,
-  type SignedTunnelRequest,
-} from '../../../worker/src/lib/index.ts';
+import type {
+  TunnelChallenge,
+  TunnelChallengeRequest,
+  TunnelProvision,
+  TunnelProvisionRequest,
+  TunnelRefusalCode,
+  TunnelRelease,
+  TunnelReleaseRequest,
+  TunnelSignInput,
+  SignedTunnelRequest,
+} from '../../../contract/index.ts';
 import { type BackoffPolicy, backoffDelayMs } from './schedule.ts';
 import { tunnelServiceHost } from './service.ts';
 
@@ -97,14 +94,13 @@ export function classifyProvisionerAnswer(answer: Exclude<ProvisionerAnswer<unkn
 /** TODO(kernel contract): bind the narrow tunnel request signer without exporting an identity key. */
 export interface TunnelRequestSigner {
   readonly daemonId: string;
-  sign(input: TunnelRequestContext): Promise<SignedTunnelRequest>;
+  sign(input: TunnelSignInput): Promise<SignedTunnelRequest>;
 }
 
 export interface TunnelProvisioningClientDependencies {
   /** The origin the tunnel service was DISCOVERED at: the only host this client will sign. */
   readonly origin: string;
   readonly provisioner: TunnelProvisionerPort;
-  readonly crypto: SessionCrypto;
   readonly identity: TunnelRequestSigner;
 }
 
@@ -147,10 +143,9 @@ export class TunnelProvisioningClient {
     const challenge = await this.deps.provisioner.challenge({ daemonId });
     if (challenge.kind !== 'ok') return settled(challenge);
     // The schema already holds the nonce to 32 bytes of base64url; decoding cannot fail past it.
-    const nonce = fromBase64UrlFixed(challenge.value.nonce, NONCE_BYTES) as Uint8Array;
+    const nonce = challenge.value.nonce;
     const value = await this.deps.identity.sign({
       action,
-      daemonId,
       host: this.#host,
       nonce,
       ...(originPort === undefined ? {} : { originPort }),

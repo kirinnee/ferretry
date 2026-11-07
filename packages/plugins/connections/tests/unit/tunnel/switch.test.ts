@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, it } from 'bun:test';
-import { TUNNEL_OFF_SENTENCE } from '../../../shared/tunnel-wire.ts';
+import { TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
 import should from 'should';
 import type { DaemonTunnelCarrierEntry } from '../../../daemon/lib/tunnel/entry.ts';
 import {

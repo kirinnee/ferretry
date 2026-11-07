@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { buildTunnelVerbs } from '../../../cli/tunnel/commands.ts';
-import { TUNNEL_OFF_SENTENCE } from '../../../shared/tunnel-wire.ts';
+import { TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
 
 const view = { enabled: false, explicit: false, state: 'off', tunnelUrl: null, sentence: TUNNEL_OFF_SENTENCE };
 describe('tunnel CLI', () => {

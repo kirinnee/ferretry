@@ -6,7 +6,7 @@ import {
   type TunnelSettings,
   type TunnelStore,
   type TunnelZoneVerdict,
-} from '../../src/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 
 /**
  * The provisioner's storage port in memory, for the unit tier. Pages are ordered by key the way

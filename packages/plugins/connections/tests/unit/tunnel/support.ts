@@ -43,7 +43,15 @@ export async function newDaemonIdentity(): Promise<
   const identity = await testCrypto.importDaemonIdentity(
     ['-----BEGIN PRIVATE KEY-----', ...(base64.match(/.{1,64}/gu) ?? []), '-----END PRIVATE KEY-----', ''].join('\n'),
   );
-  return { daemonId: identity.daemonId, sign: input => signTunnelRequest(testCrypto, identity, input) };
+  return {
+    daemonId: identity.daemonId,
+    sign: input =>
+      signTunnelRequest(testCrypto, identity, {
+        ...input,
+        daemonId: identity.daemonId,
+        nonce: fromBase64UrlFixed(input.nonce, NONCE_BYTES)!,
+      }),
+  };
 }
 
 interface Armed {

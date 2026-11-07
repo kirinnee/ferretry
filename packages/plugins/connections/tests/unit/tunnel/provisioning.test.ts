@@ -12,7 +12,7 @@ import {
   provisionRetryDelayMs,
   TunnelProvisioningClient,
 } from '../../../daemon/lib/tunnel/provisioning.ts';
-import { FakeProvisioner, newDaemonIdentity, provisionOf, testCrypto } from './support.ts';
+import { FakeProvisioner, newDaemonIdentity, provisionOf } from './support.ts';
 
 const ORIGIN = 'https://ferretry-hosted-relay.example.workers.dev';
 
@@ -23,7 +23,7 @@ beforeAll(async () => {
 });
 
 function client(provisioner: FakeProvisioner, origin = ORIGIN): TunnelProvisioningClient {
-  return new TunnelProvisioningClient({ origin, provisioner, crypto: testCrypto, identity });
+  return new TunnelProvisioningClient({ origin, provisioner, identity });
 }
 
 describe('tunnel provisioning', () => {

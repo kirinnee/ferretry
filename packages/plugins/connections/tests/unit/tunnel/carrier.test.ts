@@ -25,7 +25,6 @@ import {
   provisionOf,
   RecordedNotices,
   registered,
-  testCrypto,
   unregistered,
 } from './support.ts';
 
@@ -100,7 +99,6 @@ function carrier(overrides: Partial<TunnelCarrierDependencies> = {}): TunnelCarr
     },
     holding: world.holding,
     identity: async () => ({ ok: true, identity }),
-    crypto: testCrypto,
     provisioner: () => world.provisioner,
     openListener: async () => {
       world.listener.opened += 1;

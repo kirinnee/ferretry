@@ -9,9 +9,9 @@ import {
   TUNNEL_CONTROL_ROUTES,
   TUNNEL_RECLAIM_CONTINUE_MS,
   TUNNEL_REQUEST_MAX_BYTES,
-} from '../../src/adapters/index.ts';
+} from '../../../worker/src/adapters/index.ts';
 // From the Worker ENTRY, deliberately: Cloudflare finds the class `wrangler.hosted.json` binds only there.
-import relayWorker, { HostedTunnelControlDurableObject } from '../../src/adapters/worker.ts';
+import relayWorker, { HostedTunnelControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
   type DaemonIdentity,
   fromBase64Url,
@@ -31,10 +31,10 @@ import {
   TunnelProvisionSchema,
   TunnelRefusalSchema,
   type TunnelRow,
-} from '../../src/lib/index.ts';
-import { FAKE_CONNECTOR_TOKEN_PREFIX, FakeCloudflare } from '../support/fake-cloudflare.ts';
-import { FakeHostedTunnelControlStorage } from '../support/hosted-control-fakes.ts';
-import { newDaemonIdentity, relayCrypto } from '../support/identities.ts';
+} from '../../../worker/src/lib/index.ts';
+import { FAKE_CONNECTOR_TOKEN_PREFIX, FakeCloudflare } from '../../support/worker/fake-cloudflare.ts';
+import { FakeHostedTunnelControlStorage } from '../../support/worker/hosted-control-fakes.ts';
+import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
 
 const HOST = 'relay.example.test';
 const OPERATOR = 'operator-bearer-secret';
