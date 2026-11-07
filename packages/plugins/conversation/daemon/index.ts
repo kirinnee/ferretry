@@ -75,9 +75,10 @@ export default implementDaemon(manifest, {
     const served: Readonly<Record<string, RouteHandler | undefined>> = {
       ...a.routes,
       ...b.routes,
-      'GET /v1/ferrets/:ferretId/references': referenceCatalogRoute(prefix =>
-        ctx.hooks.provider(ReferenceCatalog, prefix),
-      ),
+      'GET /v1/ferrets/:ferretId/references': referenceCatalogRoute({
+        providerOf: prefix => ctx.hooks.provider(ReferenceCatalog, prefix),
+        ferrets: ctx.needs.ferrets,
+      }),
     };
     const routes = declared(
       manifest.actions.routes.map(route => route.key),
