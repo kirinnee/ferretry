@@ -4,10 +4,10 @@
  * through `harnessConformance`; Logins through `loginKindConformance`. The fakes pass the same suites.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ChildEnvironment } from '@ferretry/core-vault/contract';
+import { type ChildEnvironment, SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
 import type { FencedPath, FerretId, FolderRefusal, WorkFolders } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
-import type { FerretState, FerretSummary, HarnessKey, LoginKindKey } from '../ids.ts';
+import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
 import type {
   AttachRefusal,
   Delivery,
@@ -233,8 +233,38 @@ export class FakeLoginKind implements LoginKind {
   }
 }
 
+/** Which environment entries a login kind returns, so the suite can hold EVERY credential-bearing one to a reference. */
+export interface LoginEnvFixture {
+  /** Entries that carry a credential: each value must be exactly one `${secret:NAME}` reference. */
+  readonly credentialEnv: readonly string[];
+  /** Entries that carry no credential (a base URL, a flag). An entry in neither list is refused. */
+  readonly plainEnv?: readonly string[];
+}
+
+const WHOLE_SECRET_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
+
+/**
+ * Why a login's environment fails the values-as-references rule, one sentence per entry; empty when it passes. Every
+ * credential-bearing entry must be a whole `${secret:NAME}` reference with no literal material beside it, and every
+ * entry must be declared, so a literal credential cannot ride along next to a reference.
+ */
+export function loginEnvRefusals(env: Readonly<Record<string, string>>, fixture: LoginEnvFixture): readonly string[] {
+  const refusals: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (fixture.credentialEnv.includes(key)) {
+      if (!WHOLE_SECRET_REFERENCE.test(value))
+        refusals.push(`${key} carries a credential that is not a \${secret:NAME} reference`);
+    } else if (!(fixture.plainEnv ?? []).includes(key)) refusals.push(`${key} is not a declared environment entry`);
+  }
+  return refusals;
+}
+
 /** The `logins` conformance suite (§4.4): secret values only as `${secret:NAME}`, fields unique, a harness named. */
-export function loginKindConformance(name: string, make: () => LoginKind | Promise<LoginKind>): void {
+export function loginKindConformance(
+  name: string,
+  make: () => LoginKind | Promise<LoginKind>,
+  fixture: LoginEnvFixture,
+): void {
   describe(`login conformance: ${name}`, () => {
     test('field ids are unique and at least one harness can spend it', async () => {
       const login = await make();
@@ -242,13 +272,14 @@ export function loginKindConformance(name: string, make: () => LoginKind | Promi
       expect(new Set(ids).size).toBe(ids.length);
       expect(login.harnesses.length).toBeGreaterThan(0);
     });
-    test('env carries secret fields only as ${secret:NAME} references', async () => {
+    test('env carries every credential-bearing entry only as a ${secret:NAME} reference', async () => {
       const login = await make();
-      if (!login.fields.some(field => field.secret)) return;
-      const env = await login.env('work', login.harnesses[0] ?? 'claude-code');
-      const values = Object.values(env);
-      expect(values.length).toBeGreaterThan(0);
-      expect(values.some(value => /\$\{secret:[A-Z][A-Z0-9_]*\}/u.test(value))).toBe(true);
+      for (const harness of login.harnesses) {
+        const env = await login.env('work', harness);
+        expect(loginEnvRefusals(env, fixture)).toEqual([]);
+        if (login.fields.some(field => field.secret))
+          expect(Object.keys(env).some(key => fixture.credentialEnv.includes(key))).toBe(true);
+      }
     });
   });
 }
@@ -282,11 +313,12 @@ export class FakeFerrets implements FerretsApi {
   async get(ferret: FerretId) {
     return this.#ferrets.get(ferret);
   }
-  async list(filter: { readonly state?: FerretState; readonly parent?: FerretId } = {}) {
+  async list(filter: { readonly state?: FerretState; readonly parent?: FerretId; readonly pack?: PackId } = {}) {
     return [...this.#ferrets.values()].filter(
       f =>
         (filter.state === undefined || f.state === filter.state) &&
-        (filter.parent === undefined || f.parent === filter.parent),
+        (filter.parent === undefined || f.parent === filter.parent) &&
+        (filter.pack === undefined || f.pack === filter.pack),
     );
   }
   mayTouch(caller: FerretId, target: FerretId): boolean {
