@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { pluginWorkerFiles, refusePluginWorkers } from '../../../scripts/build-release.ts';
+import { pluginWorkerFiles, refusePluginWorkers, workerInputGuard } from '../../../scripts/build-release.ts';
 import { buildRelease, releaseSigner } from '../../support/release.ts';
 
 const root = resolve(import.meta.dir, '../../../../..');
@@ -23,11 +24,13 @@ type Listener = (event: Record<string, unknown>) => void;
 async function startWorker(options: { readonly scope?: string; readonly script?: string } = {}) {
   const signer = await releaseSigner();
   const signed = await buildRelease(signer);
+  const inputs = new Set<string>();
   const result = await Bun.build({
     entrypoints: [join(root, 'packages/app/src/worker/service-worker.ts')],
     format: 'iife',
     target: 'browser',
     splitting: false,
+    plugins: [workerInputGuard(undefined, inputs)],
     define: {
       __FY_RELEASE_KEY__: JSON.stringify(signer.publicKey),
       __FY_RELEASE_REWRITES__: JSON.stringify([{ from: '/app/*', to: '/app/index.html' }]),
@@ -132,8 +135,56 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
       listener({ stopImmediatePropagation() {}, waitUntil: (p: Promise<unknown>) => pending.push(p), ...event });
     await Promise.all(pending);
   };
-  return { signed, listeners, order, shown, opened, dispatch, state: () => state };
+  return { signed, listeners, order, shown, opened, dispatch, inputs, state: () => state };
 }
+
+test('the guarded release worker has exactly its shell inputs plus zod, with no plugin import graph', async () => {
+  const worker = await startWorker();
+  const app = realpathSync(join(root, 'packages/app'));
+  const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', app), '..'));
+  const shell = [...worker.inputs].filter(path => path.startsWith(`${app}/`));
+  expect(shell.map(path => relative(app, path)).sort()).toEqual([
+    'src/release/headers.ts',
+    'src/release/keeper.ts',
+    'src/release/loopback.ts',
+    'src/release/manifest.ts',
+    'src/release/storage.ts',
+    'src/release/verification.ts',
+    'src/router/routes.ts',
+    'src/storage/names.ts',
+    'src/worker/facts.ts',
+    'src/worker/notifications.ts',
+    'src/worker/service-worker.ts',
+  ]);
+  const libraries = [...worker.inputs].filter(path => !shell.includes(path));
+  expect(libraries.length).toBeGreaterThan(0);
+  expect(libraries.every(path => path.startsWith(`${zod}/`))).toBe(true);
+});
+
+test('the release worker guard refuses a transitive non-worker import even without a plugin worker file', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'fy-worker-graph-'));
+  try {
+    await mkdir(join(directory, 'src/worker'), { recursive: true });
+    await mkdir(join(directory, 'src/layout'), { recursive: true });
+    await writeFile(join(directory, 'src/worker/probe.ts'), "import './helper.ts';");
+    await writeFile(join(directory, 'src/worker/helper.ts'), "import '../layout/probe.ts';");
+    await writeFile(join(directory, 'src/layout/probe.ts'), 'globalThis.Response = undefined;');
+    const failure = await Bun.build({
+      entrypoints: [join(directory, 'src/worker/probe.ts')],
+      target: 'browser',
+      plugins: [workerInputGuard(directory)],
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors.map(String).join('\n')).toContain(
+      'no plugin code may run in the signed service worker',
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('the worker runs only its own listeners and serves signed bytes; a daemon or POST request gets no answer', async () => {
   const worker = await startWorker();

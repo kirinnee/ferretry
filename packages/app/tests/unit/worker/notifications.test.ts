@@ -3,6 +3,7 @@
  * `notification-open.test.ts`: which machine a registration serves, what a tap may open, and how it opens it.
  */
 import { describe, expect, it } from 'bun:test';
+import * as pageFacts from '@ferretry/app/worker-facts';
 import {
   NOTIFICATION_BADGE,
   NOTIFICATION_ICON,
@@ -29,6 +30,30 @@ const tick = async (): Promise<void> => {
 };
 
 describe('pushMachineOf', () => {
+  it('shares code-free scope, label and open-message facts with page halves', async () => {
+    expect(pageFacts.PUSH_SCOPE_ROOT).toBe(PUSH_SCOPE_ROOT);
+    expect(pageFacts.PUSH_LABEL_PARAMETER).toBe('machine');
+    expect(pageFacts.NOTIFICATION_OPEN_MESSAGE).toBe(NOTIFICATION_OPEN_MESSAGE);
+    expect(pageFacts.NOTIFICATION_OPEN_ACK).toBe(NOTIFICATION_OPEN_ACK);
+    const inputs = new Set<string>();
+    const result = await Bun.build({
+      entrypoints: [Bun.resolveSync('@ferretry/app/worker-facts', import.meta.dir)],
+      target: 'browser',
+      plugins: [
+        {
+          name: 'trace-facts',
+          setup(build) {
+            build.onLoad({ filter: /.*/u }, args => {
+              inputs.add(args.path);
+              return undefined;
+            });
+          },
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    expect([...inputs]).toEqual([Bun.resolveSync('@ferretry/app/worker-facts', import.meta.dir)]);
+  });
   it('reads the machine from the scope and the reader’s label from the script', () => {
     expect(PUSH_SCOPE_ROOT).toBe('/push/');
     expect(
