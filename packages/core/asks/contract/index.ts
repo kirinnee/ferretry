@@ -316,6 +316,14 @@ export interface AsksApi {
   snapshots(filter?: { readonly ferret?: string }): Promise<readonly AgendaSnapshot[]>;
   /** Apply a machine-board owner verb with the owner as actor. Ferret-board answers still use Asks' own route. */
   ownerAction(action: AskOwnerAction): Promise<AgendaSnapshot>;
+  /**
+   * Tells a ferret something in its own terminal, through `ask.delivery` (the same non-interrupting queue and composer
+   * check as an owner's answer). Idempotent by `sendId`: the same id is typed once, however often it is asked. `'sent'`:
+   * the send path accepted it. `'held'`: nothing was typed (a draft in the composer, a screen that cannot be read, or no
+   * delivery provider) and it is kept, durably, to be tried again. The text is the caller's, and never holds a secret.
+   * Optional so a build without it still satisfies the port.
+   */
+  tell?(ferret: string, text: string, sendId: string): Promise<'sent' | 'held'>;
 }
 
 export const AsksPort = definePort<AsksApi>('asks');

@@ -58,6 +58,8 @@ export function inputRequestService(
     readonly agenda?: InputAgendaPort;
     /** Whether the page target arms a pagehide clear it is asked to try (`armClear: 'try'`); absent: it never can. */
     readonly arms?: boolean;
+    /** Who is told how a request ended; absent: nobody. */
+    readonly notifier?: InputRequestServiceDependencies['notifier'];
     /** Called each time the journal is written (a request or a hold), before it answers. */
     readonly journalled?: (event: unknown) => void;
   } = {},
@@ -98,7 +100,7 @@ export function inputRequestService(
       close: async () => undefined,
       promptOf: async () => 'sudo wants your password',
     },
-    notifier: { tell: async () => undefined },
+    notifier: options.notifier ?? { tell: async () => undefined },
     journal: {
       publish: async (_session, event) => {
         events.push(event);

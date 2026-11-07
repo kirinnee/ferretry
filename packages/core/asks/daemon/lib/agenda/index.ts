@@ -6,6 +6,7 @@ export * from './home.ts';
 export * from './owner-asks.ts';
 export * from './versions.ts';
 export * from './reply-batch.ts';
+export * from './teller.ts';
 export * from './service.ts';
 export * from './state-machine.ts';
 export * from './writing-lint.ts';

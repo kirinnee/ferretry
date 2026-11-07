@@ -27,15 +27,17 @@ import { sourceAnswers } from './adapters/source-answers.ts';
 import { CARD_SOURCE, cardAskAnswers } from './adapters/card-ask-answers.ts';
 import { FileAgendaLedgerRepository } from './adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaOutboxRepository } from './adapters/agenda/file-agenda-outbox-repository.ts';
+import { FileAgendaTellStore } from './adapters/agenda/file-agenda-tell-store.ts';
 import { FileAgendaSeenStore, SqliteAgendaVersionStore } from './adapters/agenda/file-agenda-versions.ts';
 import { KeyedAgendaReplyTimers } from './adapters/agenda/keyed-agenda-reply-timers.ts';
 import { StateAgendaFiles } from './adapters/agenda/state-agenda-files.ts';
-import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agenda/index.ts';
+import { AgendaReplyBatcher, AgendaService, AgendaTeller, isAgendaSessionId } from './lib/agenda/index.ts';
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
 import {
   AgendaRepliesFiles,
+  AgendaTellFiles,
   AgendaPendingChangesFiles,
   AgendaPendingVersionsFiles,
 } from '../manifest.ts';
@@ -94,6 +96,15 @@ export default implementDaemon(manifest, {
       { ...delivery.ports, undelivered: new AgendaBoardUndelivered(agenda) },
     );
 
+    // What the daemon owes a ferret (`AsksApi.tell`) goes through the same delivery, under the caller's send id.
+    const teller = new AgendaTeller(
+      new FileAgendaTellStore(files),
+      delivery.messenger,
+      delivery.ports.composer,
+      replyTimers,
+      new KeyedSerialQueue(),
+    );
+
     const sources = (key: SourceKey) => hooks.provider(AskSources, key);
     const boards = { ferrets: async () => await state.list(AgendaLedgerFiles) };
     const recover = async () => {
@@ -110,6 +121,7 @@ export default implementDaemon(manifest, {
       ];
       for (const ferret of ferrets) await agenda.list(ferret).catch(error => warn(String(error)));
       await replies.resume(ferrets);
+      await teller.resume(await state.list(AgendaTellFiles));
     };
     kernel.jobs.add({ id: 'recover', schedule: { onceAfterStart: true }, run: recover });
     kernel.jobs.add({
@@ -148,7 +160,9 @@ export default implementDaemon(manifest, {
           sourceAnswers(agenda, sources, now),
         ),
       },
-      provides: { asks: asksPort(agenda, boards, sources) },
+      provides: {
+        asks: asksPort(agenda, boards, sources, (ferret, text, sendId) => teller.tell(ferret, text, sendId)),
+      },
     };
   },
 });
