@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import { SessionForkRequestConflictError } from '../../../../daemon/lib/forks/failures.ts';
 import { type SessionForkKey, sessionForkFingerprint, sessionForkKey } from '../../../../daemon/lib/forks/identity.ts';

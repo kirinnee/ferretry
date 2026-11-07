@@ -9,7 +9,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,

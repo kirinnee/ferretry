@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type FileHandle, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { type SessionTransferPlan, SessionTransferPlanSchema } from '../../lib/protocol/session-transfer.ts';
+import { type SessionTransferPlan, SessionTransferPlanSchema } from '../../../contract/transfer.ts';
 import type { SessionId } from '../../lib/session-id.ts';
 
 /** How `FileSessionTransferTargetPlanStore.install` resolved a target plan copy. */

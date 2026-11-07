@@ -1,4 +1,4 @@
-import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import type {
   TransferPrepareRequest,

@@ -1,5 +1,5 @@
-import type { VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
-import type { MoveCommandOptions, MoveController } from './controller.ts';
+import type { VerbInvocation } from '@ferretry/kernel/manifest';
+import type { MoveCommandOptions } from './controller.ts';
 
 /**
  * `fy ferret move <id>` (today's `fy migrate`, §1.4): continue a ferret on another runtime (another harness only with
@@ -14,17 +14,9 @@ import type { MoveCommandOptions, MoveController } from './controller.ts';
  *   --preview                    with --convert: show what the conversion would carry and change nothing
  *   --request-id <id>            stable idempotency key for an explicit retry of this move
  *   --json                       print the moved ferret as JSON
+ *
+ * The shell's parsed options as `MoveCommandOptions`; `--agent` is required, as today.
  */
-export function moveVerb(controller: MoveController): VerbHandler {
-  return async invocation => {
-    const id = invocation.args[0];
-    if (id === undefined) throw new Error('fy ferret move needs a ferret id or callsign');
-    await controller.execute(id, moveOptions(invocation));
-    return 0;
-  };
-}
-
-/** The shell's parsed options as today's `MoveCommandOptions`. `--agent` is required, as today. */
 export function moveOptions(invocation: VerbInvocation): MoveCommandOptions {
   const agent = text(invocation, 'agent') ?? text(invocation, 'a');
   if (agent === undefined) throw new Error("required option '-a, --agent <agent>' not specified");

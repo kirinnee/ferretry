@@ -2,8 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
-import { SessionTransferPlanSchema } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
+import { SessionTransferPlanSchema } from '../../../../contract/transfer.ts';
 import should from 'should';
 import {
   FileSessionForkReceiptStore,

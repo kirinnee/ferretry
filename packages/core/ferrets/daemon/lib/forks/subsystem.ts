@@ -40,8 +40,8 @@ import {
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
   type ForkSessionRequest,
-} from '../protocol/session-fork.ts';
-import { type SessionTransferPlan, type TransferOmission } from '../protocol/session-transfer.ts';
+} from '../../../contract/fork.ts';
+import { type SessionTransferPlan, type TransferOmission } from '../../../contract/transfer.ts';
 import { SessionForkRefusal, type SessionForkSubsystem } from '../runtime/mounts/session-fork.ts';
 import { tryParseSessionId } from '../session-id.ts';
 import {

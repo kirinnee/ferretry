@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as fork from '../../../../daemon/lib/protocol/session-fork.ts';
+import * as fork from '../../../../contract/fork.ts';
 import { forkOutcome, forkPlan, forkPoint, forkRequest, forkSelectionBinding, forkSession } from './fork-fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

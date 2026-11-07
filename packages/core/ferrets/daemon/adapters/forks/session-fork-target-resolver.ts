@@ -32,7 +32,7 @@
  * and what is performed cannot drift apart.
  */
 
-import type { ForkSessionFailure } from '../../lib/protocol/session-fork.ts';
+import type { ForkSessionFailure } from '../../../contract/fork.ts';
 import type { RuntimeControlRequest, RuntimeModelChoice } from '../../lib/protocol/session.ts';
 import type { CodexRuntimeCatalogCache } from '../../lib/session/harness/codex-catalog-cache.ts';
 import { codexSwitchContext } from '../../lib/session/harness/model-catalog.ts';

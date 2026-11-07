@@ -31,9 +31,9 @@ import type {
   SessionHandoverPhase,
   SessionHandoverReceipt,
   SessionHandoverRequest,
-} from '../../protocol/handover.ts';
+} from '../../../../contract/handover.ts';
 import type { SessionStatus } from '../../protocol/session-base.ts';
-import type { SessionTransferPlan } from '../../protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 
 /** The protocol's phase set, under the daemon's shorter name. There is no second enumeration. */
 export type HandoverPhase = SessionHandoverPhase;

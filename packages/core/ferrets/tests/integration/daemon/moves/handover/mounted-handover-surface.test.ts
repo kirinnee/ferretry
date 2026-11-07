@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   type SessionHandoverReceipt,
   SessionHandoverReceiptSchema,
-} from '../../../../../daemon/lib/protocol/handover.ts';
+} from '../../../../../contract/handover.ts';
 import should from 'should';
 import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';

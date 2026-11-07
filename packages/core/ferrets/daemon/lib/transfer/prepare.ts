@@ -16,7 +16,7 @@ import {
   type SessionTransferPlan,
   SessionTransferPlanSchema,
   type TransferOmission,
-} from '../protocol/session-transfer.ts';
+} from '../../../contract/transfer.ts';
 import { createHash } from 'node:crypto';
 import {
   type SessionTransferPreparePorts,

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/common.ts';
+import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
   type SessionRelaunchSettings,
   SessionRelaunchSettingsSchema,
@@ -12,7 +12,7 @@ import {
   ConversionPreviewSchema,
   type MoveRefusal,
   MoveRefusedBodySchema,
-} from '../../../../../daemon/lib/protocol/move.ts';
+} from '../../../../../contract/move.ts';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

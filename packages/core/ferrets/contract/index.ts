@@ -18,3 +18,6 @@ export * from './slots.ts';
 export * from './state.ts';
 export * from './transfer.ts';
 export * from './subtree.ts';
+export * from './fork.ts';
+export * from './handover.ts';
+export * from './move.ts';

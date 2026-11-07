@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { WorkspaceFacet } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { WorkspaceFacet } from '../../../../contract/transfer.ts';
 import { SessionTransferPreparer } from '../../../../daemon/lib/transfer/prepare.ts';
 import { TransferPrepareError } from '../../../../daemon/lib/transfer/types.ts';
 import { request, sourceSession } from './fixtures.ts';

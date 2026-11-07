@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
-import { type SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import { type SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   type RuntimeControlRequest,
   type RuntimeModelChoice,

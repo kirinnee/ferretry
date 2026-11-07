@@ -1,10 +1,10 @@
-import { FY_REQUEST_ID_HEADER } from '../../protocol/common.ts';
+import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
 import {
   type SessionHandoverFailure,
   type SessionHandoverReceipt,
   type SessionHandoverRequest,
   SessionHandoverRequestSchema,
-} from '../../protocol/handover.ts';
+} from '../../../../contract/handover.ts';
 import { agentSessionOf, isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';

@@ -6,7 +6,7 @@ import type {
   ReferenceFacet,
   TransferOmission,
   WorkspaceFacet,
-} from '../../../../daemon/lib/protocol/session-transfer.ts';
+} from '../../../../contract/transfer.ts';
 import { deriveTransferPlanId, SessionTransferPreparer } from '../../../../daemon/lib/transfer/prepare.ts';
 import {
   SESSION_TRANSFER_PREPARE_PORTS,

@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import type { AttachmentFacet } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { AttachmentFacet } from '../../../../contract/transfer.ts';
 import should from 'should';
 import {
   FileSessionAttachmentCopier,

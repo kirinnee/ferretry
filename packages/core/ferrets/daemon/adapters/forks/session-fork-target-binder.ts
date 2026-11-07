@@ -39,7 +39,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { type SessionTransferPlan } from '../../lib/protocol/session-transfer.ts';
+import { type SessionTransferPlan } from '../../../contract/transfer.ts';
 import {
   type SessionConfig,
   SessionConfigSchema,

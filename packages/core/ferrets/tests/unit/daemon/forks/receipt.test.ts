@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
-import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   SessionForkError,
   type SessionForkFailure,

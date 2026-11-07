@@ -1,5 +1,5 @@
-import type { SessionView } from '../../../daemon/lib/protocol/session.ts';
-import type { ConversionPreview, MoveConversation } from '../../../daemon/lib/protocol/move.ts';
+import type { FerretSummary } from '../../../contract/ids.ts';
+import type { ConversionPreview, MoveConversation } from '../../../contract/move.ts';
 
 /**
  * The destructive, request-id-protected move call and the read that previews a cross-harness conversion before it
@@ -18,7 +18,7 @@ export interface IMoveGateway {
     forceInflight?: boolean,
     /** Omitted, the daemon resumes the bound conversation or refuses; see `MoveConversation`. */
     conversation?: MoveConversation,
-  ): Promise<SessionView>;
+  ): Promise<FerretSummary>;
   /** A read: nothing is written and no request id is needed. */
   conversionPreview(id: string, agent: string, model?: string): Promise<ConversionPreview>;
 }

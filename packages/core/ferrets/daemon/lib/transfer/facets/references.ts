@@ -22,7 +22,7 @@
  * `harness_incompatible` kept apart so the report can say WHICH boundary a token failed to cross.
  */
 
-import type { ReferenceFacet, TransferOmission } from '../../protocol/session-transfer.ts';
+import type { ReferenceFacet, TransferOmission } from '../../../../contract/transfer.ts';
 import type {
   TransferFacetContribution,
   TransferFacetContributor,

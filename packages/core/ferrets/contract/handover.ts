@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { InstantSchema, PositiveIntegerSchema } from './common.ts';
-import { HarnessSchema } from './session.ts';
-import { SessionTransferPlanSchema } from './session-transfer.ts';
+import { IsoInstantSchema, RecordedHarnessSchema } from './records.ts';
+import { SessionTransferPlanSchema } from './transfer.ts';
+
+const PositiveIntegerSchema = z.number().int().positive();
 
 /**
  * Cross-harness handover (row 48) — the protocol-owned wire contract.
@@ -114,7 +115,7 @@ export type SessionHandoverRequestInput = z.input<typeof SessionHandoverRequestS
 export const SessionHandoverResolvedAccountSchema = z.strictObject({
   accountId: z.string().min(1),
   agent: z.string().min(1),
-  harness: HarnessSchema,
+  harness: RecordedHarnessSchema,
   model: z.string().min(1).nullable(),
   effort: z.string().min(1).nullable(),
   contextWindow: PositiveIntegerSchema,
@@ -138,7 +139,7 @@ export const SessionHandoverBoardRefSchema = z.strictObject({
   boardId: z.string().min(1),
   creatorSessionId: z.string().min(1),
   canonicalSessionId: z.string().min(1),
-  createdAt: InstantSchema,
+  createdAt: IsoInstantSchema,
   invitationRequestId: z.string().min(1).optional(),
   grantId: z.string().min(1).optional(),
 });
@@ -159,7 +160,7 @@ export type SessionHandoverEffectIntent = z.infer<typeof SessionHandoverEffectIn
  */
 export const SessionHandoverPhaseEventSchema = z.strictObject({
   phase: SessionHandoverPhaseSchema,
-  at: InstantSchema,
+  at: IsoInstantSchema,
   detail: z.string().min(1).optional(),
   effectIntent: SessionHandoverEffectIntentSchema.optional(),
 });
@@ -304,7 +305,7 @@ export const SessionHandoverReceiptSchema = z
     fingerprint: z.string().min(1),
     reason: z.string().min(1),
     sourceSessionId: z.string().min(1),
-    sourceHarness: HarnessSchema,
+    sourceHarness: RecordedHarnessSchema,
     sourceAgent: z.string().min(1),
     sourceTeammate: z.string().min(1).optional(),
     resolvedTarget: SessionHandoverResolvedTargetSchema,
@@ -316,8 +317,8 @@ export const SessionHandoverReceiptSchema = z
     phase: SessionHandoverPhaseSchema,
     phaseHistory: z.array(SessionHandoverPhaseEventSchema).readonly(),
     inflightReportPath: z.string().min(1).optional(),
-    createdAt: InstantSchema,
-    updatedAt: InstantSchema,
+    createdAt: IsoInstantSchema,
+    updatedAt: IsoInstantSchema,
     refusal: SessionHandoverRefusalSchema.optional(),
     cancelRequestId: z.string().min(1).optional(),
     effectIntent: SessionHandoverEffectIntentSchema.optional(),

@@ -19,7 +19,7 @@
  * answering a question about ancestry it was never asked.
  */
 
-import type { LineageFacet } from '../../protocol/session-transfer.ts';
+import type { LineageFacet } from '../../../../contract/transfer.ts';
 import { WARDEN_LABEL } from '../../warden/types.ts';
 import {
   type TransferFacetContribution,

@@ -2,7 +2,7 @@ import {
   type ConversionPreview,
   type MoveConversation,
   MoveConversationSchema,
-} from '../../../daemon/lib/protocol/move.ts';
+} from '../../../contract/move.ts';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IMoveGateway } from './ports.ts';

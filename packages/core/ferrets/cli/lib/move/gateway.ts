@@ -1,35 +1,22 @@
-import { type SessionView, SessionViewSchema } from '../../../daemon/lib/protocol/session.ts';
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import { type FerretSummary, FerretSummarySchema } from '../../../contract/ids.ts';
 import {
   type ConversionPreview,
   ConversionPreviewRequestSchema,
   ConversionPreviewSchema,
   type MoveConversation,
   MoveSessionRequestSchema,
-} from '../../../daemon/lib/protocol/move.ts';
-import { FY_REQUEST_ID_HEADER as REQUEST_ID_HEADER } from '../../../daemon/lib/protocol/common.ts';
+} from '../../../contract/move.ts';
 import type { IMoveGateway } from './ports.ts';
 
 /**
- * The plugin client a CLI half talks through, plus the ONE thing a move needs that `PluginClient.call` does not carry
- * yet: a request header. The move route refuses a body without `x-fy-request-id` (`missing_request_id`), because a
- * retried POST without it would kill and relaunch the pane a second time. Until the kernel's `PluginClient` carries
- * headers (asked of the lead), the shell must hand this half a client that does.
+ * Today's `FyApiClient.move` / `conversionPreview`, over the plugin client and the move routes. The move carries its
+ * logical request id as `x-fy-request-id`, the one header the plugin client lets a half set: the route refuses a body
+ * without it (`missing_request_id`), because a retried POST without it would kill and relaunch the pane a second time.
  */
-export interface MoveClient {
-  call<Answer = unknown>(
-    route: string,
-    init: {
-      readonly params: Readonly<Record<string, string>>;
-      readonly body: unknown;
-      readonly headers?: Readonly<Record<string, string>>;
-    },
-  ): Promise<Answer>;
-}
-
-/** Today's `FyApiClient.migrate` / `conversionPreview`, over the plugin client and the move routes. */
 export class ClientMoveGateway implements IMoveGateway {
   constructor(
-    private readonly client: MoveClient,
+    private readonly client: PluginClient,
     private readonly mintRequestId: () => string,
   ) {}
 
@@ -41,7 +28,7 @@ export class ClientMoveGateway implements IMoveGateway {
     requestId?: string,
     forceInflight = false,
     conversation?: MoveConversation,
-  ): Promise<SessionView> {
+  ): Promise<FerretSummary> {
     const body = MoveSessionRequestSchema.parse({
       agent,
       model,
@@ -49,17 +36,17 @@ export class ClientMoveGateway implements IMoveGateway {
       forceInflight,
       ...(conversation === undefined ? {} : { conversation }),
     });
-    const answer = await this.client.call('POST /v1/ferrets/:ferretId/move', {
+    const answer = await this.client.call<unknown>('POST /v1/ferrets/:ferretId/move', {
       params: { ferretId: id },
       body,
-      headers: { [REQUEST_ID_HEADER]: requestId ?? this.mintRequestId() },
+      headers: { 'x-fy-request-id': requestId ?? this.mintRequestId() },
     });
-    return SessionViewSchema.parse(answer);
+    return FerretSummarySchema.parse(answer);
   }
 
   async conversionPreview(id: string, agent: string, model?: string): Promise<ConversionPreview> {
     const body = ConversionPreviewRequestSchema.parse({ agent, ...(model === undefined ? {} : { model }) });
-    const answer = await this.client.call('POST /v1/ferrets/:ferretId/conversion-preview', {
+    const answer = await this.client.call<unknown>('POST /v1/ferrets/:ferretId/conversion-preview', {
       params: { ferretId: id },
       body,
     });

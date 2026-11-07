@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SessionHandoverReceiptSchema } from '../../../lib/protocol/handover.ts';
+import { SessionHandoverReceiptSchema } from '../../../../contract/handover.ts';
 import { handoverPlanId, isTerminalHandoverPhase } from '../../../lib/moves/handover/policy.ts';
 import { SessionIdSchema } from '../../../lib/session-id.ts';
 import {

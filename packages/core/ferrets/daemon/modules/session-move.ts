@@ -13,7 +13,7 @@ import {
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
   type MoveConversation,
-} from '../lib/protocol/move.ts';
+} from '../../contract/move.ts';
 import type { z } from 'zod';
 import { deliverStopSignal, KeyedSerialExecutor, type SystemClock, BunProcessProbe } from '../../src/adapters/index.ts';
 import { FileConversationFiles } from '../adapters/moves/file-conversation-files.ts';

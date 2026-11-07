@@ -1,4 +1,4 @@
-import type { InflightItem, MoveRefusal } from '../protocol/move.ts';
+import type { InflightItem, MoveRefusal } from '../../../contract/move.ts';
 import type { InflightReport } from './inflight-report.ts';
 import { age, truncate } from './render-text.ts';
 import { type InflightVerdict, verdictBlocksMove } from './verdict.ts';

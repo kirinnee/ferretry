@@ -1,8 +1,14 @@
 import { z } from 'zod';
-import { InstantSchema, PositiveIntegerSchema } from './common.ts';
-import { HarnessSchema, SessionStatusSchema } from './session.ts';
-import { TransferOmissionSchema } from './session-transfer.ts';
-import { ConversationMessagePointSchema, ExactConversationMessagePointSchema } from './session-transfer-edge.ts';
+import {
+  ConversationMessagePointSchema,
+  ExactConversationMessagePointSchema,
+  IsoInstantSchema,
+  RecordedHarnessSchema,
+  SessionStatusSchema,
+} from './records.ts';
+import { TransferOmissionSchema } from './transfer.ts';
+
+const PositiveIntegerSchema = z.number().int().positive();
 
 /**
  * Forking a conversation from one durable message into a fresh, independent session.
@@ -70,7 +76,7 @@ export const ForkedSessionSummarySchema = z.strictObject({
   id: z.string().min(1),
   name: z.string().min(1),
   agent: z.string().min(1),
-  harness: HarnessSchema,
+  harness: RecordedHarnessSchema,
   model: z.string().min(1).nullable(),
   status: SessionStatusSchema,
 });
@@ -83,7 +89,7 @@ const ForkSessionSourceCutSchema = z.strictObject({
 
 const ForkSessionTargetSummarySchema = z.strictObject({
   agent: z.string().min(1),
-  harness: HarnessSchema,
+  harness: RecordedHarnessSchema,
   model: z.string().min(1).nullable(),
   effort: z.string().min(1).nullable(),
   contextWindow: PositiveIntegerSchema,
@@ -101,7 +107,7 @@ const ForkSessionTargetSummarySchema = z.strictObject({
 export const ForkSessionPlanSummarySchema = z.strictObject({
   v: z.literal(1),
   planId: z.string().min(1),
-  preparedAt: InstantSchema,
+  preparedAt: IsoInstantSchema,
   source: ForkSessionSourceCutSchema,
   target: ForkSessionTargetSummarySchema,
   notCarried: z.array(TransferOmissionSchema).readonly(),

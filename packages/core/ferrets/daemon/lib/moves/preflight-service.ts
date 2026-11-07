@@ -1,5 +1,5 @@
 import type { SessionStatus } from '../protocol/session-base.ts';
-import type { MoveRefusal } from '../protocol/move.ts';
+import type { MoveRefusal } from '../../../contract/move.ts';
 import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import { backgroundTerminalCount } from './background-terminals.ts';
 import { describeInflight } from './inflight-describe.ts';

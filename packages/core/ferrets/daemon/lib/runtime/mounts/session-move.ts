@@ -1,4 +1,4 @@
-import { FY_REQUEST_ID_HEADER } from '../../protocol/common.ts';
+import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
 import { type SessionRelaunchSettings, type SessionView } from '../../protocol/session.ts';
 import {
   AskToStopJobsRequestSchema,
@@ -9,7 +9,7 @@ import {
   MoveSessionRequestSchema,
   type MoveConversation,
   type MoveRefusal,
-} from '../../protocol/move.ts';
+} from '../../../../contract/move.ts';
 import type { AuditedRouteRule } from '../../audit/routes.ts';
 import { parseActor } from '../../api/actor.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';

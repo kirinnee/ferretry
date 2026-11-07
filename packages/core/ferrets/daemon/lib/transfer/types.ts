@@ -39,7 +39,7 @@ import type {
   SessionTransferPlan,
   TransferOmission,
   WorkspaceFacet,
-} from '../protocol/session-transfer.ts';
+} from '../../../contract/transfer.ts';
 import type { InteractionMode, TranscriptProvenance } from '../protocol/session.ts';
 import type { SessionProvenance } from '../session/provenance/types.ts';
 import type { ConversationDigest } from '../session/transcript/digest.ts';

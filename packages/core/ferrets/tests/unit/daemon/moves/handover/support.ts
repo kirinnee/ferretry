@@ -1,5 +1,5 @@
-import type { SessionHandoverRequest } from '../../../../../daemon/lib/protocol/handover.ts';
-import type { SessionTransferPlan } from '../../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionHandoverRequest } from '../../../../../contract/handover.ts';
+import type { SessionTransferPlan } from '../../../../../contract/transfer.ts';
 import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
 import type {
   HandoverAgendaRequest,

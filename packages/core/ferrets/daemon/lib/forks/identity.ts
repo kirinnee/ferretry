@@ -26,7 +26,7 @@
 
 import { createHash } from 'node:crypto';
 import type { ConversationMessagePoint } from '../protocol/session-transfer-edge.ts';
-import type { SessionTransferPlan } from '../protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../contract/transfer.ts';
 
 /**
  * The caller's already-parsed decision.

@@ -1,8 +1,8 @@
 import { afterEach, describe, it } from 'bun:test';
 import { type FileHandle, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
-import { SessionTransferPlanSchema } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
+import { SessionTransferPlanSchema } from '../../../../contract/transfer.ts';
 import should from 'should';
 import {
   FileSessionTransferTargetPlanStore,

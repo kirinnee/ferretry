@@ -17,7 +17,7 @@
  */
 
 import type { SessionTransferEdge } from '../protocol/session-transfer-edge.ts';
-import type { SessionTransferPlan } from '../protocol/session-transfer.ts';
+import type { SessionTransferPlan } from '../../../contract/transfer.ts';
 
 type TransferKind = SessionTransferEdge['kind'];
 

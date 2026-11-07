@@ -6,22 +6,5 @@ import { RecordedHarnessSchema } from '../../../contract/records.ts';
 export const HarnessSchema = RecordedHarnessSchema;
 export type Harness = z.infer<typeof HarnessSchema>;
 
-export const SessionStatusSchema = z.enum([
-  'created',
-  'starting',
-  'running',
-  'thinking',
-  'tool_running',
-  'awaiting_question',
-  'awaiting_user',
-  'interrupted',
-  'rate_limited',
-  'retrying',
-  'kill_failed',
-  'waiting',
-  'completed',
-  'failed',
-  'stalled',
-  'stopped',
-]);
-export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+/** Where a session stands (the contract owns it: the fork's summary names one). */
+export { type SessionStatus, SessionStatusSchema } from '../../../contract/records.ts';

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SESSION_HANDOVER_PHASES, type SessionHandoverPhase } from '../../../../../daemon/lib/protocol/handover.ts';
+import { SESSION_HANDOVER_PHASES, type SessionHandoverPhase } from '../../../../../contract/handover.ts';
 import should from 'should';
 import {
   derivedStepId,

@@ -1,11 +1,11 @@
-import { FY_REQUEST_ID_HEADER } from '../../protocol/common.ts';
+import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
 import {
   type ForkSessionFailure,
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
   type ForkSessionRequest,
   ForkSessionRequestSchema,
-} from '../../protocol/session-fork.ts';
+} from '../../../../contract/fork.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';

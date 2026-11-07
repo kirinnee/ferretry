@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionHandoverPhase } from '../../../../../daemon/lib/protocol/handover.ts';
+import type { SessionHandoverPhase } from '../../../../../contract/handover.ts';
 import should from 'should';
 import { type HandoverWorld, nextPhase } from '../../../../../daemon/lib/moves/handover/policy.ts';
 import { observation, receiptAt, sessionView } from './support.ts';

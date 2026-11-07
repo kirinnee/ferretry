@@ -1,5 +1,5 @@
 import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
-import type { ConversionPreview, MoveConversation } from '../../../../daemon/lib/protocol/move.ts';
+import type { ConversionPreview, MoveConversation } from '../../../../contract/move.ts';
 import type { IMoveGateway } from '../../../../cli/lib/move/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 import { sessionView } from '../session/session-fixtures.ts';

@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFile, rm, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type SessionTransferPlan } from '../../../../daemon/lib/protocol/session-transfer.ts';
+import { type SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   type RuntimeControlRequest,
   SessionConfigSchema,

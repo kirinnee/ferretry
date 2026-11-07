@@ -1,6 +1,16 @@
 import { z } from 'zod';
-import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
-import { HarnessSchema } from './session-base.ts';
+import { RecordedHarnessSchema } from './records.ts';
+
+const NonNegativeIntegerSchema = z.number().int().nonnegative();
+const PositiveIntegerSchema = z.number().int().positive();
+
+/** Error envelope returned by every JSON API failure (today's `ApiErrorResponseSchema`). */
+const ApiErrorResponseSchema = z.looseObject({
+  error: z.string(),
+  code: z.string().optional(),
+  method: z.string().optional(),
+  path: z.string().optional(),
+});
 
 /**
  * The move wire (`POST /v1/ferrets/:ferretId/move`, `…/conversion-preview`, `…/move/ask-to-stop-jobs`): what a move
@@ -73,9 +83,9 @@ export type ConversionDropped = z.infer<typeof ConversionDroppedSchema>;
 export const ConversionSummarySchema = z.strictObject({
   /** The converter's own version, bumped whenever what it produces changes. */
   converter: PositiveIntegerSchema,
-  sourceHarness: HarnessSchema,
+  sourceHarness: RecordedHarnessSchema,
   sourceVersion: z.string().min(1).optional(),
-  targetHarness: HarnessSchema,
+  targetHarness: RecordedHarnessSchema,
   targetVersion: z.string().min(1),
   /** Turns in the source once harness-internal records are dropped: one per thing the person said. */
   turns: NonNegativeIntegerSchema,
