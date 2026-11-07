@@ -51,7 +51,7 @@ import {
   DIRECT_SESSION_DEADLINE_MS,
   type LegFailure,
   RELAY_SESSION_DEADLINE_MS,
-  type RetirableSocket,
+  type ScopedSocket,
   walkingDial,
   type WalkLeg,
   type WalkScope,
@@ -66,6 +66,11 @@ export const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
 export const PREFERENCE_CHANGED_REASON = 'the connection preference for this machine changed';
 /** Said to every session an unpair or a re-pair closes (today's `clearDaemon` sentence). */
 export const PAIRING_CLEARED_REASON = 'this daemon was re-paired or unpaired';
+/** Said to a walk whose entry a republish replaced while it was in flight (today's `STALE_WALK_REASON`). */
+export const STALE_WALK_REASON =
+  'this daemon was re-paired, unpaired or republished, or its connection preference changed, while this request was in flight, so it was not carried to another carrier';
+/** Said to a session on a carrier the daemon's republished set no longer names (today's `#refreshed` sentence). */
+export const WITHDRAWN_CARRIER_REASON = 'this rendezvous is not named in the carriers this daemon publishes';
 /** The request paths that are carrier control (§15): they ride {@link CarrierRouter.control}. */
 export const CONTROL_PATHS: readonly string[] = Object.freeze(['/v1/tunnel']);
 
@@ -189,33 +194,38 @@ const carrierOutage = (seen: readonly LegFailure[]): CarrierOutage => {
 };
 
 /**
- * One pairing under one preference: what every walk and session for it belongs to (today's entry `retired`
- * controller and its `sessions`). `rewalk` and `clearDaemon` retire it — every session it holds is closed, saying
- * why, and every walk still in flight stops before its next dial and decides nothing. A republish keeps it.
+ * One pairing under one preference: what every session for it belongs to (today's entry abort controller and its
+ * `sessions`). `rewalk` and `clearDaemon` end it — every session it holds is closed, saying why, and every walk still
+ * in flight stops before its next dial and decides nothing. A republish keeps it, closing only the sessions on a
+ * carrier the new set no longer names ({@link Generation.withdraw}).
  */
 class Generation {
-  #retired: string | undefined;
-  readonly #sockets = new Set<RetirableSocket>();
+  #endedWith: string | undefined;
+  readonly #sockets = new Set<ScopedSocket>();
 
-  scope(): WalkScope {
-    return {
-      retired: () => this.#retired,
-      track: socket => {
-        this.#sockets.add(socket);
-        return () => this.#sockets.delete(socket);
-      },
-    };
+  track(socket: ScopedSocket): () => void {
+    this.#sockets.add(socket);
+    return () => this.#sockets.delete(socket);
   }
 
-  retired(): boolean {
-    return this.#retired !== undefined;
+  /** Why this generation ended, or `undefined` while it is the pairing's. */
+  endedWith(): string | undefined {
+    return this.#endedWith;
   }
 
-  retire(reason: string): void {
-    if (this.#retired !== undefined) return;
-    this.#retired = reason;
-    for (const socket of [...this.#sockets]) socket.retire(reason);
+  end(reason: string): void {
+    if (this.#endedWith !== undefined) return;
+    this.#endedWith = reason;
+    for (const socket of [...this.#sockets]) socket.cancel(reason);
     this.#sockets.clear();
+  }
+
+  /** A republish: close every session dialling or bound to a carrier `kept` refuses, saying why (today's `#refreshed`). */
+  withdraw(kept: (method: ConnectionMethod) => boolean, reason: string): void {
+    for (const socket of [...this.#sockets]) {
+      const carrier = socket.carrier();
+      if (carrier !== undefined && !kept(carrier)) socket.cancel(reason);
+    }
   }
 }
 
@@ -272,13 +282,13 @@ export class CarrierRouter {
    *
    * The entry is REPLACED rather than edited (today's `rewalk`): every session on it is closed, saying why, so no
    * request goes on crossing a carrier the person may just have excluded, and a walk still in flight finds its
-   * generation retired and stops rather than deciding a winner under the old preference.
+   * generation ended and stops rather than deciding a winner under the old preference.
    */
   rewalk(daemonId: string): void {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
     this.#entries.set(daemonId, { published: entry.published, choice: undefined, generation: new Generation() });
-    entry.generation.retire(PREFERENCE_CHANGED_REASON);
+    entry.generation.end(PREFERENCE_CHANGED_REASON);
     this.#announce();
   }
 
@@ -287,7 +297,7 @@ export class CarrierRouter {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
     this.#entries.delete(daemonId);
-    entry.generation.retire(PAIRING_CLEARED_REASON);
+    entry.generation.end(PAIRING_CLEARED_REASON);
     this.#announce();
   }
 
@@ -296,12 +306,12 @@ export class CarrierRouter {
     return events => {
       // The preference is read once per session, so one walk never mixes two.
       const plan: WalkPlan = { preference: this.#preference(daemon.daemon) };
-      const generation = this.#entry(daemon).generation;
+      const entry = this.#entry(daemon);
       return walkingDial(
         this.deps,
-        () => this.#steps(daemon, plan, generation),
-        this.#observer(daemon, plan, true, generation),
-        generation.scope(),
+        () => this.#steps(daemon, plan, entry),
+        this.#observer(daemon, plan, true, entry),
+        this.#scope(daemon.daemon, entry),
       )(events);
     };
   }
@@ -310,12 +320,12 @@ export class CarrierRouter {
   control(daemon: PairedDaemon): CarrierDial {
     return events => {
       const plan: WalkPlan = { preference: this.#preference(daemon.daemon) };
-      const generation = this.#entry(daemon).generation;
+      const entry = this.#entry(daemon);
       return walkingDial(
         this.deps,
         () => this.#introducers(daemon),
-        this.#observer(daemon, plan, false, generation),
-        generation.scope(),
+        this.#observer(daemon, plan, false, entry),
+        this.#scope(daemon.daemon, entry),
       )(events);
     };
   }
@@ -324,20 +334,46 @@ export class CarrierRouter {
     return this.deps.preference?.(daemonId) ?? DEFAULT_CARRIER_PREFERENCE;
   }
 
+  /**
+   * Where one walk belongs: the ENTRY it started on (today's `#assertCurrent(entry)`). An unpair, a re-pair, a new
+   * preference or a republish replaces that entry, and from then on the walk dials nothing more and decides nothing:
+   * it carries the set the daemon has since corrected. Its sessions belong to the generation, so a republish leaves
+   * those on a still-published carrier open.
+   */
+  #scope(daemonId: string, entry: CarrierEntry): WalkScope {
+    return {
+      stale: () =>
+        entry.generation.endedWith() ?? (this.#entries.get(daemonId) === entry ? undefined : STALE_WALK_REASON),
+      track: socket => entry.generation.track(socket),
+    };
+  }
+
   #entry(daemon: PairedDaemon): CarrierEntry {
     const carriers = daemonCarriers(daemon);
     const published = JSON.stringify(carriers);
     const current = this.#entries.get(daemon.daemon);
     if (current !== undefined && current.published === published) return current;
-    // A republish is not a re-pair: a winner the new set still names (or one no set can name) is kept.
-    const chosen = current?.choice;
-    const kept =
-      chosen?.ok === true &&
-      (carriers.some(method => sameCarrier(method, chosen.method)) || outlivesRepublish(chosen.method))
-        ? chosen
-        : undefined;
-    const entry: CarrierEntry = { published, choice: kept, generation: current?.generation ?? new Generation() };
+    if (current === undefined) {
+      const entry: CarrierEntry = { published, choice: undefined, generation: new Generation() };
+      this.#entries.set(daemon.daemon, entry);
+      return entry;
+    }
+    // A REPUBLISH IS NOT A RE-PAIR (today's `#refreshed`): what the new set still names is kept — its sessions and a
+    // winner on it — and a direct or WebRTC winner no set can name keeps itself and its sessions. Everything else is
+    // closed, saying so, and a walk on the replaced entry stops before its next dial.
+    const chosen = current.choice;
+    const winner = chosen?.ok === true ? chosen.method : undefined;
+    const named = (method: ConnectionMethod): boolean => carriers.some(listed => sameCarrier(listed, method));
+    const outlives = (method: ConnectionMethod): boolean =>
+      winner !== undefined && outlivesRepublish(winner) && sameCarrier(method, winner);
+    const entry: CarrierEntry = {
+      published,
+      choice: winner !== undefined && (named(winner) || outlivesRepublish(winner)) ? chosen : undefined,
+      generation: current.generation,
+    };
     this.#entries.set(daemon.daemon, entry);
+    current.generation.withdraw(method => named(method) || outlives(method), WITHDRAWN_CARRIER_REASON);
+    this.#announce();
     return entry;
   }
 
@@ -353,10 +389,7 @@ export class CarrierRouter {
   }
 
   /** The walk: the remembered winner first, then the preference's order (today's `#candidates`). */
-  async *#steps(daemon: PairedDaemon, plan: WalkPlan, generation: Generation): AsyncGenerator<WalkStep> {
-    // A retired generation is never re-entered: reading `#entry` for it would recreate a cleared pairing.
-    if (generation.retired()) return;
-    const entry = this.#entry(daemon);
+  async *#steps(daemon: PairedDaemon, plan: WalkPlan, entry: CarrierEntry): AsyncGenerator<WalkStep> {
     const winner = entry.choice?.ok === true ? entry.choice.method : undefined;
     if (winner !== undefined) yield this.#leg(daemon, winner);
     const authored = daemonCarriers(daemon, this.#hostedLabel);
@@ -392,20 +425,28 @@ export class CarrierRouter {
     if (hosted !== undefined) yield this.#leg(daemon, hosted);
   }
 
-  /** This walk's entry while its generation is current; `undefined` once retired (never recreated from here). */
-  #current(daemon: PairedDaemon, generation: Generation): CarrierEntry | undefined {
-    if (generation.retired()) return undefined;
-    const entry = this.#entries.get(daemon.daemon);
+  /** The walk's own entry while it is still the pairing's (today's `#assertCurrent`); `undefined` once replaced. */
+  #current(daemonId: string, entry: CarrierEntry): CarrierEntry | undefined {
+    if (entry.generation.endedWith() !== undefined) return undefined;
+    return this.#entries.get(daemonId) === entry ? entry : undefined;
+  }
+
+  /**
+   * The pairing's entry while `generation` is still its generation. An accepted session outlives a republish that
+   * still names its carrier, so what it reports lands on the entry that holds it now, never on the replaced one.
+   */
+  #holding(daemonId: string, generation: Generation): CarrierEntry | undefined {
+    if (generation.endedWith() !== undefined) return undefined;
+    const entry = this.#entries.get(daemonId);
     return entry?.generation === generation ? entry : undefined;
   }
 
-  #observer(daemon: PairedDaemon, plan: WalkPlan, decides: boolean, generation: Generation) {
+  #observer(daemon: PairedDaemon, plan: WalkPlan, decides: boolean, walked: CarrierEntry) {
     const probes: ConnectionProbe[] = [];
     const daemonId = daemon.daemon;
     /** The stopped carrier was the remembered winner: forget it, so this walk and the next start from the top. */
-    const forget = (method: ConnectionMethod): void => {
+    const forget = (entry: CarrierEntry | undefined, method: ConnectionMethod): void => {
       if (!decides) return;
-      const entry = this.#current(daemon, generation);
       if (entry?.choice?.ok !== true || !sameCarrier(entry.choice.method, method)) return;
       entry.choice = undefined;
       this.#announce();
@@ -413,7 +454,7 @@ export class CarrierRouter {
     return {
       untried: (method: ConnectionMethod, detail: string) => probes.push(untriedProbe(method, detail)),
       failed: (failure: LegFailure) => {
-        forget(failure.method);
+        forget(this.#current(daemonId, walked), failure.method);
         probes.push(
           carrierProbe(failure.method, {
             kind: 'transport-failure',
@@ -423,7 +464,7 @@ export class CarrierRouter {
         );
       },
       committed: (method: ConnectionMethod) => {
-        const entry = this.#current(daemon, generation);
+        const entry = this.#current(daemonId, walked);
         if (entry === undefined) return;
         this.deps.health?.answered(daemonId);
         this.deps.drops?.reconnected(daemonId);
@@ -440,7 +481,7 @@ export class CarrierRouter {
           return { code: last.code, reason: last.reason };
         }
         const chosen = choiceFor(probes, plan);
-        const entry = this.#current(daemon, generation);
+        const entry = this.#current(daemonId, walked);
         if (entry === undefined)
           return { code: failures.at(-1)?.code ?? RELAY_CLOSE_CODES.daemonAbsent, reason: chosen.reason };
         if (entry.choice?.ok !== true) {
@@ -451,9 +492,9 @@ export class CarrierRouter {
         const last = failures[failures.length - 1];
         return { code: last?.code ?? RELAY_CLOSE_CODES.daemonAbsent, reason: chosen.reason };
       },
-      // A carrier that failed under an accepted session stopped carrying: the winner it was is forgotten and the change
-      // announced, whatever the optional drop log does (today's `#walk`, before it reports the lost request).
-      lost: (method: ConnectionMethod) => forget(method),
+      // A request was lost with the carrier under an accepted session: it stopped carrying, so the winner it was is
+      // forgotten and the change announced (today's request path). An idle drop never reaches here.
+      lost: (method: ConnectionMethod) => forget(this.#holding(daemonId, walked.generation), method),
       dropped: (
         method: ConnectionMethod,
         end: Parameters<NonNullable<CarrierRouterDependencies['drops']>['dropped']>[3],

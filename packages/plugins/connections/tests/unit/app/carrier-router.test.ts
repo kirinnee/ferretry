@@ -4,7 +4,13 @@
  * device the kernel admits. Only the network and the timers are scripted.
  */
 import { describe, expect, test } from 'bun:test';
-import { CONTROL_UNREACHABLE, type ConnectPorts, HEARTBEAT_RESPONSE, type PairedDaemon } from '@ferretry/app';
+import {
+  CONTROL_UNREACHABLE,
+  type ConnectPorts,
+  HEARTBEAT_RESPONSE,
+  type PairedDaemon,
+  RELAY_CLOSE_CODES,
+} from '@ferretry/app';
 import { connector, fakeDeviceClaims, WebCryptoRelayCrypto } from '@ferretry/app/testing';
 import connections from '../../../app/index.ts';
 import type { BrowserSocket } from '../../../app/adapters/browser-relay-dial.ts';
@@ -13,6 +19,7 @@ import {
   daemonCarriers,
   PAIRING_CLEARED_REASON,
   PREFERENCE_CHANGED_REASON,
+  WITHDRAWN_CARRIER_REASON,
 } from '../../../app/carriers/router.ts';
 import { documentRelayDiscovery } from '../../../app/discovery/hosted-relay.ts';
 import type { CarrierPreference } from '../../../app/lib/carrier-preference.ts';
@@ -30,7 +37,7 @@ interface Rig {
   readonly timers: HandTimers;
   readonly router: CarrierRouter;
   readonly daemon: PairedDaemon;
-  readonly connect: () => ReturnType<ReturnType<typeof connector>>;
+  readonly connect: (target?: PairedDaemon) => ReturnType<ReturnType<typeof connector>>;
 }
 
 async function rig(
@@ -69,7 +76,7 @@ async function rig(
       },
     },
   });
-  const connect = () =>
+  const connect = (target: PairedDaemon = daemon) =>
     connector({
       crypto: shellCrypto,
       claims,
@@ -77,7 +84,7 @@ async function rig(
       direct: () => {
         throw new Error('the shell’s own direct dial is not used once Connections registered a carrier');
       },
-    })(daemon);
+    })(target);
   return { fx, network, timers, router, daemon, connect };
 }
 
@@ -459,6 +466,279 @@ describe('a winner that fails under a write is forgotten (connections-app R1 fin
     expect(choiceAfterLoss?.ok).not.toBe(true);
     expect(announced).toBeGreaterThan(0);
     expect(carriedOver(r.fx)).toEqual(['/v1/first relay', '/v1/example relay', '/v1/second direct']);
+    r.fx.layer.close();
+  });
+});
+
+const RELAY_TWO = 'wss://relay-two.example';
+const RELAY_TWO_HOST = new URL(RELAY_TWO).host;
+const hostsOf = (dialled: readonly string[]): readonly string[] => dialled.map(url => new URL(url).host);
+const sleep = (ms: number): Promise<'pending'> => new Promise(resolve => setTimeout(() => resolve('pending'), ms));
+
+/** Every socket the browser opened, per host, and every close this side asked of one. */
+const recording =
+  (closes: string[], sockets: Map<string, BrowserSocket>) => (network: BrowserNetwork) => (url: string) => {
+    const socket = network.openSocket(url);
+    const host = new URL(url).host;
+    sockets.set(host, socket);
+    const close = socket.close.bind(socket);
+    socket.close = (code, reason) => {
+      closes.push(`${host} ${reason ?? ''}`);
+      close(code, reason);
+    };
+    return socket;
+  };
+
+describe('a republish fences by entry and keeps only still-published sessions (connections-app R2 finding 1)', () => {
+  test('a walk whose entry a carrier refresh replaced is refused, while the refreshed one answers (today relay-carrier.test.ts:1291)', async () => {
+    // Arrange — only the relay reaches the daemon; the daemon then republishes a second relay.
+    const r = await rig(
+      { [DIRECT_HOST]: { kind: 'dead' }, [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+    );
+    const republished: PairedDaemon = {
+      ...r.daemon,
+      carriers: [...DIRECT_AND_RELAY, { kind: 'relay', url: RELAY_TWO }],
+    };
+    const before = await r.connect();
+    const after = await r.connect(republished);
+    if (before === undefined || after === undefined) throw new Error('no transport');
+
+    // Act — a request walks the old set, and a request on the republished set replaces its entry.
+    const stale = before.request({ method: 'GET', path: '/v1/projects' }).catch((error: unknown) => error);
+    const current = after.request({ method: 'GET', path: '/v1/usage' });
+
+    // Assert — the stale walk dialled nothing more and said why; the current one answered over the relay.
+    expect(String(await stale)).toMatch(/re-paired, unpaired or republished/u);
+    expect((await current).status).toBe(200);
+    expect(carriedOver(r.fx)).toEqual(['/v1/usage relay']);
+    expect(hostsOf(r.network.dialled)).toEqual([DIRECT_HOST, RELAY_HOST]);
+    expect(r.router.choice(r.fx.daemonId)?.ok).toBe(true);
+    r.fx.layer.close();
+  });
+
+  test('a stale PUT walk never dials the withdrawn relay, and its observer never makes it the winner', async () => {
+    // Arrange — direct is silent; relay-A and relay-B both reach the daemon.
+    const r = await rig(
+      {
+        [DIRECT_HOST]: { kind: 'silent' },
+        [RELAY_HOST]: { kind: 'carries', carrier: 'relay' },
+        [RELAY_TWO_HOST]: { kind: 'carries', carrier: 'relay' },
+      },
+      DIRECT_AND_RELAY,
+    );
+    const republished: PairedDaemon = {
+      ...r.daemon,
+      carriers: [
+        { kind: 'direct', url: DIRECT },
+        { kind: 'relay', url: RELAY_TWO },
+      ],
+    };
+    const before = await r.connect();
+    const after = await r.connect(republished);
+    if (before === undefined || after === undefined) throw new Error('no transport');
+
+    // Act — a PUT holds direct with relay-A next; a walk over direct + relay-B starts; then direct's deadline passes.
+    const put = before
+      .request({ method: 'PUT', path: '/v1/example', body: { enabled: true } })
+      .catch((error: unknown) => error);
+    await pause();
+    const read = after.request({ method: 'GET', path: '/v1/usage' });
+    await pause();
+    r.timers.fireExactly(4_000);
+
+    // Assert — the PUT was refused unsent and relay-A was never dialled; the read crossed relay-B, the winner now.
+    expect(String(await put)).toMatch(/republished/u);
+    expect((await read).status).toBe(200);
+    expect(r.fx.requests.filter(request => request.method === 'PUT')).toHaveLength(0);
+    expect(hostsOf(r.network.dialled)).toEqual([DIRECT_HOST, DIRECT_HOST, RELAY_TWO_HOST]);
+    expect(JSON.stringify(r.router.choice(r.fx.daemonId))).toContain(RELAY_TWO_HOST);
+    r.fx.layer.close();
+  });
+
+  test('a rendezvous the daemon withdrew is closed under its accepted session, and the set is walked again (today relay-carrier.test.ts:1047)', async () => {
+    // Arrange — relay-A wins and holds an accepted session; the daemon then publishes relay-B instead.
+    const closes: string[] = [];
+    const sockets = new Map<string, BrowserSocket>();
+    const r = await rig(
+      {
+        [DIRECT_HOST]: { kind: 'dead' },
+        [RELAY_HOST]: { kind: 'carries', carrier: 'relay' },
+        [RELAY_TWO_HOST]: { kind: 'carries', carrier: 'relay' },
+      },
+      DIRECT_AND_RELAY,
+      'auto',
+      null,
+      recording(closes, sockets),
+    );
+    const before = await r.connect();
+    if (before === undefined) throw new Error('no transport');
+    await before.request({ method: 'GET', path: '/v1/first' });
+    const republished: PairedDaemon = {
+      ...r.daemon,
+      carriers: [
+        { kind: 'direct', url: DIRECT },
+        { kind: 'relay', url: RELAY_TWO },
+      ],
+    };
+    const after = await r.connect(republished);
+    if (after === undefined) throw new Error('no transport');
+
+    // Act
+    const answer = await after.request({ method: 'PUT', path: '/v1/example', body: { enabled: true } });
+
+    // Assert — relay-A's session was closed saying why; the PUT walked the new set and crossed relay-B only.
+    expect(answer.status).toBe(200);
+    expect(closes).toContain(`${RELAY_HOST} ${WITHDRAWN_CARRIER_REASON}`);
+    expect(hostsOf(r.network.dialled)).toEqual([DIRECT_HOST, RELAY_HOST, DIRECT_HOST, RELAY_TWO_HOST]);
+    expect(r.network.records(RELAY_HOST).length).toBeGreaterThan(0);
+    expect(JSON.stringify(r.router.choice(r.fx.daemonId))).toContain(RELAY_TWO_HOST);
+    r.fx.layer.close();
+  });
+
+  test('a direct winner the republished set cannot name keeps its session open (today’s one exception)', async () => {
+    // Arrange — direct wins; the daemon then publishes only its relay (a wildcard bind names no address).
+    const closes: string[] = [];
+    const sockets = new Map<string, BrowserSocket>();
+    const r = await rig(
+      { [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' }, [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+      'auto',
+      null,
+      recording(closes, sockets),
+    );
+    const before = await r.connect();
+    if (before === undefined) throw new Error('no transport');
+    await before.request({ method: 'GET', path: '/v1/first' });
+
+    // Act — the republish reaches the router through a new dial.
+    const after = await r.connect({ ...r.daemon, carriers: [{ kind: 'relay', url: RELAY }] });
+    if (after === undefined) throw new Error('no transport');
+    await after.request({ method: 'GET', path: '/v1/second' });
+    await before.request({ method: 'GET', path: '/v1/third' });
+
+    // Assert — nothing was closed, the first session carried its next request, and direct is still the winner.
+    expect(closes).toEqual([]);
+    expect(carriedOver(r.fx)).toEqual(['/v1/first direct', '/v1/second direct', '/v1/third direct']);
+    expect(hostsOf(r.network.dialled)).toEqual([DIRECT_HOST, DIRECT_HOST]);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'direct' } });
+    r.fx.layer.close();
+  });
+});
+
+describe('an idle drop keeps the winner (connections-app R2 finding 2)', () => {
+  test('the relay winner’s idle session is evicted: the choice stays, and the next GET redials the relay at once', async () => {
+    // Arrange — direct is silent, so the relay wins the first read after direct's deadline.
+    const closes: string[] = [];
+    const sockets = new Map<string, BrowserSocket>();
+    const r = await rig(
+      { [DIRECT_HOST]: { kind: 'silent' }, [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+      'auto',
+      null,
+      recording(closes, sockets),
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    const first = transport.request({ method: 'GET', path: '/v1/first' });
+    await pause();
+    r.timers.fireExactly(4_000);
+    await first;
+    let announced = 0;
+    r.router.subscribe(() => {
+      announced += 1;
+    });
+
+    // Act — the relay evicts the idle socket while it stays available; then the next read.
+    sockets.get(RELAY_HOST)?.close(1011, 'evicted');
+    await pause();
+    const choiceAfterDrop = r.router.choice(r.fx.daemonId);
+    const second = await Promise.race([transport.request({ method: 'GET', path: '/v1/second' }), sleep(500)]);
+
+    // Assert — the drop forgot nothing; the read crossed the same relay without waiting out direct's deadline.
+    expect(choiceAfterDrop).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    expect(announced).toBe(0);
+    expect(second).not.toBe('pending');
+    expect(carriedOver(r.fx)).toEqual(['/v1/first relay', '/v1/second relay']);
+    expect(hostsOf(r.network.dialled)).toEqual([DIRECT_HOST, RELAY_HOST, RELAY_HOST]);
+    r.fx.layer.close();
+  });
+});
+
+/** Opens like the real rendezvous and says `ready`, then refuses the session for its ceiling (4429) at the hello. */
+const refusesAtHello = (real: BrowserSocket): BrowserSocket => {
+  let refused = false;
+  const socket: BrowserSocket = {
+    binaryType: 'blob',
+    onopen: null,
+    onclose: null,
+    onerror: null,
+    onmessage: null,
+    send: () => {
+      if (refused) return;
+      refused = true;
+      real.close(1000, '');
+      setTimeout(
+        () => socket.onclose?.({ code: RELAY_CLOSE_CODES.rendezvousBusy, reason: 'session limit reached' }),
+        0,
+      );
+    },
+    close: (code, reason) => real.close(code, reason),
+  };
+  real.onopen = () => socket.onopen?.();
+  real.onmessage = event => socket.onmessage?.(event);
+  real.onclose = event => {
+    if (!refused) socket.onclose?.(event);
+  };
+  return socket;
+};
+
+describe('a stream the rendezvous refuses for its ceiling is not walked onward (connections-app R2 finding 3)', () => {
+  const streamOver = async (hostA: ScriptedHost, wrap: (network: BrowserNetwork) => (url: string) => BrowserSocket) => {
+    const r = await rig(
+      { [RELAY_HOST]: hostA, [RELAY_TWO_HOST]: { kind: 'carries', carrier: 'relay' } },
+      [
+        { kind: 'relay', url: RELAY },
+        { kind: 'relay', url: RELAY_TWO },
+      ],
+      'relay',
+      null,
+      wrap,
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    const ended = new Promise<string>(resolve => {
+      transport.socket('/v1/example/stream', { onFrame: () => undefined, onClose: resolve });
+    });
+    return { r, ended: await Promise.race([ended, sleep(1_000)]) };
+  };
+
+  test('4429 before any frame: the refusal is the stream’s answer, and the next relay is never dialled', async () => {
+    const { r, ended } = await streamOver(
+      { kind: 'absent', code: RELAY_CLOSE_CODES.rendezvousBusy },
+      network => network.openSocket,
+    );
+
+    expect(ended).toBe('no daemon holds this rendezvous');
+    expect(hostsOf(r.network.dialled)).toEqual([RELAY_HOST]);
+    r.fx.layer.close();
+  });
+
+  test('4429 after the rendezvous said ready, before acceptance: the refusal reaches the stream, nothing walks on', async () => {
+    const { r, ended } = await streamOver({ kind: 'carries', carrier: 'relay' }, network => url => {
+      const real = network.openSocket(url);
+      return new URL(url).host === RELAY_HOST ? refusesAtHello(real) : real;
+    });
+
+    expect(ended).toBe('session limit reached');
+    expect(hostsOf(r.network.dialled)).toEqual([RELAY_HOST]);
+    r.fx.layer.close();
+  });
+
+  test('an ordinary unreachable stream session still falls through to the next relay', async () => {
+    const { r } = await streamOver({ kind: 'dead' }, network => network.openSocket);
+
+    expect(hostsOf(r.network.dialled)).toEqual([RELAY_HOST, RELAY_TWO_HOST]);
     r.fx.layer.close();
   });
 });

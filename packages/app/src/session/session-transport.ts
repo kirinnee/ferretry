@@ -32,6 +32,8 @@ export interface CarrierSocketEvents {
   readonly onBinary: (bytes: Uint8Array) => void;
   readonly onText: (text: string) => void;
   readonly onClose: (code: number, reason: string) => void;
+  /** This socket carries one live stream (an event or terminal stream), not request sessions. */
+  readonly stream?: boolean;
 }
 
 /**
@@ -50,6 +52,11 @@ export interface CarrierWalkSocket extends RelayClientSocket {
    * carrier, or `undefined` when there is none left (or the walk was retired).
    */
   onward?(): CarrierDial | undefined;
+  /**
+   * A request on the accepted session failed because the session ended under it (today's request path forgets the
+   * remembered carrier then). A session that ended idle says nothing: the carrier is redialled first next time.
+   */
+  requestLost?(): void;
 }
 
 /** Opens one carrier socket for one session. */
@@ -96,6 +103,7 @@ function openSession(
     onBinary: bytes => void session?.receiveBinary(bytes),
     onText: text => session?.receiveText(text),
     onClose: (code, reason) => session?.carrierClosed(code, reason),
+    ...(mode.kind === 'stream' ? { stream: true } : {}),
   });
   session = new RelayClientSession({
     crypto: options.crypto,
@@ -115,7 +123,7 @@ function openSession(
 async function acceptedSession(
   options: SessionTransportOptions,
   mode: RelayClientSessionDependencies['mode'],
-): Promise<RelayClientSession> {
+): Promise<OpenedSession> {
   let dial = options.dial;
   for (;;) {
     const opened = openSession(options, dial, mode);
@@ -128,17 +136,27 @@ async function acceptedSession(
       continue;
     }
     opened.socket.accepted?.();
-    return opened.session;
+    return opened;
   }
 }
 
 const pairs = (query: Readonly<Record<string, string>> | undefined): readonly (readonly [string, string])[] =>
   Object.entries(query ?? {});
 
+/**
+ * A request failed: when its session ended under it, the carrier lost it (today's request path, which then forgets the
+ * remembered carrier). The caller's own abort, or a session still live (an answer), says nothing about the carrier.
+ */
+function lostUnder(opened: OpenedSession, reason: unknown, signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true && reason === signal.reason) return;
+  if (opened.session.live()) return;
+  opened.socket.requestLost?.();
+}
+
 export class SessionTransport implements DaemonTransport {
   readonly #options: SessionTransportOptions;
   readonly #reconnect = new Set<() => void>();
-  #session: Promise<RelayClientSession> | undefined;
+  #session: Promise<OpenedSession> | undefined;
   #opened = 0;
 
   constructor(options: SessionTransportOptions) {
@@ -146,15 +164,15 @@ export class SessionTransport implements DaemonTransport {
   }
 
   /** The live request session, or a new one when the last ended (a lease ran out, the carrier dropped). */
-  #requestSession(): Promise<RelayClientSession> {
+  #requestSession(): Promise<OpenedSession> {
     const current = this.#session;
     if (current !== undefined) {
-      return current.then(session => (session.live() ? session : this.#fresh()));
+      return current.then(opened => (opened.session.live() ? opened : this.#fresh()));
     }
     return this.#fresh();
   }
 
-  #fresh(): Promise<RelayClientSession> {
+  #fresh(): Promise<OpenedSession> {
     const ready = acceptedSession(this.#options, { kind: 'auth', device: this.#options.device });
     this.#session = ready;
     ready.catch(() => {
@@ -186,7 +204,7 @@ export class SessionTransport implements DaemonTransport {
     };
     let answer: RelayTunnelAnswer;
     try {
-      answer = await session.request(record, request.signal);
+      answer = await session.session.request(record, request.signal);
     } catch (reason) {
       // R244, copied from today's relay-carrier: a lapsed lease silently reopens a read ONCE.
       // A write may already have happened, and a revocation is final on every method.
@@ -194,10 +212,17 @@ export class SessionTransport implements DaemonTransport {
         !(reason instanceof RelaySessionError) ||
         reason.code !== RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE ||
         !['GET', 'HEAD'].includes(request.method.toUpperCase())
-      )
+      ) {
+        lostUnder(session, reason, request.signal);
         throw reason;
+      }
       const fresh = await this.#requestSession();
-      answer = await fresh.request(record, request.signal);
+      try {
+        answer = await fresh.session.request(record, request.signal);
+      } catch (again) {
+        lostUnder(fresh, again, request.signal);
+        throw again;
+      }
     }
     return { status: answer.status, headers: answer.headers, body: decodeBody(answer.body) };
   }
@@ -279,7 +304,7 @@ export class SessionTransport implements DaemonTransport {
   }
 
   close(): void {
-    void this.#session?.then(session => session.close()).catch(() => {});
+    void this.#session?.then(opened => opened.session.close()).catch(() => {});
     this.#session = undefined;
   }
 }

@@ -77,7 +77,7 @@ export interface WalkObserver {
   committed(method: ConnectionMethod): void;
   /** Every leg failed (or there were none): the session ends with this close. */
   exhausted(failures: readonly LegFailure[]): { readonly code: number; readonly reason: string };
-  /** An accepted session's carrier failed under this browser (not a close this side made): it stopped carrying. */
+  /** A request on an accepted session was lost because its carrier ended under this browser: it stopped carrying. */
   lost?(method: ConnectionMethod): void;
   /** An accepted session's carrier ended under this browser (not a close this side made). */
   dropped?(method: ConnectionMethod, end: CarrierSessionEnd): void;
@@ -102,22 +102,27 @@ const once = (deps: CarrierSocketDependencies, delayMs: number, run: () => void)
 };
 
 /**
- * Where a walk belongs: the router's generation of one pairing under one preference. A retired scope dials nothing
- * more and decides nothing more; every socket it tracks is closed by the router saying why.
+ * Where a walk belongs: the router's entry for one pairing, under one preference and one published set (today's
+ * `#assertCurrent(entry)`). A stale scope dials nothing more and decides nothing more; the router closes the sockets
+ * it tracks, saying why — all of them for an unpair, a re-pair or a new preference, and for a republish only those
+ * on a carrier the new set no longer names.
  */
 export interface WalkScope {
-  /** Why this walk's generation was retired, or `undefined` while it is still current. */
-  retired(): string | undefined;
-  /** Registers one live session socket so a retirement can close it; answers the deregistration. */
-  track(socket: RetirableSocket): () => void;
+  /** Why this walk no longer describes the pairing's current entry, or `undefined` while it still does. */
+  stale(): string | undefined;
+  /** Registers one live session socket so the router can close it; answers the deregistration. */
+  track(socket: ScopedSocket): () => void;
 }
 
-/** What the router can do to a live session socket when its generation is retired. */
-export interface RetirableSocket {
-  retire(reason: string): void;
+/** What the router can see of, and do to, a live session socket. */
+export interface ScopedSocket {
+  /** The carrier this session is dialling or bound to, or `undefined` before its first leg. */
+  carrier(): ConnectionMethod | undefined;
+  /** Close the session, saying why: it may not go on crossing this carrier for this pairing. */
+  cancel(reason: string): void;
 }
 
-const UNSCOPED: WalkScope = { retired: () => undefined, track: () => () => undefined };
+const UNSCOPED: WalkScope = { stale: () => undefined, track: () => () => undefined };
 
 /**
  * One walk over `steps`, shared by every fresh session its unsent failures open: a leg tried by one session is never
@@ -180,7 +185,7 @@ export function walkingDial(
  */
 type Phase = 'walking' | 'carrying' | 'accepted';
 
-class WalkingSocket implements RetirableSocket {
+class WalkingSocket implements ScopedSocket {
   readonly adapted: CarrierWalkSocket;
   #socket: RelayCarrierSocket | undefined;
   #method: ConnectionMethod = { kind: 'webrtc' };
@@ -189,7 +194,7 @@ class WalkingSocket implements RetirableSocket {
   #carryLeg: (() => void) | undefined;
   /** The acceptance deadline of the leg this session is bound to: armed until the daemon accepts. */
   #cancelAcceptance: (() => void) | undefined;
-  /** This side closed the session (the shell, a retirement, or the heartbeat): nothing after it is a drop. */
+  /** This side closed the session (the shell, the router, or the heartbeat): nothing after it is a drop. */
   #closedHere = false;
   #ended = false;
   /** The session ended before acceptance on a leg that carried its frames: the walk may go on, once. */
@@ -199,6 +204,12 @@ class WalkingSocket implements RetirableSocket {
   #pongDeadline: { readonly within: number; readonly cancel: () => void } | undefined;
   #forgiven = false;
   #stopKeepalive: (() => void) | undefined;
+  /**
+   * The close code of the accepted carrier that ended under this browser, until the shell says whether a request was
+   * lost with it. An idle drop is not the carrier failing a request: the winner is kept (today's `onClose` only logs
+   * the drop), and the next session redials it first.
+   */
+  #droppedWith: number | undefined;
   readonly #untrack: () => void;
 
   constructor(
@@ -213,13 +224,18 @@ class WalkingSocket implements RetirableSocket {
       close: (code, reason) => this.#closeFromSession(code ?? 1000, reason ?? 'the browser closed this session'),
       accepted: () => this.#accept(),
       onward: () => this.#onward(),
+      requestLost: () => this.#requestLost(),
     };
     this.#untrack = walk.scope.track(this);
     void this.#walk();
   }
 
-  /** The router retired this walk's generation (an unpair, a re-pair, a new preference): close, saying why. */
-  retire(reason: string): void {
+  carrier(): ConnectionMethod | undefined {
+    return this.#socket === undefined ? undefined : this.#method;
+  }
+
+  /** The router closes this session (an unpair, a re-pair, a new preference, a withdrawn carrier), saying why. */
+  cancel(reason: string): void {
     if (this.#ended) return;
     this.#closedHere = true;
     this.#unsent = false;
@@ -237,10 +253,29 @@ class WalkingSocket implements RetirableSocket {
     return this.#socket;
   }
 
-  #retiredReason(): string | undefined {
-    const reason = this.walk.scope.retired();
-    if (reason !== undefined) this.retire(reason);
+  #staleReason(): string | undefined {
+    const reason = this.walk.scope.stale();
+    if (reason !== undefined) this.cancel(reason);
     return reason;
+  }
+
+  /**
+   * A request on this accepted session failed because the carrier ended under it (today's request path, which forgets
+   * the remembered carrier when a request on it fails). A device refusal is the daemon's answer, not the carrier's.
+   */
+  #requestLost(): void {
+    const code = this.#droppedWith;
+    this.#droppedWith = undefined;
+    if (code === undefined || code === RELAY_CLOSE_CODES.authRejected) return;
+    this.walk.observer.lost?.(this.#method);
+  }
+
+  /**
+   * A stream the rendezvous refused for its session ceiling is answered as it is, never walked onward (today's stream
+   * walk rethrows `rendezvousBusy`): another carrier would hide the refusal behind whatever it said instead.
+   */
+  #streamRefused(code: number): boolean {
+    return this.events.stream === true && code === RELAY_CLOSE_CODES.rendezvousBusy;
   }
 
   async #walk(): Promise<void> {
@@ -248,9 +283,9 @@ class WalkingSocket implements RetirableSocket {
       for (;;) {
         // ASKED BEFORE EVERY ATTEMPT (today's `#assertCurrent`): an unpair or a new preference can land between any
         // two legs, and every leg after it would be dialled for a pairing that no longer exists.
-        if (this.#ended || this.#phase !== 'walking' || this.#retiredReason() !== undefined) return;
+        if (this.#ended || this.#phase !== 'walking' || this.#staleReason() !== undefined) return;
         const step = await this.walk.next();
-        if (this.#ended || this.#phase !== 'walking' || this.#retiredReason() !== undefined) return;
+        if (this.#ended || this.#phase !== 'walking' || this.#staleReason() !== undefined) return;
         if (step === undefined) break;
         if (step.kind === 'untried') {
           this.walk.observer.untried(step.method, step.detail);
@@ -267,7 +302,7 @@ class WalkingSocket implements RetirableSocket {
         opened: false,
       });
     }
-    if (this.#ended || this.#phase !== 'walking' || this.#retiredReason() !== undefined) return;
+    if (this.#ended || this.#phase !== 'walking' || this.#staleReason() !== undefined) return;
     this.walk.finish();
     const close = this.walk.observer.exhausted(this.walk.failures);
     this.#end(close.code, close.reason);
@@ -275,7 +310,7 @@ class WalkingSocket implements RetirableSocket {
 
   /** Records one leg that did not carry a session the daemon accepted. */
   #legFailed(failure: LegFailure): void {
-    if (this.walk.scope.retired() !== undefined) return;
+    if (this.walk.scope.stale() !== undefined) return;
     this.walk.failures.push(failure);
     this.walk.observer.failed(failure);
   }
@@ -351,6 +386,13 @@ class WalkingSocket implements RetirableSocket {
         this.events.onBinary(bytes);
       };
       socket.onClose = (code, reason) => {
+        if (stage === 'dialling' && this.#streamRefused(code)) {
+          stage = 'over';
+          cancelDeadline();
+          this.#end(code, reason);
+          resolve(false);
+          return;
+        }
         if (stage === 'dialling') {
           passOver(code, reason);
           return;
@@ -369,8 +411,8 @@ class WalkingSocket implements RetirableSocket {
     this.#cancelAcceptance = undefined;
     this.#phase = 'accepted';
     this.#servingSince = this.deps.now();
-    // A retired generation publishes nothing: its session is being closed under it.
-    if (this.walk.scope.retired() !== undefined) return;
+    // A stale walk publishes nothing: its entry was replaced, or its session is being closed under it.
+    if (this.walk.scope.stale() !== undefined) return;
     this.walk.observer.committed(this.#method);
   }
 
@@ -378,7 +420,7 @@ class WalkingSocket implements RetirableSocket {
   #onward(): CarrierDial | undefined {
     if (!this.#unsent) return undefined;
     this.#unsent = false;
-    if (this.walk.scope.retired() !== undefined || this.walk.finished()) return undefined;
+    if (this.walk.scope.stale() !== undefined || this.walk.finished()) return undefined;
     return events => new WalkingSocket(this.deps, this.walk, events).adapted;
   }
 
@@ -394,19 +436,20 @@ class WalkingSocket implements RetirableSocket {
     this.#stop();
     this.#cancelAcceptance?.();
     this.#socket?.close(code, reason);
-    if (phase === 'carrying') this.#unsentFailure(code, reason);
+    if (phase === 'carrying' && !this.#streamRefused(code)) this.#unsentFailure(code, reason);
     this.#end(code, reason);
   }
 
   #unsentFailure(code: number, reason: string): void {
     this.#legFailed({ method: this.#method, code, reason, opened: true });
-    this.#unsent = this.walk.scope.retired() === undefined;
+    this.#unsent = this.walk.scope.stale() === undefined;
   }
 
   /**
    * The carrier this session is bound to ended (it closed, missed its acceptance deadline, or stopped answering the
-   * heartbeat). Before acceptance: unsent, the walk may go on. After: a drop, and the winner it was is forgotten
-   * (today's `#walk` clears the stopped winner before reporting the lost request).
+   * heartbeat). Before acceptance: unsent, the walk may go on — except a stream the rendezvous refused for its
+   * ceiling. After: a drop, kept until the shell says a request was lost with it (`requestLost`); only then is the
+   * winner forgotten (today forgets it when a request on it fails, never on an idle drop).
    */
   #carrierEnded(code: number, reason: string, options: { readonly close?: string } = {}): void {
     if (this.#ended) return;
@@ -416,10 +459,11 @@ class WalkingSocket implements RetirableSocket {
     if (options.close !== undefined) {
       this.#socket?.close(code, options.close);
     }
-    if (phase === 'carrying') this.#unsentFailure(code, reason);
+    if (phase === 'carrying' && this.#streamRefused(code)) this.#unsent = false;
+    else if (phase === 'carrying') this.#unsentFailure(code, reason);
     else if (phase === 'accepted' && !this.#closedHere) {
       this.#dropped(code, reason);
-      if (this.walk.scope.retired() === undefined) this.walk.observer.lost?.(this.#method);
+      this.#droppedWith = code;
     }
     if (options.close !== undefined) this.#closedHere = true;
     this.#end(code, reason);
