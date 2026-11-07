@@ -25,6 +25,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-layouts": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -97,6 +98,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
@@ -129,6 +131,8 @@
       "name": "@ferretry/plugin-agenda",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -138,7 +142,10 @@
       "name": "@ferretry/plugin-board",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
@@ -200,6 +207,8 @@
       "name": "@ferretry/plugin-conversation",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -242,6 +251,7 @@
       "dependencies": {
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -362,7 +372,10 @@
       "name": "@ferretry/plugin-warden",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },

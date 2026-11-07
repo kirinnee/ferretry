@@ -1,7 +1,14 @@
 import { defineEvent, definePort, type FerretId } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import { z } from 'zod';
-import type { FerretRole, FerretState, FerretSummary, HarnessKey, PackId } from './ids.ts';
+import {
+  type FerretRole,
+  type FerretState,
+  FerretStateSchema,
+  type FerretSummary,
+  type HarnessKey,
+  type PackId,
+} from './ids.ts';
 import type { RunnerHandle, SitrepLine } from './kinds.ts';
 
 /** A request to start a ferret (from the owner's route, a pack, the board, or a lead for its helper). */
@@ -59,8 +66,17 @@ export interface FerretsApi {
 
 export const FerretsPort = definePort<FerretsApi>('ferrets');
 
-/** A ferret was added, changed state, or went away. A wake-up for views; the truth is `FerretsPort`. */
+/**
+ * A ferret was added, changed state, or went away. A wake-up for views; the truth is `FerretsPort`.
+ * State and absence also let Vault end its input values without a needs cycle back to Ferrets (I108).
+ * Missing state says nothing about whether the ferret ended: readers keep masking until they know.
+ */
 export const FerretsChanged = defineEvent(
   'ferrets.changed',
-  z.strictObject({ ferret: z.string().min(1), generation: z.number().int() }),
+  z.strictObject({
+    ferret: z.string().min(1),
+    generation: z.number().int(),
+    state: FerretStateSchema.optional(),
+    gone: z.literal(true).optional(),
+  }),
 );

@@ -1,4 +1,6 @@
-# The built-in theme. PLACEHOLDER: the token names belong to the app shell (spine slice 5, "theme tokens"); this file
-# is valid and empty until it fills them, so `fy theme use default` works from day one.
+# The built-in theme: the house family (studio) with no token laid over it (design §5.3).
 id: default
-tokens: {}
+label: Default
+base: studio
+light: {}
+dark: {}
