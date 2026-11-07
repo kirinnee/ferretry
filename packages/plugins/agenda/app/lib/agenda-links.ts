@@ -7,10 +7,10 @@
  */
 
 import { useMemo } from 'react';
-import { useScreenHref } from '../shell.ts';
+import { daemonHomeHref, useScreenHref } from '../shell.ts';
 
-/** The Agenda page (the manifest's `agenda` screen). */
-export const AGENDA_PAGE_PATH = '/agenda';
+/** A machine's Agenda page (the manifest's daemon-relative `agenda` screen). */
+export const agendaPagePath = (daemonId: string): string => `${daemonHomeHref(daemonId)}/agenda`;
 
 export interface AgendaLinks {
   /** A ferret's chat; the Agenda page when Conversation is not installed. */
@@ -31,8 +31,8 @@ export const useAgendaLinks = (): AgendaLinks => {
 /** The links over one route table (`useScreenHref`'s answer). */
 export const agendaLinks = (href: ReturnType<typeof useScreenHref>): AgendaLinks => {
   return {
-    chat: (daemonId, ferret) => href(daemonId, 'conversation', 'chat', { ferret }) ?? AGENDA_PAGE_PATH,
-    agenda: daemonId => href(daemonId, 'agenda', 'agenda') ?? AGENDA_PAGE_PATH,
+    chat: (daemonId, ferret) => href(daemonId, 'conversation', 'chat', { ferret }) ?? agendaPagePath(daemonId),
+    agenda: daemonId => href(daemonId, 'agenda', 'agenda') ?? agendaPagePath(daemonId),
     card: (daemonId, id) => href(daemonId, 'board', 'card', { id }),
     lanes: (daemonId, project) => {
       const board = href(daemonId, 'board', 'board', { project });

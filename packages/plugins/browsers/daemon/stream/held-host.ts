@@ -26,10 +26,16 @@ export function heldViewerHost(kernel: Pick<KernelPorts, 'act'>, host: BrowserSu
       ),
     dispatchHumanInput: async (sessionId, input) => {
       const status = await host.status(sessionId);
-      if (status.state !== 'running' || !('activePageId' in status)) return await host.dispatchHumanInput(sessionId, input);
-      await writeAct(kernel.act, pageTarget(status.activePageId), input.kind === 'insertText' ? 'type' : 'press', async () => {
-        await host.dispatchHumanInput(sessionId, input);
-      });
+      if (status.state !== 'running' || !('activePageId' in status))
+        return await host.dispatchHumanInput(sessionId, input);
+      await writeAct(
+        kernel.act,
+        pageTarget(status.activePageId),
+        input.kind === 'insertText' ? 'type' : 'press',
+        async () => {
+          await host.dispatchHumanInput(sessionId, input);
+        },
+      );
     },
   };
 }

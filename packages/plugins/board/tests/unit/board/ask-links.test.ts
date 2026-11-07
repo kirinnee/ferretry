@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ASK_READ_CONCURRENCY, CardAskLinks, type FerretAsksReader, type OpenAskFacts } from '../../../daemon/lib/board/index.ts';
+import {
+  ASK_READ_CONCURRENCY,
+  CardAskLinks,
+  type FerretAsksReader,
+  type OpenAskFacts,
+} from '../../../daemon/lib/board/index.ts';
 import { card } from './support.ts';
 
 const ask = (id: string, extra: Partial<OpenAskFacts> = {}): OpenAskFacts => ({ id, cards: [], gateOf: [], ...extra });

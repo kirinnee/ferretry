@@ -78,7 +78,10 @@ export const reasonOf = (cause: unknown): string => {
  * Confirm one held edit and say what happened, never throwing: `null` is "confirmed", a sentence is why it was
  * not. A passkey, when the daemon asks for one, is raised by the shell around the call.
  */
-export async function confirmHeld(client: UsageClient, pending: Pick<ConfigPending, 'path' | 'etag'>): Promise<string | null> {
+export async function confirmHeld(
+  client: UsageClient,
+  pending: Pick<ConfigPending, 'path' | 'etag'>,
+): Promise<string | null> {
   try {
     const result = ConfigConfirmResultSchema.parse(
       await client.call('POST /v1/config/confirm', { body: { path: pending.path, etag: pending.etag } }),

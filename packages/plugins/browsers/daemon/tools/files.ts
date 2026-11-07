@@ -34,7 +34,11 @@ export interface BrowserFiles {
 export interface StagedFileMover {
   /** Places one upload copy in a fresh private directory and answers its path; older copies past their time go. */
   place(name: string, bytes: Uint8Array): Promise<string>;
-  copy(from: string, to: FencedPath, options: { readonly overwrite: boolean; readonly maxBytes: number }): Promise<number>;
+  copy(
+    from: string,
+    to: FencedPath,
+    options: { readonly overwrite: boolean; readonly maxBytes: number },
+  ): Promise<number>;
 }
 
 const leafOf = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -44,7 +48,10 @@ function refusalOf(error: unknown, shown: string): BrowserToolError {
   if (error instanceof BrowserToolError) return error;
   const refusal = (error as { readonly refusal?: unknown } | undefined)?.refusal;
   if (refusal === 'fenced')
-    return new BrowserToolError('forbidden', `${shown} is in this daemon's state home, which no agent may read or write.`);
+    return new BrowserToolError(
+      'forbidden',
+      `${shown} is in this daemon's state home, which no agent may read or write.`,
+    );
   if (typeof refusal === 'string')
     return new BrowserToolError('forbidden', `${shown} is not inside your own folder (${refusal}).`);
   return new BrowserToolError('not_found', `There is no file ${shown} in your folder.`);
@@ -56,7 +63,10 @@ function resolved(root: RootHandle, requested: string): FencedPath {
   const path = root.resolve(requested);
   if (!path.ok) {
     if (path.error === 'fenced')
-      throw new BrowserToolError('forbidden', `${requested} is in this daemon's state home, which no agent may read or write.`);
+      throw new BrowserToolError(
+        'forbidden',
+        `${requested} is in this daemon's state home, which no agent may read or write.`,
+      );
     throw new BrowserToolError('forbidden', `${requested} is not inside your own folder (${path.error}).`);
   }
   return path.value;

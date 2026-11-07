@@ -3,10 +3,11 @@ import {
   type ApiResponse,
   decodeParameter,
   jsonResponse,
+  parseBody,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
-import { ownerOnly } from '@ferretry/core-gate/contract';
-import type { ZodType, z } from 'zod';
+import { claimOwnerOnly } from '@ferretry/core-gate/contract';
+import type { z } from 'zod';
 import {
   HARNESS_UPDATE_CODES,
   HarnessDialogAnswerRequestSchema,
@@ -17,20 +18,6 @@ import {
 import { DialogAnswerError, type DialogAnswerService } from './dialog/service.ts';
 import { PermissionAnswerError, type PermissionAnswerService } from './permission/service.ts';
 import { HarnessUpdateRefusal, type HarnessUpdateSubsystem } from './update/service.ts';
-
-/** The first route-level fact: a body that is not the schema is a 400 naming what is wrong. */
-async function parseBody<T>(call: Parameters<RouteHandler>[0], schema: ZodType<T>): Promise<T> {
-  let raw: unknown;
-  try {
-    const text = await call.request.text();
-    raw = text === '' ? {} : JSON.parse(text);
-  } catch {
-    throw new ApiError(400, 'the request body is not JSON', 'invalid_body');
-  }
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new ApiError(400, 'the request body is not what this route takes', 'invalid_body');
-  return parsed.data;
-}
 
 function ferretId(call: Parameters<RouteHandler>[0]): string {
   const decoded = decodeParameter(call.params.get('ferretId') ?? '');
@@ -50,7 +37,7 @@ function paneRefusal(error: unknown): never {
 export function permissionRoute(permission: PermissionAnswerService): RouteHandler {
   return async call => {
     const id = ferretId(call);
-    const request = await parseBody(call, PermissionAnswerRequestSchema);
+    const request = await parseBody(call.request, PermissionAnswerRequestSchema);
     try {
       return jsonResponse(await permission.answer(id, request));
     } catch (error) {
@@ -67,7 +54,7 @@ export function permissionRoute(permission: PermissionAnswerService): RouteHandl
 export function dialogRoute(dialog: DialogAnswerService): RouteHandler {
   return async call => {
     const id = ferretId(call);
-    const request = await parseBody(call, HarnessDialogAnswerRequestSchema);
+    const request = await parseBody(call.request, HarnessDialogAnswerRequestSchema);
     try {
       return jsonResponse(await dialog.answer(id, request));
     } catch (error) {
@@ -84,36 +71,11 @@ export function updateViewRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async () => jsonResponse(await update.view());
 }
 
-/** The largest body the start route has a use for: a version and a yes (today's harness update route). */
-const MAX_START_BODY_BYTES = 4 * 1024;
-
 /**
- * The start request, parsed at the boundary as today's harness update route did: the read is bounded, a body that does
- * not satisfy the schema never becomes a domain value, and the caller is told which field was wrong without the
- * submitted values coming back.
+ * The largest body the start route has a use for: a version and a yes. Read through the kernel's `parseBody` (today's
+ * `api/body.ts`), so the refusals are today's: `413 body_too_large`, `400 invalid_json`, `400 invalid_request`.
  */
-async function readStart(call: Parameters<RouteHandler>[0]): Promise<z.output<typeof HarnessUpdateStartRequestSchema>> {
-  let text: string;
-  try {
-    text = await call.request.text(MAX_START_BODY_BYTES);
-  } catch (error) {
-    if (error instanceof Error && error.name === 'BodyTooLargeError')
-      throw new ApiError(413, error.message, 'body_too_large');
-    throw new ApiError(400, 'the request body could not be read', 'unreadable_body');
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new ApiError(400, 'the request body is not valid JSON', 'invalid_json');
-  }
-  const result = HarnessUpdateStartRequestSchema.safeParse(parsed);
-  if (result.success) return result.data;
-  const detail = result.error.issues
-    .map(issue => `${issue.path.join('.') === '' ? 'body' : issue.path.join('.')}: ${issue.message}`)
-    .join('; ');
-  throw new ApiError(400, `the request body is invalid — ${detail}`, 'invalid_request', result.error.issues);
-}
+const MAX_START_BODY_BYTES = 4 * 1024;
 
 /** A domain refusal as a 409. The unverified one is an ANSWER, because its body carries both versions. */
 function refuseStart(error: unknown): ApiResponse {
@@ -130,14 +92,16 @@ function refuseStart(error: unknown): ApiResponse {
 
 /**
  * Starting an update: today's `harness-update.ts`. A ferret may never start one (it would be an agent replacing the
- * program it runs as), and a governed device confirms with a passkey first — the gate is Gate's {@link ownerOnly}, the
- * daemon update's own, so the acts can never be governed differently. The proof is spent only once the update has been
- * accepted.
+ * program it runs as), and a governed device confirms with a passkey first — the gate is Gate's {@link claimOwnerOnly},
+ * the daemon update's own, so the acts can never be governed differently. The proof is claimed before the update
+ * starts, so one proof admits one start and a refused start has used it up.
  */
 export function updateStartRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async call => {
-    const request = await readStart(call);
-    const refused = ownerOnly(call, 'update the agent CLIs on this machine');
+    const request = await parseBody(call.request, HarnessUpdateStartRequestSchema, {
+      maxBytes: MAX_START_BODY_BYTES,
+    });
+    const refused = claimOwnerOnly(call, 'update the agent CLIs on this machine');
     if (refused !== undefined) return refused;
     let view: Awaited<ReturnType<HarnessUpdateSubsystem['start']>>;
     try {
@@ -145,7 +109,6 @@ export function updateStartRoute(update: HarnessUpdateSubsystem): RouteHandler {
     } catch (error) {
       return refuseStart(error);
     }
-    if (call.governance?.governed === true) call.spendFreshStepUp?.();
     return jsonResponse(view, 202);
   };
 }

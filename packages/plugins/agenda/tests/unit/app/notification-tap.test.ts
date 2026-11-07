@@ -3,7 +3,7 @@
  * `notificationTapUrl(notificationUrl(url, origin, machine, sessionId), origin)`, so the proof is that
  * composition, per kind, against the page a daemon names (`agendaNotificationPath`) — plus the mark every
  * one of them wears. The rules are the Agenda's own (`lib/notification-tap.ts`); an ask's tap opens the ask's own
- * page (`/agenda/<ferret>/<ask>`), where today it opened the Inbox at that card.
+ * page (`/d/<daemon>/agenda/<ferret>/<ask>`), where today it opened the Inbox at that card.
  */
 import { describe, expect, it } from 'bun:test';
 import { agendaNotificationPath, type AgendaId, MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
@@ -45,7 +45,7 @@ const tapTarget = (payload: PushNotificationPayload): string =>
 
 describe('inboxTargetPath / inboxTargetFromSearch', () => {
   it('opens a buzz on the ask’s own page', () => {
-    expect(inboxTargetPath(daemonId('laptop'), 'session 1', A3)).toBe('/agenda/session%201/A3');
+    expect(inboxTargetPath(daemonId('laptop'), 'session 1', A3)).toBe('/d/laptop/agenda/session%201/A3');
   });
 
   it('reads a conversation and an item named on a query', () => {
@@ -63,7 +63,7 @@ describe('inboxTargetPath / inboxTargetFromSearch', () => {
 describe('a tap, per kind of push', () => {
   it('an agenda item lands on that ask’s own page', () => {
     const payload = push({ kind: 'attention', sessionId: 's1', url: agendaNotificationPath('s1', A3) });
-    expect(tapTarget(payload)).toBe(`${ORIGIN}/agenda/s1/A3`);
+    expect(tapTarget(payload)).toBe(`${HOME}/agenda/s1/A3`);
   });
 
   it('a machine notice lands on its ask’s page, never on a conversation page', () => {
@@ -72,15 +72,15 @@ describe('a tap, per kind of push', () => {
       sessionId: MACHINE_AGENDA_ID,
       url: agendaNotificationPath(MACHINE_AGENDA_ID, A3),
     });
-    expect(tapTarget(payload)).toBe(`${ORIGIN}/agenda/${MACHINE_AGENDA_ID}/A3`);
+    expect(tapTarget(payload)).toBe(`${HOME}/agenda/${MACHINE_AGENDA_ID}/A3`);
     // A push that named no page the worker may open still opens the Agenda, not a machine-agenda conversation.
-    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${ORIGIN}/agenda`);
+    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${HOME}/agenda`);
   });
 
   it('a ping, a deadline, a wake-up and a stop all carry their item, so all land on it', () => {
     for (const kind of ['agenda', 'attention', 'question'] as const) {
       const payload = push({ kind, sessionId: 's9', url: agendaNotificationPath('s9', 'A12' as AgendaId) });
-      expect(tapTarget(payload)).toBe(`${ORIGIN}/agenda/s9/A12`);
+      expect(tapTarget(payload)).toBe(`${HOME}/agenda/s9/A12`);
     }
   });
 

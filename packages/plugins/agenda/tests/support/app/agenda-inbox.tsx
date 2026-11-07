@@ -243,6 +243,6 @@ export const SCREENS: ScreenHrefOf = (daemon, plugin, screen, params = {}) => {
   if (plugin === 'conversation' && screen === 'chat') return `${at}/session/${encodeURIComponent(params.ferret ?? '')}`;
   if (plugin === 'board' && screen === 'card') return `${at}/board/${encodeURIComponent(params.id ?? '')}`;
   if (plugin === 'board' && screen === 'board') return `${at}/board/${encodeURIComponent(params.project ?? '')}`;
-  if (plugin === 'agenda' && screen === 'agenda') return `${at}/inbox`;
+  if (plugin === 'agenda' && screen === 'agenda') return `${at}/agenda`;
   return undefined;
 };

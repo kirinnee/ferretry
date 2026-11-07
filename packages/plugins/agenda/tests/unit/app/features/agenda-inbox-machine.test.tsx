@@ -296,6 +296,6 @@ describe('the Machine group in the Inbox', () => {
   test('links its item to the Inbox, not to a conversation', () => {
     expect(agendaConversationPath(daemonId('studio'), 'machine-agenda', 'M1')).not.toContain('/session/');
     // A ferret's item opens on its own ask page, its conversation under the ask.
-    expect(agendaConversationPath(daemonId('studio'), 'sess-1', 'A1')).toBe('/agenda/sess-1/A1');
+    expect(agendaConversationPath(daemonId('studio'), 'sess-1', 'A1')).toBe('/d/studio/agenda/sess-1/A1');
   });
 });

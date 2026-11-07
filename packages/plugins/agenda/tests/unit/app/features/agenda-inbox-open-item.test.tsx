@@ -114,7 +114,7 @@ describe('the open Inbox item', () => {
     expect(who.querySelector('[data-inbox-who-card]')?.textContent).toBe('&F12');
     expect(who.textContent).toContain('Laptop');
     const chat = must(who.querySelector<HTMLAnchorElement>('[data-inbox-open-chat]'), 'Open chat');
-    expect(chat.getAttribute('href')).toBe('/agenda/sess-2/A2');
+    expect(chat.getAttribute('href')).toBe('/d/laptop/agenda/sess-2/A2');
     // ✕ goes back to the Inbox, and says so.
     expect(mounted.container.querySelector('[data-agenda-close]')?.getAttribute('aria-label')).toBe(
       'Back to the Inbox',

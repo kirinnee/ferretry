@@ -1,5 +1,5 @@
 /**
- * The `agenda-ask` screen (`/agenda/:ferret/:ask`): where a buzz lands. It is the Agenda page opened AT the ask, as
+ * The `agenda-ask` screen (`agenda/:ferret/:ask` under its machine): where a buzz lands. It is the Agenda page opened AT the ask, as
  * today's page opens one from a tapped notification: the card shows while the ask is open, with the ferret's
  * conversation and composer under it (Conversation's panel in the `agenda.conversation` slot), and the reader goes on
  * to the ferret's chat when it is not open any more.

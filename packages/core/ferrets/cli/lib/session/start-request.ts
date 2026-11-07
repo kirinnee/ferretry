@@ -9,13 +9,7 @@ import type { SessionEnvironment, StartBody } from './ports.ts';
  * start's idempotency key is the shell's header. A typed one is
  * refused by name rather than sent and dropped, because a flag that was accepted and ignored is worse than a refusal.
  */
-export const START_FLAGS_ELSEWHERE: readonly string[] = [
-  'compact-at',
-  'file',
-  'prompt-file',
-  'detach',
-  'request-id',
-];
+export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'file', 'prompt-file', 'detach', 'request-id'];
 
 /**
  * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it

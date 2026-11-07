@@ -123,8 +123,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      screen('agenda', { path: '/agenda', nav: { label: 'Agenda', icon: 'inbox', order: 10 } }),
-      screen('agenda-ask', { path: '/agenda/:ferret/:ask' }),
+      screen('agenda', { path: 'agenda', nav: { label: 'Agenda', icon: 'inbox', order: 10 } }),
+      screen('agenda-ask', { path: 'agenda/:ferret/:ask' }),
     ],
     panels: [
       panel('ferret.side', { id: 'ferret-agenda', order: 10 }),

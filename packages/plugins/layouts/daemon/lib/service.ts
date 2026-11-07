@@ -1,9 +1,10 @@
 /**
  * Layouts' service: what the routes and the read model share. It reads `config/layout.yaml`, `config/layouts/` and
  * `config/themes/` through the plugin's `ConfigPort`, serves the built-ins beside the saved items, and writes through
- * the config door. Every write is one door call; nothing is kept in memory, so the files are the only truth.
+ * the kernel's config writer (`ConfigPort.write`). Every write is one call; nothing is kept in memory, so the files are
+ * the only truth.
  */
-import type { ConfigCollectionDef, ConfigFileDef, ConfigPort } from '@ferretry/kernel/contract';
+import type { ConfigCollectionDef, ConfigFileDef, ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import {
   BUILT_IN_LAYOUTS,
   BUILT_IN_THEMES,
@@ -24,15 +25,13 @@ import {
   type ThemeList,
   ThemeSchema,
 } from '../../contract/index.ts';
-import type { ConfigDoor, DoorResult } from './config-door.ts';
 import { applyOverrides, resolveCurrent, setPaths } from './overrides.ts';
 
 /** Why a change did not happen. The route turns it into a status and a code. */
 export type Refusal =
   | { readonly kind: 'invalid'; readonly code: typeof LAYOUT_CODES.invalid; readonly issues: readonly LayoutIssue[] }
   | { readonly kind: 'unknown'; readonly code: string; readonly sentence: string }
-  | { readonly kind: 'conflict'; readonly code: string; readonly sentence: string }
-  | { readonly kind: 'unavailable'; readonly code: typeof LAYOUT_CODES.noConfigDoor; readonly sentence: string };
+  | { readonly kind: 'conflict'; readonly code: string; readonly sentence: string };
 
 export type Outcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly refusal: Refusal };
 const done = <T>(value: T): Outcome<T> => ({ ok: true, value });
@@ -42,9 +41,6 @@ const refuse = (refusal: Refusal): Outcome<never> => ({ ok: false, refusal });
 const LAYOUTS_SELECTION = SELECTION_DEF as ConfigFileDef<LayoutSelection>;
 const LAYOUTS_ITEMS = ITEMS_DEF as ConfigCollectionDef<Layout>;
 const LAYOUTS_THEMES = THEMES_DEF as ConfigCollectionDef<Theme>;
-
-const NO_DOOR =
-  'this daemon cannot change its configuration files from here, so the layout can be shown but not changed';
 
 export interface LayoutsService {
   list(): LayoutList;
@@ -59,7 +55,7 @@ export interface LayoutsService {
   remove(id: LayoutId): Promise<Outcome<LayoutId>>;
 }
 
-export function createLayoutsService(config: ConfigPort, door: ConfigDoor | undefined): LayoutsService {
+export function createLayoutsService(config: ConfigPort): LayoutsService {
   const selection = (): LayoutSelection => config.file(LAYOUTS_SELECTION) ?? LayoutSelectionSchema.parse({});
 
   /** Built-ins first: a saved item cannot shadow one. */
@@ -78,19 +74,32 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
 
   const current = (): CurrentLayout => resolveCurrent(selection(), layouts(), themes());
 
-  const written = async (result: Promise<DoorResult>): Promise<Refusal | undefined> => {
+  /** Every outcome the kernel's writer can give, as the refusal a route answers (`undefined`: it is in effect). */
+  const written = async (result: Promise<ConfigWriteOutcome>): Promise<Refusal | undefined> => {
     const answer = await result;
-    if (answer.kind === 'applied') return undefined;
-    if (answer.kind === 'held')
-      return { kind: 'conflict', code: 'config_held', sentence: `held for the owner: ${answer.sentences.join('; ')}` };
-    return {
-      kind: 'invalid',
-      code: LAYOUT_CODES.invalid,
-      issues: answer.issues.map(issue => ({ path: '', message: issue.message })),
-    };
+    switch (answer.kind) {
+      case 'written':
+        return undefined;
+      case 'held':
+        return {
+          kind: 'conflict',
+          code: 'config_held',
+          sentence: `held for the owner: ${answer.sentences.join('; ')}`,
+        };
+      case 'conflict':
+        return {
+          kind: 'conflict',
+          code: 'config_conflict',
+          sentence: 'the layout files changed while this was being saved; read them again and retry',
+        };
+      case 'refused':
+        return {
+          kind: 'invalid',
+          code: LAYOUT_CODES.invalid,
+          issues: answer.issues.map(issue => ({ path: issue.path, message: issue.message })),
+        };
+    }
   };
-
-  const unavailable: Refusal = { kind: 'unavailable', code: LAYOUT_CODES.noConfigDoor, sentence: NO_DOOR };
 
   return {
     list() {
@@ -120,13 +129,12 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
     layout: id => layouts().get(id),
 
     async set(changes) {
-      if (door === undefined) return refuse(unavailable);
       const now = selection();
       const base = layouts().get(now.layout) ?? DEFAULT_LAYOUT;
       const result = setPaths(base, now.overrides, changes);
       if (!result.ok) return refuse({ kind: 'invalid', code: LAYOUT_CODES.invalid, issues: result.issues });
       const refusal = await written(
-        door.write(LAYOUTS_SELECTION, undefined, { patch: { overrides: result.overrides } }),
+        config.write(LAYOUTS_SELECTION, undefined, { patch: { overrides: result.overrides } }),
       );
       if (refusal !== undefined) return refuse(refusal);
       const laid = applyOverrides(base, result.overrides);
@@ -137,10 +145,9 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
       const target = layouts().get(id);
       if (target === undefined)
         return refuse({ kind: 'unknown', code: LAYOUT_CODES.unknown, sentence: `there is no layout called ${id}` });
-      if (door === undefined) return refuse(unavailable);
       // The old overrides were made against another layout; they start again with this one.
       const refusal = await written(
-        door.write(LAYOUTS_SELECTION, undefined, { patch: { layout: id, overrides: undefined } }),
+        config.write(LAYOUTS_SELECTION, undefined, { patch: { layout: id, overrides: undefined } }),
       );
       return refusal === undefined ? done(target) : refuse(refusal);
     },
@@ -156,15 +163,13 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
           code: LAYOUT_CODES.invalid,
           issues: checked.error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message })),
         });
-      if (door === undefined) return refuse(unavailable);
-      const refusal = await written(door.write(LAYOUTS_SELECTION, undefined, { patch: { theme: id } }));
+      const refusal = await written(config.write(LAYOUTS_SELECTION, undefined, { patch: { theme: id } }));
       return refusal === undefined ? done(checked.data) : refuse(refusal);
     },
 
     async reset() {
-      if (door === undefined) return refuse(unavailable);
       const refusal = await written(
-        door.write(LAYOUTS_SELECTION, undefined, { patch: { layout: 'default', overrides: undefined } }),
+        config.write(LAYOUTS_SELECTION, undefined, { patch: { layout: 'default', overrides: undefined } }),
       );
       return refusal === undefined ? done(DEFAULT_LAYOUT) : refuse(refusal);
     },
@@ -176,9 +181,8 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
           code: LAYOUT_CODES.exists,
           sentence: `there is already a layout called ${id}`,
         });
-      if (door === undefined) return refuse(unavailable);
       const saved: Layout = { ...current().layout, id };
-      const refusal = await written(door.write(LAYOUTS_ITEMS, id, Bun.YAML.stringify(saved, null, 2)));
+      const refusal = await written(config.write(LAYOUTS_ITEMS, id, Bun.YAML.stringify(saved, null, 2)));
       return refusal === undefined ? done({ id, origin: 'saved' as const }) : refuse(refusal);
     },
 
@@ -191,8 +195,7 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
         });
       if (!layouts().has(id))
         return refuse({ kind: 'unknown', code: LAYOUT_CODES.unknown, sentence: `there is no layout called ${id}` });
-      if (door === undefined) return refuse(unavailable);
-      const refusal = await written(door.remove(LAYOUTS_ITEMS, id));
+      const refusal = await written(config.remove(LAYOUTS_ITEMS, id));
       return refusal === undefined ? done(id) : refuse(refusal);
     },
   };

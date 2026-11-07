@@ -3,7 +3,11 @@ import { mkdir, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/p
 import path from 'node:path';
 import should from 'should';
 import { RunnerSessionGit } from '../../../../../daemon/adapters/session/filesystem/index.ts';
-import { PosixSessionRootPinner, ProcfsSessionRootPinner, testDiffScratch } from '../../../../support/daemon/session-filesystem/index.ts';
+import {
+  PosixSessionRootPinner,
+  ProcfsSessionRootPinner,
+  testDiffScratch,
+} from '../../../../support/daemon/session-filesystem/index.ts';
 import {
   FsError,
   type PinnedRoot,

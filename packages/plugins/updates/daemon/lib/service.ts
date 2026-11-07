@@ -76,8 +76,7 @@ export interface DaemonUpdateServiceOptions {
   readonly onFinished?: (target: string, outcome: UpdateOutcome) => void;
   /**
    * Whether this daemon asks for the latest release at all. Off for a development build, which has
-   * no release to compare against, and when the operator says so (`FY_UPDATE_CHECK=off`) — which is
-   * also how a suite that boots a real daemon keeps it off the network.
+   * no release to compare against (the port's `compiled`).
    */
   readonly checks: boolean;
 }

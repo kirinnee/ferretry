@@ -110,7 +110,7 @@ describe('agenda inbox helpers', () => {
     expect(origin.ferret).toBe('Kai');
     expect(origin.task).toBe('Release train');
     expect(origin.machine).toBe('Laptop');
-    expect(origin.href).toBe('/agenda/sess-2/A2');
+    expect(origin.href).toBe('/d/laptop/agenda/sess-2/A2');
     expect(inboxCardOrigin(bare, () => undefined).ferret).toBe('Moe');
   });
 });
@@ -373,7 +373,7 @@ describe('AgendaInboxPage rows', () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [twoWay], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-row]'), 'the item row');
-    expect(link.getAttribute('href')).toBe('/agenda/sess-2/A2');
+    expect(link.getAttribute('href')).toBe('/d/laptop/agenda/sess-2/A2');
     expect(link.textContent).toContain('Ship it?');
     expect(link.textContent).toContain('!A2');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
@@ -431,7 +431,7 @@ describe('AgendaInboxPage rows', () => {
     expect(lines).toEqual([withItem.key, notice.key]);
     const line = must(group.querySelector('[data-agenda-notice]'), 'the notice');
     expect(line.textContent).toContain('The build finished');
-    expect(line.querySelector('a')?.getAttribute('href')).toBe('/agenda/sess-5/N1');
+    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/laptop/agenda/sess-5/N1');
     expect(line.querySelector('[data-agenda-clear]')?.textContent).toBe('Clear');
     await mounted.unmount();
   });
@@ -455,7 +455,7 @@ describe('AgendaInboxPage rows', () => {
     const mounted = await mount(page(fake, [notice], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-notice] a'), 'the notice');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/agenda/sess-5/N1']);
+    expect(navigated).toEqual(['/d/laptop/agenda/sess-5/N1']);
     await advance(fake, 6_000);
     expect(fake.commits.map(commit => commit.card.item.id)).toEqual(['N1']);
     await mounted.unmount();
@@ -767,9 +767,9 @@ describe('AgendaNeedsYou', () => {
     ).toEqual(['A3', 'A2', 'A1']);
     const all = must(section.querySelector<HTMLAnchorElement>('[data-agenda-see-all]'), 'See all');
     expect(all.textContent).toBe('See all 4');
-    expect(all.getAttribute('href')).toBe('/d/workshop/inbox');
+    expect(all.getAttribute('href')).toBe('/d/workshop/agenda');
     await interact(() => all.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/workshop/inbox']);
+    expect(navigated).toEqual(['/d/workshop/agenda']);
     // Buttons only: these cards do not swipe.
     expect(section.querySelector('.fy-attn-card__swipe')).toBeNull();
     await mounted.unmount();

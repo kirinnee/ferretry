@@ -256,17 +256,17 @@ describe('usage parity · what the manifest declares and the half implements', (
   });
 
   it('S-0339 the Analytics page slot is the Insights nav entry of the insights screen', () => {
-    expect(screen('insights')).toMatchObject({ path: '/insights', nav: { label: 'Insights' } });
+    expect(screen('insights')).toMatchObject({ path: 'insights', nav: { label: 'Insights' } });
     expect(typeof half.screens.insights).toBe('function');
   });
 
   it('S-0365 the overview address is /d/<daemon>/insights, the screen path under the daemon', () => {
-    expect(daemonInsightsPath('alpha')).toBe(`/d/alpha${screen('insights')?.path}`);
+    expect(daemonInsightsPath('alpha')).toBe(`/d/alpha/${screen('insights')?.path}`);
     expect(daemonInsightsPath('a b')).toBe('/d/a%20b/insights');
   });
 
   it('S-0366 the query address is /d/<daemon>/insights/query, carrying the trimmed query when there is one', () => {
-    expect(daemonInsightsQueryPath('alpha')).toBe(`/d/alpha${screen('insights-query')?.path}`);
+    expect(daemonInsightsQueryPath('alpha')).toBe(`/d/alpha/${screen('insights-query')?.path}`);
     expect(daemonInsightsQueryPath('alpha', '  ')).toBe('/d/alpha/insights/query');
     expect(daemonInsightsQueryPath('alpha', ' sum by (model) ')).toBe(
       `/d/alpha/insights/query?q=${encodeURIComponent('sum by (model)')}`,

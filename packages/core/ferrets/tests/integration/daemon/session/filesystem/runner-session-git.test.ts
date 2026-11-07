@@ -31,7 +31,10 @@ const NUL = String.fromCharCode(0);
 /** A runner whose `git` is a script, for the failure paths a real Git will not produce on demand. */
 const gitOnPath = async (script: string): Promise<RunnerSessionGit> => {
   const directory = await stubGitDirectory(script);
-  return new RunnerSessionGit(testGitRunner(() => ({ PATH: directory })), testDiffScratch);
+  return new RunnerSessionGit(
+    testGitRunner(() => ({ PATH: directory })),
+    testDiffScratch,
+  );
 };
 
 afterAll(async () => {

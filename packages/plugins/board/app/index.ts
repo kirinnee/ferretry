@@ -1,4 +1,11 @@
-import type { AppComponent, PanelProps, PluginClient, RendererProps, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
+import type {
+  AppComponent,
+  PanelProps,
+  PluginClient,
+  RendererProps,
+  ScreenProps,
+  SettingsProps,
+} from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
@@ -38,7 +45,9 @@ export default implementApp(manifest, {
       screens: { board: screen('board'), card: screen('card') },
       panels: { 'cards-of-ferret': panel('cards-of-ferret'), 'card-progress': panel('card-progress') },
       settings: {
-        board: lazyComponent<SettingsProps>(async () => (await surfacesOf()).settings.board as AppComponent<SettingsProps>),
+        board: lazyComponent<SettingsProps>(
+          async () => (await surfacesOf()).settings.board as AppComponent<SettingsProps>,
+        ),
       },
       renderers: { 'ask:card': renderer('ask:card'), 'reference:&': renderer('reference:&') },
     };

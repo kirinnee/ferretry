@@ -1,4 +1,13 @@
-import { BROWSER_MAX_COORDINATE, BROWSER_REF_PATTERN, type BrowserElementTarget, type BrowserModifier, type BrowserMouseButton, type BrowserReadMode, type BrowserScreenshotFormat, type BrowserTarget } from './wire/target.ts';
+import {
+  BROWSER_MAX_COORDINATE,
+  BROWSER_REF_PATTERN,
+  type BrowserElementTarget,
+  type BrowserModifier,
+  type BrowserMouseButton,
+  type BrowserReadMode,
+  type BrowserScreenshotFormat,
+  type BrowserTarget,
+} from './wire/target.ts';
 
 /**
  * WHAT THE BROWSER WORKER DOES TO ONE PAGE, over the few Playwright calls it needs.

@@ -36,7 +36,7 @@ import {
 } from './agenda-answers.ts';
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
-import { type DaemonId, daemonId as toDaemonId } from '../shell.ts';
+import { type DaemonId, daemonHomeHref, daemonId as toDaemonId } from '../shell.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { rootViews } from '../shell.ts';
 
@@ -239,7 +239,7 @@ export const agendaSummaryKey = (summary: SessionAgendaSummary): string =>
   `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}\u0000${summary.stopped === true ? 1 : 0}`;
 
 /**
- * Where a conversation opens AT an item: the ask's own page (`/agenda/:ferret/:ask`), which draws the ask with its
+ * Where a conversation opens AT an item: the ask's own page (`/d/<daemon>/agenda/:ferret/:ask`), which draws the ask with its
  * ferret's conversation and composer under it (Conversation's panel in the `agenda.conversation` slot).
  */
 export const agendaConversationPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
@@ -262,9 +262,9 @@ export interface InboxTarget {
   readonly id: AgendaId;
 }
 
-/** Where a tap on a buzz lands: the ask's own page (`/agenda/:ferret/:ask`). */
-export const inboxTargetPath = (_daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  agendaAskPath(sessionId, id);
+/** Where a tap on a buzz lands: the ask's own page (`/d/<daemon>/agenda/:ferret/:ask`). */
+export const inboxTargetPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
+  `${daemonHomeHref(daemonId)}${agendaAskPath(sessionId, id)}`;
 
 /** The item an Inbox link names, or `null` when it names none (or a malformed one). */
 export const inboxTargetFromSearch = (search: string): InboxTarget | null => {

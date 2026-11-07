@@ -1,6 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BrowserProfileBusyError, compareChromeVersions, highestChromeVersion, isPrimedMarker, parseBrowserProfileLease, sameBrowserProfileLease } from '../../../../daemon/worker/control/profile.ts';
+import {
+  BrowserProfileBusyError,
+  compareChromeVersions,
+  highestChromeVersion,
+  isPrimedMarker,
+  parseBrowserProfileLease,
+  sameBrowserProfileLease,
+} from '../../../../daemon/worker/control/profile.ts';
 
 describe('browser profile policy', () => {
   it('should retain the reason for a refused profile lease', () => {

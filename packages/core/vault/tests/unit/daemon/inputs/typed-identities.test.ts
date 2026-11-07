@@ -1,10 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  TYPED_IDENTITY_TTL_MS,
-  TypedIdentities,
-  usernameOf,
-} from '../../../../daemon/lib/inputs/typed-identities.ts';
+import { TYPED_IDENTITY_TTL_MS, TypedIdentities, usernameOf } from '../../../../daemon/lib/inputs/typed-identities.ts';
 
 const SESSION = 'mvv6b4qw-49d0158d';
 const GOOGLE = 'accounts.google.com';

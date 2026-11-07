@@ -188,7 +188,7 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
     ]);
     const rows = [...view.container.querySelectorAll('[data-agenda-row]')];
     expect(rows).toHaveLength(2);
-    expect(rows.map(row => row.getAttribute('href'))).toContain('/agenda/home-manager/A1');
+    expect(rows.map(row => row.getAttribute('href'))).toContain('/d/studio/agenda/home-manager/A1');
 
     await interact(() => (rows[0] as HTMLElement).click());
     await settle();

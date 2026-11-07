@@ -154,9 +154,7 @@ describe('the switches every launch path hands a ferret', () => {
     await on.relaunch.relaunch(on.id);
 
     // Assert
-    for (const env of off.tmux.launches)
-      should(switches(env)).deepEqual({ FY_HYPERMEDIA: '0', FY_PACK: '0' });
-    for (const env of on.tmux.launches)
-      should(switches(env)).deepEqual({ FY_HYPERMEDIA: '1', FY_PACK: '1' });
+    for (const env of off.tmux.launches) should(switches(env)).deepEqual({ FY_HYPERMEDIA: '0', FY_PACK: '0' });
+    for (const env of on.tmux.launches) should(switches(env)).deepEqual({ FY_HYPERMEDIA: '1', FY_PACK: '1' });
   });
 });

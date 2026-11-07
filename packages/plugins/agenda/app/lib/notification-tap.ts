@@ -12,7 +12,7 @@
  */
 
 import { isMachineAgendaId } from '../wire/index.ts';
-import { AGENDA_PAGE_PATH } from './agenda-links.ts';
+import { agendaPagePath } from './agenda-links.ts';
 import { agendaTargetFromSearch, inboxTargetPath } from './agenda-inbox.ts';
 import type { DaemonId } from './machine.ts';
 import { notificationBrand, type NotificationPayload } from './notify.ts';
@@ -35,9 +35,13 @@ const withinMachine = (pathname: string, machine: PushMachine): boolean => {
 
 /** The page prefix a daemon names its own ferrets by, relative to its machine's pages. */
 const SESSION_RELATIVE = '/session/';
+/** The prefix of the Agenda's own pages (`agendaAskPath`), which a daemon's buzz names relative to its machine. */
+const AGENDA_RELATIVE = '/agenda/';
 
 const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && raw.startsWith(SESSION_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
+  machine !== null && (raw.startsWith(SESSION_RELATIVE) || raw.startsWith(AGENDA_RELATIVE))
+    ? `${machinePath(machine)}${raw}`
+    : raw;
 
 /** A ferret's page under its machine. */
 const ferretPath = (machine: PushMachine, sessionId: string): string =>
@@ -47,7 +51,7 @@ const ferretPath = (machine: PushMachine, sessionId: string): string =>
 const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined): string => {
   if (machine === null) return HOME_HREF;
   if (sessionId === undefined || sessionId.trim() === '') return machinePath(machine);
-  if (isMachineAgendaId(sessionId)) return AGENDA_PAGE_PATH;
+  if (isMachineAgendaId(sessionId)) return agendaPagePath(machine.daemonId);
   return ferretPath(machine, sessionId);
 };
 

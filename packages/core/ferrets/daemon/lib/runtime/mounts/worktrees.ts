@@ -8,7 +8,14 @@ import {
   type WorktreeRemovalRequest,
   WorktreeRemovalRequestSchema,
 } from '../../protocol/worktrees.ts';
-import { ApiError, type ApiResponse, type CallContext, jsonResponse, queryValue, type RouteHandler } from '@ferretry/kernel/contract';
+import {
+  ApiError,
+  type ApiResponse,
+  type CallContext,
+  jsonResponse,
+  queryValue,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
 import { parseBody } from '../../http/body.ts';
 import { WorktreeError, type WorktreeErrorCode } from '../../worktrees/index.ts';
 

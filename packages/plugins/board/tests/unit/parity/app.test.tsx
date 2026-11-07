@@ -96,7 +96,7 @@ const draw = async <Props extends object>(
 const screen = (id: 'board' | 'card', params: ScreenProps['params']) => ({ component: half?.screens[id], params });
 
 const drawBoard = async (search = '', params: ScreenProps['params'] = {}): Promise<HTMLElement> => {
-  await at(`/board${search}`);
+  await at(`/d/studio/board${search}`);
   const { component } = screen('board', params);
   return await draw<ScreenProps>(
     component,
@@ -109,7 +109,7 @@ const drawBoard = async (search = '', params: ScreenProps['params'] = {}): Promi
 describe('the app half the shell builds', () => {
   it('S-0341 PAGE_SLOTS Board: the board and one card are screens, and the board screen draws the board', async () => {
     expect(Object.keys(half?.screens ?? {}).sort()).toEqual(['board', 'card']);
-    expect(manifest.ui?.screens?.find(entry => entry.id === 'board')?.path).toBe('/board/:project?');
+    expect(manifest.ui?.screens?.find(entry => entry.id === 'board')?.path).toBe('board/:project?');
     const root = await drawBoard();
     expect([...root.querySelectorAll('[data-task]')].map(node => node.getAttribute('data-task'))).toEqual([
       'F1',
@@ -190,7 +190,7 @@ describe('the board page and its views', () => {
   });
 
   it('S-0266 TableView S-0263 SummaryRowView: ?view=list draws the summary rows', async () => {
-    await at('/board?view=list');
+    await at('/d/studio/board?view=list');
     const root = await draw<ScreenProps>(
       half?.screens.board,
       { params: {} },
@@ -206,7 +206,7 @@ describe('the board page and its views', () => {
   });
 
   it('S-0088 DependenciesView: ?view=dependencies lists what waits on what', async () => {
-    await at('/board?view=dependencies');
+    await at('/d/studio/board?view=dependencies');
     const root = await draw<ScreenProps>(
       half?.screens.board,
       { params: {} },
@@ -217,7 +217,7 @@ describe('the board page and its views', () => {
   });
 
   it('S-0032 ArchiveView: ?view=archive offers the archive search', async () => {
-    await at('/board?view=archive');
+    await at('/d/studio/board?view=archive');
     const root = await draw<ScreenProps>(
       half?.screens.board,
       { params: {} },
@@ -255,8 +255,9 @@ describe('the board page and its views', () => {
 
 describe('the lane editor and the board switch', () => {
   it('S-0128 LaneEditorPage: the board app owns the editor, reached at the project’s board with ?lanes=1', async () => {
-    expect(projectLanesPath('abc')).toBe('/board/abc?lanes=1');
-    await at(`/board/${PROJECT}?lanes=1`);
+    await at('/d/studio');
+    expect(projectLanesPath('abc')).toBe('/d/studio/board/abc?lanes=1');
+    await at(`/d/studio/board/${PROJECT}?lanes=1`);
     const root = await draw<ScreenProps>(
       half?.screens.board,
       { params: { project: PROJECT } },
@@ -285,13 +286,21 @@ describe('words and routes', () => {
     expect(view.container.querySelector('[title]')?.getAttribute('title')).toBe('[Hayden] Fix the scroller');
   });
 
-  it('S-0369 daemonBoardPath: the board is /board', () => {
+  it('S-0369 daemonBoardPath: the board is /board under the daemon the address is on', async () => {
     expect(boardPath()).toBe('/board');
+    await at('/d/studio/board');
+    expect(boardPath()).toBe('/d/studio/board');
   });
 
   it('S-0367 daemonBoardCardPath: a card id after /board opens that card; /card/<id> is its own page', () => {
     expect(boardCardPath(undefined, 'F12')).toBe('/board/F12');
     expect(cardPagePath('F12')).toBe('/card/F12');
+  });
+
+  it('S-0367 daemonBoardCardPath: both are per daemon, so under /d/<daemon>/ on a daemon address', async () => {
+    await at('/d/studio/board/F1');
+    expect(boardCardPath(undefined, 'F12')).toBe('/d/studio/board/F12');
+    expect(cardPagePath('F12')).toBe('/d/studio/card/F12');
   });
 
   it('S-0368 daemonBoardForFerretPath: a ferret’s board is the board narrowed by ?ferret=', () => {

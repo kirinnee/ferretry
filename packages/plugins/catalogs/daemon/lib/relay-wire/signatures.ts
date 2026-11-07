@@ -1,5 +1,5 @@
 /** TODO(kernel contract): IdentitySigner.signCatalog, the approved kernel shape. */
-import { catalogCanonicalText } from '../../contract/wire/index.ts';
+import { catalogCanonicalText } from '../../../contract/wire/index.ts';
 import { utf8Bytes, toBase64Url } from './kernel-wire/index.ts';
 import type { LinkStoreRequestContext, SignedLinkStoreRequest } from './catalog-wire/link-store.ts';
 import type { SessionCrypto as RelayCrypto } from './kernel-wire/index.ts';
@@ -10,7 +10,7 @@ import {
   SharedCatalogManifestSchema,
   SharedCatalogItemVersionsSchema,
   SharedCatalogLinkSchema,
-} from '../../contract/wire/index.ts';
+} from '../../../contract/wire/index.ts';
 import type {
   SharedCatalogManifest,
   SharedCatalogItemVersions,
@@ -18,7 +18,7 @@ import type {
   SignedCatalogManifest,
   SignedCatalogItemVersions,
   SignedCatalogLink,
-} from '../../contract/wire/index.ts';
+} from '../../../contract/wire/index.ts';
 export interface CatalogSigningIdentity {
   readonly daemonId: string;
   readonly signer: {

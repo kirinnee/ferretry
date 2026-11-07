@@ -48,8 +48,6 @@ function refusalResponse(refusal: Refusal): PlainApiResponse {
       return errorResponse(404, refusal.sentence, refusal.code);
     case 'conflict':
       return errorResponse(409, refusal.sentence, refusal.code);
-    case 'unavailable':
-      return errorResponse(503, refusal.sentence, refusal.code);
   }
 }
 

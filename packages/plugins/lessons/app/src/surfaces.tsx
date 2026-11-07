@@ -3,7 +3,7 @@
  * Each reads the ferret directory through Lessons' own client, since a half talks only to its own plugin.
  */
 
-import { useOptionalRouter } from '@ferretry/app';
+import { daemonHomeHref, useOptionalRouter } from '@ferretry/app';
 import { useEffect, useMemo, useState } from 'react';
 import type { LessonsFerret } from '../../contract/index.ts';
 import { fetchLessonsFerrets, type LessonsConnection } from './api.ts';
@@ -11,8 +11,14 @@ import { FerretLessonsPanel } from './ferret-lessons-panel.tsx';
 import { LessonsPage } from './lessons-page.tsx';
 import { LessonsSettingsSurface } from './lessons-settings.tsx';
 
-/** The screen's path, which a "View in Lessons" returns to. */
-export const LESSONS_PATH = '/lessons';
+/** The screen's path (per daemon, so under `/d/<daemon>/`), which a "View in Lessons" returns to. */
+export const LESSONS_PATH = 'lessons';
+
+/** Where "View in Lessons" goes from the route on screen: the Lessons screen of the daemon the reader is under. */
+export const lessonsHref = (route: object): string => {
+  const daemon = 'daemon' in route && typeof route.daemon === 'string' ? route.daemon : undefined;
+  return daemon === undefined ? `/${LESSONS_PATH}` : `${daemonHomeHref(daemon)}/${LESSONS_PATH}`;
+};
 
 /** The ferret directory: `null` until the first read answers, and for a daemon that cannot answer it. */
 function useLessonsFerrets(connection: LessonsConnection): readonly LessonsFerret[] | null {
@@ -55,7 +61,7 @@ export function lessonsSurfaces(connection: LessonsConnection) {
         connection={connection}
         ferretId={subject}
         ferrets={ferrets}
-        {...(router === null ? {} : { onViewLessons: () => router.navigate(LESSONS_PATH) })}
+        {...(router === null ? {} : { onViewLessons: () => router.navigate(lessonsHref(router.route)) })}
       />
     );
   }

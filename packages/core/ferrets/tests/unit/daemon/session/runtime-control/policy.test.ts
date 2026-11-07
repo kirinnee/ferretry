@@ -12,7 +12,12 @@ import {
 import { CLAUDE_VIEW, CODEX_VIEW } from './support.ts';
 
 /** Today's conversation-plugin `IDLE_SEND_STATUSES` (`session/send/types.ts`), restated: idle by their own account. */
-const IDLE_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set(['waiting', 'awaiting_user', 'rate_limited', 'interrupted']);
+const IDLE_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set([
+  'waiting',
+  'awaiting_user',
+  'rate_limited',
+  'interrupted',
+]);
 
 /**
  * The decidable half, stated as an ordered list rather than as `if`s between awaits.

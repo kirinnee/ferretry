@@ -262,15 +262,14 @@ export class McpInventoryService {
       this.deps.folders.forCwd(ferret.folder),
       this.deps.connections(),
     ]);
-    const account = accounts.find(
-      candidate => candidate.runtime === ferret.runtime,
-    );
+    const account = accounts.find(candidate => candidate.runtime === ferret.runtime);
     const harness: McpHarness = account?.harness ?? ferret.harness;
     const files = reading(this.deps.documents);
     const servers: ResolvedMcpServer[] = [this.#ferretry(harness, account === undefined ? [] : [account])];
     if (account !== undefined) servers.push(...(await this.#home(account, components, files)));
     servers.push(...(await this.#project(folder, harness, account === undefined ? [] : [account], files)));
-    if (account !== undefined && harness === 'claude-code') servers.push(...(await this.#local(account, folder, files)));
+    if (account !== undefined && harness === 'claude-code')
+      servers.push(...(await this.#local(account, folder, files)));
     return [withShadows(servers), connections, files.problems];
   }
 
@@ -352,7 +351,9 @@ export class McpInventoryService {
     files: Reading,
   ): Promise<ResolvedMcpServer[]> {
     const source =
-      harness === 'claude-code' ? posix.join(folder.root, '.mcp.json') : posix.join(folder.root, '.codex', 'config.toml');
+      harness === 'claude-code'
+        ? posix.join(folder.root, '.mcp.json')
+        : posix.join(folder.root, '.codex', 'config.toml');
     const read = (harness === 'claude-code' ? claudeServers : codexServers)(
       await files.read(source, harness === 'claude-code' ? 'json' : 'toml'),
     );

@@ -68,7 +68,7 @@ describe('opening the card', () => {
     try {
       expect(went).toHaveLength(1);
       // The ask's own page (`agendaAskPath`): the ferret, then the ask.
-      expect(went[0]).toBe('/agenda/sess-1/A8');
+      expect(went[0]).toBe('/d/b/agenda/sess-1/A8');
       expect(pendingAgendaDeepLink()).toBeNull();
     } finally {
       await mounted.unmount();

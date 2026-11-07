@@ -265,7 +265,8 @@ export function renderGrantHistory(view: GrantHistoryReport): string {
   if (view.entries.length === 0) lines.push('no grant has been changed on this machine');
   else {
     const actorWidth = Math.max(...view.entries.map(entry => entry.actor.length));
-    for (const entry of view.entries) lines.push(`${entry.at}  ${entry.actor.padEnd(actorWidth)}  ${entry.changes.join(', ')}`);
+    for (const entry of view.entries)
+      lines.push(`${entry.at}  ${entry.actor.padEnd(actorWidth)}  ${entry.changes.join(', ')}`);
   }
   if (view.truncated) lines.push('', 'older records exist; this is the tail of the journal');
   if (view.unreadable > 0)

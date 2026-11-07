@@ -146,10 +146,13 @@ describe('Access DevicesChanged suspends the rules a gone device approved', () =
 
   it('P124 should find no challenge for a stage the revoked device had waiting', async () => {
     const w = await world();
-    const staged = await w.service.stage({ kind: 'owner', actor: { kind: 'device', deviceId: DEVICE } }, {
-      signIn: GITHUB,
-      fields: ['password'],
-    });
+    const staged = await w.service.stage(
+      { kind: 'owner', actor: { kind: 'device', deviceId: DEVICE } },
+      {
+        signIn: GITHUB,
+        fields: ['password'],
+      },
+    );
     should(w.service.challengeOf(staged.stage as SignInRuleStageId, DEVICE)).not.be.undefined();
     await onDevicesChanged(w.service)(payload('revoked'));
     should(w.service.challengeOf(staged.stage as SignInRuleStageId, DEVICE)).be.undefined();

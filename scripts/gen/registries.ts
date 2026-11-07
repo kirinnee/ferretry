@@ -91,7 +91,7 @@ export async function buildModel(root: string, precise = true): Promise<Model> {
       }
     }
   const consumed = consumedBy(graph, scanned);
-  const toJsonSchema = await loadToJsonSchema(ws);
+  const toJsonSchema = await loadToJsonSchema();
   const canonical = new Map<string, string>();
   const hashFailures: string[] = [];
   for (const subsystem of loaded) {

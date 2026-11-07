@@ -36,7 +36,11 @@ import {
   readAnalyticsWindow,
   readMachineWindow,
 } from '../../../../app/features/analytics/analytics-overview-load.ts';
-import { sessionCost, sessionDescendants, sessionTreeMatcher } from '../../../../app/features/analytics/session-cost.ts';
+import {
+  sessionCost,
+  sessionDescendants,
+  sessionTreeMatcher,
+} from '../../../../app/features/analytics/session-cost.ts';
 import { dayAggregate, rawResponse, rawRow } from '../support/analytics-rows.ts';
 
 const NOW = new Date('2026-10-16T23:30:00Z');

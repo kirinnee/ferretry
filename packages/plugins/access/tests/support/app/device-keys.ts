@@ -23,7 +23,10 @@ export interface TestKeyHandle extends PrivateKeyHandle {
  */
 export const testDeviceKeyCrypto: KeyRotationCrypto = {
   async generateDeviceKey() {
-    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, [
+      'sign',
+      'verify',
+    ])) as unknown as CryptoKeyPair;
     return {
       publicKeySpki: new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)),
       privateKey: pair.privateKey,

@@ -1,11 +1,5 @@
 import type { HolderId } from '@ferretry/kernel/contract';
-import {
-  type ApiActor,
-  deviceActor,
-  ferretActor,
-  type TokenClass,
-  wardenActor,
-} from '../../../contract/index.ts';
+import { type ApiActor, deviceActor, ferretActor, type TokenClass, wardenActor } from '../../../contract/index.ts';
 
 /**
  * Per-call actor attribution (today's `api/actor.ts`, with `peer:` renamed `ferret:` and `session` renamed `ferret`,

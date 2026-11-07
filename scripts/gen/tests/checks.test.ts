@@ -24,6 +24,7 @@ import { check as pluginGraph } from '../../validate/plugin-graph.ts';
 import { check as portsPending } from '../../validate/ports-pending.ts';
 import { readScopedIn } from '../../validate/read-scoped.ts';
 import { check as registriesFresh } from '../../validate/registries-fresh.ts';
+import { check as screenPaths, screenPathFindings } from '../../validate/screen-paths.ts';
 import { check as words } from '../../validate/words.ts';
 import { buildModel, generateGlobal, generatePackage, packageRegistryPath, writeFiles } from '../registries.ts';
 import { type Fixture, type FixturePackage, LEAF, SDK, ZOD, fixture, routeDecl } from './fixture.ts';
@@ -40,6 +41,8 @@ const ws = (
   made.push(f);
   return f;
 };
+/** The Kernel as a fixture package: the generated command registry always carries its manifest (§9.6). */
+const KERNEL_PACKAGE: FixturePackage = { id: 'kernel', core: true, halves: false };
 const NO_BASE = { base: 'file:/nonexistent/ports-pending.json' };
 const run = async (
   check: { run: (ctx: ReturnType<typeof contextFor>) => Promise<readonly Finding[]> },
@@ -621,6 +624,38 @@ describe('glossary phrase exceptions', () => {
   });
 });
 
+describe('screen-paths', () => {
+  const screens = (body: string): FixturePackage => ({
+    id: 'sample',
+    manifestImports: `import { screen } from '${SDK}';`,
+    manifest: `  ui: { screens: [${body}] },`,
+  });
+  test('planted: an absolute path without the marker is a finding', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('board', { path: '/board' })")]);
+    const found = messages(await run(screenPaths, f));
+    expect(found).toContain('sample');
+    expect(found).toContain('"/board"');
+  });
+  test('a relative path is per daemon and passes', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('board', { path: 'board/:project?' })")]);
+    expect(messages(await run(screenPaths, f))).toBe('');
+  });
+  test('an absolute path that declares itself daemonless passes', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('join', { path: '/join', daemonless: true })")]);
+    expect(messages(await run(screenPaths, f))).toBe('');
+  });
+  test('the marker on a relative path contradicts itself', () => {
+    expect(screenPathFindings('x', [{ id: 'a', path: 'a', daemonless: true }]).length).toBe(1);
+    expect(screenPathFindings('x', [{ id: 'a', path: '/a' }]).length).toBe(1);
+    expect(
+      screenPathFindings('x', [
+        { id: 'a', path: '/a', daemonless: true },
+        { id: 'b', path: 'b' },
+      ]),
+    ).toEqual([]);
+  });
+});
+
 describe('pins', () => {
   const rev = 'a'.repeat(40);
   test('planted: an unlocked flake, an npx command, an unpinned npm payload', () => {
@@ -776,7 +811,7 @@ describe('registry generator', () => {
   });
 
   test('pending app halves are omitted, ported halves register, and registries --check stays exact', async () => {
-    const f = ws([{ id: 'alpha' }, { id: 'beta' }]);
+    const f = ws([KERNEL_PACKAGE, { id: 'alpha' }, { id: 'beta' }]);
     f.write(
       'ports-pending.json',
       JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { alpha: ['app'] } }),
@@ -800,7 +835,7 @@ describe('registry generator', () => {
   });
 
   test('registries-fresh planted: a hand-edited generated file', async () => {
-    const f = ws(graph('name'), { pending: ['alpha', 'beta', 'gamma'] });
+    const f = ws([KERNEL_PACKAGE, ...graph('name')], { pending: ['alpha', 'beta', 'gamma'] });
     const model = await buildModel(f.root);
     const files = generateGlobal(model);
     writeFiles(f.root, files);

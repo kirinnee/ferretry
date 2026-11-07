@@ -9,7 +9,12 @@
 import { useId, useRef, useState } from 'react';
 import type { HarnessDialog, PermissionRequest } from '../../contract/index.ts';
 import type { ClaudeCodeClient } from '../lib/client.ts';
-import { HarnessDialogGone, answerHarnessDialog, harnessDialogSentence, harnessTrustNote } from '../lib/harness-dialogs.ts';
+import {
+  HarnessDialogGone,
+  answerHarnessDialog,
+  harnessDialogSentence,
+  harnessTrustNote,
+} from '../lib/harness-dialogs.ts';
 import {
   PermissionPromptGone,
   answerPermissionRequest,
@@ -70,15 +75,16 @@ export function PermissionCard({
   onSettled,
 }: CardProps & { readonly request: PermissionRequest }) {
   const headingId = useId();
-  const { phase, run } = useAnswer(
-    cause => cause instanceof PermissionPromptGone,
-    onSettled,
-  );
+  const { phase, run } = useAnswer(cause => cause instanceof PermissionPromptGone, onSettled);
   const busy = phase === 'sending' || phase === 'answered' || phase === 'gone';
   const words = permissionWords(agentName, request);
   const text = phaseText(phase, agentName, 'prompt');
   return (
-    <section aria-labelledby={headingId} data-permission-request={request.id} data-permission-phase={typeof phase === 'string' ? phase : 'refused'}>
+    <section
+      aria-labelledby={headingId}
+      data-permission-request={request.id}
+      data-permission-phase={typeof phase === 'string' ? phase : 'refused'}
+    >
       <p id={headingId}>
         {words.lead}
         {words.what === undefined ? null : <code> {words.what}</code>}
@@ -91,7 +97,13 @@ export function PermissionCard({
             disabled={busy}
             key={option.number}
             onClick={() =>
-              void run(() => answerPermissionRequest(client, ferret, { kind: 'choice', requestId: request.id, number: option.number }))
+              void run(() =>
+                answerPermissionRequest(client, ferret, {
+                  kind: 'choice',
+                  requestId: request.id,
+                  number: option.number,
+                }),
+              )
             }
             title={label.harness}
             type="button"
@@ -114,10 +126,7 @@ export function DialogCard({
   onSettled,
 }: CardProps & { readonly dialog: HarnessDialog }) {
   const headingId = useId();
-  const { phase, run } = useAnswer(
-    cause => cause instanceof HarnessDialogGone,
-    onSettled,
-  );
+  const { phase, run } = useAnswer(cause => cause instanceof HarnessDialogGone, onSettled);
   const busy = phase === 'sending' || phase === 'answered' || phase === 'gone';
   const text = phaseText(phase, agentName, 'dialog');
   return (
@@ -129,7 +138,11 @@ export function DialogCard({
           data-dialog-option={option.number}
           disabled={busy}
           key={option.number}
-          onClick={() => void run(() => answerHarnessDialog(client, ferret, { kind: 'choice', dialogId: dialog.id, number: option.number }))}
+          onClick={() =>
+            void run(() =>
+              answerHarnessDialog(client, ferret, { kind: 'choice', dialogId: dialog.id, number: option.number }),
+            )
+          }
           title={option.label}
           type="button"
         >
