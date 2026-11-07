@@ -19,7 +19,7 @@ const HARD_TASK = 'redesign the critical production authentication flow and port
 
 const TEAM: TeamRecommendation = {
   task: HARD_TASK,
-  classification: 'Read as high risk, a migration of an authentication flow (words: redesign, critical, production).',
+  classification: 'Read as high risk, a rewrite of an authentication flow (words: redesign, critical, production).',
   reasoning: 'A risky change gets a planner and a reviewer.',
   roles: [
     {
