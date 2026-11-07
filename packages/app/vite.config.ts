@@ -17,13 +17,27 @@ import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
 import { textScalePostcss } from './scripts/text-scale-postcss.ts';
+import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '../plugins/connections/contract/hosted-directory.ts';
 
 /** The release version this app is built from (`release.json`, §10.6), stamped into the HTML. */
 const release = JSON.parse(readFileSync(fileURLToPath(new URL('../../release.json', import.meta.url)), 'utf8')) as {
   readonly version: string;
 };
 
+/**
+ * THE RELAY DIRECTORY ORIGIN this bundle discovers the hosted rendezvous from (R580), copied from today's PWA build:
+ * Connections' shared `HOSTED_RELAY_DIRECTORY_ORIGIN`, overridden by `FY_RELAY_DIRECTORY_ORIGIN` exactly as the daemon
+ * honours it, so both ends of a session read the same advertisement. A blank value is not an override; `off` (CI)
+ * is an origin that parses as nothing, so discovery fails closed to direct-only.
+ */
+const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
+
 export default defineConfig({
+  define: {
+    __FY_RELAY_DIRECTORY__: JSON.stringify(
+      overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
+    ),
+  },
   plugins: [
     {
       name: 'fy-release-version',
