@@ -214,28 +214,47 @@ export interface TerminalStreamHandlers {
   onRefused(status: number, body: string): void;
 }
 
+/** `reveal` asks the daemon to show THIS viewer a held terminal (I77). It is per connection and audited by the daemon. */
+export interface TerminalAttachOptions {
+  readonly reveal?: boolean;
+}
+
 export type TerminalStreamAttach = (
   scope: TerminalScope,
   terminalId: string,
   handlers: TerminalStreamHandlers,
+  options?: TerminalAttachOptions,
 ) => Promise<TerminalStream>;
 
 /** The shell's client widens the leaf's with sockets (`ShellPluginClient`); a client without them cannot stream. */
 export interface SocketPluginClient extends PluginClient {
-  socket(key: string, params: Readonly<Record<string, string>>, listeners: SocketListeners): TransportSocket;
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket;
+  /** "This daemon is reachable again" — present on the shell's client; see {@link terminalRecovery}. */
+  onReconnect?(listener: () => void): () => void;
 }
 
 const canStream = (client: PluginClient): client is SocketPluginClient =>
   typeof (client as Partial<SocketPluginClient>).socket === 'function';
 
 /**
- * The close code a carrier drop is handed to the deck as: the browser's own "abnormal closure", which the deck's
- * reopen policy retries with backoff.
+ * "This daemon is reachable again", for a pane waiting out its reopen backoff. Absent on a client that cannot say,
+ * and the pane then waits out the backoff, as it does for any client without the signal.
+ */
+export const terminalRecovery = (client: PluginClient): ((listener: () => void) => () => void) | undefined => {
+  const reconnect = (client as Partial<SocketPluginClient>).onReconnect;
+  return typeof reconnect === 'function' ? listener => reconnect.call(client, listener) : undefined;
+};
+
+/**
+ * The close code of a stream that ended without the daemon's own: a carrier that dropped, a plugin that was paused.
+ * It is the browser's "abnormal closure", which the deck's reopen policy retries with backoff.
  */
 export const STREAM_DROPPED_CODE = 1006;
-
-/** What the session says when the daemon answers a stream open with a refusal (`the daemon refused this stream: 403`). */
-const REFUSED_STREAM = /refused this stream: (\d{3})/u;
 
 /**
  * Attaches to one terminal as one socket on the shell client.
@@ -245,28 +264,39 @@ const REFUSED_STREAM = /refused this stream: (\d{3})/u;
  * the emulator, because writing it would put the daemon's own JSON on the reader's screen as if the shell had
  * printed it.
  *
- * THE VIEWER SEES WHAT THE DAEMON DRAWS AND NOTHING ELSE. There is no way to ask for more here: the route is opened
- * with the ferret and the terminal and no other parameter, so the masked cells (and, while the terminal is held, the
- * daemon's notice in their place) are all that can arrive.
+ * THE VIEWER SEES WHAT THE DAEMON DRAWS AND NOTHING ELSE. The route is opened with the ferret and the terminal and, only
+ * when the reader pressed "Show anyway", `?reveal=1` (I77): the daemon decides, audits it, and may refuse. Without it
+ * the masked cells (and, while the terminal is held, the daemon's notice in their place) are all that can arrive.
  */
 export const terminalStreamAttach =
   (client: PluginClient): TerminalStreamAttach =>
-  async (scope, terminalId, handlers) => {
+  async (scope, terminalId, handlers, options = {}) => {
     if (!canStream(client)) throw new Error('this client cannot open a terminal stream');
     let over = false;
-    const socket = client.socket(TERMINAL_ROUTES.stream, terminalParams(scope, terminalId), {
-      onFrame: frame => {
-        if (!over && frame instanceof Uint8Array) handlers.onBytes(frame);
+    const socket = client.socket(
+      TERMINAL_ROUTES.stream,
+      terminalParams(scope, terminalId),
+      {
+        onFrame: frame => {
+          if (!over && frame instanceof Uint8Array) handlers.onBytes(frame);
+        },
+        // LIVE ONLY ONCE IT OPENS: the shell says so when the daemon accepts the stream, never before.
+        onOpen: () => {
+          if (!over) handlers.onOpen();
+        },
+        onClose: (reason, detail) => {
+          if (over) return;
+          over = true;
+          // The daemon's refusal is final for this attempt (its status and body, as sent); anything else carries
+          // the stream's own close code when there was one, so a policy close (1008/1009) or a deliberate end
+          // (1000) is told apart from a drop.
+          if (detail?.refusedStatus !== undefined) handlers.onRefused(detail.refusedStatus, detail.body ?? '');
+          else handlers.onClosed(detail?.code ?? STREAM_DROPPED_CODE, reason);
+        },
       },
-      onClose: reason => {
-        if (over) return;
-        over = true;
-        const refused = REFUSED_STREAM.exec(reason);
-        if (refused !== null) handlers.onRefused(Number(refused[1]), '');
-        else handlers.onClosed(STREAM_DROPPED_CODE, reason);
-      },
-    });
-    handlers.onOpen();
+      // The one extra parameter the route takes, and only when the reader chose to see a held terminal.
+      options.reveal === true ? { reveal: '1' } : undefined,
+    );
     return {
       write: bytes => socket.send(bytes),
       control: text => socket.send(text),

@@ -199,10 +199,36 @@ describe('the viewer stream', () => {
     ]);
   });
 
+  it('I77 asks for ?reveal=1 only when the reader chose to see a held terminal', async () => {
+    const { client, opened } = socketClient();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, handlers().handlers, { reveal: false });
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, handlers().handlers, { reveal: true });
+    expect(opened.map(item => item.query)).toEqual([undefined, { reveal: '1' }]);
+  });
+
+  it('I83 a reveal the daemon refuses arrives as a refusal with its status and body, not as a drop', async () => {
+    const { client, daemon } = socketClient();
+    const refusedWith: [number, string][] = [];
+    const { seen, handlers: given } = handlers();
+    await terminalStreamAttach(client)(
+      scope,
+      TERMINAL_ID,
+      { ...given, onRefused: (status, body) => void refusedWith.push([status, body]) },
+      { reveal: true },
+    );
+    daemon.close('the daemon refused this stream: 503', {
+      refusedStatus: 503,
+      body: 'the audit could not be recorded',
+    });
+    expect(refusedWith).toEqual([[503, 'the audit could not be recorded']]);
+    expect(seen.closed).toEqual([]);
+  });
+
   it('draws only bytes: a text frame is the daemon speaking a shape this stream does not have', async () => {
     const { client, daemon, sent } = socketClient();
     const { seen, handlers: given } = handlers();
     const stream = await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    daemon.open();
     daemon.frame(new Uint8Array([104, 105]));
     daemon.frame('{"daemon":"json"}');
     stream.control('{"type":"resize","cols":80,"rows":24}');
@@ -212,22 +238,66 @@ describe('the viewer stream', () => {
     expect(sent).toEqual(['{"type":"resize","cols":80,"rows":24}', new Uint8Array([108])]);
   });
 
+  it('is live only once the daemon accepts the stream, never on attach', async () => {
+    const { client, daemon } = socketClient();
+    const { seen, handlers: given } = handlers();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    expect(seen.opened).toBe(0);
+    daemon.open();
+    expect(seen.opened).toBe(1);
+  });
+
+  it('never reports live for a stream that failed before it opened', async () => {
+    const { client, daemon } = socketClient();
+    const { seen, handlers: given } = handlers();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    daemon.close('the carrier could not be reached');
+    daemon.open();
+    expect(seen.opened).toBe(0);
+    expect(seen.closed).toEqual([[STREAM_DROPPED_CODE, 'the carrier could not be reached']]);
+  });
+
   it('hands a carrier drop up as the abnormal closure the deck retries with backoff', async () => {
     const { client, daemon } = socketClient();
     const { seen, handlers: given } = handlers();
     await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    daemon.open();
     daemon.close('carrier lost');
     expect(seen.closed).toEqual([[STREAM_DROPPED_CODE, 'carrier lost']]);
     expect(seen.refused).toEqual([]);
   });
 
+  it("keeps the daemon's own close code, so a policy close or a deliberate end is not read as a drop", async () => {
+    for (const code of [1000, 1008, 1009, 1013]) {
+      const { client, daemon } = socketClient();
+      const { seen, handlers: given } = handlers();
+      await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+      daemon.open();
+      daemon.close('invalid terminal input', { code });
+      expect(seen.closed).toEqual([[code, 'invalid terminal input']]);
+    }
+  });
+
   it('tells a refusal from a drop, so the deck does not retry a permanent no', async () => {
+    const { client, daemon } = socketClient();
+    const refusedWith: [number, string][] = [];
+    const { seen, handlers: given } = handlers();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, {
+      ...given,
+      onRefused: (status, body) => void refusedWith.push([status, body]),
+    });
+    daemon.close('the daemon refused this stream: 403', { refusedStatus: 403, body: 'no terminal grant' });
+    expect(refusedWith).toEqual([[403, 'no terminal grant']]);
+    expect(seen.closed).toEqual([]);
+  });
+
+  it('does not read a refusal out of the words of an error message', async () => {
     const { client, daemon } = socketClient();
     const { seen, handlers: given } = handlers();
     await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
     daemon.close('the daemon refused this stream: 403');
-    expect(seen.refused).toEqual([403]);
-    expect(seen.closed).toEqual([]);
+    expect(seen.refused).toEqual([]);
+    expect(seen.closed).toEqual([[STREAM_DROPPED_CODE, 'the daemon refused this stream: 403']]);
   });
 
   it('says nothing after a deliberate leave', async () => {

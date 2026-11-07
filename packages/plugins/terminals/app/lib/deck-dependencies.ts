@@ -18,19 +18,24 @@ import {
   listSessionQuarantines,
   listSessionTerminals,
   renameSessionTerminal,
+  terminalRecovery,
   terminalStreamAttach,
 } from './web-terminals.ts';
 
 export const terminalDeckDependencies = (
   client: PluginClient,
   host: TerminalDeckHost = browserTerminalDeckHost(),
-): TerminalDeckDependencies => ({
-  list: scope => listSessionTerminals(client, scope),
-  create: scope => createSessionTerminal(client, scope),
-  rename: (scope, id, title) => renameSessionTerminal(client, scope, id, title),
-  close: (scope, id) => closeSessionTerminal(client, scope, id),
-  attach: terminalStreamAttach(client),
-  quarantines: scope => listSessionQuarantines(client, scope),
-  endQuarantine: (scope, key) => endSessionQuarantine(client, scope, key),
-  ...host,
-});
+): TerminalDeckDependencies => {
+  const recovery = terminalRecovery(client);
+  return {
+    list: scope => listSessionTerminals(client, scope),
+    create: scope => createSessionTerminal(client, scope),
+    rename: (scope, id, title) => renameSessionTerminal(client, scope, id, title),
+    close: (scope, id) => closeSessionTerminal(client, scope, id),
+    attach: terminalStreamAttach(client),
+    quarantines: scope => listSessionQuarantines(client, scope),
+    endQuarantine: (scope, key) => endSessionQuarantine(client, scope, key),
+    ...(recovery === undefined ? {} : { onRecovered: recovery }),
+    ...host,
+  };
+};

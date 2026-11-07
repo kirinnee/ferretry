@@ -30,11 +30,21 @@ export const snapshotQuery = (live = false, extent: SnapshotScope = 'history'): 
 });
 
 /**
- * The shell decodes an answer as JSON when it parses and as text when it does not, so a pane that holds nothing
- * (`undefined`) or only something JSON-shaped (a number) arrives as a non-string; either way it is read back as text.
+ * The shell's client reads a capture as text, exactly as the daemon sent it. `call` would decode an answer as JSON
+ * when it parses, so a pane whose whole screen is `[1, 2]` or `null` would come back reformatted or empty.
  */
-const textOf = (body: unknown): string =>
-  typeof body === 'string' ? body : body === undefined || body === null ? '' : JSON.stringify(body);
+export interface TextPluginClient extends PluginClient {
+  callText(
+    route: string,
+    init?: {
+      readonly params?: Readonly<Record<string, string>>;
+      readonly query?: Readonly<Record<string, string>>;
+    },
+  ): Promise<string>;
+}
+
+const canReadText = (client: PluginClient): client is TextPluginClient =>
+  typeof (client as Partial<TextPluginClient>).callText === 'function';
 
 /** Reads one pane snapshot from the daemon that owns the ferret. */
 export const readPaneSnapshot = async (
@@ -44,10 +54,13 @@ export const readPaneSnapshot = async (
   live = false,
   /** How much of a live pane to return; `screen` is the visible frame. */
   extent: SnapshotScope = 'history',
-): Promise<string> =>
-  textOf(
-    await client.call(SNAPSHOT_ROUTE, { params: { ferretId: scope.sessionId }, query: snapshotQuery(live, extent) }),
-  );
+): Promise<string> => {
+  if (!canReadText(client)) throw new Error('this client cannot read a pane snapshot as text');
+  return await client.callText(SNAPSHOT_ROUTE, {
+    params: { ferretId: scope.sessionId },
+    query: snapshotQuery(live, extent),
+  });
+};
 
 /** How the daemon's unreachability is worded when the last good text is kept. */
 export const describeSnapshotError = (error: unknown): string =>

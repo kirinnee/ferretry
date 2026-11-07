@@ -52,6 +52,8 @@ export interface FakeDeck {
   readonly renamed: { id: string; title: string }[];
   readonly closed: string[];
   readonly copied: string[];
+  /** The `reveal` choice of every attach, so a test can prove a viewer asked to see a held terminal. */
+  readonly reveals: boolean[];
   /** The ferret and terminal of every attach, so a test can prove which stream the deck asked for. */
   readonly attached: { readonly sessionId: string; readonly terminalId: string }[];
   /** Every link the emulator asked to open. */
@@ -135,6 +137,7 @@ export const fakeDeck = (
     closed: [],
     copied: [],
     attached: [],
+    reveals: [],
     opened: [],
     linkQuestions: [],
     confirmLinks: true,
@@ -155,8 +158,9 @@ export const fakeDeck = (
       deck.closed.push(id);
       return { closed: true, id };
     },
-    attach: async (scope, id, handlers) => {
+    attach: async (scope, id, handlers, options) => {
       deck.attached.push({ sessionId: scope.sessionId, terminalId: id });
+      deck.reveals.push(options?.reveal === true);
       const socket = new FakeSocket(id, handlers);
       deck.sockets.push(socket);
       return socket.stream();

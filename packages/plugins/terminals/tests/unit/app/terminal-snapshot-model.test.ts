@@ -44,9 +44,33 @@ describe('reading a pane snapshot', () => {
     expect(calls[0]?.init?.query).toEqual({ live: 'true', scope: 'screen' });
   });
 
-  it('reads an empty pane, and a pane the shell decoded as JSON, back as text', async () => {
+  it('reads an empty pane as empty text', async () => {
     expect(await readPaneSnapshot(scriptedClient(undefined).client, scope)).toBe('');
-    expect(await readPaneSnapshot(scriptedClient(42).client, scope)).toBe('42');
+  });
+
+  it('keeps a capture that parses as JSON exactly as the pane drew it', async () => {
+    for (const capture of ['"ok"', '[1, 2]', '  42\n', 'null']) {
+      expect(await readPaneSnapshot(scriptedClient(capture).client, scope)).toBe(capture);
+    }
+  });
+
+  it('asks the shell for text, never for a decoded answer', async () => {
+    const { client } = scriptedClient('x');
+    let decoded = 0;
+    const watching = {
+      ...client,
+      call: async () => {
+        decoded += 1;
+        return undefined as never;
+      },
+    };
+    await readPaneSnapshot(watching, scope);
+    expect(decoded).toBe(0);
+  });
+
+  it('refuses a client that cannot read text rather than decode a capture as JSON', async () => {
+    const plain = { call: async () => 'x' as never, subscribe: () => () => undefined };
+    await expect(readPaneSnapshot(plain, scope)).rejects.toThrow('cannot read a pane snapshot as text');
   });
 
   it('surfaces a daemon refusal with its sentence', async () => {

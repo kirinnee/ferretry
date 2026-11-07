@@ -716,6 +716,81 @@ describe('SessionTerminalDeck pane wiring', () => {
     run(() => page.unmount());
   });
 
+  test('never says live for a stream that fails before it opens, and backs off instead of hammering the daemon', async () => {
+    let attaches = 0;
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      // The carrier is down: the stream never opens, and ends at once with the abnormal closure.
+      attach: async (_scope, _id, handlers) => {
+        attaches += 1;
+        handlers.onClosed(1006, 'the carrier could not be reached');
+        return { write: () => undefined, control: () => undefined, close: () => undefined };
+      },
+    });
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(json(page)).not.toContain('"live"');
+
+    // 250 ms, then 500 ms: a constant 250 ms would have made a fourth attempt by now.
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS * 3 + 150));
+    });
+    await settle();
+    expect(attaches).toBeLessThanOrEqual(3);
+    expect(attaches).toBeGreaterThanOrEqual(2);
+    expect(json(page)).not.toContain('"live"');
+    await outlastGrace();
+    expect(json(page)).toContain('reconnecting');
+    expect(json(page)).not.toContain('"live"');
+    run(() => page.unmount());
+  });
+
+  test('stops in refused for the daemon policy closes 1008 and 1009, and does not reopen', async () => {
+    for (const code of [1008, 1009]) {
+      const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+      const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+      await settle();
+      await runAsync(async () => {
+        deck.sockets[0]?.emit('open');
+        deck.sockets[0]?.emit('close', { code });
+        await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS + 100));
+      });
+      await settle();
+      expect(deck.sockets).toHaveLength(1);
+      expect(json(page)).toContain('refused');
+      run(() => page.unmount());
+    }
+  });
+
+  test('reopens a backed-off pane at once when the daemon is reachable again, and stops listening on unmount', async () => {
+    let recovered: (() => void) | undefined;
+    let stopped = 0;
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      onRecovered: listener => {
+        recovered = listener;
+        return () => {
+          stopped += 1;
+        };
+      },
+    });
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('open');
+      deck.sockets[0]?.emit('close', { code: 1006 });
+      await Promise.resolve();
+    });
+    // The first retry is still 250 ms away; the daemon coming back does not wait for it.
+    expect(deck.sockets).toHaveLength(1);
+    await runAsync(async () => {
+      recovered?.();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(deck.sockets).toHaveLength(2);
+    run(() => page.unmount());
+    expect(stopped).toBeGreaterThan(0);
+  });
+
   test('reports a create, rename or close the daemon refused', async () => {
     const refuse = async (): Promise<never> => {
       throw new Error('terminal capacity reached');
@@ -1143,11 +1218,12 @@ describe('SessionTerminalDeck quarantine', () => {
     return { deck, ended };
   };
 
-  test('offers only ending the hold when the open terminal is held, by its name or its id', async () => {
+  test('I77 offers both choices when the open terminal is held, by its name or its id', async () => {
     for (const key of ['dev', FIRST]) {
       const { deck } = quarantinedDeck(key);
       const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
       await settle();
+      expect(textButton(page, 'Show anyway')).toBeDefined();
       expect(textButton(page, 'End quarantine')).toBeDefined();
       expect(json(page)).toContain('hidden from the ferret');
       expect(json(page)).toContain('and from this screen');
@@ -1163,18 +1239,78 @@ describe('SessionTerminalDeck quarantine', () => {
     run(() => page.unmount());
   });
 
-  test('G77 a held terminal has no way to be revealed: no button, and the attach carries nothing but the terminal', async () => {
+  test('I77 "Show anyway" reconnects only this viewer with reveal on, and offers it once', async () => {
     const { deck } = quarantinedDeck('dev');
     const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
+    // Nothing is asked for until the reader chooses: the first attach carries no reveal.
+    expect(deck.reveals).toEqual([false]);
+
+    run(() => pressText(page, 'Show anyway'));
+    await settle();
+    expect(deck.reveals).toEqual([false, true]);
+    expect(deck.attached).toEqual([
+      { sessionId: 'shared', terminalId: FIRST },
+      { sessionId: 'shared', terminalId: FIRST },
+    ]);
+    expect(deck.sockets[0]?.closes[0]?.code).toBe(1000);
     expect(textButton(page, 'Show anyway')).toBeUndefined();
-    expect(json(page)).not.toContain('Show anyway');
-    expect(deck.attached).toEqual([{ sessionId: 'shared', terminalId: FIRST }]);
-    expect(deck.dependencies.attach.length).toBe(3);
+    expect(textButton(page, 'End quarantine')).toBeDefined();
+    expect(json(page)).toContain('It is shown to you on this screen only.');
     run(() => page.unmount());
   });
 
-  test('"End quarantine" posts the end route for the listed key, then reconnects', async () => {
+  test('I77 ending a quarantine reconnects the viewer without a reveal', async () => {
+    const { deck } = quarantinedDeck('dev');
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    run(() => pressText(page, 'Show anyway'));
+    await settle();
+    await runAsync(async () => {
+      pressText(page, 'End quarantine');
+      await Promise.resolve();
+    });
+    await settle();
+    expect(deck.reveals).toEqual([false, true, false]);
+    run(() => page.unmount());
+  });
+
+  test('I72 a held terminal in another tab is not revealed by choosing "Show anyway" on this one', async () => {
+    const { deck } = quarantinedDeck('someone-else');
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(textButton(page, 'Show anyway')).toBeUndefined();
+    expect(deck.reveals).toEqual([false]);
+    run(() => page.unmount());
+  });
+
+  test('I83 a reveal the daemon refuses (it could not record it) is shown as refused, and is not retried', async () => {
+    const { deck } = quarantinedDeck('dev');
+    const attach = deck.dependencies.attach;
+    const asked: boolean[] = [];
+    deck.dependencies.attach = async (scope, id, handlers, options) => {
+      asked.push(options?.reveal === true);
+      if (options?.reveal === true) {
+        handlers.onRefused(503, 'the audit could not be recorded');
+        return { write: () => undefined, control: () => undefined, close: () => undefined };
+      }
+      return await attach(scope, id, handlers, options);
+    };
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    run(() => pressText(page, 'Show anyway'));
+    await settle();
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS + 100));
+    });
+    await settle();
+    expect(asked).toEqual([false, true]);
+    expect(json(page)).toContain('refused');
+    expect(json(page)).not.toContain('reconnecting');
+    run(() => page.unmount());
+  });
+
+  test('I77 "End quarantine" posts the end route for the listed key, then reconnects without reveal', async () => {
     const { deck, ended } = quarantinedDeck('dev');
     const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
