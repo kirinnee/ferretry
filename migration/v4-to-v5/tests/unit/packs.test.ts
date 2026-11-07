@@ -42,6 +42,7 @@ const ids = () =>
     },
   });
 const written = async (path: string) => JSON.parse(await readFile(join(f.to, path), 'utf8')) as Record<string, unknown>;
+const config = (name: string) => readFile(join(f.to, 'config', name), 'utf8');
 const exists = async (path: string) => (await stat(join(f.to, path)).catch(() => undefined)) !== undefined;
 const whats = (report: { notCarried: readonly { what: string }[] }) => report.notCarried.map(item => item.what);
 
@@ -347,6 +348,49 @@ test('routing.json is not carried: accounts are named by runtime NAME, never by 
   expect(damaged.status).toBe('converted');
   expect(whats(damaged)).toContain('config/routing.json');
   expect(JSON.stringify(damaged)).not.toContain('FAKE-TORN');
+});
+
+test("routing.json's excluded runtimes become one line at the end of the routing prompt, only when there is one", async () => {
+  await ids();
+  const marker = 'FAKE-REASON-MARKER-91ab';
+  await f.put('config/routing.json', {
+    models: [{ id: 'm1' }],
+    accounts: [{ accountId: UUID_CHEAP, excludedReason: marker }],
+  });
+  await raw('config/models-guide.yaml', '# my guide\nprompt: reviews on the strongest model\n');
+  const report = await packsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const text = await config('packs.yaml');
+  expect(text).toContain('# my guide');
+  expect(PacksFileSchema.parse(parse(text)).routing?.prompt).toBe(
+    "reviews on the strongest model\n\nNever start a helper on these runtimes (v4's routing catalog excluded them): codex-cheap.",
+  );
+  expect(text).not.toContain(marker);
+  expect(report.kept).toContainEqual({
+    what: "routing prompt line naming the runtimes v4's routing.json excluded",
+    count: 1,
+  });
+  expect(report.notCarried.find(item => item.what.endsWith('excluded runtimes: codex-cheap'))?.why).toContain(
+    'one line naming them was added',
+  );
+
+  // No prompt of its own: v5 renders one, so nothing is added and the report says what to do instead.
+  await f.clean();
+  f = await fixture();
+  await ids();
+  await f.put('config/routing.json', {
+    models: [{ id: 'm1' }],
+    accounts: [{ accountId: UUID_CHEAP, excludedReason: marker }],
+  });
+  await raw('config/pack.yaml', 'enabled: false\n');
+  const bare = await packsStep.run(f.ctx());
+  expect(PacksFileSchema.parse(parse(await config('packs.yaml'))).routing?.prompt).toBeUndefined();
+  expect(bare.kept.map(item => item.what)).not.toContain(
+    "routing prompt line naming the runtimes v4's routing.json excluded",
+  );
+  expect(bare.notCarried.find(item => item.what.endsWith('excluded runtimes: codex-cheap'))?.why).toContain(
+    'no routing prompt of its own',
+  );
 });
 
 test("Jev's spend ledger and the routing-migration backups are named, never opened", async () => {
