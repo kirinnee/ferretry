@@ -122,6 +122,12 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
   for (const id of graph.ids)
     for (const take of graph.manifests.get(id)?.hooks?.takes ?? [])
       if (take.hook.name === 'ask.sources' && take.key !== undefined) askRegistrar.set(take.key, id);
+  // A reference prefix is registered by the first package (start order) that declares a renderer for it; a package
+  // that renders the same prefix consumes that registrar (§9.6: "a reference prefix it renders").
+  const prefixRegistrar = new Map<string, string>();
+  for (const id of graph.ids)
+    for (const entry of graph.manifests.get(id)?.ui?.renderers ?? [])
+      if (entry.kind === 'reference' && !prefixRegistrar.has(entry.prefix)) prefixRegistrar.set(entry.prefix, id);
   for (const id of graph.ids) {
     const m = graph.manifests.get(id) as Manifest;
     const add = (other: string | undefined): void => {
@@ -131,7 +137,16 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
       for (const provider of graph.providers.get(token.name) ?? []) add(provider);
     for (const take of m.hooks?.takes ?? [])
       for (const offerer of graph.offerers.get(take.hook.name) ?? []) add(offerer);
-    for (const entry of m.ui?.renderers ?? []) if (entry.kind === 'ask') add(askRegistrar.get(entry.source));
+    for (const entry of m.ui?.renderers ?? []) {
+      if (entry.kind === 'ask') add(askRegistrar.get(entry.source));
+      else add(prefixRegistrar.get(entry.prefix));
+    }
+    // §9.6: "an `input.targets` kind it drives". A package that offers `input.targets` drives every kind a taker
+    // registers under it (a terminal, a page), so a change to a taker's contract changes the offerer's hash.
+    if ((m.hooks?.offers ?? []).some(offer => offer.hook.name === INPUT_TARGETS))
+      for (const other of graph.ids)
+        if ((graph.manifests.get(other)?.hooks?.takes ?? []).some(take => take.hook.name === INPUT_TARGETS))
+          add(other);
   }
   for (const edge of edges) {
     const from = edge.fromPkg.id;
@@ -142,6 +157,9 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
   for (const [id, set] of consumed) set.delete(id);
   return consumed;
 }
+
+/** The Vault hook whose keys are target kinds (`terminal`, `page`, …). */
+const INPUT_TARGETS = 'input.targets';
 
 export interface ContractHashes {
   readonly canonical: string;
