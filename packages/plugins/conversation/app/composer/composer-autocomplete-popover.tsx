@@ -271,7 +271,7 @@ function AgentTasksToggle({ included, onToggle }: AgentTasksSwitch) {
       type="button"
     >
       <span aria-hidden="true" className="fy-ac-switch-track" data-on={included || undefined} />
-      Include agent tasks
+      Include agent cards
     </button>
   );
 }

@@ -7,8 +7,8 @@
  * query.
  */
 
-import { FerretSearchQuerySchema } from '@ferretry/core-ferrets/contract';
 import {
+  FerretSearchQuerySchema,
   MAX_SESSION_SEARCH_QUERY_LENGTH,
   matchesSessionSearchQuery,
   type SessionFileIndexCoverage,
@@ -16,7 +16,7 @@ import {
   SessionFileIndexResponseSchema,
   type SessionFileIndexSkip,
   sessionSearchFileHaystack,
-} from './ferret-file-index.ts';
+} from '@ferretry/core-ferrets/contract';
 import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
 import {
   createContext,
@@ -746,7 +746,7 @@ export function SessionSearchControl({
         }}
         onFocus={() => search.present(instanceId)}
         onKeyDown={onKeyDown}
-        placeholder="Search files & tasks"
+        placeholder="Search files & cards"
         ref={input}
         role="combobox"
         spellCheck={false}

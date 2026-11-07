@@ -127,7 +127,7 @@ export interface SessionMoveNeeds {
   readonly storage: DaemonStorage;
   readonly sessions: SessionDirectorySubsystem;
   /** The SAME service the revive uses. */
-  readonly resume: SessionResumeService;
+  readonly resume: Pick<SessionResumeService, 'resume'>;
   /** The SAME rebuild a revive runs, asked whether it would change anything. */
   readonly launch: SessionLaunchService;
   readonly preflight: MovePreflight;
@@ -184,7 +184,7 @@ interface SessionMoveParts {
   readonly processes: { lookup(pids: readonly number[]): Promise<ReadonlyMap<number, ProcRow>> };
   readonly sessions: SessionDirectorySubsystem;
   /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
-  readonly resume: SessionResumeService;
+  readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly preflight: MovePreflight;
   /**
    * Puts one Ferretry-authored message in the session's queue — the only thing a refused move's
