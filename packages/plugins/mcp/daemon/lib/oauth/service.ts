@@ -25,8 +25,22 @@
  * once per server however many launches ask at the same moment.
  */
 
-import { isLoopbackHost, MCP_OAUTH_LOOPBACK_HOST, MCP_OAUTH_LOOPBACK_PATH, type McpOAuthCompleteRequest, type McpOAuthCompletion, type McpOAuthConnection, type McpOAuthFlow, type McpOAuthFlowCancelled, type McpOAuthSignedOut, type McpOAuthStartRequest, mcpOAuthRedirectPath, mcpOAuthSecretNames, sha256Hex } from '../../../contract/index.ts';
-import { type SecretName, secretReference } from '@ferretry/core-vault/contract';
+import {
+  isLoopbackHost,
+  MCP_OAUTH_LOOPBACK_HOST,
+  MCP_OAUTH_LOOPBACK_PATH,
+  type McpOAuthCompleteRequest,
+  type McpOAuthCompletion,
+  type McpOAuthConnection,
+  type McpOAuthFlow,
+  type McpOAuthFlowCancelled,
+  type McpOAuthSignedOut,
+  type McpOAuthStartRequest,
+  mcpOAuthRedirectPath,
+  mcpOAuthSecretNames,
+  sha256Hex,
+} from '../../../contract/index.ts';
+import { type SecretName, type SecretSummary, secretReference } from '@ferretry/core-vault/contract';
 import { checkCallback, pwaRedirectUri } from './callback.ts';
 import {
   type AuthorizationServer,
@@ -115,8 +129,15 @@ export class McpOAuthRefusal extends Error {
   }
 }
 
-/** A store this service both writes and reads: the daemon-internal one. */
-export type McpOAuthInternalSecrets = McpOAuthSecretWriter & McpOAuthSecretValues;
+/**
+ * A store this service both writes and reads: the daemon-internal one (`state/mcp/oauth-secrets.json`, sealed). It
+ * lists names only — a sealed document keeps no summary — and nothing but this service is ever handed it.
+ */
+export interface McpOAuthInternalSecrets extends McpOAuthSecretValues {
+  list(): Promise<readonly Pick<SecretSummary, 'name'>[]>;
+  put(name: SecretName, value: string): Promise<unknown>;
+  remove(name: SecretName): Promise<boolean>;
+}
 
 export interface McpOAuthServiceDeps {
   readonly servers: McpOAuthServers;
