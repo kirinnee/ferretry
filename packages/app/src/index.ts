@@ -29,6 +29,7 @@ export { daemonOfClient } from './connect/daemon-of.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
   PAIRING_REFUSED_REASON,
+  type DeviceKeyRotation,
   type RelayClientSocket,
   RelayPairingRefusedError,
   type RelayPairingOutcome,
@@ -37,10 +38,15 @@ export {
   type SessionDeviceClaim,
 } from './session/session-client.ts';
 export {
+  type AmendedRotation,
   type CarrierDial,
   type CarrierSocketEvents,
   type CarrierWalkSocket,
   fromBase64Url,
+  NO_DEVICE_KEY,
+  type RotatingSession,
+  type RotationRequest,
+  type SessionKeyRotation,
   toBase64Url,
 } from './session/session-transport.ts';
 export { RelayKeyHandleError } from './session/webcrypto.ts';
@@ -55,6 +61,21 @@ export {
   type RelayCrypto,
   RELAY_CLOSE_CODES,
 } from './session/wire/index.ts';
+
+// ─── the one passkey prompt: what Access provides, and where every daemon call consults it (G95, G105) ──────────
+export {
+  PASSKEY_TAKERS,
+  type PasskeyAsk,
+  type PasskeyHandler,
+  type PasskeyNeed,
+  type PasskeyPorts,
+  type PasskeyProvision,
+  type PasskeyRefusal,
+  type PasskeyWords,
+  type PromptOrigin,
+  requestOrigin,
+} from './passkey/passkey.ts';
+export { useLockedDaemons, usePasskeyAsk } from './shell/passkey-mount.tsx';
 
 // ─── the paired daemons ────────────────────────────────────────────────────────────────────────────────────────────
 export {

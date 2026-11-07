@@ -27,13 +27,8 @@ import type {
 import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
 import { TURN_WATCH_INTERVAL_MS, type TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import {
-  INERT_PANE_WORK,
-  INERT_QUESTIONS,
-  testTurnWatcher,
-  UNWIRED_PANE_WORK,
-  UNWIRED_QUESTIONS,
-} from '../../../../support/daemon/observer-peers.ts';
+import { INERT_PANE_WORK, testTurnWatcher } from '../../../../support/daemon/observer-peers.ts';
+import { SCRIPTED_PANE_WORK, SCRIPTED_QUESTIONS } from '../../../../support/daemon/observer-stand-ins.ts';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
@@ -125,7 +120,7 @@ async function rig(
   const storage = await openStorage();
   const ledgerRows = new Map<string, never>();
   const answers = { all: async () => ledgerRows, append: async () => undefined };
-  const applier = new SessionObservationApplier(storage, answers, new KeyedSerialExecutor(), INERT_QUESTIONS);
+  const applier = new SessionObservationApplier(storage, answers, new KeyedSerialExecutor(), SCRIPTED_QUESTIONS);
   const reads: string[] = [];
   const serial = new KeyedSerialExecutor();
   const answerSerial = {
@@ -171,7 +166,7 @@ async function rig(
       },
       turnWatcher: testTurnWatcher,
     },
-    new SessionObserver(text => `digest(${text})`, INERT_QUESTIONS),
+    new SessionObserver(text => `digest(${text})`, SCRIPTED_QUESTIONS),
   );
   const workers: AnsweringWorker[] = [];
   const scheduled: number[] = [];
@@ -220,12 +215,12 @@ async function rig(
         return { close: () => closedWatches.push(path) };
       },
     },
-    observer: new SessionObserver(text => `digest(${text})`, INERT_QUESTIONS),
+    observer: new SessionObserver(text => `digest(${text})`, SCRIPTED_QUESTIONS),
     liveness: {
       redact: async text => text.replaceAll('secret', '[redacted]'),
       processes: async () =>
         ({ kind: 'observed', processes: [{ pid: 1, argv: 'bash -c sleep 600', verdict: 'unknown' }] }) as never,
-      paneWork: UNWIRED_PANE_WORK,
+      paneWork: SCRIPTED_PANE_WORK,
     },
     clock: { now: () => NOW },
     barrierMs: options.barrierMs ?? 1_000,
@@ -273,14 +268,14 @@ const stateOf = async (storage: DaemonStorage, id: SessionId) =>
   (await storage.readState(id)) as Record<string, unknown>;
 
 describe('WorkerObserverHost — what a worker found', () => {
-  it.skip('pending port: warden paneWorkSummary; conversation question policy — should apply a session’s patches in the order they came, question before turn', async () => {
+  it('should apply a session’s patches in the order they came, question before turn', async () => {
     // Arrange
     const { storage, subject } = await rig();
     await storage.writeState(A, { id: A, status: 'running', turn: 1 });
     const patches: readonly ObserverPatch[] = [
       {
         kind: 'question',
-        projection: UNWIRED_QUESTIONS.projectStructuredQuestion([question]),
+        projection: SCRIPTED_QUESTIONS.projectStructuredQuestion([question]),
         records: [],
         settlements: [],
         runtime: {},
@@ -300,7 +295,7 @@ describe('WorkerObserverHost — what a worker found', () => {
     should(state.turnState).equal('needs-input');
   });
 
-  it.skip('pending port: warden paneWorkSummary; conversation question policy — should never write a question patch while an answer drive holds the session, and survive a refused write', async () => {
+  it('should never write a question patch while an answer drive holds the session, and survive a refused write', async () => {
     // Arrange
     const { storage, subject } = await rig({ answerBusy: true });
     await storage.writeState(A, { id: A, status: 'running', turn: 1 });
@@ -309,7 +304,7 @@ describe('WorkerObserverHost — what a worker found', () => {
     subject.observed(A, [
       {
         kind: 'question',
-        projection: UNWIRED_QUESTIONS.projectStructuredQuestion([question]),
+        projection: SCRIPTED_QUESTIONS.projectStructuredQuestion([question]),
         records: [],
         settlements: [],
         runtime: {},
@@ -411,7 +406,7 @@ describe('WorkerObserverHost — the tick', () => {
 });
 
 describe('WorkerObserverHost — reads that need an answer now', () => {
-  it.skip('pending port: warden paneWorkSummary; conversation question policy — should ask a hosted session’s worker, and use what it answered', async () => {
+  it('should ask a hosted session’s worker, and use what it answered', async () => {
     // Arrange
     const { storage, subject, hostAll, reads } = await rig({
       answer: request => {
@@ -456,7 +451,7 @@ describe('WorkerObserverHost — reads that need an answer now', () => {
     should(await subject.midTurn()).equal(1);
   });
 
-  it.skip('pending port: warden paneWorkSummary; conversation question policy — should work it out on this thread when the worker cannot answer, or answers too late', async () => {
+  it('should work it out on this thread when the worker cannot answer, or answers too late', async () => {
     // Arrange — every request fails, except a barrier the worker never answers.
     const { storage, subject, hostAll, reads } = await rig({
       barrierMs: 20,

@@ -27,6 +27,7 @@ import {
   inUseSentence,
   type LoginEdit,
   LoginChangeRefusal,
+  BUDGET_FIRST_SENTENCE,
   USERS_UNKNOWN_SENTENCE,
 } from './derive.ts';
 import { type HeldChange, LoginChangeHoldRefusal, LoginChangeStore } from './store.ts';
@@ -85,6 +86,10 @@ export interface LoginChangeServiceDeps {
   readonly signOut: (id: string) => Promise<LoginSignOutOutcome>;
   /** Write or remove one of this plugin's own login files through the kernel config port. */
   readonly write: (id: string, patch: Readonly<Record<string, unknown>>) => Promise<ConfigWriteOutcome>;
+  /**
+   * Remove one of this plugin's login files. Always with `refuseIfHeld`: a removal the kernel would hold comes back
+   * `refused` / `would_hold` with the file untouched and nothing held.
+   */
   readonly remove: (id: string) => Promise<ConfigWriteOutcome>;
   readonly changed: (
     id: string,
@@ -240,6 +245,10 @@ export class LoginChangeService {
           'login_change_stale',
           `login ${write.id} changed while this was being applied; review it again`,
         );
+      }
+      if (outcome.kind === 'refused' && outcome.reason === 'would_hold') {
+        // The kernel would have held this removal for this caller: nothing was touched, nothing is held.
+        throw new LoginChangeError('login_change_refused', BUDGET_FIRST_SENTENCE);
       }
       if (outcome.kind === 'refused') {
         throw new LoginChangeError(

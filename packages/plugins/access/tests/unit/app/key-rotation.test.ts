@@ -9,19 +9,19 @@
 import { describe, it } from 'bun:test';
 import { DeviceKeyRotationSchema } from '../../../contract/index.ts';
 import should from 'should';
+import type { RotationRequest } from '@ferretry/app';
 import { KeyRotation, type RotatingSession } from '../../../app/lib/key-rotation.ts';
 import { toBase64Url } from '../../../app/shell-pairing.ts';
 import { MemoryDeviceKeyStore, testDeviceKeyCrypto as relayCrypto } from '../../support/app/device-keys.ts';
 
-const URL_BASE = 'https://studio.example';
 const DEVICE_ID = 'fy_device_id_rotationTestDevice0000001';
 const NOW = Date.parse('2026-10-13T12:00:00.000Z');
 const PAST = '2026-10-01T00:00:00.000Z';
 const FUTURE = '2026-11-01T00:00:00.000Z';
-const ASSERTION = JSON.stringify({ credentialId: 'c', clientDataJSON: 'd', authenticatorData: 'a', signature: 's' });
-const STEP_UP = `${URL_BASE}/v1/step-up`;
-const UNLOCK = `${URL_BASE}/v1/unlock`;
-const POST = { method: 'POST', body: ASSERTION } as const;
+/** The value the ceremony hands the transport (an object; a JSON text is read the same way). */
+const ASSERTION = { credentialId: 'c', clientDataJSON: 'd', authenticatorData: 'a', signature: 's' };
+const STEP_UP = { method: 'POST', path: '/v1/step-up', body: ASSERTION } as const;
+const UNLOCK = { method: 'POST', path: '/v1/unlock', body: ASSERTION } as const;
 
 const keyPair = async () => {
   const minted = await relayCrypto.generateDeviceKey();
@@ -62,10 +62,10 @@ describe('amending a step-up with a rotation', () => {
       return await sign(...args);
     };
 
-    const amended = await newRotation(store).amend(session, daemon, STEP_UP, POST);
+    const amended = await newRotation(store).amend(session, daemon, STEP_UP);
 
     should(amended.rotated).be.true();
-    const body = JSON.parse(String(amended.init.body)) as Record<string, unknown>;
+    const body = amended.request.body as Record<string, unknown>;
     should(body).have.property('credentialId', 'c');
     should(DeviceKeyRotationSchema.safeParse(body.rotation).success).be.true();
     should(order).eql(['saved', 'signed']);
@@ -78,8 +78,8 @@ describe('amending a step-up with a rotation', () => {
   it('should leave the request alone when rotateBy is in the future, absent or unreadable', async () => {
     for (const rotateBy of [FUTURE, undefined, 'not an instant']) {
       const store = new MemoryDeviceKeyStore();
-      const amended = await newRotation(store).amend(fakeSession(rotateBy), daemon, STEP_UP, POST);
-      should(amended).eql({ init: POST, rotated: false });
+      const amended = await newRotation(store).amend(fakeSession(rotateBy), daemon, STEP_UP);
+      should(amended).eql({ request: STEP_UP, rotated: false });
       should(store.pending.size).equal(0);
     }
   });
@@ -88,10 +88,10 @@ describe('amending a step-up with a rotation', () => {
     const store = new MemoryDeviceKeyStore();
     const session = fakeSession(PAST);
 
-    const amended = await newRotation(store).amend(session, daemon, UNLOCK, POST);
+    const amended = await newRotation(store).amend(session, daemon, UNLOCK);
 
     should(amended.rotated).be.true();
-    const body = JSON.parse(String(amended.init.body)) as Record<string, unknown>;
+    const body = amended.request.body as Record<string, unknown>;
     should(DeviceKeyRotationSchema.safeParse(body.rotation).success).be.true();
     should(store.pending.size).equal(1);
     should(session.signed).have.length(1);
@@ -99,7 +99,7 @@ describe('amending a step-up with a rotation', () => {
 
   it('should treat the instant itself as due', async () => {
     const store = new MemoryDeviceKeyStore();
-    const amended = await newRotation(store, Date.parse(PAST)).amend(fakeSession(PAST), daemon, STEP_UP, POST);
+    const amended = await newRotation(store, Date.parse(PAST)).amend(fakeSession(PAST), daemon, STEP_UP);
     should(amended.rotated).be.true();
   });
 
@@ -107,27 +107,28 @@ describe('amending a step-up with a rotation', () => {
     const store = new MemoryDeviceKeyStore();
     const session = fakeSession(PAST);
     const rotation = newRotation(store);
-    const cases: [string, RequestInit][] = [
-      [`${URL_BASE}/v1/step-up/options`, POST],
-      [`${URL_BASE}/v1/unlock/options`, POST],
-      [`${URL_BASE}/v1/passkeys`, POST],
-      [STEP_UP, { method: 'GET' }],
-      [STEP_UP, {}],
-      [STEP_UP, { method: 'POST' }],
-      [STEP_UP, { method: 'POST', body: '{not json' }],
-      [STEP_UP, { method: 'POST', body: '[1]' }],
-      [STEP_UP, { method: 'POST', body: 'null' }],
-      [STEP_UP, { method: 'POST', body: '"text"' }],
+    const cases: RotationRequest[] = [
+      { ...STEP_UP, path: '/v1/step-up/options' },
+      { ...UNLOCK, path: '/v1/unlock/options' },
+      { ...STEP_UP, path: '/v1/passkeys' },
+      { method: 'GET', path: '/v1/step-up' },
+      { method: 'POST', path: '/v1/step-up' },
+      { method: 'POST', path: '/v1/step-up', body: '{not json' },
+      { method: 'POST', path: '/v1/step-up', body: [1] },
+      { method: 'POST', path: '/v1/step-up', body: '[1]' },
+      { method: 'POST', path: '/v1/step-up', body: null },
+      { method: 'POST', path: '/v1/step-up', body: 'null' },
+      { method: 'POST', path: '/v1/step-up', body: '"text"' },
     ];
-    for (const [url, init] of cases)
-      should(await rotation.amend(session, daemon, url, init)).eql({ init, rotated: false });
+    for (const request of cases)
+      should(await rotation.amend(session, daemon, request)).eql({ request, rotated: false });
     should(store.pending.size).equal(0);
     should(session.signed).eql([]);
   });
 });
 
-const granted = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+/** The transport's answer: a status and the body it already read as JSON (or kept as text). */
+const granted = (body: unknown, status = 200) => ({ status, body });
 
 describe('settling the pending key from the daemon’s answer', () => {
   const stored = async () => {
@@ -170,7 +171,7 @@ describe('settling the pending key from the daemon’s answer', () => {
   it('should discard it on a refusal, and on a body it cannot read', async () => {
     for (const response of [
       granted({ code: 'step_up_rotation_required' }, 403),
-      new Response('not json', { status: 200 }),
+      granted('not json'),
       granted({ expiresAt: FUTURE, keyRotated: false }),
     ]) {
       const { store, current } = await stored();

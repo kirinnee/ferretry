@@ -27,20 +27,7 @@ const NAME = 'pending-tags';
  * `@public` tags whose reason is not yet a row id or a surface, by `file#<the tag's text>`, each with the lead's reason. This list
  * only shrinks; a new entry needs the review lead's sign-off.
  */
-export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([
-  [
-    'packages/core/kernel/testing/host.ts#Test-caller shape for ports to come.',
-    'kernel test seam kept for the ports; gustavo to name a row or delete (2026-11-07)',
-  ],
-  [
-    'packages/core/kernel/testing/clock.ts#Fake-time helper for ports to come.',
-    'kernel test seam kept for the ports; gustavo to name a row or delete (2026-11-07)',
-  ],
-  [
-    'packages/core/kernel/testing/parity.ts#Parity finding shape, consumed by the ports to come.',
-    'kernel test seam kept for the ports; gustavo to name a row or delete (2026-11-07)',
-  ],
-]);
+export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([]);
 export const KNIP_CONFIGS = ['knip.json', 'knip.production.json'] as const;
 
 /** One source file as the rules read it. */

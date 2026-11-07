@@ -50,6 +50,12 @@ export const ReferenceCatalogEntrySchema = z.strictObject({
   detail: z.string().max(512).optional(),
   aliases: z.array(z.string().max(64)).max(4).optional(),
   closed: z.boolean().optional(),
+  /**
+   * The ask behind this entry was not the owner's (another ferret's, the Warden's, an automatic card): the `&` menu
+   * hides it unless the reader turns "Include agent cards" on, or types its id exactly. Absent means the owner's own.
+   * Only the cards' provider (Board) sets it.
+   */
+  agentAsked: z.boolean().optional(),
 });
 export type ReferenceCatalogEntry = z.infer<typeof ReferenceCatalogEntrySchema>;
 

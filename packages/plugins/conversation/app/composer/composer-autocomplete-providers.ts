@@ -93,8 +93,8 @@ export interface ComposerAutocompleteProvidersOptions {
   readonly waitForCatalog?: ComposerProviderWarmup;
   readonly hostedPrefixes?: readonly ReferenceCatalogPrefix[];
   /**
-   * The menu's "Include agent tasks" switch, read live. GAP(board): a catalog entry does not say whether the human
-   * asked for the card, so the switch is read (it re-asks the open menu) but has nothing to filter by yet.
+   * The menu's "Include agent cards" switch, read live. Off (the default): a card whose ask the owner did not make
+   * (the catalog entry's `agentAsked`) is not offered, unless its id is typed exactly.
    */
   readonly getIncludeAgentTasks?: () => boolean;
   /**
@@ -583,7 +583,7 @@ const agendaCandidates = (
         label: reference,
         detail: entry.label,
         keywords: entryKeywords(entry),
-        group: 'Agenda',
+        group: 'Asks',
         ...(entry.detail === undefined ? {} : { badge: entry.detail }),
         replacement: reference,
         append: 'space',
@@ -594,9 +594,9 @@ const agendaCandidates = (
 /** A project holds dozens of open cards the owner may mean; the menu shows the best of them and the query narrows it. */
 const MAX_TASK_RESULTS = 50;
 
-const TASK_MENU_LABELS: ReadonlySet<string> = new Set(['Tasks', '& tasks']);
+const TASK_MENU_LABELS: ReadonlySet<string> = new Set(['Cards', '& cards']);
 
-/** Whether an open list is the task menu, the only one "Include agent tasks" applies to. */
+/** Whether an open list is the task menu, the only one "Include agent cards" applies to. */
 export const isTaskMenuLabel = (label: string | undefined): boolean =>
   label !== undefined && TASK_MENU_LABELS.has(label);
 
@@ -604,15 +604,23 @@ export const isTaskMenuLabel = (label: string | undefined): boolean =>
  * Closed work (done, dropped) is hidden until the reader types its id exactly: a finished card is rarely the one
  * being referenced, and ten of them above the live ones would bury the menu's purpose. The board's own order (active
  * first, then most recently touched) is kept.
+ *
+ * The same holds for a card whose ask the owner did not make (another ferret's, the Warden's, an automatic card):
+ * the menu offers what the owner asked for, unless the reader turns "Include agent cards" on.
  */
 const taskCandidates = (
   scope: DaemonFerretScope,
   entries: readonly ReferenceCatalogEntry[],
   query: string,
+  includeAgentCards: boolean,
 ): ComposerAutocompleteCandidate[] => {
   const typed = query.toUpperCase();
   return entries
-    .filter(entry => entry.token.toUpperCase() === typed || entry.closed !== true)
+    .filter(
+      entry =>
+        entry.token.toUpperCase() === typed ||
+        (entry.closed !== true && (includeAgentCards || entry.agentAsked !== true)),
+    )
     .flatMap(entry => {
       const reference = tokenOf({ kind: 'task', id: entry.token });
       if (reference === undefined) return [];
@@ -623,7 +631,7 @@ const taskCandidates = (
           label: reference,
           detail: [entry.label, entry.detail ?? ''].filter(Boolean).join(' · '),
           keywords: entryKeywords(entry),
-          group: 'Tasks',
+          group: 'Cards',
           ...(entry.closed === true ? { badge: 'closed' } : {}),
           replacement: reference,
           append: 'space',
@@ -667,7 +675,7 @@ const cardHitCandidate = (
     kind: 'task',
     label: reference,
     detail: [hit.title, workProjectLabel(hit.project, projectNames)].filter(part => part !== '').join(' · '),
-    group: 'Tasks',
+    group: 'Cards',
     badge: hit.standing,
     rankPriority: -1,
     prematched: true,
@@ -688,7 +696,7 @@ const askHitCandidate = (
     kind: 'attention',
     label: reference,
     detail: hit.title,
-    group: 'Agenda',
+    group: 'Asks',
     badge: hit.standing,
     rankPriority: -1,
     prematched: true,
@@ -757,8 +765,8 @@ type ReferenceFamily = ':' | '!' | '&';
 
 const FAMILY_LABELS: Readonly<Record<ReferenceFamily, { readonly ladder: string; readonly direct: string }>> = {
   ':': { ladder: 'Agents', direct: ': fleet agents' },
-  '!': { ladder: 'Agenda', direct: '! open agenda items' },
-  '&': { ladder: 'Tasks', direct: '& tasks' },
+  '!': { ladder: 'Asks', direct: '! open asks' },
+  '&': { ladder: 'Cards', direct: '& cards' },
 };
 
 const familyResult = (
@@ -767,12 +775,13 @@ const familyResult = (
   entries: readonly ReferenceCatalogEntry[],
   query: string,
   contextLabel: string,
+  includeAgentCards: boolean,
 ): ComposerProviderResult => {
   if (family === ':')
     return { candidates: agentCandidates(scope, entries), filterQuery: query, limit: MAX_AGENT_RESULTS, contextLabel };
   if (family === '!') return { candidates: agendaCandidates(scope, entries), filterQuery: query, contextLabel };
   return {
-    candidates: taskCandidates(scope, entries, query),
+    candidates: taskCandidates(scope, entries, query, includeAgentCards),
     filterQuery: query,
     limit: MAX_TASK_RESULTS,
     contextLabel,
@@ -793,10 +802,16 @@ const unreadFamilyResult = (contextLabel: string, query: string, error: unknown)
  * A FAMILY STILL BEING READ IS UNKNOWN, NOT EMPTY: `initial` answers only from what is already known, so the engine
  * shows `loading` until the read arrives rather than an empty list presented as fact.
  */
-const familyAnswers = (scope: DaemonFerretScope, source: CatalogSource) => ({
+const familyAnswers = (
+  scope: DaemonFerretScope,
+  source: CatalogSource,
+  includeAgentCards: () => boolean = () => false,
+) => ({
   initial: (family: ReferenceFamily, query: string, contextLabel: string): ComposerProviderResult | undefined => {
     const known = source.known(family);
-    return known === undefined ? undefined : familyResult(family, scope, known, query, contextLabel);
+    return known === undefined
+      ? undefined
+      : familyResult(family, scope, known, query, contextLabel, includeAgentCards());
   },
   read: async (
     family: ReferenceFamily,
@@ -805,7 +820,7 @@ const familyAnswers = (scope: DaemonFerretScope, source: CatalogSource) => ({
     signal: AbortSignal,
   ): Promise<ComposerProviderResult> => {
     try {
-      return familyResult(family, scope, await source.read(family, signal), query, contextLabel);
+      return familyResult(family, scope, await source.read(family, signal), query, contextLabel, includeAgentCards());
     } catch (error) {
       if (signal.aborted || isAbortError(error)) throw error;
       return unreadFamilyResult(contextLabel, query, error);
@@ -822,7 +837,7 @@ export function createReferencesProvider(
   const { daemon, scope, suggestions = DEFAULT_COMPOSER_SUGGESTIONS } = options;
   assertProviderScope(daemon, scope);
   const files = filesProvider(scope, source);
-  const families = familyAnswers(scope, source);
+  const families = familyAnswers(scope, source, () => options.getIncludeAgentTasks?.() === true);
   const track = snapshotTracker(daemonFerretKey(scope));
   const overTyped = (tier: number, query: string): ComposerProviderResult => ({
     candidates: [],
@@ -891,7 +906,7 @@ export function createDirectReferenceProviders(
   const { daemon, scope, suggestions = DEFAULT_COMPOSER_SUGGESTIONS } = options;
   assertProviderScope(daemon, scope);
   const allow = (match: ComposerTriggerMatch): boolean => composerSuggestionsAllow(suggestions, match);
-  const families = familyAnswers(scope, source);
+  const families = familyAnswers(scope, source, () => options.getIncludeAgentTasks?.() === true);
   const direct = (family: ReferenceFamily, id: string): ComposerAutocompleteProvider => ({
     id: scopedId(id, scope),
     trigger: family,

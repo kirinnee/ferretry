@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { TestHost } from '@ferretry/kernel/testing';
-import { FerretHistoryFiles, FerretsChanged, FerretsPort, type FerretSummary } from '../../../../contract/index.ts';
+import {
+  FerretHistoryFiles,
+  FerretsChanged,
+  FerretsPort,
+  type FerretSummary,
+  FerretSummaryFiles,
+  FerretWaitFiles,
+} from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
-import { FerretSummaryFiles, FerretWaitFiles } from '../../../../daemon/lib/state.ts';
 import { as, host, record } from './route-fixture.ts';
 
 /**

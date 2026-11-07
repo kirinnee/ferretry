@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { unclearedRemovalBlockers, type WorktreeLiveState } from '../../lib/protocol/worktrees.ts';
+import { unclearedRemovalBlockers, type WorktreeLiveState } from '../../../contract/index.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from '../../lib/worktrees/errors.ts';
 import { assessBranchDeletion, assessWorktreeRemoval, isWithinDirectory } from '../../lib/worktrees/policy.ts';
 import type {
@@ -324,13 +324,11 @@ export class ManagedWorktreeAdapter {
    */
   async adopt(intent: ManagedWorktreeIntent): Promise<ManagedWorktreeAdoption> {
     if ((await this.fileSystem.type(intent.path)) === 'missing') return { kind: 'absent' };
-    const checkout = await this.gateway.inspect(intent.path).catch(
-      (error: unknown): GitCheckoutSnapshot => ({
-        repo: false,
-        kind: 'not_git',
-        observedAt: `inspection failed: ${message(error)}`,
-      }),
-    );
+    const checkout = await this.gateway.inspect(intent.path).catch((error: unknown): GitCheckoutSnapshot => ({
+      repo: false,
+      kind: 'not_git',
+      observedAt: `inspection failed: ${message(error)}`,
+    }));
     if (
       !checkout.repo ||
       checkout.kind !== 'linked_worktree' ||

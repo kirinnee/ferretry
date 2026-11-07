@@ -16,7 +16,7 @@ import { factCommand, HostInstallFacts } from './adapters/install-facts.ts';
 import { configDoorOf } from './lib/config-door.ts';
 import { processSeams } from './adapters/process-seams.ts';
 import { updateHostUsable } from './lib/host.ts';
-import { UPDATE_NAMES } from './lib/names.ts';
+import { updateNames } from './lib/names.ts';
 import { updateRoutes } from './lib/routes.ts';
 import { DaemonUpdateService, UPDATE_BACKSTOP_INTERVAL_MS } from './lib/service.ts';
 
@@ -42,7 +42,7 @@ function statusOf(view: DaemonUpdateView): UpdateStatus {
 export default implementDaemon(manifest, {
   build: ({ needs, kernel }) => {
     const port = kernel.updateHost;
-    const names = UPDATE_NAMES;
+    const names = updateNames(kernel.identity.binaries);
     const host = { port, product: names.product, ...processSeams(kernel.paths.home()) };
     const autoInstall = (): boolean => kernel.config.file(UPDATES_CONFIG)?.autoInstall ?? false;
     const service = new DaemonUpdateService({
@@ -58,8 +58,9 @@ export default implementDaemon(manifest, {
       launcher: { launch: async target => await port.launchUpdate(target) },
       activity: { midTurn: async () => (await needs.ferrets.list({ state: 'working' })).length },
       clock: { now: () => kernel.clock.nowMs() },
-      // A source run has no release to compare with.
-      checks: port.compiled,
+      // A source run has no release to compare with, and `FY_UPDATE_CHECK=off` keeps a compiled one off GitHub: the
+      // kernel folds both into the port, so this plugin never reads the environment.
+      checks: port.checks,
       checkIntervalMs: UPDATE_CHECK_INTERVAL_MS,
       onAvailable: latest => kernel.events.publish(UpdateAvailable, { latest }),
       onFinished: (target, outcome) => kernel.events.publish(UpdateFinished, { target, outcome }),

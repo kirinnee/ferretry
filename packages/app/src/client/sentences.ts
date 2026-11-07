@@ -8,7 +8,7 @@ import type { Standing } from './inventory.ts';
  */
 
 /** The command a person runs to update a daemon; the `fy` binary name is single-sourced and this is owner text. */
-export const UPDATE_DAEMON_COMMAND = 'fy daemon update';
+export const UPDATE_DAEMON_COMMAND = 'fy update';
 
 /** -1, 0, 1 by semver core (`5.0.0`); a pre-release or build suffix is ignored. Unparseable sorts lowest. */
 export function compareVersions(a: string, b: string): number {

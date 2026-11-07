@@ -400,6 +400,7 @@ describe('turning automatic install on is the owner’s act; turning it off is n
     const undeclared = {
       release: '5.0.0',
       compiled: false,
+      checks: false,
       executable: async () => {
         throw new Error('updates did not declare permissions.updateHost.');
       },

@@ -5,11 +5,9 @@
     "vault",
     "ferrets",
     "connections",
-    "updates",
     "claude-code",
     "codex",
     "logins",
-    "terminals",
     "browsers",
     "accounts",
     "conversation",
@@ -27,7 +25,6 @@
     "onboarding"
   ],
   "pendingReasons": {
-    "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
@@ -76,12 +73,13 @@
       "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ],
     "ferrets": [
+      "GAP(events): GET /v1/events cannot follow an archived ferret (its `sessionId` is a 404 where today's findSession also found archived sessions): the stream's `exists` is the live registry; an archived ferret's journal is read by its own routes",
       "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
       "Interrupt is not ported: it is Conversation's turn.interrupt, and Ferrets' Actions menu has no row for it until that route is bound",
       "Actions rows still to port: add MCP server, compact-at, the context menu, the ferret row-actions and the Warden and learning actions; each needs the plugin that owns it to contribute a row",
       "Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported: they read other plugins' facts (Board, Usage, Conversation, Surfaces, Warden) and wait for those contracts to be bound; only Overview and Runtime are drawn",
       "Session search inside the files tab is not ported",
-      "The file-instance surface and the image viewer are not ported: the image viewer still lives in Conversation's app and composer, and the files tab opens an image through a plain preview until it is shared",
+      "The file-instance surface is not ported, and the files tab opens an image through a plain preview: the image viewer is now shared in @ferretry/app/ui (Conversation draws with it too), and the tab has yet to open an image in it",
       "Continue-conversation (resume a finished ferret's conversation as a new one) and the registered-projects picker on the new-ferret page are not ported",
       "The files side tab is hidden until Layouts lists it in the ferret.side panel layout",
       "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
@@ -93,13 +91,12 @@
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
       "GAP(C3): the Composer takes the ferret's harness as a prop (a Codex ferret's picked skill inserts $name); the chat screen passes it from the Ferrets read",
       "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt); today's boot drain of every machine's saved messages is not run, a kept message is retried when the chat screen draws it",
-      "GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes reference.catalog yet, so every composer menu answers provided:false and is empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
+      "GAP(browsers, ferrets): no plugin takes reference.catalog for %browser, : or @ yet, so those composer menus answer provided:false and are empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
       "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
       "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
-      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)",
-      "GAP(ferrets): the in-ferret search (app/search/session-search.tsx) is mounted nowhere yet — its host is Ferrets' ferret header and files view; its file index (app/search/ferret-file-index.ts) is a copy of the part of Ferrets' contract/view/session-search.ts that Ferrets' contract index does not export (the search query itself is imported), until an additive export lands",
-      "GAP(conversation daemon): PATCH /v1/ferrets/:ferretId/hypermedia is declared by Conversation's manifest but has no handler in its daemon half, so the hypermedia switch's press is refused; the switch reads the mode default because Ferrets' read of a ferret carries no config",
+      "GAP(ferrets): the in-ferret search (app/search/session-search.tsx) is mounted nowhere yet — its host is Ferrets' ferret header and files view; its file index and query rules are imported from Ferrets' contract",
+      "GAP(ferrets): the hypermedia switch reads the mode default because Ferrets' read of a ferret carries no config",
       "GAP(app): today's All queues view is dropped (no screen lists every ferret's queue); the queue is a panel in the ferret.side slot with the full page reachable from it",
       "Runtimes is not a need of Conversation: Continue and the picker mount Ferrets' ferrets.move-account slot for the runtime and fall back to a typed runtime name where no panel is placed; Continue always opens the runtime step, so one runtime takes an extra press where today's adopted it at once",
       "GAP(app-shell): the command bar's work search keeps today's words, all=true window and 6-per-kind cap, but a command entry has no chips, pending line, muted rows or second line: the Cards/Agenda and Everything/Open filters, the \"Searching cards and agenda…\" line, muted closed rows and a row's project name and ask owner are not drawn (a card's project reads only 'Unfiled', the names being Board's and Ferrets')",
@@ -115,7 +112,8 @@
       "GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
       "GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
       "GAP(shells): the `#rules/<stage>` deep link and the \"Don't ask again\" offer on the input card are not drawn; they are not Accounts' surfaces, and dropping them removes no protection",
-      "67 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S91 S93 S97 S98"
+      "67 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S91 S93 S97 S98",
+      "GAP(access): the bound passkey pre-asks are not bound to Access's one prompt: nothing on rebuild/5.0 or on port-accounts-app-b/-r2 binds `usePasskeyAsk` (-r2 leaves `askPasskey` undefined in accounts-surface.tsx), and no one owns the binding until an Accounts fix round adds it (one `usePasskeyAsk` per surface). Until then these acts CANNOT be completed from the app: saving a 2FA seed (I193/S88/S91), account defaults (S80), and approving a sign-in rule or a paste rule (G84/G85; S108/S119 on the Accounts side) FAIL. The refusal-driven prompt (G105) names the act but no subject, and the daemon issues options for a bound act only with its subject (`404 stage_not_found` for a sign-in or paste rule; a 2FA seed act is refused `not-verified`), so the prompt cannot produce a usable proof and the retry is refused again"
     ],
     "agenda": [
       "GAP(agenda-inbox-machines): the Inbox reads the one machine this half is built for (runtime.client), where today's hook read every paired machine's list; the cross-machine count, machine filter and per-machine notes need a shell-level reader over every daemon's Agenda half, which is not built",
@@ -125,6 +123,20 @@
       "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap"
+    ],
+    "skills": [
+      "Add skills: the page’s other group, the skills of the catalogs this device subscribes to, and a skill row’s Publish / Uninstall / “installed from” in its ⋯ are Catalogs’ rows; they need Catalogs’ app half and a row contribution, and the half has no Catalogs edge",
+      "Add skills: Install from this machine offers a project and an agent only; a runtime-and-profile target needs Runtimes’ profile list through its contract (the copy routes already take one)",
+      "a /name or $name reference links to Settings › Skills on the daemon it names; opening the Skills tab of the ferret’s context needs Ferrets to offer a way to select a side panel (no screen or address for it yet)"
+    ],
+    "mcp": [
+      "Actions › Add MCP server: the form, its model and the panel’s Add… link are Ferrets’ Actions rows (add-mcp-form, add-mcp-model, session-mcp-api) and wait for the plugin that owns the row to contribute it",
+      "MCP rows in the ferret panel: share / add to a catalog, “installed from” and install from a file need Catalogs’ row host; the half has no Catalogs edge",
+      "Runtimes’ components page MCP rows (today’s ComponentMcpStatus and useMachineMcp) are not drawn: Runtimes cannot import this half, and no contract offers the row yet"
+    ],
+    "gate": [
+      "GAP(kernel): a background read parked behind the unlock prompt is never released when its caller stops waiting: PluginClient.call takes no abort signal, so today's untilAborted (rebuild-ref relay-carrier.ts:1752) has no equivalent; it resolves only on focus and confirm, or dismiss. Feed-aware polls skip a tick while their read is in flight (G95): startFeedAwarePoll skips only when `read` returns its promise, and both Browsers page polls (useSessionBrowser, useBrowserControl) now do, so one parked read per page is all that waits; any other poll must return its promise too",
+      "GAP(access): the update dot asks locked machines too: today it skipped them (rebuild-ref App.tsx:1099 useLockedMachines); useLockedDaemons() from @ferretry/app has no consumer yet, so the settings machine rows and the machine switcher (App.tsx:1961, :2637) do not mark a locked machine either (G95)"
     ]
   },
   "pendingHalves": {},

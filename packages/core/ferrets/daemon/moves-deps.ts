@@ -7,6 +7,7 @@ import type manifest from '../manifest.ts';
 import type { DaemonStorage } from './adapters/storage/session-storage.ts';
 import type { ProcessHostFacts } from './adapters/moves/process-inventory.ts';
 import type { MovesDeps } from './moves.ts';
+import type { SessionMoveNeeds } from './modules/session-move.ts';
 import type { SessionId } from './lib/session-id.ts';
 
 /**
@@ -61,6 +62,8 @@ export interface MovesOwn {
   readonly storage: DaemonStorage;
   /** The binary name a person drives, which an account resolution is typed with. */
   readonly clientName: string;
+  /** The move's relaunch, bound by Ferrets to its own resume; unbound, a move refuses before it writes anything. */
+  readonly resume?: SessionMoveNeeds['resume'];
 }
 
 export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): MovesDeps {
@@ -125,7 +128,7 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       clock: kernel.clock,
       storage,
       sessions: unbound('The session directory'),
-      resume: unbound('Resuming a ferret'),
+      resume: own.resume ?? unbound('Resuming a ferret'),
       launch: unbound('Launching a ferret'),
       preflight: unbound('The move preflight'),
       askAgent: unboundFn('Queueing a message'),

@@ -20,6 +20,7 @@ const RELEASE = {
 const refusingHost: UpdateHostPort = {
   release: '4.28.0',
   compiled: false,
+  checks: false,
   executable: async () => {
     throw new Error('updates did not declare permissions.updateHost.');
   },
@@ -34,6 +35,7 @@ function build(updateHost: UpdateHostPort = fakeHost().port) {
   const quiet = { debug() {}, info() {}, warn() {}, error() {}, child: () => quiet };
   const kernel = {
     updateHost,
+    identity: { binaries: { client: 'fy', daemon: 'fyd' } },
     paths: { home: () => '/home/kirin' },
     jobs: { add: (job: JobSpec) => void jobs.push(job), kick: () => undefined },
     config: { file: () => undefined, collection: () => new Map(), watch: () => () => undefined },

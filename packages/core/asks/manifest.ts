@@ -1,8 +1,15 @@
 import { GatePort } from '@ferretry/core-gate/contract';
-import { defineConfig, defineState, neverLoosens, type ConfigDef } from '@ferretry/kernel/contract';
-import { z } from 'zod';
+import { defineState, type ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
-import { AskAnswered, AskDeliveries, AskSources, AsksChanged, AsksPort, AskVersionsFiles } from './contract/index.ts';
+import {
+  AskAnswered,
+  AskDeliveries,
+  AsksConfigFile,
+  AskSources,
+  AsksChanged,
+  AsksPort,
+  AskVersionsFiles,
+} from './contract/index.ts';
 
 /**
  * Asks' private state (§9.2, lead decision 2026-11-07): ONE LEDGER PER FERRET, as today's engine keeps it, under
@@ -17,14 +24,6 @@ import { AskAnswered, AskDeliveries, AskSources, AsksChanged, AsksPort, AskVersi
  */
 const perFerret = <const Name extends string>(name: Name, file: string) =>
   defineState({ name, path: `ferrets/*/${file}`, store: 'opaque', format: 1 });
-
-/** Discussions resurface only when configured; snooze waking is always on. */
-export const AsksConfigFile = defineConfig({
-  file: 'asks.yaml',
-  schema: z.strictObject({ resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional() }),
-  axis: 'configure',
-  loosens: neverLoosens,
-});
 
 /** The board: every open and recently closed ask of one ferret (today's `agenda.json`). */
 export const AgendaLedgerFiles = perFerret('ledgers', 'agenda.json');

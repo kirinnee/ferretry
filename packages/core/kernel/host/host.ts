@@ -1,4 +1,4 @@
-import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { BinaryNames, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
@@ -63,10 +63,18 @@ import {
 import { EventBus } from './events.ts';
 import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
-import { type InventoryEntry, type InventorySurfaces, inventorySurfacesOf, kernelRoutes } from './kernel-half.ts';
+import {
+  type InventoryEntry,
+  type InventorySurfaces,
+  inventorySurfacesOf,
+  type KernelHalfSources,
+  kernelRoutes,
+  kernelSockets,
+} from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
+import { carrierListenerPort } from './carrier-listener.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { livePort } from './live-port.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
@@ -76,7 +84,9 @@ import { noWebSockets } from './adapters/process.ts';
 import { ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
-import { undeclaredUpdateHost } from './adapters/update-host.ts';
+import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
+import { PRODUCT_BINARIES } from './binaries.ts';
+import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
@@ -172,8 +182,11 @@ export interface HostAdapters {
   readonly hostFacts?: HostFactsPort;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
   readonly compressor?: ResponseCompressor;
-  /** `kernel.updateHost` per plugin. Absent: facts refuse, launches fail. */
-  readonly updateHost?: (plugin: string) => UpdateHostPort;
+  /**
+   * `kernel.updateHost` per plugin, over the plugin's own declared `report` and `log` state files (their paths inside
+   * its state folder). Absent: facts refuse, launches fail.
+   */
+  readonly updateHost?: (plugin: string, files: UpdateHostFiles) => UpdateHostPort;
   /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
   readonly pinner?: SessionRootPinner;
   /** Private scratch folders. Absent: every open is refused. */
@@ -213,6 +226,8 @@ export interface HostOptions {
   readonly timings?: DaemonTimings;
   /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
   readonly backgroundDelayMs?: number;
+  /** The product's binary names for `kernel.identity`. Default: read from the repo's `bin` keys. */
+  readonly binaries?: BinaryNames;
 }
 
 export type PluginStatus = 'serving' | 'skeleton' | 'failed' | 'damaged' | 'off' | 'refused';
@@ -257,6 +272,21 @@ export interface RunningHost {
 export type BootOutcome =
   | { readonly kind: 'running'; readonly host: RunningHost }
   | { readonly kind: 'refused'; readonly sentence: string; readonly trace: readonly string[] };
+
+/**
+ * The plugin's update seam: the real one only for a plugin that declared `permissions.updateHost` AND the state files
+ * `report` and `log` the launch writes to. Their paths are the plugin's declared ones, never a second spelling.
+ */
+function updateHostOf(manifest: Manifest, adapters: HostAdapters, version: string): UpdateHostPort {
+  if (manifest.permissions?.updateHost !== true || adapters.updateHost === undefined)
+    return undeclaredUpdateHost(manifest.id, version);
+  const declared = (name: string): string | undefined => manifest.data?.state?.find(def => def.name === name)?.path;
+  const report = declared('report');
+  const log = declared('log');
+  if (report === undefined || log === undefined)
+    return undeclaredUpdateHost(manifest.id, version, `${manifest.id} did not declare the state files report and log.`);
+  return adapters.updateHost(manifest.id, { report, log });
+}
 
 const isCore = (id: string): boolean => (CORE_IDS as readonly string[]).includes(id);
 
@@ -360,6 +390,7 @@ async function bootLocked(
   const identityPort = Object.freeze({
     daemonId: identity.daemonId,
     daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
+    binaries: options.binaries ?? PRODUCT_BINARIES,
   });
   const websockets = adapters.websocket ?? noWebSockets();
   const sessionSigner = createIdentitySigner(identity);
@@ -615,12 +646,16 @@ async function bootLocked(
       items,
       resolversOf(manifest.id),
     ),
+    carrierListener: carrierListenerPort({
+      manifest,
+      dispatcher: () => dispatcher,
+      daemonId: identityPort.daemonId,
+      onStop: lifecycle.onStop.bind(lifecycle),
+      stopping: () => lifecycle.stopping(),
+    }),
     identity: identityPort,
     paths: ownerPaths,
-    updateHost:
-      manifest.permissions?.updateHost === true && adapters.updateHost !== undefined
-        ? adapters.updateHost(manifest.id)
-        : undeclaredUpdateHost(manifest.id, options.version),
+    updateHost: updateHostOf(manifest, adapters, options.version),
     hostFacts:
       manifest.permissions?.hostFacts === true
         ? (adapters.hostFacts ?? NO_HOST_FACTS)
@@ -760,10 +795,12 @@ async function bootLocked(
         if (fn !== undefined) events.subscribe(manifest.id, event, fn);
       }
     } catch (error) {
-      const why = `${manifest.title} failed to build: ${error instanceof Error ? error.message.slice(0, 200) : 'unknown error'}`;
-      log.error('a plugin failed to build', { plugin: manifest.id });
-      if (isCore(manifest.id)) return { kind: 'refused', sentence: why, trace };
-      await failed(manifest.id, why);
+      const thrown = error instanceof Error ? error.message.slice(0, 200) : 'unknown error';
+      // The thrown text may carry a path or a value a parser echoed: it stays in the local log and, for a core package
+      // (the daemon does not boot), on the operator's own stderr. The record, and so `GET /v1/doctor`, says only which plugin.
+      log.error('a plugin failed to build', { plugin: manifest.id, error: thrown });
+      if (isCore(manifest.id)) return { kind: 'refused', sentence: `${manifest.title} failed to build: ${thrown}`, trace };
+      await failed(manifest.id, `${manifest.title} failed to build.`);
     }
   }
 
@@ -840,26 +877,53 @@ async function bootLocked(
   const surfaces: InventorySurfaces = new Map(
     manifests.map(manifest => [manifest.id, inventorySurfacesOf(manifest)] as const),
   );
-  const kernelHandlers = kernelRoutes({
+  const project = (request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined => {
+    const admission = bound.admission;
+    if (admission === undefined) return undefined;
+    try {
+      return admission.inventory(request, entries, surfaces);
+    } catch {
+      return undefined;
+    }
+  };
+  const eventPublishers = new Map<string, string>(
+    manifests.flatMap(manifest => (manifest.data?.publishes ?? []).map(event => [event.name, manifest.id] as const)),
+  );
+  const kernelSources: KernelHalfSources = {
     version: options.version,
     inventory,
-    project: (request, entries) => {
-      const admission = bound.admission;
-      if (admission === undefined) return undefined;
-      try {
-        return admission.inventory(request, entries, surfaces);
-      } catch {
-        return undefined;
-      }
+    project,
+    tools: {
+      owners: name => [...tools.keys()].filter(key => key.slice(key.indexOf('/') + 1) === name).map(key => key.slice(0, key.indexOf('/'))),
+      call: (plugin, name, input, request) => callTool(plugin, name, input, request),
+    },
+    bus: {
+      subscribe: listener => events.onAny(listener),
+      publisher: name => eventPublishers.get(name),
+      // The projection `GET /v1/plugins` answers with: what the caller may discover. With no Gate bound that is the core
+      // pieces only; when Gate IS bound and its projection throws (an undetermined device, a provider error) the answer
+      // is no frame at all: a live feed fails closed, where the plugin list falls back to core.
+      admits: (request, plugin) => {
+        const admission = bound.admission;
+        if (admission === undefined) return isCore(plugin);
+        try {
+          return admission.inventory(request, inventory(), surfaces).some(entry => entry.id === plugin);
+        } catch {
+          return false;
+        }
+      },
     },
     snapshot: () => frozen as PostBuildSnapshot,
     config: { writer: () => configWriter, admission: () => bound.admission, home },
+    doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
       uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),
       pid: options.pid ?? 0,
     }),
-  });
+  };
+  const kernelHandlers = kernelRoutes(kernelSources);
+  const kernelBus = kernelSockets(kernelSources);
   const routes: MountedRoute[] = [];
   const sockets: MountedSocket[] = [];
   const memberRoutes: MountedMemberRoute[] = [];
@@ -876,9 +940,11 @@ async function bootLocked(
       routes.push({ ...decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
     for (const decl of manifest.actions?.sockets ?? []) {
-      const accept = (half?.sockets as Readonly<Record<string, unknown>> | undefined)?.[
-        decl.key
-      ] as MountedSocket['accept'];
+      const accept = (
+        manifest.id === 'kernel'
+          ? (kernelBus as Readonly<Record<string, unknown>>)
+          : (half?.sockets as Readonly<Record<string, unknown>> | undefined)
+      )?.[decl.key] as MountedSocket['accept'];
       sockets.push({ ...decl, owner, ...(accept === undefined ? {} : { accept }) });
     }
     for (const decl of manifest.actions?.memberRoutes ?? []) {
@@ -889,7 +955,8 @@ async function bootLocked(
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
       const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        ToolHandler | undefined;
+        | ToolHandler
+        | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

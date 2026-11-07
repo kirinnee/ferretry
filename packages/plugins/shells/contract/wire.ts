@@ -151,8 +151,6 @@ export const SHELL_CODES = {
   buildFailed: 'shell_build_failed',
   exists: 'shell_exists',
   invalid: 'shell_invalid',
-  /** The daemon has no door to write `config/` with, so it can show shells but not change them. */
-  noConfigDoor: 'shell_config_unavailable',
 } as const;
 
 /** `state/shells/cache/<narHash>/`: a built shell's environment; dropped and rebuilt freely. */
