@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@ferretry/std": "workspace:*",
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "sideEffects": false
