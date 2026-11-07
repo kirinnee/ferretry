@@ -38,9 +38,12 @@ const NOT_YET = (what: string): never => {
  *   port and handed to the sign-in service alone. Reading a held ACCESS token back (revoke it at sign-out, a check's
  *   bearer) needs a Vault operation that spends a named secret for this plugin; until that contract change it is not
  *   sent (sign-out revokes with the held refresh token, and answers `revoked: false` when there is none).
- * - The Claude Code harness's home is not a root MCP may read, so a project server's local-scope entry is handed to
- *   the harness as an `mcp` launch part, and a runtime that DISABLED that server in the project (today's
- *   `disabledMcpjsonServers` in its `.claude.json`) is not seen yet: the entry is offered regardless.
+ * - The Claude Code harness's home is not a root MCP may read, so whether a runtime DISABLED a project server
+ *   (today's `disabledMcpjsonServers` in its `.claude.json`, or its `settings.json`) cannot be seen. A launch fails
+ *   closed on that (`ProjectMcpLaunch`): project servers bind nothing until MCP may read the harness home's
+ *   approvals — no env variable, so the Vault opens no project token into the child, and no local-scope entry. Their
+ *   sign-ins are still renewed at launch. Reading the harness home needs a root MCP may open (a kernel/Ferrets
+ *   decision), not a change here.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -110,6 +113,7 @@ export default implementDaemon(manifest, {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
         await refreshOwners();
         // The launch is its own account: 5.0 carries the runtime, harness and home on the spec (no Runtimes import).
+        // The home is outside every ferret folder, so its approvals read as unreadable and nothing is bound (GAP above).
         const agent = spec.runtime ?? spec.ferret;
         return await new ProjectMcpLaunch({
           accounts: async () => [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],

@@ -160,19 +160,62 @@ describe('ProjectMcpLaunch', () => {
     should(renewed).have.length(1);
   });
 
-  it('should read an unreadable home or settings as nothing, and still deliver', async () => {
-    // Arrange
+  it('should give a server this runtime disabled no variable and no local entry, though its token is held', async () => {
+    // Arrange — the approval documents ARE read here; `docs` is signed in (held) and declined in the project.
     const files = documents();
-    files.set(`${CLAUDE_HOME}/.claude.json`, BROKEN);
-    files.set(`${CLAUDE_HOME}/settings.json`, BROKEN);
-    const { launch, localScope } = launcher(files);
+    const home = files.get(`${CLAUDE_HOME}/.claude.json`) as {
+      projects: Record<string, { disabledMcpjsonServers: string[] }>;
+    };
+    home.projects[PROJECT]?.disabledMcpjsonServers.push('docs');
+    const { launch } = launcher(files);
 
     // Act
-    const env = await launch.forLaunch('/fy/fleet/bin/claude-work', PROJECT);
+    const share = await launch.share('/fy/fleet/bin/claude-work', PROJECT);
 
     // Assert
-    should(Object.keys(env)).deepEqual([DOCS.variable]);
-    should(localScope.calls).have.length(1);
+    should(share.env).deepEqual({});
+    should(share.servers).deepEqual({});
+  });
+
+  it.each([
+    ['the runtime’s .claude.json', `${CLAUDE_HOME}/.claude.json`],
+    ['the runtime’s settings', `${CLAUDE_HOME}/settings.json`],
+    ['both', 'both'],
+  ] as const)(
+    'should fail closed when %s cannot be read: renewed, but no variable and no local entry',
+    async (_what, path) => {
+      // Arrange — the approvals are unknown, so whether the runtime declined `docs` cannot be told.
+      const files = documents();
+      for (const target of [`${CLAUDE_HOME}/.claude.json`, `${CLAUDE_HOME}/settings.json`])
+        if (path === 'both' || path === target) files.set(target, BROKEN);
+      const { launch, renewed } = launcher(files);
+
+      // Act
+      const share = await launch.share('/fy/fleet/bin/claude-work', PROJECT);
+
+      // Assert
+      should(renewed).deepEqual([[DOCS.access, LINEAR.access]]);
+      should(share.env).deepEqual({});
+      should(share.servers).deepEqual({});
+    },
+  );
+
+  it('should bind a server whose readable approval documents approve it, and one a runtime has no documents for yet', async () => {
+    // Arrange — the fixture's home approves `docs` in the project; a fresh home's documents are not there at all.
+    const files = documents();
+    const fresh = documents();
+    fresh.delete(`${CLAUDE_HOME}/.claude.json`);
+    fresh.delete(`${CLAUDE_HOME}/settings.json`);
+
+    // Act
+    const approving = await launcher(files).launch.share('/fy/fleet/bin/claude-work', PROJECT);
+    const absent = await launcher(fresh).launch.share('/fy/fleet/bin/claude-work', PROJECT);
+
+    // Assert
+    for (const share of [approving, absent]) {
+      should(share.env).deepEqual({ [DOCS.variable]: secretReference(DOCS.access) });
+      should(Object.keys(share.servers)).deepEqual(['docs']);
+    }
   });
 
   it.each([
