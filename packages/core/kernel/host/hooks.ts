@@ -11,6 +11,8 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import { CORE_IDS } from '../contract/ids.ts';
+import { ApiError } from '../contract/http.ts';
+import { livePort } from './live-port.ts';
 import type { Log } from '../contract/ports.ts';
 import type { HookInvoker } from '../manifest/implement.ts';
 import type { HookOffer, HookTake, Manifest } from '../manifest/types.ts';
@@ -158,7 +160,10 @@ export class HookEngine {
     for (const [key, taker] of this.byPluginKey) {
       if (!key.startsWith(`${plugin}\u0000`)) continue;
       taker.state = state;
-      if (state === 'live') taker.handler = impls?.[takeKey(taker.take)];
+      if (state === 'live')
+        taker.handler = livePort(impls?.[takeKey(taker.take)], () => {
+          if (taker.state !== 'live') throw new ApiError(503, `${plugin} is not running.`, 'plugin_unavailable');
+        });
       if (state === 'live' && taker.handler === undefined) taker.state = 'skeleton';
     }
   }
@@ -217,6 +222,7 @@ export class HookEngine {
       if (taker.state !== 'live') continue;
       const handler = taker.handler as (payload: P) => void | Promise<void>;
       queueMicrotask(() => {
+        if (taker.state !== 'live') return;
         try {
           void Promise.resolve(handler(payload)).catch(error => this.observeFailed(hook, taker, error));
         } catch (error) {
@@ -259,6 +265,8 @@ export class HookEngine {
       if (taker.state !== 'live') continue;
       const handler = taker.handler as (input: I) => HookDecision | Promise<HookDecision>;
       const answer = await this.bounded(() => handler(input), this.timeoutOf(hook));
+      if (taker.state !== 'live')
+        return { allow: false, reason: `${taker.plugin} is not running, so it cannot agree to this.` };
       if (answer === 'timeout') return { allow: false, reason: `${taker.plugin} did not answer in time.` };
       if (answer === 'threw') return { allow: false, reason: `${taker.plugin} failed while deciding.` };
       const decision = answer.value;
@@ -284,6 +292,7 @@ export class HookEngine {
       const handler = taker.handler as (value: V) => V | Promise<V>;
       const before = current;
       const answer = await this.bounded(() => handler(before), this.timeoutOf(hook));
+      if (taker.state !== 'live') return err(`${taker.plugin} is not running, so this was refused.`);
       if (answer === 'timeout') return err(`${taker.plugin} did not answer in time.`);
       if (answer === 'threw') return err(`${taker.plugin} failed while changing this.`);
       if (hook.value !== undefined) {

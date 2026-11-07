@@ -4,6 +4,9 @@
   "private": true,
   "description": "Browsers (plugins piece of Ferretry 5)",
   "type": "module",
+  "bin": {
+    "fyd-browser-worker": "daemon/worker/adapters/main.ts"
+  },
   "ferretry": {
     "id": "browsers",
     "manifest": "./manifest.ts"
@@ -17,11 +20,16 @@
     "./cli": "./cli/index.ts"
   },
   "dependencies": {
+    "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-vault": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
+    "playwright-core": "1.62.1",
     "zod": "4.4.3"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "happy-dom": "20.14.6"
+  }
 }

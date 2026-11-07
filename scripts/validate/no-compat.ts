@@ -28,6 +28,10 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
     'packages/core/kernel/contract/home.ts#CARRY_OVER_PROMPT',
     'names the carry-over runbook path (docs/migration/); lead decision 2026-11-07',
   ],
+  [
+    'packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts#CODEX_HIDDEN_NOTICES',
+    "Codex's own [notice] config key names, which spell 'migration'; the harness defines them, not Ferretry",
+  ],
 ]);
 
 export function compatIn(file: string, where = file): Finding[] {

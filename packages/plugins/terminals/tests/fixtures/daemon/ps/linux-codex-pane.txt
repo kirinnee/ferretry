@@ -1,0 +1,6 @@
+ 678503       1       56:32 tmux -L fylab new-session -d -s c156 -x 120 -y 40 -c /home/user/work
+ 678504  678503       56:25 /nix/store/gd5d4yxccd7kzkqg3ghzamq0wm7km55j-codex-0.156.1/libexec/codex
+ 710513  678504       50:08 /home/user/.codex/packages/app-server-daemon/releases/0.163.0-x86_64-unknown-linux-musl/bin/codex app-server --listen unix:// --analytics-default-enabled --managed-daemon
+ 710664  710513       50:08 /home/user/.codex/packages/app-server-daemon/releases/0.163.0-x86_64-unknown-linux-musl/bin/codex app-server daemon pid-update-loop
+ 710700  678504       50:07 /nix/store/h6l3-ferretry/bin/fy mcp serve
+ 710800  678504       00:31 /nix/store/bash-5.3/bin/bash -c git push origin main

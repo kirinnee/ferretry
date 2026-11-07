@@ -42,7 +42,10 @@ export const skeletonHalf = (half: 'Daemon' | 'App' | 'Cli'): string =>
 
 export function fixture(
   packages: readonly FixturePackage[],
-  options: { readonly pending?: readonly string[] } = {},
+  options: {
+    readonly pending?: readonly string[];
+    readonly pendingReasons?: Readonly<Record<string, readonly string[]>>;
+  } = {},
 ): Fixture {
   const root = join(TMP, `w${process.pid}-${++counter}`);
   rmSync(root, { recursive: true, force: true });
@@ -59,7 +62,14 @@ export function fixture(
       workspaces: ['packages/*', 'packages/core/*', 'packages/plugins/*'],
     }),
   );
-  write('ports-pending.json', JSON.stringify({ format: 1, pending: options.pending ?? [] }));
+  write(
+    'ports-pending.json',
+    JSON.stringify({
+      format: 1,
+      pending: options.pending ?? [],
+      ...(options.pendingReasons === undefined ? {} : { pendingReasons: options.pendingReasons }),
+    }),
+  );
   for (const pkg of packages) {
     const dir = pkg.core === true ? `packages/core/${pkg.id}` : `packages/plugins/${pkg.id}`;
     write(

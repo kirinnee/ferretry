@@ -1,5 +1,9 @@
-/** `fy daemon status|start|stop|restart` (§1.4). The daemon starts itself on the first other command (§9.1). */
-import { skeletonSentence } from '@ferretry/kernel/contract';
+/** `fy daemon status|start|stop|restart|install|uninstall|logs|which|reset` (§1.4). The daemon starts itself on the first other command (§9.1). */
+import { DaemonUpdateViewSchema } from '@ferretry/plugin-updates/contract';
+import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
+import { optionOn } from '../argv.ts';
+import type { DaemonController } from '../daemon/controller.ts';
+import { ClientResetInventory } from '../daemon/reset-inventory.ts';
 import { EXIT } from '../errors.ts';
 import { judgePlugin } from '../guard.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
@@ -53,13 +57,71 @@ export const daemonStart: ShellVerb = async ctx => {
   return EXIT.ok;
 };
 
-/** Stopping needs the kernel host's stop route (or its lock file), which this build of the host does not serve yet. */
-const unwired =
-  (what: string) =>
-  async (ctx: ShellContext): Promise<number> => {
-    ctx.world.io.err(`${skeletonSentence(what)}\n`);
-    return EXIT.unavailable;
+/**
+ * The process-control verbs run one {@link DaemonController} method each. The two reads that need the daemon are
+ * made through the guarded client, and only while the daemon answers: asking would otherwise start the daemon a
+ * `stop` or `reset` has just been told to take down.
+ */
+const controlled =
+  (run: (controller: DaemonController, ctx: ShellContext) => Promise<void>): ShellVerb =>
+  async ctx => {
+    const { world } = ctx;
+    if (world.daemon === undefined) {
+      world.io.err('This fy has no local daemon-control adapters.\n');
+      return EXIT.unavailable;
+    }
+    const whileUp = async <T>(fallback: T, read: () => Promise<T>): Promise<T> => {
+      if ((await world.probe()).state !== 'up') return fallback;
+      try {
+        return await read();
+      } catch {
+        return fallback;
+      }
+    };
+    // EACH of the three counts is asked only while the daemon answers, like the mid-turn read: a daemon that died since
+    // the controller's probe is not started by a read in the middle of a reset.
+    const whileAnswering = (id: Manifest['id']): Pick<PluginClient, 'call'> => ({
+      call: async (route, init) => {
+        if ((await world.probe()).state !== 'up') throw new Error('the daemon stopped answering');
+        return await ctx.client(id).call(route, init);
+      },
+    });
+    const built = world.daemon({
+      resetInventory: new ClientResetInventory(
+        whileAnswering('vault'),
+        whileAnswering('access'),
+        whileAnswering('ferrets'),
+      ),
+      turns: {
+        midTurn: () =>
+          whileUp(
+            0,
+            async () => DaemonUpdateViewSchema.parse(await ctx.client('updates').call(MID_TURN_ROUTE)).midTurn,
+          ),
+      },
+    });
+    await run(built.controller, ctx);
+    return built.exitCode();
   };
 
-export const daemonStop: ShellVerb = unwired('Stopping the daemon from fy');
-export const daemonRestart: ShellVerb = unwired('Restarting the daemon from fy');
+/** The Updates plugin's read of the daemon's own account of itself, which counts the ferrets mid-turn. */
+const MID_TURN_ROUTE = 'GET /v1/daemon/update';
+
+export const daemonStop: ShellVerb = controlled(async controller => controller.stop());
+
+/** V-0237: `--when-idle` waits until no ferret is mid-turn; without it the restart goes ahead and ferrets keep running. */
+export const daemonRestart: ShellVerb = controlled(async (controller, ctx) =>
+  controller.restart(optionOn(ctx.invocation, 'when-idle') ? { whenIdle: true } : {}),
+);
+
+export const daemonInstall: ShellVerb = controlled(async controller => controller.install());
+export const daemonUninstall: ShellVerb = controlled(async controller => controller.uninstall());
+export const daemonWhich: ShellVerb = controlled(async (controller, ctx) =>
+  controller.which({ json: optionOn(ctx.invocation, 'json') }),
+);
+export const daemonLogs: ShellVerb = controlled(async (controller, ctx) =>
+  controller.logs({ follow: optionOn(ctx.invocation, 'follow') || optionOn(ctx.invocation, 'f') }),
+);
+export const daemonReset: ShellVerb = controlled(async (controller, ctx) =>
+  controller.reset({ yes: optionOn(ctx.invocation, 'yes') || optionOn(ctx.invocation, 'y') }),
+);

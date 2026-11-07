@@ -40,18 +40,22 @@ import {
   SEND_CANCELLED_AUDIT,
   SEND_ENTERED_AUDIT,
   SEND_RETRIED_AUDIT,
+  SearchSources,
   SearchWorkToolInputSchema,
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretsPort, SitrepLines } from '@ferretry/core-ferrets/contract';
+import { FerretChanged, FerretsPort, FerretStopping, SitrepLines } from '@ferretry/core-ferrets/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
 const PERSON = { minimum: 'operator', caller: 'person', noStore: true } as const;
 /** The body can show a ferret's words, a transcript, a pane or a draft: built inside one `Redaction.read` (§7.3). */
 const SECRETS = { guard: 'secrets' } as const;
+const OWN_DRAFT = {
+  guard: { none: "the owner's own draft, person caller only, served raw as today: positional edits need the raw text" },
+} as const;
 const READ = { audit: { skip: 'read' } } as const;
 const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault text' } } as const;
 
@@ -125,8 +129,6 @@ export default definePlugin({
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferretId/events', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/snapshot', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...READ, ...SECRETS }), // R265: strong etag over redacted text
       route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
       route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
@@ -140,6 +142,7 @@ export default definePlugin({
       }),
 
       // ── questions, compaction, hypermedia ─────────────────────────────────────────────────────
+      route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/answer', {
         ...PERSON,
         audit: { record: QUESTION_ANSWERED_AUDIT },
@@ -182,11 +185,13 @@ export default definePlugin({
       route('GET /v1/renders/:id', { minimum: 'operator', caller: 'any', ...READ, ...SECRETS }),
 
       // ── shared drafts: owner-only, twice (`operator` and `person`) ────────────────────────────
-      route('GET /v1/ferrets/:ferretId/shared-draft', { ...PERSON, ...READ, ...SECRETS }),
+      // Served raw, as today: the owner's own words, and an edit is a run of positions in the stored text, so a mask
+      // of another width would move every offset after it (and the stream carries the same raw text).
+      route('GET /v1/ferrets/:ferretId/shared-draft', { ...PERSON, ...READ, ...OWN_DRAFT }),
       route('POST /v1/ferrets/:ferretId/shared-draft', {
         ...PERSON,
         audit: { record: DRAFT_EDITED_AUDIT },
-        ...SECRETS,
+        ...OWN_DRAFT,
       }),
 
       // ── links (§6.2; today's conversation-import and foreign-history) ─────────────────────────
@@ -221,12 +226,13 @@ export default definePlugin({
       }),
     ],
     sockets: [
-      // The live stream of one ferret's draft, every open composer kept in step.
+      // The live stream of one ferret's draft, every open composer kept in step. It carries the same raw text as the
+      // two shared-draft routes, never built inside a `Redaction.read`, so it declares what they declare.
       socket('GET /v1/ferrets/:ferretId/shared-draft/stream', {
         minimum: 'operator',
         caller: 'person',
         audit: { skip: 'a stream; the edits it carries are audited as drafts' },
-        guard: 'secrets',
+        ...OWN_DRAFT,
       }),
     ],
     cli: [
@@ -238,8 +244,6 @@ export default definePlugin({
       verb('queue edit', { summary: 'change a queued message before it is typed' }),
       verb('queue cancel', { summary: 'withdraw a queued message' }),
       verb('logs', { summary: "read a ferret's conversation log" }),
-      verb('snapshot', { summary: "a ferret's screen as text" }),
-      verb('events', { summary: "follow a ferret's events" }),
       verb('compact-at', { summary: 'when a ferret squeezes its memory' }),
       verb('search', { summary: 'find cards and asks by what they say' }),
       verb('render', { summary: 'save a picture a ferret can show in a message' }),
@@ -297,8 +301,12 @@ export default definePlugin({
     takes: [
       { hook: AskSources, key: 'question', schema: QuestionSchema },
       { hook: SitrepLines, priority: 50 },
+      // A ferret that stops has its unlocked attachments zeroed; every change of state is a look for `turn.ended`.
+      { hook: FerretChanged },
+      // A stop is being attempted: the unlocked attachments are zeroed whether or not it then succeeds.
+      { hook: FerretStopping },
     ],
-    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }],
+    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }],
   },
 
   // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner

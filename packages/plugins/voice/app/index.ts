@@ -1,5 +1,14 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { voiceSurfaces } from './surfaces.tsx';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+/** Voice's app half (§2.3): the Voice and Speed-ups settings tabs and the composer's dictation control. */
+export default implementApp(manifest, {
+  build: ({ client }) => {
+    const { VoiceTab, SpeedupsTab, DictationPanel } = voiceSurfaces(client);
+    return {
+      settings: { voice: VoiceTab, speedups: SpeedupsTab },
+      panels: { dictation: DictationPanel },
+    };
+  },
+});

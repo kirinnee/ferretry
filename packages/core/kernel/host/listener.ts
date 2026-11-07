@@ -191,28 +191,43 @@ export async function listenLocal(
       `The home path is too long for the local socket (${socketPath}); point FY_HOME at a shorter folder.`,
     );
   await options.remove(socketPath);
-  const unix = serve(host, () => true, { unix: socketPath });
-  await options.chmod(socketPath, 0o600);
-  const hostname = options.hostname ?? '127.0.0.1';
-  const tcp = serve(host, peer => (peer !== undefined && isLoopbackPeer(peer) ? true : 'refuse'), {
-    hostname,
-    port: options.port,
-  });
-  const bind: DaemonRun = {
-    format: 1,
-    socket: socketPath,
-    host: hostname,
-    port: tcp.port ?? options.port,
-    pid: options.pid,
-    version: options.version,
+  const resources: (() => void | Promise<void>)[] = [];
+  const cleanup = async (): Promise<void> => {
+    for (const release of resources.splice(0).reverse()) {
+      try {
+        await release();
+      } catch {
+        /* release the other listener even if this one fails */
+      }
+    }
   };
-  await options.write(runBindPath(options.home), `${JSON.stringify(bind)}\n`);
-  return {
-    addresses: [socketPath, recordedBindAddress(bind)],
-    stop: async () => {
-      await Promise.all([unix.stop(true), tcp.stop(true)]);
-      await options.remove(socketPath);
-      await options.remove(runBindPath(options.home));
-    },
-  };
+  try {
+    resources.push(() => options.remove(socketPath));
+    const unix = serve(host, () => true, { unix: socketPath });
+    resources.push(() => unix.stop(true));
+    await options.chmod(socketPath, 0o600);
+    const hostname = options.hostname ?? '127.0.0.1';
+    const tcp = serve(host, peer => (peer !== undefined && isLoopbackPeer(peer) ? true : 'refuse'), {
+      hostname,
+      port: options.port,
+    });
+    resources.push(() => tcp.stop(true));
+    const bind: DaemonRun = {
+      format: 1,
+      socket: socketPath,
+      host: hostname,
+      port: tcp.port ?? options.port,
+      pid: options.pid,
+      version: options.version,
+    };
+    resources.push(() => options.remove(runBindPath(options.home)));
+    await options.write(runBindPath(options.home), `${JSON.stringify(bind)}\n`);
+    return {
+      addresses: [socketPath, recordedBindAddress(bind)],
+      stop: cleanup,
+    };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }

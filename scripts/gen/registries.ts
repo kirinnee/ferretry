@@ -31,6 +31,7 @@ import {
   surfaceOf,
 } from './lib/hashes.ts';
 import { type ImportEdge, importsOf, scannedImportsOf } from './lib/imports.ts';
+import { readPendingApps } from './lib/pending-apps.ts';
 import {
   HALVES,
   type LoadedSubsystem,
@@ -189,6 +190,11 @@ function commandsRegistry(model: Model): string {
   const out = join(model.ws.root, GENERATED.commands);
   const imports: string[] = [];
   const entries: string[] = [];
+  // The Kernel has no CLI half, but its routes and its effective hash belong to every client's guard (§9.6).
+  const kernel = model.ws.byId('kernel');
+  if (kernel?.manifestPath === undefined) throw new Error('the kernel package declares no manifest');
+  imports.push(`import manifest_kernel from '${importPath(out, kernel.manifestPath)}';`);
+  const kernelEntry = `  kernel: { manifest: manifest_kernel, contract: ${JSON.stringify(model.hashes.get('kernel')?.effective ?? 'unhashed')} },`;
   for (const id of startOrder(model)) {
     const pkg = model.ws.byId(id);
     const cli = pkg === undefined ? undefined : halfPath(pkg, 'cli');
@@ -205,7 +211,7 @@ function commandsRegistry(model: Model): string {
     ...imports,
     '',
     '/** Every subsystem with a CLI half, in start order (§7.5). */',
-    `export const registry: CommandRegistry = {\n  plugins: [\n${entries.join('\n')}\n  ],\n};`,
+    `export const registry: CommandRegistry = {\n${kernelEntry}\n  plugins: [\n${entries.join('\n')}\n  ],\n};`,
     '',
   ].join('\n');
 }
@@ -217,6 +223,7 @@ function commandsRegistry(model: Model): string {
  */
 function surfacesRegistry(model: Model): string {
   const out = join(model.ws.root, GENERATED.surfaces);
+  const pendingApps = readPendingApps(model.ws.root).halves;
   const imports: string[] = [];
   const entries: string[] = [];
   for (const id of startOrder(model)) {
@@ -224,7 +231,7 @@ function surfacesRegistry(model: Model): string {
     if (pkg?.manifestPath === undefined) continue;
     const manifest = ident('manifest', id);
     imports.push(`import ${manifest} from '${importPath(out, pkg.manifestPath)}';`);
-    const app = halfPath(pkg, 'app');
+    const app = pendingApps.has(id) ? undefined : halfPath(pkg, 'app');
     const appName = ident('app', id);
     if (app !== undefined) imports.push(`import ${appName} from '${importPath(out, app)}';`);
     entries.push(

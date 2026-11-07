@@ -3,7 +3,7 @@ import { instantFromEpochMs } from '@ferretry/std';
 import { homeLockedSentence } from '../../../host/state/home-lock.ts';
 import { assertRecordSize, scanJsonl } from '../../../host/state/jsonl-scan.ts';
 import { moveStateAside, openPluginState } from '../../../host/state/open-plugin-state.ts';
-import { allFiles, HOME, memoryStore } from './support.ts';
+import { allFiles, HOME, memoryStore, rulesFile } from './support.ts';
 
 const clock = { now: () => instantFromEpochMs(Date.UTC(2026, 10, 7, 9, 5)) };
 const open = (fs: ReturnType<typeof memoryStore>['fs'], over: Partial<Parameters<typeof openPluginState>[0]> = {}) =>
@@ -86,6 +86,17 @@ describe('openPluginState: the boot check (§9.3)', () => {
     const { createStatePort } = await import('../../../host/state/state-port.ts');
     const port = createStatePort({ home: HOME, pluginId: 'demo', files: allFiles, fs, initialDamage: opened.damaged });
     expect(port.damaged()).toEqual(opened.damaged);
+  });
+
+  test('narrower parse, schema and lower-format findings never damage or move aside the subsystem', async () => {
+    for (const text of ['{ broken', '{"format":1,"rules":1}', '{"format":0,"rules":[]}']) {
+      const { fs, path } = memoryStore();
+      fs.seed(path('sign-in-rules.json'), text);
+      const opened = await open(fs, { files: [rulesFile] });
+      expect(opened.damaged).toEqual([]);
+      expect(opened.narrowed).toHaveLength(1);
+      expect(opened.moveAside).toBeUndefined();
+    }
   });
 
   test('moving aside renames the folder, narrows it to 0700 and leaves an empty folder to start in', async () => {

@@ -1,0 +1,253 @@
+/**
+ * The text Ferretry itself puts into an agent's conversation: the banner on a message one ferret sent
+ * another, and the notices the daemon types into a session on its own account.
+ *
+ * ONE OWNER FOR BOTH ENDS. The daemon writes these into a harness that reads only message TEXT, and
+ * the app reads them back out of the transcript to render a peer message as coming FROM that ferret —
+ * not as "You" — and a notice as a notice. The two sides live in packages that may not import one
+ * another, and a banner the daemon rewords while the app still matches the old wording would silently
+ * turn every peer message back into one the owner typed. So the format is written once, here, beside
+ * the parser that reads it, and each end calls the half it needs.
+ *
+ * THE PARSERS ARE TOLERANT IN ONE DIRECTION ONLY. An unrecognised shape is left as ordinary text
+ * rather than half-stripped, so a version skew degrades to "shows extra text" and never to
+ * "silently eats the first paragraph of a message".
+ *
+ * The contract — the wording, the kinds, and what each Chat shows — is docs/ferret-messages.md.
+ */
+
+/**
+ * What one ferret's message to another IS:
+ *
+ *   * `message` — a note; the sender has carried on and did not say whether it wants an answer.
+ *   * `question` — the sender asked for an answer: parked until it comes (`send --ask`), or carrying on
+ *     while it waits for one (`send --expect-reply`).
+ *   * `reply` — the answer to a question the RECEIVER asked, and is parked on.
+ */
+export const PEER_MESSAGE_KINDS = ['message', 'question', 'reply'] as const;
+export type PeerMessageKind = (typeof PEER_MESSAGE_KINDS)[number];
+
+/**
+ * An optional label a sender gives a message so its receiver can triage it: `blocker` (the sender cannot
+ * go on without an answer), `action` (something for the receiver to do) or `fyi` (no action needed).
+ *
+ * `fy send --kind blocker|action|fyi` fills it (default `action`), and it also decides WHEN the message is
+ * delivered: a blocker at once, actions combined for a minute, an FYI held for the receiver's next turn end
+ * (docs/message-delivery.md § Labels and combined delivery). The CLI says `--kind`; the data and the wire
+ * say `label`, because `kind` already means "does it want an answer" (`PeerMessageKind`).
+ */
+export const PEER_MESSAGE_LABELS = ['blocker', 'action', 'fyi'] as const;
+export type PeerMessageLabel = (typeof PEER_MESSAGE_LABELS)[number];
+
+/** Which message of a combined delivery this is: 1-based `index` of `total`. */
+export interface PeerEnvelopePart {
+  readonly index: number;
+  readonly total: number;
+}
+
+/** What the daemon needs to say who sent a message. */
+export interface PeerEnvelopeSender {
+  /** The sender's ferret name, or its session id when it has none. */
+  readonly name: string;
+  readonly sessionId: string;
+  readonly kind: PeerMessageKind;
+  /** The sender's triage label; omitted for a message sent before labels existed. */
+  readonly label?: PeerMessageLabel | undefined;
+  /** Set when this message is one of several delivered as ONE turn (`combinedDelivery`). */
+  readonly part?: PeerEnvelopePart | undefined;
+  /** The command-line binary the receiver answers with (`fy`). */
+  readonly clientName: string;
+}
+
+/**
+ * The banner prepended to a message one ferret sent another: ONE line, then the message on the next.
+ *
+ *     [<kind> from ferret <name> (session <id>) — not from the owner] <note>
+ *     <message…>
+ *
+ * With a triage label (see `PEER_MESSAGE_LABELS`) the label follows the kind after a middle dot, before
+ * `from`; inside a combined delivery the part's place leads the kind the same way:
+ *
+ *     [<kind> · <label> from ferret <name> (session <id>) — not from the owner] <note>
+ *     [<i>/<n> · <kind> · <label> from ferret <name> (session <id>) — not from the owner] <note>
+ *
+ * ONE LINE ON PURPOSE. A composer takes a single-line message verbatim but pastes a multi-line one, and
+ * the daemon types a short message straight into an idle agent instead of handing it a file to read
+ * (docs/message-delivery.md). A two-line banner plus a blank line made every peer message multi-line
+ * before its first word, so every one of them cost the receiver an extra model call to read a file.
+ *
+ * The note says whether an answer is owed and the one command that sends it. Only a `question` asks for
+ * an answer, so a note never nags its receiver into replying — and a note never says no answer is owed
+ * either: a sender that forgot `--expect-reply` may still be waiting on one, and "No reply needed" over
+ * "send your verdict now" left a lead's sub-ferrets silent for hours (2026-10-31).
+ */
+export function peerEnvelopePreamble(sender: PeerEnvelopeSender): string {
+  const { name, sessionId, kind, label, part, clientName } = sender;
+  const place = part === undefined ? '' : `${part.index}/${part.total} · `;
+  const heading = `${place}${label === undefined ? kind : `${kind} · ${label}`}`;
+  const attribution = `[${heading} from ferret ${name} (session ${sessionId}) — not from the owner]`;
+  const command = `${clientName} send ${name} "<reply>"`;
+  const note =
+    kind === 'question' ? `${name} is waiting for your answer. Reply with: ${command}` : `To reply: ${command}`;
+  return `${attribution} ${note}\n`;
+}
+
+/** A peer message as read back out of a transcript. */
+export interface PeerEnvelope {
+  /** The sender's ferret name, exactly as the banner carries it. */
+  readonly name: string;
+  /** The sender's session id, when the banner names one. */
+  readonly sessionId?: string;
+  readonly kind: PeerMessageKind;
+  /** The triage label, when the banner carries one. */
+  readonly label?: PeerMessageLabel;
+  /** Its place in a combined delivery, when the banner carries one. */
+  readonly part?: PeerEnvelopePart;
+  /** The sender asked for an answer when it sent this — the same fact as `kind === 'question'`. */
+  readonly replyExpected: boolean;
+  /** The banner's delivery boilerplate — addressed to the receiving agent, not to a person. */
+  readonly note: string;
+}
+
+/**
+ * The one-line banner. The note must open the way `peerEnvelopePreamble` writes it, so a line that merely
+ * starts with a bracket is never half-stripped.
+ */
+const PEER_BANNER =
+  /^\[(?:(\d+)\/(\d+) · )?(message|question|reply)(?: · (blocker|action|fyi))? from ferret ([^\s(\]]+)([^\]]*)\] ((?:To reply: |[^\n]+ is waiting for your answer\. Reply with: )[^\n]*)\n/u;
+/** The two-line banner with a blank line after it, written until the one-line form; read, never written. */
+const TWO_LINE_PEER_BANNER = /^\[(message|question|reply) from ferret ([^\s(\]]+)([^\]]*)\]\n(.*?)\n\n/su;
+const PEER_SESSION = /\(session ([^\s)]+)\)/u;
+
+const envelopeOf = (
+  name: string,
+  rest: string,
+  kind: PeerMessageKind,
+  note: string,
+  label?: PeerMessageLabel,
+  part?: PeerEnvelopePart,
+): PeerEnvelope => {
+  const sessionId = PEER_SESSION.exec(rest)?.[1];
+  return {
+    name,
+    ...(sessionId === undefined ? {} : { sessionId }),
+    kind,
+    ...(label === undefined ? {} : { label }),
+    ...(part === undefined ? {} : { part }),
+    replyExpected: kind === 'question',
+    note,
+  };
+};
+
+/** Splits a peer message into its envelope and the message itself; `null` when it carries no banner. */
+export function parsePeerEnvelope(text: string): { readonly envelope: PeerEnvelope; readonly body: string } | null {
+  const oneLine = PEER_BANNER.exec(text);
+  if (oneLine !== null) {
+    const [banner, index, total, kind, label, name, rest, note] = oneLine as unknown as [
+      string,
+      string | undefined,
+      string | undefined,
+      PeerMessageKind,
+      PeerMessageLabel | undefined,
+      string,
+      string,
+      string,
+    ];
+    const part =
+      index === undefined || total === undefined ? undefined : { index: Number(index), total: Number(total) };
+    return { envelope: envelopeOf(name, rest, kind, note, label, part), body: text.slice(banner.length) };
+  }
+  const current = TWO_LINE_PEER_BANNER.exec(text);
+  if (current !== null) {
+    const [banner, kind, name, rest, note] = current as unknown as [string, PeerMessageKind, string, string, string];
+    return { envelope: envelopeOf(name, rest, kind, note), body: text.slice(banner.length) };
+  }
+  return null;
+}
+
+/** One message of a combined delivery: who sent it and what it says. */
+export interface CombinedPart {
+  readonly sender: Omit<PeerEnvelopeSender, 'part' | 'clientName'>;
+  readonly body: string;
+}
+
+const COMBINED_HEADER = /^\[(\d+) messages from ferrets, oldest first — not from the owner\]\n\n/u;
+const NEXT_PART = /\n\n(?=\[\d+\/\d+ · )/u;
+
+/**
+ * Several ferret messages delivered as ONE turn, oldest first:
+ *
+ *     [3 messages from ferrets, oldest first — not from the owner]
+ *
+ *     [1/3 · message · action from ferret avary (session …) — not from the owner] To reply: fy send avary "<reply>"
+ *     <body 1>
+ *
+ *     [2/3 · …
+ *
+ * Each part opens with its own one-line banner, so the receiver knows who sent which and what each one is.
+ * The header says how many, which is also how the app knows it has read them all. Two or more parts only:
+ * a delivery of one is a plain banner (`peerEnvelopePreamble`).
+ */
+export function combinedDelivery(parts: readonly CombinedPart[], clientName: string): string {
+  const total = parts.length;
+  const rendered = parts.map(
+    ({ sender, body }, position) =>
+      `${peerEnvelopePreamble({ ...sender, part: { index: position + 1, total }, clientName })}${body}`,
+  );
+  return `[${total} messages from ferrets, oldest first — not from the owner]\n\n${rendered.join('\n\n')}`;
+}
+
+/** A combined delivery as read back out of a transcript: one envelope and body per message. */
+export interface ParsedCombinedDelivery {
+  readonly parts: readonly { readonly envelope: PeerEnvelope; readonly body: string }[];
+}
+
+/**
+ * Splits a combined delivery into its messages; `null` when the text is not one.
+ *
+ * Strict, because a body is a ferret's free text: the header's count must equal the parts found, and their
+ * places must run 1..N in order, or the whole text is left as ordinary text. A message that merely QUOTES a
+ * banner can therefore only make a combined turn display as the plain text it is, never re-attribute words.
+ */
+export function parseCombinedDelivery(text: string): ParsedCombinedDelivery | null {
+  const header = COMBINED_HEADER.exec(text);
+  if (header === null) return null;
+  const count = Number(header[1]);
+  if (count < 2) return null;
+  const chunks = text.slice(header[0].length).split(NEXT_PART);
+  if (chunks.length !== count) return null;
+  const parts: { envelope: PeerEnvelope; body: string }[] = [];
+  for (const [position, chunk] of chunks.entries()) {
+    const parsed = parsePeerEnvelope(chunk);
+    if (parsed === null || parsed.envelope.part?.index !== position + 1 || parsed.envelope.part.total !== count)
+      return null;
+    parts.push({ envelope: parsed.envelope, body: parsed.body });
+  }
+  return { parts };
+}
+
+/** How every notice the daemon types into a session on its own account opens. */
+const NOTICE_TAG = '[ferretry] ';
+
+/** A notice from Ferretry itself, as typed into an agent's session. */
+export function ferretryNotice(text: string): string {
+  return `${NOTICE_TAG}${text}`;
+}
+
+/** The notice's text without its tag; `null` when the message is not a Ferretry notice. */
+export function parseFerretryNotice(text: string): string | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith(NOTICE_TAG)) return null;
+  const notice = trimmed.slice(NOTICE_TAG.length).trim();
+  return notice === '' ? null : notice;
+}
+
+/**
+ * A notice as the app draws it: its first paragraph is the headline a person reads, and anything
+ * after the first blank line is addressed to the agent — shown only behind a "details" control.
+ */
+export function splitFerretryNotice(notice: string): { readonly headline: string; readonly details: string | null } {
+  const [headline = '', ...rest] = notice.split(/\n[^\S\n]*\n/u);
+  const details = rest.join('\n\n').trim();
+  return { headline: headline.trim(), details: details === '' ? null : details };
+}

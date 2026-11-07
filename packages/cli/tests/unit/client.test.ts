@@ -1,11 +1,14 @@
 import { describe, it } from 'bun:test';
+import { defineEvent } from '@ferretry/kernel/contract';
 import should from 'should';
-import { pluginClient } from '../../src/lib/client.ts';
+import { z } from 'zod';
+import { pluginClient, type SendOptions } from '../../src/lib/client.ts';
 import { DaemonRefusal } from '../../src/lib/errors.ts';
 import { PluginPausedError } from '../../src/lib/guard.ts';
 import { PERSON_ONLY_REFUSAL } from '../../src/lib/credential.ts';
 import { ToolClient, toolPath } from '../../src/lib/tool-client.ts';
-import { boardEntry, depsOf, inventoryOf, registryOf } from './fakes.ts';
+import type { DaemonRequest } from '../../src/lib/request.ts';
+import { boardEntry, depsOf, FeedingTransport, inventoryOf, RecordingTransport, registryOf } from './fakes.ts';
 
 const registry = registryOf(boardEntry());
 const healthy = inventoryOf({ id: 'board', contract: 'h-board' });
@@ -153,11 +156,147 @@ describe('the guarded client', () => {
     should(transport.sent.length).equal(1);
   });
 
-  it('should say when no plugin declares the route, and never subscribe', async () => {
+  it('should say when no plugin declares the route', async () => {
     const { deps } = depsOf(registry, healthy);
     const client = pluginClient(deps, 'board');
     await should(client.call('GET /v1/nothing')).be.rejectedWith(/no plugin declares the route/u);
-    should(() => client.subscribe({} as never, () => undefined)).throw(/does not subscribe/u);
+  });
+
+  it('should refuse to subscribe over a transport that cannot hold a feed open, saying so', () => {
+    const { deps } = depsOf(registry, healthy);
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    should(() => pluginClient(deps, 'board').subscribe(moved, () => undefined)).throw(/does not subscribe/u);
+  });
+
+  it('should open one feed for every listener, hand each event its payload, and close the feed with the last', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, healthy, { transport });
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    const heard: string[] = [];
+    const first = pluginClient(deps, 'board').subscribe(moved, payload => heard.push('a:' + payload.id));
+    const second = pluginClient(deps, 'board').subscribe(moved, payload => heard.push('b:' + payload.id));
+    await Bun.sleep(10);
+    should(transport.opened).equal(1);
+    transport.push('board.moved', { id: '1' });
+    transport.push('board.moved', { id: 2 });
+    await Bun.sleep(10);
+    should(heard).deepEqual(['a:1', 'b:1']);
+    first();
+    should(transport.cancelled).equal(0);
+    second();
+    should(transport.cancelled).equal(1);
+  });
+
+  it('should drop the held inventory when the feed announces kernel.plugins-changed', async () => {
+    const transport = new FeedingTransport();
+    const { deps, reads } = depsOf(registry, healthy, { transport });
+    await deps.inventory.current();
+    pluginClient(deps, 'board').subscribe(defineEvent('board.moved', z.strictObject({})), () => undefined);
+    await Bun.sleep(10);
+    transport.push('kernel.plugins-changed', { generation: 2 });
+    await deps.inventory.current();
+    should(reads.count).equal(2);
+  });
+
+  it('§9.6 a subscription to a package that is off ends with the paused sentence and never opens the feed', async () => {
+    // Arrange
+    const transport = new FeedingTransport();
+    const { deps, reads } = depsOf(registry, inventoryOf({ id: 'board', on: false, contract: 'h-board' }), {
+      transport,
+    });
+    const moved = defineEvent('board.moved', z.strictObject({}));
+    const ended: string[] = [];
+
+    // Act
+    const cancel = pluginClient(deps, 'board').follow(
+      moved,
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+
+    // Assert
+    should(transport.opened).equal(0);
+    should(ended.length).equal(1);
+    should(ended[0]).match(/off/iu);
+    should(reads.count).equal(2); // the one re-read before it was blocked
+    cancel();
+    should(transport.cancelled).equal(0);
+  });
+
+  it('§9.6 a subscription whose event owner is blocked is refused though the caller is allowed', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(
+      registry,
+      inventoryOf({ id: 'board', contract: 'h-board' }, { id: 'ferrets', on: false, contract: 'h-ferrets' }),
+      {
+        transport,
+      },
+    );
+    const ended: string[] = [];
+    pluginClient(deps, 'board').follow(
+      defineEvent('ferrets.changed', z.strictObject({})),
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+    should(ended.length).equal(1);
+  });
+
+  it('§9.6 a daemon on another contract refuses the subscription with the restart sentence, feed unopened', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, inventoryOf({ id: 'board', contract: 'other' }), { transport });
+    const ended: string[] = [];
+    pluginClient(deps, 'board').follow(
+      defineEvent('board.moved', z.strictObject({})),
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+    should(ended.length).equal(1);
+    should(ended[0]).not.equal('');
+  });
+
+  it('§9.6 a subscription cancelled before the check finishes never opens the feed', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, healthy, { transport });
+    const cancel = pluginClient(deps, 'board').subscribe(
+      defineEvent('board.moved', z.strictObject({})),
+      () => undefined,
+    );
+    cancel();
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+  });
+
+  it('§9.6 a frame is dropped when the package went off since the check, with no inventory read per frame', async () => {
+    // Arrange
+    const transport = new FeedingTransport();
+    let current = healthy;
+    const { deps, reads } = depsOf(registry, () => current, { transport });
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    const heard: string[] = [];
+    pluginClient(deps, 'board').subscribe(moved, payload => heard.push(payload.id));
+    await Bun.sleep(10);
+    transport.push('board.moved', { id: '1' });
+    await Bun.sleep(10);
+    const readsWhileOn = reads.count;
+
+    // Act: the held inventory now says the package is off; the next frames are judged by it alone
+    current = inventoryOf({ id: 'board', on: false, contract: 'h-board' });
+    deps.inventory.invalidate();
+    await deps.inventory.current();
+    const readsBefore = reads.count;
+    transport.push('board.moved', { id: '2' });
+    transport.push('board.moved', { id: '3' });
+    await Bun.sleep(10);
+
+    // Assert
+    should(heard).deepEqual(['1']);
+    should(readsWhileOn).equal(1);
+    should(reads.count).equal(readsBefore);
   });
 });
 
@@ -184,5 +323,111 @@ describe('the agent-tool client', () => {
   it('should refuse a tool nobody declares', async () => {
     const { deps } = depsOf(registry, healthy);
     await should(new ToolClient(deps).call('board', 'nope', {})).be.rejectedWith(/declares no tool/u);
+  });
+});
+
+describe('the guard keeps up with the daemon (§9.6)', () => {
+  it('should read the inventory again when the daemon restarted, and send nothing the new one blocks', async () => {
+    // Arrange: the second call meets a daemon that came back as another process with Board off.
+    let pid = '100';
+    const { deps, transport, reads } = depsOf(
+      registry,
+      () => (pid === '100' ? healthy : inventoryOf({ id: 'board', on: false, contract: 'h-board' })),
+      { instance: async () => pid },
+    );
+    const client = pluginClient(deps, 'board');
+    await client.call('GET /v1/cards/:id', { params: { id: 'a' } });
+
+    // Act
+    pid = '200';
+    const error = await client.call('GET /v1/cards/:id', { params: { id: 'b' } }).catch((failure: unknown) => failure);
+
+    // Assert
+    should(error).be.instanceOf(PluginPausedError);
+    should(reads.count).be.above(1);
+    should(transport.sent.length).equal(1);
+  });
+
+  it('should drop the held inventory when kernel.plugins-changed is heard, and judge the next call afresh', async () => {
+    // Arrange
+    let board = healthy;
+    const { deps, transport, reads } = depsOf(registry, () => board);
+    const client = pluginClient(deps, 'board');
+    await client.call('GET /v1/cards/:id', { params: { id: 'a' } });
+
+    // Act
+    board = inventoryOf({ id: 'board', contract: 'another-build' });
+    deps.inventory.heard('board.changed');
+    const before = reads.count;
+    deps.inventory.heard('kernel.plugins-changed');
+    const error = await client.call('GET /v1/cards/:id', { params: { id: 'b' } }).catch((failure: unknown) => failure);
+
+    // Assert
+    should(before).equal(1);
+    should(error).be.instanceOf(PluginPausedError);
+    should(transport.sent.length).equal(1);
+  });
+
+  it('should hand the transport a recheck that re-reads the inventory and refuses the resend after a restart', async () => {
+    // Arrange: a transport that, like one riding out a restart, asks the recheck before sending again.
+    let board = healthy;
+    const rechecked: string[] = [];
+    const transport = new (class extends RecordingTransport {
+      override async send(request: DaemonRequest, options?: SendOptions) {
+        board = inventoryOf({ id: 'board', on: false, contract: 'h-board' });
+        try {
+          await options?.recheck?.();
+        } catch (error) {
+          rechecked.push((error as Error).name);
+          throw error;
+        }
+        return await super.send(request);
+      }
+    })();
+    const { deps, reads } = depsOf(registry, () => board, { transport });
+
+    // Act
+    const error = await pluginClient(deps, 'board')
+      .call('GET /v1/cards/:id', { params: { id: 'a' } })
+      .catch((failure: unknown) => failure);
+
+    // Assert
+    should(error).be.instanceOf(PluginPausedError);
+    should(rechecked).deepEqual(['PluginPausedError']);
+    should(reads.count).equal(3);
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('should block every plugin, unsent, when a core package differs, whatever the plugin’s own hash', async () => {
+    // Arrange: Board matches; Gate is another build.
+    const { deps, transport } = depsOf(
+      registry,
+      inventoryOf({ id: 'gate', contract: 'other-gate' }, { id: 'board', contract: 'h-board' }),
+    );
+
+    // Act
+    const error = await pluginClient(deps, 'board')
+      .call('GET /v1/cards/:id', { params: { id: 'a' } })
+      .catch((failure: unknown) => failure);
+
+    // Assert
+    should(error).be.instanceOf(PluginPausedError);
+    should((error as PluginPausedError).reason).equal('core');
+    should((error as PluginPausedError).plugin).equal('gate');
+    should((error as Error).message).containEql('Gate, which everything needs');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('should send a Kernel route only once the Kernel’s own hash matches', async () => {
+    const blocked = depsOf(
+      registry,
+      inventoryOf({ id: 'kernel', contract: 'old-kernel' }, { id: 'board', contract: 'h-board' }),
+    );
+    await should(pluginClient(blocked.deps, 'kernel').call('GET /v1/glossary')).be.rejectedWith(PluginPausedError);
+    should(blocked.transport.sent).deepEqual([]);
+
+    const allowed = depsOf(registry, healthy);
+    await pluginClient(allowed.deps, 'kernel').call('GET /v1/glossary');
+    should(allowed.transport.sent).deepEqual([{ method: 'GET', path: '/v1/glossary' }]);
   });
 });

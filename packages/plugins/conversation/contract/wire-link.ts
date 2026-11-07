@@ -7,10 +7,12 @@ import { z } from 'zod';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 export const CONVERSATION_NAME_MAX = 120;
-export const CONVERSATION_PREVIEW_MAX = 300;
-export const CONVERSATION_EXCHANGE_TEXT_MAX = 2_000;
+export const CONVERSATION_PREVIEW_MAX = 120;
+/** How many exchanges (an owner message and the replies to it) a preview shows. */
+export const CONVERSATION_EXCHANGE_COUNT = 4;
+export const CONVERSATION_EXCHANGE_TEXT_MAX = 280;
 export const CONVERSATION_KEEP_MAX = 200;
-export const CONVERSATION_LAUNCH_MAX = 5;
+export const CONVERSATION_LAUNCH_MAX = 10;
 
 /** A harness's own conversation id (a uuid or a slug); also a ledger key. */
 export const LinkIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u);
@@ -66,7 +68,12 @@ export const LinkPreviewSchema = z.strictObject({
 });
 export type LinkPreview = z.infer<typeof LinkPreviewSchema>;
 
-export const KeepItemSchema = z.strictObject({ id: LinkIdSchema, start: z.boolean().default(false) });
+/** One conversation to keep. It is read where the harness keeps it (a link); `copy` asks for Ferretry's own copy of the file instead (owner choice Q19: link by default, copy on request). */
+export const KeepItemSchema = z.strictObject({
+  id: LinkIdSchema,
+  start: z.boolean().default(false),
+  copy: z.boolean().optional(),
+});
 
 /** `POST /v1/imports/conversations/adopt`: keep these conversations as ferrets. */
 export const KeepRequestSchema = z
@@ -133,7 +140,19 @@ export const LinksFileSchema = z.strictObject({
       harness: HarnessIdSchema,
       ferret: FerretIdSchema,
       linkedAt: InstantSchema,
+      /** Ferretry made its own copy of the file (the owner asked); absent means it is read where the harness keeps it. */
+      copied: z.literal(true).optional(),
     }),
   ),
 });
+/**
+ * `finder.json`: a cache of where each harness keeps each conversation's file, so a listing does not walk every
+ * folder again. Harness → conversation id → the file's path below the harness's history root.
+ */
+export const FinderFileSchema = z.strictObject({
+  format: z.literal(1),
+  files: z.record(z.string(), z.record(z.string(), z.string())),
+});
+export type FinderFile = z.infer<typeof FinderFileSchema>;
+
 export type LinksFile = z.infer<typeof LinksFileSchema>;
