@@ -141,9 +141,12 @@ test('keeps the card id and every mapped field; renames v4 names to v5 ones', as
     createdBy: { kind: 'ferret', name: 'fake-lead', ferret: 'lead' },
     createdAt: AT,
   });
-  // Deep members are carried whole, in their v4 shape.
-  expect(plain(kept.history)).toEqual(history);
-  expect(kept.clarifications).toEqual(clarifications);
+  // Every actor inside history and clarifications takes v5's CardActorSchema shape; the rest is carried whole.
+  const lead = { kind: 'ferret', name: 'fake-lead', ferret: 'lead' };
+  expect(plain(kept.history)).toEqual(history.map(event => ({ ...event, actor: lead })));
+  expect(kept.clarifications).toEqual([
+    { text: 'Fake more words', source: 'fake chat', at: AT, by: { kind: 'owner', via: 'admin-token' } },
+  ]);
   expect(kept.terms).toEqual([{ term: 'Fake', meaning: 'a fake term' }]);
   const raw = (await output('state/board/cards/F1792.json')) as Record<string, unknown>;
   for (const v4Only of ['v', 'machineId', 'projectId', 'laneId', 'status', 'legacyRef', 'createdByVia'])
@@ -249,7 +252,7 @@ test('owner and daemon creators: via kept on the owner, the session they acted f
   expect((await card('F2')).createdBy).toEqual({ kind: 'daemon' });
   // A ferret whose session folder is gone is named by its id, and the report counts it.
   expect(plain((await card('F3')).createdBy)).toEqual({ kind: 'ferret', name: 'gone', ferret: 'gone' });
-  expect(report.kept).toContainEqual({ what: 'ferret creators named by id (no v4 config left)', count: 1 });
+  expect(report.kept).toContainEqual({ what: 'ferret actors named by id (no v4 config left)', count: 4 });
   expect(report.notCarried.map(item => item.what)).toContain('card ask.source (where the owner said the words)');
 });
 
@@ -370,4 +373,42 @@ test('an empty v4 home converts to counters only, and the step is registered (no
   expect(report.status).toBe('converted');
   expect(await readdir(join(f.to, 'state/board'))).toEqual(['counters.json']);
   expect(STEPS.find(step => step.id === 'board')).toBe(boardStep);
+});
+
+test('a daemon move a person reported keeps who reported it, in the v5 actor shape', async () => {
+  await f.session('lead', { name: 'fake-lead' });
+  const history = [
+    { seq: 1, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
+    {
+      seq: 2,
+      at: LATER,
+      actor: { kind: 'daemon', sessionId: 'lead' },
+      type: 'moved',
+      from: 'todo',
+      to: 'in-progress',
+      backward: false,
+      reason: null,
+      auto: true,
+      reportedBy: { kind: 'owner' },
+      reportedVia: 'admin-token',
+    },
+  ];
+  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  expect((await boardStep.run(f.ctx())).status).toBe('converted');
+  const moved = (await card('F1')).history[1] as Record<string, unknown>;
+  expect(moved.actor).toEqual({ kind: 'daemon' });
+  expect(moved.reportedBy).toEqual({ kind: 'owner', via: 'admin-token' });
+  expect(moved).not.toHaveProperty('reportedVia');
+  expect(moved).not.toHaveProperty('actorVia');
+});
+
+test('a history event with an unreadable actor fails the step, naming the card only', async () => {
+  const history = [
+    { seq: 1, at: AT, actor: { kind: 'robot', sessionId: 'SECRET-FAKE' }, type: 'created', laneId: 'todo' },
+  ];
+  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  const report = await boardStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(JSON.stringify(report)).not.toContain('SECRET-FAKE');
+  expect(await exists('state/board/cards/F1.json')).toBe(false);
 });
