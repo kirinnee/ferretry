@@ -7,6 +7,7 @@ import type { Word } from '@ferretry/kernel/contract';
 import { defineConfig, defineEvent, definePort, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
+import { LocalSkillInstallStateSchema } from './installs-state.ts';
 import {
   type FerretSkills,
   type FerretSkillsInventory,
@@ -15,6 +16,7 @@ import {
   SkillsItemSchema,
 } from './wire.ts';
 
+export * from './installs-state.ts';
 export * from './wire.ts';
 
 export const SKILLS = 'skills' as const;
@@ -60,6 +62,15 @@ export const SKILLS_INSTALLED_STATE = defineState({
   path: 'installed/*',
   store: 'opaque',
   format: 1,
+});
+
+/** `state/skills/installs.json`: the copies this machine made, with the hash of every file written. */
+export const SKILLS_INSTALLS_STATE = defineState({
+  name: 'installs',
+  path: 'installs.json',
+  store: 'json',
+  format: 1,
+  schema: LocalSkillInstallStateSchema,
 });
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
