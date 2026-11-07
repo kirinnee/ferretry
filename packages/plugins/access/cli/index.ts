@@ -1,5 +1,4 @@
 import { implementCli } from '@ferretry/kernel/manifest';
-import type { StatePort } from '@ferretry/kernel/contract';
 import manifest from '../manifest.ts';
 import { desktopBrowserOpener } from './adapters/pair/browser-opener.ts';
 import { QrCodeTerminal } from './adapters/pair/qr-terminal.ts';
@@ -31,8 +30,7 @@ import { BINARY_NAME, ExitStatus, hostFacilities } from './shell.ts';
 export default implementCli(manifest, {
   build(ctx) {
     const { client, io } = ctx;
-    // TODO(kernel contract): the CLI receives this plugin's fenced StatePort, never the whole state home.
-    const state = (ctx as typeof ctx & { readonly ownState?: StatePort }).ownState;
+    const state = ctx.ownState;
     const host = hostFacilities(io);
     const exit = new ExitStatus();
     const out = {

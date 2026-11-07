@@ -2,15 +2,6 @@ import type { StatePort } from '@ferretry/kernel/contract';
 import { GrantAuditFile, type GrantAuditLine } from '../../../contract/index.ts';
 import type { GrantAuditEntry, GrantAuditPort, GrantAuditReading } from '../../lib/grants/index.ts';
 
-/** TODO(kernel contract): additive StatePort.tail, approved by the lead; never fall back to a full scan. */
-export interface TailStatePort extends StatePort {
-  version(file: typeof GrantAuditFile): Promise<{ readonly size: number; readonly etag: string } | undefined>;
-  tail(
-    file: typeof GrantAuditFile,
-    options: { readonly maxBytes: number },
-  ): Promise<{ readonly records: readonly GrantAuditLine[]; readonly unreadable: number }>;
-}
-
 const AUDIT_WINDOW_BYTES = 64 * 1024;
 
 /**
@@ -42,11 +33,8 @@ export class JournalGrantAudit implements GrantAuditPort {
    */
   async recent(limit: number): Promise<GrantAuditReading> {
     const entries: GrantAuditEntry[] = [];
-    const state = this.state as Partial<TailStatePort>;
-    if (state.tail === undefined || state.version === undefined)
-      throw new Error('the kernel does not provide bounded journal tail reads yet');
-    const information = await state.version(GrantAuditFile);
-    const { records, unreadable: damaged } = await state.tail(GrantAuditFile, { maxBytes: AUDIT_WINDOW_BYTES });
+    const information = await this.state.version(GrantAuditFile);
+    const { records, unreadable: damaged } = await this.state.tail(GrantAuditFile, { maxBytes: AUDIT_WINDOW_BYTES });
     for (const line of records) {
       // The kernel already validated each record: another journal's kind is healthy, not damaged bytes.
       if (line.kind === this.kind) entries.push({ at: line.at, actor: line.actor, changes: line.changes });

@@ -5,12 +5,9 @@ import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { fixedClock } from '@ferretry/kernel/testing';
 import { PairingRedirectsFile } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
-import type {
-  PairingBootHalf,
-  PairingRedirectStatePort,
-} from '../../../daemon/adapters/pairing/boot-redirect-sweep.ts';
+import type { PairingRedirectStatePort } from '../../../daemon/adapters/pairing/boot-redirect-sweep.ts';
 import manifest from '../../../manifest.ts';
-import { MemoryStateFolder } from '../../support/daemon/state-folder.ts';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import {
   createPairingRedirectPage,
   type PairingRedirectCliStatePort,
@@ -19,7 +16,7 @@ import { sweepPairingRedirectState as cliSweep } from '../../../cli/adapters/pai
 
 function fixture() {
   const clock = fixedClock('2026-11-06T09:00:00.000Z');
-  const nodes = new Map<string, { kind: 'file' | 'directory' | 'symlink' | 'other'; modifiedMs: number }>();
+  const nodes = new Map<string, { kind: 'file' | 'directory' | 'symlink'; modifiedMs: number }>();
   const calls: string[] = [];
   const warnings: string[] = [];
   let locked = false;
@@ -61,7 +58,7 @@ function fixture() {
     hooks: { provider: () => 'unavailable' },
   } as unknown as DaemonContext<typeof manifest>;
   if (daemon.build === undefined) throw new Error('daemon must build');
-  const half = daemon.build(context) as ReturnType<NonNullable<typeof daemon.build>> & PairingBootHalf;
+  const half = daemon.build(context);
   return {
     nodes,
     calls,
@@ -77,7 +74,7 @@ function fixture() {
     },
     boot: async () => {
       locked = true;
-      await half.beforeListen(context);
+      await half.beforeListen?.(context);
       locked = false;
       calls.push('listen');
     },
@@ -127,7 +124,7 @@ test('P106 daemon boot treats an absent redirect tree as a no-op', async () => {
 
 test('P106 CLI writes the same private opaque tree that daemon boot and the next pair sweep', async () => {
   const f = fixture();
-  const state: PairingRedirectCliStatePort = {
+  const state: PairingRedirectCliStatePort & PairingRedirectStatePort = {
     ...f.state,
     createPrivateDirectory: async (file, name) => {
       expect(file.name).toBe(PairingRedirectsFile.name);
@@ -139,7 +136,7 @@ test('P106 CLI writes the same private opaque tree that daemon boot and the next
       expect(value).toBeInstanceOf(Uint8Array);
       f.nodes.set(name as string, { kind: 'file', modifiedMs: f.clock.nowMs() });
     },
-    pathOf: (file, name) => `/fixture/state/access/${file.path.replace('*', name)}`,
+    pathOf: (file, name) => `/fixture/state/access/${file.path.replace('*', name ?? '')}`,
   };
   const page = await createPairingRedirectPage(state, '<html>fixture</html>');
   expect(page.file).toMatch(/^\/fixture\/state\/access\/pairing-redirects\/pair-open-[A-Za-z0-9]{6}\/pairing.html$/u);
@@ -153,14 +150,4 @@ test('P106 CLI writes the same private opaque tree that daemon boot and the next
   await f.clock.advance(30_001);
   await f.boot();
   expect(f.nodes.size).toBe(0);
-});
-
-test('P106 daemon boot names the missing kernel state ports instead of claiming a sweep', async () => {
-  const f = fixture();
-  Object.assign(f.kernel, { state: {} });
-  await f.boot();
-  expect(f.warnings).toEqual([
-    'pairing redirect boot cleanup needs kernel state stat and empty-directory removal ports',
-  ]);
-  expect(f.calls).toEqual(['listen']);
 });

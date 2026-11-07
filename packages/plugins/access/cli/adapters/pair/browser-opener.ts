@@ -185,12 +185,11 @@ export const holdProcessOpen = (run: () => void, ms: number): void => {
   setTimeout(run, ms);
 };
 
-/** TODO(kernel contract): CLI-side StatePort and opaque tree path, exclusive 0700 mkdir, plain rmdir. */
-export interface PairingRedirectCliStatePort extends StatePort {
-  pathOf(file: typeof PairingRedirectsFile, name: string): string;
-  createPrivateDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
-  removeEmptyDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
-}
+/** What `--open` needs of the CLI's own state: the kernel's scoped StatePort members, nothing wider. */
+export type PairingRedirectCliStatePort = Pick<
+  StatePort,
+  'write' | 'pathOf' | 'remove' | 'removeEmptyDirectory' | 'createPrivateDirectory'
+>;
 
 /** Creates only inside a fresh private directory of the declared tree, so a stale name is never overwritten. */
 export async function createPairingRedirectPage(
@@ -221,15 +220,8 @@ export async function createPairingRedirectPage(
 }
 
 /** The shipped opener uses the same declared opaque tree as the daemon sweep; absent ports refuse --open. */
-export const desktopBrowserOpener = (stateHome: string, port?: StatePort): IBrowserOpener => {
-  const state = port as Partial<PairingRedirectCliStatePort> | undefined;
-  if (
-    state?.pathOf === undefined ||
-    state.createPrivateDirectory === undefined ||
-    state.removeEmptyDirectory === undefined
-  )
-    return { open: async () => false };
-  const ready = state as PairingRedirectCliStatePort;
+export const desktopBrowserOpener = (stateHome: string, ready?: PairingRedirectCliStatePort): IBrowserOpener => {
+  if (ready === undefined) return { open: async () => false };
   return new DesktopBrowserOpener({
     platform: process.platform,
     spawn,

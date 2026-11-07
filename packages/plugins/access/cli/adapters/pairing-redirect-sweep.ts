@@ -8,26 +8,13 @@ import {
   PairingRedirectsFile,
 } from '../../contract/index.ts';
 
-/** TODO(kernel contract): same scoped metadata/empty-directory ports as the daemon's boot adapter. */
-interface RedirectState extends StatePort {
-  stat(
-    file: typeof PairingRedirectsFile,
-    name: string,
-  ): Promise<
-    | {
-        readonly kind: 'file' | 'directory' | 'symlink' | 'other';
-        readonly modifiedMs: number;
-      }
-    | undefined
-  >;
-  removeEmptyDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
-}
+/** What the sweep needs of the CLI's own state: the kernel's scoped StatePort members, nothing wider. */
+export type RedirectState = Pick<StatePort, 'list' | 'stat' | 'remove' | 'removeEmptyDirectory'>;
 
 /** The CLI and daemon now share Access's declared opaque tree, rather than reading arbitrary home files. */
-export async function sweepPairingRedirectState(port: StatePort | undefined, nowMs: number): Promise<void> {
-  const pending = port as Partial<RedirectState> | undefined;
-  if (pending?.stat === undefined || pending.removeEmptyDirectory === undefined) return;
-  const state = pending as RedirectState;
+export async function sweepPairingRedirectState(port: RedirectState | undefined, nowMs: number): Promise<void> {
+  if (port === undefined) return;
+  const state: RedirectState = port;
   try {
     for (const directory of await state.list(PairingRedirectsFile)) {
       if (!isPairingRedirectDirectoryName(directory)) continue;

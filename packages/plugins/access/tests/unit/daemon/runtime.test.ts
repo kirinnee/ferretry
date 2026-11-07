@@ -1,4 +1,4 @@
-import { MemoryStateFolder } from '../../support/daemon/state-folder.ts';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 /**
  * Access's composition (`daemon/runtime.ts`): the `device` and `pair` session modes, the `credentials:device`
  * provider and the Access port, wired to fake kernel ports (state in memory, a driven clock), a fake Gate and a

@@ -6,32 +6,16 @@ import {
   PairingRedirectsFile,
 } from '../../../contract/index.ts';
 
-interface RedirectStat {
-  readonly kind: 'file' | 'directory' | 'symlink' | 'other';
-  readonly modifiedMs: number;
-}
+/** What the sweep needs of Access's own state: the kernel's scoped StatePort members, nothing wider. */
+export type PairingRedirectStatePort = Pick<StatePort, 'list' | 'stat' | 'remove' | 'removeEmptyDirectory'>;
 
-/** TODO(kernel contract): lstat refuses symlink parents, never follows the leaf; directory removal is plain rmdir. */
-export interface PairingRedirectStatePort extends StatePort {
-  stat(file: typeof PairingRedirectsFile, name: string): Promise<RedirectStat | undefined>;
-  removeEmptyDirectory(file: typeof PairingRedirectsFile, name: string): Promise<void>;
-}
-
-/** TODO(kernel contract): DaemonHalf hook, awaited once under the home lock after state is ready, before listen. */
-export interface PairingBootHalf {
-  beforeListen(ctx: { readonly kernel: KernelPorts }): Promise<void>;
-}
-
-/** The actual daemon half exposes this hook even while the kernel dispatcher is pending. */
-export function pairingRedirectBoot(): PairingBootHalf {
+/** The daemon half's `beforeListen`: the kernel awaits it once under the home lock, after state is ready. */
+export function pairingRedirectBoot(): {
+  readonly beforeListen: (ctx: { readonly kernel: KernelPorts }) => Promise<void>;
+} {
   return {
     beforeListen: async ({ kernel }) => {
-      const state = kernel.state as Partial<PairingRedirectStatePort>;
-      if (state.stat === undefined || state.removeEmptyDirectory === undefined) {
-        kernel.log.warn('pairing redirect boot cleanup needs kernel state stat and empty-directory removal ports');
-        return;
-      }
-      await sweepPairingRedirectState(state as PairingRedirectStatePort, kernel.clock.nowMs());
+      await sweepPairingRedirectState(kernel.state, kernel.clock.nowMs());
     },
   };
 }

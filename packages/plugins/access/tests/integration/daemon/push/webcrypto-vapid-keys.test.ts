@@ -1,4 +1,4 @@
-import { MemoryStateFolder } from '../../../support/daemon/state-folder.ts';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { describe, it } from 'bun:test';
 
 import should from 'should';
