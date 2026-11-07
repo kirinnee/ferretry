@@ -60,14 +60,6 @@ export interface FoundationPaths {
    */
   readonly daemonIdentity: string;
   /**
-   * A RETIRED file: where the operator password's verifier used to live.
-   *
-   * The passkey step-up replaced that password, so nothing reads or writes this path any more. It is
-   * named only so boot can delete a copy an older daemon left behind and say so once — a verifier for a
-   * gate that no longer exists is a file somebody could mistake for one that still protects them.
-   */
-  readonly retiredOperatorPassword: string;
-  /**
    * Where a change to the grants is written down, one JSON line per change.
    *
    * IN THE STATE HOME, so it is keyed by daemon by construction — a state home has exactly one owner,
@@ -154,7 +146,6 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     archivedSessions: join(state, 'archived-sessions.json'),
     temporary: join(state, 'tmp'),
     daemonIdentity: join(state, 'daemon-identity.json'),
-    retiredOperatorPassword: join(state, 'operator-password.json'),
     grantAudit: join(state, 'grant-audit.jsonl'),
     securityAudit: join(state, 'security-audit.jsonl'),
     catalogs: join(state, 'catalogs'),

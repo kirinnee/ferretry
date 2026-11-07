@@ -18,7 +18,7 @@ import { writeJsonAtomic } from './atomic-json.ts';
  * absent file means no tick has ever serviced this park, which is the same fault one stage earlier.
  *
  * `checks/waiting.json` IS KTEAM'S OWN PATH, kept so an operator who knows where to look still finds
- * it, and so a migrated state home reads the same either side of the cut.
+ * it, and so a moved state home reads the same either side of the cut.
  */
 export class FileWaitHeartbeat implements WaitHeartbeatSink {
   constructor(

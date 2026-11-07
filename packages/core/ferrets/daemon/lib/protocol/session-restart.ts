@@ -6,7 +6,7 @@ import { LaunchInstructionSectionIdSchema } from './session.ts';
  * Restarting ferrets that run on out-of-date instructions (docs/launch-settings.md, "Restarting ferrets
  * whose instructions are out of date").
  *
- * A restart is the same-login migrate with the conversation resumed — never a fresh conversation, never
+ * A restart is the same-login move with the conversation resumed — never a fresh conversation, never
  * past the in-flight inventory. A ferret that is busy is QUEUED and restarted at its next idle moment, so
  * every answer here is a split between what happened now and what is waiting.
  */
@@ -38,7 +38,7 @@ export type RestartRequest = z.infer<typeof RestartRequestSchema>;
  * Why a restart waits.
  *
  *   mid-turn     the ferret is working, or its turn waits on someone — it is not at a your-turn or a declared wait
- *   in-flight    it is idle, but the migrate inventory found work a restart would lose (a tool, a process)
+ *   in-flight    it is idle, but the move inventory found work a restart would lose (a tool, a process)
  *   own-session  the ferret that asked is the one to restart; it goes when its own turn ends
  */
 export const RestartQueueReasonSchema = z.enum(['mid-turn', 'in-flight', 'own-session']);
@@ -73,7 +73,7 @@ export const RestartQueueEntrySchema = z.strictObject({
   since: InstantSchema,
   reason: RestartQueueReasonSchema,
   onlyIfOutdated: z.boolean(),
-  /** Who asked, as a migration's `by` names them: `owner`, or `session:<id>`. Absent on a request queued before it was kept. */
+  /** Who asked, as a move's `by` names them: `owner`, or `session:<id>`. Absent on a request queued before it was kept. */
   requestedBy: z.string().min(1).optional(),
 });
 export type RestartQueueEntry = z.infer<typeof RestartQueueEntrySchema>;

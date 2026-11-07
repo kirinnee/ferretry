@@ -167,7 +167,7 @@ function build(
 describe('a session signalling that it is done', () => {
   it('should write its evidence before it touches the pane, then record the completion', async () => {
     // THE ORDERING IS THE TEST. The summary and the turn-certified marker are the only account of the
-    // work that survives the kill; a completion that retired the pane first and then died would leave
+    // work that survives the kill; a completion that closed the pane first and then died would leave
     // a finished session indistinguishable from one that crashed at the finish line.
     // Arrange
     const { service, repository, artifacts, terminal } = parts();

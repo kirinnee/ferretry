@@ -42,7 +42,7 @@ function message(error: unknown): string {
  * A COMPLETED TICK IS THE ONLY THING THAT ADVANCES THE LEDGER. A tick that threw leaves `lastTickAt`
  * where it was, so the next health read reports the loop as overdue by however long it has been
  * failing. The alternative — stamping the attempt — is a scheduler whose failure is indistinguishable
- * from a fleet with nothing parked, which is the bug this migration keeps finding in other clothes.
+ * from a fleet with nothing parked, which is the bug this port keeps finding in other clothes.
  *
  * ONE SESSION'S FAILURE NEVER ABANDONS THE REST. Each park is serviced inside its own boundary and a
  * failure is recorded against that session, because the sessions in a tick have nothing to do with

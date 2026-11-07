@@ -44,7 +44,7 @@ export interface SessionSignalRequest {
  * `help` IS A PROTOCOL VIOLATION IN AUTOMODE, and that asymmetry is the whole point. An interactive
  * session has a person at the keyboard, so asking a question is an ordinary pause. An automode
  * teammate has nobody, so a question is an agent that has stopped and will never be answered: it is
- * recorded, the pane is retired, and the session fails loudly rather than sitting open forever
+ * recorded, the pane is closed, and the session fails loudly rather than sitting open forever
  * waiting for a human who was never watching. `waiting` exists precisely so an automode teammate can
  * park on an EXTERNAL condition without asking anyone for anything.
  *

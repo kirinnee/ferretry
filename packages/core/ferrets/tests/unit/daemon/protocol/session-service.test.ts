@@ -532,7 +532,7 @@ describe('session schemas', () => {
   it('should resolve every runtime-control and signal union member', () => {
     // Arrange
     const controls = [{ action: 'model', model: 'm' }, { action: 'effort', effort: 'high' }, { action: 'compact' }];
-    const retiredControls = [{ action: 'clear' }];
+    const removedControls = [{ action: 'clear' }];
     const signals = [
       { kind: 'done', message: 'complete' },
       { kind: 'help', message: 'blocked' },
@@ -543,8 +543,8 @@ describe('session schemas', () => {
     // Act + Assert
     for (const value of controls) should(session.RuntimeControlRequestSchema.parse(value)).deepEqual(value);
     assertRejects(
-      retiredControls.map(value => ({
-        name: 'retired runtime control',
+      removedControls.map(value => ({
+        name: 'removed runtime control',
         schema: session.RuntimeControlRequestSchema,
         value,
       })),

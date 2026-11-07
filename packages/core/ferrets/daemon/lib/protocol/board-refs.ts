@@ -50,8 +50,6 @@ export type TaskRef = z.infer<typeof TaskRefSchema>;
 
 /** The sigil of the `&task` reference kind (`docs/reference-standard.md`). */
 export const TASK_REF_SIGIL = '&';
-/** The retired sigil: still accepted as input for one release, never printed. */
-export const LEGACY_TASK_REF_SIGIL = '#';
 
 /** How a card is written everywhere: `&F412`. The machine is not part of it (see the file header). */
 export const formatTaskRef = (ref: TaskRef): string => `${TASK_REF_SIGIL}${ref.id}`;
@@ -59,14 +57,13 @@ export const formatTaskRef = (ref: TaskRef): string => `${TASK_REF_SIGIL}${ref.i
 export type TaskRefParseError = { readonly code: 'empty' } | { readonly code: 'malformed'; readonly input: string };
 
 /**
- * Reads a card reference a person or ferret typed: `&F412`, the retired `#F412`, or a bare `F412`, in
+ * Reads a card reference a person or ferret typed: `&F412` or a bare `F412`, in
  * any case. Surrounding space is ignored; anything else that is not exactly one id is `malformed`.
  */
 export const parseTaskRef = (input: string): BoardResult<TaskRef, TaskRefParseError> => {
   const trimmed = input.trim();
   if (trimmed === '') return boardErr({ code: 'empty' });
-  const bare =
-    trimmed.startsWith(TASK_REF_SIGIL) || trimmed.startsWith(LEGACY_TASK_REF_SIGIL) ? trimmed.slice(1) : trimmed;
+  const bare = trimmed.startsWith(TASK_REF_SIGIL) ? trimmed.slice(1) : trimmed;
   const id = bare.toUpperCase();
   return BOARD_TASK_ID_PATTERN.test(id) ? boardOk({ id }) : boardErr({ code: 'malformed', input });
 };

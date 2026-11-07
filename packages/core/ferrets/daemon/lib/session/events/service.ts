@@ -9,7 +9,7 @@ import { sameLiveReading } from '../live/policy.ts';
 import { journalEventToFyEvent, type StoredSessionEvent } from '../peers/reads.ts';
 
 /**
- * The source-compatible fleet backfill bound: recent tail, then live. It is also the default and the
+ * The source-preserving fleet backfill bound: recent tail, then live. It is also the default and the
  * ceiling of `?tail=`, so a reader may ask for less history than an old reader got, never more.
  */
 export const FLEET_EVENT_BACKLOG_LIMIT = 5_000;

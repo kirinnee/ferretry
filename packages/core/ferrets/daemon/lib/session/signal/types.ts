@@ -5,7 +5,7 @@ import type { SessionId } from '../../session-id.ts';
  * What a session says about ITSELF, as distinct from what an operator does TO it.
  *
  * Every other write surface in the daemon is addressed by a person or by the daemon's own
- * supervision: a start, a stop, a revive, a migration. This one is addressed by the agent in the
+ * supervision: a start, a stop, a revive, a move. This one is addressed by the agent in the
  * pane, and that is the whole reason it exists. An automode teammate has no human at the wheel, so
  * the only account of "I finished", "I am parked", or "I am stuck" is the one it gives.
  *
@@ -127,7 +127,7 @@ export interface SignalArtifacts {
 
 /** The terminal side of a signal. Every address goes through the daemon's own isolated tmux socket. */
 export interface SignalTerminal {
-  /** Captures the final frame before the pane is retired, so the last screen survives it. */
+  /** Captures the final frame before the pane is closed, so the last screen survives it. */
   snapshot(id: SessionId): Promise<void>;
   /** Stops the pane this daemon created for this session, and nothing else. */
   stop(id: SessionId, reason: string): Promise<void>;

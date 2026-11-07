@@ -7,12 +7,12 @@ export const ConversationMessagePointSchema = z.strictObject({
   v: z.literal(1),
   byteOffset: NonNegativeIntegerSchema,
   // Kept optional for plans written before multi-block transcript records were exported. Forks
-  // refine this legacy durable shape to an exact point at their request boundary.
+  // refine this durable shape to an exact point at their request boundary.
   blockIndex: NonNegativeIntegerSchema.optional(),
 });
 export type ConversationMessagePoint = z.infer<typeof ConversationMessagePointSchema>;
 
-/** A newly-issued fork cut must address one block, not merely a legacy record offset. */
+/** A newly-issued fork cut must address one block, not merely a record offset. */
 export const ExactConversationMessagePointSchema = ConversationMessagePointSchema.extend({
   blockIndex: NonNegativeIntegerSchema,
 });

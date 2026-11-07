@@ -9,7 +9,7 @@ import { writeJsonAtomic } from './atomic-json.ts';
  *
  * THE PUBLISH HAPPENS WHETHER OR NOT THE TICK SUCCEEDED, and that is the whole design. A loop that
  * only writes when it works is a loop whose failure looks exactly like a fleet with nothing parked —
- * the shape this migration has now found three times. A failed tick leaves `lastTickAt` where it was
+ * the shape this port has now found three times. A failed tick leaves `lastTickAt` where it was
  * and writes `overdue: true` beside the reason it failed, so the record says "the loop is not
  * running" rather than saying nothing at all.
  *
