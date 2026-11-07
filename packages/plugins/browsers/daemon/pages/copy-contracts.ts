@@ -1,4 +1,8 @@
-import type { BrowserElementTarget, CopyElementPart } from '@ferretry/protocol';
+import type { BrowserElementTarget } from './wire/target.ts';
+/** The longest value a secure copy holds, in UTF-8 bytes (today's `COPY_VALUE_MAX_BYTES`; the Vault's copy keeps the same cap). */
+export const COPY_VALUE_MAX_BYTES = 16_384;
+/** What part of an element is read: its visible text, a form field's current value, or one attribute. */
+export type CopyElementPart = 'text' | 'value' | 'attribute';
 
 /**
  * SECURE COPY'S SEAM INTO THE AGENT BROWSER (docs/secure-copy.md, "Capturing").

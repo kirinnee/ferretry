@@ -1,21 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  assembleBrowserStream,
-  type BrowserInputEvent,
-  type BrowserScreencastFrame,
-  EMPTY_BROWSER_STREAM_ASSEMBLY,
-} from '@ferretry/protocol';
-import {
-  BrowserViewerStream,
-  type BrowserViewerHost,
-  type FrameClock,
-  type FrameTimer,
-  type ViewerAttachment,
-  type ViewerDownstream,
-  type ViewerStreamOptions,
-  type ViewerTerminalSignal,
-} from '../../../../src/lib/index.ts';
+import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../daemon/stream/wire.ts';
+import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
+import { type BrowserViewerHost, type ViewerAttachment, type ViewerDownstream, type ViewerStreamOptions, type ViewerTerminalSignal } from '../../../daemon/stream/viewer-contracts.ts';
+import { type FrameClock, type FrameTimer } from '../../../daemon/stream/contracts.ts';
 import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
 
 /** Every whole envelope a run of sent chunks carries, read exactly as a viewer reads the stream. */

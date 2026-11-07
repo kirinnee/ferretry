@@ -16,7 +16,7 @@ import {
   parseBrowserProfileLease,
   passwordSavingOff,
   sameBrowserProfileLease,
-} from '../../../lib/browser/control/index.ts';
+} from '../index.ts';
 
 const leaseName = 'profile.lock';
 const reclaimName = 'profile.lock.reclaim';

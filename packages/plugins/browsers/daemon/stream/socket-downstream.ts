@@ -1,4 +1,4 @@
-import type { ViewerDownstream } from '../../../lib/index.ts';
+import type { ViewerDownstream } from './viewer-contracts.ts';
 
 /**
  * The subset of a server WebSocket the transport needs. Bun's socket reports `0` when it dropped a

@@ -3,12 +3,8 @@ import { chmod, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, createConnection } from 'node:net';
 import { hostname as osHostname, userInfo } from 'node:os';
 import { join } from 'node:path';
-import {
-  BROWSER_MAX_HEIGHT,
-  BROWSER_MAX_WIDTH,
-  type BrowserViewport,
-  type ResolvedBrowserPorts,
-} from '@ferretry/protocol';
+import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../pages/wire/browser.ts';
+import { type ResolvedBrowserPorts } from '../../../proxy/wire/ports.ts';
 import {
   BrowserControlError,
   generateXCookie,
@@ -16,7 +12,7 @@ import {
   selectChromeExecutable,
   xauthorityEntry,
   xvfbLaunchArguments,
-} from '../../../lib/browser/control/index.ts';
+} from '../index.ts';
 import { type ListenerProverPort, ProcListenerProver } from './listener-prover.ts';
 import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
 

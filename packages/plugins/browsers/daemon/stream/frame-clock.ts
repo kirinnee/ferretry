@@ -1,15 +1,16 @@
-import type { FrameClock, FrameTimer } from '../../../lib/index.ts';
+import type { Clock } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
+import type { FrameClock, FrameTimer } from './contracts.ts';
 
-/** The real timer wheel behind the frame governor and the viewer stream's recovery poll. */
-export class SystemFrameClock implements FrameClock {
+/** The kernel's clock behind the frame governor and the viewer stream's recovery poll (today's `SystemFrameClock`). */
+export class KernelFrameClock implements FrameClock {
+  constructor(private readonly clock: Clock) {}
+
   now(): number {
-    return Date.now();
+    return this.clock.nowMs();
   }
 
   schedule(callback: () => void, delayMs: number): FrameTimer {
-    const timer = setTimeout(callback, delayMs);
-    return {
-      cancel: () => clearTimeout(timer),
-    };
+    return { cancel: this.clock.after(milliseconds(delayMs), callback) };
   }
 }

@@ -1,6 +1,7 @@
 import { closeSync, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import type { BrowserMode, BrowserProxyStatus, ResolvedBrowserPorts } from '@ferretry/protocol';
+import type { BrowserMode, BrowserProxyStatus } from '../../contract/index.ts';
+import type { ResolvedBrowserPorts } from '../proxy/wire/ports.ts';
 import {
   agentBrowserArguments,
   BrowserControlError,
@@ -12,14 +13,16 @@ import {
   honestChromeUserAgent,
   listenerHeldRefusal,
   selectChromeExecutable,
-} from '../../../lib/browser/control/index.ts';
-import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../../../lib/browser/proxy/index.ts';
-import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
-import { type BrowserAutomation, CDP_PIPE_ENDPOINT } from '../../../lib/browser/transport/index.ts';
-import { type ListenerProverPort, ProcListenerProver } from '../control/listener-prover.ts';
-import type { BrowserDisplayPort } from '../control/login-runtime.ts';
-import { ProxySignInRelay } from '../proxy/sign-in-relay.ts';
-import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from '../transport/worker-client.ts';
+} from './control/index.ts';
+import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../proxy/index.ts';
+import type { BrowserSessionLauncher } from '../pages/service.ts';
+import type { Clock, WorkerHandle } from '@ferretry/kernel/contract';
+import { type BrowserAutomation } from '../pages/automation.ts';
+import { CDP_PIPE_ENDPOINT } from './cdp-pipe.ts';
+import { type ListenerProverPort, ProcListenerProver } from './control/adapters/listener-prover.ts';
+import type { BrowserDisplayPort } from './control/adapters/login-runtime.ts';
+import { ProxySignInRelay } from '../proxy/adapters/sign-in-relay.ts';
+import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from './client.ts';
 
 /** Launches the machine's ONE agent Chrome — in the machine's Browser mode (headless by default; a real
  * window when the owner asked for one), over the dedicated agent profile, shared by every session — and the
@@ -28,9 +31,10 @@ import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from 
  * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
  * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it.
  *
- * The worker reaches Chrome over the machine's DevTools transport (`CdpTransport`). Over the PIPE
- * (`CDP_PIPE_SWITCH`) Chrome is spawned with its fds 3 and 4 wired, the daemon's ends become the worker's
- * fds 3 and 4, and the daemon then closes its own copies: nothing on this host — another account included —
+ * The worker is a Bun worker thread the kernel starts (`kernel.workers`); it reaches Chrome over the machine's
+ * DevTools transport (`CdpTransport`). Over the PIPE (`CDP_PIPE_SWITCH`) Chrome is spawned with its fds 3 and 4
+ * wired, and the worker thread, which shares this process, drives the daemon's ends; they are closed once the
+ * worker is gone: nothing on this host — another account included —
  * has an address to drive the owner's signed-in profile through, and there is no free-port probe for anyone
  * to race. Over a PORT, Chrome listens on loopback and the worker connects to it once it answers — and only
  * once the kernel shows the listener is THIS Chrome's own socket (`lib/browser/control/listener-proof.ts`):
@@ -89,18 +93,18 @@ export interface SessionBrowserModeOptions {
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   constructor(
     private readonly profile: BrowserProfilePort,
-    private readonly worker: BrowserWorkerProgram,
-    private readonly workerRuntime: string,
-    private readonly environment: Readonly<Record<string, string | undefined>> = process.env,
+    /** Starts the browser worker thread (`kernel.workers.start` over `./main.ts`). */
+    private readonly workers: () => WorkerHandle,
+    private readonly clock: Clock,
+    private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly connectWorker: (options: WorkerClientOptions) => Promise<BrowserWorkerClient> = options =>
       BrowserWorkerClient.connect(options),
     private readonly modes: SessionBrowserModeOptions = {},
   ) {}
 
   async launch(viewport: { readonly width: number; readonly height: number }): Promise<BrowserAutomation> {
-    // Both preconditions are checked BEFORE the profile is leased: a machine with no worker or no
-    // browser has nothing to clean up, and the refusal is the one plain sentence that names the fix.
-    if (this.worker.kind === 'missing') throw new BrowserControlError('launch_failed', this.worker.message);
+    // The precondition is checked BEFORE the profile is leased: a machine with no browser has nothing to clean
+    // up, and the refusal is the one plain sentence that names the fix.
     const executable = selectChromeExecutable(process.platform, this.environment.FY_CHROME_BIN, existsSync, {
       home: this.environment.HOME,
       path: this.environment.PATH,
@@ -185,27 +189,20 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       let worker: BrowserWorkerClient;
       try {
         worker = await this.connectWorker({
-          runtime: this.workerRuntime,
-          workerEntry: this.worker.kind === 'executable' ? this.worker.path : this.worker.entry,
+          start: this.workers,
+          clock: this.clock,
           endpoint,
           ...(pipe === undefined ? {} : { cdpPipe: pipe }),
-          workerExecutable: this.worker.kind === 'executable',
-          environment: this.environment,
-          ...(this.modes.limits === undefined
-            ? {}
-            : { wrapCommand: this.modes.limits.browserCommand.bind(this.modes.limits) }),
           readyTimeoutMs: WORKER_ATTACH_TIMEOUT_MS,
           ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
         });
       } catch (error) {
         throw await attachFailure(error, chrome, diagnostics);
-      } finally {
-        // The worker has its own copies now, or never will. Closing the daemon's is what lets Chrome see
-        // end-of-file when the worker goes, and is what keeps the pipe between exactly two processes.
-        // Forgotten once closed, so the failure path below never closes a descriptor reused since.
-        if (pipe !== undefined) closePipe(pipe);
-        pipe = undefined;
       }
+      // The worker thread drives these ends now; the leased browser closes them once the worker is gone.
+      // Forgotten here, so the failure path below never closes a descriptor the browser still uses.
+      const held = pipe;
+      pipe = undefined;
       return new LeasedBrowser(
         worker,
         chrome,
@@ -213,6 +210,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         this.modes.shutdownTimeoutMs,
         relay,
         proxy === undefined ? undefined : browserProxyStatus(proxy.setting),
+        held,
       );
     } catch (error) {
       if (pipe !== undefined) closePipe(pipe);
@@ -265,6 +263,7 @@ class LeasedBrowser implements BrowserAutomation {
     private readonly shutdownTimeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
     private readonly relay?: ProxySignInRelay,
     readonly proxy?: BrowserProxyStatus,
+    private readonly pipe?: CdpPipeEnds,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
     // Chrome without its worker is an unreachable window still holding the profile — the pipe died with
@@ -334,6 +333,8 @@ class LeasedBrowser implements BrowserAutomation {
     // not confirm that, so the answer is kept rather than swallowed: a worker still standing is a
     // browser still reachable, whatever happened to Chrome.
     const workerGone = await this.worker.close().then(succeeded, failed);
+    // The worker thread is gone, so nothing reads or writes the pipe's daemon ends any more.
+    if (this.pipe !== undefined) closePipe(this.pipe);
     // Chrome is reaped either way — a worker that would not die is no reason to leave a browser up.
     const chromeGone = await reapChrome(this.chrome, 'SIGTERM', this.shutdownTimeoutMs);
     await this.relay?.close().catch(() => undefined);

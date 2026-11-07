@@ -2,10 +2,10 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserScreencastFrame } from '@ferretry/protocol';
+import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
-import { BrowserWorkerClient, type WorkerClientOptions } from '../../../../src/adapters/browser/transport/index.ts';
-import type { FrameClock } from '../../../../src/lib/index.ts';
+import { BrowserWorkerClient, type WorkerClientOptions } from '../../../daemon/worker/client.ts';
+import type { FrameClock } from '../../../daemon/stream/contracts.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 const WORKER_ENTRY = join(import.meta.dir, 'fixtures', 'fake-worker.mjs');

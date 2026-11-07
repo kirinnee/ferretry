@@ -3,14 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { BrowserProfileStore } from '../../../../src/adapters/browser/control/index.ts';
-import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/index.ts';
-import {
-  type BrowserAutomation,
-  type BrowserInputFacts,
-  type BrowserInputFieldsPort,
-  BrowserSessionService,
-} from '../../../../src/lib/index.ts';
+import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
+import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
+import { type BrowserAutomation } from '../../../daemon/pages/automation.ts';
+import { type BrowserInputFacts, type BrowserInputFieldsPort } from '../../../daemon/pages/input-contracts.ts';
+import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 
 /**
  * A GRANT FILL'S FIELD EMPTYING, IN A REAL CHROME (docs/input-requests.md, "Task plan fills"; invariant 19).

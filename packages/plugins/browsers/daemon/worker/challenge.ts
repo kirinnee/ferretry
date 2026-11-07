@@ -1,4 +1,4 @@
-import type { BrowserChallenge, BrowserChallengeProvider } from '@ferretry/protocol';
+import type { BrowserChallenge, BrowserChallengeProvider } from '../pages/wire/browser.ts';
 
 /**
  * Whether a page appears to be asking the person on it to prove they are human — so the view can say so

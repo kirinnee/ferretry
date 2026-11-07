@@ -1,22 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as browser from '../../src/lib/browser.ts';
-import type {
-  BrowserAction,
-  BrowserActionResult,
-  BrowserAgentPage,
-  BrowserCapacity,
-  BrowserInputEvent,
-  BrowserLastActor,
-  BrowserPageActionSnapshot,
-  BrowserPageSnapshot,
-  BrowserPageSummary,
-  BrowserProxySetting,
-  BrowserProxyStatus,
-  BrowserScreencastFrame,
-  BrowserStatus,
-  BrowserViewport,
-} from '../../src/lib/index.ts';
+import * as browser from '../../../../daemon/pages/wire/browser.ts';
+import type { BrowserAction, BrowserActionResult, BrowserAgentPage, BrowserCapacity, BrowserInputEvent, BrowserLastActor, BrowserPageActionSnapshot, BrowserPageSnapshot, BrowserPageSummary, BrowserScreencastFrame, BrowserStatus, BrowserViewport } from '../../../../daemon/pages/wire/browser.ts';
+import type { BrowserProxySetting, BrowserProxyStatus } from '../../../../contract/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

@@ -1,10 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import {
-  LOOPBACK_FIREWALL_MARKER_PATH,
-  type LoopbackFirewallMarker,
-  readLoopbackFirewallMarker,
-} from '@ferretry/protocol';
-import type { LoopbackMarkerReader } from '../../../lib/browser/firewall/index.ts';
+import { LOOPBACK_FIREWALL_MARKER_PATH, type LoopbackFirewallMarker, readLoopbackFirewallMarker } from '../wire/ports.ts';
+import type { LoopbackMarkerReader } from './state.ts';
 
 /** Reads the marker the root script leaves. A missing or unparseable file is `undefined`, never an error. */
 export class FileLoopbackMarkerReader implements LoopbackMarkerReader {

@@ -1,12 +1,5 @@
 import { describe, it } from 'bun:test';
-import type {
-  BrowserAction,
-  BrowserInputEvent,
-  BrowserPageActionSnapshot,
-  BrowserPageSnapshot,
-  BrowserPageSummary,
-  BrowserScreencastFrame,
-} from '@ferretry/protocol';
+import type { BrowserAction, BrowserInputEvent, BrowserPageActionSnapshot, BrowserPageSnapshot, BrowserPageSummary, BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
 import {
   type BrowserIdlePolicy,
@@ -14,8 +7,8 @@ import {
   BrowserSessionError,
   BrowserSessionService,
   pendingDialogOf,
-} from '../../../../src/lib/browser/runtime/service.ts';
-import type { BrowserAutomation } from '../../../../src/lib/browser/transport/automation-contracts.ts';
+} from '../../../daemon/pages/service.ts';
+import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import { TypedIdentities } from '../../../../src/lib/input-requests/typed-identities.ts';
 
 type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };

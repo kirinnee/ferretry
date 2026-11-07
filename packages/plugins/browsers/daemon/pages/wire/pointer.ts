@@ -5,7 +5,7 @@ import {
   type BrowserModifier,
   BrowserRefSchema,
   browserTargetProblem,
-} from './browser-target.ts';
+} from './target.ts';
 
 /**
  * THE POINTER AND KEYS VOCABULARY — hover, drag, mouse, press, scroll, select, check, fill_form and

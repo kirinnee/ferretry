@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import { BROWSER_MAX_DOWNLOAD_NOTICES, type BrowserDownloadNotice } from '@ferretry/protocol';
-import { AGENT_FILE_LIMITS, STAGED_FILE_TTL_MS, sanitizeFileName } from '../../agent-files/policy.ts';
+import { BROWSER_MAX_DOWNLOAD_NOTICES, type BrowserDownloadNotice } from '../pages/wire/browser.ts';
+import { AGENT_FILE_LIMITS, STAGED_FILE_TTL_MS, sanitizeFileName } from '../tools/files-policy.ts';
 
 /**
  * WHERE THE WORKER KEEPS WHAT A PAGE DOWNLOADED, or printed, until the daemon saves it for the agent.

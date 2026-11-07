@@ -1,4 +1,5 @@
-import type { BrowserElementTarget, InputBrowserFieldFacts } from '@ferretry/protocol';
+import type { BrowserElementTarget } from '../pages/wire/target.ts';
+import type { PageFieldFacts as InputBrowserFieldFacts } from '@ferretry/core-vault/contract';
 import { recogniseBrowserChallenge } from './challenge.ts';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
@@ -13,8 +14,8 @@ import {
   type BrowserInputShot,
   type BrowserInputValue,
   BROWSER_INPUT_TEXT_MAX_CHARS,
-} from './input-contracts.ts';
-import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf, browserSelectorOf } from './page-acts.ts';
+} from '../pages/input-contracts.ts';
+import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf, browserSelectorOf } from '../pages/page-acts.ts';
 
 /**
  * WHAT THE BROWSER WORKER DOES FOR THE INPUT BRIDGE (docs/input-requests.md, "Pages"): look at the fields an
@@ -557,7 +558,7 @@ async function pageFactsOf(
     frameUrls: page.frames().map(frame => frame.url()),
   });
   return {
-    kind: 'browser',
+    kind: 'page',
     pageId: subject.pageId,
     origin: originOfUrl(url),
     secure: isSecureUrl(url),

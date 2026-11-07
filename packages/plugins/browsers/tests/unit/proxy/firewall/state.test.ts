@@ -1,13 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { LoopbackFirewallMarker, LoopbackFirewallState } from '@ferretry/protocol';
+import type { LoopbackFirewallMarker } from '../../../../daemon/proxy/wire/ports.ts';
+import type { LoopbackFirewallState } from '../../../../daemon/proxy/wire/firewall.ts';
 import should from 'should';
-import {
-  firewallRefusal,
-  judgeLoopbackFirewall,
-  LoopbackFirewallWatch,
-  loopbackFirewallRemedy,
-  readLoopbackFirewall,
-} from '../../../../src/lib/index.ts';
+import { firewallRefusal, judgeLoopbackFirewall, LoopbackFirewallWatch, loopbackFirewallRemedy, readLoopbackFirewall } from '../../../../daemon/proxy/firewall/state.ts';
 
 const NOW = Date.parse('2026-10-31T01:10:00.000Z');
 const FRESH = '2026-10-31T01:08:00.000Z';

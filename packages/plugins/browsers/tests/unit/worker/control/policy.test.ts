@@ -1,24 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  AUTOMATION_SWITCH_PATTERN,
-  CDP_PIPE_SWITCH,
-  defaultCdpTransport,
-  agentBrowserArguments,
-  BrowserControlError,
-  browserEnvironment,
-  browserLoginChromeArguments,
-  chromeExecutableCandidates,
-  chromeInstallCommand,
-  chromeLaunchArguments,
-  generateVncPassword,
-  loginWindowMinutes,
-  selectChromeExecutable,
-  vncSupervisorArguments,
-  x11vncLaunchArguments,
-  xvfbInstallCommand,
-  xvfbMissingMessage,
-} from '../../../../src/lib/index.ts';
+import { AUTOMATION_SWITCH_PATTERN, CDP_PIPE_SWITCH, defaultCdpTransport, agentBrowserArguments, BrowserControlError, browserEnvironment, browserLoginChromeArguments, chromeExecutableCandidates, chromeInstallCommand, chromeLaunchArguments, generateVncPassword, loginWindowMinutes, selectChromeExecutable, vncSupervisorArguments, x11vncLaunchArguments, xvfbInstallCommand, xvfbMissingMessage } from '../../../../daemon/worker/control/policy.ts';
 
 /** The default transport, on a fixed number so an assertion can name it. */
 const PORT = { kind: 'port', port: 9222 } as const;

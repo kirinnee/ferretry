@@ -1,7 +1,7 @@
 import { afterEach, describe, it, onTestFinished } from 'bun:test';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import should from 'should';
-import { ProxySignInRelay } from '../../../../src/adapters/browser/proxy/sign-in-relay.ts';
+import { ProxySignInRelay } from '../../../daemon/proxy/adapters/sign-in-relay.ts';
 
 /** Every peer here is a loopback fake: the relay is exercised against sockets, never against a network. */
 const servers: Server[] = [];

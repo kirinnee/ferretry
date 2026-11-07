@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { SurfaceNameSchema } from './agent-tools.ts';
+import {
+  BROWSER_PROXY_SCHEMES,
+  BrowserActorKindSchema,
+  BROWSER_MAX_PAGE_ID_LENGTH,
+  BrowserPageStateSchema,
+  BrowserProfileKindSchema,
+  BrowserProxySettingSchema,
+  BrowserProxyStatusSchema,
+  SurfaceNameSchema,
+} from '../../../contract/index.ts';
 import {
   BROWSER_MAX_FIND_CHARS,
   BROWSER_MAX_HEIGHT,
@@ -17,7 +26,7 @@ import {
   refineBrowserRead,
   refineBrowserScreenshot,
   refineBrowserTarget,
-} from './browser-target.ts';
+} from './target.ts';
 import {
   BROWSER_MAX_SCROLL_TEXT_CHARS,
   BrowserMouseActionSchema,
@@ -31,152 +40,43 @@ import {
   refineBrowserHighlight,
   refineBrowserMouse,
   refineBrowserScroll,
-} from './browser-pointer.ts';
-import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
-import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
+} from './pointer.ts';
+import { InstantSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { SurfaceOpenerSchema } from './surface.ts';
 
 export { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, BROWSER_MIN_HEIGHT, BROWSER_MIN_WIDTH };
 
-export const BROWSER_MAX_INSTANCES = 3;
-/** The most pages one SESSION keeps open; opening another past it is refused, never hidden. */
-export const BROWSER_MAX_PAGES = 20;
-/** The most pages the machine's one agent browser holds across every session. */
-export const BROWSER_MAX_MACHINE_PAGES = 60;
-export const BROWSER_MAX_PAGE_ID_LENGTH = 128;
+/** The lifecycle, the limits, the mode and the proxy setting are the contract's (`contract/wire.ts`). */
+export {
+  BROWSER_MAX_INSTANCES,
+  BROWSER_MAX_MACHINE_PAGES,
+  BROWSER_MAX_PAGE_ID_LENGTH,
+  BROWSER_MAX_PAGES,
+  BROWSER_PROXY_MAX_BYPASS,
+  BROWSER_PROXY_SCHEMES,
+  BrowserActorKindSchema,
+  type BrowserLifecycle,
+  BrowserLifecycleSchema,
+  type BrowserMode,
+  BrowserPageStateSchema,
+  BrowserProfileKindSchema,
+  type BrowserProxySetting,
+  BrowserProxySettingSchema,
+  type BrowserProxyStatus,
+  BrowserProxyStatusSchema,
+  browserProxyUrlProblem,
+} from '../../../contract/index.ts';
 export const BROWSER_MAX_SELECTOR_LENGTH = 4_096;
 export const BROWSER_MAX_TEXT_LENGTH = 200_000;
-
-export const BrowserLifecycleSchema = z.enum(['stopped', 'starting', 'running', 'stopping', 'error']);
-export type BrowserLifecycle = z.infer<typeof BrowserLifecycleSchema>;
-
-export const BrowserActorKindSchema = z.enum(['agent', 'human']);
 export type BrowserActorKind = z.infer<typeof BrowserActorKindSchema>;
-
-export const BrowserProfileKindSchema = z.enum(['shared', 'session']);
 export type BrowserProfileKind = z.infer<typeof BrowserProfileKindSchema>;
-
-export const BrowserPageStateSchema = z.enum(['loading', 'ready', 'error']);
 export type BrowserPageState = z.infer<typeof BrowserPageStateSchema>;
-
-/**
- * How this machine runs its one agent browser (`machine.yaml` `browserMode`, docs/browser-mode.md).
- *
- * - `headless` — no window: what agents get by default, and what a server with no display can run.
- * - `window` — a real Chrome window: a private virtual display on Linux, a real window on macOS. For an
- *   owner who browses and signs in through it themselves, so a site sees an ordinary desktop browser.
- *
- * Both are an honest Chrome. Neither disguises automation, and neither solves a challenge for anyone.
- */
-export const BrowserModeSchema = z.enum(['headless', 'window']);
-export type BrowserMode = z.infer<typeof BrowserModeSchema>;
-
-export const BROWSER_PROXY_SCHEMES = ['http', 'https', 'socks5'] as const;
 export type BrowserProxyScheme = (typeof BROWSER_PROXY_SCHEMES)[number];
-
-/** The most bypass entries one proxy setting carries. */
-export const BROWSER_PROXY_MAX_BYPASS = 64;
-
-/**
- * Why a proxy address is refused, or `undefined` when it is a usable one: an `http://`, `https://` or
- * `socks5://` address with a host, no credentials in it and nothing after the port. Credentials never
- * travel in the address — the address is shown in the app and in the status — they are the
- * `username` / `password` references of {@link BrowserProxySettingSchema}.
- */
-export function browserProxyUrlProblem(value: string): string | undefined {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return 'a proxy address looks like http://host:8080, https://host:8443 or socks5://host:1080';
-  }
-  const scheme = url.protocol.slice(0, -1);
-  if (!(BROWSER_PROXY_SCHEMES as readonly string[]).includes(scheme)) {
-    return 'a proxy address starts with http://, https:// or socks5://';
-  }
-  if (url.hostname === '') return 'a proxy address needs a host';
-  if (url.username !== '' || url.password !== '') {
-    return 'a proxy address never carries a user name or password: set username and password to ${secret:NAME} references instead';
-  }
-  if ((url.pathname !== '' && url.pathname !== '/') || url.search !== '' || url.hash !== '') {
-    return 'a proxy address is only a scheme, a host and a port';
-  }
-  return undefined;
-}
-
-const BROWSER_PROXY_BYPASS_ENTRY = /^[A-Za-z0-9*._:/<>\[\]-]{1,253}$/u;
-const BROWSER_PROXY_SECRET_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
-
-const BrowserProxySecretReferenceSchema = z
-  .string()
-  .regex(
-    BROWSER_PROXY_SECRET_REFERENCE,
-    'proxy credentials are written as a ${secret:NAME} reference to the secret store, never as the value',
-  );
-
-/**
- * Where the machine's one agent browser sends its traffic (`machine.yaml` `browserProxy`,
- * docs/browser-proxy.md). Absent means direct — what every browser did before this setting.
- *
- * - `url` — `http://`, `https://` or `socks5://` address of the proxy, without credentials.
- * - `bypass` — hosts that skip the proxy, in Chrome's own syntax (`*.internal.example`, `10.0.0.0/8`,
- *   `<local>`). Loopback is bypassed by Chrome itself.
- * - `username` / `password` — `${secret:NAME}` references and nothing else: a value here would sit in a
- *   file every editor of the directory can read. Both or neither.
- */
-export const BrowserProxySettingSchema = z
-  .strictObject({
-    url: z
-      .string()
-      .trim()
-      .min(1)
-      .max(512)
-      .superRefine((value, context) => {
-        const problem = browserProxyUrlProblem(value);
-        if (problem !== undefined) context.addIssue({ code: 'custom', message: problem });
-      }),
-    bypass: z
-      .array(
-        z
-          .string()
-          .trim()
-          .regex(
-            BROWSER_PROXY_BYPASS_ENTRY,
-            'a bypass entry is a host, a *.domain pattern, an address range such as 10.0.0.0/8, or <local>',
-          ),
-      )
-      .max(BROWSER_PROXY_MAX_BYPASS)
-      .default([]),
-    username: BrowserProxySecretReferenceSchema.optional(),
-    password: BrowserProxySecretReferenceSchema.optional(),
-  })
-  .superRefine((value, context) => {
-    if ((value.username === undefined) !== (value.password === undefined)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'a proxy with credentials needs both username and password, each a ${secret:NAME} reference',
-        path: [value.username === undefined ? 'username' : 'password'],
-      });
-    }
-  });
-export type BrowserProxySetting = z.infer<typeof BrowserProxySettingSchema>;
 export type BrowserProxySettingInput = z.input<typeof BrowserProxySettingSchema>;
-
-/**
- * The proxy a RUNNING browser was started with, as the browser pane shows it. The address is the
- * proxy's, never a credential; the browser keeps the proxy it started with until it stops, whatever the
- * setting says since.
- */
-export const BrowserProxyStatusSchema = z.strictObject({
-  url: z.string().min(1).max(512),
-  authenticated: z.boolean(),
-  bypassCount: NonNegativeIntegerSchema,
-});
-export type BrowserProxyStatus = z.infer<typeof BrowserProxyStatusSchema>;
 
 /** Who is asking the person on a page to prove they are human: kept beside the browser targets, which the input
  *  request reads too, and named here with the rest of the browser's schemas. */
-export { type BrowserChallengeProvider, BrowserChallengeProviderSchema } from './browser-target.ts';
+export { type BrowserChallengeProvider, BrowserChallengeProviderSchema } from './target.ts';
 
 /**
  * A page that appears to be showing a human check — a captcha or a "checking your browser" interstitial.

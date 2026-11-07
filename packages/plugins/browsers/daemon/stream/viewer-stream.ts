@@ -1,10 +1,5 @@
-import {
-  type BrowserInputEvent,
-  type BrowserScreencastFrame,
-  encodeBrowserStreamChunks,
-  nextBrowserStreamSerial,
-} from '@ferretry/protocol';
-import { MAX_TUNNEL_DATA_BYTES } from '../../relay/tunnel.ts';
+import { type BrowserInputEvent, type BrowserScreencastFrame } from '../pages/wire/browser.ts';
+import { encodeBrowserStreamChunks, nextBrowserStreamSerial } from './wire.ts';
 import type { FrameClock, FrameTimer } from './contracts.ts';
 import { MAX_FRAME_BYTES, encodeFrameEnvelope } from './envelope.ts';
 import { type BrowserKeyInput, keyIdentity, keyReleaseSequence, normalizeBrowserInput } from './input.ts';
@@ -19,6 +14,11 @@ import {
   type ViewerStreamOptions,
   type ViewerTerminalSignal,
 } from './viewer-contracts.ts';
+/**
+ * Raw bytes one relayed `data` record carries: today's `MAX_TUNNEL_DATA_BYTES`, the kernel session layer's
+ * `relayDataByteBudget(MAX_PLAINTEXT_BYTES)` (49 101), so one browser chunk still fits one relayed record.
+ */
+const MAX_TUNNEL_DATA_BYTES = 49_101;
 
 export const MAX_INPUT_MESSAGE_BYTES = 256 * 1024;
 export const MAX_QUEUED_INPUT_BYTES = 1024 * 1024;

@@ -1,4 +1,5 @@
-import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserMode, type BrowserViewport } from '@ferretry/protocol';
+import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../pages/wire/browser.ts';
+import { type BrowserMode } from '../../../contract/index.ts';
 
 export const browserLoginDefaultMinutes = 15;
 export const browserLoginMaximumMinutes = 60;

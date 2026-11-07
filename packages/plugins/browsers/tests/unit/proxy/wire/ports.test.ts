@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as browserPorts from '../../src/lib/browser-ports.ts';
+import * as browserPorts from '../../../../daemon/proxy/wire/ports.ts';
 import {
   BROWSER_PER_USER_DEFAULT_BASE,
   BrowserPortsSchema,
@@ -14,7 +14,7 @@ import {
   perUserBrowserPorts,
   readLoopbackFirewallMarker,
   resolveBrowserPorts,
-} from '../../src/lib/browser-ports.ts';
+} from '../../../../daemon/proxy/wire/ports.ts';
 import { INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

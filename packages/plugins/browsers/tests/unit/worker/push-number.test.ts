@@ -7,7 +7,7 @@ import {
   identityProviderOf,
   numberSourceFits,
   scanPushNumber,
-} from '../../../../src/lib/browser/transport/push-number.ts';
+} from '../../../daemon/worker/push-number.ts';
 
 const FIXTURES = join(import.meta.dir, '../../../fixtures/push');
 const fixture = (name: string): string => readFileSync(join(FIXTURES, name), 'utf8');

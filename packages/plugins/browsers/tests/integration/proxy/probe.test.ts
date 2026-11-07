@@ -1,8 +1,8 @@
 import { afterEach, describe, it } from 'bun:test';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import should from 'should';
-import { TunnelProxyProbe } from '../../../../src/adapters/browser/proxy/probe.ts';
-import { proxyEndpoint } from '../../../../src/lib/browser/proxy/index.ts';
+import { TunnelProxyProbe } from '../../../daemon/proxy/adapters/probe.ts';
+import { proxyEndpoint } from '../../../daemon/proxy/index.ts';
 
 /** Every peer is a loopback fake. The probe's TLS step is swapped for a pass-through: a fake has no certificate. */
 const servers: Server[] = [];

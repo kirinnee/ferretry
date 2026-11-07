@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileLoopbackMarkerReader } from '../../../../src/adapters/browser/firewall/marker-reader.ts';
+import { FileLoopbackMarkerReader } from '../../../../daemon/proxy/firewall/marker-reader.ts';
 
 const directories: string[] = [];
 afterEach(async () => {

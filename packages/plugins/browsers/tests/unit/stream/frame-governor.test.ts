@@ -1,13 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  BrowserFrameGovernor,
-  type FrameClock,
-  type FrameSink,
-  type FrameTimer,
-  MAX_HELD_FRAME_ACKNOWLEDGEMENTS,
-  MIN_FRAME_INTERVAL_MS,
-} from '../../../../src/lib/index.ts';
+import { BrowserFrameGovernor, MAX_HELD_FRAME_ACKNOWLEDGEMENTS, MIN_FRAME_INTERVAL_MS } from '../../../daemon/stream/frame-governor.ts';
+import { type FrameClock, type FrameSink, type FrameTimer } from '../../../daemon/stream/contracts.ts';
 
 class FakeClock implements FrameClock {
   private current = 1_000;

@@ -2,11 +2,12 @@ import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserScreencastFrame } from '@ferretry/protocol';
+import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
-import { BrowserProfileStore, XvfbDisplay } from '../../../../src/adapters/browser/control/index.ts';
-import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/index.ts';
-import { BrowserSessionService } from '../../../../src/lib/index.ts';
+import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
+import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runtime.ts';
+import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
+import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 /**

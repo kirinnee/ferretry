@@ -5,7 +5,7 @@ import {
   BROWSER_MIN_HEIGHT,
   BROWSER_MIN_WIDTH,
   BrowserRefSchema,
-} from './browser-target.ts';
+} from './target.ts';
 
 /**
  * A PAGE'S LIFECYCLE — what happens to a page that is not a click, a keystroke or a read: a dialog it

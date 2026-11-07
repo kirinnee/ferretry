@@ -1,14 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  BROWSER_HIGHLIGHT_STYLE,
-  type PointerAct,
-  type PointerLocator,
-  type PointerPage,
-  performPointerAct,
-  pointerActParam,
-  staleRefMessage,
-} from '../../../../src/lib/index.ts';
+import { BROWSER_HIGHLIGHT_STYLE, type PointerAct, type PointerLocator, type PointerPage, performPointerAct, pointerActParam } from '../../../daemon/pages/pointer-acts.ts';
+import { staleRefMessage } from '../../../daemon/pages/page-acts.ts';
 
 /** A page that records every Playwright call a pointer act makes, in order, one line each. */
 class FakePage implements PointerPage {

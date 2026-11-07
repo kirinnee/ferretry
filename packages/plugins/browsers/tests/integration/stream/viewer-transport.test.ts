@@ -1,13 +1,11 @@
 import { describe, it } from 'bun:test';
-import {
-  assembleBrowserStream,
-  type BrowserInputEvent,
-  type BrowserScreencastFrame,
-  EMPTY_BROWSER_STREAM_ASSEMBLY,
-} from '@ferretry/protocol';
+import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../daemon/stream/wire.ts';
+import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
-import { SocketViewerDownstream, SystemFrameClock, type ViewerSocket } from '../../../../src/adapters/index.ts';
-import { type BrowserViewerHost, BrowserViewerStream, type ViewerAttachment } from '../../../../src/lib/index.ts';
+import { SocketViewerDownstream, type ViewerSocket } from '../../../daemon/stream/socket-downstream.ts';
+import { KernelFrameClock } from '../../../daemon/stream/frame-clock.ts';
+import { type BrowserViewerHost, type ViewerAttachment } from '../../../daemon/stream/viewer-contracts.ts';
+import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
 import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
@@ -66,7 +64,7 @@ class RecordingHost implements BrowserViewerHost {
 describe('system frame clock', () => {
   it('should report wall-clock time and fire a scheduled callback', async () => {
     // Arrange
-    const clock = new SystemFrameClock();
+    const clock = new KernelFrameClock();
     const before = Date.now();
     let fired = 0;
 
@@ -84,7 +82,7 @@ describe('system frame clock', () => {
 
   it('should not fire a cancelled timer', async () => {
     // Arrange
-    const clock = new SystemFrameClock();
+    const clock = new KernelFrameClock();
     let fired = 0;
     let sentinel = false;
 
@@ -167,7 +165,7 @@ describe('viewer stream over a real socket adapter', () => {
       host,
       'session-1',
       new SocketViewerDownstream(socket),
-      new SystemFrameClock(),
+      new KernelFrameClock(),
     );
 
     // Act
@@ -195,7 +193,7 @@ describe('viewer stream over a real socket adapter', () => {
     const socket = new FakeSocket();
     socket.buffered = 0;
     socket.result = 0;
-    await BrowserViewerStream.connect(host, 'session-1', new SocketViewerDownstream(socket), new SystemFrameClock(), {
+    await BrowserViewerStream.connect(host, 'session-1', new SocketViewerDownstream(socket), new KernelFrameClock(), {
       recoveryPollMs: 5,
     });
 

@@ -1,13 +1,14 @@
 import { describe, it } from 'bun:test';
-import { BrowserProxyTestResultSchema, BrowserStateViewSchema, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
+import { BrowserProxyTestResultSchema, BrowserStateViewSchema } from '../../../contract/index.ts';
+import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
-import { browserProxyRoutes } from '../../../../src/lib/runtime/mounts/browser-proxy.ts';
+import { BrowserProxyTester } from '../../../daemon/proxy/index.ts';
+import { browserProxyRoutes } from '../../../daemon/proxy/routes.ts';
 import { jsonBody, request } from '../../api/support.ts';
 
 type Kind = 'host' | 'device' | 'agent';

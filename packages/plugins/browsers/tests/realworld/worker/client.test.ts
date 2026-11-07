@@ -2,7 +2,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
-import { BrowserWorkerClient } from '../../../../src/adapters/browser/transport/index.ts';
+import { BrowserWorkerClient } from '../../../daemon/worker/client.ts';
 
 const WORKER_ENTRY = join(
   import.meta.dir,

@@ -4,8 +4,9 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import os from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { BrowserProfileStore } from '../../../../src/adapters/index.ts';
-import { BrowserControlError, BrowserProfileBusyError } from '../../../../src/lib/index.ts';
+import { BrowserProfileStore } from '../../../../daemon/worker/control/adapters/profile-store.ts';
+import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
+import { BrowserProfileBusyError } from '../../../../daemon/worker/control/profile.ts';
 
 const roots: string[] = [];
 

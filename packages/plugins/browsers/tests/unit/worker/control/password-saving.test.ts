@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { PASSWORD_SAVING_OFF, passwordSavingOff } from '../../../../src/lib/browser/control/profile.ts';
+import { PASSWORD_SAVING_OFF, passwordSavingOff } from '../../../../daemon/worker/control/profile.ts';
 
 describe('passwordSavingOff', () => {
   it('should force every password-saving switch off and keep every other preference', () => {

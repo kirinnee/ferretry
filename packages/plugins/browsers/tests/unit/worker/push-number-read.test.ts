@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parsePushNumberRead } from '../../../../src/adapters/browser/transport/worker-client.ts';
-import type { PushNumberScan } from '../../../../src/lib/browser/transport/push-number.ts';
-import { type PushNumberPage, readPushNumber } from '../../../../src/lib/browser/transport/push-number-read.ts';
+import { parsePushNumberRead } from '../../../daemon/worker/client.ts';
+import type { PushNumberScan } from '../../../daemon/worker/push-number.ts';
+import { type PushNumberPage, readPushNumber } from '../../../daemon/worker/push-number-read.ts';
 
 const ORIGIN = 'https://login.example.test';
 

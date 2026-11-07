@@ -1,13 +1,6 @@
-import {
-  BROWSER_DEFAULT_DRAG_STEPS,
-  type BrowserAction,
-  BrowserActionSchema,
-  type BrowserElementTarget,
-  type BrowserMouseButton,
-  type BrowserTarget,
-  browserTargetOf,
-  parseBrowserKeyChord,
-} from '@ferretry/protocol';
+import { BROWSER_DEFAULT_DRAG_STEPS, parseBrowserKeyChord } from './wire/pointer.ts';
+import { type BrowserAction, BrowserActionSchema } from './wire/browser.ts';
+import { type BrowserElementTarget, type BrowserMouseButton, type BrowserTarget, browserTargetOf } from './wire/target.ts';
 import {
   type ActableLocator,
   type ActablePage,

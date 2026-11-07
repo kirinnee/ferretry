@@ -10,7 +10,7 @@ import {
   proxyUnreachable,
   responseStatus,
   socks5,
-} from '../../../lib/browser/proxy/index.ts';
+} from '../index.ts';
 
 export interface ProxyCredentials {
   readonly username: string;

@@ -1,7 +1,7 @@
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { loopbackListenersOn, PROC_TCP_TABLES } from '@ferretry/protocol';
-import { type ListenerProof, proveListener } from '../../../lib/browser/control/index.ts';
+import { loopbackListenersOn, PROC_TCP_TABLES } from '../../../proxy/wire/tcp-listeners.ts';
+import { type ListenerProof, proveListener } from '../index.ts';
 
 /** How the prover reads the host: its `/proc`, and this process's uid. Both are injected so a test can stage a
  *  fake `/proc` (tables, fd links, stat lines) in a temp directory instead of depending on a real squatter. */

@@ -1,10 +1,6 @@
-import {
-  type BrowserProxySetting,
-  type BrowserProxyStatus,
-  secretReferencePattern,
-  secretReferencesIn,
-} from '@ferretry/protocol';
-import { BrowserControlError } from '../control/policy.ts';
+import { type BrowserProxySetting, type BrowserProxyStatus } from '../../contract/index.ts';
+import { secretReferencePattern, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { BrowserControlError } from '../worker/control/policy.ts';
 
 export type ProxyScheme = 'http' | 'https' | 'socks5';
 

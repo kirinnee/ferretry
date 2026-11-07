@@ -1,3 +1,4 @@
+import { instantFromEpochMs } from '@ferretry/std';
 import {
   BrowserControlError,
   browserEnvironment,
@@ -11,7 +12,7 @@ import {
   type BrowserLoginStatus,
   type BrowserLoginWindow,
   type BrowserProfilePort,
-} from '../../../lib/browser/control/index.ts';
+} from '../index.ts';
 
 export interface BrowserLoginChild {
   readonly pid: number;
@@ -179,8 +180,8 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
         browserEnvironment(display, runtime.environmentSource, authority),
       );
       await runtime.waitForVnc(port, vnc);
-      const openedAt = new Date(runtime.now()).toISOString();
-      const expiresAt = new Date(runtime.now() + minutes * 60_000).toISOString();
+      const openedAt = instantFromEpochMs(runtime.now());
+      const expiresAt = instantFromEpochMs(runtime.now() + minutes * 60_000);
       this.active = {
         chrome,
         vnc,

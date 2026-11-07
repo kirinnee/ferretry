@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { InstantSchema } from './common.ts';
+import { InstantSchema } from '@ferretry/std';
 
 /**
  * Which loopback ports the machine's agent browser uses (`machine.yaml` `browserPorts`,

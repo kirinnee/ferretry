@@ -1,4 +1,4 @@
-import type { BrowserViewport } from '@ferretry/protocol';
+import type { BrowserViewport } from '../../pages/wire/browser.ts';
 
 /**
  * The pure half of keeping a private X display private: the cookie, its on-disk encoding and the

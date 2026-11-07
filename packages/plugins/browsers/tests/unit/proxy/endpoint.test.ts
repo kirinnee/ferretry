@@ -1,12 +1,8 @@
 import { describe, it } from 'bun:test';
-import { BrowserProxySettingSchema } from '@ferretry/protocol';
+import { BrowserProxySettingSchema } from '../../../contract/index.ts';
 import should from 'should';
-import {
-  BrowserControlError,
-  browserProxyStatus,
-  proxyEndpoint,
-  resolveBrowserProxy,
-} from '../../../../src/lib/index.ts';
+import { BrowserControlError } from '../../../daemon/worker/control/policy.ts';
+import { browserProxyStatus, proxyEndpoint, resolveBrowserProxy } from '../../../daemon/proxy/endpoint.ts';
 
 const setting = (extra: Record<string, unknown> = {}) =>
   BrowserProxySettingSchema.parse({ url: 'http://proxy.example:8080', ...extra });

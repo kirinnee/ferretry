@@ -1,5 +1,6 @@
-import { AGENT_TOOL_DEFAULT_SCRIPT_MS, AGENT_TOOL_MAX_SCRIPT_MS, type BrowserElementTarget } from '@ferretry/protocol';
-import { type ActableCdp, type ActablePage, browserElementOf } from './page-acts.ts';
+import { type BrowserElementTarget } from '../pages/wire/target.ts';
+import { AGENT_TOOL_DEFAULT_SCRIPT_MS, AGENT_TOOL_MAX_SCRIPT_MS } from '../tools/limits.ts';
+import { type ActableCdp, type ActablePage, browserElementOf } from '../pages/page-acts.ts';
 
 /**
  * AN AGENT'S OWN SCRIPT, RUN IN A WORLD OF ITS OWN (`browser.eval`, owner-gated: docs/agent-tools.md).

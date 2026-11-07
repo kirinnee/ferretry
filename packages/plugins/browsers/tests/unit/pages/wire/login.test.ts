@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as browser from '../../src/lib/browser.ts';
-import * as browserLogin from '../../src/lib/browser-login.ts';
-import type { BrowserLoginAction, BrowserLoginConnection, BrowserLoginStatus } from '../../src/lib/index.ts';
+import * as browser from '../../../../daemon/pages/wire/browser.ts';
+import * as browserLogin from '../../../../contract/index.ts';
+import type { BrowserLoginAction, BrowserLoginStatus } from '../../../../contract/index.ts';
+import type { BrowserLoginConnection } from '../../../../daemon/worker/control/login.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

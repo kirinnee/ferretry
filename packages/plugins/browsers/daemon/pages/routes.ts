@@ -1,4 +1,5 @@
-import { type BrowserActionResult, BrowserActionSchema, BrowserLoginActionSchema } from '@ferretry/protocol';
+import { type BrowserActionResult, BrowserActionSchema } from './wire/browser.ts';
+import { BrowserLoginActionSchema } from '../../contract/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -9,8 +10,8 @@ import {
   BrowserControlError,
   type BrowserLoginLifecycle,
   type BrowserLoginStatus,
-} from '../../browser/control/index.ts';
-import { BrowserSessionError, type BrowserSubsystem } from '../../browser/runtime/index.ts';
+} from '../worker/control/index.ts';
+import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
 
 export interface BrowserMountedSubsystem extends BrowserSubsystem {
   stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;

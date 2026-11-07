@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type BrowserProxySetting, BrowserProxyTestResultSchema } from '@ferretry/protocol';
+import { type BrowserProxySetting, BrowserProxyTestResultSchema } from '../../../contract/index.ts';
 import should from 'should';
 import {
   BrowserProxyTester,
@@ -7,7 +7,7 @@ import {
   type ProbeOutcome,
   type ProxyEndpoint,
   parseProbeReply,
-} from '../../../../src/lib/browser/proxy/index.ts';
+} from '../../../daemon/proxy/index.ts';
 
 const SAVED: BrowserProxySetting = { url: 'http://proxy.example:8080', bypass: [] };
 const SIGNED_IN: BrowserProxySetting = {

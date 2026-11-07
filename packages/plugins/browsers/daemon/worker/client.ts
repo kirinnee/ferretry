@@ -1,59 +1,20 @@
-import { dirname } from 'node:path';
-import type {
-  BrowserElementTarget,
-  BrowserInputEvent,
-  BrowserPageLifecycleReply,
-  BrowserPageLifecycleRequest,
-  BrowserPageSnapshot,
-  BrowserScreencastFrame,
-  BrowserScreenshotFormat,
-  BrowserTarget,
-  BrowserViewport,
-  CopyElementPart,
-} from '@ferretry/protocol';
-import { COPY_VALUE_MAX_BYTES, InputTargetFactsSchema } from '@ferretry/protocol';
-import {
-  BROWSER_COPY_WORKER_METHODS,
-  BROWSER_INPUT_TEXT_MAX_CHARS,
-  BROWSER_INPUT_WORKER_METHODS,
-  type BrowserAutomation,
-  type BrowserClickOptions,
-  type BrowserCopyRead,
-  BrowserFrameGovernor,
-  type BrowserInputClearJob,
-  type BrowserInputClearOutcome,
-  type BrowserInputDocument,
-  type BrowserInputFacts,
-  type BrowserInputFieldPointer,
-  type BrowserInputObservation,
-  type BrowserInputOutcome,
-  type BrowserInputShot,
-  type BrowserInputValue,
-  type BrowserPageActed,
-  type BrowserPushNumberRead,
-  type BrowserReadOptions,
-  type BrowserScreenshotOptions,
-  BrowserTransportError,
-  type BrowserTypeOptions,
-  type BrowserUploadMode,
-  boundedReadText,
-  boundedScreenshot,
-  encodeWorkerRequest,
-  type FrameClock,
-  normalizeLifecycleReply,
-  normalizeWorkerActionSnapshot,
-  normalizeWorkerDialog,
-  normalizeWorkerSnapshot,
-  normalizeWorkerStaged,
-  PAGE_SCRIPT_ORIGIN_MAX_CHARS,
-  type PageScript,
-  type PointerAct,
-  parseWorkerLine,
-  WorkerLineAssembler,
-  type WorkerSnapshotResult,
-  type WorkerStagedFile,
-} from '../../../lib/index.ts';
-import { SystemFrameClock } from './system-frame-clock.ts';
+import type { Clock, WorkerHandle } from '@ferretry/kernel/contract';
+import type { BrowserElementTarget, BrowserScreenshotFormat, BrowserTarget } from '../pages/wire/target.ts';
+import type { BrowserInputEvent, BrowserPageSnapshot, BrowserScreencastFrame, BrowserViewport } from '../pages/wire/browser.ts';
+import type { BrowserPageLifecycleReply, BrowserPageLifecycleRequest } from '../pages/wire/page-lifecycle.ts';
+import type { CopyElementPart } from '../pages/copy-contracts.ts';
+import { InputTargetFactsSchema } from '@ferretry/core-vault/contract';
+import { COPY_VALUE_MAX_BYTES } from '../pages/copy-contracts.ts';
+import { BROWSER_COPY_WORKER_METHODS, type BrowserCopyRead } from '../pages/copy-contracts.ts';
+import { BROWSER_INPUT_TEXT_MAX_CHARS, BROWSER_INPUT_WORKER_METHODS, type BrowserInputClearJob, type BrowserInputClearOutcome, type BrowserInputDocument, type BrowserInputFacts, type BrowserInputFieldPointer, type BrowserInputObservation, type BrowserInputOutcome, type BrowserInputShot, type BrowserInputValue, type BrowserPushNumberRead } from '../pages/input-contracts.ts';
+import { type BrowserAutomation, type BrowserPageActed } from '../pages/automation.ts';
+import { type BrowserClickOptions, type BrowserReadOptions, type BrowserScreenshotOptions, type BrowserTypeOptions, type BrowserUploadMode } from '../pages/page-acts.ts';
+import { BrowserFrameGovernor } from '../stream/frame-governor.ts';
+import { BrowserTransportError, boundedReadText, boundedScreenshot, encodeWorkerRequest, normalizeLifecycleReply, normalizeWorkerActionSnapshot, normalizeWorkerDialog, normalizeWorkerSnapshot, normalizeWorkerStaged, parseWorkerLine, WorkerLineAssembler, type WorkerSnapshotResult, type WorkerStagedFile } from './protocol.ts';
+import { type FrameClock } from '../stream/contracts.ts';
+import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from './page-script.ts';
+import { type PointerAct } from '../pages/pointer-acts.ts';
+import { KernelFrameClock } from '../stream/frame-clock.ts';
 
 /** What the worker saw of a page's fields, checked against the protocol before it is believed. */
 function parseObservation(raw: unknown): BrowserInputObservation {
@@ -63,7 +24,7 @@ function parseObservation(raw: unknown): BrowserInputObservation {
   if (observation?.ok === false && typeof observation.ambiguous === 'string')
     return { ok: false, ambiguous: observation.ambiguous.slice(0, 64) };
   const facts = InputTargetFactsSchema.safeParse(observation?.facts);
-  if (observation?.ok === true && facts.success && facts.data.kind === 'browser')
+  if (observation?.ok === true && facts.success && facts.data.kind === 'page')
     return { ok: true, facts: facts.data };
   throw new BrowserTransportError(
     'upstream_failed',
@@ -187,49 +148,31 @@ export const READY_TIMEOUT_MS = 15_000;
 export const REQUEST_TIMEOUT_MS = 60_000;
 export const SHUTDOWN_TIMEOUT_MS = 2_000;
 
-/** Only the variables a browser needs; nothing else about this host leaks into the child. */
-const FORWARDED_ENVIRONMENT = [
-  'PATH',
-  'HOME',
-  'USER',
-  'LOGNAME',
-  'LANG',
-  'LC_ALL',
-  'XDG_RUNTIME_DIR',
-  'DBUS_SESSION_BUS_ADDRESS',
-] as const;
-
 export interface WorkerClientOptions {
-  /** Puts this child in the shared browser allowance before exec, retaining its stdio and PID. */
-  readonly wrapCommand?: (command: readonly string[]) => Promise<readonly string[]>;
-  /** Runtime that executes the worker entry, e.g. a Node binary. */
-  readonly runtime: string;
-  /** Absolute path to the worker script. */
-  readonly workerEntry: string;
-  /** A compiled worker executable is invoked directly; a source worker is invoked through Bun. */
-  readonly workerExecutable?: boolean;
   /**
-   * The worker's first argument: how it reaches Chrome. Opaque to the client. The agent browser passes
-   * `CDP_PIPE_ENDPOINT` together with {@link cdpPipe}; the scripted test worker reads it as a behaviour.
+   * Starts the browser worker: a Bun worker thread from this package (`kernel.workers.start`, §7.4). It reads one
+   * `{ kind: 'start' }` message, then one JSON request line per message, and posts JSON record lines back.
+   */
+  readonly start: () => WorkerHandle;
+  /**
+   * How the worker reaches Chrome. Opaque to the client. The agent browser passes `CDP_PIPE_ENDPOINT` together
+   * with {@link cdpPipe}; the scripted test worker reads it as a behaviour.
    */
   readonly endpoint: string;
   /**
-   * The daemon's ends of Chrome's DevTools pipe, handed to the worker as ITS fds 3 (requests to Chrome) and 4
-   * (replies and events from Chrome). The worker inherits them; the caller still owns — and closes — its own
-   * copies once `connect` has settled, so that only the worker and Chrome hold the pipe.
+   * The daemon's ends of Chrome's DevTools pipe. The worker thread shares this process, so it reads and writes
+   * these descriptors itself; the caller still closes them once the worker is gone.
    */
   readonly cdpPipe?: CdpPipeEnds;
   /** The daemon-owned directory the worker stages downloads and PDFs in; without one it stages nothing. */
   readonly stageDirectory?: string;
-  readonly cwd?: string;
-  readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly readyTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
   readonly shutdownTimeoutMs?: number;
   /** Ceiling on one newline-free worker record; the default sizes a full screenshot reply. */
   readonly maxProtocolLineChars?: number;
-  /** Time source for frame pacing; the real timer wheel unless a test injects its own. */
-  readonly clock?: FrameClock;
+  /** The kernel's clock: frame pacing and every timeout (a test hands in a driven one). */
+  readonly clock: Clock;
   /** Floor on the interval between frames handed to viewers. */
   readonly frameIntervalMs?: number;
 }
@@ -254,7 +197,41 @@ interface Pending {
   reject(error: unknown): void;
 }
 
-type ChildProcess = ReturnType<typeof Bun.spawn<'pipe', 'pipe', 'ignore'>>;
+/**
+ * The browser worker thread as the client drives it: request lines in, record text out, and an end it can wait on.
+ * Built from the kernel's {@link WorkerHandle}; a test hands in its own.
+ */
+interface WorkerChannel {
+  write(line: string): void;
+  onText(listener: (text: string) => void): void;
+  readonly exited: Promise<number>;
+  stop(): void;
+}
+
+function workerChannel(handle: WorkerHandle): WorkerChannel {
+  const exit = deferred<number>();
+  let stopped = false;
+  return {
+    write: line => handle.post(line),
+    onText: listener => {
+      handle.onMessage(message => {
+        if (typeof message === 'string') listener(message);
+        else if (
+          typeof message === 'object' &&
+          message !== null &&
+          (message as { readonly type?: unknown }).type === 'exit'
+        )
+          exit.resolve(0);
+      });
+    },
+    exited: exit.promise,
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      void handle.terminate().finally(() => exit.resolve(0));
+    },
+  };
+}
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
   let resolve!: (value: T) => void;
@@ -267,29 +244,23 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 
 /** A timeout that is always cleared, so no pending request can keep the runtime alive. */
-async function withTimeout<T>(work: Promise<T>, timeoutMs: number, onTimeout: () => BrowserTransportError): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function withTimeout<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => BrowserTransportError,
+  clock: FrameClock,
+): Promise<T> {
+  let timer: { cancel(): void } | undefined;
   try {
     return await Promise.race([
       work,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(onTimeout()), timeoutMs);
+        timer = clock.schedule(() => reject(onTimeout()), timeoutMs);
       }),
     ]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    timer?.cancel();
   }
-}
-
-function workerEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string | undefined> {
-  const environment: Record<string, string | undefined> = {};
-  for (const key of FORWARDED_ENVIRONMENT) {
-    if (source[key] !== undefined) environment[key] = source[key];
-  }
-  // A browser must never route loopback traffic through a proxy the host happens to configure.
-  environment['NO_PROXY'] = '127.0.0.1,localhost,::1';
-  environment['no_proxy'] = environment['NO_PROXY'];
-  return environment;
 }
 
 function shutdownExpired(): BrowserTransportError {
@@ -325,45 +296,36 @@ export class BrowserWorkerClient implements BrowserAutomation {
   readonly unexpectedExit = this.exit.promise;
 
   private constructor(
-    private readonly child: ChildProcess,
+    private readonly child: WorkerChannel,
     options: WorkerClientOptions,
   ) {
     this.assembler = new WorkerLineAssembler(options.maxProtocolLineChars);
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS;
-    this.clock = options.clock ?? new SystemFrameClock();
+    this.clock = new KernelFrameClock(options.clock);
     this.frameIntervalMs = options.frameIntervalMs;
-    void this.readOutput().catch(() => undefined);
+    this.readOutput();
     void this.child.exited.then(code => this.onExit(code));
-  }
-
-  /** The child process id, so an operator (or a test) can confirm the worker is really gone. */
-  get pid(): number {
-    return this.child.pid;
   }
 
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
   static async connect(options: WorkerClientOptions): Promise<BrowserWorkerClient> {
-    const command = [
-      ...(options.workerExecutable ? [options.workerEntry] : [options.runtime, options.workerEntry]),
-      options.endpoint,
-      ...(options.stageDirectory === undefined ? [] : [options.stageDirectory]),
-    ];
-    const child = Bun.spawn([...((await options.wrapCommand?.(command)) ?? command)], {
-      cwd: options.cwd ?? dirname(options.workerEntry),
-      env: workerEnvironment(options.environment ?? {}),
-      // Fds 3 and 4 are Chrome's DevTools pipe when there is one; nothing else is ever passed past stderr.
-      stdio:
-        options.cdpPipe === undefined
-          ? ['pipe', 'pipe', 'ignore']
-          : ['pipe', 'pipe', 'ignore', options.cdpPipe.toChrome, options.cdpPipe.fromChrome],
-    });
+    const child = workerChannel(options.start());
+    child.write(
+      JSON.stringify({
+        kind: 'start',
+        endpoint: options.endpoint,
+        ...(options.stageDirectory === undefined ? {} : { stageDirectory: options.stageDirectory }),
+        ...(options.cdpPipe === undefined ? {} : { cdpPipe: options.cdpPipe }),
+      }),
+    );
     const client = new BrowserWorkerClient(child, options);
     try {
       await withTimeout(
         client.ready.promise,
         options.readyTimeoutMs ?? READY_TIMEOUT_MS,
         () => new BrowserTransportError('launch_failed', 'browser worker did not become ready', 503),
+        client.clock,
       );
       return client;
     } catch (error) {
@@ -684,23 +646,20 @@ export class BrowserWorkerClient implements BrowserAutomation {
     if (this.closed) return;
     this.closing = true;
     const deadline = this.shutdownTimeoutMs;
-    await withTimeout(this.request('close', {}), deadline, () => shutdownExpired()).catch(() => undefined);
+    await withTimeout(this.request('close', {}), deadline, () => shutdownExpired(), this.clock).catch(
+      () => undefined,
+    );
     this.closed = true;
     this.disposeCasts();
-    this.child.stdin.end();
     await this.terminate(deadline);
   }
 
   /**
-   * Escalates until the child is really gone. A browser worker routinely traps SIGTERM so it can shut
-   * Chrome down cleanly, so a signal is a request, not an outcome — and reporting success while the
-   * process (and the browser tree it owns) is still alive is how orphans accumulate.
+   * Ends the worker thread and waits for it to be gone. A thread cannot trap a terminate the way a child process
+   * trapped SIGTERM, so one terminate is the outcome; the bound still applies.
    */
   private async terminate(deadline: number): Promise<void> {
-    if (await this.exitedWithin(deadline)) return;
-    this.signal('SIGTERM');
-    if (await this.exitedWithin(deadline)) return;
-    this.signal('SIGKILL');
+    this.child.stop();
     if (await this.exitedWithin(deadline)) return;
     throw new BrowserTransportError('upstream_failed', 'browser worker could not be terminated', 504);
   }
@@ -710,22 +669,8 @@ export class BrowserWorkerClient implements BrowserAutomation {
       this.child.exited.then(() => true),
       deadline,
       () => shutdownExpired(),
+      this.clock,
     ).catch(() => false);
-  }
-
-  private signal(signal: 'SIGTERM' | 'SIGKILL'): void {
-    try {
-      // The negative pid targets the child's whole process group, so the browser it spawned dies with
-      // it rather than being reparented and left holding a profile lock.
-      process.kill(-this.child.pid, signal);
-    } catch {
-      // No process group (or already reaped): fall back to the child itself.
-      try {
-        this.child.kill(signal);
-      } catch {
-        // Already gone, which is the outcome we wanted.
-      }
-    }
   }
 
   async lifecycle(
@@ -747,32 +692,25 @@ export class BrowserWorkerClient implements BrowserAutomation {
     const result = deferred<unknown>();
     this.pending.set(id, result);
     try {
-      this.child.stdin.write(encodeWorkerRequest(id, method, params));
-      await this.child.stdin.flush();
+      this.child.write(encodeWorkerRequest(id, method, params));
       return await withTimeout(
         result.promise,
         this.requestTimeoutMs,
         () => new BrowserTransportError('upstream_failed', `browser ${method} timed out`, 504),
+        this.clock,
       );
     } finally {
       this.pending.delete(id);
     }
   }
 
-  private async readOutput(): Promise<void> {
-    const reader = this.child.stdout.getReader();
-    const decoder = new TextDecoder();
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) return;
-      const batch = this.assembler.push(decoder.decode(chunk.value, { stream: true }));
+  private readOutput(): void {
+    this.child.onText(text => {
+      if (this.closed && this.readyState !== 'pending') return;
+      const batch = this.assembler.push(text);
       for (const line of batch.lines) this.onEvent(line);
-      if (batch.overflowed) {
-        this.failProtocol();
-        return;
-      }
-      if (this.closed) return;
-    }
+      if (batch.overflowed) this.failProtocol();
+    });
   }
 
   private onEvent(line: string): void {
@@ -896,11 +834,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
       this.exit.resolve(-1);
     }
     this.rejectPending(error);
-    try {
-      this.child.kill('SIGTERM');
-    } catch {
-      // The child may have exited between the protocol check and termination.
-    }
+    this.child.stop();
   }
 
   private onExit(code: number): void {

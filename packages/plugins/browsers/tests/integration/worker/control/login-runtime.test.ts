@@ -3,15 +3,10 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import should from 'should';
-import {
-  type BrowserDisplayPort,
-  type BrowserLoginChild,
-  type ListenerProverPort,
-  NodeBrowserLoginRuntime,
-  type XvfbChild,
-  XvfbDisplay,
-} from '../../../../src/adapters/index.ts';
-import { BrowserControlError } from '../../../../src/lib/index.ts';
+import { type BrowserDisplayPort, NodeBrowserLoginRuntime, type XvfbChild, XvfbDisplay } from '../../../../daemon/worker/control/adapters/login-runtime.ts';
+import { type BrowserLoginChild } from '../../../../daemon/worker/control/adapters/login-window.ts';
+import { type ListenerProverPort } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
+import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
 
 /**
  * The host effects the human login window performs, over real spawns of FAKE executables.

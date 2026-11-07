@@ -1,4 +1,4 @@
-import { BROWSER_MAX_PAGE_ID_LENGTH } from '@ferretry/protocol';
+import { BROWSER_MAX_PAGE_ID_LENGTH } from '../../contract/index.ts';
 
 /** ASCII "FYBF" — Ferretry browser frame. */
 export const FRAME_ENVELOPE_MAGIC: readonly number[] = [0x46, 0x59, 0x42, 0x46];

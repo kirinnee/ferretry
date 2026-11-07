@@ -1,4 +1,4 @@
-import { loopbackListenersOn } from '@ferretry/protocol';
+import { loopbackListenersOn } from '../../proxy/wire/tcp-listeners.ts';
 
 /**
  * WHETHER THE PROGRAM THE DAEMON JUST STARTED IS THE ONE LISTENING on the loopback port it was told to take.

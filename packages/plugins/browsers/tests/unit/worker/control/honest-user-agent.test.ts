@@ -1,12 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  agentBrowserArguments,
-  chromeLaunchArguments,
-  chromePlatformToken,
-  chromeProxyArguments,
-  honestChromeUserAgent,
-} from '../../../../src/lib/index.ts';
+import { agentBrowserArguments, chromeLaunchArguments, chromePlatformToken, chromeProxyArguments, honestChromeUserAgent } from '../../../../daemon/worker/control/policy.ts';
 
 const VIEWPORT = { width: 1280, height: 800 };
 const PORT = { kind: 'port', port: 9222 } as const;

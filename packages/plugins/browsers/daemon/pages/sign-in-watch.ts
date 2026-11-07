@@ -1,4 +1,4 @@
-import type { BrowserAction } from '@ferretry/protocol';
+import type { BrowserAction } from './wire/browser.ts';
 
 /**
  * Told when an act on a page MAY have changed who the page signs in without the daemon reading who: the record of who

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { ProcListenerProver } from '../../../../src/adapters/browser/control/listener-prover.ts';
+import { ProcListenerProver } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
 
 /**
  * The prover reads a `/proc` the test stages in a temp directory — socket tables, `fd` links and `stat` lines —

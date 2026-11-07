@@ -8,7 +8,7 @@ import {
   type ProxyEndpoint,
   type ProxyProbe,
   parseProbeReply,
-} from '../../../lib/browser/proxy/index.ts';
+} from '../index.ts';
 import { openTunnel, type ProxyCredentials } from './tunnel.ts';
 
 const PROBE_TIMEOUT_MS = 10_000;

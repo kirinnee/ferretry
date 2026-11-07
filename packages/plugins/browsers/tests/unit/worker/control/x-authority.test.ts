@@ -1,12 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  generateXCookie,
-  X_AUTH_PROTOCOL,
-  X_COOKIE_BYTES,
-  xauthorityEntry,
-  xvfbLaunchArguments,
-} from '../../../../src/lib/index.ts';
+import { generateXCookie, X_AUTH_PROTOCOL, X_COOKIE_BYTES, xauthorityEntry, xvfbLaunchArguments } from '../../../../daemon/worker/control/x-authority.ts';
 
 describe('X authority', () => {
   it('should draw a 16-byte cookie from the entropy it is given', () => {

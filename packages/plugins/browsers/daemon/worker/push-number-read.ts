@@ -1,4 +1,4 @@
-import type { BrowserPushNumberRead } from './input-contracts.ts';
+import type { BrowserPushNumberRead } from '../pages/input-contracts.ts';
 import { originOfUrl } from './input-fields.ts';
 import { type PushNumberScan, scanPushNumber } from './push-number.ts';
 

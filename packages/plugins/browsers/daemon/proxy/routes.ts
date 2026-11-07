@@ -1,8 +1,9 @@
-import { BrowserProxyTestRequestSchema, type BrowserStateView, type LoopbackFirewallState } from '@ferretry/protocol';
+import { BrowserProxyTestRequestSchema, type BrowserStateView } from '../../contract/index.ts';
+import { type LoopbackFirewallState } from './wire/firewall.ts';
 import { parseBody } from '../../api/body.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
-import type { BrowserProxyTester } from '../../browser/proxy/index.ts';
+import type { BrowserProxyTester } from './index.ts';
 import { ownerOnly } from './daemon-update.ts';
 
 export interface BrowserProxySubsystem {

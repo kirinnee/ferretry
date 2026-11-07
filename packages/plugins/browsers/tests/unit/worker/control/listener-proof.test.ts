@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { listenerHeldRefusal, proveListener } from '../../../../src/lib/index.ts';
+import { listenerHeldRefusal, proveListener } from '../../../../daemon/worker/control/listener-proof.ts';
 
 const HEADER = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
 

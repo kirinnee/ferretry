@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { BrowserInputEvent } from '@ferretry/protocol';
+import type { BrowserInputEvent } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
-import { pointerAfter, pointerSequence } from '../../../../src/lib/index.ts';
+import { pointerAfter, pointerSequence } from '../../../daemon/pages/pointer.ts';
 
 const press = { kind: 'mouse', type: 'mousePressed', x: 40, y: 50, button: 'left', buttons: 1, clickCount: 1 } as const;
 

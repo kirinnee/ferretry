@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { recogniseBrowserChallenge } from '../../../../src/lib/index.ts';
+import { recogniseBrowserChallenge } from '../../../daemon/worker/challenge.ts';
 
 const page = (overrides: Partial<{ url: string; title: string; frameUrls: readonly string[] }> = {}) => ({
   url: 'https://shop.example/',

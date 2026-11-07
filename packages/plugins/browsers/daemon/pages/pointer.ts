@@ -1,4 +1,4 @@
-import type { BrowserInputEvent } from '@ferretry/protocol';
+import type { BrowserInputEvent } from './wire/browser.ts';
 
 /** Where the pointer last was on one page, in that page's own coordinates. */
 export interface PointerPosition {

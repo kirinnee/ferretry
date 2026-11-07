@@ -1,5 +1,5 @@
 import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
-import { BrowserControlError, listenerHeldRefusal } from '../../../lib/browser/control/index.ts';
+import { BrowserControlError, listenerHeldRefusal } from '../../worker/control/index.ts';
 import {
   badRequest,
   basicProxyAuthorization,
@@ -14,8 +14,8 @@ import {
   parsePlainTarget,
   parseRequestHead,
   proxyUnreachable,
-} from '../../../lib/browser/proxy/index.ts';
-import { ProcListenerProver } from '../control/listener-prover.ts';
+} from '../index.ts';
+import { ProcListenerProver } from '../../worker/control/adapters/listener-prover.ts';
 import { dial, openTunnel, type ProxyCredentials, Reader } from './tunnel.ts';
 
 const CONNECT_TIMEOUT_MS = 15_000;

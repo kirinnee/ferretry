@@ -1,10 +1,9 @@
-import type {
-  BrowserProxyErrorClass,
-  BrowserProxySetting,
-  BrowserProxyTestRequest,
-  BrowserProxyTestResult,
-} from '@ferretry/protocol';
-import { BrowserControlError } from '../control/policy.ts';
+import type { z } from 'zod';
+import type { BrowserProxyErrorClassSchema } from '../../contract/index.ts';
+
+type BrowserProxyErrorClass = z.infer<typeof BrowserProxyErrorClassSchema>;
+import type { BrowserProxySetting, BrowserProxyTestRequest, BrowserProxyTestResult } from '../../contract/index.ts';
+import { BrowserControlError } from '../worker/control/policy.ts';
 import { type ProxyEndpoint, proxyEndpoint, resolveBrowserProxy } from './endpoint.ts';
 
 /** The one neutral HTTPS endpoint a test asks: it answers with nothing but the address the request came from. */

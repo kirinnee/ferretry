@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import { COPY_VALUE_MAX_BYTES } from '@ferretry/protocol';
+import { COPY_VALUE_MAX_BYTES } from '@ferretry/protocol'; // PORT: unresolved
 import should from 'should';
 import {
   type CopyablePage,
   type CopyHandle,
   type CopyLocator,
   readCopyElement,
-} from '../../../../src/lib/browser/transport/copy-read.ts';
+} from '../../../daemon/worker/copy-read.ts';
 
 const TOKEN = 'ghp_PAGE-COPY-NEVER-LOGGED-91c2';
 

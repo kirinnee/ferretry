@@ -1,4 +1,4 @@
-import { type BrowserInputEvent, BrowserInputEventSchema } from '@ferretry/protocol';
+import { type BrowserInputEvent, BrowserInputEventSchema } from '../pages/wire/browser.ts';
 
 /** The key variant, named once so the release policy below can talk about it. */
 export type BrowserKeyInput = Extract<BrowserInputEvent, { kind: 'key' }>;

@@ -1,4 +1,4 @@
-import type { PushNumberProvider } from './input-contracts.ts';
+import type { PushNumberProvider } from '../pages/input-contracts.ts';
 
 /**
  * THE NUMBER A PUSH APPROVAL SHOWS, READ OFF THE PROVIDER'S OWN PAGE (docs/input-requests.md, "Approve on your

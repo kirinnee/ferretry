@@ -1,4 +1,5 @@
-import type { BrowserElementTarget, InputTargetFacts } from '@ferretry/protocol';
+import type { BrowserElementTarget } from './wire/target.ts';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE INPUT BRIDGE'S SEAM INTO THE AGENT BROWSER (docs/input-requests.md, "Pages").
@@ -35,7 +36,7 @@ export interface BrowserInputFieldPointer {
 }
 
 /** A page's facts, exactly the protocol's browser facts. */
-export type BrowserInputFacts = Extract<InputTargetFacts, { readonly kind: 'browser' }>;
+export type BrowserInputFacts = Extract<InputTargetFacts, { readonly kind: 'page' }>;
 
 /**
  * What a look found. `missing` names a field whose element is not on the page (a stale ref, a selector that

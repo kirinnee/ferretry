@@ -1,17 +1,10 @@
 import { describe, it } from 'bun:test';
-import { BrowserLoginStatusSchema } from '@ferretry/protocol';
+import { BrowserLoginStatusSchema } from '../../../../contract/index.ts';
 import should from 'should';
-import {
-  BrowserControlError,
-  type BrowserLoginStatus,
-  type BrowserProfileLease,
-  type BrowserProfilePort,
-} from '../../../../src/lib/index.ts';
-import {
-  BrowserLoginWindowService,
-  type BrowserLoginChild,
-  type BrowserLoginRuntime,
-} from '../../../../src/adapters/index.ts';
+import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
+import { type BrowserLoginStatus } from '../../../../contract/index.ts';
+import { type BrowserProfileLease, type BrowserProfilePort } from '../../../../daemon/worker/control/profile.ts';
+import { BrowserLoginWindowService, type BrowserLoginChild, type BrowserLoginRuntime } from '../../../../daemon/worker/control/adapters/login-window.ts';
 
 /**
  * Every status the daemon emits must satisfy the wire contract the reader parses

@@ -1,4 +1,5 @@
-import type { BrowserLoginConnection, BrowserLoginState, BrowserLoginStatus } from '@ferretry/protocol';
+import type { Instant } from '@ferretry/std';
+import type { BrowserLoginConnection, BrowserLoginState, BrowserLoginStatus } from '../../pages/wire/login.ts';
 import type { BrowserProfileLease, BrowserProfilePort } from './profile.ts';
 
 /**
@@ -27,8 +28,8 @@ export interface BrowserLoginWindow {
   readonly chromeVersion: string;
   readonly port: number;
   readonly password: string;
-  readonly openedAt: string;
-  readonly expiresAt: string;
+  readonly openedAt: Instant;
+  readonly expiresAt: Instant;
 }
 
 export interface BrowserLoginDependencies {

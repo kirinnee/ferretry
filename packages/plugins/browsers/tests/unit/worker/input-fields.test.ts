@@ -1,37 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  BROWSER_INPUT_SHOT_MARGIN,
-  BROWSER_INPUT_TEXT_MAX_CHARS,
-  BROWSER_INPUT_SHOT_MAX_SIDE,
-  type BrowserInputClearJob,
-  type BrowserInputFacts,
-  armInputFields,
-  clearInputFields,
-  describeInputDocument,
-  type InputCdp,
-  type InputCdpSession,
-  type InputFrame,
-  InputFrameSessions,
-  type InputHandle,
-  type InputLocator,
-  type InputablePage,
-  type InputSubject,
-  INPUT_REFIND_MAX_CANDIDATES,
-  inputFieldAttributes,
-  inputFieldSelector,
-  isSecureUrl,
-  observeInputFields,
-  originOfUrl,
-  PLAYWRIGHT_REACHED_VERSION,
-  playwrightNodeOf,
-  refindInputFields,
-  PROBE_SECOND_LOOK_MS,
-  probeInputFields,
-  readInputText,
-  shootInputFields,
-  typeInputFields,
-} from '../../../../src/lib/index.ts';
+import { BROWSER_INPUT_SHOT_MARGIN, BROWSER_INPUT_TEXT_MAX_CHARS, BROWSER_INPUT_SHOT_MAX_SIDE, type BrowserInputClearJob, type BrowserInputFacts } from '../../../daemon/pages/input-contracts.ts';
+import { armInputFields, clearInputFields, describeInputDocument, type InputCdp, type InputCdpSession, type InputFrame, InputFrameSessions, type InputHandle, type InputLocator, type InputablePage, type InputSubject, INPUT_REFIND_MAX_CANDIDATES, inputFieldAttributes, inputFieldSelector, isSecureUrl, observeInputFields, originOfUrl, PLAYWRIGHT_REACHED_VERSION, playwrightNodeOf, refindInputFields, PROBE_SECOND_LOOK_MS, probeInputFields, readInputText, shootInputFields, typeInputFields } from '../../../daemon/worker/input-fields.ts';
 
 const PAGE_URL = 'http://localhost:3000/login';
 const SECRET = 'Tr0ub4dor&3-the-secret-value';

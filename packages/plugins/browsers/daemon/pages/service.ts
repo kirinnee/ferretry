@@ -1,35 +1,16 @@
-import {
-  BROWSER_MAX_MACHINE_PAGES,
-  BROWSER_MAX_PAGES,
-  type BrowserAction,
-  type BrowserActionResult,
-  type BrowserDialogInfo,
-  BrowserDialogInfoSchema,
-  type BrowserElementTarget,
-  type BrowserInputEvent,
-  type BrowserPageActionSnapshot,
-  type BrowserPageLifecycleReply,
-  type BrowserPageLifecycleRequest,
-  type BrowserPageSnapshot,
-  type BrowserPageSummary,
-  type BrowserScreencastFrame,
-  type BrowserStateView,
-  type BrowserStatus,
-  type BrowserTarget,
-  type BrowserTargetFields,
-  type BrowserViewport,
-  browserReadModeOf,
-  browserTargetOf,
-  type SurfaceOpener,
-} from '@ferretry/protocol';
-import { agentSpokenName } from '../../names/session-names.ts';
-import type { BrowserAutomation, BrowserPageActed } from '../transport/automation-contracts.ts';
-import type { BrowserCopyPort } from '../transport/copy-contracts.ts';
-import type { BrowserInputFieldsPort } from '../transport/input-contracts.ts';
-import type { BrowserUploadMode } from '../transport/page-acts.ts';
-import type { PageScript } from '../transport/page-script.ts';
-import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
-import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
+import { BROWSER_MAX_MACHINE_PAGES, BROWSER_MAX_PAGES, type BrowserStateView } from '../../contract/index.ts';
+import { type BrowserAction, type BrowserActionResult, type BrowserInputEvent, type BrowserPageActionSnapshot, type BrowserPageSnapshot, type BrowserPageSummary, type BrowserScreencastFrame, type BrowserStatus, type BrowserViewport } from './wire/browser.ts';
+import { type BrowserDialogInfo, BrowserDialogInfoSchema, type BrowserPageLifecycleReply, type BrowserPageLifecycleRequest } from './wire/page-lifecycle.ts';
+import { type BrowserElementTarget, type BrowserTarget, type BrowserTargetFields, browserReadModeOf, browserTargetOf } from './wire/target.ts';
+import { type SurfaceOpener } from './wire/surface.ts';
+import type { BrowserAutomation, BrowserPageActed } from './automation.ts';
+import type { BrowserCopyPort } from './copy-contracts.ts';
+import type { BrowserInputFieldsPort } from './input-contracts.ts';
+import type { BrowserUploadMode } from './page-acts.ts';
+import type { PageScript } from '../worker/page-script.ts';
+import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
+import type { WorkerStagedFile } from '../worker/protocol.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in-watch.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
@@ -80,11 +61,9 @@ export interface BrowserGuardPage {
  */
 export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void>;
 
-/** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
+/** The ferrets the browser serves: whether one exists, and the spoken name a page is grouped under (Ferrets' own). */
 export interface BrowserSessionDirectory {
-  get(
-    sessionId: string,
-  ): Promise<{ readonly config?: { readonly name?: string | null; readonly teammate?: string } } | undefined>;
+  get(sessionId: string): Promise<{ readonly name?: string } | undefined>;
 }
 
 /** What can be done to ONE named page: the agent tools' browser verbs. */
@@ -238,7 +217,7 @@ interface Viewer {
 /** The machine's agent browser while it runs. Pages are in memory: they do not outlive it. */
 interface Running {
   readonly driver: BrowserAutomation;
-  readonly startedAt: string;
+  readonly startedAt: Instant;
   /** The last page list the browser reported, every session's pages together. */
   snapshot: BrowserPageSnapshot;
   closed: boolean;
@@ -613,7 +592,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       driver = await this.launcher.launch(DEFAULT_BROWSER_VIEWPORT);
       const run: Running = {
         driver,
-        startedAt: new Date(this.now()).toISOString(),
+        startedAt: instantFromEpochMs(this.now()),
         snapshot: pageOf(await driver.location()),
         closed: false,
         viewers: new Set(),
@@ -943,15 +922,8 @@ export class BrowserSessionService implements BrowserSubsystem {
   private async requireSession(sessionId: string): Promise<void> {
     const session = await this.sessions.get(sessionId);
     if (session === undefined) throw new BrowserSessionError('not_found', 'the session does not exist');
-    const name = session.config?.name;
-    if (typeof name === 'string' && name !== '')
-      this.sessionNames.set(
-        sessionId,
-        agentSpokenName({
-          name,
-          ...(session.config?.teammate === undefined ? {} : { teammate: session.config.teammate }),
-        }),
-      );
+    const name = session.name;
+    if (typeof name === 'string' && name !== '') this.sessionNames.set(sessionId, name);
   }
 
   /** Work on one page runs in order; work on different pages runs side by side. `''` is the browser. */

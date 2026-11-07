@@ -1,15 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  type ActableCdp,
-  type ActableLocator,
-  type ActablePage,
-  PAGE_SCRIPT_MAX_RESULT_CHARS,
-  PAGE_SCRIPT_WORLD,
-  pageScriptExpression,
-  runPageScript,
-  staleRefMessage,
-} from '../../../../src/lib/index.ts';
+import { type ActableCdp, type ActableLocator, type ActablePage, staleRefMessage } from '../../../daemon/pages/page-acts.ts';
+import { PAGE_SCRIPT_MAX_RESULT_CHARS, PAGE_SCRIPT_WORLD, pageScriptExpression, runPageScript } from '../../../daemon/worker/page-script.ts';
 
 /** A DevTools session that answers the three calls a page script makes, and records each. */
 class FakeCdp implements ActableCdp {
