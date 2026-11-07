@@ -71,14 +71,13 @@ export class GovernedAdmission implements Admission {
       },
     };
   }
-
-  admitMember(input: Parameters<Admission['admitMember']>[0]) {
-    return this.#stand.admitMember(input);
+  admitMember(): ReturnType<Admission['admitMember']> {
+    return this.#stand.admitMember();
   }
-  readmit(request: ApiRequest, descriptor: Parameters<Admission['readmit']>[1]): boolean {
-    return this.#stand.readmit(request, descriptor);
+  readmit(): boolean {
+    return true;
   }
-  inventory(...args: Parameters<Admission['inventory']>) {
-    return this.#stand.inventory(...args);
+  inventory(_request: ApiRequest, entries: Parameters<Admission['inventory']>[1]) {
+    return entries;
   }
 }
