@@ -7,7 +7,8 @@
  * order; it is not Gate, and these tests prove none of Gate's guarantees.
  */
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
-import { type CallStanding, StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallStanding } from '@ferretry/kernel/contract';
+import { StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
