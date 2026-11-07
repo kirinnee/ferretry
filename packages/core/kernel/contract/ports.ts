@@ -1,6 +1,6 @@
 import type { Duration, Instant, Result } from '@ferretry/std';
 import type { ActRunner, OpaqueId } from './act.ts';
-import type { FencedPath, FolderRefusal, Redaction } from './bound.ts';
+import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
@@ -188,8 +188,11 @@ export interface WorkersPort {
 
 export interface SpawnOptions {
   readonly cwd?: FencedPath;
-  /** Names only; values never pass through a plugin. A secret goes through Vault's `run`. */
-  readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Plain values the half owns, or a Vault {@link ChildEnvironment} (secrets resolved for this child). A handle is
+   * opened inside the kernel's adapter at exec time; its values never pass through the plugin (lead decision 9).
+   */
+  readonly env?: Readonly<Record<string, string>> | ChildEnvironment;
   readonly stdin?: string | Uint8Array;
   readonly timeout?: Duration;
   readonly signal?: AbortSignal;

@@ -1,4 +1,6 @@
-import type { FetchPort, SpawnPort } from '../contract/ports.ts';
+import type { ChildEnvironmentOpener } from '../contract/bound.ts';
+import type { FetchPort, SpawnOptions, SpawnPort } from '../contract/ports.ts';
+import { resolveEnv } from './adapters/process.ts';
 
 export class PermissionError extends Error {
   constructor(sentence: string) {
@@ -54,5 +56,18 @@ export function restrictFetch(plugin: string, declared: readonly string[], base:
       // Redirects are not followed blindly: a declared host could bounce the request anywhere.
       return await base.request(parsed, { ...init, redirect: 'manual' });
     },
+  };
+}
+
+/**
+ * Opens a Vault `ChildEnvironment` handle inside the kernel, at the moment the child starts (lead decision 9). The half
+ * only ever held the opaque handle; the values go from the opener straight into the adapter's spawn call.
+ */
+export function openChildEnvironments(base: SpawnPort, opener: () => ChildEnvironmentOpener | undefined): SpawnPort {
+  const resolved = (options?: SpawnOptions): SpawnOptions | undefined =>
+    options?.env === undefined ? options : { ...options, env: resolveEnv(options.env, opener()) };
+  return {
+    run: async (program, args, options) => await base.run(program, args, resolved(options)),
+    start: (program, args, options) => base.start(program, args, resolved(options)),
   };
 }

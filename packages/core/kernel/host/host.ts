@@ -1,7 +1,15 @@
 import type { Instant } from '@ferretry/std';
 import { milliseconds } from '@ferretry/std';
 import type { InputHolds, OutputGuard, Admission, Redaction, WorkFolders } from '../contract/bound.ts';
-import { AdmissionPort, InputHoldsPort, OutputGuardPort, RedactionPort, WorkFoldersPort } from '../contract/bound.ts';
+import {
+  AdmissionPort,
+  type ChildEnvironmentOpener,
+  ChildEnvironmentPort,
+  InputHoldsPort,
+  OutputGuardPort,
+  RedactionPort,
+  WorkFoldersPort,
+} from '../contract/bound.ts';
 import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
@@ -43,7 +51,7 @@ import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
-import { restrictFetch, restrictSpawn } from './permissions.ts';
+import { openChildEnvironments, restrictFetch, restrictSpawn } from './permissions.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
@@ -281,6 +289,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     holds?: InputHolds;
     redaction?: Redaction;
     workFolders?: WorkFolders;
+    childEnvironments?: ChildEnvironmentOpener;
   } = {};
   const act = createActRunner(() => bound.holds, ids);
   const redaction: Redaction = {
@@ -312,7 +321,11 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
     jobs: jobs.portFor(manifest.id),
     workers: adapters.workers,
-    spawn: restrictSpawn(manifest.id, manifest.permissions?.spawn ?? [], adapters.spawn),
+    spawn: restrictSpawn(
+      manifest.id,
+      manifest.permissions?.spawn ?? [],
+      openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+    ),
     fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
     act,
     ids: { mint: prefix => ids.mint(prefix) },
@@ -423,6 +436,8 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const holds = boundValue(InputHoldsPort);
   const redactor = boundValue(RedactionPort);
   const workFolders = boundValue(WorkFoldersPort);
+  const childEnvironments = boundValue(ChildEnvironmentPort);
+  if (childEnvironments !== undefined) bound.childEnvironments = childEnvironments;
   if (admission !== undefined) bound.admission = admission;
   if (outputGuard !== undefined) bound.outputGuard = outputGuard;
   if (holds !== undefined) bound.holds = holds;

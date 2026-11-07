@@ -131,10 +131,37 @@ export interface WorkFolders {
 
 export const WorkFoldersPort = defineBoundPort<WorkFolders>('work-folders', 'ferrets');
 
+// ─── Child environments (Vault) ───────────────────────────────────────────────────────────────────────────────────
+
+declare const childEnvironmentBrand: unique symbol;
+
+/**
+ * An environment whose `${secret:NAME}` references the Vault resolved for ONE child process (lead decision 9).
+ * Opaque: no field, no enumeration, no JSON (it serialises as names only). A half hands it to `kernel.spawn`, and the
+ * kernel's adapter opens it at exec time, so the values are in that child's environment and in no plugin's data
+ * (secrets.md "use, never read"). Vault's contract re-exports this type.
+ */
+export interface ChildEnvironment {
+  readonly [childEnvironmentBrand]: true;
+  /** The variable names it sets, for the launch record. Never a value. */
+  readonly names: readonly string[];
+}
+
+/**
+ * Opens a {@link ChildEnvironment} into its values, for the kernel's spawn adapter only: bound by the kernel, never
+ * handed to a half. `undefined` = not a handle this Vault minted (or already spent).
+ */
+export interface ChildEnvironmentOpener {
+  open(env: ChildEnvironment): Readonly<Record<string, string>> | undefined;
+}
+
+export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');
+
 export const KERNEL_BOUND_PORTS = [
   AdmissionPort,
   OutputGuardPort,
   InputHoldsPort,
   RedactionPort,
   WorkFoldersPort,
+  ChildEnvironmentPort,
 ] as const;
