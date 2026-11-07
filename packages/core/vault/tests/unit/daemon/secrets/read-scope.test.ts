@@ -1,5 +1,19 @@
 import { describe, it } from 'bun:test';
-import type { ChildEnvironment, TargetKind } from '@ferretry/kernel/contract';
+import {
+  type Admission,
+  type AdmissionDecision,
+  type ApiRequest,
+  type CallStanding,
+  type ChildEnvironment,
+  finalised,
+  headersFrom,
+  jsonResponse,
+  type PluginId,
+  queryFrom,
+  type TargetKind,
+  WITHHELD_SENTENCE,
+} from '@ferretry/kernel/contract';
+import { Dispatcher, localArrival, type MountedRoute } from '@ferretry/kernel/host';
 import should from 'should';
 import { SecretNameSchema } from '../../../../contract/index.ts';
 import {
@@ -85,10 +99,7 @@ describe('the read-scoped redaction', () => {
     // Arrange — the token's first 8 characters end row one and the rest start row two.
     const grid = {
       columns: 12,
-      rows: [
-        [...`abcd${TOKEN.slice(0, 8)}`],
-        [...`${TOKEN.slice(8)}x`],
-      ],
+      rows: [[...`abcd${TOKEN.slice(0, 8)}`], [...`${TOKEN.slice(8)}x`]],
     };
 
     // Act
@@ -132,12 +143,51 @@ describe('child environments (lead decision 9)', () => {
 });
 
 describe('what the types refuse', () => {
-  it('S6 S7 S157 the management surface has no method that hands back a value', () => {
+  it('S6 S157 the management surface has no method that hands back a value', () => {
     // Assert — the directory a route holds can list, write and remove; nothing on it opens ciphertext.
     const methods = Object.getOwnPropertyNames(SecretDirectory.prototype).filter(name => name !== 'constructor');
     should(methods.filter(name => !name.startsWith('#')).sort()).deepEqual(
       ['document', 'inTurn', 'list', 'put', 'putIf', 'putMissing', 'remove', 'write'].sort(),
     );
+  });
+
+  it('S7 only the allowlisted holders are given a SecretVault, all of them in the composition root', async () => {
+    // Arrange — the package's own source (never its tests), comments stripped so prose cannot hide or fake a use.
+    const root = new URL('../../../../', import.meta.url).pathname;
+    const sources = new Map<string, string>();
+    for await (const path of new Bun.Glob('{contract,daemon,app,cli}/**/*.ts').scan({ cwd: root })) {
+      const text = await Bun.file(`${root}${path}`).text();
+      sources.set(path, text.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*\/\/.*$/gmu, ''));
+    }
+    sources.set('manifest.ts', await Bun.file(`${root}manifest.ts`).text());
+
+    // Act
+    const constructs = [...sources].filter(([, text]) => /new\s+SecretVault\s*\(/u.test(text)).map(([path]) => path);
+    const importers = [...sources]
+      .filter(
+        ([path, text]) => path !== 'daemon/lib/secrets/vault.ts' && /import[^;]*\bSecretVault\b[^;]*from/u.test(text),
+      )
+      .map(([path]) => path)
+      .sort();
+    const composition = sources.get('daemon/index.ts') ?? '';
+    // Every place the composition root's vault binding is handed on or opened, keys like `vault: api` aside.
+    const uses = [...composition.matchAll(/(?<![.\w'"/-])vault(?![\w-])(?!\s*:)/gu)].length - 1; // minus its declaration
+    const holders = {
+      redactor: /combinedValues\(\s*vault\b/u,
+      'use executor': /new\s+SecretUseService\(\s*vault\b/u,
+      'outbound provider authorizer': /new\s+OutboundProviderAuthorizer\(\s*vault\b/u,
+      'secret export': /new\s+SecretExportService\(\{[^}]*\bvault\b[^}]*\}\)/u,
+      'ferret launch environment': /childEnvironment\s*=\s*async[\s\S]*?\bvault\.values\(\)/u,
+    };
+
+    // Assert — one vault, built in one place, handed only to the allowlist. A new holder adds a use and fails here.
+    should(constructs).deepEqual(['daemon/index.ts']);
+    should(importers).deepEqual(['daemon/index.ts', 'daemon/lib/secrets/clone.ts', 'daemon/lib/secrets/use.ts']);
+    for (const [holder, pattern] of Object.entries(holders)) should(pattern.test(composition)).be.true(holder);
+    should(uses).equal(Object.keys(holders).length);
+    // The routes are handed the directory and the services, never the vault itself.
+    should(composition).match(/secretRouteHandlers\(\{\s*directory,\s*references:[^}]*\}\)/u);
+    should(/secretRouteHandlers\(\{[^}]*\bvault\b/u.test(composition)).be.false();
   });
 
   it('S12 S62 `${secret:…}` names only a stored secret: an account seal key is not a secret name', () => {
@@ -173,5 +223,69 @@ describe('the output guard', () => {
   it('should read a stamp it cannot check as not showable', () => {
     const guard = new HoldRegistry();
     should(guard.stillShowable({ generation: 0, targets: null as never })).be.false();
+  });
+
+  it('I74 an unscoped stamp is withheld once any hold changed after it', () => {
+    // Arrange — the kernel dispatcher stamps without targets: it does not know what the handler will read.
+    const guard = new HoldRegistry();
+    const unscoped = guard.stamp();
+
+    // Act
+    guard.moved(other);
+
+    // Assert — an empty target list is not "nothing to check".
+    should(guard.stillShowable(unscoped)).be.false();
+    should(guard.stillShowable(guard.stamp())).be.true();
+  });
+
+  it('I74 through the real kernel Dispatcher, a hold that began after a guarded body was built withholds it', async () => {
+    // Arrange — a `guard: 'secrets'` route mounted on the kernel's own dispatcher, bound to this HoldRegistry.
+    const guard = new HoldRegistry();
+    const admitted: AdmissionDecision = {
+      outcome: 'admitted',
+      standing: {} as CallStanding,
+      actor: 'owner-tools',
+    };
+    const admission = {
+      admit: () => admitted,
+      admitMember: () => admitted,
+      readmit: () => true,
+      inventory: (_request: unknown, entries: unknown) => entries,
+    } as unknown as Admission;
+    const route: MountedRoute = {
+      method: 'GET',
+      path: '/v1/pane',
+      minimum: 'authenticated',
+      caller: 'any',
+      audit: { skip: 'test' },
+      guard: 'secrets',
+      owner: { plugin: 'terminals' as PluginId, title: 'Terminals', serving: () => ({ kind: 'serving' }) },
+      handle: async () => jsonResponse({ text: 'export TOKEN=[redacted:TOKEN] and the old pane' }),
+    };
+    const dispatcher = new Dispatcher(
+      { admission: () => admission, outputGuard: () => guard, version: '5.0.0' },
+      { routes: [route], sockets: [], memberRoutes: [] },
+    );
+    const call = (): ApiRequest => ({
+      method: 'GET',
+      path: '/v1/pane',
+      query: queryFrom([]),
+      headers: headersFrom({}),
+      arrival: localArrival(false),
+      text: async () => '',
+    });
+
+    // Act — one response finalised with nothing changed, one after a hold began on a terminal.
+    const untouched = finalised(await dispatcher.dispatch(call()));
+    const response = await dispatcher.dispatch(call());
+    guard.moved(pane);
+    const last = finalised(response);
+
+    // Assert — the late check chose the withheld sentence, not the body built before the hold.
+    should(untouched.status).equal(200);
+    should(untouched.body).containEql('the old pane');
+    should(last.status).equal(409);
+    should(last.body).containEql(WITHHELD_SENTENCE);
+    should(last.body).not.containEql('the old pane');
   });
 });

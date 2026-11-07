@@ -3,8 +3,14 @@
  *
  * A body that may show pane, page or vault-derived text is built inside one `Redaction.read`, stamped here, and the
  * dispatcher's `late` asks `stillShowable` as the last synchronous step before bytes leave (I74). It answers from a
- * generation counter alone, with no await and no vault: false when a hold began on one of the stamp's targets (or
- * its generation otherwise moved) after the stamp was taken.
+ * generation counter alone, with no await and no vault:
+ *
+ * - a stamp that names targets is withheld once a hold began on one of THEM (or its generation otherwise moved) after
+ *   the stamp was taken;
+ * - a stamp that names NO target — the one the kernel dispatcher takes for every `guard: 'secrets'` route, which does
+ *   not know what the handler will read — is withheld once ANY hold changed after it. Today's late check re-spelled
+ *   every guarded body against the holds in force at the last moment, so an unscoped body never outlived a hold change;
+ *   an empty target list must not read as "nothing to check".
  *
  * The holds themselves are the input half's (`InputHolds`, vault-b): it calls {@link HoldRegistry.moved} on the same
  * serialization chain as every hold change, so the guard and the holds never disagree about order.
@@ -36,6 +42,8 @@ export class HoldRegistry implements OutputGuard {
 
   stillShowable(stamp: GuardStamp): boolean {
     try {
+      // Unscoped: the body could show any target, so any hold change since the stamp withholds it.
+      if (stamp.targets.length === 0) return this.#generation === stamp.generation;
       return stamp.targets.every(target => (this.#movedAt.get(keyOf(target)) ?? 0) <= stamp.generation);
     } catch {
       // A throw is read as false: withheld, never shown on a doubt.
