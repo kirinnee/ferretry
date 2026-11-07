@@ -25,6 +25,8 @@
  * `docs/pwa-release-signing.md`.
  */
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { isBuiltin } from 'node:module';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import {
@@ -40,6 +42,7 @@ import {
 } from '../src/release/manifest.ts';
 import { parseReleaseHeaders } from '../src/release/headers.ts';
 import { sha256Base64Url } from '../src/release/verification.ts';
+import type { BunPlugin } from 'bun';
 
 const packageRoot = resolve(import.meta.dir, '..');
 const repositoryRoot = resolve(packageRoot, '../..');
@@ -66,7 +69,8 @@ const COMMITTED_RELEASE_KEY = join(packageRoot, 'release-signing-key.pub');
  * NO PLUGIN CODE RUNS IN THE RELEASE WORKER. Code evaluated in the worker's realm could rewrite the globals the release
  * check serves through (`Response`, `crypto.subtle`, `caches`, …) before any event arrives, and no list of names can
  * stop that — so the worker compiles `src/worker/service-worker.ts` and the shell's own modules only, and the build
- * REFUSES any `packages/{core,plugins}/<id>/app/worker.ts`. A plugin that needs worker behaviour (push, notification
+ * REFUSES any `packages/{core,plugins}/<id>/app/worker.ts` and any resolved input outside the shell allowlist and zod.
+ * A plugin that needs worker behaviour (push, notification
  * taps) asks for it as declarative data the worker interprets, through its own contract — later; none does today.
  */
 export async function pluginWorkerFiles(root: string): Promise<string[]> {
@@ -92,6 +96,32 @@ export async function refusePluginWorkers(root: string): Promise<void> {
     fail(
       `no plugin code may run in the signed service worker; remove ${found.join(', ')} (a plugin needing worker behaviour asks for it as declarative data in its contract)`,
     );
+}
+
+/** Guard the resolved graph, including transitive imports and symlinks, before any worker bytes are emitted. */
+export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunPlugin {
+  const app = realpathSync(root);
+  const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', packageRoot), '..'));
+  const allowed = ['worker', 'release', 'router', 'storage'].map(directory => join(app, 'src', directory) + sep);
+  return {
+    name: 'shell-worker-inputs',
+    setup(build) {
+      build.onResolve({ filter: /.*/u }, args => {
+        if (isBuiltin(args.path) || args.path.startsWith('bun:')) {
+          throw new Error(`no plugin code may run in the signed service worker: refused input ${args.path}`);
+        }
+        return undefined;
+      });
+      build.onLoad({ filter: /.*/u }, args => {
+        const path = realpathSync(args.path);
+        if (!allowed.some(directory => path.startsWith(directory)) && !path.startsWith(zod + sep)) {
+          throw new Error(`no plugin code may run in the signed service worker: refused input ${path}`);
+        }
+        inputs?.add(path);
+        return undefined;
+      });
+    },
+  };
 }
 
 /** The arguments that are neither a `--flag` nor a flag's value. */
@@ -128,6 +158,7 @@ const buildRelease = async (
     minify: true,
     splitting: false,
     target: 'browser',
+    plugins: [workerInputGuard()],
     define: {
       __FY_RELEASE_KEY__: JSON.stringify(key),
       __FY_RELEASE_REWRITES__: JSON.stringify(rewrites),
