@@ -338,6 +338,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       manifests.filter(manifest => on(manifest.id)),
       log,
       deadline,
+      manifests,
     );
     const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
     const hookEdges = (manifest: Manifest): readonly string[] =>

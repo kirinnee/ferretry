@@ -59,6 +59,7 @@ export class HookEngine {
   private readonly offers = new Map<string, { readonly plugin: string; readonly offer: HookOffer }>();
   private readonly takers = new Map<string, Taker[]>();
   private readonly byPluginKey = new Map<string, Taker>();
+  private readonly declaredProviders = new Map<string, Set<string>>();
   /** Plain sentences for `fy doctor`: contribute items left out, takers that failed. */
   readonly notes: string[] = [];
 
@@ -72,6 +73,7 @@ export class HookEngine {
     manifests: readonly Manifest[],
     log: Log,
     deadline: Deadline,
+    declaredManifests: readonly Manifest[] = manifests,
   ): { readonly engine: HookEngine; readonly refusals: readonly HookRefusal[] } {
     const engine = new HookEngine(log, deadline);
     const refusals: HookRefusal[] = [];
@@ -97,6 +99,17 @@ export class HookEngine {
         }
         engine.offers.set(hook.name, { plugin: manifest.id, offer });
       }
+    for (const manifest of declaredManifests) {
+      for (const take of manifest.hooks?.takes ?? []) {
+        const hook = engine.offers.get(take.hook.name)?.offer.hook;
+        if (hook?.mode !== 'provide' || take.key === undefined || !hook.key.safeParse(take.key).success) continue;
+        if (hook.takers !== undefined && !hook.takers.includes(manifest.id)) continue;
+        const key = `${hook.name}:${take.key}`;
+        const ids = engine.declaredProviders.get(key) ?? new Set<string>();
+        ids.add(manifest.id);
+        engine.declaredProviders.set(key, ids);
+      }
+    }
     const providedKeys = new Map<string, string>();
     manifests.forEach((manifest, rank) => {
       for (const take of manifest.hooks?.takes ?? []) {
@@ -190,6 +203,11 @@ export class HookEngine {
       provider: (hook, key) => {
         offered(hook);
         return this.provider(hook, key);
+      },
+      declaredProvider: (hook, key) => {
+        offered(hook);
+        const ids = this.declaredProviders.get(`${hook.name}:${key}`);
+        return ids?.size === 1 ? [...ids][0] : undefined;
       },
       providers: hook => {
         offered(hook);

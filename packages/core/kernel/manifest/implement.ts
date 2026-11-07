@@ -92,6 +92,8 @@ export interface HookInvoker {
   decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision>;
   transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>>;
   provider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): V | 'unavailable';
+  /** The declaring plugin id, even when off, failed or skeleton; undefined when nobody declares that key. */
+  declaredProvider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): string | undefined;
   providers<K extends string, V>(hook: ProvideHook<string, K, V>): ReadonlyMap<K, V>;
   contributions<I>(hook: ContributeHook<string, I>): readonly Contribution<I>[];
 }

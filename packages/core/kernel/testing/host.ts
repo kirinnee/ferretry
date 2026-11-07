@@ -65,7 +65,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
-import type { Manifest, ToolDecl } from '../manifest/types.ts';
+import type { HookTake, Manifest, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
 import { type DrivenClock, fixedClock } from './clock.ts';
@@ -393,6 +393,23 @@ async function start(world: World): Promise<TestHost> {
         own(hook.name);
         const taker = hookTakers(hook.name).find(t => t.key === key);
         return taker === undefined || taker.impl === undefined ? 'unavailable' : (taker.impl as never);
+      },
+      declaredProvider(hook, key) {
+        own(hook.name);
+        const declared = (manifest.hooks?.offers ?? []).find(offer => offer.hook.name === hook.name)?.hook;
+        if (declared?.mode !== 'provide' || !declared.key.safeParse(key).success) return undefined;
+        const ids = new Set(
+          options.plugins
+            .filter(
+              plugin =>
+                (declared.takers === undefined || declared.takers.includes(plugin.manifest.id)) &&
+                (plugin.manifest.hooks?.takes ?? []).some(
+                  (take: HookTake) => take.hook.name === declared.name && take.key === key,
+                ),
+            )
+            .map(plugin => plugin.manifest.id),
+        );
+        return ids.size === 1 ? [...ids][0] : undefined;
       },
       providers(hook) {
         own(hook.name);
