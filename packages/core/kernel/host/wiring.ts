@@ -85,6 +85,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
     });
     return {
       port: plugin => service.port(plugin),
+      secretReferences: plugin => service.secretReferences(plugin),
       writer: () => service.writer(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
