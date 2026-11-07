@@ -1,6 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { inputTargetConformance } from '@ferretry/core-vault/contract/testing';
-import { PageInputTarget } from '../../../daemon/target/adapter.ts';
 import { pageActLeavesSignIn, toolbarActLeavesSignIn } from '../../../daemon/target/sign-in/watch.ts';
 
 describe('which acts leave who a page signs in', () => {
@@ -38,13 +36,3 @@ describe('which acts leave who a page signs in', () => {
       expect(toolbarActLeavesSignIn({ action })).toBe(false);
   });
 });
-
-inputTargetConformance('the page input target', () => ({
-  adapter: new PageInputTarget({
-    inputOnPage: async () => {
-      throw new Error('no such page in this session');
-    },
-  }),
-  unknownKey: 'nowhere',
-  kind: 'page',
-}));

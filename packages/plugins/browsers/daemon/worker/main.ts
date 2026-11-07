@@ -507,6 +507,7 @@ function inputSubject(page: Page): InputSubject {
     },
     sessions,
     // The bounded wait for a title and the probe's second look (the thread's own timer).
+    // read-scoped: none — a timer: it waits a number of milliseconds and reads nothing
     wait: async ms => await new Promise(resolve => setTimeout(resolve, ms)),
   };
 }
