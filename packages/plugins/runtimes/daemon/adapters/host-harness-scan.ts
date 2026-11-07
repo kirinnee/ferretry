@@ -2,8 +2,8 @@
  * Reading this machine's own Claude Code and Codex setup for the first-run import
  * (docs/design/account-model.md §4.3, §7 `/v1/fleet/setup/scan`).
  *
- * This is the half of the import that touches the host: it finds each harness's instructions,
- * settings, MCP servers, hooks and skills where the harness itself keeps them, reads safe sign-in facts, and looks each MCP command up on this machine. Everything it reads is handed to
+ * This is the half of the import that touches the host: it locates each harness's instructions,
+ * settings, MCP servers, hooks and skills, reads safe sign-in facts, and looks each MCP command up on this machine. Everything it reads is handed to
  * `../lib/account/import.ts`, which decides what becomes a component. Nothing here writes.
  *
  * WHERE EACH HARNESS KEEPS ITS SETUP, as the harness resolves it:
@@ -20,12 +20,12 @@
  * The login is an opaque host pointer. Only Logins contract status and email facts are consumed.
  * Missing host discovery facts are reported as unknown. No sign-in file is opened.
  *
- * Nothing is launched: a `PATH` lookup and file reads, so it is safe to run on a page open.
+ * Nothing is launched. Setup contents remain unreadable until the host supplies descriptor-checked reads;
+ * path-based metadata checks alone cannot make reading a document or traversing a skill safe.
  *
  * The reads go through {@link HostFiles}; GAP(kernel): the host's harness homes have no root the plugin may declare.
  */
-import { isAbsolute, join, relative } from 'node:path';
-import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostCodexHome } from '../lib/account/credentials.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import {
@@ -36,7 +36,7 @@ import {
   scannedMcpServers,
 } from '../lib/account/import.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
-import type { HostFiles } from './ports.ts';
+import type { HostEntry, HostFiles } from './ports.ts';
 
 /** Resolving a bare command name on this machine's `PATH`. The daemon's one harness locator. */
 export interface HostCommandResolver {
@@ -57,20 +57,24 @@ export interface HostHarnessScanDeps {
   readonly logins: Pick<LoginsApi, 'list'>;
   /** Largest document read; anything larger is reported, never truncated. */
   readonly maxDocumentBytes: number;
-  /** Most files hashed in one skill folder before the folder is reported as too large. */
+  /** Limit for skill hashing once checked host traversal is available. */
   readonly maxSkillFiles?: number;
 }
 
-const DEFAULT_MAX_SKILL_FILES = 2_000;
+// Logins and the harness contracts expose no sign-in filename list. These are the Claude/Codex
+// filenames also named by account/credentials.ts; refuse them in every component, before any host call.
+const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
+
+// The state-home-guard's checked-folder rule: metadata and reads must use the SAME descriptor.
+// GAP(kernel): HostFiles exposes only path calls, with no checked open or descriptor identity.
+// An lstat pass alone cannot protect a subsequent read/list from a swapped file or ancestor.
+const CHECKED_READ_UNAVAILABLE =
+  'checked host reads are unavailable: the host cannot check and read through the same descriptor';
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export class HostHarnessScanner {
-  readonly #maxSkillFiles: number;
-
-  constructor(private readonly deps: HostHarnessScanDeps) {
-    this.#maxSkillFiles = deps.maxSkillFiles ?? DEFAULT_MAX_SKILL_FILES;
-  }
+  constructor(private readonly deps: HostHarnessScanDeps) {}
 
   /** Both harnesses, installed or not, in a stable order. */
   async scan(): Promise<readonly HostHarnessScan[]> {
@@ -83,10 +87,10 @@ export class HostHarnessScanner {
     const home = configured ?? join(this.deps.userHome, '.claude');
     const claudeJson = configured === undefined ? join(this.deps.userHome, '.claude.json') : join(home, '.claude.json');
     const [instructions, settings, mcp, skills] = await Promise.all([
-      this.#read(join(home, 'CLAUDE.md')),
-      this.#read(join(home, 'settings.json')),
-      this.#read(claudeJson),
-      this.#skills('claude', join(home, 'skills')),
+      this.#read(home, join(home, 'CLAUDE.md')),
+      this.#read(home, join(home, 'settings.json')),
+      this.#read(configured === undefined ? this.deps.userHome : home, claudeJson),
+      this.#skills(home, join(home, 'skills')),
     ]);
     const login = await this.#login('claude');
     return await this.#complete({
@@ -121,10 +125,10 @@ export class HostHarnessScanner {
       });
     }
     const [instructions, settings, hooks, skills] = await Promise.all([
-      this.#read(join(home, 'AGENTS.md')),
-      this.#read(join(home, 'config.toml')),
-      this.#read(join(home, 'hooks.json')),
-      this.#skills('codex', join(home, 'skills')),
+      this.#read(home, join(home, 'AGENTS.md')),
+      this.#read(home, join(home, 'config.toml')),
+      this.#read(home, join(home, 'hooks.json')),
+      this.#skills(home, join(home, 'skills')),
     ]);
     const login = await this.#login('codex');
     return await this.#complete({
@@ -188,80 +192,53 @@ export class HostHarnessScanner {
     }
   }
 
-  async #read(path: string): Promise<HostDocumentRead> {
+  /** Metadata only: reject links at the home and every component beneath it, never stat through one. */
+  async #inspect(home: string, path: string): Promise<HostEntry | undefined> {
+    const inside = relative(home, path);
+    if (!isAbsolute(home) || isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) {
+      throw new Error('the path is outside its harness home');
+    }
+    const components = inside === '' ? [] : inside.split(sep);
+    if ([basename(home), ...components].some(name => SIGN_IN_FILES.has(name))) {
+      throw new Error('sign-in files are not readable setup documents');
+    }
+    let current = home;
+    for (let index = 0; index <= components.length; index += 1) {
+      const info = await this.deps.files.lstat(current);
+      if (info === undefined) return undefined;
+      if (info.kind === 'link') throw new Error('symbolic links are not readable setup paths');
+      if (index === components.length) return info;
+      if (info.kind !== 'directory') throw new Error('a setup path ancestor is not a directory');
+      const component = components[index];
+      if (component === undefined) throw new Error('a setup path component is missing');
+      current = join(current, component);
+    }
+    return undefined;
+  }
+
+  async #read(home: string, path: string): Promise<HostDocumentRead> {
     try {
-      const info = await this.deps.files.stat(path);
+      const info = await this.#inspect(home, path);
       if (info === undefined) return { kind: 'absent', source: path };
       if (info.kind !== 'file') return { kind: 'unreadable', source: path, reason: 'it is not a file' };
       if (info.size > this.deps.maxDocumentBytes) return { kind: 'too-large', source: path, bytes: info.size };
-      const text = await this.deps.files.readText(path);
-      if (text === undefined) return { kind: 'absent', source: path };
-      return { kind: 'text', source: path, text, bytes: Buffer.byteLength(text) };
+      // Never fall back to readText(path): the checked entry could have been replaced since lstat.
+      return { kind: 'unreadable', source: path, reason: CHECKED_READ_UNAVAILABLE };
     } catch (error) {
       return { kind: 'unreadable', source: path, reason: errorText(error) };
     }
   }
 
-  /** Every skill folder: one per item, each with a digest of its whole content. */
-  async #skills(harness: HarnessKind, directory: string): Promise<{ found: HostSkill[]; problems: string[] }> {
-    let entries: string[];
+  /** Skill traversal also needs a held folder; a path-based list can follow a replaced ancestor. */
+  async #skills(home: string, directory: string): Promise<{ found: HostSkill[]; problems: string[] }> {
     try {
-      const names = await this.deps.files.list(directory);
-      if (names === undefined) return { found: [], problems: [] };
-      entries = [...names].sort();
+      const info = await this.#inspect(home, directory);
+      if (info === undefined) return { found: [], problems: [] };
+      if (info.kind !== 'directory') throw new Error('it is not a directory');
+      // No list/readBytes fallback: even an ordinary skill folder can hide a sign-in file or alias.
+      throw new Error(CHECKED_READ_UNAVAILABLE);
     } catch (error) {
       return { found: [], problems: [`Your skills folder ${directory} could not be read (${errorText(error)}).`] };
     }
-    const found: HostSkill[] = [];
-    const problems: string[] = [];
-    for (const item of entries) {
-      if (item.startsWith('.') || isHarnessOwnedSkillEntry(harness, item)) continue;
-      const source = join(directory, item);
-      try {
-        const entry = await this.deps.files.stat(source);
-        if (entry === undefined) throw new Error('it is gone');
-        if (entry.kind !== 'directory') continue;
-        const digest = await this.#digest(source);
-        if (digest === undefined) {
-          problems.push(`Skill "${item}" has more than ${String(this.#maxSkillFiles)} files, so it was not imported.`);
-          continue;
-        }
-        found.push({ item, source, digest });
-      } catch (error) {
-        problems.push(`Skill "${item}" at ${source} could not be read (${errorText(error)}).`);
-      }
-    }
-    return { found, problems };
-  }
-
-  async #bytes(path: string): Promise<Uint8Array> {
-    const bytes = await this.deps.files.readBytes(path);
-    if (bytes === undefined) throw new Error(`${path} is gone`);
-    return bytes;
-  }
-
-  /** A digest over every file's relative path and bytes, in a stable order; `undefined` when too many. */
-  async #digest(root: string): Promise<string | undefined> {
-    const hasher = new Bun.CryptoHasher('sha256');
-    const pending = [root];
-    let files = 0;
-    const all: string[] = [];
-    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-      for (const name of (await this.deps.files.list(next)) ?? []) {
-        const path = join(next, name);
-        const info = await this.deps.files.lstat(path);
-        if (info?.kind === 'directory') pending.push(path);
-        else all.push(path);
-      }
-    }
-    for (const path of all.sort()) {
-      files += 1;
-      if (files > this.#maxSkillFiles) return undefined;
-      hasher.update(`${relative(root, path)}\0`);
-      const info = await this.deps.files.lstat(path);
-      hasher.update(info?.kind === 'link' ? `link\0` : await this.#bytes(path));
-      hasher.update('\0');
-    }
-    return hasher.digest('hex');
   }
 }

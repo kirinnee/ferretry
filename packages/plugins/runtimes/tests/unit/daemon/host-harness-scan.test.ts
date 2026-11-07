@@ -3,6 +3,159 @@ import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testin
 import type { LoginsApi, LoginView } from '@ferretry/plugin-logins/contract';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
 import { planImport } from '../../../daemon/lib/account/import.ts';
+import type { HostEntry, HostFiles } from '../../../daemon/adapters/ports.ts';
+
+type FixtureEntry =
+  | { readonly kind: 'file'; readonly text: string }
+  | { readonly kind: 'directory'; readonly names: readonly string[] }
+  | { readonly kind: 'link'; readonly target: string };
+
+/** In-memory paths only. Like the host, stat/read/list follow links; lstat follows ancestors only. */
+const fixtureFiles = (entries: Readonly<Record<string, FixtureEntry>>) => {
+  const opened: string[] = [];
+  const listed: string[] = [];
+  const described: string[] = [];
+  const followed: string[] = [];
+  const resolve = (path: string, followLeaf = true, hops = 0): string => {
+    if (hops > 20) throw new Error('fixture link loop');
+    const parts = path.split('/').filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      const prefix = `/${parts.slice(0, index + 1).join('/')}`;
+      const entry = entries[prefix];
+      if (entry?.kind === 'link' && (followLeaf || index < parts.length - 1)) {
+        const rest = parts.slice(index + 1).join('/');
+        return resolve(`${entry.target}${rest === '' ? '' : `/${rest}`}`, followLeaf, hops + 1);
+      }
+    }
+    return path;
+  };
+  const describe = (entry: FixtureEntry | undefined): HostEntry | undefined =>
+    entry === undefined ? undefined : { kind: entry.kind, size: entry.kind === 'file' ? entry.text.length : 0 };
+  const text = async (path: string): Promise<string | undefined> => {
+    const target = resolve(path);
+    opened.push(target);
+    const entry = entries[target];
+    return entry?.kind === 'file' ? entry.text : undefined;
+  };
+  const files: HostFiles = {
+    stat: async path => {
+      followed.push(path);
+      return describe(entries[resolve(path)]);
+    },
+    lstat: async path => {
+      described.push(path);
+      return describe(entries[resolve(path, false)]);
+    },
+    readText: text,
+    readBytes: async path => {
+      const value = await text(path);
+      return value === undefined ? undefined : new TextEncoder().encode(value);
+    },
+    list: async path => {
+      listed.push(path);
+      const entry = entries[resolve(path)];
+      return entry?.kind === 'directory' ? entry.names : undefined;
+    },
+  };
+  return { files, opened, listed, described, followed };
+};
+
+const fixtureScan = async (entries: Readonly<Record<string, FixtureEntry>>, claudeConfigDir?: string) => {
+  const fixture = fixtureFiles({
+    '/fixture/home': { kind: 'directory', names: ['.claude', '.codex'] },
+    '/fixture/home/.claude': { kind: 'directory', names: ['CLAUDE.md', 'skills'] },
+    '/fixture/home/.codex': { kind: 'directory', names: ['auth.json'] },
+    ...entries,
+  });
+  const scanner = new HostHarnessScanner({
+    userHome: '/fixture/home',
+    ...(claudeConfigDir === undefined ? {} : { claudeConfigDir }),
+    files: fixture.files,
+    commands: { resolve: () => undefined },
+    logins: fakeLogins([]),
+    maxDocumentBytes: 4096,
+  });
+  return { ...fixture, scans: await scanner.scan() };
+};
+
+describe('host setup filesystem aliases', () => {
+  const inert = 'INERT_SIGN_IN_FIXTURE';
+
+  it('refuses CLAUDE.md linked to .codex/auth.json without opening or returning sign-in bytes', async () => {
+    const result = await fixtureScan({
+      '/fixture/home/.claude/CLAUDE.md': { kind: 'link', target: '/fixture/home/.codex/auth.json' },
+      '/fixture/home/.codex/auth.json': { kind: 'file', text: inert },
+    });
+    expect(result.scans[0]?.instructions).toMatchObject({
+      kind: 'unreadable',
+      reason: expect.stringContaining('links'),
+    });
+    expect(result.described).toContain('/fixture/home/.claude/CLAUDE.md');
+    expect(result.opened).toEqual([]);
+    expect(result.followed).toEqual([]);
+    expect(JSON.stringify(result.scans)).not.toContain(inert);
+  });
+
+  it('refuses a skill directory linked to the Codex home without opening any credential bytes', async () => {
+    const result = await fixtureScan({
+      '/fixture/home/.claude/skills': { kind: 'directory', names: ['linked-home'] },
+      '/fixture/home/.claude/skills/linked-home': { kind: 'link', target: '/fixture/home/.codex' },
+      '/fixture/home/.codex/auth.json': { kind: 'file', text: inert },
+    });
+    expect(result.scans[0]?.skills).toEqual([]);
+    expect(result.scans[0]?.problems.join(' ')).toContain('same descriptor');
+    expect(result.listed).toEqual([]);
+    expect(result.opened).toEqual([]);
+    expect(result.followed).toEqual([]);
+    expect(JSON.stringify(result.scans)).not.toContain(inert);
+  });
+
+  it('rejects a linked harness home and skills ancestor before reaching their children', async () => {
+    for (const linked of ['/fixture/home/.claude', '/fixture/home/.claude/skills']) {
+      const result = await fixtureScan({
+        [linked]: { kind: 'link', target: '/fixture/home/.codex' },
+        '/fixture/home/.codex/CLAUDE.md': { kind: 'file', text: inert },
+        '/fixture/home/.codex/auth.json': { kind: 'file', text: inert },
+      });
+      expect(result.scans[0]?.problems.join(' ')).toContain('links');
+      expect(result.described.some(path => path.startsWith(`${linked}/`))).toBe(false);
+      expect(result.opened).toEqual([]);
+      expect(result.listed).toEqual([]);
+      expect(JSON.stringify(result.scans)).not.toContain(inert);
+    }
+  });
+
+  it('refuses sign-in filenames as configured home components before any host call', async () => {
+    for (const name of ['auth.json', '.credentials.json']) {
+      const home = `/fixture/home/${name}`;
+      const result = await fixtureScan({ [home]: { kind: 'directory', names: ['CLAUDE.md'] } }, home);
+      expect(result.scans[0]?.instructions).toMatchObject({
+        kind: 'unreadable',
+        reason: expect.stringContaining('sign-in files'),
+      });
+      expect(result.described.some(path => path === home || path.startsWith(`${home}/`))).toBe(false);
+      expect(result.opened).toEqual([]);
+      expect(result.listed).toEqual([]);
+    }
+  });
+
+  it('reports ordinary documents and skill folders unreadable when checked opens are unavailable', async () => {
+    const result = await fixtureScan({
+      '/fixture/home/.claude/CLAUDE.md': { kind: 'file', text: 'ordinary instructions' },
+      '/fixture/home/.claude/skills': { kind: 'directory', names: ['ordinary-skill', 'auth.json'] },
+      '/fixture/home/.claude/skills/auth.json': { kind: 'file', text: inert },
+    });
+    expect(result.scans[0]?.instructions).toMatchObject({
+      kind: 'unreadable',
+      reason: expect.stringContaining('same descriptor'),
+    });
+    expect(result.scans[0]?.problems.join(' ')).toContain('same descriptor');
+    expect(result.scans[0]?.skills).toEqual([]);
+    expect(result.opened).toEqual([]);
+    expect(result.listed).toEqual([]);
+    expect(JSON.stringify(result.scans)).not.toContain(inert);
+  });
+});
 
 const scan = async (logins: Pick<LoginsApi, 'list'>) => {
   const paths: string[] = [];
