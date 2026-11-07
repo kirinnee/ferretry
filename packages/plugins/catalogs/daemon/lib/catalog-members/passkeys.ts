@@ -113,15 +113,6 @@ export class MemberPasskeyService {
     return this.#generation;
   }
 
-  /** Gate owns its ceremony and challenge; use the same verifier and counter CAS as a member unlock. */
-  async verifyWitness(
-    keyId: string,
-    assertion: Omit<StepUpAssertion, 'rotation'>,
-    challenge: Uint8Array,
-  ): Promise<boolean> {
-    if ((await this.deps.members.access(keyId)) === undefined) return false;
-    return await this.#verify(keyId, assertion, challenge);
-  }
   #persisting: Promise<unknown> = Promise.resolve();
   /** The registration in flight per key: one key adds its passkeys one at a time. */
   readonly #registering = new Map<string, Promise<void>>();

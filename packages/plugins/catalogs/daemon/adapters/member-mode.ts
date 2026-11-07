@@ -1,16 +1,14 @@
 import type { HolderId, ModeRedemption, SessionId, SessionMode } from '@ferretry/kernel/contract';
-import type { CredentialProvider, StepUpWitness } from '@ferretry/core-gate/contract';
+import type { CredentialProvider } from '@ferretry/core-gate/contract';
 import { InstantSchema } from '@ferretry/std';
 import type { MemberJoinProof } from '../lib/boundary.ts';
 import type { CatalogMemberService } from '../lib/catalog-members/service.ts';
 import type { MemberPasskeyService } from '../lib/catalog-members/passkeys.ts';
 import type { MemberJoinGate } from '../lib/catalog-members/join.ts';
 import type { LiveMemberSessions } from '../lib/catalog-members/sessions.ts';
-import type { StatePasskeyStore } from './member-passkey-store.ts';
 import type { MemberJoinCarrier } from './member-session.ts';
-import { secretsMatch } from '../lib/secrets-match.ts';
 
-/** TODO(kernel contract): MemberRedemptionBody is exported on port-kernel, unchanged from these records. */
+/** The kernel's `MemberRedemptionBody`, with the passkey proof typed as Catalogs reads it. */
 type MemberRedemptionBody =
   | {
       readonly act: 'join';
@@ -27,7 +25,6 @@ export function memberMode(deps: {
   passkeys: MemberPasskeyService;
   join: MemberJoinGate;
   live: LiveMemberSessions;
-  store: StatePasskeyStore;
 }) {
   const pages = new Map<SessionId, { readonly keyId: string; readonly appSession: string }>();
   let generation = 0;
@@ -51,28 +48,6 @@ export function memberMode(deps: {
         generation += 1;
       }
       return generation;
-    },
-  };
-  const witness: StepUpWitness = {
-    passkeys(holder, origin) {
-      if (deps.members.accessNow(holder) === undefined) return 'unknown';
-      const registered = deps.store.snapshot(holder);
-      return registered === undefined
-        ? 'unknown'
-        : registered.filter(key => key.origin === origin).map(key => ({ type: 'public-key', id: key.credentialId }));
-    },
-    async verify(ceremony) {
-      // Members hold no machine capability and cannot prove a machine's per-act step-up.
-      if (ceremony.act !== undefined || ceremony.assertion.rotation !== undefined) return { refused: 'not-a-device' };
-      const registered = deps.store.snapshot(ceremony.holder);
-      if (
-        !registered?.some(
-          key => key.origin === ceremony.origin && secretsMatch(key.credentialId, ceremony.assertion.credentialId),
-        )
-      )
-        return { refused: 'not-verified' };
-      const verified = await deps.passkeys.verifyWitness(ceremony.holder, ceremony.assertion, ceremony.challenge);
-      return verified ? { holder: ceremony.holder, provedAt: ceremony.now } : { refused: 'not-verified' };
     },
   };
   const mode: SessionMode = {
@@ -100,9 +75,6 @@ export function memberMode(deps: {
         pages.delete(watch.session);
       };
     },
-    seen(holder) {
-      void deps.members.touchKey(holder).catch(() => undefined);
-    },
     async redeem(attempt: ModeRedemption) {
       if (attempt.proof.mode !== 'member' || typeof attempt.proof.body !== 'object' || attempt.proof.body === null)
         return 'refused';
@@ -128,5 +100,5 @@ export function memberMode(deps: {
       return answer.ok ? { outcome: 'joined', fields: { response: answer.response } } : 'refused';
     },
   };
-  return { mode, credentials, witness, pages };
+  return { mode, credentials, pages };
 }

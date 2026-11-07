@@ -30,11 +30,11 @@ import {
 import { parseBody } from '../../adapters/body.ts';
 import { namesTag } from '../response-headers.ts';
 import type { AuditEntry } from '../audit.ts';
-import { CatalogRefusal } from '../shared-catalogs/refusal.ts';
+import { CatalogRefusal, type CatalogRefusalCode } from '../shared-catalogs/refusal.ts';
 import type { MemberPasskeyOutcome, MemberPasskeyRefusal, MemberPasskeyService } from './passkeys.ts';
 import type { MemberAuditSink } from './ports.ts';
 import type { LiveMemberSessions } from './sessions.ts';
-import { CatalogMemberRefusal } from './refusal.ts';
+import { CATALOG_MEMBER_STATUS, CatalogMemberRefusal } from './refusal.ts';
 import type { CatalogMemberService, MemberAccess } from './service.ts';
 export interface SharedCatalogReader {
   catalogs(): Promise<readonly { readonly id: string; readonly name: string; readonly revision: number }[]>;
@@ -98,6 +98,25 @@ async function asNotOffered<T>(work: () => Promise<T>): Promise<T> {
       throw new ApiError(404, ITEM_NOT_OFFERED, 'item_unknown');
     throw error;
   }
+}
+
+const CATALOG_STATUS: Partial<Record<CatalogRefusalCode, number>> = {
+  catalog_unknown: 404,
+  item_unknown: 404,
+  item_withdrawn: 409,
+  signing_unavailable: 503,
+};
+
+/**
+ * What a member route's failure says over the wire, as today's member dispatcher answered it: the domain's own
+ * refusals keep their code and status; anything else is left as it was (the kernel answers 500).
+ */
+export function memberFailure(error: unknown): unknown {
+  if (error instanceof CatalogMemberRefusal)
+    return new ApiError(CATALOG_MEMBER_STATUS[error.refusal], error.message, error.refusal);
+  if (error instanceof CatalogRefusal)
+    return new ApiError(CATALOG_STATUS[error.refusal] ?? 500, error.message, error.refusal);
+  return error;
 }
 
 const REDEEM_REFUSAL: Readonly<Record<CatalogShareRefusal, string>> = {

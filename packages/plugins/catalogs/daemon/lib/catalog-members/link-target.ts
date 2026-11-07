@@ -1,5 +1,5 @@
 import { isLoopbackLinkAddress } from '../boundary.ts';
-import type { Advertisement } from '../../adapters/host-facts.ts';
+import type { Advertisement } from '@ferretry/plugin-connections/contract';
 import type { ShareLinkTarget } from './ports.ts';
 
 /** The remedy for a machine nobody else can reach: the relay first (it opens no port), then an address. */

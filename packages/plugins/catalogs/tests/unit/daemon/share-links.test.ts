@@ -7,7 +7,7 @@
  * and the fingerprint and NOTHING about a rendezvous, so the browser discovers one itself.
  */
 import { describe, expect, it } from 'bun:test';
-import type { ConnectionAdvertisement } from '../../../daemon/adapters/host-facts.ts';
+import type { ConnectionAdvertisement } from '@ferretry/plugin-connections/contract';
 import {
   APP_ORIGIN,
   browser,

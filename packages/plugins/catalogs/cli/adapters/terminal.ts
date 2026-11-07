@@ -4,17 +4,16 @@ import type { ICatalogFileReader, ICatalogInstallOutput } from '../lib/catalog-i
 import type { IShareScreen, ITerminalSize } from '../lib/catalog-share/ports.ts';
 
 /**
- * TODO(CliContext port): DECISIONS-1 #21 gives a CLI half prompt/confirm, and rebuild/port-kernel adds `prompt?` and
- * `readText?` to `CliContext` (optional until the fy shell fills them in). rebuild/5.0's `CliContext` has neither yet,
- * and no CliContext has a file WRITER, so this half reads them by shape and refuses, before anything is sent, a verb
- * that needs one the shell did not hand it. No `fs` here: a CLI half reaches files only through the shell.
+ * What the shell does not hand a CLI half yet, read by shape: today's `FileCatalogWriter` (`exists`, `write` with
+ * `wx` / rename-over) for an export to an arbitrary `--out` path (`ownState` reaches own declared defs only), the
+ * size of a file without reading it, and the terminal's width. A verb that needs one the shell did not hand it refuses
+ * before anything is sent. No `fs` here: a CLI half reaches files only through the shell.
  */
 interface CliExtras {
-  readText?(path: string): Promise<string>;
-  prompt?(question: string): Promise<string | undefined>;
-  /** Not on any CliContext yet: today's `FileCatalogWriter` (`exists`, `write` with `wx` / rename-over). */
-  readonly files?: ICatalogFileWriter;
-  /** Not on any CliContext yet: the terminal's width, or nothing when it will not say. */
+  readonly files?: ICatalogFileWriter & {
+    /** A file's size from its directory entry, without reading it (today's `stat` before every read). */
+    size?(path: string): Promise<number>;
+  };
   columns?(): number | undefined;
 }
 
@@ -57,7 +56,7 @@ export class TerminalScreen implements IShareScreen {
 
 /** A typed answer at the terminal; no terminal to ask at reads as no answer, which no question takes for yes. */
 export class TerminalPrompt implements ICatalogPrompt {
-  constructor(private readonly ask_: CliExtras['prompt']) {}
+  constructor(private readonly ask_: CliContext<never>['prompt']) {}
   async ask(message: string): Promise<string> {
     return (await this.ask_?.(message)) ?? '';
   }
@@ -68,14 +67,21 @@ const NO_READER =
 const NO_WRITER =
   'this fy cannot write a file for Catalogs yet, so nothing was signed. (The fy shell hands plugins a file writer in a later build.)';
 
-/** Today's `FsCatalogFileReader` over the shell's reader: its size first, then a read bounded by `maxBytes`. */
+/**
+ * Today's `FsCatalogFileReader` over the shell: the size first, from a stat when the shell can give one (so a file
+ * past the cap is never read), then a read bounded by `maxBytes`. The shell's reader has no cap of its own, so a
+ * shell with no stat reads before it counts.
+ */
 export class ShellCatalogFileReader implements ICatalogFileReader {
-  readonly #read: CliExtras['readText'];
+  readonly #read: CliContext<never>['readText'];
+  readonly #stat: ((path: string) => Promise<number>) | undefined;
   readonly #texts = new Map<string, string>();
-  constructor(read: CliExtras['readText']) {
+  constructor(read: CliContext<never>['readText'], stat?: (path: string) => Promise<number>) {
     this.#read = read;
+    this.#stat = stat;
   }
   async size(path: string): Promise<number> {
+    if (this.#stat !== undefined) return await this.#stat(path);
     return new TextEncoder().encode(await this.#text(path)).length;
   }
   async read(path: string, maxBytes: number): Promise<string> {
@@ -120,9 +126,9 @@ export function catalogTerminal(ctx: CliContext<never>): CatalogTerminal {
   return {
     out: new TerminalOutput(ctx.io),
     screen: new TerminalScreen(ctx.io),
-    prompt: new TerminalPrompt(more.prompt?.bind(ctx)),
-    interactive: ctx.io.isTty && more.prompt !== undefined,
-    reader: new ShellCatalogFileReader(more.readText?.bind(ctx)),
+    prompt: new TerminalPrompt(ctx.prompt?.bind(ctx)),
+    interactive: ctx.io.isTty && ctx.prompt !== undefined,
+    reader: new ShellCatalogFileReader(ctx.readText?.bind(ctx), more.files?.size?.bind(more.files)),
     writer: more.files ?? refusingWriter,
     size: { columns: () => more.columns?.() },
   };

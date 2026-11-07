@@ -716,6 +716,12 @@ describe('catalog member sessions on the kernel session layer', () => {
   it('R620 should make a revoke take effect on the next request, written before its sessions are closed', async () => {
     // Arrange
     const { fx, joined, end } = await unlockedMember();
+    const atClose: { onFile: string; standing: unknown }[] = [];
+    fx.closing.onRevoked = () =>
+      atClose.push({
+        onFile: fx.host.state('catalogs').files.get('members.json') ?? '',
+        standing: fx.half.hooks['credentials:member'].standing(joined.keyId as never, fx.clock.now()),
+      });
 
     // Act
     const revoked = await fx.host.request('DELETE', `/v1/catalog-members/${joined.memberId}`);
@@ -726,6 +732,12 @@ describe('catalog member sessions on the kernel session layer', () => {
     expect(revoked.status).toBe(200);
     expect(onFile).not.toContain(joined.memberId);
     expect(end.end?.code).toBe(SESSION_CLOSE_CODES.authRejected);
+    // The order: the write is on disk and the projection has dropped the key BEFORE its session is told to close.
+    expect(atClose.length).toBeGreaterThan(0);
+    for (const seen of atClose) {
+      expect(seen.onFile).not.toContain(joined.memberId);
+      expect(seen.standing).toBe('unknown');
+    }
   });
 
   it('R622 should end a guest or member-revoked first record as an unknown t, 4400', async () => {

@@ -277,7 +277,7 @@ export class LinkStoreWorld {
     const built = new Request(`https://${LINK_HOST}${path}`, {
       method,
       headers,
-      ...(options.body === undefined ? {} : { body: options.body }),
+      ...(options.body === undefined ? {} : { body: options.body as BodyInit }),
     });
     return options.contentLength === undefined ? built : lyingAboutLength(built, options.contentLength);
   }

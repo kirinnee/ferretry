@@ -6,10 +6,24 @@ import { createHash } from './adapters/share-code-hasher.ts';
 import manifest from '../manifest.ts';
 import { CatalogsChanged, CatalogInstallSummarySchema } from '../contract/index.ts';
 import { CatalogLinkKeys, CatalogInstallPrefs } from '../contract/storage.ts';
-import { CatalogsConfigFile } from '../contract/config.ts';
-import { documentStore, blobStore, linkKeyVault } from './adapters/state.ts';
+import { CatalogsConfigFile, MEMBER_UNLOCK_DAYS } from '../contract/config.ts';
+import {
+  documentStore,
+  blobStore,
+  linkKeyVault,
+  linksDamage,
+  membersDamage,
+  catalogsDamage,
+  installsDamage,
+} from './adapters/state.ts';
 import { itemProviders } from './adapters/items.ts';
-import { connectionFacts, type CatalogKernel } from './adapters/host-facts.ts';
+import {
+  ALLOWED_ORIGINS,
+  APP_ORIGIN,
+  DIRECTORY_ORIGIN,
+  connectionFacts,
+  type CatalogKernel,
+} from './adapters/host-facts.ts';
 import { WebCryptoSessionCrypto, toBase64Url } from './adapters/relay.ts';
 import { StatePasskeyStore } from './adapters/member-passkey-store.ts';
 import { StateUnlockLedger } from './adapters/member-unlocks.ts';
@@ -28,7 +42,7 @@ import { MemberJoinGate } from './lib/catalog-members/join.ts';
 import { MemberJoinProver } from './lib/catalog-members/join-proof.ts';
 import { LiveMemberSessions } from './lib/catalog-members/sessions.ts';
 import { shareLinkTarget } from './lib/catalog-members/link-target.ts';
-import { sharedRoutes } from './lib/catalog-members/shared-routes.ts';
+import { memberFailure, sharedRoutes } from './lib/catalog-members/shared-routes.ts';
 import {
   MembersDocumentSchema,
   SharesDocumentSchema,
@@ -44,6 +58,7 @@ import { catalogMemberRoutes } from './lib/routes/catalog-members.ts';
 import { catalogLinkRoutes } from './lib/routes/catalog-links.ts';
 import { catalogInstallRoutes } from './lib/routes/catalog-installs.ts';
 import type { AuditEntry } from './lib/audit.ts';
+import type { DocumentDamage } from './adapters/state.ts';
 
 /** Composition moved from today's daemon/bin/fyd.ts catalog block; all IO is through declared ports. */
 export default implementDaemon(manifest, {
@@ -66,8 +81,9 @@ export default implementDaemon(manifest, {
       schema: import('zod').z.ZodType<T>,
       empty: T,
       change: 'catalog' | 'share' | 'member' | 'link' | 'install',
+      damage: DocumentDamage,
     ) {
-      const document = documentStore(kernel.state, file(name), schema, empty);
+      const document = documentStore(kernel.state, file(name), schema, empty, damage);
       return {
         read: document.read,
         write: async (value: T) => {
@@ -76,32 +92,24 @@ export default implementDaemon(manifest, {
         },
       };
     }
-    const catalogDocuments = store('catalogs', CatalogsDocumentSchema, EMPTY_CATALOGS_DOCUMENT, 'catalog');
-    const linkDocuments = store('links', LinksDocumentSchema, EMPTY_LINKS_DOCUMENT, 'link');
+    const catalogDocuments = store(
+      'catalogs',
+      CatalogsDocumentSchema,
+      EMPTY_CATALOGS_DOCUMENT,
+      'catalog',
+      catalogsDamage,
+    );
+    const linkDocuments = store('links', LinksDocumentSchema, EMPTY_LINKS_DOCUMENT, 'link', linksDamage);
     const identity = {
-      identity: async () =>
-        kernel.identity === undefined || kernel.signer === undefined
-          ? undefined
-          : { daemonId: kernel.identity.daemonId, signer: kernel.signer },
-      publisherName: () => kernel.identity?.daemonName ?? 'Ferretry',
+      identity: async () => ({ daemonId: kernel.identity.daemonId, signer: kernel.signer }),
+      publisherName: () => kernel.identity.daemonName,
     };
     const audit = {
       record: async (entry: AuditEntry) => await ctx.needs.gate.audit({ ...entry, event: auditKind(entry.event) }),
     };
-    const currentIdentity = () => {
-      if (kernel.identity === undefined)
-        throw new ApiError(503, 'The daemon identity is not available.', 'signing_unavailable');
-      return kernel.identity;
-    };
-    const unlockDays = () => {
-      const policy = ctx.needs.gate.policy();
-      if (policy === undefined) throw new ApiError(503, 'The member unlock policy is not available.', 'store_damaged');
-      // TODO(Gate contract): memberUnlockDays is approved (1..90, default 30), read live, and raising it loosens.
-      const days = (policy.security as typeof policy.security & { memberUnlockDays?: number }).memberUnlockDays ?? 30;
-      if (!Number.isInteger(days) || days < 1 || days > 90)
-        throw new ApiError(503, 'The member unlock policy is invalid.', 'store_damaged');
-      return days;
-    };
+    const currentIdentity = () => kernel.identity;
+    /** `catalogs.yaml` `memberUnlockDays` (1..90, default 30), read live; raising it loosens, so it is the owner's. */
+    const unlockDays = () => kernel.config.file(CatalogsConfigFile)?.memberUnlockDays ?? MEMBER_UNLOCK_DAYS.default;
     const publisher = () => {
       const connection = ctx.uses.connections.current();
       if (connection === undefined || facts() === undefined)
@@ -110,8 +118,8 @@ export default implementDaemon(manifest, {
     };
     const live = new LiveMemberSessions();
     const members = new CatalogMemberService({
-      members: store('members', MembersDocumentSchema, EMPTY_MEMBERS_DOCUMENT, 'member'),
-      shares: store('shares', SharesDocumentSchema, EMPTY_SHARES_DOCUMENT, 'share'),
+      members: store('members', MembersDocumentSchema, EMPTY_MEMBERS_DOCUMENT, 'member', membersDamage),
+      shares: store('shares', SharesDocumentSchema, EMPTY_SHARES_DOCUMENT, 'share', membersDamage),
       hasher: { hex: text => createHash(text) },
       crypto,
       catalogs: { knownIds: async () => new Set((await catalogs.list()).catalogs.map(catalog => catalog.id)) },
@@ -120,8 +128,8 @@ export default implementDaemon(manifest, {
           const connection = facts();
           return shareLinkTarget(
             connection?.advertisement,
-            kernel.identity?.daemonId,
-            connection?.appOrigin ?? '',
+            kernel.identity.daemonId,
+            connection === undefined ? '' : APP_ORIGIN,
             connection?.discoveredRelayUrl,
           );
         },
@@ -140,6 +148,8 @@ export default implementDaemon(manifest, {
     const verifier = memberVerifier(ctx.needs.access);
     const random = { bytes: (length: number) => crypto.randomBytes(length) };
     const clock = { nowMs: now };
+    // TODO(Access contract): today's `passkeysChanged` signal ('member-key-forgotten', so Accounts' sign-in rules drop a
+    // forgotten browser's passkeys) has no hook on Access's port yet; wire `passkeysChanged` here when it does.
     const passkeys = new MemberPasskeyService({
       store: passkeyStore,
       verifier,
@@ -149,7 +159,7 @@ export default implementDaemon(manifest, {
       unlocks: new StateUnlockLedger(kernel.state, file('member-unlocks'), () => currentIdentity().daemonId),
       members,
       catalogNames: async () => new Map((await catalogs.list()).catalogs.map(catalog => [catalog.id, catalog.name])),
-      allowedOrigins: () => facts()?.allowedOrigins ?? [],
+      allowedOrigins: () => (facts() === undefined ? [] : ALLOWED_ORIGINS),
       relyingPartyName: 'Ferretry',
       daemonName: () => currentIdentity().daemonName,
       unlockDays,
@@ -163,7 +173,7 @@ export default implementDaemon(manifest, {
         verifier,
         random,
         clock,
-        allowedOrigins: () => facts()?.allowedOrigins ?? [],
+        allowedOrigins: () => (facts() === undefined ? [] : ALLOWED_ORIGINS),
       }),
       publisher,
       audit,
@@ -172,7 +182,7 @@ export default implementDaemon(manifest, {
         kernel.clock.after(milliseconds(ms), run);
       },
     });
-    const member = memberMode({ members, passkeys, join, live, store: passkeyStore });
+    const member = memberMode({ members, passkeys, join, live });
     const catalogs = new SharedCatalogService({
       membership: members,
       linkUsage: linkUsageOf(linkDocuments),
@@ -193,7 +203,7 @@ export default implementDaemon(manifest, {
       vault: linkKeyVault(ctx.needs.sealed.open(kernel.state, CatalogLinkKeys)),
       locator: new ConfiguredLinkStoreLocator(
         () => kernel.config.file(CatalogsConfigFile)?.linkStore ?? { enabled: false },
-        () => facts()?.directoryOrigin,
+        () => (facts() === undefined ? undefined : DIRECTORY_ORIGIN),
         client,
       ),
       client,
@@ -202,7 +212,7 @@ export default implementDaemon(manifest, {
       crypto,
       now,
       get appOrigin() {
-        return facts()?.appOrigin ?? '';
+        return facts() === undefined ? '' : APP_ORIGIN;
       },
       random: () => {
         const bytes = crypto.randomBytes(4);
@@ -212,12 +222,19 @@ export default implementDaemon(manifest, {
     });
     const installs = new CatalogInstallService({
       crypto,
-      store: store('installs', CatalogInstallStateSchema, EMPTY_CATALOG_INSTALL_STATE, 'install'),
+      store: store(
+        'installs',
+        CatalogInstallStateSchema,
+        EMPTY_CATALOG_INSTALL_STATE,
+        'install',
+        installsDamage('install', 'installs'),
+      ),
       prefs: documentStore(
         kernel.state,
         CatalogInstallPrefs,
         CatalogInstallPrefsStateSchema,
         EMPTY_CATALOG_INSTALL_PREFS,
+        installsDamage('preference', 'preferences'),
       ),
       projectRoots: providers.projectRoots,
       mcpFiles: providers.mcpFiles,
@@ -258,19 +275,24 @@ export default implementDaemon(manifest, {
       shared.map(route => [
         `${route.method} ${route.path}`,
         (async call => {
-          const page = member.pages.get(call.session);
-          const access = await members.access(call.principal.holder);
-          if (page === undefined || access === undefined || page.keyId !== access.keyId)
-            throw new ApiError(401, 'this browser is no longer registered here', 'unauthorized');
-          if (route.needs === 'unlocked' && passkeys.unlockExpiresAt(access.keyId) === undefined)
-            throw new ApiError(403, 'unlock this browser with your passkey first', 'member_locked');
-          return await route.handle({
-            request: call.request,
-            params: call.params,
-            access,
-            appSession: page.appSession,
-            sessionId: call.session,
-          });
+          try {
+            const page = member.pages.get(call.session);
+            const access = await members.access(call.principal.holder);
+            if (page === undefined || access === undefined || page.keyId !== access.keyId)
+              throw new ApiError(401, 'this browser is no longer registered here', 'unauthorized');
+            if (route.needs === 'unlocked' && passkeys.unlockExpiresAt(access.keyId) === undefined)
+              throw new ApiError(403, 'unlock with your passkey first', 'member_locked');
+            return await route.handle({
+              request: call.request,
+              params: call.params,
+              access,
+              appSession: page.appSession,
+              sessionId: call.session,
+            });
+          } catch (error) {
+            // The member side's refusals answer as they always did: their own code and status, never a bare 500.
+            throw memberFailure(error);
+          }
         }) satisfies MemberRouteHandler,
       ]),
     ) as Record<string, MemberRouteHandler>;
@@ -319,7 +341,6 @@ export default implementDaemon(manifest, {
       memberRoutes: memberRoutes as DaemonHalf<typeof manifest>['memberRoutes'],
       hooks: {
         'credentials:member': member.credentials,
-        'step-up:member': member.witness,
         'session.modes:member': member.mode,
       },
       provides: {

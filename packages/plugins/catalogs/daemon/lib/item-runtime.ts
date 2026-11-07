@@ -19,13 +19,3 @@ export interface ItemRuntime {
     governance: CallerGovernance | undefined,
   ): Promise<{ readonly component: unknown }>;
 }
-/** Provider refusal, preserving today's code and message for the catalog boundary. */
-export class ItemRuntimeRefusal extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ItemRuntimeRefusal';
-  }
-}

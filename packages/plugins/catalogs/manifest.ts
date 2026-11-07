@@ -1,4 +1,4 @@
-import { Credentials, StepUp, GatePort } from '@ferretry/core-gate/contract';
+import { Credentials, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort, SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
 import { CatalogsConfigFile } from './contract/config.ts';
@@ -555,7 +555,6 @@ export default definePlugin({
     offers: [{ hook: CatalogItems }],
     takes: [
       { hook: Credentials, key: 'member' },
-      { hook: StepUp, key: 'member' },
       { hook: SessionModes, key: 'member' },
     ],
   },

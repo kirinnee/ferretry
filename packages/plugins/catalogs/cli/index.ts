@@ -2,6 +2,7 @@ import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { BlockQrEncoder } from './adapters/qr.ts';
 import { catalogTerminal } from './adapters/terminal.ts';
+import { workingDirectory } from './adapters/working-directory.ts';
 import { CatalogController } from './lib/catalog/controller.ts';
 import { ClientCatalogGateway } from './lib/catalog/gateway.ts';
 import { CatalogInstallController } from './lib/catalog-install/controller.ts';
@@ -52,7 +53,7 @@ export default implementCli(manifest, {
       terminal.prompt,
       terminal.writer,
       terminal.interactive,
-      process.cwd(),
+      workingDirectory(),
     );
     const installs = new CatalogInstallController({
       gateway: new ClientCatalogInstallGateway(ctx.client),
@@ -60,7 +61,7 @@ export default implementCli(manifest, {
       out: terminal.out,
       prompt: terminal.prompt,
       interactive: terminal.interactive,
-      cwd: process.cwd(),
+      cwd: workingDirectory(),
       binaryName: BINARY,
     });
     const sharing = new ShareController({

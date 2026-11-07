@@ -64,7 +64,7 @@ G62	kept	gate	-	behaviour as written	grants	G62
 G63	kept	catalogs	gate	behaviour as written	grants	G63
 G64	kept	gate	-	behaviour as written	grants	G64
 G65	kept	gate	-	behaviour as written	grants	G65
-G66	kept	gate	-	behaviour as written	grants	G66
+G66	kept	catalogs	gate	behaviour as written	grants	G66
 G67	kept	catalogs	-	behaviour as written	grants	G67
 G68	kept	gate	-	behaviour as written	grants	G68
 G69	removed	access	-	-	grants	-

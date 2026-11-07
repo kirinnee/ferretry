@@ -52,7 +52,8 @@ import { CatalogInstallRefusalError } from '../catalog-installs/ports.ts';
 import { CatalogInstallStateError } from '../catalog-installs/store.ts';
 import type { CatalogInstallPrefsRequest, CatalogInstallPreviewRequest, CatalogInstallRequest } from '../boundary.ts';
 import type { CatalogCaller } from '../catalog-installs/service.ts';
-import { ItemRuntimeRefusal, type FreshStepUpContext } from '../item-runtime.ts';
+import type { FreshStepUpContext } from '../item-runtime.ts';
+import { CatalogItemRefusal } from '../../../contract/items/index.ts';
 
 /** The eight acts, from the parsed request to the answer the caller sees. */
 export interface CatalogInstallSubsystem {
@@ -110,7 +111,7 @@ const REFUSAL_STATUS: Readonly<Record<CatalogInstallRefusal, number>> = {
 function refuse(error: unknown): never {
   if (error instanceof CatalogInstallRefusalError)
     throw new ApiError(REFUSAL_STATUS[error.code], error.message, error.code);
-  if (error instanceof ItemRuntimeRefusal)
+  if (error instanceof CatalogItemRefusal)
     throw new ApiError(error.code === 'fleet_change_unknown' ? 404 : 409, error.message, error.code);
   if (error instanceof CatalogInstallStateError) throw new ApiError(500, error.message, 'catalog_installs_unreadable');
   throw error;

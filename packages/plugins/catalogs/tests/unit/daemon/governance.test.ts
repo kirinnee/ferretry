@@ -111,6 +111,66 @@ describe('Gate on the catalog routes', () => {
     expect(owner.status).not.toBe(403);
   });
 
+  it('G66 should let a ferret list and read download links and refuse it every other act with 403 forbidden', async () => {
+    // Arrange
+    const fx = await catalogsFixture();
+    const LINK_ID = `lnk_${'l'.repeat(22)}`;
+    const body = { itemId: `itm_${'q'.repeat(22)}` };
+    const acts: readonly (readonly [string, string, string, unknown?])[] = [
+      ['POST', '/v1/catalog-links/preview', 'preview a download link', body],
+      ['POST', '/v1/catalog-links', 'make a download link', body],
+      ['POST', `/v1/catalog-links/${LINK_ID}/copy`, 'copy a download link'],
+      ['PUT', `/v1/catalog-links/${LINK_ID}/version`, 'move a download link', { version: 1 }],
+      ['PATCH', `/v1/catalog-links/${LINK_ID}`, 'change a download link', { note: 'x' }],
+      ['DELETE', `/v1/catalog-links/${LINK_ID}`, 'turn off a download link'],
+    ];
+
+    // Act
+    const listed = await fx.host.request('GET', '/v1/catalog-links', { as: ferret });
+    const status = await fx.host.request('GET', '/v1/catalog-links/store', { as: ferret });
+    const read = await fx.host.request('GET', `/v1/catalog-links/${LINK_ID}`, { as: ferret });
+    const refused = await Promise.all(
+      acts.map(
+        async ([method, path, , payload]) =>
+          await fx.host.request(method as 'POST', path, {
+            as: ferret,
+            ...(payload === undefined ? {} : { body: payload }),
+          }),
+      ),
+    );
+
+    // Assert — the reads are the ferret's: a list, the store's status and one link (unknown here, so 404, not 403)
+    expect(listed.status).toBe(200);
+    expect(status.status).not.toBe(403);
+    expect(read.status).toBe(404);
+    expect(read.json<{ code: string }>().code).toBe('link_unknown');
+    // Assert — every other act is refused on the composed route
+    for (const answer of refused) expect(answer.status).toBe(403);
+    // Assert — and Catalogs' own handler refuses it by name, whatever the descriptor check said first
+    for (const [method, path, act] of acts) {
+      const key = `${method} ${path.replace(LINK_ID, ':linkId')}`;
+      const handle = fx.half.routes[key];
+      if (handle === undefined) throw new Error(`no handler for ${key}`);
+      const refusal = await (handle as (call: unknown) => Promise<unknown>)({
+        credential: { tokenClass: 'ferret', ferret: 'F1936' },
+        actor: 'ferret',
+        params: new Map([['linkId', LINK_ID]]),
+        request: { query: new Map(), headers: new Map() },
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toMatchObject({
+        status: 403,
+        code: 'forbidden',
+        message: `a ferret cannot ${act}; the owner does. A download link lets another person install a skill or an MCP setup from this machine.`,
+      });
+    }
+    // Assert — nothing the ferret asked made, changed or ended a link, and no passkey was asked
+    expect(fx.callers.claims).toEqual([]);
+    expect((await fx.host.request('GET', '/v1/catalog-links')).json<{ links: unknown[] }>().links).toEqual([]);
+  });
+
   it('G171 should ask no passkey of a replaceEdited preview, a remove or a Stay/Skip, and refuse a ferret install and remove', async () => {
     // Arrange
     const fx = await catalogsFixture();

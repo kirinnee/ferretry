@@ -90,3 +90,18 @@ export const CatalogItems = defineHook('catalog.items', {
   key: CatalogItemKindSchema,
   value: z.custom<CatalogItemProvider>(),
 });
+
+/**
+ * A provider's refusal of one install, removal or read, carrying today's code and sentence. Catalogs answers it as
+ * the fleet change it always was: `fleet_change_unknown` is 404, any other code is 409. A provider throws this
+ * instead of an `ApiError` so the answer keeps today's code whichever plugin owns the kind.
+ */
+export class CatalogItemRefusal extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CatalogItemRefusal';
+  }
+}

@@ -17,7 +17,7 @@ describe('the Catalogs daemon half on the kernel test host', () => {
     expect(Object.keys(fx.half.memberRoutes).sort()).toEqual(
       manifest.actions.memberRoutes.map(route => route.key).sort(),
     );
-    expect(Object.keys(fx.half.hooks).sort()).toEqual(['credentials:member', 'session.modes:member', 'step-up:member']);
+    expect(Object.keys(fx.half.hooks).sort()).toEqual(['credentials:member', 'session.modes:member']);
     expect(fx.half.hooks['session.modes:member'].principalKind).toBe('member');
   });
 

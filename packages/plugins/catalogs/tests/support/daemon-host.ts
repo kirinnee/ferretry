@@ -9,8 +9,8 @@
  *   WebCrypto, with Catalogs' own `session.modes:member` provider as the only mode.
  *
  * Fakes are only what Catalogs does not own: who is calling (Gate's StandInAdmission), the passkey verifier, the
- * clock, the daemon's identity signer (TODO(kernel contract): `kernel.identity` / `kernel.signer` are on
- * rebuild/port-kernel; until they reach rebuild/5.0 the half is given them here exactly as that branch shapes them).
+ * clock, and the daemon's identity (`kernel.identity` / `kernel.signer`), which the half is given here over a real
+ * Ed25519 key so every signature it makes is checked by the real verifier.
  */
 import {
   type Admission,
@@ -31,7 +31,6 @@ import {
   type MemberStanding,
   type SessionEnd,
   type SessionMode,
-  type StatePort,
 } from '@ferretry/kernel/contract';
 import { Dispatcher, type MountedMemberRoute, type MountedRoute, session } from '@ferretry/kernel/host';
 import { type DrivenClock, fixedClock, type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -42,19 +41,23 @@ import {
   ownerStanding,
   StandInAdmission,
 } from '@ferretry/core-gate/contract/testing';
-import type { CapabilityGrants, CredentialProvider, StepUpWitness } from '@ferretry/core-gate/contract';
+import type { CapabilityGrants, CredentialProvider } from '@ferretry/core-gate/contract';
 import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
 import type { Instant } from '@ferretry/std';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeAccess } from '@ferretry/plugin-access/contract/testing';
 import type { PasskeyVerifier } from '@ferretry/plugin-access/contract';
 import { fakeConnections } from '@ferretry/plugin-connections/contract/testing';
-import type { PublishedCarriers } from '@ferretry/plugin-connections/contract';
+import {
+  type ConnectionAdvertisement,
+  HOSTED_APP_ORIGIN,
+  type PublishedCarriers,
+} from '@ferretry/plugin-connections/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { CatalogItems, type CatalogMcpProvider, type McpSourceServer } from '../../contract/items/index.ts';
 import catalogsDaemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
-import type { ConnectionAdvertisement } from '../../daemon/adapters/host-facts.ts';
+
 import type { CatalogSigningIdentity } from '../../daemon/adapters/signatures.ts';
 import {
   catalogLinkSignedBytes,
@@ -66,7 +69,8 @@ import { WebCryptoSessionCrypto as CatalogWireCrypto, toBase64Url } from '../../
 export const kernelCrypto = new session.WebCryptoSessionCrypto();
 const wireCrypto = new CatalogWireCrypto();
 
-export const APP_ORIGIN = 'https://app.ferretry.test';
+/** The one origin a member ceremony may run on: the hosted app Connections names. */
+export const APP_ORIGIN: string = HOSTED_APP_ORIGIN;
 export const LOOPBACK_URL = 'http://127.0.0.1:4141';
 export const DISCOVERED_RELAY = 'wss://relay.ferretry.test/v1/daemon';
 export const START = '2026-11-07T09:00:00.000Z';
@@ -192,7 +196,6 @@ export interface CatalogsHalf {
   readonly memberRoutes: Record<string, (call: never) => Promise<ApiResponse>>;
   readonly hooks: {
     readonly 'credentials:member': CredentialProvider;
-    readonly 'step-up:member': StepUpWitness;
     readonly 'session.modes:member': SessionMode;
   };
 }
@@ -201,7 +204,7 @@ export interface CatalogsFixtureOptions {
   /** What Connections advertises; `undefined` = Connections is off. */
   readonly advertisement?: ConnectionAdvertisement | undefined;
   readonly carriers?: PublishedCarriers;
-  /** Gate's settings; `undefined` = undetermined. */
+  /** `catalogs.yaml` `memberUnlockDays`; absent = the default. */
   readonly memberUnlockDays?: number;
   /** Leave the `member` mode out of the session layer (a daemon with no bound member side). */
   readonly noMemberMode?: boolean;
@@ -259,8 +262,6 @@ export const LOOPBACK_ADVERTISEMENT: ConnectionAdvertisement = {
   advertisement: { kind: 'local-only', url: LOOPBACK_URL },
   discoveredRelayUrl: DISCOVERED_RELAY,
   port: 4141,
-  appOrigin: APP_ORIGIN,
-  allowedOrigins: [APP_ORIGIN],
 };
 
 export interface CatalogsFixture {
@@ -276,6 +277,8 @@ export interface CatalogsFixture {
   readonly layer: session.SessionLayerHost;
   /** Every request the session layer handed the kernel's dispatcher. */
   readonly dispatched: ApiRequest[];
+  /** Runs at the instant the session layer is told a member's session is revoked, before that session closes. */
+  readonly closing: { onRevoked?: () => void };
   /** Turn Connections off (or back on) after build. */
   setAdvertisement(next: ConnectionAdvertisement | undefined): void;
   /** Open one session on a carrier, as a carrier would. */
@@ -309,14 +312,6 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
   };
   const clock = fixedClock(START);
   const gate = new FakeGate();
-  if (options.memberUnlockDays !== undefined) {
-    const policy = gate.policy();
-    if (policy !== undefined)
-      gate.setPolicy({
-        ...policy,
-        security: { ...policy.security, memberUnlockDays: options.memberUnlockDays } as never,
-      });
-  }
   const vault = new FakeVault();
   const verifier = acceptingVerifier();
   const access = fakeAccess({ passkeys: verifier });
@@ -343,7 +338,6 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
         ...ctx,
         kernel: {
           ...ctx.kernel,
-          state: opaqueAsBytes(ctx.kernel.state),
           identity: { daemonId: wireIdentity.daemonId, daemonName: 'Publisher' },
           signer,
         } as typeof ctx.kernel,
@@ -358,7 +352,16 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     uses: { connections },
     gate: admission,
     clock,
-    ...(options.config === undefined ? {} : { config: options.config }),
+    ...(options.config === undefined && options.memberUnlockDays === undefined
+      ? {}
+      : {
+          config: {
+            ...(options.memberUnlockDays === undefined
+              ? {}
+              : { 'catalogs.yaml': { memberUnlockDays: options.memberUnlockDays } }),
+            ...options.config,
+          },
+        }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
   if (half === undefined) throw new Error('the Catalogs half was not built');
@@ -377,10 +380,25 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     },
   );
   const dispatched: ApiRequest[] = [];
+  const closing: { onRevoked?: () => void } = {};
   const layer = session.createSessionLayer({
     crypto: kernelCrypto,
     identity: { ...kernelIdentity, sign: session.signingKey(kernelCrypto, kernelIdentity).sign },
-    modes: key => (key === 'member' && options.noMemberMode !== true ? built.hooks['session.modes:member'] : undefined),
+    modes: key => {
+      if (key !== 'member' || options.noMemberMode === true) return undefined;
+      const mode = built.hooks['session.modes:member'];
+      return {
+        ...mode,
+        watch: (holder, watch) =>
+          mode.watch?.(holder, {
+            ...watch,
+            revoked: () => {
+              closing.onRevoked?.();
+              watch.revoked();
+            },
+          }),
+      };
+    },
     dispatch: async request => {
       dispatched.push(request);
       return await dispatcher.dispatch(request);
@@ -402,6 +420,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     dispatcher,
     layer,
     dispatched,
+    closing,
     setAdvertisement: next => {
       advertisement = next;
     },
@@ -410,35 +429,6 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
       return new BrowserEnd(link, wireIdentity.daemonId);
     },
   };
-}
-
-/**
- * TODO(kernel testing): the real host keeps an `opaque` file as the bytes written and reads them back as bytes
- * (`host/state/state-port.ts`: writeAtomic, readBytesFile); the test host's MemoryStateFolder stamps the value into a
- * JSON object (a string is spread into its characters). Catalogs is written against the real host, so the fixture
- * keeps opaque files as the real host does; the write still goes through the test host, so a simulated crash bites.
- */
-function opaqueAsBytes(state: StatePort): StatePort {
-  const bytes = new Map<string, Uint8Array>();
-  const key = (file: { readonly path: string }, name?: string) => `${file.path}\u0000${name ?? ''}`;
-  return {
-    ...state,
-    read: async (file, name) => {
-      if (file.store !== 'opaque') return await state.read(file, name);
-      const result = await state.read(file, name);
-      if (!result.ok) return result;
-      const held = bytes.get(key(file, name));
-      return { ok: true, value: held === undefined ? undefined : held.slice() } as typeof result;
-    },
-    write: async (file, value, name) => {
-      if (file.store === 'opaque')
-        bytes.set(
-          key(file, name),
-          typeof value === 'string' ? new TextEncoder().encode(value) : (value as Uint8Array).slice(),
-        );
-      await state.write(file, file.store === 'opaque' ? ({} as never) : value, name);
-    },
-  } as StatePort;
 }
 
 // ─── the owner's side, through the test host ─────────────────────────────────────────────────────────────────────
