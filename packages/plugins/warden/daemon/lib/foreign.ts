@@ -143,7 +143,7 @@ export interface BoardTask {
   readonly createdAt: string;
   readonly lastTouchedAt?: string | null;
   readonly ask: { readonly source: string; readonly text: string };
-  readonly clarifications: readonly { readonly source: string; readonly text: string; readonly at?: string }[];
+  readonly clarifications: readonly { readonly source: string; readonly text: string; readonly at?: string; readonly [key: string]: unknown }[];
   readonly links: {
     readonly prs: readonly PrLink[];
     readonly branch: string | null;
