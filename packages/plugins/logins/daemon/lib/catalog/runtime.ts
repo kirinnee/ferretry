@@ -19,8 +19,7 @@
  * Pure.
  */
 import type { LocalModels } from '../../../contract/index.ts';
-import type { ResolvedModelSet } from '@@EXT:fleet/src/lib/account/layering.ts@@';
-import type { HarnessKind } from '../shared/manifest.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 import {
   type CatalogHalf,
   catalogDefault,
@@ -67,6 +66,19 @@ export interface RuntimeModels {
   /** What the last read of the local server found, when this catalog detects one and it was read. */
   readonly local?: LocalModels;
 }
+
+/**
+ * The model set a runtime's profile resolved (Runtimes owns the resolution; only the part this module reads is
+ * stated). `harness-default`: no set applies, the harness picks. `model-set`: the models this login can use.
+ */
+export type ResolvedModelSet =
+  | { readonly source: 'harness-default' }
+  | {
+      readonly source: 'model-set';
+      readonly models: readonly { readonly id: string; readonly available: boolean }[];
+      readonly declaredDefault: string;
+      readonly default: string | undefined;
+    };
 
 export interface RuntimeModelsInput {
   readonly harness: HarnessKind;

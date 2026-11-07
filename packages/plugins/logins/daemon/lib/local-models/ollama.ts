@@ -8,11 +8,12 @@
  *
  * Pure.
  */
-import { catalogDefault, MODEL_ID_PATTERN, type ModelCatalog } from '@ferretry/fleet';
+import { catalogDefault, MODEL_ID_PATTERN, type ModelCatalog } from '../catalog/schema.ts';
 import { type LocalModel, type LocalModels } from '../../../contract/index.ts';
 import { isLoopbackHost } from '../shared/address.ts';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import { z } from 'zod';
-import type { AuthorizedOutcome } from '@@EXT:daemon/src/lib/speedups/ports.ts@@';
+import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 
 export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
 const OLLAMA_PORT = '11434';
@@ -71,9 +72,9 @@ const present = (value: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed === '' ? undefined : trimmed;
 };
 
-const instantOf = (value: string | undefined): string | undefined => {
+const instantOf = (value: string | undefined): Instant | undefined => {
   const parsed = value === undefined ? Number.NaN : Date.parse(value);
-  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+  return Number.isNaN(parsed) ? undefined : instantFromEpochMs(parsed);
 };
 
 /**
@@ -128,7 +129,7 @@ export function describeOllama(input: {
   readonly outcome: AuthorizedOutcome | undefined;
   readonly disabled?: boolean;
   readonly suggested: string;
-  readonly at: string;
+  readonly at: Instant;
 }): LocalModels {
   const { address, outcome, suggested, at, disabled = false } = input;
   const view = (state: LocalModels['state'], message: string, models: readonly LocalModel[] = []): LocalModels => ({

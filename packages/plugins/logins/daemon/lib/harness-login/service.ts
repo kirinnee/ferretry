@@ -72,14 +72,17 @@
  * {@link HarnessLoginService.submit} through the Codex flow's check to the delivery port and nowhere
  * else, exactly as Claude's code goes to stdin and nowhere else.
  */
-import { type HarnessKind, sanitizeHarnessEnv } from '@ferretry/fleet';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
+import { type HarnessKind } from '../shared/harness.ts';
+import { sanitizeHarnessEnv } from '../shared/harness-env.ts';
 import type {
   HarnessLoginFlow,
   HarnessLoginStartRequest,
   HarnessLoginSubmission,
   HarnessLoginSubmitRequest,
+  LoginId,
 } from '../../../contract/index.ts';
-import type { CallerGovernance } from '@@EXT:daemon/src/lib/api/capability.ts@@';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import { type CredentialSignInTarget, FleetCredentialRefusal, type SignInCheck } from '../credentials/credentials-service.ts';
 import {
   CLAUDE_LOGIN_ARGV,
@@ -146,7 +149,7 @@ export interface DaemonHarnessLoginOptions {
   /** How long a flow may live. Bounded in minutes, like the browser login window's one-to-sixty. */
   readonly windowMinutes?: number;
   /** Resolves a credential id to what a sign-in for it launches (account model §4.6). */
-  readonly credentialTargets: { target(credentialId: string): Promise<CredentialSignInTarget> };
+  readonly credentialTargets: { target(loginId: string): Promise<CredentialSignInTarget> };
   /** The harness command, by this daemon's one rule. A sign-in launches it directly. */
   readonly locate: (harness: HarnessKind) => string | undefined;
   /** Who listens on Codex's callback ports, so starting over can clear a leftover Codex sign-in. */
@@ -163,7 +166,7 @@ export interface DaemonHarnessLoginOptions {
    * Told when a sign-in completes, so an open app learns the login's state moved even though no request
    * of its own changed it — the sign-in finished in the background (docs/config-files.md "Live changes").
    */
-  readonly onSignedIn?: (credentialId: string) => void;
+  readonly onSignedIn?: (loginId: string) => void;
 }
 
 /**
@@ -212,7 +215,7 @@ type FlowStage =
 
 interface FlowRecord {
   readonly flowId: string;
-  readonly credentialId: string;
+  readonly loginId: LoginId;
   readonly identityKey: string;
   readonly startedAt: number;
   readonly expiresAt: number;
@@ -255,7 +258,7 @@ const needsReader = (stage: FlowStage): boolean =>
 const published = (stage: FlowStage): boolean =>
   stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : CODEX_PUBLISHED.has(stage.stage.stage);
 
-const instant = (milliseconds: number): string => new Date(Math.trunc(milliseconds)).toISOString();
+const instant = (milliseconds: number): Instant => instantFromEpochMs(Math.trunc(milliseconds));
 
 /** What to run for this flow's current stage. A Codex flow in `linking` runs the link sign-in. */
 const argvFor = (stage: FlowStage): readonly string[] => {
@@ -287,10 +290,10 @@ export class HarnessLoginService {
         'this daemon cannot say whether this caller may sign this machine in',
       );
     }
-    const credentialId = request.credentialId;
+    const loginId = request.loginId;
     let target: CredentialSignInTarget;
     try {
-      target = await this.options.credentialTargets.target(credentialId);
+      target = await this.options.credentialTargets.target(loginId);
     } catch (error) {
       if (error instanceof FleetCredentialRefusal)
         throw new HarnessLoginRefusal('fleet_login_unavailable', error.message);
@@ -373,7 +376,7 @@ export class HarnessLoginService {
         record.stage.harness === 'claude'
           ? { harness: 'claude', stage: { stage: 'complete' } }
           : { harness: 'codex', stage: { stage: 'complete' } };
-      this.options.onSignedIn?.(record.credentialId);
+      this.options.onSignedIn?.(record.loginId);
       return { outcome: 'accepted', flow: this.#projection(record) };
     }
     const reason = `${NO_USABLE_LOGIN} ${check.finding}`;
@@ -497,7 +500,7 @@ export class HarnessLoginService {
       throw new HarnessLoginRefusal('fleet_login_unavailable', 'this daemon is stopping, so it starts no sign-in');
     // Nothing between here and the record landing in `#flows` awaits, so of two starts for one
     // credential the later finds the earlier here.
-    const running = this.#running(target.credentialId);
+    const running = this.#running(target.loginId);
     if (running !== undefined && !restart) {
       this.#touch(running);
       return { ...this.#projection(running), resumed: true };
@@ -506,7 +509,7 @@ export class HarnessLoginService {
     // two never hold one store — or one Codex callback port — at the same time.
     const previous = running?.child;
     if (running !== undefined) this.#end(running, 'this sign-in was replaced by a new one');
-    const record = this.#record(target.harness, target.credentialId, link);
+    const record = this.#record(target.harness, target.loginId, link);
     // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
     // login itself takes as long as a person takes. Every failure is recorded on the record, so nothing
     // here can reject into an unhandled rejection.
@@ -544,14 +547,14 @@ export class HarnessLoginService {
     });
   }
 
-  #record(harness: HarnessKind, credentialId: string, link: boolean): FlowRecord {
+  #record(harness: HarnessKind, loginId: LoginId, link: boolean): FlowRecord {
     this.#prune();
     const startedAt = this.options.clock.now();
     const window = (this.options.windowMinutes ?? HARNESS_LOGIN_WINDOW_MINUTES) * 60_000;
     const record: FlowRecord = {
       flowId: this.options.mintId(),
-      credentialId,
-      identityKey: credentialId,
+      loginId,
+      identityKey: loginId,
       startedAt,
       expiresAt: startedAt + window,
       stage:
@@ -717,12 +720,12 @@ export class HarnessLoginService {
       record.stage.harness === 'claude'
         ? { harness: 'claude', stage: { stage: 'complete' } }
         : { harness: 'codex', stage: { stage: 'complete' } };
-    this.options.onSignedIn?.(record.credentialId);
+    this.options.onSignedIn?.(record.loginId);
   }
 
   /** End this flow and its child, keeping whatever outcome it already reached. */
   #end(record: FlowRecord, reason: string): void {
-    const remedy = `sign this login in on the host with \`${this.options.clientName} credential signin ${record.credentialId}\``;
+    const remedy = `sign this login in on the host with \`${this.options.clientName} login signin ${record.loginId}\``;
     this.#endWith(record, { stage: 'failed', reason, remedy });
   }
 
@@ -784,7 +787,7 @@ export class HarnessLoginService {
   #projection(record: FlowRecord): HarnessLoginFlow {
     const base: HarnessLoginFlowBase = {
       flowId: record.flowId,
-      credentialId: record.credentialId,
+      loginId: record.loginId,
       identity: record.identityKey,
       startedAt: instant(record.startedAt),
       expiresAt: instant(record.expiresAt),

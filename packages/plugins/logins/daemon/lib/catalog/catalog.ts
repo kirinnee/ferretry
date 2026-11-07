@@ -32,9 +32,9 @@ import qwen from '../../../data/models/qwen.yaml' with { type: 'text' };
 import vercelAiGateway from '../../../data/models/vercel-ai-gateway.yaml' with { type: 'text' };
 import zai from '../../../data/models/zai.yaml' with { type: 'text' };
 import type { LocalModels } from '../../../contract/index.ts';
-import type { Credential } from '@@EXT:fleet/src/lib/account/schema.ts@@';
+import type { Credential } from '../shared/credential.ts';
 import { readConfigText } from '../shared/yaml-text.ts';
-import type { HarnessKind } from '../shared/manifest.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import { type CatalogHalf, type ModelCatalog, type ModelCatalogFile, ModelCatalogFileSchema } from './schema.ts';
 

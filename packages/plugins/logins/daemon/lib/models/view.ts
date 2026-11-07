@@ -2,7 +2,8 @@
  * `GET /v1/models` (docs/model-catalog.md): every catalog in effect, each model with its tier, context
  * window, efforts and whether it is the default, and the published catalog this machine follows.
  */
-import { type CatalogHalf, catalogModelValue, type ModelCatalog } from '@ferretry/fleet';
+import { type CatalogHalf, catalogModelValue, type ModelCatalog } from '../catalog/schema.ts';
+import type { Instant } from '@ferretry/std';
 import type { ModelCatalogEntryView, ModelCatalogRefreshResult, ModelCatalogsView } from '../../../contract/index.ts';
 
 const entries = (half: CatalogHalf): readonly ModelCatalogEntryView[] =>
@@ -22,8 +23,8 @@ export interface PublishedCatalogState {
   readonly origin: string;
   readonly enabled: boolean;
   readonly version?: number;
-  readonly fetchedAt?: string;
-  readonly checkedAt?: string;
+  readonly fetchedAt?: Instant;
+  readonly checkedAt?: Instant;
   readonly last?: ModelCatalogRefreshResult;
 }
 

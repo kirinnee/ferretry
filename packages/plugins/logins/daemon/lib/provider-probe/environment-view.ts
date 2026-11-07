@@ -8,18 +8,12 @@
  * have been refused for, so it can only be a hand edit the watcher has not judged yet — is reported
  * as hidden rather than shown.
  */
-import {
-  type Credential,
-  cloudCredentialSentence,
-  cloudCredentialVariable,
-  credentialCodexProvider,
-  credentialVariables,
-  type HarnessKind,
-  looksLikeRawSecret,
-  looksSecret,
-  type ProviderPreset,
-  parseCloudCredential,
-} from '@ferretry/fleet';
+import { type Credential } from '../shared/credential.ts';
+import { cloudCredentialSentence, cloudCredentialVariable, parseCloudCredential } from '../shared/environment.ts';
+import { credentialCodexProvider, credentialVariables } from '../shared/halves.ts';
+import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type ProviderPreset } from '../presets/schema.ts';
+import { looksLikeRawSecret, looksSecret } from '../shared/secret-shape.ts';
 import { type LoginEnvironment, type LoginEnvironmentVariable } from '../../../contract/index.ts';
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { planProviderProbe } from './plan.ts';
@@ -32,7 +26,7 @@ function variableView(
   held: ReadonlySet<string> | undefined,
   harness?: HarnessKind,
 ): LoginEnvironmentVariable {
-  const half = harness === undefined ? {} : { harness };
+  const half = harness === undefined ? {} : { harness: harnessKey(harness) };
   const secrets = secretReferencesIn(value);
   if (secrets.length > 0) {
     return {

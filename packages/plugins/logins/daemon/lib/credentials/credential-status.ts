@@ -54,7 +54,7 @@ import {
   credentialShape,
   decodeJwtExpiry,
 } from '../shared/identity.ts';
-import type { HarnessKind } from '../shared/manifest.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 import {
   type CodexRefreshFailure,
   classifyCodexRefreshFailure,

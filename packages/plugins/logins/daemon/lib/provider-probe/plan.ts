@@ -19,17 +19,13 @@
  *
  * Pure.
  */
-import {
-  type Credential,
-  credentialVariables,
-  isCredentialSafeUrl,
-  type PresetTest,
-  type ProviderPreset,
-  templatePlaceholders,
-} from '@ferretry/fleet';
+import { type Credential } from '../shared/credential.ts';
+import { credentialVariables } from '../shared/halves.ts';
+import { isCredentialSafeUrl, templatePlaceholders } from '../shared/environment.ts';
+import { type PresetTest, type ProviderPreset } from '../presets/schema.ts';
 import { isLoopbackHost } from '../shared/address.ts';
 import { SECRET_REFERENCE_SOURCE, type SecretName } from '@ferretry/core-vault/contract';
-import type { CredentialPlacement, OutboundHttpRequest } from '@@EXT:daemon/src/lib/speedups/ports.ts@@';
+import type { CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 
 /** How long a Test waits for the provider. */
 export const PROVIDER_PROBE_TIMEOUT_MS = 10_000;

@@ -19,13 +19,8 @@
  * runtime list, an apply) and the last check is older than the interval (six hours), and when the owner
  * asks (`fy models refresh`). A check is a plain GET with no credential and no inference.
  */
-import {
-  type ModelCatalog,
-  PUBLISHED_MODEL_CATALOG_FILE,
-  PUBLISHED_MODEL_CATALOG_VERSION_FILE,
-  PublishedModelCatalogVersionSchema,
-  readPublishedModelCatalog,
-} from '@ferretry/fleet';
+import { type ModelCatalog } from '../catalog/schema.ts';
+import { PUBLISHED_MODEL_CATALOG_FILE, PUBLISHED_MODEL_CATALOG_VERSION_FILE, PublishedModelCatalogVersionSchema, readPublishedModelCatalog } from '../catalog/published.ts';
 import type { ModelCatalogRefreshResult } from '../../../contract/index.ts';
 
 /** The signed release list and its signature, at the hosted app's root (docs/pwa-release-signing.md). */
@@ -33,7 +28,7 @@ export const RELEASE_LIST_FILE = 'release-manifest.json';
 export const RELEASE_SIGNATURE_FILE = 'release-manifest.sig';
 
 /** The hosted app's origin, which serves the published catalog beside the app itself (one address, owned by the protocol). */
-export { HOSTED_APP_ORIGIN } from '../../../contract/index.ts';
+export { HOSTED_APP_ORIGIN } from '../shared/hosted.ts';
 
 /** Bytes as the hosted app answered them, over a plain buffer WebCrypto accepts. */
 export type Bytes = Uint8Array<ArrayBuffer>;

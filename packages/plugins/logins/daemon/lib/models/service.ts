@@ -7,9 +7,11 @@
  * set may travel to any caller with `fleet.use`.
  */
 import type { LocalModels } from '../../../contract/index.ts';
-import { type ModelCatalog, type ModelCatalogSources, modelCatalogs, type ProviderPreset } from '@ferretry/fleet';
-// Parsed when this build is made, never at boot: `@ferretry/fleet/built-ins` says why.
-import { checkedBuiltInModelCatalogs } from '@ferretry/fleet/built-ins' with { type: 'macro' };
+import { type ModelCatalog } from '../catalog/schema.ts';
+import { type ModelCatalogSources, modelCatalogs } from '../catalog/catalog.ts';
+import { type ProviderPreset } from '../presets/schema.ts';
+// Parsed when this build is made, never at boot: `../built-ins.ts` says why.
+import { checkedBuiltInModelCatalogs } from '../built-ins.ts' with { type: 'macro' };
 
 export interface ModelCatalogServiceDeps {
   /** This machine's own catalog files that check, by id. */

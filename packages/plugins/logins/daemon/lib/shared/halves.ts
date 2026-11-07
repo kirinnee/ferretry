@@ -14,7 +14,7 @@
  *
  * Pure.
  */
-import type { HarnessKind } from './manifest.ts';
+import type { HarnessKind } from './harness.ts';
 import type { CodexProvider } from './environment.ts';
 
 /** What one CLI is given by a login: its variables, and — Codex — the model provider it points at. */

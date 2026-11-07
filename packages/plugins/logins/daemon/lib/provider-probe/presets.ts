@@ -5,17 +5,12 @@
  * A preset is never a secret and names none by value — only the NAME a secret is suggested to be kept
  * under — so the whole catalogue may travel to any caller with `fleet.use`.
  */
-import {
-  catalogModelValue,
-  type HarnessKind,
-  type ModelCatalog,
-  type PresetTest,
-  type ProviderPreset,
-  presetCatalog,
-  presetHarnesses,
-} from '@ferretry/fleet';
-// Parsed when this build is made, never at boot: `@ferretry/fleet/built-ins` says why.
-import { checkedBuiltInPresets } from '@ferretry/fleet/built-ins' with { type: 'macro' };
+import { catalogModelValue, type ModelCatalog } from '../catalog/schema.ts';
+import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type PresetTest, type ProviderPreset, presetHarnesses } from '../presets/schema.ts';
+import { presetCatalog } from '../presets/catalog.ts';
+// Parsed when this build is made, never at boot: `../built-ins.ts` says why.
+import { checkedBuiltInPresets } from '../built-ins.ts' with { type: 'macro' };
 import type {
   LoginAct,
   LoginTestAct,
@@ -48,11 +43,14 @@ const isEmptyDetect = (preset: ProviderPreset): boolean =>
 const offered = (preset: ProviderPreset): LoginAct =>
   preset.unavailable === undefined ? { available: true } : { available: false, reason: preset.unavailable };
 
-/** The halves that set a variable, said only for a preset a login from which drives both CLIs. */
-function variableHalves(preset: ProviderPreset, name: string): { harnesses?: HarnessKind[] } {
+/**
+ * The halves that set a variable. The wire's `harnesses` is required (a preset with one usable half names it), where
+ * today's was absent for such a preset.
+ */
+function variableHalves(preset: ProviderPreset, name: string): { harnesses: ReturnType<typeof harnessKey>[] } {
   const usable = presetHarnesses(preset);
-  if (usable.length < 2) return {};
-  return { harnesses: usable.filter(harness => preset.halves[harness]?.env[name] !== undefined) };
+  if (usable.length < 2) return { harnesses: [harnessKey(preset.harness)] };
+  return { harnesses: usable.filter(harness => preset.halves[harness]?.env[name] !== undefined).map(harnessKey) };
 }
 
 const HALF_ORDER: readonly HarnessKind[] = ['claude', 'codex'];
@@ -79,7 +77,7 @@ function halvesView(preset: ProviderPreset, catalogs: CatalogsById): NonNullable
     if (half === undefined) return [];
     return [
       {
-        harness,
+        harness: harnessKey(harness),
         offered: usable.includes(harness)
           ? { available: true as const }
           : { available: false as const, reason: half.unavailable ?? (preset.unavailable as string) },
@@ -95,7 +93,7 @@ export function presetView(preset: ProviderPreset, catalogs: CatalogsById = {}):
   return {
     id: preset.id,
     label: preset.label,
-    harness: preset.harness,
+    harness: harnessKey(preset.harness),
     summary: preset.summary,
     ...(preset.group === undefined ? {} : { group: preset.group }),
     docs: preset.docs,

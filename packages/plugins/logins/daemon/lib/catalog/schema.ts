@@ -15,9 +15,9 @@
  *
  * Pure.
  */
-import { AnalyticsPricingProviderSchema, AnalyticsPricingSourceUrlSchema } from '../../../contract/index.ts';
+import { AnalyticsPricingProviderSchema, AnalyticsPricingSourceUrlSchema } from './price-source.ts';
 import { z } from 'zod';
-import type { HarnessKind } from '../shared/manifest.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 
 const Text = z.string().min(1).max(600);
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/u;

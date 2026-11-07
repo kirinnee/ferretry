@@ -30,37 +30,21 @@
  */
 
 import { dirname, join } from 'node:path';
-import {
-  type AccountModel,
-  activeDisable,
-  CLAUDE_SECURE_STORAGE_VARIABLE,
-  type ClaudeStoreResolution,
-  CODEX_CREDENTIAL_STORE_FILE,
-  CODEX_CREDENTIAL_STORE_KEY,
-  type CodexStoreResolution,
-  CREDENTIAL_STATUS_LABELS,
-  type Credential,
-  type CredentialStatusReason,
-  type CredentialStatusView,
-  type CredentialStoreInspection,
-  type CredentialStorePaths,
-  type CredentialStoreResolution,
-  type CredentialSubject,
-  type CredentialUsage,
-  type CredentialViewOptions,
-  credentialHarnesses,
-  type Disabled,
-  type FleetUsageWindow,
-  type HarnessKind,
-  HOST_CLAUDE_SECURE_STORAGE,
-  type ProviderPreset,
-  resolveCredentialStore,
-  type StoredCredentialResolution,
-  storeInspectionWords,
-  usableCredentialReading,
-} from '@ferretry/fleet';
+import { activeDisable, type Disabled } from '../shared/disabled.ts';
+import { CLAUDE_SECURE_STORAGE_VARIABLE, type ClaudeStoreResolution, CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY, type CodexStoreResolution, type CredentialStorePaths, type CredentialStoreResolution, HOST_CLAUDE_SECURE_STORAGE, resolveCredentialStore, type StoredCredentialResolution, type UnavailableStoreResolution } from './credentials.ts';
+import { CREDENTIAL_STATUS_LABELS, type CredentialStatusReason, type CredentialStatusView, type CredentialSubject, type CredentialUsage, type CredentialViewOptions } from './credential-status.ts';
+import { type Credential } from '../shared/credential.ts';
+import { type CredentialStoreInspection, storeInspectionWords, usableCredentialReading } from '../shared/store-inspection.ts';
+import { credentialHarnesses } from '../shared/halves.ts';
+import { type FleetUsageWindow } from './usage.ts';
+import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
+import { type ProviderPreset } from '../presets/schema.ts';
 import {
   type LoginAct,
+  type LoginFile,
+  type LoginId,
+  type LoginUsage,
   type LoginList,
   LoginListSchema,
   type LoginSignOut,
@@ -73,11 +57,11 @@ import {
   type ProviderPresetCatalog,
   type ProviderQuotaReading,
 } from '../../../contract/index.ts';
-import type { CallerGovernance } from '@@EXT:daemon/src/lib/api/capability.ts@@';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import { credentialEnvironmentView } from '../provider-probe/environment-view.ts';
 import type { ProviderProbeSubject } from '../provider-probe/service.ts';
-import { withProviderQuota } from '@@EXT:daemon/src/lib/usage/provider-quota/account.ts@@';
-import { disabledOf } from '@@EXT:daemon/src/lib/fleet/disabled-view.ts@@';
+import { disabledUntilMs } from '../shared/disabled.ts';
+import { credentialOf } from '../shared/credential.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -119,9 +103,15 @@ export interface CredentialHarnessRun {
 }
 
 export interface FleetCredentialCatalogDeps {
-  /** The machine's account model, or `undefined` when there is no fleet yet. Throws when unreadable. */
-  document(): Promise<AccountModel | undefined>;
-  readonly paths: CredentialStorePaths;
+  /** The logins on this machine (`config/logins/*.yaml`, parsed and live), by id. */
+  logins(): ReadonlyMap<string, LoginFile>;
+  /** The runtimes that use a login, by name (Runtimes owns the fact; absent, a login reads as used by none). */
+  usedBy?(id: string): readonly string[];
+  /**
+   * The absolute directories a login's store lives in. Absent when this build cannot name them, and every login that
+   * keeps its sign-in in a store then reads as unreachable, with the sentence that says so.
+   */
+  readonly paths: CredentialStorePaths | undefined;
   /**
    * One store read with its trail — the verdict and every place looked in, never material — so a sign-in
    * that found no usable login can say where it looked and what was there.
@@ -158,19 +148,19 @@ const CLAUDE_ACCOUNT_FILE = '.claude.json';
 export class FleetCredentialCatalog {
   constructor(private readonly deps: FleetCredentialCatalogDeps) {}
 
-  async entries(): Promise<{ readonly format: 2; readonly entries: readonly CredentialEntry[] }> {
-    let document: AccountModel | undefined;
+  async entries(): Promise<{ readonly format: 1; readonly entries: readonly CredentialEntry[] }> {
+    let logins: ReadonlyMap<string, LoginFile>;
     try {
-      document = await this.deps.document();
+      logins = this.deps.logins();
     } catch (error) {
       throw new FleetCredentialRefusal(
         'fleet_credentials_unreadable',
-        `this machine's fleet configuration could not be read, so its logins cannot be listed: ${
+        `this machine's logins could not be read, so they cannot be listed: ${
           error instanceof Error && error.message.length > 0 ? error.message : 'unreadable'
         }`,
       );
     }
-    return { format: 2, entries: document === undefined ? [] : this.#modelEntries(document) };
+    return { format: 1, entries: this.#modelEntries(logins) };
   }
 
   /** One credential, or a refusal naming the id. */
@@ -182,16 +172,25 @@ export class FleetCredentialCatalog {
     return found;
   }
 
-  #modelEntries(model: AccountModel): readonly CredentialEntry[] {
-    return Object.entries(model.credentials).map(([id, credential]) => ({
-      id,
-      credential,
-      resolution: resolveCredentialStore(id, credential, this.deps.paths),
-      usedBy: Object.entries(model.runtimes)
-        .filter(([, runtime]) => runtime.credential === id)
-        .map(([name]) => name)
-        .sort(),
-    }));
+  #modelEntries(logins: ReadonlyMap<string, LoginFile>): readonly CredentialEntry[] {
+    return [...logins.entries()]
+      .toSorted(([left], [right]) => (left < right ? -1 : 1))
+      .map(([id, file]) => {
+        const credential = credentialOf(file);
+        return {
+          id,
+          credential,
+          resolution:
+            this.deps.paths === undefined && credential.store !== 'environment'
+              ? ({
+                  harness: credential.harness,
+                  store: credential.store,
+                  unavailable: NO_STORE_PATHS,
+                } satisfies UnavailableStoreResolution)
+              : resolveCredentialStore(id, credential, this.deps.paths as CredentialStorePaths),
+          usedBy: [...(this.deps.usedBy?.(id) ?? [])].sort(),
+        };
+      });
   }
 
   /** Where the harness recorded this login's email, for display. */
@@ -243,7 +242,7 @@ export class FleetCredentialCatalog {
     const ensure = this.deps.ensureDirectory;
     return {
       kind: 'store',
-      credentialId: entry.id,
+      loginId: entry.id as LoginId,
       harness: resolution.harness,
       environment: launch.environment,
       arguments: launch.arguments,
@@ -265,7 +264,7 @@ export type SignInCheck = { readonly signedIn: true } | { readonly signedIn: fal
 export type CredentialSignInTarget =
   | {
       readonly kind: 'store';
-      readonly credentialId: string;
+      readonly loginId: LoginId;
       readonly harness: HarnessKind;
       /** Set on top of the sanitized environment. Names a store, never a credential value. */
       readonly environment: Readonly<Record<string, string>>;
@@ -276,11 +275,11 @@ export type CredentialSignInTarget =
       /** Whether the store now holds a usable login, and what was found when it does not. Re-reads every call. */
       check(): Promise<SignInCheck>;
     }
-  | { readonly kind: 'refused'; readonly credentialId: string; readonly reason: string };
+  | { readonly kind: 'refused'; readonly loginId: LoginId; readonly reason: string };
 
 const refusedSignIn = (entry: CredentialEntry, reason: string): CredentialSignInTarget => ({
   kind: 'refused',
-  credentialId: entry.id,
+  loginId: entry.id as LoginId,
   reason,
 });
 
@@ -354,7 +353,45 @@ const REASON_SENTENCES: Readonly<Record<CredentialStatusReason, string>> = {
   check_in_flight: 'A check is running now.',
 };
 
-const instant = (milliseconds: number): string => new Date(Math.trunc(milliseconds)).toISOString();
+const instant = (milliseconds: number): Instant => instantFromEpochMs(Math.trunc(milliseconds));
+
+/** Why a login kept in a store reads as unreachable until the host names the directories the stores live in. */
+const NO_STORE_PATHS =
+  'this build cannot reach the directories logins are signed in to, so it cannot read or sign this one in';
+
+/** A login's `disabled` block as the wire carries it. */
+function disabledOf(block: Disabled, source: LoginDisabled['source']): LoginDisabled {
+  const until = disabledUntilMs(block.until);
+  return {
+    ...(block.reason === undefined ? {} : { reason: block.reason }),
+    ...(until === undefined ? {} : { until: instant(until) }),
+    source,
+  };
+}
+
+const windowNamed = (reading: ProviderQuotaReading, label: '5h' | 'week') =>
+  reading.windows.find(window => window.label === label);
+
+function quotaWindow(reading: ProviderQuotaReading, label: '5h' | 'week'): LoginUsageWindow {
+  const window = windowNamed(reading, label);
+  return {
+    ...(window?.usedPercent === undefined ? {} : { usedPercent: window.usedPercent }),
+    ...(window?.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
+  };
+}
+
+/** An environment login's provider quota reading laid over its usage (today's `withProviderQuota`). */
+function withProviderQuota(usage: LoginUsage, reading: ProviderQuotaReading | undefined): LoginUsage {
+  if (reading === undefined) return usage;
+  if (usage.source !== undefined) return { ...usage, provider: reading };
+  return {
+    fiveHour: quotaWindow(reading, '5h'),
+    weekly: quotaWindow(reading, 'week'),
+    ...(reading.via === 'endpoint' ? { source: 'provider-quota' as const } : {}),
+    at: reading.at,
+    provider: reading,
+  };
+}
 
 function windowOf(window: FleetUsageWindow): LoginUsageWindow {
   return {
@@ -573,7 +610,7 @@ export class FleetCredentialsService {
       const view = await this.deps.status.view(subjectOf(entry), options);
       credentials.push(this.#row(entry, view, emails, entries, environment));
     }
-    return LoginListSchema.parse({ format, machine: this.deps.machineName(), credentials });
+    return LoginListSchema.parse({ format, machine: this.deps.machineName(), logins: credentials });
   }
 
   /**
@@ -735,8 +772,8 @@ export class FleetCredentialsService {
     const status = view.status;
     return LoginViewSchema.parse({
       id: entry.id,
-      harness: entry.credential.harness,
-      harnesses: [...credentialHarnesses(entry.credential)],
+      harness: harnessKey(entry.credential.harness),
+      harnesses: credentialHarnesses(entry.credential).map(harnessKey),
       store: entry.credential.store,
       ...(email === undefined ? {} : { email }),
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),

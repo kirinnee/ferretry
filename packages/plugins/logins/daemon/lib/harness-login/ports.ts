@@ -9,6 +9,8 @@
  * yields the raw stream, no buffer to inspect, and nothing to journal.
  */
 
+import type { Instant } from '@ferretry/std';
+import type { LoginId } from '../../../contract/index.ts';
 import type { CodexCallbackDelivery } from './codex-link.ts';
 import type { CallbackPortHolder } from './port-holders.ts';
 
@@ -16,10 +18,10 @@ import type { CallbackPortHolder } from './port-holders.ts';
 export interface HarnessLoginFlowBase {
   readonly flowId: string;
   /** The account-model credential being signed in. */
-  readonly credentialId: string;
+  readonly loginId: LoginId;
   readonly identity: string;
-  readonly startedAt: string;
-  readonly expiresAt: string;
+  readonly startedAt: Instant;
+  readonly expiresAt: Instant;
 }
 
 /** A submission that may not go ahead, in words. Both flows answer with these. */

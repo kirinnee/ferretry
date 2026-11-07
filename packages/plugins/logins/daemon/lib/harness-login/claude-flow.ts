@@ -192,7 +192,7 @@ export function decideClaudeSubmit(stage: ClaudeLoginStage): HarnessLoginSubmitD
 export function claudeProjection(base: HarnessLoginFlowBase, stage: ClaudeLoginStage): ClaudeLoginFlow {
   if (stage.stage === 'awaiting-code') {
     return {
-      harness: 'claude',
+      harness: 'claude-code',
       ...base,
       state: 'awaiting-code',
       verificationUrl: stage.verificationUrl,
@@ -200,11 +200,11 @@ export function claudeProjection(base: HarnessLoginFlowBase, stage: ClaudeLoginS
     };
   }
   if (stage.stage === 'complete') {
-    return { harness: 'claude', ...base, state: 'complete' };
+    return { harness: 'claude-code', ...base, state: 'complete' };
   }
   if (stage.stage === 'failed') {
     return {
-      harness: 'claude',
+      harness: 'claude-code',
       ...base,
       state: 'failed',
       reason: stage.reason,
@@ -212,5 +212,5 @@ export function claudeProjection(base: HarnessLoginFlowBase, stage: ClaudeLoginS
       ...(stage.lastCode === undefined ? {} : { lastCode: stage.lastCode }),
     };
   }
-  return { harness: 'claude', ...base, state: 'starting' };
+  return { harness: 'claude-code', ...base, state: 'starting' };
 }

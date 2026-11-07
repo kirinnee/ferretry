@@ -1,6 +1,7 @@
-import type { Credential, ProviderPreset } from '@ferretry/fleet';
-import type { LoginTestCode, LoginTestResult } from '../../../contract/index.ts';
-import type { AuthorizedOutcome } from '@@EXT:daemon/src/lib/speedups/ports.ts@@';
+import type { Credential } from '../shared/credential.ts';
+import type { ProviderPreset } from '../presets/schema.ts';
+import type { LoginId, LoginTestCode, LoginTestResult } from '../../../contract/index.ts';
+import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 import { planProviderProbe } from './plan.ts';
 import type { ProviderProbeClock, ProviderProbePort } from './ports.ts';
 
@@ -83,7 +84,7 @@ export class ProviderProbeService {
       message = PROVIDER_TEST_MESSAGES[code],
       sent = false,
     ): LoginTestResult => ({
-      credentialId: subject.id,
+      loginId: subject.id as LoginId,
       ok: code === 'ok',
       code,
       message,

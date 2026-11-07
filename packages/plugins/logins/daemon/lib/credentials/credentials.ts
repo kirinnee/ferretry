@@ -35,7 +35,7 @@
  * is computed by the credential-store adapter, which is where every platform fact is applied.
  */
 import { isAbsolute, join } from 'node:path';
-import type { HarnessKind } from '../shared/manifest.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 import { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory } from './credential-directory.ts';
 import {
   cloudCredentialEnvironment,
@@ -44,7 +44,7 @@ import {
   parseCloudCredential,
 } from '../shared/environment.ts';
 import { credentialHalf } from '../shared/halves.ts';
-import type { Credential } from '@@EXT:fleet/src/lib/account/schema.ts@@';
+import type { Credential } from '../shared/credential.ts';
 
 export { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory };
 
@@ -117,10 +117,10 @@ export interface EnvironmentStoreResolution {
   readonly modelArgs?: readonly string[];
 }
 
-/** A `host` Codex credential on a machine whose Codex home cannot be named: nothing to share. */
+/** A `host` or `ferretry` login with no store to read: a Codex home that cannot be named, or a build that cannot reach the stores. */
 export interface UnavailableStoreResolution {
-  readonly harness: 'codex';
-  readonly store: 'host';
+  readonly harness: HarnessKind;
+  readonly store: 'host' | 'ferretry';
   readonly unavailable: string;
 }
 

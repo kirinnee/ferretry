@@ -21,7 +21,7 @@ import {
 /**
  * Logins (§2.3): the AI provider sign-ins, API keys, proxies and endpoints ferrets spend. It takes the five `logins:*`
  * keys from Ferrets and needs the Vault (secrets by name; there is no getter). Paths follow the plugin prefix
- * (`/v1/logins/…`, §3.2); today's `/v1/fleet/login*`, `/v1/fleet/credentials*`, `/v1/fleet/presets` and `/v1/models*`
+ * (`/v1/logins/…`, §3.2); today's `/v1/fleet/login*`, `/v1/fleet/credentials*` and `/v1/fleet/presets` (a retired word) move there, while `/v1/models*` keeps its path
  * come here, descriptors copied field for field (minimum, caller, capability, noStore).
  *
  * NOT HERE, on purpose: `GET/POST /v1/speedups…` (the provider test for voice speed-up keys) is Voice's and Usage's,
@@ -110,7 +110,7 @@ export default definePlugin({
       }),
 
       // The model catalogs (today's models.ts): reads and a refresh that spends nothing.
-      route('GET /v1/logins/models', {
+      route('GET /v1/models', {
         minimum: 'operator',
         caller: 'any',
         capability: cap('fleet', 'use'),
@@ -118,7 +118,7 @@ export default definePlugin({
         audit: { skip: 'a read' },
         guard: { none: 'labels, model ids and tiers only' },
       }),
-      route('POST /v1/logins/models/refresh', {
+      route('POST /v1/models/refresh', {
         minimum: 'operator',
         caller: 'any',
         capability: cap('fleet', 'use'),
@@ -126,7 +126,7 @@ export default definePlugin({
         audit: { skip: 'a refresh is a read that spends nothing (no rule today)' },
         guard: { none: 'labels, model ids and tiers only' },
       }),
-      route('POST /v1/logins/models/local/refresh', {
+      route('POST /v1/models/local/refresh', {
         minimum: 'operator',
         caller: 'any',
         capability: cap('fleet', 'use'),

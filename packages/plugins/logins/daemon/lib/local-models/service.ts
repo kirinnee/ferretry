@@ -1,3 +1,4 @@
+import type { Instant } from '@ferretry/std';
 import type { LocalModels } from '../../../contract/index.ts';
 import type { ProviderProbePort } from '../provider-probe/ports.ts';
 import { describeOllama, OLLAMA_MAX_BYTES, OLLAMA_TIMEOUT_MS, ollamaAddress } from './ollama.ts';
@@ -11,7 +12,7 @@ export interface LocalModelsServiceDeps {
   readonly enabled: boolean;
   /** The model the catalog suggests, named in the command that installs one. */
   readonly suggested: () => Promise<string>;
-  readonly now: () => string;
+  readonly now: () => Instant;
   /** Run when a read changed what the machine has, so the fleet can offer it. It must never throw. */
   readonly onChanged?: () => Promise<void>;
 }

@@ -23,7 +23,7 @@ import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { CodexProviderSchema } from '../shared/environment.ts';
 import { EnvNameSchema } from '../shared/config.ts';
-import { type HarnessKind, HarnessKindSchema } from '../shared/manifest.ts';
+import { type HarnessKind, HarnessKindSchema } from '../shared/harness.ts';
 
 const Text = z.string().min(1).max(600);
 

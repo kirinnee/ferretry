@@ -1,4 +1,5 @@
-import type { AuthorizedOutcome } from '@@EXT:daemon/src/lib/speedups/ports.ts@@';
+import type { Instant } from '@ferretry/std';
+import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 import type { ProviderProbePlan } from './plan.ts';
 
 /**
@@ -21,5 +22,5 @@ export interface ProviderSecretNames {
 /** Monotonic milliseconds for latency, and the wall-clock instant a result is stamped with. */
 export interface ProviderProbeClock {
   monotonicMs(): number;
-  now(): string;
+  now(): Instant;
 }
