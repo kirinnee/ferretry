@@ -18,12 +18,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ApiRequest, type EventDef, headersFrom, queryFrom } from '@ferretry/kernel/contract';
-import { buildModelOnly, buildRelease, type Release } from '../../../../../scripts/test/two-release/releases.ts';
+import { buildModelOnly, buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
 import { type RecordingProxy, recordingProxy } from '../../../../../scripts/test/two-release/proxy.ts';
 import { createWorld } from '../../../src/adapters/world.ts';
-import { type ClientDeps, ensureAllowed, surfacesOf } from '../../../src/lib/client.ts';
+import { type ClientDeps, ensureAllowed, pluginClient, surfacesOf } from '../../../src/lib/client.ts';
 import { PluginPausedError } from '../../../src/lib/guard.ts';
 import { runFy } from '../../../src/lib/run.ts';
 import { ToolClient } from '../../../src/lib/tool-client.ts';
@@ -52,12 +52,12 @@ let userHome: string;
 beforeAll(async () => {
   userHome = await mkdtemp(join(tmpdir(), 'fy-tworel-user-'));
   await mkdir(join(userHome, 'bin'), { recursive: true });
-  [A, Bb, Bc, Bd] = await Promise.all([
-    buildRelease('A'),
-    buildRelease('B_b'),
-    buildRelease('B_c'),
-    buildRelease('B_d'),
-  ]);
+  try {
+    [A, Bb, Bc, Bd] = await buildReleases();
+  } catch (error) {
+    await rm(userHome, { recursive: true, force: true });
+    throw error;
+  }
 });
 
 afterAll(async () => {
@@ -83,7 +83,19 @@ interface Session {
 /** A daemon of `daemonRelease`, a recording proxy in front of it, and an `fy` of release A aimed at the proxy. */
 async function open(daemonRelease: Release, version = A.appVersion): Promise<Session> {
   const daemon = await startDaemon(daemonRelease, { version });
-  const proxy = recordingProxy(daemon.url);
+  let proxy: RecordingProxy | undefined;
+  try {
+    proxy = recordingProxy(daemon.url);
+    return await attach(daemon, proxy);
+  } catch (error) {
+    // A host that booted is stopped when anything after it fails: the one bun process runs every integration file.
+    await proxy?.stop().catch(() => undefined);
+    await daemon.stop().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function attach(daemon: StartedDaemon, proxy: RecordingProxy): Promise<Session> {
   const token = await daemon.adminToken();
   const worldFor = (io = capturedIo()) =>
     createWorld({
@@ -192,7 +204,7 @@ describe('(a) nothing changed: fy of this commit against a daemon of this commit
     session = await open(A);
   });
   afterAll(async () => {
-    await session.stop();
+    await session?.stop();
   });
 
   test('`fy delta show` and `fy alpha show` exit 0 with the plugin’s own answer, after one inventory read', async () => {
@@ -256,7 +268,7 @@ describe('(b) a provider’s route, tool, event and socket schema changed: daemo
     session = await open(Bb);
   });
   afterAll(async () => {
-    await session.stop();
+    await session?.stop();
   });
 
   test('`fy alpha show`, `fy alpha watch` and `fy beta show` exit 69 and say what to do; nothing but the inventory is read', async () => {
@@ -292,6 +304,38 @@ describe('(b) a provider’s route, tool, event and socket schema changed: daemo
     expectNoDaemonWork('alpha');
   });
 
+  test('a subscription to the provider’s event is refused BEFORE the feed is opened: no call first, no socket, no frame heard', async () => {
+    // `alpha watch` calls its route first, so the call guard refuses it and `follow` is never reached. This case goes to
+    // `follow` directly, so only the SUBSCRIBE guard (`ensureAllAllowed` in `pluginClient.follow`) can stop it: remove
+    // that guard and the feed opens (the proxy sees an upgrade) and this test goes red.
+    const { AlphaChangedEvent } = await A.load('packages/plugins/alpha/contract/index.ts');
+    const deps = await session.deps();
+    // The provider itself, and a consumer of it (a refusal on the provider's standing), and the unchanged plugin
+    // subscribing to the provider's event (a refusal on the event's owner alone).
+    // The sentence names the first package of [caller, event owner] that is refused.
+    const named = { alpha: 'Alpha', beta: 'Beta', delta: 'Alpha' } as const;
+    for (const caller of ['alpha', 'beta', 'delta'] as const) {
+      resetCounters();
+      session.proxy.reset();
+      let heard = 0;
+      const ended: string[] = [];
+      const cancel = pluginClient(deps, caller).follow(
+        AlphaChangedEvent as EventDef<'alpha.changed', unknown>,
+        () => {
+          heard += 1;
+        },
+        reason => ended.push(reason),
+      );
+      await waitFor(() => (ended.length > 0 ? ended : undefined), `the ${caller} subscription to end`);
+      cancel();
+      expect(ended).toEqual([`${named[caller]} differs between fy and the daemon: ${UPDATE}.`]);
+      expect(heard).toBe(0);
+      expect(session.proxy.upgrades()).toEqual([]);
+      expectOnlyInventoryReads(session);
+      expectNoDaemonWork('alpha', 'beta', 'gamma');
+    }
+  });
+
   test('delta, which consumes nothing that changed, still works after the blocked attempts', async () => {
     resetCounters();
     const delta = await session.fy(['delta', 'show']);
@@ -309,7 +353,7 @@ describe('(c) a consumer that only RENDERS the provider’s ask source: daemon B
     session = await open(Bc);
   });
   afterAll(async () => {
-    await session.stop();
+    await session?.stop();
   });
 
   test('gamma, which imports nothing of alpha, is paused through its renderer edge; the inventory is all that is read', async () => {
@@ -341,7 +385,7 @@ describe('(d) a core contract changed: daemon B_d', () => {
     session = await open(Bd);
   });
   afterAll(async () => {
-    await session.stop();
+    await session?.stop();
   });
 
   test('every verb is refused, even the unchanged plugin’s; the sentence names the first core piece that differs', async () => {
@@ -367,7 +411,7 @@ describe('(e) who may read the inventory: daemon A', () => {
     session = await open(A);
   });
   afterAll(async () => {
-    await session.stop();
+    await session?.stop();
   });
 
   /** A request as a carrier delivers it: not local, with a principal when a session proved one. */

@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import type { EventDef } from '@ferretry/kernel/contract';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { builds, hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
-import { buildRelease, type Release } from '../../../../../scripts/test/two-release/releases.ts';
+import { buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
 import { DaemonCallError } from '../../../src/client/transport.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
@@ -52,12 +52,7 @@ const interact: typeof import('../../support/dom.ts').interact = callback => dom
 
 beforeAll(async () => {
   dom = await import('../../support/dom.ts');
-  [A, Bb, Bc, Bd] = await Promise.all([
-    buildRelease('A'),
-    buildRelease('B_b'),
-    buildRelease('B_c'),
-    buildRelease('B_d'),
-  ]);
+  [A, Bb, Bc, Bd] = await buildReleases();
 });
 
 afterAll(async () => {
@@ -92,6 +87,21 @@ interface Scenario {
   stop(): Promise<void>;
 }
 
+/**
+ * A device paired with `grants` on an ALREADY-RUNNING `daemon`, the app of release A over it, its inventory read.
+ * Stopping it closes the device only; whoever booted the daemon stops it.
+ */
+async function pairDevice(daemon: StartedDaemon, grants: 'full' | 'limited'): Promise<Scenario> {
+  const session = await openApp(daemon, A, { grants });
+  try {
+    await session.ready();
+  } catch (error) {
+    session.close();
+    throw error;
+  }
+  return { daemon, session, stop: async () => session.close() };
+}
+
 /** A daemon of `daemonRelease`, a device paired with `grants`, the app of release A over it, its inventory read. */
 async function open(
   daemonRelease: Release,
@@ -99,13 +109,11 @@ async function open(
 ): Promise<Scenario> {
   const daemon = await startDaemon(daemonRelease, { version: options.version });
   try {
-    const session = await openApp(daemon, A, { grants: options.grants });
-    await session.ready();
+    const device = await pairDevice(daemon, options.grants);
     return {
-      daemon,
-      session,
+      ...device,
       stop: async () => {
-        session.close();
+        await device.stop();
         await daemon.stop();
       },
     };
@@ -217,6 +225,20 @@ describe('(a) nothing changed: the app of this commit against a daemon of this c
     await until(() => view.container.querySelector('[data-testid="delta"]') !== null, 'delta’s screen');
     expect(view.container.querySelector('[data-testid="delta"]')?.textContent).toBe('The Delta screen');
     await view.unmount();
+  });
+
+  test('G1 the positive control for (c): the ask renderer of the unchanged workspace DRAWS gamma’s renderer and builds its half', async () => {
+    resetCounters();
+    const view = await mount(
+      <PluginViewWithShell id="ask:alpha-item" plugin="gamma" scenario={scenario} section="renderers" />,
+    );
+    await until(
+      () => view.container.querySelector('[data-testid="gamma-renderer"]') !== null,
+      'gamma’s renderer to be drawn',
+    );
+    expect(view.container.querySelector('[data-testid="gamma-renderer"]')?.textContent).toBe('The Gamma renderer');
+    await view.unmount();
+    expect(builds.gamma.app).toBe(1);
   });
 
   test('G2 an unchanged event reaches its listener (the kernel has no event stream route)', async () => {
@@ -450,17 +472,26 @@ describe('(d) a core contract changed: daemon B_d', () => {
 // ─── (e) a limited device ─────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('(e) a limited device reads the inventory: daemon A', () => {
+  // ONE daemon, two devices paired on it: the control is about one Gate projecting the same table differently.
+  let daemon: StartedDaemon;
   let limited: Scenario;
   let full: Scenario;
+  const stopAll = async (): Promise<void> => {
+    await limited?.stop();
+    await full?.stop();
+    await daemon?.stop();
+  };
   beforeAll(async () => {
-    [limited, full] = await Promise.all([
-      open(A, { version: A.appVersion, grants: 'limited' }),
-      open(A, { version: A.appVersion, grants: 'full' }),
-    ]);
+    daemon = await startDaemon(A, { version: A.appVersion });
+    try {
+      limited = await pairDevice(daemon, 'limited');
+      full = await pairDevice(daemon, 'full');
+    } catch (error) {
+      await stopAll();
+      throw error;
+    }
   });
-  afterAll(async () => {
-    await Promise.all([limited.stop(), full.stop()]);
-  });
+  afterAll(stopAll);
 
   test('G1 the limited device’s inventory is the core pieces, Access and the one plugin its grants admit', () => {
     const connection = limited.session.runtime.connection(limited.session.daemonId);
@@ -469,7 +500,9 @@ describe('(e) a limited device reads the inventory: daemon A', () => {
     expect([...connection.client.inventory.entries.keys()].sort()).toEqual([...CORE_IDS, 'delta'].sort());
   });
 
-  test('the plugins the grants do not admit are missing, say so in their own line, and are never contacted', () => {
+  // NOT evidence of grant filtering today: while G1 stands every paired device, a full one included, reads these as
+  // `missing` (the G1 control below is the red half). It becomes a proof of the limited projection when G1 lands.
+  test('the plugins the grants do not admit are missing, say so in their own line, and are never contacted (a proof of filtering only once G1 lands; today every device reads missing)', () => {
     limited.session.recording().reset();
     for (const id of ['alpha', 'beta', 'gamma'] as const) {
       expect(standing(limited, id)).toEqual({ state: 'blocked', reason: 'missing' });
@@ -486,7 +519,8 @@ describe('(e) a limited device reads the inventory: daemon A', () => {
     expect(await clientOf(limited, 'delta').call('GET /v1/delta')).toEqual({ plugin: 'delta', item: 'one' });
   });
 
-  test('G1 the positive control: a FULL device on the same daemon sees all four fixture plugins', () => {
+  test('G1 the positive control: a FULL device on the SAME daemon sees all four fixture plugins', () => {
+    expect(full.daemon).toBe(limited.daemon);
     for (const id of FIXTURE_IDS) expect(standing(full, id)).toEqual({ state: 'allowed' });
   });
 

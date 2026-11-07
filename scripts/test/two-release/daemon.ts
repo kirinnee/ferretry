@@ -96,11 +96,21 @@ export async function startDaemon(release: Release, options: { readonly version:
     throw new Error(`the ${release.name} daemon refused to boot: ${outcome.sentence}`);
   }
   const { host } = outcome;
-  const run = await until(
-    async () => JSON.parse(await readFile(join(home, 'run', 'daemon.json'), 'utf8')) as { host: string; port: number },
-    10_000,
-    'the run record',
-  );
+  // A host that booted must be stopped when anything after it fails: it holds a Unix socket and a loopback listener in
+  // the one process every integration file shares.
+  let run: { host: string; port: number };
+  try {
+    run = await until(
+      async () =>
+        JSON.parse(await readFile(join(home, 'run', 'daemon.json'), 'utf8')) as { host: string; port: number },
+      10_000,
+      'the run record',
+    );
+  } catch (error) {
+    await host.stop().catch(() => undefined);
+    rmSync(parent, { recursive: true, force: true });
+    throw error;
+  }
   return {
     host,
     url: `http://${run.host}:${run.port}`,

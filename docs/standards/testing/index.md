@@ -425,8 +425,10 @@ itself passes, so no production hook exists for it. The app of this commit (the 
 and `App`, over a real paired direct session) and `fy` of this commit (`runFy` over `createWorld`, through a recording
 proxy) are then run against it. The cases — nothing changed, a provider's schemas changed, a consumer by renderer only,
 a core contract changed, a limited device and a member reading the inventory — each prove that a blocked package was
-never contacted three independent ways: the client's own record, the daemon's hit counters and the plugin halves that
-never built.
+never contacted three independent ways. The app leg reads the client's own record, the daemon's hit counters and the
+plugin halves that never built. The fy leg builds a verb's CLI half before its first call, so it has no build counter:
+its witnesses are the proxy's record, the daemon's hit counters and the refusal itself (the guard's sentence and exit
+code).
 
 - The rig is `scripts/test/two-release/`; the app leg is `packages/app/tests/integration/two-release/`; the fy leg is
   `packages/cli/tests/integration/two-release/`. They run in the `int` group `all` (`config/test-groups.json`), so

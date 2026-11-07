@@ -6,7 +6,9 @@
  * reads {@link RecordingProxy.paths} and finds only the inventory and health reads. The proxy runs in the test's own
  * process, so `fy`'s own-listener check (same user, same machine) passes.
  *
- * It records paths and methods only: never a header, a body or a credential.
+ * It records paths and methods only: never a header, a body or a credential. It FORWARDS the credential, on a plain
+ * request and on a WebSocket upgrade alike (the event feed authenticates with an `authorization` header on the
+ * upgrade), and writes it nowhere.
  */
 import type { Server, ServerWebSocket } from 'bun';
 
@@ -23,11 +25,33 @@ export interface RecordingProxy {
 
 interface Tunnel {
   readonly target: string;
+  /** The upgrade request's own headers, minus the hop-by-hop ones; the upstream upgrade carries them. */
+  readonly headers: Readonly<Record<string, string>>;
   upstream?: WebSocket;
   readonly queued: (string | Uint8Array<ArrayBuffer>)[];
 }
 
 const DROPPED = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection']);
+
+/** Headers that belong to ONE hop of the upgrade: the proxy's own handshake with the client, not the daemon's. */
+const HOP_HEADERS = new Set(['host', 'connection', 'upgrade', 'content-length']);
+
+/** The request's headers for the upstream upgrade: everything but the hop headers and the `sec-websocket-*` handshake. */
+function upgradeHeaders(request: Request): Record<string, string> {
+  const forwarded: Record<string, string> = {};
+  for (const [name, value] of request.headers) {
+    const lower = name.toLowerCase();
+    if (HOP_HEADERS.has(lower) || lower.startsWith('sec-websocket-')) continue;
+    forwarded[name] = value;
+  }
+  return forwarded;
+}
+
+/** Bun's `WebSocket` takes request headers as a second argument, which the DOM type does not know. */
+const openUpstream = (target: string, headers: Record<string, string>): WebSocket =>
+  new (WebSocket as unknown as new (url: string, options: { headers: Record<string, string> }) => WebSocket)(target, {
+    headers,
+  });
 
 export function recordingProxy(daemonUrl: string): RecordingProxy {
   const seen: string[] = [];
@@ -41,7 +65,9 @@ export function recordingProxy(daemonUrl: string): RecordingProxy {
       if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
         upgraded.push(`GET ${url.pathname}`);
         target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
-        return serving.upgrade(request, { data: { target: target.toString(), queued: [] } })
+        return serving.upgrade(request, {
+          data: { target: target.toString(), headers: upgradeHeaders(request), queued: [] },
+        })
           ? undefined
           : new Response('upgrade failed', { status: 400 });
       }
@@ -59,7 +85,7 @@ export function recordingProxy(daemonUrl: string): RecordingProxy {
     },
     websocket: {
       open(socket: ServerWebSocket<Tunnel>) {
-        const upstream = new WebSocket(socket.data.target);
+        const upstream = openUpstream(socket.data.target, { ...socket.data.headers });
         socket.data.upstream = upstream;
         upstream.binaryType = 'arraybuffer';
         upstream.onopen = () => {
