@@ -30,6 +30,18 @@ const isClosed = (view: CardView, category: LaneCategory | undefined): boolean =
 /** Work in progress: an active or review lane. The menu lists it first. */
 const isActive = (category: LaneCategory | undefined): boolean => category === 'active' || category === 'review';
 
+/**
+ * Whether the ask behind a card was an agent's, not the owner's: TODAY'S rule (the `&` menu's "Include agent cards"
+ * switch), read from the card's own facts and never guessed from its text. The daemon's `askedBy: person` or
+ * `origin: human` is the owner's; `origin: agent` or `askedBy: agent` is an agent's; a view that carries neither
+ * falls back to "the owner raised it" (`createdBy`), as the app's `isMine` reads it.
+ */
+const isAgentAsked = (view: CardView): boolean => {
+  if (view.askedBy === 'person' || view.origin === 'human') return false;
+  if (view.origin === 'agent' || view.askedBy === 'agent') return true;
+  return view.createdBy.kind !== 'owner';
+};
+
 const touchedMs = (view: CardView): number => {
   const parsed = Date.parse(view.lastTouchedAt ?? view.createdAt);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -59,9 +71,9 @@ const compareRows = (left: Row, right: Row): number =>
  * detail its assignee (or `unassigned`); the lane and the card's summary are the other words it is found by. A done or
  * dropped card is `closed` (known, so `&F12` still proves, but not offered until its id is typed).
  *
- * Who asked for a card is NOT in an entry (the contract has no field for it), so the "Include agent tasks" switch has
- * nothing to filter by: GAP(board), declared in Conversation's NEEDS-APP-SHELL.txt. Dropping agent cards here instead
- * would make `&F12` of a helper's card stop proving, which is worse.
+ * An entry says who asked: `agentAsked: true` when a ferret or the daemon asked for the card (the card's own
+ * `askedBy` / `origin`), omitted when the owner did. The composer's "Include agent cards" switch filters by it and
+ * still offers the card when its id is typed, so `&F12` of a helper's card proves either way: no card is dropped here.
  *
  * The demand is the one `GET /v1/board` declares (`fleet` use), because it reads the same cards; Conversation asks it
  * of the caller before `entries` runs and refuses exactly as that route would. An entry carries card text and ids only.
@@ -93,6 +105,7 @@ export class BoardReferenceCatalog implements ReferenceCatalogProvider {
           detail,
           ...(aliases.length === 0 ? {} : { aliases }),
           ...(closed ? { closed: true } : {}),
+          ...(isAgentAsked(view) ? { agentAsked: true } : {}),
         },
       });
     }

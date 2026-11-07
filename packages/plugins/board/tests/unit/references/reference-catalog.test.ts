@@ -105,7 +105,10 @@ describe('board provides the & reference menu (reference.catalog)', () => {
 
   test('a card on a board whose lanes cannot be read stands as open under its lane id', async () => {
     const entries = await new BoardReferenceCatalog({
-      sweepBoard: async () => ({ views: [view({ id: 'F1', owner: 'f1', laneId: 'mystery' })], laneSets: new Map() }),
+      sweepBoard: async () => ({
+        views: [view({ id: 'F1', owner: 'f1', laneId: 'mystery', askedBy: 'person' })],
+        laneSets: new Map(),
+      }),
     }).entries(ask('f1'));
     expect(entries).toEqual([{ token: 'F1', label: 'Board store', detail: 'unassigned', aliases: ['mystery'] }]);
   });
@@ -156,9 +159,43 @@ describe('board provides the & reference menu (reference.catalog)', () => {
     ]).entries(ask('f1'));
     expect(JSON.stringify(entries)).not.toMatch(/ASK-TEXT|BRIEF-TEXT|CONTEXT-TEXT|TEST-TEXT/u);
     for (const entry of entries)
-      expect(Object.keys(entry).every(key => ['token', 'label', 'detail', 'aliases', 'closed'].includes(key))).toBe(
-        true,
-      );
+      expect(
+        Object.keys(entry).every(key => ['token', 'label', 'detail', 'aliases', 'closed', 'agentAsked'].includes(key)),
+      ).toBe(true);
+  });
+
+  test("agentAsked is set for a card an agent asked for and omitted for a person's, by the card's own facts", async () => {
+    const owner = { kind: 'owner' } as const;
+    const entries = await catalog([
+      view({ id: 'F1', owner: 'f1', askedBy: 'agent' }),
+      view({ id: 'F2', owner: 'f1', askedBy: 'person' }),
+      { ...view({ id: 'F3', owner: 'f1', askedBy: 'agent' }), origin: 'human' },
+      { ...view({ id: 'F4', owner: 'f1', askedBy: 'person' }), origin: 'agent' },
+      { ...view({ id: 'F5', owner: 'f1' }), origin: 'agent' },
+    ]).entries(ask('f1'));
+    const byId = new Map(entries.map(entry => [entry.token, entry]));
+    expect(byId.get('F1')?.agentAsked).toBe(true);
+    expect(byId.get('F5')?.agentAsked).toBe(true);
+    // A person's ask wins (askedBy person, or the owner's own chat: origin human), as the app's split reads it.
+    for (const id of ['F2', 'F3', 'F4']) expect(byId.get(id)).not.toHaveProperty('agentAsked');
+    // A view that says neither falls back to who raised the card.
+    const [raised, helper] = await catalog([
+      view({ id: 'F6', owner: 'f1', createdBy: owner }),
+      view({ id: 'F7', owner: 'f1' }),
+    ]).entries(ask('f1'));
+    const fallback = new Map([raised, helper].map(entry => [entry?.token, entry]));
+    expect(fallback.get('F6')).not.toHaveProperty('agentAsked');
+    expect(fallback.get('F7')?.agentAsked).toBe(true);
+    for (const entry of [...entries, raised, helper]) {
+      expect(ReferenceCatalogEntrySchema.safeParse(entry).success).toBe(true);
+    }
+  });
+
+  test('a closed agent-asked card is both: known (closed) and flagged, so its id still proves', async () => {
+    const [entry] = await catalog([view({ id: 'F1', owner: 'f1', laneId: 'closed', askedBy: 'agent' })]).entries(
+      ask('f1'),
+    );
+    expect(entry).toMatchObject({ token: 'F1', closed: true, agentAsked: true });
   });
 
   test('the demand declared is the one the direct board read declares (GET /v1/board: fleet use)', () => {
