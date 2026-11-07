@@ -25,6 +25,10 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
     "Google Authenticator's own export-link scheme (`otpauth-migration://`), an external format name the key reader " +
       'refuses by name; lead decision 2026-11-07 (DECISIONS-1 item 6)',
   ],
+  [
+    'packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts#CODEX_HIDDEN_NOTICES',
+    "Codex's own [notice] config key names, which spell 'migration'; the harness defines them, not Ferretry",
+  ],
 ]);
 
 export function compatIn(file: string, where = file): Finding[] {

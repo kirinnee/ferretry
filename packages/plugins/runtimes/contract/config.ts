@@ -88,6 +88,8 @@ export const RuntimeFileSchema = z.strictObject({
   profile: ItemNameSchema,
   /** For a login that drives both harnesses: which one this runtime runs. Left out: the profile's, else the login's. */
   harness: HarnessKeySchema.optional(),
+  /** The shell item this runtime enters (Q18): a ferret enters a shell only when its runtime names one. */
+  shell: ItemNameSchema.optional(),
   /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
   agent: z.boolean().default(false),
   disabled: DisabledConfigSchema.optional(),
