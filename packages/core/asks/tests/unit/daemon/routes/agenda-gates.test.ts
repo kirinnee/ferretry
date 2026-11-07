@@ -215,6 +215,7 @@ describe('a gate answer on the agenda route', () => {
     // Act
     await post(gates, HOST, {
       ...answer,
+      gate: true,
       response: { kind: 'multiple-choice', choice: 'Not good' },
       attachments: files,
     });
