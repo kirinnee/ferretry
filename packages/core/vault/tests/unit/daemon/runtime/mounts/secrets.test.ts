@@ -9,8 +9,11 @@ import {
   type LocalArrival,
 } from '@ferretry/kernel/contract';
 import should from 'should';
+import { MAX_SECRET_VALUE_LENGTH } from '../../../../../contract/index.ts';
 import manifest from '../../../../../manifest.ts';
 import { WebCryptoCloneCrypto } from '../../../../../daemon/adapters/secrets/webcrypto-clone-crypto.ts';
+import { MAX_REQUEST_BODY_BYTES } from '../../../../../daemon/lib/api/body.ts';
+import type { DaemonIdentity } from '../../../../../daemon/lib/secrets/clone-crypto.ts';
 import { secretRouteHandlers } from '../../../../../daemon/lib/runtime/mounts/secrets.ts';
 import {
   ChildEnvironments,
@@ -34,13 +37,28 @@ const CLOCK = { now: () => '2026-01-01T00:00:00.000Z' } as unknown as Clock;
 const TOKEN = 'sk-live-0123456789';
 const ENVS = new ChildEnvironments();
 
-function subsystem(documents = new MemorySecretDocuments()) {
+const CLONE_CRYPTO = new WebCryptoCloneCrypto();
+
+/** A real Ed25519 identity for one machine, as the clone tests mint it. */
+async function makeIdentity(): Promise<DaemonIdentity> {
+  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as unknown as CryptoKeyPair;
+  const der = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
+  return await CLONE_CRYPTO.importDaemonIdentity(
+    ['-----BEGIN PRIVATE KEY-----', ...(base64.match(/.{1,64}/gu) ?? []), '-----END PRIVATE KEY-----', ''].join('\n'),
+  );
+}
+
+function subsystem(documents = new MemorySecretDocuments(), identityKey?: DaemonIdentity) {
   const cipher = new FakeSecretCipher();
   const directory = new SecretDirectory(documents, cipher, CLOCK);
   const vault = new SecretVault(documents, cipher);
   const runner = new EchoSecretChildRunner(ENVS, env => `token=${env.TOKEN ?? ''}`);
-  const crypto = new WebCryptoCloneCrypto();
-  const identity = { load: async () => undefined };
+  const crypto = CLONE_CRYPTO;
+  const identity = { load: async () => identityKey };
   let changes = 0;
   const handlers = secretRouteHandlers({
     directory,
@@ -68,7 +86,13 @@ function call(
       query: new Map(),
       headers: new Map(),
       arrival: { kind: 'local', privileged: false } as unknown as LocalArrival,
-      text: async () => (body === undefined ? '' : JSON.stringify(body)),
+      // Honours the bound the handler reads under, as the kernel's request does: past it, the read throws.
+      text: async (limitBytes?: number) => {
+        const text = body === undefined ? '' : JSON.stringify(body);
+        if (limitBytes !== undefined && new TextEncoder().encode(text).byteLength > limitBytes)
+          throw new Error('over the body limit');
+        return text;
+      },
     },
     params: new Map(Object.entries(params)),
     ...standing,
@@ -176,13 +200,95 @@ describe('the secret routes', () => {
     should(descriptor('POST /v1/secrets/imports/:importId')?.caller).equal('person');
   });
 
-  it("S156 a use and an export are recorded as secrets.used, a put, delete and import as secrets.changed", () => {
+  /**
+   * Copies secrets from a source machine to a target through the real handlers: the target opens an import, the
+   * source seals the chosen names to it, the target files the bundle. Answers each step's JSON.
+   */
+  async function copied(
+    prepare: (machines: { source: SecretDirectory; target: SecretDirectory }) => Promise<void>,
+    names: readonly string[],
+  ) {
+    const [sourceIdentity, targetIdentity] = await Promise.all([makeIdentity(), makeIdentity()]);
+    const source = subsystem(new MemorySecretDocuments(), sourceIdentity);
+    const target = subsystem(new MemorySecretDocuments(), targetIdentity);
+    await prepare({ source: source.directory, target: target.directory });
+    const opened = await target.handlers['POST /v1/secrets/imports'](call(ownerStanding()));
+    const offer = JSON.parse(opened.body) as { readonly importId: string };
+    const exportPath = { importId: offer.importId };
+    const sealed = await source.handlers['POST /v1/secrets/exports/:importId'](
+      call(ownerStanding(), { offer, names }, exportPath),
+    );
+    const { bundle } = JSON.parse(sealed.body) as { readonly bundle: unknown };
+    const filed = await target.handlers['POST /v1/secrets/imports/:importId'](
+      call(ownerStanding(), { bundle }, { importId: offer.importId }),
+    );
+    const bodyBytes = new TextEncoder().encode(JSON.stringify({ bundle })).byteLength;
+    return { offer, exportPath, sealed, filed, target, bodyBytes };
+  }
+
+  /**
+   * Today's audit rule for the two copy routes (`lib/audit/routes.ts`): the subject is the `importId` PATH parameter,
+   * and the only field of the answer read is a list of names — `names` at the source, `imported` at the target.
+   */
+  const ruleRead = (importId: string, answer: string, field: 'names' | 'imported') => ({
+    subject: importId,
+    names: (JSON.parse(answer) as Record<string, readonly string[]>)[field],
+  });
+
+  it('S156 both ends name the same import id, names only, and the receiver records only names it imported', async () => {
+    // Arrange — the target already holds DB_PASSWORD, so a copy of it is kept, not imported.
+    const VALUE = 'correct-horse-battery-staple';
+    const { offer, exportPath, sealed, filed } = await copied(
+      async ({ source, target }) => {
+        await source.put('API_KEY', TOKEN);
+        await source.put('DB_PASSWORD', VALUE);
+        await target.put('DB_PASSWORD', 'the-target-own-value');
+      },
+      ['API_KEY', 'DB_PASSWORD'],
+    );
+
+    // Act — what today's rule records at each end.
+    const result = JSON.parse(filed.body) as { importId: string; imported: string[]; kept: string[] };
+    const sourceRecord = ruleRead(exportPath.importId, sealed.body, 'names');
+    const targetRecord = ruleRead(offer.importId, filed.body, 'imported');
+
+    // Assert — the same import id at both ends (and in the target's own answer).
+    should(sealed.status).equal(200);
+    should(filed.status).equal(200);
+    should(sourceRecord.subject).equal(targetRecord.subject);
+    should(result.importId).equal(offer.importId);
+    // Names only: the fields the rule reads are names, and no value is anywhere the rule could read it.
+    should(sourceRecord.names).deepEqual(['API_KEY', 'DB_PASSWORD']);
+    for (const answer of [sealed.body, filed.body]) {
+      should(answer).not.containEql(TOKEN);
+      should(answer).not.containEql(VALUE);
+    }
+    // The receiver records only what it actually imported; a kept name is reported, never recorded as filed.
+    should(targetRecord.names).deepEqual(['API_KEY']);
+    should(result.kept).deepEqual(['DB_PASSWORD']);
+    // And the descriptors name the kinds: `secrets.used` at the source, `secrets.changed` at the target.
     const kind = (key: string) => (descriptor(key)?.audit as { readonly record?: string } | undefined)?.record;
-    should(kind('POST /v1/secrets/use')).equal('secrets.used');
     should(kind('POST /v1/secrets/exports/:importId')).equal('secrets.used');
+    should(kind('POST /v1/secrets/imports/:importId')).equal('secrets.changed');
+    should(kind('POST /v1/secrets/use')).equal('secrets.used');
     should(kind('POST /v1/secrets')).equal('secrets.changed');
     should(kind('DELETE /v1/secrets/:name')).equal('secrets.changed');
-    should(kind('POST /v1/secrets/imports/:importId')).equal('secrets.changed');
+  });
+
+  it("should file a valid import bundle past half a mebibyte, under today's request body bound", async () => {
+    // Arrange — 40 secrets at the 16 KiB value ceiling seal to a bundle of roughly 875 KB.
+    const names = Array.from({ length: 40 }, (_, index) => `BIG_${String(index).padStart(2, '0')}`);
+    const { filed, target, bodyBytes } = await copied(async ({ source }) => {
+      for (const [index, name] of names.entries())
+        await source.put(name, `${name}-`.padEnd(MAX_SECRET_VALUE_LENGTH, String.fromCharCode(97 + (index % 26))));
+    }, names);
+
+    // Assert — today's bound (MAX_REQUEST_BODY_BYTES), not a tighter one, so the whole batch is filed.
+    should(bodyBytes).be.above(512 * 1024);
+    should(bodyBytes).be.below(MAX_REQUEST_BODY_BYTES);
+    should(filed.status).equal(200);
+    should((JSON.parse(filed.body) as { imported: string[] }).imported).deepEqual(names);
+    should((await target.directory.list()).length).equal(40);
   });
 
   it('S159 S147 sealing for another machine needs a passkey for that act, even from an unlocked device', async () => {
@@ -241,7 +347,9 @@ describe('the secret routes', () => {
 
   it('should refuse a relative working directory with 400 invalid_cwd', async () => {
     const { handlers } = subsystem();
-    const error = await refusal(handlers['POST /v1/secrets/use'](call(ownerStanding(), { command: ['env'], cwd: 'rel' })));
+    const error = await refusal(
+      handlers['POST /v1/secrets/use'](call(ownerStanding(), { command: ['env'], cwd: 'rel' })),
+    );
     should(error.status).equal(400);
     should(error.code).equal('invalid_cwd');
   });
