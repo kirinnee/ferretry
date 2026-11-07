@@ -12,7 +12,9 @@
  * - **Secrets.** Every text passes the redactor's scrub before it is indexed. When the set of known values changes (its
  *   epoch), the next search rebuilds the whole index before it answers. The kernel's redaction carries no epoch yet, so
  *   every answer is ALSO re-judged on its matched work scrubbed again inside one redaction read: a value registered as a
- *   secret after it was written on a card stops being findable at once, and a redaction that cannot open refuses.
+ *   secret after it was written on a card stops being findable at once — no hit, count, score or order tells whether
+ *   it appears — and a redaction that cannot open refuses EVERY answer alike, matched or not: refusing only the queries
+ *   that matched would itself say the guessed value is in the work.
  *
  * The first search waits for the first full build; {@link warm} starts it at boot so it rarely has to.
  */
@@ -96,14 +98,12 @@ export class WorkSearchService {
     await this.current();
     const nowMs = this.ports.now();
     const keys = this.index.matchingKeys(query);
-    const { hits, total, olderHidden } =
-      keys.length === 0
-        ? { hits: [], total: 0, olderHidden: 0 }
-        : await this.ports.redaction.batch(scrub => {
-            const now = new WorkIndex();
-            for (const document of this.rescrubbed(keys, scrub).values()) now.put(document);
-            return now.search(query, nowMs);
-          });
+    // The read opens for every query, matched or not, so a redaction that fails refuses them all the same way.
+    const { hits, total, olderHidden } = await this.ports.redaction.batch(scrub => {
+      const now = new WorkIndex();
+      for (const document of this.rescrubbed(keys, scrub).values()) now.put(document);
+      return now.search(query, nowMs);
+    });
     return {
       hits: [...hits],
       total,
@@ -116,8 +116,9 @@ export class WorkSearchService {
     await this.current();
     const nowMs = this.ports.now();
     const ask = request.ask ?? '';
-    const keys = this.index.relatedKeys(request.title, ask, nowMs);
-    if (keys.length === 0) return { matches: [] };
+    // Every candidate, not only the ones that matched as indexed: they are also what says how rare each asked word is
+    // now. And the read opens even when there is none, so a failing redaction refuses every check alike.
+    const keys = this.index.relatedCandidates(request.title, ask);
     const matches = await this.ports.redaction.batch(scrub =>
       this.index.relatedAmong(request.title, ask, nowMs, MAX_WORK_RELATED_HITS, this.rescrubbed(keys, scrub)),
     );

@@ -127,3 +127,73 @@ describe('a value that became a secret after it was indexed (no epoch moved)', (
     await expect(service.related({ kind: 'card', title: 'Login' })).rejects.toThrow('the vault will not open');
   });
 });
+
+describe('G164 work search cannot tell whether a value that became a secret appears (review round 2 probes)', () => {
+  const HIDDEN = 'zqsecret';
+  const GUESS = 'zqguess';
+  const board = () =>
+    new FakeSource(
+      'cards',
+      [
+        cardWork({ id: 'F1', title: 'Quokka widget' }),
+        cardWork({ id: 'F2', title: `Plinth ${HIDDEN}` }),
+        cardWork({ id: 'F3', title: `Marble ${HIDDEN}` }),
+        cardWork({ id: 'F4', title: 'Unrelated thing' }),
+      ],
+      true,
+    );
+  /** Indexed while the value was ordinary text, then registered as a secret with no epoch change. */
+  const afterIndexing = async () => {
+    const redaction = new FakeRedaction();
+    const { service } = build([board()], { redaction });
+    await service.search(query('quokka'));
+    redaction.values = [HIDDEN];
+    return { service, redaction };
+  };
+  const relatedOf = async (service: WorkSearchService, title: string) =>
+    (await service.related({ kind: 'card', title })).matches.map(match => [
+      match.hit.id,
+      match.strength,
+      match.hit.score,
+    ]);
+
+  test('G164 a search for it finds, counts and quotes nothing, exactly like a word nobody wrote', async () => {
+    const { service } = await afterIndexing();
+    const secret = await service.search(query(HIDDEN, { all: true }));
+    const guess = await service.search(query(GUESS, { all: true }));
+    expect(secret).toEqual(guess);
+    expect(secret).toMatchObject({ hits: [], total: 0, olderHidden: 0 });
+    const prefix = await service.search(query('zqs', { all: true }));
+    expect(prefix).toMatchObject({ hits: [], total: 0 });
+  });
+
+  test('G164 a related check weighs it like a word no item holds: the same scores, strengths and order', async () => {
+    const { service, redaction } = await afterIndexing();
+    const secret = await relatedOf(service, `Quokka widget ${HIDDEN}`);
+    const guess = await relatedOf(service, `Quokka widget ${GUESS}`);
+    expect(secret).toEqual(guess);
+    redaction.generation += 1;
+    expect(await relatedOf(service, `Quokka widget ${HIDDEN}`)).toEqual(secret);
+  });
+
+  test('G164 a related check cannot reach an item through the mask the secret left behind', async () => {
+    const { service } = await afterIndexing();
+    expect(await relatedOf(service, `Plinth redacted ${HIDDEN}`)).toEqual(
+      await relatedOf(service, `Plinth redacted ${GUESS}`),
+    );
+    expect(await relatedOf(service, `Pebble redacted ${HIDDEN}`)).toEqual(
+      await relatedOf(service, `Pebble redacted ${GUESS}`),
+    );
+  });
+
+  test('G164 a redaction that fails refuses every search and related check alike, matched or not', async () => {
+    const { service, redaction } = await afterIndexing();
+    redaction.batch = async () => {
+      throw new Error('vault closed');
+    };
+    for (const q of [HIDDEN, GUESS, 'quokka'])
+      await expect(service.search(query(q, { all: true }))).rejects.toThrow('vault closed');
+    for (const title of [`Quokka ${HIDDEN}`, `Quokka ${GUESS}`, GUESS])
+      await expect(service.related({ kind: 'card', title })).rejects.toThrow('vault closed');
+  });
+});

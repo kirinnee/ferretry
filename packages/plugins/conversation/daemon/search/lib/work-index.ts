@@ -115,6 +115,9 @@ export class WorkIndex {
     return this.documents.keys();
   }
 
+  /** How many indexed documents hold a word in their title, summary or ask. */
+  private readonly indexedFrequency = (token: string): number => this.coreFrequency.get(token) ?? 0;
+
   /** Adds or replaces a document. */
   put(document: WorkDocument): void {
     this.remove(document.key);
@@ -208,20 +211,36 @@ export class WorkIndex {
    * Closed work is at most `weak`: a near copy of finished work is more often a follow-up than a mistake.
    */
   related(title: string, ask: string, nowMs: number, limit: number): readonly WorkRelatedMatch[] {
-    return this.relatedMatches(title, ask, nowMs, key => this.documents.get(key))
-      .slice(0, limit)
-      .map(({ strength, hit }) => ({ strength, hit }));
-  }
-
-  /** The keys {@link related} would answer with, every one of them, as the documents were indexed. */
-  relatedKeys(title: string, ask: string, nowMs: number): readonly string[] {
-    return this.relatedMatches(title, ask, nowMs, key => this.documents.get(key)).map(match => match.key);
+    return this.relatedMatches(title, ask, nowMs, key => this.documents.get(key), this.indexedFrequency).slice(
+      0,
+      limit,
+    );
   }
 
   /**
-   * {@link related}, judged on the documents given instead of the ones indexed (the same pieces of work, scrubbed
-   * again now): a piece of work missing from `documents` is not an answer. The rarity of each word is still the
-   * index's, so strengths agree with an ordinary related check.
+   * Every piece of work a related check on this title and ask could weigh: each one whose title, summary or ask held one
+   * of the asked words when it was indexed. The service scrubs them all again before {@link relatedAmong} judges them,
+   * because those are also the documents that say how rare each asked word is.
+   */
+  relatedCandidates(title: string, ask: string): readonly string[] {
+    const asked = meaningfulTokens(`${title}\n${ask}`);
+    const keys = new Set<string>();
+    for (const token of asked)
+      for (const key of this.postings.get(token)?.keys() ?? [])
+        if (this.documents.get(key)?.core.has(token) === true) keys.add(key);
+    return [...keys];
+  }
+
+  /**
+   * {@link related}, judged on the documents given instead of the ones indexed (the same pieces of work, scrubbed again
+   * now, every one {@link relatedCandidates} named): a piece of work missing from `documents` is not an answer.
+   *
+   * NOTHING ABOUT A VALUE THAT BECAME A SECRET MAY MOVE THE ANSWER. A document's words are the ones it held both when it
+   * was indexed AND now, so a word the scrub took away stops counting and a word the mask put in never starts (it would
+   * make a document a candidate only because the asked secret named it). And how rare an ASKED word is comes from those
+   * same documents, never from the index: the index's count still holds every item the secret was written in, and that
+   * count steers the score of every other hit. A secret therefore reads exactly like a word no item holds. The rarity
+   * of a document's own words that were not asked is still the index's: it does not depend on what was asked.
    */
   relatedAmong(
     title: string,
@@ -231,10 +250,19 @@ export class WorkIndex {
     documents: ReadonlyMap<string, WorkDocument>,
   ): readonly WorkRelatedMatch[] {
     const held = new Map<string, Indexed>();
-    for (const [key, document] of documents) held.set(key, indexedOf(document));
-    return this.relatedMatches(title, ask, nowMs, key => held.get(key))
-      .slice(0, limit)
-      .map(({ strength, hit }) => ({ strength, hit }));
+    for (const [key, document] of documents) {
+      const indexed = this.documents.get(key);
+      if (indexed === undefined) continue;
+      const now = indexedOf(document);
+      held.set(key, { ...now, core: new Set([...now.core].filter(token => indexed.core.has(token))) });
+    }
+    const asked = new Set(meaningfulTokens(`${title}\n${ask}`));
+    const askedFrequency = new Map<string, number>();
+    for (const { core } of held.values())
+      for (const token of core) if (asked.has(token)) askedFrequency.set(token, (askedFrequency.get(token) ?? 0) + 1);
+    const frequency = (token: string): number =>
+      asked.has(token) ? (askedFrequency.get(token) ?? 0) : (this.coreFrequency.get(token) ?? 0);
+    return this.relatedMatches(title, ask, nowMs, key => held.get(key), frequency).slice(0, limit);
   }
 
   private relatedMatches(
@@ -242,13 +270,14 @@ export class WorkIndex {
     ask: string,
     nowMs: number,
     documentOf: (key: string) => Indexed | undefined,
-  ): readonly (WorkRelatedMatch & { readonly key: string })[] {
+    frequency: (token: string) => number,
+  ): readonly WorkRelatedMatch[] {
     const newTitle = meaningfulTokens(title);
     const asked = meaningfulTokens(`${title}\n${ask}`);
     if (asked.length === 0) return [];
     const phrase = normalizePhrase(title);
     const total = this.documents.size;
-    const idf = (token: string): number => Math.log(1 + total / Math.max(1, this.coreFrequency.get(token) ?? 0));
+    const idf = (token: string): number => Math.log(1 + total / Math.max(1, frequency(token)));
     const squared = (tokens: Iterable<string>): number => {
       let sum = 0;
       for (const token of tokens) sum += idf(token) ** 2;
@@ -288,7 +317,6 @@ export class WorkIndex {
           right.indexed.document.updatedAtMs - left.indexed.document.updatedAtMs,
       )
       .map(({ strength, closeness, indexed }) => ({
-        key: indexed.document.key,
         strength,
         hit: hitOf(indexed.document, Math.round(closeness * 100), asked, 0),
       }));
