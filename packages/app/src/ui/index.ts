@@ -49,3 +49,4 @@ export * from './lib/orientation-lock.ts';
 export * from './lib/title-marquee.ts';
 export * from './lib/viewport-diagnostics.ts';
 export * from '../security/trusted-types.ts';
+export * from './copy-button.tsx';

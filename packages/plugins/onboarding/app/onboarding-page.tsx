@@ -55,7 +55,7 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
+import { useKeyboardOpen } from '@ferretry/app/ui';
 import type { ClipboardWriter } from './copy-button.tsx';
 import type { HostedRelayFallback } from './pending-connections.ts';
 import { activeCarrierStatus, carrierDisclosure } from './connection-disclosure.ts';

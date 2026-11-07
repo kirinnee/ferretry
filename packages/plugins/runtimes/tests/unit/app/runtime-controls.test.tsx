@@ -142,7 +142,7 @@ describe('RuntimeModelChoices', () => {
         choices={null}
         disabled={false}
         error={new Error('catalog exploded')}
-        harness="claude"
+        harness="claude-code"
         onChoose={() => undefined}
       />,
     );
@@ -154,7 +154,13 @@ describe('RuntimeModelChoices', () => {
 
   test('shows a loading readout while the catalog is unknown', async () => {
     const screen = await mount(
-      <RuntimeModelChoices choices={null} disabled={false} error={null} harness="claude" onChoose={() => undefined} />,
+      <RuntimeModelChoices
+        choices={null}
+        disabled={false}
+        error={null}
+        harness="claude-code"
+        onChoose={() => undefined}
+      />,
     );
     expect(screen.container.textContent).toContain('Loading account-aware model choices');
     await screen.unmount();
@@ -162,7 +168,13 @@ describe('RuntimeModelChoices', () => {
 
   test('says so when the account advertises nothing', async () => {
     const screen = await mount(
-      <RuntimeModelChoices choices={[]} disabled={false} error={null} harness="claude" onChoose={() => undefined} />,
+      <RuntimeModelChoices
+        choices={[]}
+        disabled={false}
+        error={null}
+        harness="claude-code"
+        onChoose={() => undefined}
+      />,
     );
     expect(screen.container.textContent).toContain('does not advertise any in-place model choices');
     await screen.unmount();
@@ -176,7 +188,7 @@ describe('RuntimeModelChoices', () => {
         currentModel="claude-sonnet-5"
         disabled={false}
         error={null}
-        harness="claude"
+        harness="claude-code"
         onChoose={choice => chosen.push(choice.value)}
         submittingModel="claude-opus-5"
       />,
@@ -184,7 +196,7 @@ describe('RuntimeModelChoices', () => {
 
     // A labelled single-choice menu: the role carries the label a bare div could not.
     const list = must(screen.container.querySelector('[role="menu"]'), 'the choice list');
-    expect(list.getAttribute('aria-label')).toBe('Switch claude model in place');
+    expect(list.getAttribute('aria-label')).toBe('Switch claude-code model in place');
     expect(list.querySelectorAll('[role="menuitemradio"]').length).toBe(2);
 
     const current = byLabel(screen.container, 'Switch model in place to claude-sonnet-5, current');
