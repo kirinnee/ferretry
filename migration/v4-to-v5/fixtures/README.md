@@ -37,7 +37,8 @@ the public URL otherwise.
 ## Boot v5 on the converted home
 
 `boot-v5.ts --fixture <out>` starts this repository's v5 `fyd` (from source, `--port 0`, a disposable `HOME`) on the
-converter's real output `<out>/v5`, which must be complete. It fails for any plugin v5 reports down — a state file it
+converter's real output `<out>/v5`, which must be complete, after booting it on an empty home as a baseline. It fails for
+any plugin v5 reports down on the converted home alone (one down on the empty home too is v5's bug: a warning) — a state file it
 refuses (named `state/<plugin>/<file>`), a plugin that failed or needs one that did, a folder moved aside — and checks
 through v5's own routes that the ferrets, project, cards and agenda items in `made.json` are there. While v5's Gate is a
 skeleton every authenticated route answers `503 admission_unavailable`, so those data checks are skipped with a warning
