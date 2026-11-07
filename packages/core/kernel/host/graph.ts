@@ -1,11 +1,20 @@
 import type { PortToken } from '../contract/define.ts';
+import { KERNEL_ONLY_PORTS } from '../contract/bound.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import type { Manifest } from '../manifest/types.ts';
 
 /** Why a plugin is not started (§3.4 checked/resolved, §2.4). Each is a plain sentence for `fy doctor`. */
 export interface GraphRefusal {
   readonly plugin: string;
-  readonly reason: 'off' | 'missing-provider' | 'cycle' | 'bound-port' | 'duplicate' | 'needs-refused' | 'hook';
+  readonly reason:
+    | 'off'
+    | 'missing-provider'
+    | 'cycle'
+    | 'bound-port'
+    | 'duplicate'
+    | 'needs-refused'
+    | 'hook'
+    | 'kernel-only-port';
   readonly sentence: string;
 }
 
@@ -75,6 +84,20 @@ export function planGraph(
       }
       providers.set(token.name, manifest.id);
     }
+  }
+
+  // A port only the kernel may hold (the ChildEnvironment opener) reaches no half, through needs or uses.
+  for (const manifest of byId.values()) {
+    if (refused.has(manifest.id)) continue;
+    const asked = [...tokens(manifest.needs), ...tokens(manifest.uses)].find(token =>
+      KERNEL_ONLY_PORTS.includes(token.name),
+    );
+    if (asked !== undefined)
+      refuse({
+        plugin: manifest.id,
+        reason: 'kernel-only-port',
+        sentence: `${manifest.title} asks for ${asked.name}, which only the kernel may hold.`,
+      });
   }
 
   // Required providers, transitively: a plugin whose need is refused is refused too.

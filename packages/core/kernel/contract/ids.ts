@@ -20,7 +20,11 @@ export type PluginApi = typeof PLUGIN_API;
 /** A ferret's id, minted by Ferrets. The kernel only carries it (spawn limits, work folders, actor stamps). */
 export type FerretId = Brand<string, 'FerretId'>;
 
-/** The device id or member id whose key signed a session's transcript (§7.1). */
+/**
+ * The device id or member key id whose key signed a session's transcript (§7.1).
+ * A Catalogs member session names the member KEY id (today's SessionMember.keyId),
+ * so tracking, unlocking and revoking apply to that key individually.
+ */
 export type HolderId = Brand<string, 'HolderId'>;
 
 /** One sealed session on the session layer. */

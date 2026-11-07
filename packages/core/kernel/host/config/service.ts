@@ -27,6 +27,7 @@
  * Every load and every write runs one at a time, so two of them can never each decide against a record the other is
  * about to replace.
  */
+import { addedSecretReferenceSentences, secretReferencesIn } from '../secrets.ts';
 import { createHash } from 'node:crypto';
 import { type Duration, milliseconds } from '@ferretry/std';
 import type {
@@ -34,10 +35,14 @@ import type {
   Clock,
   ConfigCollectionDef,
   ConfigFileDef,
+  ConfigFileStatus,
+  ConfigFilesWriter,
   ConfigPort,
+  ConfigWriteOutcome,
   Log,
   StatePort,
 } from '../../contract/index.ts';
+import { judgeLoosening } from '../../contract/define.ts';
 import { StoreDamagedError } from '../state/errors.ts';
 import type { HostFs } from '../state/host-fs.ts';
 import { createStatePort } from '../state/state-port.ts';
@@ -95,8 +100,15 @@ export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unkn
 export interface ConfigWriteOptions {
   /** Whether the caller may put a loosening into effect in this same act (Gate proved it). Default: no. */
   readonly confirmedLoosening?: boolean;
+  /** Asked only when the edit loosens and `confirmedLoosening` is not set: Gate's judge for a plugin's own write. */
+  readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
   /** The etag the editor read; a file that moved since is refused `conflict`. */
   readonly ifMatch?: string;
+  /**
+   * The plugin's OWN write (`kernel.config.write`): an edit that adds a `${secret:NAME}` reference is held for the
+   * owner, and neither Gate's judge nor anything else confirms it (NN2). The owner's writer never sets it.
+   */
+  readonly byPlugin?: true;
 }
 
 export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
@@ -115,7 +127,7 @@ export type ConfigWriteResult =
 export type ConfigRemoveResult =
   | { readonly kind: 'applied'; readonly loosened: readonly string[] }
   | { readonly kind: 'held'; readonly id: string; readonly sentences: readonly string[] }
-  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' };
+  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' | 'conflict' };
 
 export interface ConfigFileView {
   readonly path: string;
@@ -143,6 +155,16 @@ export interface ConfigFilesOptions {
   readonly binary: string;
   /** The kernel's state port, which must declare {@link acceptedConfigFile}; absent, one is made over `fs`. */
   readonly state?: StatePort;
+  /**
+   * Gate's judge of a plugin's OWN loosening write (`Admission.judgeConfigWrite`, read live, with the call's actor):
+   * true puts it into effect. Absent or throwing: held for the owner.
+   */
+  readonly judge?: (input: {
+    readonly plugin: string;
+    readonly path: string;
+    readonly removal: boolean;
+    readonly sentences: readonly string[];
+  }) => boolean;
 }
 
 export interface ConfigFiles {
@@ -178,6 +200,45 @@ export interface ConfigFiles {
   directories(): Promise<readonly string[]>;
   /** Writes every def's JSON Schema into `config/.schema/`, each only when it changed. */
   publishSchemas(): Promise<void>;
+  /** The writer over every declared file, as Gate receives it (`kernel.configFiles`). */
+  writer(): ConfigFilesWriter;
+  /**
+   * Every `${secret:NAME}` the plugin's OWN files name, as they are IN EFFECT (an edit held for the owner names
+   * nothing yet): what `kernel.secrets` checks a name against.
+   */
+  secretReferences(plugin: string): ReadonlySet<string>;
+}
+
+/** A write result as the contract says it: never thrown, `conflict` on its own. */
+export function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
+  if (result.kind === 'applied') return { kind: 'written', etag: result.etag, loosened: result.loosened };
+  if (result.kind === 'held') return { kind: 'held', etag: result.etag, id: result.id, sentences: result.sentences };
+  if (result.reason === 'conflict') return { kind: 'conflict' };
+  return {
+    kind: 'refused',
+    reason: result.reason,
+    issues: result.issues.map(issue => ({
+      path: issue.path,
+      ...(issue.line === undefined ? {} : { line: issue.line }),
+      message: issue.message,
+    })),
+  };
+}
+
+/** An entry's state as the contract names it. */
+function statusOf(evaluated: EvaluatedConfig | undefined): ConfigFileStatus {
+  if (evaluated === undefined) return { state: 'absent', inEffect: false, sentences: [] };
+  const inEffect = evaluated.inEffect !== undefined;
+  switch (evaluated.state) {
+    case 'ok':
+      return { state: 'valid', inEffect, sentences: [] };
+    case 'pending':
+      return { state: 'held', inEffect, sentences: evaluated.held?.sentences ?? [] };
+    case 'invalid':
+      return { state: 'invalid', inEffect, sentences: evaluated.issues.map(issue => issue.message) };
+    default:
+      return { state: 'absent', inEffect, sentences: [] };
+  }
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -447,14 +508,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return {
       file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined {
         own(def);
-        return settled.get(def.file)?.evaluated.value as Shape | undefined;
+        // The settled value is authority (including secret references), never a plugin's mutable object.
+        return structuredClone(settled.get(def.file)?.evaluated.value) as Shape | undefined;
       },
       collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape> {
         own(def);
         const found = new Map<string, Shape>();
         for (const { slot, evaluated } of settled.values()) {
           if (slot.declaration.def === def && slot.name !== undefined && evaluated.value !== undefined)
-            found.set(slot.name, evaluated.value as Shape);
+            found.set(slot.name, structuredClone(evaluated.value) as Shape);
         }
         return new Map([...found].toSorted(([a], [b]) => a.localeCompare(b)));
       },
@@ -465,6 +527,26 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         set.add(listener);
         return () => void set.delete(listener);
       },
+      fileState(def, name): ConfigFileStatus {
+        own(def);
+        const declaration = declared(pluginId, def as ConfigDef) as ConfigDeclaration;
+        const slot = slotFor(declaration, name);
+        return statusOf(slot === undefined ? undefined : settled.get(slot.path)?.evaluated);
+      },
+      // A plugin's own write takes the one writer; a loosening goes into effect only on Gate's judge, else it is held.
+      write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+        writeOutcome(
+          await write(pluginId, def as ConfigDef, name, edit, {
+            byPlugin: true,
+            judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+            ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+          }),
+        ),
+      remove: async (def, name, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+        await removeOutcome(pluginId, def as ConfigDef, name, {
+          judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+          ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+        }),
     };
   };
 
@@ -509,6 +591,20 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return editConfigText(existing, target, current, schemaModeline(def, slot.path));
   };
 
+  const askJudge = (writeOptions: ConfigWriteOptions, sentences: readonly string[], removal: boolean): boolean => {
+    try {
+      return writeOptions.judge?.(sentences, removal) === true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** A plugin's own write: Gate's judge, never a confirmation of its own. */
+  const ownJudge =
+    (plugin: string, path: () => string) =>
+    (sentences: readonly string[], removal: boolean): boolean =>
+      options.judge?.({ plugin, path: path(), removal, sentences }) === true;
+
   const write = async (
     plugin: string,
     def: ConfigDef,
@@ -544,15 +640,20 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         };
       const etag = digest(text);
       const before = settled.get(slot.path)?.evaluated.value;
-      const loosens =
-        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : def.loosens(before, checked.value);
-      if (loosens.length === 0 || writeOptions.confirmedLoosening === true) acknowledge(slot.path, text);
+      const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
+      const added =
+        unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, checked.value);
+      const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
+      const confirmed =
+        added.length === 0 &&
+        (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
+      if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
       await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
       await load();
       const held = settled.get(slot.path)?.evaluated.held;
       return held !== undefined && held.etag === etag
         ? { kind: 'held', etag, id: idOf(slot.path, etag), sentences: held.sentences }
-        : { kind: 'applied', etag, text, loosened: writeOptions.confirmedLoosening === true ? loosens : [] };
+        : { kind: 'applied', etag, text, loosened: confirmed ? loosens : [] };
     });
   };
 
@@ -568,21 +669,46 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name' };
     return await serial(async () => {
       await load();
+      const disk = await readDisk(slot.path);
+      const etag = disk.kind === 'text' ? digest(disk.text) : ABSENT_CONFIG_ETAG;
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etag)
+        return { kind: 'refused', reason: 'conflict' };
       const current = settled.get(slot.path);
       const defaults = defaultsOf(def);
+      // A deletion is judged even with no defaults: `after` is then `undefined` (K5).
       const sentences =
-        current?.evaluated.inEffect === undefined || defaults === undefined
-          ? []
-          : def.loosens(current.evaluated.value, defaults);
-      if (sentences.length === 0 || writeOptions.confirmedLoosening === true)
-        acknowledgedRemovals.set(slot.path, options.clock.nowMs());
+        current?.evaluated.inEffect === undefined ? [] : judgeLoosening(def, current.evaluated.value, defaults);
+      const confirmed =
+        writeOptions.confirmedLoosening === true || (sentences.length > 0 && askJudge(writeOptions, sentences, true));
+      if (sentences.length === 0 || confirmed) acknowledgedRemovals.set(slot.path, options.clock.nowMs());
       await fs.remove(`${root}/${slot.path}`);
       await load();
       const held = settled.get(slot.path)?.evaluated.held;
       return held !== undefined && held.etag === ABSENT_CONFIG_ETAG
         ? { kind: 'held', id: idOf(slot.path, held.etag), sentences: held.sentences }
-        : { kind: 'applied', loosened: writeOptions.confirmedLoosening === true ? sentences : [] };
+        : { kind: 'applied', loosened: confirmed ? sentences : [] };
     });
+  };
+
+  /** The file a def and name write, relative to `config/` (the def's own path when the name does not fit). */
+  const pathOf = (plugin: string, def: ConfigDef, name: string | undefined): string => {
+    const declaration = declared(plugin, def);
+    const slot = declaration === undefined ? undefined : slotFor(declaration, name);
+    return slot?.path ?? claimOf(def);
+  };
+
+  const removeOutcome = async (
+    plugin: string,
+    def: ConfigDef,
+    name: string | undefined,
+    writeOptions: ConfigWriteOptions,
+  ): Promise<ConfigWriteOutcome> => {
+    const removed = await remove(plugin, def, name, writeOptions);
+    if (removed.kind === 'applied') return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
+    if (removed.kind === 'held')
+      return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
+    if (removed.reason === 'conflict') return { kind: 'conflict' };
+    return { kind: 'refused', reason: removed.reason, issues: [] };
   };
 
   const confirm = async (id: string): Promise<boolean> =>
@@ -685,6 +811,12 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     write,
     remove,
     read,
+    secretReferences: plugin => {
+      const named = new Set<string>();
+      for (const entry of settled.values())
+        if (entry.slot.declaration.plugin === plugin) secretReferencesIn(entry.evaluated.value, named);
+      return named;
+    },
     held: () => heldOf(settled),
     confirm,
     discard,
@@ -693,5 +825,28 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     status,
     startWatching,
     publishSchemas,
+    writer: (): ConfigFilesWriter => ({
+      declarations: () => declarations.map(({ plugin, def }) => ({ plugin, def })),
+      read: async target => {
+        const view = await read(target.plugin, target.def as ConfigDef, target.name);
+        if (view === undefined) return undefined;
+        const declaration = declared(target.plugin, target.def as ConfigDef) as ConfigDeclaration;
+        const slot = slotFor(declaration, target.name) as Slot;
+        return {
+          path: view.path,
+          exists: view.exists,
+          text: view.text,
+          etag: view.etag,
+          status: statusOf(settled.get(slot.path)?.evaluated),
+        };
+      },
+      write: async (target, edit, writeOptions = {}) =>
+        writeOutcome(await write(target.plugin, target.def as ConfigDef, target.name, edit, writeOptions)),
+      remove: async (target, writeOptions = {}) =>
+        await removeOutcome(target.plugin, target.def as ConfigDef, target.name, writeOptions),
+      held: () => heldOf(settled),
+      confirm,
+      discard,
+    }),
   };
 }

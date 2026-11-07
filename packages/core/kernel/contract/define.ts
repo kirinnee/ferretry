@@ -222,8 +222,36 @@ export function defineState<const Name extends string, Shape = unknown>(spec: {
 /**
  * Which edits loosen spend or authority (§7.2). An empty list = not loosening; a loosening edit is held for the owner.
  * Each entry is a plain sentence naming what widened.
+ *
+ * A DELETION is judged too (lead decision 9, K5): `after` is the schema's defaults, or `undefined` when it has none.
+ * A judgement written against this type does not expect `undefined`, so the kernel holds a deletion whose judgement
+ * throws ({@link judgeLoosening}) rather than letting it through unjudged; one that answers a deletion in words is a
+ * {@link LoosensWithRemoval}.
  */
 export type Loosens<Shape> = (before: Shape | undefined, after: Shape) => readonly string[];
+
+/** A {@link Loosens} that judges a deletion itself: `after` is `undefined` when the file is gone with no defaults. */
+export type LoosensWithRemoval<Shape> = (before: Shape | undefined, after: Shape | undefined) => readonly string[];
+
+/**
+ * The kernel's call of a def's `loosens`: a judgement that throws (a `loosens` written before `after` could be
+ * `undefined`) is a loosening that waits for the owner, never an unjudged edit.
+ */
+export function judgeLoosening<Shape>(
+  def: { loosens(before: Shape | undefined, after: Shape | undefined): readonly string[] },
+  before: Shape | undefined,
+  after: Shape | undefined,
+): readonly string[] {
+  try {
+    return def.loosens(before, after);
+  } catch {
+    return [
+      after === undefined
+        ? 'Removing this file could not be judged, so it waits for the owner.'
+        : 'This edit could not be judged, so it waits for the owner.',
+    ];
+  }
+}
 
 interface ConfigBase<Shape> {
   readonly kind: 'config';
@@ -231,7 +259,7 @@ interface ConfigBase<Shape> {
   /** The grant axis a remote editor needs; Gate applies it to `fy config write` and the app's editor. */
   readonly axis: CapabilityAxis;
   /** Method syntax on purpose: bivariant, so a typed `defineConfig` result is a `ConfigDef` (lead decision 4). */
-  loosens(before: Shape | undefined, after: Shape): readonly string[];
+  loosens(before: Shape | undefined, after: Shape | undefined): readonly string[];
   /** Person-only and passkey-checked (`plugins.yaml`, `gate.yaml`). */
   readonly personOnly?: true;
 }
@@ -255,7 +283,12 @@ export function defineConfig<Shape>(spec: {
   readonly file: string;
   readonly schema: z.ZodType<Shape>;
   readonly axis: CapabilityAxis;
-  readonly loosens: Loosens<Shape>;
+  /**
+   * Method syntax, `after: Shape` for an inline judgement; a named {@link Loosens} (whose `after` may be
+   * `undefined`) fits too. On a deletion with no defaults the kernel passes `undefined`, and a judgement that
+   * throws on it is held for the owner (`judgeLoosening`), so an older inline one fails closed.
+   */
+  loosens(before: Shape | undefined, after: Shape): readonly string[];
   readonly personOnly?: true;
 }): ConfigFileDef<Shape>;
 export function defineConfig<Shape>(spec: {
@@ -263,7 +296,7 @@ export function defineConfig<Shape>(spec: {
   readonly name: RegExp;
   readonly schema: z.ZodType<Shape>;
   readonly axis: CapabilityAxis;
-  readonly loosens: Loosens<Shape>;
+  loosens(before: Shape | undefined, after: Shape): readonly string[];
   readonly personOnly?: true;
 }): ConfigCollectionDef<Shape>;
 export function defineConfig(spec: Record<string, unknown>): ConfigDef {

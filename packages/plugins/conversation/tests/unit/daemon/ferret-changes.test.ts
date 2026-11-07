@@ -75,6 +75,7 @@ const unlockingWorker = (): WorkerHandle => {
         listener = undefined;
       };
     },
+    onExit: () => () => undefined,
     terminate: async () => undefined,
   };
 };

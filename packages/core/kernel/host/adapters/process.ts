@@ -1,10 +1,15 @@
+import { close as closeDescriptor } from 'node:fs';
 import type { ChildEnvironment, ChildEnvironmentOpener } from '../../contract/bound.ts';
 import type {
   ChildHandle,
   FetchPort,
+  SpawnBytesOptions,
+  SpawnBytesResult,
   SpawnOptions,
   SpawnPort,
   SpawnResult,
+  WebSocketClient,
+  WebSocketPort,
   WorkerHandle,
   WorkersPort,
 } from '../../contract/ports.ts';
@@ -15,6 +20,9 @@ import type {
  * values go straight into the child and never back to the caller (lead decision 9). A handle with no opener bound, or
  * one the opener does not recognise, refuses the start: it is never passed through as if it were plain values.
  */
+/** The most extra pipes one child may have (Chrome's DevTools pipe needs two). */
+export const MAX_EXTRA_PIPES = 4;
+
 export function bunSpawn(
   baseEnv: Readonly<Record<string, string>>,
   opener: () => ChildEnvironmentOpener | undefined = () => undefined,
@@ -24,21 +32,42 @@ export function bunSpawn(
     ...resolveEnv(options?.env, opener()),
   });
   const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
-    const child = Bun.spawn([program, ...args], {
-      ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
-      env: env(options),
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      ...(options?.signal === undefined ? {} : { signal: options.signal }),
-      ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-    });
+    const cwd = options?.cwd;
+    // A pin is installed for exactly the one spawn statement, no await inside the bracket, and the child is given
+    // `.`: it inherits the held directory and resolves `.` against it, never a name re-resolved after the fact.
+    const release = cwd === undefined || typeof cwd === 'string' ? undefined : cwd.install();
+    const extra = options?.extraPipes ?? 0;
+    if (!Number.isInteger(extra) || extra < 0 || extra > MAX_EXTRA_PIPES)
+      throw new RangeError(`extraPipes must be a whole number from 0 to ${String(MAX_EXTRA_PIPES)}`);
+    let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>;
+    try {
+      child = Bun.spawn([program, ...args], {
+        ...(cwd === undefined ? {} : { cwd: typeof cwd === 'string' ? cwd : '.' }),
+        env: env(options),
+        ...(extra === 0
+          ? { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }
+          : { stdio: ['pipe', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] }),
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
+      });
+    } finally {
+      release?.();
+    }
     if (options?.stdin !== undefined) {
       child.stdin.write(options.stdin);
       void child.stdin.end();
     }
+    // Reading `stdio` hands the daemon's ends over; Bun made them close-on-exec.
+    const pipes = extra === 0 ? [] : (child.stdio as unknown as readonly (number | null)[]).slice(3, 3 + extra);
+    let pipesOpen = pipes.length > 0;
     return {
       pid: child.pid,
+      pipes: pipes.filter((fd): fd is number => typeof fd === 'number'),
+      closePipes: () => {
+        if (!pipesOpen) return;
+        pipesOpen = false;
+        for (const fd of pipes) if (typeof fd === 'number') closeDescriptor(fd, () => undefined);
+      },
       stdout: child.stdout,
       stderr: child.stderr,
       write: chunk => {
@@ -50,6 +79,40 @@ export function bunSpawn(
   };
   return {
     start,
+    runBytes: async (program, args, options): Promise<SpawnBytesResult> => {
+      const maxStdout = checkedLimit(options?.maxStdoutBytes, DEFAULT_STDOUT_LIMIT, 'maxStdoutBytes');
+      const maxStderr = checkedLimit(options?.maxStderrBytes, DEFAULT_STDERR_LIMIT, 'maxStderrBytes');
+      // The timeout is ours (SIGKILL, then stop reading): a grandchild holding the pipe cannot hang the caller.
+      const { timeout, ...rest } = options ?? {};
+      const child = start(program, args, rest as SpawnBytesOptions);
+      let timedOut = false;
+      const abandoned = Promise.withResolvers<typeof ABANDONED>();
+      const timer =
+        timeout === undefined
+          ? undefined
+          : setTimeout(() => {
+              timedOut = true;
+              child.kill('SIGKILL');
+              abandoned.resolve(ABANDONED);
+            }, timeout);
+      try {
+        const [exited, stdout, stderr] = await Promise.all([
+          Promise.race([child.exited, abandoned.promise]),
+          readCapped(child.stdout, maxStdout, abandoned.promise),
+          readCapped(child.stderr, maxStderr, abandoned.promise),
+        ]);
+        return {
+          exitCode: exited === ABANDONED || exited === null ? -1 : exited,
+          stdout: stdout.bytes,
+          stderr: new TextDecoder().decode(stderr.bytes),
+          stdoutTruncated: stdout.truncated,
+          stderrTruncated: stderr.truncated,
+          timedOut,
+        };
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    },
     run: async (program, args, options): Promise<SpawnResult> => {
       const child = start(program, args, options);
       const [stdout, stderr, exitCode] = await Promise.all([
@@ -60,6 +123,61 @@ export function bunSpawn(
       return { exitCode, signal: null, stdout, stderr };
     },
   };
+}
+
+/** Today's Git runner limits. */
+export const DEFAULT_STDOUT_LIMIT = 1024 * 1024;
+export const DEFAULT_STDERR_LIMIT = 64 * 1024;
+
+function checkedLimit(value: number | undefined, fallback: number, label: string): number {
+  const limit = value ?? fallback;
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new RangeError(`${label} must be a non-negative safe integer`);
+  return limit;
+}
+
+const ABANDONED = Symbol('abandoned');
+
+/**
+ * Reads at most `maxBytes`, and stops the moment `abandoned` settles (today's Git runner `readCapped`, copied).
+ * Without that escape a grandchild inheriting the pipe would keep the stream open past the timeout.
+ */
+async function readCapped(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  abandoned: Promise<typeof ABANDONED>,
+): Promise<{ readonly bytes: Uint8Array; readonly truncated: boolean }> {
+  const chunks: Uint8Array[] = [];
+  let keptBytes = 0;
+  let truncated = false;
+  let abandonedRead = false;
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const result = await Promise.race([reader.read(), abandoned]);
+      if (result === ABANDONED) {
+        abandonedRead = true;
+        break;
+      }
+      if (result.done) break;
+      const chunk = result.value;
+      // `remaining` is never negative, so an empty chunk after the cap keeps `kept` empty and is not a truncation.
+      const remaining = maxBytes - keptBytes;
+      const kept = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
+      chunks.push(kept);
+      keptBytes += kept.byteLength;
+      truncated ||= kept.byteLength < chunk.byteLength;
+    }
+  } finally {
+    if (abandonedRead) await reader.cancel();
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(keptBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, truncated };
 }
 
 /** Plain values pass as they are; anything else must be a handle the bound opener recognises. */
@@ -88,7 +206,12 @@ export function globalFetch(): FetchPort {
 export function bunWorkers(): WorkersPort {
   return {
     start: (moduleUrl, options): WorkerHandle => {
-      const worker = new Worker(moduleUrl, options?.name === undefined ? {} : { name: options.name });
+      // `workerData` carries only what the host put there (the resolved sqlite grants); `state` itself is the host's.
+      const data = (options as { readonly workerData?: unknown } | undefined)?.workerData;
+      const worker = new Worker(moduleUrl, {
+        ...(options?.name === undefined ? {} : { name: options.name }),
+        ...(data === undefined ? {} : { workerData: data }),
+      } as WorkerOptions);
       return {
         post: (message, transfer) => worker.postMessage(message, [...(transfer ?? [])]),
         onMessage: listener => {
@@ -96,10 +219,45 @@ export function bunWorkers(): WorkersPort {
           worker.addEventListener('message', handler);
           return () => worker.removeEventListener('message', handler);
         },
+        onExit: listener => {
+          let reason: string | undefined;
+          let told = false;
+          const onError = (event: ErrorEvent): void => {
+            reason = event.message || String(event.error ?? 'the worker failed');
+          };
+          const onClose = (event: Event): void => {
+            if (told) return;
+            told = true;
+            const given = (event as Event & { readonly code?: number }).code ?? 0;
+            // an uncaught error is a failure even when the runtime reports the thread's code as 0
+            const code = reason !== undefined && given === 0 ? 1 : given;
+            listener(reason === undefined ? { code } : { code, reason });
+          };
+          worker.addEventListener('error', onError);
+          worker.addEventListener('close', onClose);
+          return () => {
+            worker.removeEventListener('error', onError);
+            worker.removeEventListener('close', onClose);
+          };
+        },
         terminate: async () => {
           worker.terminate();
         },
       };
+    },
+  };
+}
+
+/** Today's relay carrier dial, `new WebSocket(url)` and nothing more; the host narrows it per plugin. */
+export function bunWebSockets(): WebSocketPort {
+  return { connect: url => new WebSocket(url) as unknown as WebSocketClient };
+}
+
+/** The adapter a host without one gets: every dial refused, so a test can never reach the network by accident. */
+export function noWebSockets(): WebSocketPort {
+  return {
+    connect: () => {
+      throw new Error('This host opens no WebSocket connections.');
     },
   };
 }
