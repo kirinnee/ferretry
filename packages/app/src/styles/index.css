@@ -8,7 +8,6 @@
    THEME TOKENS LIVE IN `themes.css`; the frame's own rules are in `shell.css`. Plugin stylesheets come with their
    app halves. Nothing here hardcodes a colour.
    ============================================================================ */
-   ============================================================================ */
 * {
   box-sizing: border-box;
 }
