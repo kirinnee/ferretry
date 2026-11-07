@@ -64,17 +64,6 @@ export const boardManifest = definePlugin({
   },
 });
 
-const wiringManifest = definePlugin({
-  id: 'wiring',
-  title: 'Wiring',
-  version: '5.0.0',
-  api: 5,
-  core: false,
-  kinds: ['command'],
-  needs: {},
-  actions: { cli: [verb('wiring show')] },
-});
-
 export function entry(
   manifest: Manifest,
   contract: string,

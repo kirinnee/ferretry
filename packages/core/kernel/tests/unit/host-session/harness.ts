@@ -31,7 +31,6 @@ import {
   deviceRenewMessage,
   encodeCreditPayload,
   encodeFrame,
-  encodeHandshakeMessage,
   FRAME_KINDS,
   openChannel,
   openRecord,

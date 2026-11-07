@@ -38,10 +38,6 @@ export function damageOf(label: string, reason: Reason, detail = ''): StateDamag
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** Whether a thrown value is a missing-file fault. */
-const isMissingFile = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as { code?: string }).code === 'ENOENT';
-
 export const describeFault = (error: unknown): string =>
   error instanceof Error ? error.message.split('\n')[0] || error.name : String(error);
 

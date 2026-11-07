@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 /** The kernel's filesystem seam: the only place `node:fs` is used by the host (§7.7 `banned-globals`). */
@@ -60,17 +60,6 @@ export function nodeFs(randomSuffix: () => string): HostFs {
     chmod: (path, mode) => chmod(path, mode),
     rename: (from, to) => rename(from, to),
   };
-}
-
-/** `stat` that follows links, for the home probe. */
-async function statKind(path: string): Promise<'missing' | 'file' | 'directory' | 'other'> {
-  try {
-    const info = await stat(path);
-    return info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other';
-  } catch (error) {
-    if (isMissing(error)) return 'missing';
-    throw error;
-  }
 }
 
 ;
