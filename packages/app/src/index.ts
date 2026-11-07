@@ -44,6 +44,7 @@ export {
 export {
   type CarrierDial,
   type CarrierSocketEvents,
+  type CarrierWalkSocket,
   fromBase64Url,
   toBase64Url,
 } from './session/session-transport.ts';

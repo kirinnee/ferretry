@@ -7,8 +7,8 @@
  * - **The walk** is the preference's order (`carrierOrder`): the daemon's own addresses of each kind in the daemon's
  *   order, WebRTC through its dialer, a published tunnel, and the hosted relay last — reached only by exhaustion, and
  *   only when the daemon authored no rendezvous, so the directory never delays a direct-first attempt.
- * - **The winner is remembered** per daemon once a session commits to it, and tried first; when it stops carrying it
- *   is forgotten and the walk runs again. The winner is the connection's fact: a later walk that happened to reach a
+ * - **The winner is remembered** per daemon once the daemon ACCEPTS a session over it, and tried first; when it stops
+ *   carrying (before acceptance, or under an accepted session) it is forgotten and the walk runs again. The winner is the connection's fact: a later walk that happened to reach a
  *   relay does not turn timing into a relay preference.
  * - **Carrier control** (`GET`/`PUT /v1/tunnel`, R634) rides the introducers only — the daemon's direct address or a
  *   rendezvous, never the tunnel or WebRTC — and decides nothing: no winner is remembered from it.
@@ -51,8 +51,10 @@ import {
   DIRECT_SESSION_DEADLINE_MS,
   type LegFailure,
   RELAY_SESSION_DEADLINE_MS,
+  type RetirableSocket,
   walkingDial,
   type WalkLeg,
+  type WalkScope,
   type WalkStep,
 } from './carrier-socket.ts';
 
@@ -60,6 +62,10 @@ import {
 export const WEBRTC_UNAVAILABLE = 'WebRTC isn’t available in this build yet';
 /** Said when a walk that wanted a relay found none. */
 export const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
+/** Said to every session a new preference closes (today's `PREFERENCE_CHANGED_REASON`). */
+export const PREFERENCE_CHANGED_REASON = 'the connection preference for this machine changed';
+/** Said to every session an unpair or a re-pair closes (today's `clearDaemon` sentence). */
+export const PAIRING_CLEARED_REASON = 'this daemon was re-paired or unpaired';
 /** The request paths that are carrier control (§15): they ride {@link CarrierRouter.control}. */
 export const CONTROL_PATHS: readonly string[] = Object.freeze(['/v1/tunnel']);
 
@@ -182,10 +188,42 @@ const carrierOutage = (seen: readonly LegFailure[]): CarrierOutage => {
   };
 };
 
+/**
+ * One pairing under one preference: what every walk and session for it belongs to (today's entry `retired`
+ * controller and its `sessions`). `rewalk` and `clearDaemon` retire it — every session it holds is closed, saying
+ * why, and every walk still in flight stops before its next dial and decides nothing. A republish keeps it.
+ */
+class Generation {
+  #retired: string | undefined;
+  readonly #sockets = new Set<RetirableSocket>();
+
+  scope(): WalkScope {
+    return {
+      retired: () => this.#retired,
+      track: socket => {
+        this.#sockets.add(socket);
+        return () => this.#sockets.delete(socket);
+      },
+    };
+  }
+
+  retired(): boolean {
+    return this.#retired !== undefined;
+  }
+
+  retire(reason: string): void {
+    if (this.#retired !== undefined) return;
+    this.#retired = reason;
+    for (const socket of [...this.#sockets]) socket.retire(reason);
+    this.#sockets.clear();
+  }
+}
+
 interface CarrierEntry {
   /** The published set this entry was walked against, to tell a republish from the same set. */
   readonly published: string;
   choice: ConnectionChoice | undefined;
+  readonly generation: Generation;
 }
 
 export class CarrierRouter {
@@ -229,17 +267,28 @@ export class CarrierRouter {
     return this.#entries.get(daemonId)?.choice;
   }
 
-  /** The preference changed: forget the winner the old one chose, so the next session walks the new order. */
+  /**
+   * THE PREFERENCE CHANGED: forget the winner the old one chose, so the next session walks the new order.
+   *
+   * The entry is REPLACED rather than edited (today's `rewalk`): every session on it is closed, saying why, so no
+   * request goes on crossing a carrier the person may just have excluded, and a walk still in flight finds its
+   * generation retired and stops rather than deciding a winner under the old preference.
+   */
   rewalk(daemonId: string): void {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
-    entry.choice = undefined;
+    this.#entries.set(daemonId, { published: entry.published, choice: undefined, generation: new Generation() });
+    entry.generation.retire(PREFERENCE_CHANGED_REASON);
     this.#announce();
   }
 
-  /** The pairing went away: nothing about it is kept. */
+  /** The pairing went away: nothing about it is kept, and everything it holds or is still dialling ends. */
   clearDaemon(daemonId: string): void {
-    if (this.#entries.delete(daemonId)) this.#announce();
+    const entry = this.#entries.get(daemonId);
+    if (entry === undefined) return;
+    this.#entries.delete(daemonId);
+    entry.generation.retire(PAIRING_CLEARED_REASON);
+    this.#announce();
   }
 
   /** A dial for one session to this daemon, over the preference's walk. */
@@ -247,7 +296,13 @@ export class CarrierRouter {
     return events => {
       // The preference is read once per session, so one walk never mixes two.
       const plan: WalkPlan = { preference: this.#preference(daemon.daemon) };
-      return walkingDial(this.deps, () => this.#steps(daemon, plan), this.#observer(daemon, plan, true))(events);
+      const generation = this.#entry(daemon).generation;
+      return walkingDial(
+        this.deps,
+        () => this.#steps(daemon, plan, generation),
+        this.#observer(daemon, plan, true, generation),
+        generation.scope(),
+      )(events);
     };
   }
 
@@ -255,7 +310,13 @@ export class CarrierRouter {
   control(daemon: PairedDaemon): CarrierDial {
     return events => {
       const plan: WalkPlan = { preference: this.#preference(daemon.daemon) };
-      return walkingDial(this.deps, () => this.#introducers(daemon), this.#observer(daemon, plan, false))(events);
+      const generation = this.#entry(daemon).generation;
+      return walkingDial(
+        this.deps,
+        () => this.#introducers(daemon),
+        this.#observer(daemon, plan, false, generation),
+        generation.scope(),
+      )(events);
     };
   }
 
@@ -275,7 +336,7 @@ export class CarrierRouter {
       (carriers.some(method => sameCarrier(method, chosen.method)) || outlivesRepublish(chosen.method))
         ? chosen
         : undefined;
-    const entry: CarrierEntry = { published, choice: kept };
+    const entry: CarrierEntry = { published, choice: kept, generation: current?.generation ?? new Generation() };
     this.#entries.set(daemon.daemon, entry);
     return entry;
   }
@@ -292,7 +353,9 @@ export class CarrierRouter {
   }
 
   /** The walk: the remembered winner first, then the preference's order (today's `#candidates`). */
-  async *#steps(daemon: PairedDaemon, plan: WalkPlan): AsyncGenerator<WalkStep> {
+  async *#steps(daemon: PairedDaemon, plan: WalkPlan, generation: Generation): AsyncGenerator<WalkStep> {
+    // A retired generation is never re-entered: reading `#entry` for it would recreate a cleared pairing.
+    if (generation.retired()) return;
     const entry = this.#entry(daemon);
     const winner = entry.choice?.ok === true ? entry.choice.method : undefined;
     if (winner !== undefined) yield this.#leg(daemon, winner);
@@ -329,18 +392,28 @@ export class CarrierRouter {
     if (hosted !== undefined) yield this.#leg(daemon, hosted);
   }
 
-  #observer(daemon: PairedDaemon, plan: WalkPlan, decides: boolean) {
+  /** This walk's entry while its generation is current; `undefined` once retired (never recreated from here). */
+  #current(daemon: PairedDaemon, generation: Generation): CarrierEntry | undefined {
+    if (generation.retired()) return undefined;
+    const entry = this.#entries.get(daemon.daemon);
+    return entry?.generation === generation ? entry : undefined;
+  }
+
+  #observer(daemon: PairedDaemon, plan: WalkPlan, decides: boolean, generation: Generation) {
     const probes: ConnectionProbe[] = [];
     const daemonId = daemon.daemon;
+    /** The stopped carrier was the remembered winner: forget it, so this walk and the next start from the top. */
+    const forget = (method: ConnectionMethod): void => {
+      if (!decides) return;
+      const entry = this.#current(daemon, generation);
+      if (entry?.choice?.ok !== true || !sameCarrier(entry.choice.method, method)) return;
+      entry.choice = undefined;
+      this.#announce();
+    };
     return {
       untried: (method: ConnectionMethod, detail: string) => probes.push(untriedProbe(method, detail)),
       failed: (failure: LegFailure) => {
-        const entry = this.#entries.get(daemonId);
-        // The remembered carrier stopped carrying: forget it, so this walk and the next start from the top.
-        if (decides && entry?.choice?.ok === true && sameCarrier(entry.choice.method, failure.method)) {
-          entry.choice = undefined;
-          this.#announce();
-        }
+        forget(failure.method);
         probes.push(
           carrierProbe(failure.method, {
             kind: 'transport-failure',
@@ -350,10 +423,11 @@ export class CarrierRouter {
         );
       },
       committed: (method: ConnectionMethod) => {
+        const entry = this.#current(daemon, generation);
+        if (entry === undefined) return;
         this.deps.health?.answered(daemonId);
         this.deps.drops?.reconnected(daemonId);
         if (!decides) return;
-        const entry = this.#entry(daemon);
         // Initial sessions may walk concurrently; once one has a winner, that is the connection's fact.
         if (entry.choice?.ok === true) return;
         entry.choice = choiceFor([...probes, carrierProbe(method, { kind: 'answered', status: 101 })], plan);
@@ -365,16 +439,21 @@ export class CarrierRouter {
           const last = failures[failures.length - 1] as LegFailure;
           return { code: last.code, reason: last.reason };
         }
-        const entry = this.#entry(daemon);
+        const chosen = choiceFor(probes, plan);
+        const entry = this.#current(daemon, generation);
+        if (entry === undefined)
+          return { code: failures.at(-1)?.code ?? RELAY_CLOSE_CODES.daemonAbsent, reason: chosen.reason };
         if (entry.choice?.ok !== true) {
           entry.choice = choiceFor(probes, plan);
           this.#announce();
         }
         if (failures.length > 0) this.deps.health?.outage(daemonId, carrierOutage(failures));
-        const chosen = choiceFor(probes, plan);
         const last = failures[failures.length - 1];
         return { code: last?.code ?? RELAY_CLOSE_CODES.daemonAbsent, reason: chosen.reason };
       },
+      // A carrier that failed under an accepted session stopped carrying: the winner it was is forgotten and the change
+      // announced, whatever the optional drop log does (today's `#walk`, before it reports the lost request).
+      lost: (method: ConnectionMethod) => forget(method),
       dropped: (
         method: ConnectionMethod,
         end: Parameters<NonNullable<CarrierRouterDependencies['drops']>['dropped']>[3],

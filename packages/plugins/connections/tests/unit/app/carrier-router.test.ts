@@ -4,10 +4,16 @@
  * device the kernel admits. Only the network and the timers are scripted.
  */
 import { describe, expect, test } from 'bun:test';
-import { CONTROL_UNREACHABLE, type ConnectPorts, type PairedDaemon } from '@ferretry/app';
+import { CONTROL_UNREACHABLE, type ConnectPorts, HEARTBEAT_RESPONSE, type PairedDaemon } from '@ferretry/app';
 import { connector, fakeDeviceClaims, WebCryptoRelayCrypto } from '@ferretry/app/testing';
 import connections from '../../../app/index.ts';
-import { CarrierRouter, daemonCarriers } from '../../../app/carriers/router.ts';
+import type { BrowserSocket } from '../../../app/adapters/browser-relay-dial.ts';
+import {
+  CarrierRouter,
+  daemonCarriers,
+  PAIRING_CLEARED_REASON,
+  PREFERENCE_CHANGED_REASON,
+} from '../../../app/carriers/router.ts';
 import { documentRelayDiscovery } from '../../../app/discovery/hosted-relay.ts';
 import type { CarrierPreference } from '../../../app/lib/carrier-preference.ts';
 import { BrowserNetwork, HandTimers, type ScriptedHost } from '../../support/browser-network.ts';
@@ -30,18 +36,19 @@ interface Rig {
 async function rig(
   hosts: Record<string, ScriptedHost>,
   carriers: readonly unknown[],
-  preference: CarrierPreference = 'auto',
+  preference: CarrierPreference | (() => CarrierPreference) = 'auto',
   hosted: string | null = null,
+  openSocket?: (network: BrowserNetwork, fx: KernelFixture) => (url: string) => BrowserSocket,
 ): Promise<Rig> {
   const fx = await kernelFixture();
   const device = await fx.paired();
   const network = new BrowserNetwork(fx, hosts);
   const timers = new HandTimers();
   const router = new CarrierRouter({
-    openSocket: network.openSocket,
+    openSocket: openSocket?.(network, fx) ?? network.openSocket,
     after: timers.after,
     now: () => 0,
-    preference: () => preference,
+    preference: typeof preference === 'function' ? preference : () => preference,
     hostedRelay: async () => hosted ?? undefined,
   });
   const daemon: PairedDaemon = {
@@ -236,5 +243,224 @@ describe('hosted relay discovery (R580)', () => {
     );
     expect(await withdrawn.hostedRelay()).toBeUndefined();
     expect((await withdrawn.fallback()).kind).toBe('disabled');
+  });
+});
+
+const pause = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 15));
+const DIRECT_HOST = new URL(DIRECT).host;
+const RELAY_HOST = new URL(RELAY).host;
+const DIRECT_AND_RELAY = [
+  { kind: 'direct', url: DIRECT },
+  { kind: 'relay', url: RELAY },
+] as const;
+
+/** A socket that opens and then only ever answers heartbeats: a carrier, but no session. */
+const heartbeatsOnly = (): BrowserSocket => {
+  const socket: BrowserSocket = {
+    binaryType: 'blob',
+    onopen: null,
+    onclose: null,
+    onerror: null,
+    onmessage: null,
+    send: () => undefined,
+    close: (code, reason) => {
+      void Promise.resolve().then(() => socket.onclose?.({ code: code ?? 1000, reason: reason ?? '' }));
+    },
+  };
+  setTimeout(() => {
+    socket.onopen?.();
+    socket.onmessage?.({ data: HEARTBEAT_RESPONSE });
+  }, 0);
+  return socket;
+};
+
+describe('acceptance decides, not the first frame (connections-app R1 finding 1)', () => {
+  test('a carrier that only answers heartbeats keeps its acceptance deadline; the unsent PUT then walks to the relay', async () => {
+    // Arrange — direct opens and answers heartbeats but never carries a session; the relay carries the real daemon.
+    const r = await rig(
+      { [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+      'auto',
+      null,
+      network => url => {
+        if (new URL(url).host !== DIRECT_HOST) return network.openSocket(url);
+        network.dialled.push(url);
+        return heartbeatsOnly();
+      },
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+
+    // Act — a write while direct holds the session; then direct's 4 s acceptance deadline passes.
+    const put = transport.request({ method: 'PUT', path: '/v1/example', body: { enabled: true } });
+    await pause();
+    const choiceBeforeDeadline = r.router.choice(r.fx.daemonId);
+    r.timers.fireExactly(4_000);
+    const answer = await put;
+
+    // Assert — a heartbeat was not a winner; the write was never sent over direct, and it crossed the relay once.
+    expect(choiceBeforeDeadline).toBeUndefined();
+    expect(answer.status).toBe(200);
+    expect(carriedOver(r.fx)).toEqual(['/v1/example relay']);
+    expect(r.network.dialled.map(url => new URL(url).host)).toEqual([DIRECT_HOST, RELAY_HOST]);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    r.fx.layer.close();
+  });
+
+  test('a different daemon on direct refuses the opening hello: nothing was sent, so the PUT walks to the relay on a fresh session', async () => {
+    // Arrange — direct reaches a REAL daemon with another identity; the relay reaches the paired one.
+    const wrong = await kernelFixture();
+    const r = await rig(
+      { [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+      'auto',
+      null,
+      network => {
+        const impostor = new BrowserNetwork(wrong, { [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' } });
+        return url => {
+          if (new URL(url).host !== DIRECT_HOST) return network.openSocket(url);
+          network.dialled.push(url);
+          return impostor.openSocket(url);
+        };
+      },
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+
+    // Act
+    const answer = await transport.request({ method: 'PUT', path: '/v1/example', body: { enabled: true } });
+
+    // Assert — the impostor got no credential or request record and handled nothing; the write rode the relay once,
+    // and the relay — the carrier a session was ACCEPTED over — is the winner.
+    expect(answer.status).toBe(200);
+    expect(wrong.requests).toEqual([]);
+    expect(carriedOver(r.fx)).toEqual(['/v1/example relay']);
+    expect(r.network.dialled.map(url => new URL(url).host)).toEqual([DIRECT_HOST, RELAY_HOST]);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    wrong.layer.close();
+    r.fx.layer.close();
+  });
+});
+
+describe('retired generations (connections-app R1 finding 2)', () => {
+  test('an unpair while the walk waits on discovery stops it: the relay is never dialled and no winner is recreated', async () => {
+    // Arrange — direct is dead and the walk then waits on the hosted relay directory.
+    let release: (url: string) => void = () => undefined;
+    const fx = await kernelFixture();
+    const network = new BrowserNetwork(fx, { 'hosted.example': { kind: 'carries', carrier: 'relay' } });
+    const router = new CarrierRouter({
+      openSocket: network.openSocket,
+      after: () => undefined,
+      now: () => 0,
+      preference: () => 'auto',
+      hostedRelay: () =>
+        new Promise<string>(resolve => {
+          release = resolve;
+        }),
+    });
+    const daemon: PairedDaemon = {
+      daemon: fx.daemonId,
+      machine: 'laptop',
+      deviceId: 'fy_device_x',
+      address: DIRECT,
+      carriers: [{ kind: 'direct', url: DIRECT }],
+      pairedAt: 1,
+      lastSelectedAt: 1,
+    };
+    const closes: string[] = [];
+    router.dial(daemon)({
+      onBinary: () => undefined,
+      onText: () => undefined,
+      onClose: (_code, reason) => closes.push(reason),
+    });
+    await pause();
+
+    // Act — the pairing goes away, then the directory answers.
+    router.clearDaemon(fx.daemonId);
+    release('wss://hosted.example');
+    await pause();
+
+    // Assert — the session was ended saying why; the discovered relay was never dialled; nothing was remembered.
+    expect(closes).toEqual([PAIRING_CLEARED_REASON]);
+    expect(network.dialled.map(url => new URL(url).host)).toEqual([DIRECT_HOST]);
+    expect(router.choice(fx.daemonId)).toBeUndefined();
+    fx.layer.close();
+  });
+
+  test('a new preference closes the session on the excluded carrier: the next request walks the new order', async () => {
+    // Arrange — Auto, with direct and the relay both working: the first request crosses direct.
+    let preference: CarrierPreference = 'auto';
+    const r = await rig(
+      {
+        [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' },
+        [RELAY_HOST]: { kind: 'carries', carrier: 'relay' },
+      },
+      DIRECT_AND_RELAY,
+      () => preference,
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/first' });
+
+    // Act — the person picks "Relay only".
+    preference = 'relay';
+    r.router.rewalk(r.fx.daemonId);
+    await pause();
+    await transport.request({ method: 'GET', path: '/v1/second' });
+
+    // Assert — the request after the change crossed the relay, not the session already open over direct.
+    expect(carriedOver(r.fx)).toEqual(['/v1/first direct', '/v1/second relay']);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    expect(PREFERENCE_CHANGED_REASON).toBe('the connection preference for this machine changed');
+    transport.close();
+    r.fx.layer.close();
+  });
+});
+
+describe('a winner that fails under a write is forgotten (connections-app R1 finding 3)', () => {
+  test('the relay winner closes under a pending PUT: the PUT fails unresent, the winner is cleared and announced, and the recovered direct is tried next', async () => {
+    // Arrange — direct is dead, so the relay wins the first read.
+    const hosts: Record<string, ScriptedHost> = {
+      [DIRECT_HOST]: { kind: 'dead' },
+      [RELAY_HOST]: { kind: 'carries', carrier: 'relay' },
+    };
+    const sockets = new Map<string, BrowserSocket>();
+    const r = await rig(hosts, DIRECT_AND_RELAY, 'auto', null, network => url => {
+      const socket = network.openSocket(url);
+      sockets.set(new URL(url).host, socket);
+      return socket;
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/first' });
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    let announced = 0;
+    r.router.subscribe(() => {
+      announced += 1;
+    });
+    const route = r.fx.route;
+    r.fx.route = request => (request.method === 'PUT' ? new Promise(() => undefined) : route(request));
+
+    // Act — the relay fails while the PUT waits for its answer; then direct comes back.
+    const put = transport
+      .request({ method: 'PUT', path: '/v1/example', body: { enabled: true } })
+      .catch(error => error);
+    await pause();
+    sockets.get(RELAY_HOST)?.close(1011, 'carrier failed');
+    const failure = await put;
+    const choiceAfterLoss = r.router.choice(r.fx.daemonId);
+    hosts[DIRECT_HOST] = { kind: 'carries', carrier: 'direct' };
+    r.fx.route = route;
+    await transport.request({ method: 'GET', path: '/v1/second' });
+
+    // Assert — the write failed and was never re-sent; the stopped winner was forgotten and said so; the next read
+    // walked from the top and crossed the recovered direct address.
+    expect(failure).toBeInstanceOf(Error);
+    expect(r.fx.requests.filter(request => request.method === 'PUT')).toHaveLength(1);
+    expect(choiceAfterLoss?.ok).not.toBe(true);
+    expect(announced).toBeGreaterThan(0);
+    expect(carriedOver(r.fx)).toEqual(['/v1/first relay', '/v1/example relay', '/v1/second direct']);
+    transport.close();
+    r.fx.layer.close();
   });
 });

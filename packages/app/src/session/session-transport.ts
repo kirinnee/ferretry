@@ -32,8 +32,26 @@ export interface CarrierSocketEvents {
   readonly onClose: (code: number, reason: string) => void;
 }
 
+/**
+ * What a carrier that WALKS may add to the socket it hands one session. Both members are optional, so any plain
+ * socket (the shell's own direct dial) is one, and a session over it behaves exactly as it always did.
+ *
+ * Today's rule (PWA `relay-carrier.ts`, `RelayUnsentError`): a session the daemon never accepted carried no request,
+ * so even a write may try the next carrier, on a FRESH session — the old one's handshake belongs to the old carrier.
+ * Only the session knows when the daemon accepted it, so it says so; only the carrier knows what is left to try.
+ */
+export interface CarrierWalkSocket extends RelayClientSocket {
+  /** The daemon accepted the session on this socket (`ready()` resolved): this carrier carries. */
+  accepted?(): void;
+  /**
+   * The session on this socket ended before the daemon accepted it. The dial for a fresh session on the walk's next
+   * carrier, or `undefined` when there is none left (or the walk was retired).
+   */
+  onward?(): CarrierDial | undefined;
+}
+
 /** Opens one carrier socket for one session. */
-export type CarrierDial = (events: CarrierSocketEvents) => RelayClientSocket;
+export type CarrierDial = (events: CarrierSocketEvents) => CarrierWalkSocket;
 
 export interface SessionTransportOptions {
   readonly crypto: RelayCrypto;
@@ -60,13 +78,19 @@ function decodeBody(text: string): unknown {
   }
 }
 
+interface OpenedSession {
+  readonly session: RelayClientSession;
+  readonly socket: CarrierWalkSocket;
+}
+
 function openSession(
   options: SessionTransportOptions,
+  dial: CarrierDial,
   mode: RelayClientSessionDependencies['mode'],
   onData?: (frame: RelayStreamFrame) => void,
-): RelayClientSession {
+): OpenedSession {
   let session: RelayClientSession | undefined;
-  const socket = options.dial({
+  const socket = dial({
     onBinary: bytes => void session?.receiveBinary(bytes),
     onText: text => session?.receiveText(text),
     onClose: (code, reason) => session?.carrierClosed(code, reason),
@@ -78,7 +102,32 @@ function openSession(
     socket,
     ...(onData === undefined ? {} : { onData }),
   });
-  return session;
+  return { session, socket };
+}
+
+/**
+ * A request session the daemon ACCEPTED, walking on to a fresh session over the carrier's next leg each time one ends
+ * before acceptance (see {@link CarrierWalkSocket}). Nothing a request needs has left before acceptance, so the walk
+ * is safe for a write too; once the daemon accepted, a failure is the session's and is never re-dialled here.
+ */
+async function acceptedSession(
+  options: SessionTransportOptions,
+  mode: RelayClientSessionDependencies['mode'],
+): Promise<RelayClientSession> {
+  let dial = options.dial;
+  for (;;) {
+    const opened = openSession(options, dial, mode);
+    try {
+      await opened.session.ready();
+    } catch (reason) {
+      const onward = opened.socket.onward?.();
+      if (onward === undefined) throw reason;
+      dial = onward;
+      continue;
+    }
+    opened.socket.accepted?.();
+    return opened.session;
+  }
 }
 
 const pairs = (query: Readonly<Record<string, string>> | undefined): readonly (readonly [string, string])[] =>
@@ -104,8 +153,7 @@ export class SessionTransport implements DaemonTransport {
   }
 
   #fresh(): Promise<RelayClientSession> {
-    const session = openSession(this.#options, { kind: 'auth', device: this.#options.device });
-    const ready = session.ready();
+    const ready = acceptedSession(this.#options, { kind: 'auth', device: this.#options.device });
     this.#session = ready;
     ready.catch(() => {
       if (this.#session === ready) this.#session = undefined;
@@ -164,30 +212,49 @@ export class SessionTransport implements DaemonTransport {
     const url = new URL(path, 'http://session.invalid');
     const query = [...url.searchParams.entries()];
     let closed = false;
-    const session = openSession(
-      this.#options,
-      {
-        kind: 'stream',
-        device: this.#options.device,
-        path: url.pathname,
-        ...(query.length === 0 ? {} : { query }),
-      },
-      frame => listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes),
-    );
     const end = (reason: string): void => {
       if (closed) return;
       closed = true;
       listeners.onClose(reason);
     };
-    session.onStreamClosed(closedWith => end(closedWith.reason));
-    session.ready().catch((error: unknown) => end(error instanceof Error ? error.message : String(error)));
+    const mode: RelayClientSessionDependencies['mode'] = {
+      kind: 'stream',
+      device: this.#options.device,
+      path: url.pathname,
+      ...(query.length === 0 ? {} : { query }),
+    };
+    const onData = (frame: RelayStreamFrame): void =>
+      listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes);
+    let session: RelayClientSession | undefined;
+    // A stream the daemon never opened carried nothing (a stream session sends no data before `stream-opened`), so it
+    // walks on to a fresh session over the carrier's next leg exactly as a request session does.
+    const open = (dial: CarrierDial): void => {
+      const opened = openSession(this.#options, dial, mode, onData);
+      session = opened.session;
+      opened.session.onStreamClosed(closedWith => end(closedWith.reason));
+      opened.session.ready().then(
+        () => opened.socket.accepted?.(),
+        (error: unknown) => {
+          if (closed) return;
+          const onward = opened.socket.onward?.();
+          if (onward !== undefined) {
+            open(onward);
+            return;
+          }
+          end(error instanceof Error ? error.message : String(error));
+        },
+      );
+    };
+    open(this.#options.dial);
     return {
       send: frame =>
-        session.sendStream(typeof frame === 'string' ? { kind: 'text', text: frame } : { kind: 'bytes', bytes: frame }),
+        session?.sendStream(
+          typeof frame === 'string' ? { kind: 'text', text: frame } : { kind: 'bytes', bytes: frame },
+        ),
       close: () => {
         if (closed) return;
         closed = true;
-        session.closeStream();
+        session?.closeStream();
       },
     };
   }

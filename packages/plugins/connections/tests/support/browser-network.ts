@@ -130,4 +130,10 @@ export class HandTimers {
     this.pending.splice(0, this.pending.length, ...this.pending.filter(timer => timer.ms < ms));
     for (const timer of due) timer.run();
   }
+  /** Fires only the timers armed for exactly `ms` (one kind of deadline), once. */
+  fireExactly(ms: number): void {
+    const due = this.pending.filter(timer => timer.ms === ms);
+    this.pending.splice(0, this.pending.length, ...this.pending.filter(timer => timer.ms !== ms));
+    for (const timer of due) timer.run();
+  }
 }
