@@ -52,6 +52,8 @@ export function inputRequestService(
     readonly observer?: InputRequestServiceDependencies['observer'];
     /** Where page scripts ran across the machine, as the standing rules keep it; with no grant that ever fills. */
     readonly scriptedOrigins?: () => ScriptedOriginsView;
+    /** Where page scripts ran as Browsers told the Vault (`MachineScripts`, `VaultApi.scriptedOn`). */
+    readonly scripts?: { scriptedOrigins(): ScriptedOriginsView };
     /** The agenda the cards are raised on; absent: a board that takes every card and says nothing. */
     readonly agenda?: InputAgendaPort;
     /** Whether the page target arms a pagehide clear it is asked to try (`armClear: 'try'`); absent: it never can. */
@@ -115,6 +117,7 @@ export function inputRequestService(
     quarantine,
     redact: async text => values.scrubAll(text),
     ...(options.logins === undefined ? {} : { logins: options.logins }),
+    ...(options.scripts === undefined ? {} : { scripts: options.scripts }),
     ...(options.scriptedOrigins === undefined
       ? {}
       : {
