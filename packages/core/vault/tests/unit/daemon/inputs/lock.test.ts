@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { INPUT_LOCK_WORDS, type InputRequestField } from '../../../../daemon/lib/inputs/wire.ts';
-import { type InputTargetFacts } from '../../../../contract/index.ts';
-import { type LoginObserved } from '../../../../daemon/lib/inputs/borrowed.ts';
+import type { InputTargetFacts } from '../../../../contract/index.ts';
+import type { LoginObserved } from '../../../../daemon/lib/inputs/borrowed.ts';
 import should from 'should';
 import {
   heldFromView,
@@ -84,7 +84,7 @@ const proven = (facts: InputTargetFacts, extra: Partial<LoginObserved> = {}): Lo
 });
 
 describe('a terminal', () => {
-  it('should be short only for a local password prompt from a root-owned password program', () => {
+  it('I87 should be short only for a local password prompt from a root-owned password program', () => {
     should(lockFor(sudo(), SECRET, QUIET)).deepEqual({ seconds: 10, reason: 'hidden-terminal' });
     for (const comm of ['su', 'doas', 'passwd', 'sudoedit']) should(terminalHides(sudo({}, comm))).be.true();
   });
@@ -156,7 +156,7 @@ describe('a page field', () => {
     });
   });
 
-  it('should never shorten a value Ferretry does not submit by the facts, only hold it until the page moves on', () => {
+  it('I94 should never shorten a value Ferretry does not submit by the facts, only hold it until the page moves on', () => {
     // Arrange — the facts say what the page does AFTER a submit, even with the owner's own tap on record (secrev-1333 M1).
     const facts = page();
     const unsubmitted = { ...QUIET, submitted: false };
@@ -232,7 +232,7 @@ describe('a page field', () => {
     });
   });
 
-  it('should let nothing shorten the lock on a page the ferret has scripted', () => {
+  it('I93 should let nothing shorten the lock on a page the ferret has scripted', () => {
     // Arrange — every proof at once: facts, an owner's tap, a submit and a clean probe.
     const facts = page();
     const all: LockContext = {
@@ -251,7 +251,7 @@ describe('a page field', () => {
     });
   });
 
-  it('should be long for any page field the card would not draw green', () => {
+  it('I88 should be long for any page field the card would not draw green', () => {
     const cases: InputTargetFacts[] = [
       page([pageField({}, { type: 'text' })]),
       page([pageField({}, { tag: 'textarea' })]),
@@ -269,7 +269,7 @@ describe('a page field', () => {
     should(pageFieldsQualify(sudo(), SECRET)).be.false();
   });
 
-  it('should keep the longer of two locks', () => {
+  it('I92 should keep the longer of two locks', () => {
     const short = { seconds: 10, reason: 'probed-field' } as const;
     const long = { seconds: 120, reason: 'not-proven' } as const;
     should(longerLock(short, long)).equal(long);
@@ -315,7 +315,7 @@ describe('when the dummy probe may run', () => {
 describe('a one-time code (`code`)', () => {
   const CODE = [field('code', 'code')];
 
-  it('should hold nothing for a card of codes and plain values, and hold a private value or a secret', () => {
+  it('I90 should hold nothing for a card of codes and plain values, and hold a private value or a secret', () => {
     // Act / Assert — the ferret may see a code, so no lock would hide anything it is not allowed to read.
     should(heldFromView(CODE)).be.false();
     should(heldFromView([field('email', 'plain'), field('code', 'code')])).be.false();
@@ -363,7 +363,7 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
     should(passwordTarget(page([pageField({}, { type: 'text', name: 'shipping', id: 'otp' })]), 'password')).be.false();
   });
 
-  it('should see a password prompt by its program, hidden typing or wording, and not an echoing code prompt', () => {
+  it('I35 should see a password prompt by its program, hidden typing or wording, and not an echoing code prompt', () => {
     // Arrange
     const otp = sudo({ echo: 'on', promptLine: 'Verification code:' }, 'ssh');
 
@@ -373,7 +373,7 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
     should(passwordTarget(otp, 'value')).be.false();
   });
 
-  it('should keep an echo-off prompt a code only when the pane asks for a code and names nothing secret', () => {
+  it('I36 should keep an echo-off prompt a code only when the pane asks for a code and names nothing secret', () => {
     // Arrange — ssh's keyboard-interactive prompts, typing hidden, from an ssh this account cannot replace.
     const hidden = (promptLine: string, comm = 'ssh', codeProgram = true) =>
       passwordTarget(sudo({ echo: 'off', promptLine }, comm), 'value', codeProgram);
@@ -410,7 +410,7 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
 });
 
 describe('look-alike and hidden spellings (the pane and the ferret are untrusted text)', () => {
-  it('should read accented, fullwidth, zero-width and mixed-script spellings of password as password', () => {
+  it('I37 should read accented, fullwidth, zero-width and mixed-script spellings of password as password', () => {
     // Arrange
     const shown = (promptLine: string) => passwordTarget(sudo({ echo: 'on', promptLine }, 'bash'), 'value');
 

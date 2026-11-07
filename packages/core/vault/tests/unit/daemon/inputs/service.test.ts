@@ -1,7 +1,13 @@
 import { describe, it } from 'bun:test';
-import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
+import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { INPUT_MAX_REBINDS, type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
-import { type InputDeliverBody, type InputEvent, type InputQuarantineEvent, type InputRequest, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
+import {
+  type InputDeliverBody,
+  type InputEvent,
+  type InputQuarantineEvent,
+  type InputRequest,
+  padInputValue,
+} from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import { digestFacts } from '../../../../daemon/lib/inputs/digest.ts';
 import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
@@ -357,7 +363,7 @@ describe('InputRequestService.raise', () => {
     should(error.code).equal('conflict');
   });
 
-  it('should hold three pending per session', async () => {
+  it('I54 should hold three pending per session', async () => {
     const { service } = build();
     for (const key of ['a', 'b', 'c']) await service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key } });
     const error = await refused(service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key: 'd' } }));
@@ -387,7 +393,7 @@ async function findId(service: InputRequestService, card: AgendaId): Promise<str
 }
 
 describe('InputRequestService.deliver', () => {
-  it('should type the value once, tell the agent, close the card and press Enter when asked', async () => {
+  it('I12 should type the value once, tell the agent, close the card and press Enter when asked', async () => {
     const { w, service, id, digest } = await raised();
     const result = await service.deliver(SESSION, id, bodyFor(digest), HOST);
 
@@ -410,7 +416,7 @@ describe('InputRequestService.deliver', () => {
     should(w.audits.at(-1)?.actor).eql({ kind: 'device', deviceId: 'phone-1' });
   });
 
-  it('should refuse an agent and write nothing', async () => {
+  it('I44 should refuse an agent and write nothing', async () => {
     const { w, service, id, digest } = await raised();
     const error = await refused(service.deliver(SESSION, id, bodyFor(digest), AGENT));
 
@@ -418,7 +424,7 @@ describe('InputRequestService.deliver', () => {
     should(w.writes.length).equal(0);
   });
 
-  it('should answer a retry of a deliveryId with the first outcome and never type twice', async () => {
+  it('I45 should answer a retry of a deliveryId with the first outcome and never type twice', async () => {
     const { w, service, id, digest } = await raised();
     const body = bodyFor(digest);
     const first = await service.deliver(SESSION, id, body, HOST);
@@ -440,7 +446,7 @@ describe('InputRequestService.deliver', () => {
     should(w.writes.length).equal(0);
   });
 
-  it('should queue a second delivery behind the first, then refuse it, and answer a same-id retry with the first', async () => {
+  it('I46 should queue a second delivery behind the first, then refuse it, and answer a same-id retry with the first', async () => {
     const { w, service, id, digest } = await raised();
     let release: () => void = () => undefined;
     w.gate = new Promise<void>(resolve => {
@@ -517,7 +523,7 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
-  it('should refuse a card older than the request without counting it: target_rebound, zero writes', async () => {
+  it('I61 should refuse a card older than the request without counting it: target_rebound, zero writes', async () => {
     const { w, service, id, digest } = await raised();
     for (let n = 0; n < 5; n += 1) {
       const error = await refused(service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST));
@@ -578,7 +584,7 @@ describe('InputRequestService.deliver', () => {
     should((await service.list(HOST)).length).equal(1);
   });
 
-  it('should end the request after three failed checks, saying why in plain words', async () => {
+  it('I49 should end the request after three failed checks, saying why in plain words', async () => {
     const { w, service, id, digest } = await raised();
     w.facts = ANOTHER_PROGRAM;
     const errors: InputRequestError[] = [];
@@ -607,7 +613,7 @@ describe('InputRequestService.deliver', () => {
     should(w.audits.at(-1)?.detail.reason).equal('target_changed');
   });
 
-  it('should flag a secret amber, and still raise and type it, when echo is on or cannot be told', async () => {
+  it('I85 should flag a secret amber, and still raise and type it, when echo is on or cannot be told', async () => {
     for (const echo of ['on', 'unknown'] as const) {
       const { w, service, id, digest } = await raised({ facts: { ...FACTS, echo } });
       const [card] = await service.list(HOST);
@@ -645,7 +651,7 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
-  it('should accept a private code, flag it amber and quarantine the terminal like a secret', async () => {
+  it('I22 should accept a private code, flag it amber and quarantine the terminal like a secret', async () => {
     const { w, service, values, id, digest, view } = await raised({}, { ...RAISE, sensitivity: 'private' });
     const [card] = await service.list(HOST);
     const done = await service.deliver(SESSION, id, bodyFor(digest), HOST);
@@ -667,7 +673,7 @@ describe('InputRequestService.deliver', () => {
     should(error.code).equal('bad_request');
   });
 
-  it('should flag a recognised program with typing hidden green, an unrecognised one amber, and plain text red', async () => {
+  it('I65 should flag a recognised program with typing hidden green, an unrecognised one amber, and plain text red', async () => {
     const odd: InputTargetFacts = {
       ...FACTS,
       recognisedConsumer: false,
@@ -688,7 +694,7 @@ describe('InputRequestService.deliver', () => {
     should(redCard?.risk?.reason).equal('Not secret: the ferret can see this value.');
   });
 
-  it('should flag an UNVERIFIED reader amber with the full lock, even when ps calls it sudo', async () => {
+  it('I66 should flag an UNVERIFIED reader amber with the full lock, even when ps calls it sudo', async () => {
     // Arrange — a ferret's shell renamed itself sudo: echo off, line mode, but the kernel proved no program.
     const disguised = {
       ...FACTS,
@@ -726,7 +732,7 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
-  it('should type a secret into an unrecognised program without any extra tick, since the flag is the warning', async () => {
+  it('I67 should type a secret into an unrecognised program without any extra tick, since the flag is the warning', async () => {
     const odd: InputTargetFacts = {
       ...FACTS,
       recognisedConsumer: false,
@@ -775,7 +781,7 @@ describe('InputRequestService.deliver', () => {
 });
 
 describe('the value never leaves the one write', () => {
-  it('should put the value nowhere but the terminal write and the ephemeral map', async () => {
+  it('I8 should put the value nowhere but the terminal write and the ephemeral map', async () => {
     const { w, service, values, view, id, digest } = await raised();
     const seen: unknown[] = [view];
     const result = await service.deliver(SESSION, id, bodyFor(digest), HOST);
@@ -799,7 +805,7 @@ describe('the value never leaves the one write', () => {
     should(values.scrub('another-session', echoed)).equal(echoed);
   });
 
-  it('should keep the value out of every refusal message too', async () => {
+  it('I2 should keep the value out of every refusal message too', async () => {
     const { service, id } = await raised();
     const errors = [
       await refused(service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST)),
@@ -809,13 +815,24 @@ describe('the value never leaves the one write', () => {
     should(errors.map(error => error.message).join(' ')).not.containEql('hunter2');
   });
 
-  it('should mask the value from reads for the window and no longer', async () => {
+  it('I9 should mask the value from reads for the window and no longer', async () => {
     const { w, service, values, id, digest } = await raised();
     await service.deliver(SESSION, id, bodyFor(digest), HOST);
     w.now += 599_000;
     should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
     w.now += 2_000;
     should(values.scrub(SESSION, VALUE)).equal(VALUE);
+  });
+
+  it('I91 should keep the full redaction window when the lock is the short one', async () => {
+    const { w, service, values, quarantine, request, id, digest } = await raised({
+      facts: { ...FACTS, trustedProgram: true },
+    });
+    should(request.lock?.seconds).equal(10);
+    await service.deliver(SESSION, id, bodyFor(digest), HOST);
+    should(quarantine.until(SESSION, ['dev'])).equal(w.now + 10_000);
+    w.now += 599_000;
+    should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
   });
 });
 
@@ -831,7 +848,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(again.code).equal('gone');
   });
 
-  it('should refuse the raising agent’s cancel before anything is read or changed', async () => {
+  it('I240 should refuse the raising agent’s cancel before anything is read or changed', async () => {
     const { w, service, id } = await raised();
     const events = w.events.length;
     const audits = w.audits.length;
@@ -858,7 +875,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(wrong.code).equal('not_found');
   });
 
-  it('should end a request when its card is dismissed, once', async () => {
+  it('I53 should end a request when its card is dismissed, once', async () => {
     const { w, service } = await raised();
     await service.cardDismissed(SESSION, 'A1' as AgendaId);
     await service.cardDismissed(SESSION, 'A1' as AgendaId);
@@ -901,7 +918,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(service.hasOpen(SESSION)).be.false();
   });
 
-  it('should mask a delivered value from an agent read for the redaction window', async () => {
+  it('I101 should mask a delivered value from an agent read for the redaction window', async () => {
     const { service, id, digest } = await raised();
     await service.deliver(SESSION, id, bodyFor(digest), HOST);
 
@@ -948,7 +965,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should((await service.list(HOST, 'x-1')).length).equal(0);
   });
 
-  it('should bring a pending request back after a restart and re-observe before Send is allowed', async () => {
+  it('I11 should bring a pending request back after a restart and re-observe before Send is allowed', async () => {
     const first = await raised();
     const history = first.w.events;
     const second = build({ history: [...history] });
@@ -1058,7 +1075,7 @@ describe('R7: the agent is never sent to chat for a value', () => {
 });
 
 describe('review regressions: delivery is one recorded, serialised, never-repeated write', () => {
-  it('should record the delivery start durably BEFORE the write, then end uncertain and never type twice', async () => {
+  it('I242 should record the delivery start durably BEFORE the write, then end uncertain and never type twice', async () => {
     const { w, service, id, digest } = await raised({ typeResult: 'uncertain' });
     const body = bodyFor(digest);
     const first = await refused(service.deliver(SESSION, id, body, HOST));
@@ -1152,7 +1169,7 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
     should((await restored.service.list(HOST)).length).equal(1);
   });
 
-  it('should make a raise wait for an agent turn and a secure write wait for both', async () => {
+  it('I52 should make a raise wait for an agent turn and a secure write wait for both', async () => {
     const { w, service, id, digest } = await raised();
     let release: () => void = () => undefined;
     const turn = service.exclusive(SESSION, async () => await new Promise<void>(resolve => (release = resolve)));
@@ -1372,7 +1389,7 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(quarantine.sessions()).eql([]);
   });
 
-  it('should hold nothing for a plain answer', async () => {
+  it('I21 should hold nothing for a plain answer', async () => {
     const { w, service, id, digest } = await raised({}, { ...RAISE, sensitivity: 'plain' });
     await service.deliver(SESSION, id, bodyFor(digest, {}, 'y'), HOST);
 
@@ -1531,7 +1548,7 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(service.quarantinedUntil(SESSION, ['dev'])).equal(w.now + WINDOW);
   });
 
-  it('should let only the owner see, end or reveal a quarantine, and record each', async () => {
+  it('I77 should let only the owner see, end or reveal a quarantine, and record each', async () => {
     const { w, service, id, digest } = await raised();
     await service.deliver(SESSION, id, bodyFor(digest), DEVICE);
 
@@ -1549,7 +1566,7 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(gone.code).equal('not_found');
   });
 
-  it('should refuse to reveal a quarantined terminal when the reveal cannot be recorded', async () => {
+  it('I83 should refuse to reveal a quarantined terminal when the reveal cannot be recorded', async () => {
     const { w, service, id, digest } = await raised({ auditThrows: true });
     await service.deliver(SESSION, id, bodyFor(digest), HOST);
 
@@ -1754,7 +1771,7 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
   });
 
   // Q5
-  it('should keep a quarantined consumer name out of the audit record of the delivery', async () => {
+  it('I76 should keep a quarantined consumer name out of the audit record of the delivery', async () => {
     const { w, service, id, digest } = await raised();
     await service.deliver(SESSION, id, bodyFor(digest), HOST);
 
@@ -2165,7 +2182,7 @@ describe('when the terminal changes under the card (#B100)', () => {
   /** The same sudo prompt, redrawn: the program printed it again a row lower (a resize, a retry, a clear). */
   const REDRAWN: InputTargetFacts = { ...FACTS, cursorRow: 4 };
 
-  it('should redraw the card for the same prompt redrawn a row lower, count nothing, and type once into it', async () => {
+  it('I57 should redraw the card for the same prompt redrawn a row lower, count nothing, and type once into it', async () => {
     const { w, service, id, digest } = await raised();
     w.facts = REDRAWN;
 
@@ -2200,7 +2217,7 @@ describe('when the terminal changes under the card (#B100)', () => {
     should((await service.deliver(SESSION, id, bodyFor(digest), HOST)).state).equal('delivered');
   });
 
-  it('should end, in plain words, a terminal that keeps redrawing faster than the owner can answer', async () => {
+  it('I62 should end, in plain words, a terminal that keeps redrawing faster than the owner can answer', async () => {
     const { w, service, id } = await raised();
     const reasons: (string | undefined)[] = [];
     for (let row = 2; row < 3 + INPUT_MAX_REBINDS; row += 1) {
@@ -2270,7 +2287,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     promptLine: 'Verification code:',
   } as InputTargetFacts;
 
-  it('should raise a card that says the ferret can see the code, flagged neutral, with no lock and no ping', async () => {
+  it('I23 should raise a card that says the ferret can see the code, flagged neutral, with no lock and no ping', async () => {
     // Act
     const { w, view, request } = await raised({ facts: OTP }, CODE);
 
@@ -2311,7 +2328,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     should(error.code).equal('bad_request');
   });
 
-  it('should leave the typing gate open for a card of codes only, and closed for any other card', async () => {
+  it('I32 should leave the typing gate open for a card of codes only, and closed for any other card', async () => {
     // Arrange
     const code = await raised({ facts: OTP }, CODE);
     const secret = await raised({}, RAISE);
@@ -2390,7 +2407,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     should(renamed.request.sensitivity).equal('secret');
   });
 
-  it('should move the whole card to secret when a redraw upgrades its code field, never leave sensitivity at code', async () => {
+  it('I38 should move the whole card to secret when a redraw upgrades its code field, never leave sensitivity at code', async () => {
     // Arrange — a hidden-typing code prompt kept as a code by a proved code program; the redraw no longer proves it.
     const HIDDEN = { ...OTP, echo: 'off' } as InputTargetFacts;
     const { w, service, id, digest } = await raised({ facts: HIDDEN, codeProgram: true }, CODE);

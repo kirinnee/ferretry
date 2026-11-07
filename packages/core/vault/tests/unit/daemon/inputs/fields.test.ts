@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import { type AccountList, type LoginFieldRole } from '../../../../daemon/lib/inputs/borrowed.ts';
-import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
+import type { AccountList, LoginFieldRole, TwoFactorKeySummary } from '../../../../daemon/lib/inputs/borrowed.ts';
+import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputDeliverBody, type InputEvent, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
-import { type InputRaise, type InputTarget, type InputTargetFacts } from '../../../../contract/index.ts';
+import type { InputRaise, InputTarget, InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from '../../../../daemon/lib/inputs/errors.ts';
@@ -207,7 +207,7 @@ const GOOGLE_COM: Pick<AccountList, 'accounts' | 'signIns'> = {
       id: 'GOOGLE_COM',
       label: 'google_com',
       username: 'kirin',
-      fields: { password: true, totp: false },
+      fields: { password: true },
       factors: [],
       signIns: ['si_00000000000000f1'],
       createdAt: 'a',
@@ -288,7 +288,7 @@ describe('a card of several fields', () => {
     should(raisedCard?.ask).equal('Type them into the page. Not secret: the ferret can see this value.');
   });
 
-  it('should type every field in one write, in order, and mask only the values that are not plain', async () => {
+  it('I27 should type every field in one write, in order, and mask only the values that are not plain', async () => {
     const { service, request, writes, values } = await raisedLogin();
 
     const result = await service.deliver(
@@ -318,7 +318,7 @@ describe('a card of several fields', () => {
     should(values.scrub(SESSION, `${EMAIL} ${PASSWORD}`)).containEql(EMAIL);
   });
 
-  it('should refuse a Send that leaves a field empty, names a field the card lacks, or sends one bare value', async () => {
+  it('I25 should refuse a Send that leaves a field empty, names a field the card lacks, or sends one bare value', async () => {
     const { service, request, writes } = await raisedLogin();
     const digest = request.observedDigest ?? '';
 
@@ -422,7 +422,7 @@ describe('a card of several fields', () => {
       id,
       label: id.toLowerCase(),
       ...(username === undefined ? {} : { username }),
-      fields: { password: true, totp: false },
+      fields: { password: true },
       factors: [],
       signIns: [],
       createdAt: 'a',
@@ -459,7 +459,7 @@ describe('a card of several fields', () => {
     should(two.request.saved?.saves).equal('password');
   });
 
-  it('should refuse a terminal card of two fields and a terminal field that names an element', async () => {
+  it('I24 should refuse a terminal card of two fields and a terminal field that names an element', async () => {
     const { service } = build();
     const terminal: InputTarget = { kind: 'terminal', key: 'dev' };
 
@@ -580,7 +580,7 @@ describe('a card of several fields', () => {
     should(writes).eql([]);
   });
 
-  it('should end a page’s card after a restart instead of holding it with no way to send', async () => {
+  it('I31 should end a page’s card after a restart instead of holding it with no way to send', async () => {
     const history: InputEvent[] = [
       {
         type: 'surface.input_requested',
@@ -682,7 +682,7 @@ describe('InputTargetRouter', () => {
 });
 
 describe('review regressions: a card of several fields', () => {
-  it('should keep a visible text field amber for a secret even when autocomplete says it is for a password', async () => {
+  it('I29 should keep a visible text field amber for a secret even when autocomplete says it is for a password', async () => {
     for (const autocomplete of ['current-password', 'new-password']) {
       const facts: PageFacts = {
         ...PAGE,
@@ -697,7 +697,7 @@ describe('review regressions: a card of several fields', () => {
     }
   });
 
-  it('should refuse a chain to a card that is not one of this session’s input requests', async () => {
+  it('I28 should refuse a chain to a card that is not one of this session’s input requests', async () => {
     const { service } = build();
     const unknown = await refused(service.raise(SESSION, { ...LOGIN, chain: 'A9' as AgendaId }));
     await service.raise(SESSION, LOGIN);
@@ -864,7 +864,7 @@ describe('when the page changes under the card (#B100)', () => {
     fields: [pageField('email'), pageField('password', { backendNodeId: 99, box: { x: 10, y: 64, w: 300, h: 40 } })],
   };
 
-  it('should redraw the card for a field re-rendered as a new node, then type into the new node', async () => {
+  it('I58 should redraw the card for a field re-rendered as a new node, then type into the new node', async () => {
     const { service, request, writes, setFacts, shots, typedInto, told } = await raisedLogin();
     setFacts(RERENDERED);
 
@@ -889,7 +889,7 @@ describe('when the page changes under the card (#B100)', () => {
     should(told.at(-1)).containEql('was answered and typed');
   });
 
-  it("should flag a card redrawn onto a new document amber, above the field's own flag", async () => {
+  it("I59 should flag a card redrawn onto a new document amber, above the field's own flag", async () => {
     const { service, request, setFacts } = await raisedLogin();
     setFacts({ ...RERENDERED, navigationId: 'loader-2' });
 
@@ -999,12 +999,12 @@ describe('when the page changes under the card (#B100)', () => {
 });
 
 describe('a deliver types a saved account only as the card offers it now (secrev-1234 L1)', () => {
-  const account = (id: string, fields = { password: true, totp: false }) => ({
+  const account = (id: string, fields = { password: true }, factors: readonly TwoFactorKeySummary[] = []) => ({
     id,
     label: id.toLowerCase(),
     username: `${id.toLowerCase()}@example.com`,
     fields,
-    factors: [],
+    factors,
     signIns: [],
     createdAt: 'a',
     updatedAt: 'a',
@@ -1020,7 +1020,7 @@ describe('a deliver types a saved account only as the card offers it now (secrev
   });
   /** The page (accounts.google.com) is where SITE signs in, through the OKTA provider. */
   const throughProvider = (linked: boolean): Pick<AccountList, 'accounts' | 'signIns'> => ({
-    accounts: [account('SITE', { password: false, totp: false }), account('OKTA')],
+    accounts: [account('SITE', { password: false }), account('OKTA')],
     signIns: [
       site('si_0000000000000a01', 'OKTA', 'login.okta.test'),
       site(
@@ -1032,7 +1032,7 @@ describe('a deliver types a saved account only as the card offers it now (secrev
               method: { kind: 'sso', name: 'Okta', via: 'OKTA' },
               via: { account: { id: 'OKTA', label: 'okta' }, signIn: 'si_0000000000000a01' },
             }
-          : // The migration dropped the via link: the method is kept, the provider named nowhere.
+          : // The via link is gone: the method is kept, the provider named nowhere.
             { method: { kind: 'sso', name: 'Okta' } },
       ),
     ],
@@ -1056,7 +1056,19 @@ describe('a deliver types a saved account only as the card offers it now (secrev
 
   it('should type no 2FA code from an account that does not sign in here', async () => {
     const elsewhere = {
-      accounts: [account('GITLAB', { password: true, totp: true })],
+      accounts: [
+        account('GITLAB', { password: true }, [
+          {
+            id: 'tf_0000000000a1',
+            kind: 'totp',
+            label: 'App',
+            addedAt: 'a',
+            addedBy: 'owner',
+            automatic: true,
+            params: { algorithm: 'SHA1', digits: 6, period: 30 },
+          },
+        ]),
+      ],
       signIns: [site('si_0000000000000a03', 'GITLAB', 'gitlab.com')],
     };
     const code: InputRaise = {

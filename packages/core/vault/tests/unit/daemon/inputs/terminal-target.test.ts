@@ -440,7 +440,7 @@ describe('typing into a terminal an input request aims at', () => {
     }
   });
 
-  it('should write nothing when the foreground program, echo state or prompt changed after the card', async () => {
+  it('I55 should write nothing when the foreground program, echo state or prompt changed after the card', async () => {
     const expected = await observed(world());
     const foreground = world();
     foreground.ps = ' 4400  4400  4400 ssh ssh evil\n';

@@ -15,7 +15,7 @@ const settled = (quarantine: QuarantineRegistry, session: string, names: string[
 };
 
 describe('QuarantineRegistry', () => {
-  it('should hold a terminal under every name it is known by, until the window ends', () => {
+  it('I84 should hold a terminal under every name it is known by, until the window ends', () => {
     const { clock, quarantine } = registry();
 
     const until = settled(quarantine, SESSION, ['dev', '000000000001']);
@@ -30,7 +30,7 @@ describe('QuarantineRegistry', () => {
     should(quarantine.sessions()).eql([]);
   });
 
-  it('should keep a hold in flight open for a full window from now, however long the delivery takes', () => {
+  it('I79 should keep a hold in flight open for a full window from now, however long the delivery takes', () => {
     const { clock, quarantine } = registry();
     const hold = quarantine.begin(SESSION, ['dev'], 'req');
 
@@ -66,7 +66,7 @@ describe('QuarantineRegistry', () => {
     should(quarantine.until(SESSION, ['b'])).equal(second);
   });
 
-  it('should let a failed attempt release only its own hold, never an earlier delivery', () => {
+  it('I80 should let a failed attempt release only its own hold, never an earlier delivery', () => {
     const { clock, quarantine } = registry();
     const delivered = settled(quarantine, SESSION, ['dev', 'a']);
     clock.ms += 30_000;
@@ -86,7 +86,7 @@ describe('QuarantineRegistry', () => {
     should(quarantine.sessions()).eql([]);
   });
 
-  it('should end every settled hold on a terminal and give back each hold it released, by id', () => {
+  it('I78 should end every settled hold on a terminal and give back each hold it released, by id', () => {
     const { quarantine } = registry();
     settled(quarantine, SESSION, ['dev', 'a']);
     settled(quarantine, SESSION, ['a', 'b']);
@@ -224,7 +224,7 @@ describe('QuarantineRegistry', () => {
     should(quarantine.until(SESSION, ['b'])).be.undefined();
   });
 
-  it('should restore an unresolved hold with all its names, holding until it is settled to a fresh window', () => {
+  it('I82 should restore an unresolved hold with all its names, holding until it is settled to a fresh window', () => {
     const { clock, quarantine } = registry();
     quarantine.lock();
     const hold = quarantine.restore(SESSION, ['dev', '000000000001'], 'in-flight', 'req/9');
@@ -242,7 +242,7 @@ describe('QuarantineRegistry', () => {
 });
 
 describe('a hold with its own lock window', () => {
-  it('should run the short window once settled, and the full window while in flight', () => {
+  it('I81 should run the short window once settled, and the full window while in flight', () => {
     const { clock, quarantine } = registry();
     const hold = quarantine.begin(SESSION, ['dev'], 'req', 10_000);
     should(quarantine.until(SESSION, ['dev'])).equal(1_120_000);

@@ -1,4 +1,29 @@
-import { type AccountId, type AccountList, type AccountSummary, automaticKeysInOfferOrder, chosenSignIn, fillRoleFor, type InputCodeKey, type InputSaved, type InputSavedOffer, InputSavedSchema, type InputSignIn, type LoginFieldRole, LoginMatchSchema, LOGIN_MATCH_MAX, matchedSignIns, namesSignIn, type PlaceKey, placeHosts, type SignInChoiceContext, type SignInSummary, signInMatches, suggestedNewAccount, type TwoFactorId, type TwoFactorKeySummary } from './borrowed.ts';
+import {
+  type AccountId,
+  type AccountList,
+  type AccountSummary,
+  automaticKeysInOfferOrder,
+  chosenSignIn,
+  fillRoleFor,
+  type InputCodeKey,
+  type InputSaved,
+  type InputSavedOffer,
+  InputSavedSchema,
+  type InputSignIn,
+  type LoginFieldRole,
+  LoginMatchSchema,
+  LOGIN_MATCH_MAX,
+  matchedSignIns,
+  namesSignIn,
+  type PlaceKey,
+  placeHosts,
+  type SignInChoiceContext,
+  type SignInSummary,
+  signInMatches,
+  suggestedNewAccount,
+  type TwoFactorId,
+  type TwoFactorKeySummary,
+} from './borrowed.ts';
 import { type InputSensitivity, type InputTargetFacts, strongestSensitivity } from '../../../contract/index.ts';
 import { savedRolesOf } from './wire.ts';
 
@@ -123,7 +148,8 @@ export function signInFor(matchKey: string | undefined, listing: SavedListing): 
 }
 
 function holds(account: AccountSummary, role: LoginFieldRole): boolean {
-  return role === 'username' ? account.username !== undefined : account.fields[role];
+  if (role === 'username') return account.username !== undefined;
+  return role === 'totp' ? account.factors.some(key => key.automatic) : account.fields[role];
 }
 
 /** The account a ferret's `secretHint` names: an account handle, or the account of the `si_…` it names. */
@@ -138,7 +164,7 @@ function hintedAccount(hint: string | undefined, listing: SavedListing): Account
  * - a one-time code: a code belongs to the sign-in it was made for;
  * - on a target a sign-in reaches THROUGH A PROVIDER ("Sign in with Google"): no saved password belongs on that site's
  *   own page, so nothing but what the daemon matched there is offered — whether or not the link to the provider's
- *   account survived (a migration that dropped a `via` leaves the provider unnamed, never one tap away);
+ *   account survived (a sign-in whose `via` is gone leaves the provider unnamed, never one tap away);
  * - a provider: an account a sign-in goes via. Its password belongs on its own login domains, where it is matched.
  */
 function handPickable(

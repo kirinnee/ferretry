@@ -92,7 +92,7 @@ const AT = 'a';
 const account = (id: string, extra: Partial<AccountSummary> = {}): AccountSummary => ({
   id,
   label: id.toLowerCase(),
-  fields: { password: true, totp: false },
+  fields: { password: true },
   factors: [],
   signIns: [],
   createdAt: AT,
@@ -143,7 +143,7 @@ describe('what a card offers', () => {
           account('ALPHA'),
           account('HINTED'),
           account('MATCH'),
-          account('NO_PASSWORD', { fields: { password: false, totp: false } }),
+          account('NO_PASSWORD', { fields: { password: false } }),
         ],
         [tty('ZED', 'sudo', 'other'), tty('ALPHA', 'sudo', 'other'), match, tty('NO_PASSWORD', 'sudo', 'box')],
       ),
@@ -262,9 +262,7 @@ describe('the one-tap primary: chosen ONLY among the sign-ins the daemon matched
   it('should choose among the accounts that can fill the card: one that cannot is not matched', () => {
     const { list } = two();
     const narrowed = listing(
-      list.accounts.map(each =>
-        each.id === 'GITHUB_B' ? { ...each, fields: { password: false, totp: false } } : each,
-      ),
+      list.accounts.map(each => (each.id === 'GITHUB_B' ? { ...each, fields: { password: false } } : each)),
       [...list.signIns],
     );
     should(offersOf(savedFor('secret', 'github.com', narrowed))[0]).deepEqual(['GITHUB_A', true, 'only']);
@@ -325,7 +323,7 @@ describe('a site that signs in through a provider (secrev-1201 L5)', () => {
   });
   const accounts = [
     account('GOOGLE_KIRIN', { label: 'Google (kirin@)', username: 'kirin@x.test' }),
-    account('VERCEL', { label: 'Vercel', fields: { password: false, totp: false } }),
+    account('VERCEL', { label: 'Vercel', fields: { password: false } }),
     account('UNRELATED', { label: 'Unrelated' }),
   ];
 
@@ -341,7 +339,7 @@ describe('a site that signs in through a provider (secrev-1201 L5)', () => {
     should(signInFor('sudo@kirin-box', listing(accounts, [google, vercel]))).be.undefined();
   });
 
-  it('should never put the provider one tap away there, even when the migration dropped the via link', () => {
+  it('should never put the provider one tap away there, even when its via link is gone', () => {
     // v1 VERCEL went via GOOGLE_KIRIN, which signed in nowhere: the link was dropped, the method kept.
     const dropped = site('VERCEL', ['vercel.com'], { method: { kind: 'google' } });
     const saved = savedFor('secret', 'vercel.com', listing(accounts, [dropped]));
@@ -372,11 +370,22 @@ describe('a site that signs in through a provider (secrev-1201 L5)', () => {
   });
 });
 
+/** A 2FA key Ferretry holds the seed of: it makes this account's codes. */
+const SEEDED_KEY = {
+  id: 'tf_0000000000a1',
+  kind: 'totp',
+  label: 'App',
+  addedAt: 'a',
+  addedBy: 'owner',
+  automatic: true,
+  params: { algorithm: 'SHA1', digits: 6, period: 30 },
+} as const;
+
 describe('a one-time code is never offered by hand', () => {
   it('should offer a code only from an account that signs in here', () => {
     const here = site('GITHUB', ['github.com']);
     const elsewhere = site('GITLAB', ['gitlab.com']);
-    const seeded = { fields: { password: true, totp: true } };
+    const seeded = { factors: [SEEDED_KEY] };
     const saved = savedFor(
       'code',
       'github.com',
@@ -388,7 +397,7 @@ describe('a one-time code is never offered by hand', () => {
 
   it('should offer no code at all unless the caller says the target may take one it makes', () => {
     const here = site('GITHUB', ['github.com']);
-    const seeded = listing([account('GITHUB', { fields: { password: true, totp: true } })], [here]);
+    const seeded = listing([account('GITHUB', { factors: [SEEDED_KEY] })], [here]);
     should(savedFor('code', 'github.com', seeded).offers).deepEqual([]);
     should(savedFor('code', 'github.com', seeded, { codesHere: false }).offers).deepEqual([]);
     should(savedFor('secret', 'github.com', seeded).offers.map(offer => offer.fills)).deepEqual(['password']);

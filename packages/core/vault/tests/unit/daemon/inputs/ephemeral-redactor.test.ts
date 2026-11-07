@@ -50,7 +50,7 @@ describe('EphemeralAwareRedactor', () => {
     should(data).eql({ k: '[redacted:input A1]' });
   });
 
-  it('should mask a vault secret that overlaps a just-typed value as one run, whichever store is read first', async () => {
+  it('I102 should mask a vault secret that overlaps a just-typed value as one run, whichever store is read first', async () => {
     const overlapping = new EphemeralValues({ now: () => 1 });
     overlapping.hold('s1', 'defgh', 'A1');
     const redactor = new EphemeralAwareRedactor(

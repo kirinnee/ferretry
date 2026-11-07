@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { INPUT_HOLD_REASONS, INPUT_QUARANTINE_SECONDS, INPUT_SHORT_LOCK_SECONDS, InputHoldSchema } from '../../../contract/index.ts';
+import {
+  INPUT_HOLD_REASONS,
+  INPUT_QUARANTINE_SECONDS,
+  INPUT_SHORT_LOCK_SECONDS,
+  InputHoldSchema,
+} from '../../../contract/index.ts';
 import { INPUT_LOCK_WORDS, InputAgentViewSchema, lockWords } from '../../../daemon/lib/inputs/wire.ts';
 
 describe('the lock a card shows', () => {
@@ -13,14 +18,14 @@ describe('the lock a card shows', () => {
     expect(InputHoldSchema.safeParse({ seconds: 10, reason: 'probed-field', note: 'x' }).success).toBe(false);
   });
 
-  it('should say every reason in a fixed sentence, and the length in words', () => {
+  it('I89 should say every reason in a fixed sentence, and the length in words', () => {
     for (const reason of INPUT_HOLD_REASONS) expect(INPUT_LOCK_WORDS[reason].length).toBeGreaterThan(10);
     expect(lockWords({ seconds: 10, reason: 'probed-field' })).toBe('10 s');
     expect(lockWords({ seconds: 120, reason: 'not-proven' })).toBe('2 minutes');
     expect(lockWords({ seconds: 60, reason: 'not-proven' })).toBe('1 minute');
   });
 
-  it('should tell the agent the seconds, and nothing else about it', () => {
+  it('I86 should tell the agent the seconds, and nothing else about it', () => {
     expect(InputAgentViewSchema.safeParse({ id: 'A7', state: 'delivered', lockSeconds: 10 }).success).toBe(true);
     expect(InputAgentViewSchema.safeParse({ id: 'A7', state: 'delivered', lockSeconds: 121 }).success).toBe(false);
   });

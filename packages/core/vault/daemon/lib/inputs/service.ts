@@ -1,7 +1,67 @@
-import { type AccountId, type AccountKey, type CopyMeta, copyHandle, factorAskWords, fillRoleFor, grantFilledLineFor, type GrantMissReason, LOGIN_PASSWORD_MIN_LENGTH, LOGIN_USERNAME_MAX_LENGTH, type LoginEntryId, type PushSubject, placeKeys, type SignInChoiceContext, type SignInId, TASK_PLAN_MISS_AGENT_NOTE, type TwoFactorId } from './borrowed.ts';
+import {
+  type AccountId,
+  type AccountKey,
+  type CopyMeta,
+  copyHandle,
+  factorAskWords,
+  fillRoleFor,
+  grantFilledLineFor,
+  type GrantMissReason,
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LOGIN_USERNAME_MAX_LENGTH,
+  type LoginEntryId,
+  type PushSubject,
+  placeKeys,
+  type SignInChoiceContext,
+  type SignInId,
+  TASK_PLAN_MISS_AGENT_NOTE,
+  type TwoFactorId,
+} from './borrowed.ts';
 import { type AgendaId, MAX_AGENDA_TITLE_LENGTH } from './wire.ts';
-import { INPUT_DEFAULT_EXPIRY_SECONDS, INPUT_MAX_CHECK_FAILURES, INPUT_MAX_PENDING_PER_FERRET, INPUT_MAX_RAISES_PER_HOUR, INPUT_MAX_REBINDS, INPUT_PROMPT_MAX_LENGTH, INPUT_QUARANTINE_SECONDS, type InputFieldRaise, type InputRaise, type InputSensitivity, type InputShot, type InputTarget, type InputTargetFacts, strongestSensitivity } from '../../../contract/index.ts';
-import { INPUT_ERROR_CODES, INPUT_JOURNAL_EVENT_TYPES, INPUT_QUARANTINE_EVENT_TYPES, INPUT_CODE_VISIBLE_NOTICE, INPUT_PLAIN_VALUE_NOTICE, INPUT_QUARANTINE_WORDS, INPUT_SINGLE_FIELD_ID, type InputActor, type InputAgentView, type InputAuditDetail, type InputAuditEvent, type InputDeliverBody, type InputDeliverResult, type InputEvent, type InputQuarantine, type InputQuarantineEvent, type InputReason, type InputRequest, type InputRequestField, type InputRisk, inputRaiseFields, inputValueProblem, observerByOf, savedRolesOf, unpadInputValue, worstRisk } from './wire.ts';
+import {
+  INPUT_DEFAULT_EXPIRY_SECONDS,
+  INPUT_MAX_CHECK_FAILURES,
+  INPUT_MAX_PENDING_PER_FERRET,
+  INPUT_MAX_RAISES_PER_HOUR,
+  INPUT_MAX_REBINDS,
+  INPUT_PROMPT_MAX_LENGTH,
+  INPUT_QUARANTINE_SECONDS,
+  type InputFieldRaise,
+  type InputRaise,
+  type InputSensitivity,
+  type InputShot,
+  type InputTarget,
+  type InputTargetFacts,
+  strongestSensitivity,
+} from '../../../contract/index.ts';
+import {
+  INPUT_ERROR_CODES,
+  INPUT_JOURNAL_EVENT_TYPES,
+  INPUT_QUARANTINE_EVENT_TYPES,
+  INPUT_CODE_VISIBLE_NOTICE,
+  INPUT_PLAIN_VALUE_NOTICE,
+  INPUT_QUARANTINE_WORDS,
+  INPUT_SINGLE_FIELD_ID,
+  type InputActor,
+  type InputAgentView,
+  type InputAuditDetail,
+  type InputAuditEvent,
+  type InputDeliverBody,
+  type InputDeliverResult,
+  type InputEvent,
+  type InputQuarantine,
+  type InputQuarantineEvent,
+  type InputReason,
+  type InputRequest,
+  type InputRequestField,
+  type InputRisk,
+  inputRaiseFields,
+  inputValueProblem,
+  observerByOf,
+  savedRolesOf,
+  unpadInputValue,
+  worstRisk,
+} from './wire.ts';
 import { LoginEntryError, type LoginFieldValues } from './borrowed.ts';
 import type { ClearJob, ClearOutcome } from '../../../contract/index.ts';
 import { clearJobOf } from './borrowed-grants.ts';
@@ -1183,6 +1243,13 @@ export class InputRequestService {
    * Whether the session has a card open the owner has not answered yet — what keeps the Warden from moving a ferret
    * in the middle of one. A yes or no, nothing about the card: it needs no owner, and says nothing a value could leak through.
    */
+  /** The sessions with a request still open: where a hold decision has a pending card to find. */
+  openSessions(): readonly string[] {
+    const sessions = new Set<string>();
+    for (const { request } of this.held.values()) if (!isFinal(request)) sessions.add(request.sessionId);
+    return [...sessions];
+  }
+
   hasOpen(sessionId: string): boolean {
     for (const { request } of this.held.values()) if (request.sessionId === sessionId && !isFinal(request)) return true;
     return false;
@@ -2817,18 +2884,18 @@ export class InputRequestService {
     await this.deps.journal.publish(
       request.sessionId,
       {
-      type: INPUT_JOURNAL_EVENT_TYPES[kind],
-      requestId: request.id,
-      agendaItemId: request.agendaItemId,
-      sessionId: request.sessionId,
-      target: { kind: request.target.kind, key: request.target.key },
-      sensitivity: request.sensitivity,
-      submit: request.submit,
-      ...(request.source === undefined ? {} : { sealed: request.source.name }),
-      state: request.state,
-      ...(deliveryId === undefined ? {} : { deliveryId }),
-      ...(submitted === undefined ? {} : { submitted }),
-      ...(reason === undefined ? {} : { reason }),
+        type: INPUT_JOURNAL_EVENT_TYPES[kind],
+        requestId: request.id,
+        agendaItemId: request.agendaItemId,
+        sessionId: request.sessionId,
+        target: { kind: request.target.kind, key: request.target.key },
+        sensitivity: request.sensitivity,
+        submit: request.submit,
+        ...(request.source === undefined ? {} : { sealed: request.source.name }),
+        state: request.state,
+        ...(deliveryId === undefined ? {} : { deliveryId }),
+        ...(submitted === undefined ? {} : { submitted }),
+        ...(reason === undefined ? {} : { reason }),
         ...(kind === 'requested' || kind === 'delivering' ? { expiresAt: request.expiresAt } : {}),
         at: instant(this.deps.clock.now()),
       },

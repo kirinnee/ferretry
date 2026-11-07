@@ -1,6 +1,6 @@
 import { INPUT_QUARANTINE_SECONDS, INPUT_SHORT_LOCK_SECONDS, type InputTargetFacts } from '../../../contract/index.ts';
-import { type InputLock, type InputRequestField } from './wire.ts';
-import { type LoginObserved } from './borrowed.ts';
+import type { InputLock, InputRequestField } from './wire.ts';
+import type { LoginObserved } from './borrowed.ts';
 import { identityOf, placeOf } from './login-observer.ts';
 
 /**
@@ -123,7 +123,7 @@ export const CODE_PROGRAMS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Text as it is matched: compatibility-normalised (NFKC), with combining marks and invisible format characters taken
+ * Text as it is matched: NFKC-normalised, with combining marks and invisible format characters taken
  * out, so "pàss​word" or a fullwidth "ｐａｓｓｗｏｒｄ" reads "password". Applied to the pane's line and to the ferret's own words.
  */
 export function matchable(text: string): string {

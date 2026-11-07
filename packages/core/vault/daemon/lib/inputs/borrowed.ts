@@ -216,7 +216,7 @@ export const signInRuleSuspensionOf = (reason: GrantMissReason): SignInRuleSuspe
 
 // ─── from account-ids.ts ───
 
-/** A sign-in's id: `si_` and 16 lowercase hex digits. Random on create; derived on migration (accounts.ts). */
+/** A sign-in's id: `si_` and 16 lowercase hex digits. Random on create. */
 export const SignInIdSchema = z.string().regex(/^si_[0-9a-f]{16}$/u, 'a sign-in id is si_ and 16 hex digits');
 
 /**
@@ -270,7 +270,7 @@ const SIGN_IN_RULE_FACTORS_DOMAIN = 'ferretry.sign-in-rule.factors.v1';
 
 /**
  * A 2FA key's id: `tf_` and 12 lowercase hex digits. Immutable and never shown to people (the CLI and plan lines
- * only): a card names a key by its owner-written label. Random on add; derived on migration (accounts.ts).
+ * only): a card names a key by its owner-written label. Random on add.
  */
 export const TwoFactorIdSchema = z.string().regex(/^tf_[0-9a-f]{12}$/u, 'a 2FA key id is tf_ and 12 hex digits');
 
@@ -284,8 +284,8 @@ export const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
 /** A key's label: the OWNER's words, one line. A card names a key by it, never by a ferret's text. */
 export const TwoFactorLabelSchema = oneLine(TWO_FACTOR_LABEL_MAX_LENGTH);
 
-/** Who put a key there. `migration`: a saved login's seed, moved. Never a ferret. */
-export const TwoFactorAddedBySchema = z.enum(['owner', 'migration']);
+/** Who put a key there: the owner. Never a ferret. */
+export const TwoFactorAddedBySchema = z.enum(['owner']);
 
 /** What every kind says, beside its kind. */
 const factorShape = <Time extends z.ZodType<string>>(time: Time) => ({
@@ -320,7 +320,7 @@ const totpShape = {
 
 /**
  * Whether a code Ferretry made went through, as the daemon saw it (the page moved on, or the same prompt came back).
- * Absent: never tried since it was added (every migrated seed starts here). It orders the offers; it grants nothing.
+ * Absent: never tried since it was added. It orders the offers; it grants nothing.
  */
 const verifiedShape = <Time extends z.ZodType<string>>(time: Time) => z.strictObject({ worked: z.boolean(), at: time });
 
@@ -1486,18 +1486,6 @@ export function automaticKeysInOfferOrder(keys: readonly TwoFactorKeySummary[]):
     );
 }
 
-/**
- * An owner summary's one-release compatibility fields, from its keys: `fields.totp` (any key holds a seed) and `totp`
- * (the code parameters of the first key in {@link automaticKeysInOfferOrder}), as an app from before 2FA keys reads.
- */
-export function accountSeedFields(keys: readonly TwoFactorKeySummary[]): {
-  readonly totp: boolean;
-  readonly params?: TotpParameters;
-} {
-  const [first] = automaticKeysInOfferOrder(keys);
-  return first?.kind === 'totp' && first.params !== undefined ? { totp: true, params: first.params } : { totp: false };
-}
-
 /** An account named by another: its handle and its label, never what it holds. */
 export const AccountRefSchema = z.strictObject({ id: AccountIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
 
@@ -1507,28 +1495,18 @@ export type AccountRef = z.infer<typeof AccountRefSchema>;
 export const SignInViaSchema = z.strictObject({ account: AccountRefSchema, signIn: SignInIdSchema.optional() });
 
 /** An account as the OWNER reads it. `fields` says which secret fields exist, never what they hold. */
-export const AccountSummarySchema = z
-  .strictObject({
-    id: AccountIdSchema,
-    label: oneLine(LOGIN_LABEL_MAX_LENGTH),
-    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-    /**
-     * OWNER VIEW ONLY: which secret fields exist. Never in a hint. `totp` is kept for one release for an app from before
-     * 2FA keys: whether any key holds a seed ({@link accountSeedFields}).
-     */
-    fields: z.strictObject({ password: z.boolean(), totp: z.boolean() }),
-    /** Kept for one release, as `fields.totp`: the code parameters of the key a deliver without `factor` would use. */
-    totp: TotpParametersSchema.optional(),
-    /** The account's 2FA keys, in the owner's order: kind, label and plain facts, and whether Ferretry makes the codes. */
-    factors: z.array(TwoFactorKeySummarySchema).max(MAX_FACTORS_PER_ACCOUNT).readonly(),
-    signIns: z.array(SignInIdSchema).max(MAX_SIGN_INS_PER_ACCOUNT).readonly(),
-    createdAt: InstantSchema,
-    updatedAt: InstantSchema,
-  })
-  .refine(account => account.fields.totp === account.factors.some(key => key.automatic), {
-    path: ['fields', 'totp'],
-    message: 'fields.totp says whether a 2FA key holds a seed',
-  });
+export const AccountSummarySchema = z.strictObject({
+  id: AccountIdSchema,
+  label: oneLine(LOGIN_LABEL_MAX_LENGTH),
+  username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
+  /** OWNER VIEW ONLY: which secret fields exist. Never in a hint. */
+  fields: z.strictObject({ password: z.boolean() }),
+  /** The account's 2FA keys, in the owner's order: kind, label and plain facts, and whether Ferretry makes the codes. */
+  factors: z.array(TwoFactorKeySummarySchema).max(MAX_FACTORS_PER_ACCOUNT).readonly(),
+  signIns: z.array(SignInIdSchema).max(MAX_SIGN_INS_PER_ACCOUNT).readonly(),
+  createdAt: InstantSchema,
+  updatedAt: InstantSchema,
+});
 
 export type AccountSummary = z.infer<typeof AccountSummarySchema>;
 
@@ -1832,7 +1810,6 @@ export function factorAskWords(
   if (codes.length === 1) return oneKeyWords(only);
   return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
 }
-
 
 // ─── from daemon/src/lib/secrets/accounts.ts ───
 

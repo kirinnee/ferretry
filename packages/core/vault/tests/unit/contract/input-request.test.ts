@@ -3,8 +3,45 @@ import should from 'should';
 import { z } from 'zod';
 import { StoredAskSchema } from '@ferretry/core-asks/contract';
 import { AUDIT_KIND_NAMES } from '@ferretry/core-gate/contract';
-import { INPUT_ACTOR_OBSERVER_BY, INPUT_AUDIT_EVENTS, INPUT_JOURNAL_EVENT_TYPES, INPUT_PROMPT_MARKER, inputContextLines, INPUT_SINGLE_FIELD_ID, type InputActor, InputActorSchema, InputAgentViewSchema, InputAuditDetailSchema, InputCancelBodySchema, InputDeliverBodySchema, InputDeliverResultSchema, InputEventSchema, InputOutcomeSchema, InputRequestListSchema, InputRequestSchema, inputRaiseFields, inputValueProblem, LOGIN_OBSERVER_BYS, type LoginObserverBy, observerByOf, ownerTapped, padInputValue, savedRolesOf, unpadInputValue, worstRisk } from '../../../daemon/lib/inputs/wire.ts';
-import { INPUT_DEFAULT_EXPIRY_SECONDS, INPUT_MAX_EXPIRY_SECONDS, INPUT_MAX_FIELDS, INPUT_PAD_BUCKET_BYTES, INPUT_VALUE_MAX_BYTES, InputRaiseSchema, InputTargetFactsSchema, strongestSensitivity } from '../../../contract/index.ts';
+import {
+  INPUT_ACTOR_OBSERVER_BY,
+  INPUT_AUDIT_EVENTS,
+  INPUT_JOURNAL_EVENT_TYPES,
+  INPUT_PROMPT_MARKER,
+  inputContextLines,
+  INPUT_SINGLE_FIELD_ID,
+  type InputActor,
+  InputActorSchema,
+  InputAgentViewSchema,
+  InputAuditDetailSchema,
+  InputCancelBodySchema,
+  InputDeliverBodySchema,
+  InputDeliverResultSchema,
+  InputEventSchema,
+  InputOutcomeSchema,
+  InputRequestListSchema,
+  InputRequestSchema,
+  inputRaiseFields,
+  inputValueProblem,
+  LOGIN_OBSERVER_BYS,
+  type LoginObserverBy,
+  observerByOf,
+  ownerTapped,
+  padInputValue,
+  savedRolesOf,
+  unpadInputValue,
+  worstRisk,
+} from '../../../daemon/lib/inputs/wire.ts';
+import {
+  INPUT_DEFAULT_EXPIRY_SECONDS,
+  INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_MAX_FIELDS,
+  INPUT_PAD_BUCKET_BYTES,
+  INPUT_VALUE_MAX_BYTES,
+  InputRaiseSchema,
+  InputTargetFactsSchema,
+  strongestSensitivity,
+} from '../../../contract/index.ts';
 
 const ID = 'b'.repeat(32);
 const DIGEST = 'c'.repeat(64);
@@ -110,10 +147,11 @@ describe('raising an input request', () => {
     const raise = { target: { kind: 'page', key: 'app' }, prompt: 'p', sensitivity: 'private' };
     // The key's id is Accounts', carried opaque and bounded (Accounts parses it).
     should(InputRaiseSchema.safeParse({ ...raise, factor: 'tf_000000000001' }).success).be.true();
-    for (const factor of ['', 'x'.repeat(129)]) should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
+    for (const factor of ['', 'x'.repeat(129)])
+      should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
   });
 
-  it('should refuse anything the agent could use to claim what the daemon observes', () => {
+  it('I15 should refuse anything the agent could use to claim what the daemon observes', () => {
     for (const extra of [{ observed: TERMINAL_FACTS }, { echo: 'off' }, { origin: 'https://github.com' }]) {
       should(
         InputRaiseSchema.safeParse({
@@ -209,7 +247,7 @@ describe('a card of several fields', () => {
     should(InputDeliverBodySchema.safeParse({ ...head, save: { ...save, mode: 'replace' } }).success).be.false();
   });
 
-  it('should deliver each typed field padded on its own, a saved login for the rest, and never a bare padded beside them', () => {
+  it('I16 should deliver each typed field padded on its own, a saved login for the rest, and never a bare padded beside them', () => {
     const typed = { field: 'email', padded: padInputValue('me@example.com') };
     const head = { deliveryId: DELIVERY, observedDigest: DIGEST, submit: true };
 
@@ -232,7 +270,7 @@ describe('a card of several fields', () => {
     ).be.false();
   });
 
-  it('should keep a login card as ONE saved login: the plain field as the username, the secret as the password', () => {
+  it('I26 should keep a login card as ONE saved login: the plain field as the username, the secret as the password', () => {
     should([...(savedRolesOf([email, password]) ?? [])]).deepEqual([
       ['email', 'username'],
       ['password', 'password'],
@@ -310,7 +348,7 @@ describe('an input request', () => {
     should(InputOutcomeSchema.safeParse({ ...outcome, secretName: 'SUDO_KIRIN_BOX' }).success).be.false();
   });
 
-  it('should tell the agent where it stands without a value, a length or a saved secret name', () => {
+  it('I17 should tell the agent where it stands without a value, a length or a saved secret name', () => {
     const view = { id: 'A7', state: 'delivered', submitted: true, source: 'saved', screen: 'building…' };
 
     should(InputAgentViewSchema.safeParse(view).success).be.true();
@@ -339,7 +377,7 @@ describe('the events and the audit detail', () => {
     ]);
   });
 
-  it('should carry names and flags in an audit detail, nothing else', () => {
+  it('I18 should carry names and flags in an audit detail, nothing else', () => {
     const detail = {
       targetKind: 'terminal',
       consumer: 'sudo',
@@ -511,7 +549,7 @@ describe('a card a standing sign-in rule filled, or tried to', () => {
 describe('delivering', () => {
   const body = { deliveryId: DELIVERY, observedDigest: DIGEST, padded: padInputValue('hunter2-UNIQUE'), submit: true };
 
-  it('should carry the padded value or a saved login handle, exactly one', () => {
+  it('I10 should carry the padded value or a saved login handle, exactly one', () => {
     should(InputDeliverBodySchema.safeParse(body).success).be.true();
     should(
       InputDeliverBodySchema.safeParse({
@@ -581,7 +619,7 @@ describe('delivering', () => {
 });
 
 describe('padding a value for the wire', () => {
-  it('should round every value up to a bucket and read it back', () => {
+  it('I7 should round every value up to a bucket and read it back', () => {
     for (const value of [
       'a',
       'hunter2-UNIQUE',
@@ -597,7 +635,7 @@ describe('padding a value for the wire', () => {
     }
   });
 
-  it('should make a short password and a long one the same size', () => {
+  it('I69 should make a short password and a long one the same size', () => {
     should(padInputValue('a').length).equal(padInputValue('p'.repeat(200)).length);
   });
 
@@ -624,7 +662,7 @@ describe('padding a value for the wire', () => {
 });
 
 describe('what may be typed', () => {
-  it('should refuse a control character or a line break for a secret or a private value', () => {
+  it('I20 should refuse a control character or a line break for a secret or a private value', () => {
     for (const sensitivity of ['secret', 'private'] as const) {
       should(inputValueProblem('pass\nword', sensitivity)).containEql('press keys');
       should(inputValueProblem('pass\u001b[A', sensitivity)).containEql('press keys');
@@ -727,13 +765,13 @@ describe('the schemas that must never hold a value', () => {
     });
   }
 
-  it('should hold the value in exactly one place: the deliver body, padded', () => {
+  it('I4 should hold the value in exactly one place: the deliver body, padded', () => {
     should([...new Set(propertyNames(InputDeliverBodySchema).filter(property => VALUE_LIKE.test(property)))]).deepEqual(
       ['padded'],
     );
   });
 
-  it('should reject a value smuggled into any of them', () => {
+  it('I1 should reject a value smuggled into any of them', () => {
     const smuggled = { ...REQUEST, value: 'hunter2-UNIQUE' };
 
     should(InputRequestSchema.safeParse(smuggled).success).be.false();
@@ -749,10 +787,13 @@ describe('the schemas that must never hold a value', () => {
 
   it('should audit only events the closed audit list knows', () => {
     const gateName = (event: string): string =>
-      event === 'input.quarantine_ended' ? 'input.hold-ended' : event === 'input.quarantine_revealed' ? 'input.hold-revealed' : event;
+      event === 'input.quarantine_ended'
+        ? 'input.hold-ended'
+        : event === 'input.quarantine_revealed'
+          ? 'input.hold-revealed'
+          : event;
     for (const event of INPUT_AUDIT_EVENTS) should(AUDIT_KIND_NAMES).containEql(gateName(event));
   });
-
 
   it('should list requests and refuse a list that carries anything else', () => {
     should(InputRequestListSchema.parse({ requests: [] })).deepEqual({ requests: [] });
@@ -773,7 +814,7 @@ describe('a one-time code (`code`)', () => {
     should(of('code')).equal('code');
   });
 
-  it('should refuse a code that would press keys and never keep one as a saved login', () => {
+  it('I40 should refuse a code that would press keys and never keep one as a saved login', () => {
     // Act / Assert
     should(inputValueProblem('123 456', 'code')).be.undefined();
     should(inputValueProblem('12\t34', 'code')).containEql('press keys');
@@ -816,7 +857,7 @@ describe('a one-time code (`code`)', () => {
     ).be.false();
   });
 
-  it('should read a sensitivity or risk level this build does not know as secret and amber, never plain', () => {
+  it('I41 should read a sensitivity or risk level this build does not know as secret and amber, never plain', () => {
     // Arrange — a request from a NEWER daemon, with a kind and a level this client was built without.
     const newer = {
       ...REQUEST,
@@ -848,7 +889,7 @@ describe('a one-time code (`code`)', () => {
 });
 
 describe('an input card’s context without the agent’s prompt', () => {
-  it('keeps the daemon’s own lines and leaves out the prompt after the marker', () => {
+  it('I13 keeps the daemon’s own lines and leaves out the prompt after the marker', () => {
     should(inputContextLines(`This follows !A7 in the same login.\n${INPUT_PROMPT_MARKER}[sudo] password:`)).equal(
       'This follows !A7 in the same login.',
     );

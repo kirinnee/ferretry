@@ -1,22 +1,18 @@
-import { type AsksApi, EntryIdSchema } from '@ferretry/core-asks/contract';
+import { type AskSourceSpec, type AsksApi, EntryIdSchema } from '@ferretry/core-asks/contract';
 import type { GateApi } from '@ferretry/core-gate/contract';
-import type { FerretId, KernelPorts } from '@ferretry/kernel/contract';
-import type { HookInvoker } from '@ferretry/kernel/manifest';
+import type { FerretId, InputHolds, KernelPorts } from '@ferretry/kernel/contract';
+import type { HookInvoker, ToolHandler } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
-import { type InputTargetAdapter, InputRequestFiles, InputTargets } from '../contract/index.ts';
+import { InputAskRefSchema, type InputTargetAdapter, InputRequestFiles, InputTargets } from '../contract/index.ts';
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
+import { InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
 import { PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
 import type { SignInGrantSource } from './lib/inputs/borrowed-grants.ts';
 import type { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import type { LoginFactSink, LoginObserver } from './lib/inputs/login-observer.ts';
-import type {
-  InputChoicePort,
-  InputLoginPort,
-  InputPasteRules,
-  InputSealedPort,
-} from './lib/inputs/ports.ts';
+import type { InputChoicePort, InputLoginPort, InputPasteRules, InputSealedPort } from './lib/inputs/ports.ts';
 import type { QuarantineRegistry } from './lib/inputs/quarantine.ts';
 import { type SecretStoreDirectory, SecretStoreTarget } from './lib/inputs/secret-store-target.ts';
 import { InputRequestService } from './lib/inputs/service.ts';
@@ -24,6 +20,7 @@ import { INPUT_REQUEST_SWEEP_MS } from './lib/inputs/sweep.ts';
 import { InputTargetRouter } from './lib/inputs/target-router.ts';
 import { TypedIdentities } from './lib/inputs/typed-identities.ts';
 import { inputRequestRoutes } from './lib/runtime/mounts/inputs.ts';
+import { inputTools } from './lib/runtime/tools/input-wait.ts';
 
 /**
  * THE INPUT BRIDGE (today's `bin/modules/input-requests.ts`): a ferret stuck at a password prompt, a code or a
@@ -71,7 +68,20 @@ export interface Inputs {
   readonly observer?: LoginObserver;
   /** The owner's input routes, by the keys `manifest.ts` declares: Vault's build spreads them into its `routes`. */
   readonly routes: ReturnType<typeof inputRequestRoutes>;
+  /** The agent tools, by the names `manifest.ts` declares (`input_wait`): spread into Vault's `tools`. */
+  readonly tools: { readonly input_wait: ToolHandler };
+  /** The kernel-bound `InputHolds` Vault provides as `inputHolds`. */
+  readonly holds: InputHolds;
+  /** Vault's `ask.sources` provider for the key `input`: the input card's ref and title. */
+  readonly askSource: AskSourceSpec;
 }
+
+/** The input card as Asks knows the source: the request it presents, answered on the input form, never as an ask. */
+export const INPUT_ASK_SOURCE_SPEC: AskSourceSpec = {
+  schema: InputAskRefSchema,
+  title: 'Input request {request}',
+  form: false,
+};
 
 /** The part of `build(ctx)` the input bridge reads. */
 export interface InputsContext {
@@ -87,7 +97,11 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     return found === 'unavailable' ? undefined : found;
   };
   const cardOf = async (requestId: string) => {
-    const [open] = await ctx.needs.asks.open({ source: INPUT_ASK_SOURCE, entry: EntryIdSchema.parse(requestId), state: 'open' });
+    const [open] = await ctx.needs.asks.open({
+      source: INPUT_ASK_SOURCE,
+      entry: EntryIdSchema.parse(requestId),
+      state: 'open',
+    });
     return open?.id as string | undefined;
   };
   const journal = new InputStateJournal(state, cardOf, () => clock.now());
@@ -132,11 +146,17 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     after: ['inputs-restore'],
     run: async () => await service.sweep(),
   });
-  return { service, identities, routes: inputRequestRoutes(service) };
+  return {
+    service,
+    identities,
+    routes: inputRequestRoutes(service),
+    tools: inputTools(service),
+    holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs()),
+    askSource: INPUT_ASK_SOURCE_SPEC,
+  };
 }
 
 async function ferretsWithRequests(state: InputsContext['kernel']['state']): Promise<readonly string[]> {
-
   const ferrets: string[] = [];
   for (const name of await state.list(InputRequestFiles)) {
     const read = await state.read(InputRequestFiles, name);

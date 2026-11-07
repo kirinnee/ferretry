@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type AccountList, type AccountSummary, type LoginObserved, type SignInSummary } from '../../../../daemon/lib/inputs/borrowed.ts';
-import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
+import type {
+  AccountList,
+  AccountSummary,
+  LoginObserved,
+  SignInSummary,
+} from '../../../../daemon/lib/inputs/borrowed.ts';
+import type { InputRaise, InputTargetFacts } from '../../../../contract/index.ts';
 import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import { identityOf, LoginObserver } from '../../../../daemon/lib/inputs/login-observer.ts';
@@ -53,7 +58,7 @@ const proof = (value = true): LoginObserved => ({
 const account = (id: string): AccountSummary => ({
   id,
   label: id.toLowerCase(),
-  fields: { password: true, totp: false },
+  fields: { password: true },
   factors: [],
   signIns: [],
   createdAt: 'a',
@@ -101,7 +106,7 @@ const deliver = async (w: ReturnType<typeof inputRequestService>, request: { id:
   );
 
 describe('the lock a card shows, and the hold that runs it', () => {
-  it('should hold a sudo terminal with echo off for 10 seconds, and tell the agent so', async () => {
+  it('I71 should hold a sudo terminal with echo off for 10 seconds, and tell the agent so', async () => {
     const w = inputRequestService({ facts: { ...FACTS, canonical: true, trustedProgram: true } });
     const { view, request } = await raised(w);
     should(request.lock).deepEqual({ seconds: 10, reason: 'hidden-terminal' });

@@ -25,7 +25,7 @@ describe('EphemeralValues', () => {
     should(values.heldCount()).equal(0);
   });
 
-  it('should REPLACE the stored arrays on a prune, so an expired value is no longer reachable', () => {
+  it('I108 should REPLACE the stored arrays on a prune, so an expired value is no longer reachable', () => {
     const values = build();
     values.hold('s1', 'old-value', 'A1', 10);
     values.hold('s1', 'new-value', 'A2', 100);
