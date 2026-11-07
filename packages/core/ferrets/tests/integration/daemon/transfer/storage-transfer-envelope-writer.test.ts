@@ -6,12 +6,10 @@ import {
   SessionTransferEnvelopeError,
   StorageTransferEnvelopeWriter,
 } from '../../../../daemon/adapters/transfer/storage-transfer-envelope-writer.ts';
-import { StorageSessionProvenanceStore } from '../../../../daemon/adapters/session/provenance/index.ts';
-import {
-  SessionProvenanceSchema,
-  SessionProvenanceRecorder,
-  SessionProvenanceStamper,
-} from '../../../../daemon/lib/session/provenance/index.ts';
+import { StorageSessionProvenanceStore } from '../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
+import { SessionProvenanceSchema } from '../../../../daemon/lib/session/provenance/types.ts';
+import { SessionProvenanceRecorder } from '../../../../daemon/lib/session/provenance/recorder.ts';
+import { SessionProvenanceStamper } from '../../../../daemon/lib/session/provenance/stamper.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
 import { memoryStorage } from '../../../support/daemon/storage.ts';

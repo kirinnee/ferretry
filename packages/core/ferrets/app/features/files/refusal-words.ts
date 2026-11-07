@@ -28,7 +28,7 @@ const EXPLANATION: Readonly<Record<Refusal, string>> = {
     'This daemon could not read its own grant document, so it is refusing everything governed by it. Nothing is broken about this browser; the document on the host needs repairing.',
 };
 
-export interface FailureFields {
+interface FailureFields {
   readonly status?: unknown;
   readonly code?: unknown;
   readonly message?: unknown;

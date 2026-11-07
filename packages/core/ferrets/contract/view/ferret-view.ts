@@ -41,6 +41,7 @@ export const PendingQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
 });
+/** @pending ferrets: The 5.0 ferret record carries no turn state, model, effort, limits or context */
 export type PendingQuestionOption = z.infer<typeof PendingQuestionOptionSchema>;
 
 export const PendingQuestionSchema = z.object({
@@ -88,6 +89,7 @@ export const ConversationConversionSchema = z.strictObject({
   keptTurns: NonNegativeIntegerSchema,
   omittedTurns: NonNegativeIntegerSchema,
 });
+/** @pending ferrets: Continue-conversation (resume a finished ferret */
 export type ConversationConversion = z.infer<typeof ConversationConversionSchema>;
 
 /** Effective, safe-to-publish session configuration. */
@@ -252,10 +254,8 @@ export const SessionHealthSchema = z.enum([
 export type SessionHealth = z.infer<typeof SessionHealthSchema>;
 
 export const AccountAvailabilitySchema = z.enum(['available', 'unavailable']);
-export type AccountAvailability = z.infer<typeof AccountAvailabilitySchema>;
 
 export const AccountUnavailableReasonSchema = z.enum(['cooldown', 'spend_limit', 'auth', 'provider', 'no_credentials']);
-export type AccountUnavailableReason = z.infer<typeof AccountUnavailableReasonSchema>;
 
 /** Upstream account-health row. It also breaks the former core/usage type cycle. */
 export const AccountUsageSchema = z.object({
@@ -456,7 +456,6 @@ export type SessionState = z.infer<typeof SessionStateSchema>;
 export const SessionOutdatedSchema = z.strictObject({
   sections: z.array(LaunchInstructionSectionIdSchema).min(1),
 });
-export type SessionOutdated = z.infer<typeof SessionOutdatedSchema>;
 
 /**
  * Whether a session can be brought back, with the reason in words: the one answer every Resume button

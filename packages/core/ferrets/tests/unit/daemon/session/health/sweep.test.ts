@@ -1,11 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  classifyWardenSweep,
-  defaultSessionHealthSettings,
-  wardenSweepDeadlineMs,
-  type WardenSweepObservation,
-} from '../../../../../daemon/lib/session/health/index.ts';
+import { classifyWardenSweep, wardenSweepDeadlineMs } from '../../../../../daemon/lib/session/health/sweep.ts';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import { type WardenSweepObservation } from '../../../../../daemon/lib/session/health/types.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const NOW_MS = Date.parse('2026-07-31T10:00:00.000Z');

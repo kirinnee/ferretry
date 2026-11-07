@@ -52,7 +52,7 @@ export function sessionTmuxName(id: SessionId, settings: SessionLifecycleSetting
  * published runtimes are in hand — {@link unrunnableAccountRefusal}, through `resolveStartAccount` —
  * from the manifest's own declaration rather than from anything in a name.
  */
-export function isFleetLauncher(path: string, settings: SessionLifecycleSettings): boolean {
+function isFleetLauncher(path: string, settings: SessionLifecycleSettings): boolean {
   return settings.runtimeLauncherPattern.test(path);
 }
 

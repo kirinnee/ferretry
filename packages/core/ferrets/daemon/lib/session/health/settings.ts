@@ -44,7 +44,7 @@ export interface SessionHealthSettings {
  * interval declares every healthy tick a wedge, and one that configures a zero threshold restarts
  * the daemon on the first imperfect pass. Both are caught here instead of in production.
  */
-export const SessionHealthSettingsSchema = z
+const SessionHealthSettingsSchema = z
   .object({
     selfCheckIntervalMs: z.number().int().positive(),
     wedgeGapMs: z.number().int().positive(),
@@ -84,7 +84,7 @@ export function parseSessionHealthSettings(value: unknown): SessionHealthSetting
  * How many missed ticks make a gap unambiguous. The default pair above is exactly this ratio, and
  * naming it is what keeps the two numbers from drifting when the cadence is configured.
  */
-export const WEDGE_TICK_ALLOWANCE = 3;
+const WEDGE_TICK_ALLOWANCE = 3;
 
 /**
  * The settings for an operator-configured self-check cadence.

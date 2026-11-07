@@ -23,7 +23,7 @@ import { readFerret, readFerrets, readRelaunchSettings, readWorktrees } from './
 import { type InfoRead, useInfoRead } from './use-info-read.ts';
 import { useInfoPlacement } from './use-info-placement.ts';
 
-export interface FerretInfoProps {
+interface FerretInfoProps {
   readonly client: FerretsClient;
   readonly ferretId: string;
   /** Phone: the sheet's half/full control is offered. */
@@ -47,7 +47,7 @@ const relaunchRead = (
       ? { kind: 'failed', reason: read.reason }
       : { kind: 'loading' };
 
-export function FerretInfo({
+function FerretInfo({
   client,
   ferretId,
   presentation,

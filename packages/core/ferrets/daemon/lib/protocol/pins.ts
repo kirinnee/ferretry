@@ -5,13 +5,7 @@ import { MAX_PIN_NOTE_LENGTH, PinBlockKindSchema, PinPreviewSchema, PinSchema } 
  * The pin documents' stored shapes are the contract's (`contract/pins.ts`); this module keeps the daemon's own
  * limits, snapshot and request vocabulary, and re-exports the moved names so its readers are unchanged.
  */
-export {
-  MAX_PIN_NOTE_LENGTH,
-  MAX_PIN_PREVIEW_LENGTH,
-  type Pin,
-  type PinBlockKind,
-  type PinBy,
-} from '../../../contract/pins.ts';
+export { MAX_PIN_NOTE_LENGTH, MAX_PIN_PREVIEW_LENGTH, type Pin } from '../../../contract/pins.ts';
 
 /** An ISO instant as the wire spells it (today's `InstantSchema`: kept as written, not re-branded). */
 const InstantSchema = z.iso.datetime({ offset: true });
@@ -19,7 +13,7 @@ const InstantSchema = z.iso.datetime({ offset: true });
 export const PIN_SCHEMA_VERSION = 1 as const;
 export const MAX_PINS_PER_SESSION = 20;
 
-export const PinSnapshotSchema = z
+const PinSnapshotSchema = z
   .object({
     v: z.literal(PIN_SCHEMA_VERSION),
     sessionId: z.string().min(1),
@@ -63,14 +57,3 @@ export const PinActionRequestSchema = z.union([
   }),
   z.strictObject({ action: z.literal('remove'), id: z.uuid() }),
 ]);
-export type PinActionRequest = z.infer<typeof PinActionRequestSchema>;
-
-export const PinErrorCodeSchema = z.enum([
-  'invalid',
-  'too-long',
-  'not-found',
-  'forbidden',
-  'rate-limited',
-  'read-only',
-]);
-export type PinErrorCode = z.infer<typeof PinErrorCodeSchema>;

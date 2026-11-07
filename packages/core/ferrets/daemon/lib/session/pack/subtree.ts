@@ -49,7 +49,7 @@ export interface SubtreeLimits {
   readonly endedRows: number;
 }
 
-export const SUBTREE_LIMITS: SubtreeLimits = { concurrency: 4, excerptRows: 64, endedRows: 8 };
+const SUBTREE_LIMITS: SubtreeLimits = { concurrency: 4, excerptRows: 64, endedRows: 8 };
 
 export interface SubtreePorts {
   /** The plugin-added sitrep lines of one ferret (`sitrep.lines`). Read only, never a write. */
@@ -81,7 +81,7 @@ export function oneLine(text: string, max: number = SUBTREE_LAST_LINE_MAX): stri
         .trimEnd()}…`;
 }
 
-export function subtreeStateOf(ferret: FerretSummary): SubtreeState {
+function subtreeStateOf(ferret: FerretSummary): SubtreeState {
   if (isEnded(ferret)) return 'ended';
   return ferret.state === 'idle' ? 'waiting' : 'running';
 }
@@ -126,7 +126,7 @@ export function subtreeMembers(
 }
 
 /** The newest dated line, in full; a tie goes to the earlier source. */
-export function newestLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
+function newestLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
   return lines.reduce<SitrepLine | undefined>((best, next) => {
     if (next.at === undefined || next.text.trim() === '') return best;
     return best === undefined || epochMs(next.at) > epochMs(best.at as Instant) ? next : best;
@@ -137,7 +137,7 @@ export function newestLine(lines: readonly SitrepLine[]): SitrepLine | undefined
  * The members that get an excerpt: live ones in tree order up to `excerptRows`, then recently ended ones up to
  * `endedRows` and whatever room is left. Returns their positions in `members`.
  */
-export function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimits): ReadonlySet<number> {
+function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimits): ReadonlySet<number> {
   const positions = members.map((_, index) => index);
   const live = positions.filter(index => !isEnded((members[index] as SubtreeMember).ferret));
   const ended = positions.filter(index => isEnded((members[index] as SubtreeMember).ferret));
@@ -146,7 +146,7 @@ export function excerptEligible(members: readonly SubtreeMember[], limits: Subtr
   return new Set([...liveChosen, ...endedChosen]);
 }
 
-export function rowOf(member: SubtreeMember, last: SubtreeRow['last']): SubtreeRow {
+function rowOf(member: SubtreeMember, last: SubtreeRow['last']): SubtreeRow {
   const { ferret, depth } = member;
   const state = subtreeStateOf(ferret);
   return {

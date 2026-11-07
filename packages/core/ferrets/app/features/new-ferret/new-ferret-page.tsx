@@ -13,7 +13,7 @@ import { type AccountSlotProps, ShellAccountSlot } from './shell-account-slot.ts
 const FIRST_RUN_RUNTIME = 'claude-default';
 
 /** The one sentence about what fast mode costs, said once in the form's hint. */
-export const FAST_COST_NOTE = 'Fast mode can cost more.';
+const FAST_COST_NOTE = 'Fast mode can cost more.';
 
 type TextDraftField = Exclude<keyof NewFerretDraft, 'mode' | 'fast' | 'remoteControl'>;
 
@@ -64,7 +64,7 @@ const modelPlaceholder = (account: ChosenFerretAccount | null): string =>
 const FAST_REASON_ID = 'fy-new-ferret-fast-reason';
 
 /** Why the chosen model cannot launch in fast mode, or nothing when it can or nobody can say. */
-export const fastUnavailableReason = (account: ChosenFerretAccount | null, typed: string): string | undefined => {
+const fastUnavailableReason = (account: ChosenFerretAccount | null, typed: string): string | undefined => {
   if (account === null) return undefined;
   const id = typed.trim() === '' ? (account.defaultModel ?? undefined) : typed.trim();
   const model = account.models.find(candidate => candidate.id === id);

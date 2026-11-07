@@ -24,7 +24,7 @@ export function entityTag(body: string): string {
 }
 
 /** Whether `If-None-Match` names this tag. GET compares weakly (RFC 9110 §13.1.2), so `W/` is ignored. */
-export function namesTag(ifNoneMatch: string, etag: string): boolean {
+function namesTag(ifNoneMatch: string, etag: string): boolean {
   return ifNoneMatch
     .split(',')
     .map(candidate => candidate.trim())
@@ -32,7 +32,7 @@ export function namesTag(ifNoneMatch: string, etag: string): boolean {
 }
 
 /** A response made conditional: it carries `etag`, and a request naming it is answered `304` with no body. */
-export function conditionalWithTag(response: ApiResponse, etag: string, ifNoneMatch: string | undefined): ApiResponse {
+function conditionalWithTag(response: ApiResponse, etag: string, ifNoneMatch: string | undefined): ApiResponse {
   const headers = new Map(response.headers);
   headers.set('etag', etag);
   if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, etag)) return { status: 304, headers, body: '' };
@@ -43,7 +43,7 @@ export function conditionalWithTag(response: ApiResponse, etag: string, ifNoneMa
 const rendered = new WeakMap<FerretSummary, string>();
 
 /** The list's JSON from each summary's own JSON: byte for byte `JSON.stringify(list)`. */
-export function renderFerretList(list: readonly FerretSummary[]): string {
+function renderFerretList(list: readonly FerretSummary[]): string {
   const parts = new Array<string>(list.length);
   for (const [at, summary] of list.entries()) {
     let json = rendered.get(summary);

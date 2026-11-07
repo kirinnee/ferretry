@@ -7,4 +7,5 @@ export const ProviderQuotaBalanceSchema = z.strictObject({
   amount: z.number().finite(),
   currency: z.string().regex(/^[A-Z]{3}$/u, 'a currency is a three-letter ISO code'),
 });
+/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
 export type ProviderQuotaBalance = z.infer<typeof ProviderQuotaBalanceSchema>;

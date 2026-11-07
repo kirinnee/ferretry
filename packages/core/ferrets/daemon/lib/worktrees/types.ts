@@ -1,6 +1,5 @@
 import type {
   BranchDeletionBlocker,
-  BranchDeletionBlockerCode,
   BranchDeletionConfirmation,
   BranchDeletionDecision,
   WorktreeLiveState,
@@ -24,21 +23,18 @@ import type {
  */
 export type {
   BranchDeletionBlocker,
-  BranchDeletionBlockerCode,
   BranchDeletionConfirmation,
   BranchDeletionDecision,
-  WorktreeLiveState,
   WorktreeRemovalBlocker,
   WorktreeRemovalBlockerCode,
   WorktreeRemovalDecision,
   WorktreeRemovalOverride,
-  WorktreeBase,
 };
 
 /** The daemon-side name for the status summary the wire carries. */
 export type WorktreeStatusSummary = WorktreeStatusSummaryView;
 
-export type GitCheckoutKind = 'main_checkout' | 'linked_worktree' | 'not_git' | 'missing';
+type GitCheckoutKind = 'main_checkout' | 'linked_worktree' | 'not_git' | 'missing';
 
 export interface GitCheckoutSnapshot {
   readonly repo: boolean;
@@ -173,7 +169,7 @@ export interface CreatedManagedWorktree {
 }
 
 /** Where a new checkout starts from. The protocol owns the vocabulary; this is the daemon's name for it. */
-export type ManagedWorktreeBase = WorktreeBase;
+type ManagedWorktreeBase = WorktreeBase;
 
 export interface CreateManagedWorktreeInput {
   readonly sourceCwd: string;

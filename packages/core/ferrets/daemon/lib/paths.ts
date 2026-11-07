@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import { join } from 'node:path';
 import type { SessionId } from './session-id.ts';
 import type { StateHome } from './state-home.ts';
 /** Today's `protocol/src/lib/state-home-layout.ts` layout marker file name. */
@@ -176,41 +176,4 @@ export function createSessionPaths(paths: FoundationPaths, sessionId: SessionId)
     media: join(directory, 'media'),
     questionAsked: join(directory, 'question-asked.json'),
   };
-}
-
-export function requiredLayoutDirectories(paths: FoundationPaths): readonly string[] {
-  return [paths.home, paths.config, paths.fleet, paths.logs, paths.state, paths.index, paths.sessions, paths.temporary];
-}
-
-/**
- * A SQLite database and the two sidecars the engine opens beside it.
- *
- * Named for every store rather than only the session index, because the sidecars are the reason this
- * function exists: the engine opens `-wal` and `-shm` by itself, outside any port, so every store that
- * wants its paths confined or its modes set has to enumerate all three.
- */
-export function sqliteDatabaseFiles(database: string): readonly string[] {
-  const directory = dirname(database);
-  const name = basename(database);
-  return [database, join(directory, `${name}-wal`), join(directory, `${name}-shm`)];
-}
-
-export function indexFiles(paths: FoundationPaths): readonly string[] {
-  return sqliteDatabaseFiles(paths.sessionIndex);
-}
-
-export function analyticsIndexFiles(paths: FoundationPaths): readonly string[] {
-  return sqliteDatabaseFiles(paths.analyticsIndex);
-}
-
-export function isPathInside(home: StateHome, candidate: string): boolean {
-  if (!isAbsolute(candidate)) return false;
-  const pathFromHome = relative(home, candidate);
-  return pathFromHome === '' || (!pathFromHome.startsWith('..') && !isAbsolute(pathFromHome));
-}
-
-export function temporaryFilePath(paths: FoundationPaths, target: string, uniqueId: string): string {
-  if (!isPathInside(paths.home, target)) throw new Error('atomic-write target is outside the state home');
-  if (!/^[a-zA-Z0-9-]+$/.test(uniqueId)) throw new Error('temporary-file id is not path safe');
-  return join(paths.temporary, `${basename(target)}.${uniqueId}.tmp`);
 }

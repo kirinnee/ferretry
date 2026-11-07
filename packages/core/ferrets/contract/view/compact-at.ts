@@ -7,6 +7,7 @@ import { z } from 'zod';
  *
  * The floor is the smallest value Claude Code accepts for its own `/autocompact`; the ceiling is the model's window,
  * which only the daemon knows and checks (see {@link checkCompactAt}).
+ * @pending ferrets: Actions rows still to port: add MCP server, compact-at
  */
 export const COMPACT_AT_MIN_TOKENS = 100_000;
 
@@ -20,10 +21,16 @@ export const CompactAtSchema = z.union([
 ]);
 export type CompactAt = z.infer<typeof CompactAtSchema>;
 
-/** The choices a surface offers beside a custom value. */
+/**
+ * The choices a surface offers beside a custom value.
+ * @pending ferrets: Actions rows still to port: add MCP server, compact-at
+ */
 export const COMPACT_AT_PRESETS = [200_000, 250_000, 400_000] as const;
 
-/** The refusal for a value below the floor, in plain words; `undefined` when it clears it. */
+/**
+ * The refusal for a value below the floor, in plain words; `undefined` when it clears it.
+ * @pending ferrets: Actions rows still to port: add MCP server, compact-at
+ */
 export function compactAtFloorRefusal(tokens: number): string | undefined {
   return tokens >= COMPACT_AT_MIN_TOKENS
     ? undefined
@@ -43,7 +50,10 @@ export function checkCompactAt(value: CompactAt, window: number | undefined): st
   return undefined;
 }
 
-/** `250k`, `1m`, `1.5m`, `120,500` — the short form a person reads. */
+/**
+ * `250k`, `1m`, `1.5m`, `120,500` — the short form a person reads.
+ * @pending ferrets: Actions rows still to port: add MCP server, compact-at
+ */
 export function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000 && tokens % 100_000 === 0) return `${tokens / 1_000_000}m`;
   if (tokens >= 1_000 && tokens % 1_000 === 0) return `${tokens / 1_000}k`;
@@ -55,5 +65,8 @@ export function describeCompactAt(value: CompactAt): string {
   return value === 'auto' ? 'Auto' : formatTokens(value);
 }
 
-/** The one line a surface shows beside the control. */
+/**
+ * The one line a surface shows beside the control.
+ * @pending ferrets: Actions rows still to port: add MCP server, compact-at
+ */
 export const COMPACT_AT_TRADE_OFF = 'Smaller = cheaper steps; the ferret keeps less detail between squeezes.';

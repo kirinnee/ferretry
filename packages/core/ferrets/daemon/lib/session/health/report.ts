@@ -1,6 +1,6 @@
 import type { SelfCheckLedger, SessionHealthObservation, WardenSweepVerdict } from './types.ts';
 
-export type BootstrapState = 'running' | 'degraded' | 'complete';
+type BootstrapState = 'running' | 'degraded' | 'complete';
 
 export interface DaemonHealthInput {
   readonly bootstrapFinished: boolean;

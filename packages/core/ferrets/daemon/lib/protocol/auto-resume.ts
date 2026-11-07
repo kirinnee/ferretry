@@ -5,11 +5,10 @@ import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '.
  * One session the daemon looked at when it came back up after a restart and could NOT resume on its own,
  * with the reason a person can act on ("couldn't auto-resume: <reason>").
  */
-export const AutoResumeSkippedSchema = z.strictObject({
+const AutoResumeSkippedSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   reason: NonEmptyStringSchema,
 });
-export type AutoResumeSkipped = z.infer<typeof AutoResumeSkippedSchema>;
 
 /**
  * What the last "Auto-resume after restart" pass did: how many ferrets were brought back with their

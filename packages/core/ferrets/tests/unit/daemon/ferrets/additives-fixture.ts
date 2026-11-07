@@ -22,13 +22,13 @@ import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 
 /** One recorded act: what the harness seam asked the act runner to do. */
-export interface ActedRecord {
+interface ActedRecord {
   readonly target: TargetRef;
   readonly op: string;
 }
 
 /** A runner that also records every interrupt it is asked for. */
-export class SignalRunner extends FakeRunner {
+class SignalRunner extends FakeRunner {
   readonly signals: { readonly handle: RunnerHandle; readonly signal: 'interrupt' | 'terminate' }[] = [];
   override async signal(handle?: RunnerHandle, signal?: 'interrupt' | 'terminate'): Promise<void> {
     if (handle !== undefined && signal !== undefined) this.signals.push({ handle, signal });
@@ -61,7 +61,7 @@ export class ActingRunner extends SignalRunner {
  * The kernel's real act rules over a test host: ONE serial queue per target, then the hold decision for that target.
  * `hold` names the pane keys that are held.
  */
-export function queueingAct(hold: { readonly held: Set<string> } = { held: new Set() }): ActRunner {
+function queueingAct(hold: { readonly held: Set<string> } = { held: new Set() }): ActRunner {
   return testActRunner({
     holds: () => ({
       decide: (target): HoldDecision => (hold.held.has(target.key) ? { refused: 'held' } : 'allow'),

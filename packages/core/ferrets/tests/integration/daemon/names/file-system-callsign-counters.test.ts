@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
 import { nameFiles } from '../../../support/daemon/name-files.ts';
-import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/index.ts';
+import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/file-system-callsign-counters.ts';
 
 /**
  * The system-callsign counters over a real state home: what a restart reads back, and that a missing or
