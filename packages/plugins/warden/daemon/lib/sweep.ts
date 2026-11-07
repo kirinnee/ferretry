@@ -626,6 +626,15 @@ export interface WardenSweepSettings extends WardenPromptSettings {
    * and nothing is typed to anyone.
    */
   readonly nudgesOverdue: boolean;
+  /**
+   * Whether the liveness reflex nudges a quiet ferret (`reflex`), or only detects.
+   *
+   * The act is safe only when the fleet says which ferrets declared a wait (they are never nudged) and each
+   * ferret's own nudge and frozen times (`reflexSettingsFor`): without those, a ferret waiting on CI by
+   * declaration, or started with a longer nudge time, is typed to after the default five minutes. False:
+   * `agent_frozen`, `sus_*` and `dead_monitor` still fire, and nothing is typed to anyone.
+   */
+  readonly reflexNudges: boolean;
   /** This machine's name, read when a notification is written, so one among every machine's says which. */
   readonly machineName?: () => string | undefined;
 }
@@ -1376,7 +1385,7 @@ export class WardenSweepService {
         });
         continue;
       }
-      if (!config.enabled || !config.mayActAlone.nudge) continue;
+      if (!this.settings.reflexNudges || !config.enabled || !config.mayActAlone.nudge) continue;
       const base = {
         at,
         sessionId: event.sessionId,

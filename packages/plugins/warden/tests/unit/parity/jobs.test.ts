@@ -97,18 +97,21 @@ describe('job parity', () => {
     expect(host.looks()).toBe(2);
   });
 
-  test('J-0035 the tick nudges a quiet ferret only while the Warden is on and may nudge alone', async () => {
+  test('J-0035 0 nudges on the 5.0 subsystem; 1 nudge with the setting on, only while the Warden is on and may nudge alone', async () => {
     const quiet = () => ({ paneHash: 'same', pane: '❯ ', subprocessAlive: false });
-    const sentTo = async (config: unknown): Promise<number> => {
-      const host = livenessHost({ sample: quiet, config });
+    const sentTo = async (config: unknown, reflexNudges?: boolean): Promise<number> => {
+      const host = livenessHost({ sample: quiet, config, ...(reflexNudges === undefined ? {} : { reflexNudges }) });
       const disarm = host.arm();
       await host.ticks(12);
       disarm();
       return (await host.conversation.sends(FERRET)).sends.length;
     };
 
-    expect(await sentTo(undefined)).toBe(1);
-    expect(await sentTo({ mayActAlone: { nudge: false } })).toBe(0);
-    expect(await sentTo({ enabled: false })).toBe(0);
+    // The 5.0 subsystem: the tick looks and detects, and types to nobody (FerretSummary lacks waiting and reflex times).
+    expect(await sentTo(undefined)).toBe(0);
+    // Today's act, with the setting on.
+    expect(await sentTo(undefined, true)).toBe(1);
+    expect(await sentTo({ mayActAlone: { nudge: false } }, true)).toBe(0);
+    expect(await sentTo({ enabled: false }, true)).toBe(0);
   });
 });

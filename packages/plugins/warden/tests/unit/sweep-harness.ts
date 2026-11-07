@@ -87,6 +87,7 @@ const settings = (overrides: Partial<WardenSweepSettings> = {}): WardenSweepSett
   wardenCwd: '/state',
   supervisesMonitors: true,
   nudgesOverdue: true,
+  reflexNudges: true,
   mayAct: false,
   ...overrides,
 });

@@ -78,9 +78,31 @@ describe('the Warden flags what the liveness monitor sees through Terminals (tod
     should(kinds).containEql('sus_subprocess');
   });
 
-  it('should flag agent_frozen after the reflex nudged a ferret showing no sign of life, and nudge it once', async () => {
-    // Arrange
+  it('should flag agent_frozen, and nudge NOBODY, for a quiet auto ferret on the 5.0 subsystem (detection only)', async () => {
+    // Arrange: the reviewer's case — a quiet auto ferret past five minutes. FerretSummary carries neither a declared
+    // wait nor its own --nudge-after, so the 5.0 reflex may not type to it at all.
     const host = livenessHost({ sample: () => stillScreen });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(12);
+    const afterFive = (await host.conversation.sends(FERRET)).sends.length;
+    await host.ticks(22);
+    const kinds = await host.sweep();
+    const sent = (await host.conversation.sends(FERRET)).sends;
+    const nudges = (await host.subsystem.status()).actions.filter(action => action.action === 'nudge');
+    disarm();
+
+    // Assert
+    should(afterFive).equal(0);
+    should(kinds).containEql('agent_frozen');
+    should(sent).eql([]);
+    should(nudges).eql([]);
+  });
+
+  it('should flag agent_frozen after the reflex nudged a ferret showing no sign of life, and nudge it once (reflex nudges on)', async () => {
+    // Arrange: today's act, with the setting the 5.0 daemon leaves off turned on.
+    const host = livenessHost({ sample: () => stillScreen, reflexNudges: true });
     const disarm = host.arm();
 
     // Act

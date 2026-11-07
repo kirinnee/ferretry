@@ -26,6 +26,8 @@ export interface LivenessHostOptions {
   readonly browsers?: FakeBrowsers | 'off';
   /** `warden.yaml`, as the owner wrote it. */
   readonly config?: unknown;
+  /** Let the reflex nudge (today's act). Absent: the 5.0 subsystem's own setting, detection only. */
+  readonly reflexNudges?: boolean;
 }
 
 const settle = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 15));
@@ -76,6 +78,7 @@ export function livenessHost(options: LivenessHostOptions = {}) {
     board: () => undefined,
     terminals: () => (options.terminalsOff === true ? undefined : terminals),
     browsers: () => browsers,
+    ...(options.reflexNudges === undefined ? {} : { reflexNudges: options.reflexNudges }),
   });
   return {
     subsystem,

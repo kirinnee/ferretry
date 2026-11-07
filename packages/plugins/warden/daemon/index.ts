@@ -14,8 +14,9 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   `liveness` look at each ferret's own pane and Conversation's transcript tail every 30 s while Terminals (an
  *   optional use) is on; off, `dead_monitor`, `sus_*` and `agent_frozen` do not run. A browser left under a pane is
  *   closed through Browsers' `closeLeftoverBrowsers` (an optional use) behind today's `mayActAlone.closeLeftovers`;
- *   off, that check does not run. Ferrets records no declared wait nor per-ferret reflex times, so none is waiting and
- *   the reflex keeps its defaults.
+ *   off, that check does not run. Ferrets stores each ferret's declared wait and its own nudge and frozen times, but
+ *   `FerretSummary` does not carry them, so none reads as waiting and the reflex keeps its defaults: it therefore only
+ *   DETECTS (`reflexNudges` off) — `agent_frozen`, `sus_*` and `dead_monitor` fire, and no quiet ferret is nudged.
  * - A sub-ferret overdue on a report is flagged only: today nudged it and told its parent, skipping one that declared a
  *   wait or signalled done, and `FerretSummary` carries neither, so nothing is typed to anyone until Ferrets does.
  * - Investigator wardens, failover and auto-move need a folder Ferrets can start a warden in and read reports back from,

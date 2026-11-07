@@ -233,8 +233,9 @@ export function withLiveness(
 
 /**
  * The ferrets the liveness monitor may look at (today's `targets`): every ferret the sweep reads, wardens excluded.
- * Ferrets records no declared wait and no per-ferret nudge or frozen time, so none is waiting and the reflex uses its
- * defaults (declared GAP).
+ * Ferrets stores each ferret's declared wait and its own nudge and frozen times, but `FerretSummary` does not carry
+ * them, so none reads as waiting and the reflex uses its defaults. That is why the reflex only DETECTS on 5.0
+ * (`WardenSweepSettings.reflexNudges` false; declared GAP in `ports-pending.json`).
  */
 export function livenessTargets(fleet: readonly WardenFleetSession[]): readonly LivenessTarget[] {
   return fleet
