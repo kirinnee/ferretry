@@ -286,6 +286,12 @@ export class Dispatcher {
     }
   }
 
+  /** The session layer's question about a stream already open: the same socket route, asked again (R217). */
+  reauthorize(request: ApiRequest): boolean {
+    const found = this.sockets.lookup(request.method, request.path);
+    return found.kind === 'matched' && notServing(found.route.owner) === undefined && this.readmit(request, found.route);
+  }
+
   /** Re-admits an open stream after a provider's generation moved (§7.1); false closes it `4401`. */
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
     try {

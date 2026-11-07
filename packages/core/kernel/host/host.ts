@@ -6,20 +6,18 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
-import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged } from '../contract/kernel.ts';
+import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
   Clock,
   ConfigPort,
   FetchPort,
   KernelPorts,
-  Log,
   SpawnPort,
   StateDamage,
   StatePort,
   WorkersPort,
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS } from '../contract/refusals.ts';
-import type { SocketUpgradeDecision } from '../contract/socket.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { DaemonContext, DaemonHalf, DaemonImplementation, ToolHandler, ToolResult } from '../manifest/implement.ts';
 import type { Manifest, ToolDecl } from '../manifest/types.ts';
@@ -50,6 +48,7 @@ import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { type DaemonIdentity, loadIdentity } from './identity.ts';
+import { createSessionLayer, type SessionCrypto, type SessionLayerHost, WebCryptoSessionCrypto } from './session/index.ts';
 
 /** What the store opens for one plugin (the store slice's `openPluginState`). */
 export interface PluginStateHandle {
@@ -81,16 +80,6 @@ export interface HostAdapters {
   readonly workers: WorkersPort;
 }
 
-/** What the session layer is handed (the session slice's factory adapts to this). */
-export interface SessionLayerKernel {
-  dispatch(request: ApiRequest): Promise<ApiResponse>;
-  upgrade(request: ApiRequest): Promise<SocketUpgradeDecision>;
-  readonly identity: DaemonIdentity;
-  readonly clock: Clock;
-  readonly log: Log;
-  readonly hooks: HookEngine;
-}
-
 export interface Listening {
   readonly addresses: readonly string[];
   stop(): Promise<void>;
@@ -108,10 +97,8 @@ export interface HostOptions {
   readonly instructionText?: (plugin: string, path: string) => string | undefined;
   /** The local listener (Unix socket + loopback port); started at step 7. */
   readonly listen?: (host: RunningHost) => Promise<Listening>;
-  /** The session layer, opened for every carrier at step 7. */
-  readonly sessionLayer?: (kernel: SessionLayerKernel) => import('../contract/session.ts').SessionLayer & {
-    close?(): void;
-  };
+  /** The session layer's crypto (WebCrypto unless a suite drives it). */
+  readonly sessionCrypto?: SessionCrypto;
   readonly pid?: number;
   /** `<home>-worktrees` unless given. */
   readonly worktrees?: string;
@@ -145,7 +132,7 @@ export interface RunningHost {
   readonly events: EventBus;
   readonly jobs: JobRunner;
   readonly ids: MintedIdRegistry;
-  readonly sessionLayer?: import('../contract/session.ts').SessionLayer;
+  readonly sessionLayer: SessionLayerHost;
   dispatch(request: ApiRequest): Promise<ApiResponse>;
   callTool(plugin: string, name: string, input: unknown, request: ApiRequest): Promise<ToolResult>;
   doctor(): Promise<readonly DoctorLine[]>;
@@ -542,8 +529,22 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     }
   };
 
+  // The session layer: one per daemon; every carrier opens a link per session on it (§4.8).
+  const sessionLayer = createSessionLayer({
+    crypto: options.sessionCrypto ?? new WebCryptoSessionCrypto(),
+    identity,
+    modes: mode => {
+      const provided = hooks.provider(SessionModes, mode);
+      return provided === 'unavailable' ? undefined : provided;
+    },
+    dispatch: request => dispatcher.dispatch(request),
+    sockets: { upgrade: request => dispatcher.upgrade(request), reauthorize: request => dispatcher.reauthorize(request) },
+    clock,
+  });
+  let stopHost = async (): Promise<void> => undefined;
   const running: RunningHost = {
     dispatcher,
+    sessionLayer,
     identity,
     snapshot: frozen,
     trace,
@@ -555,7 +556,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     dispatch: request => dispatcher.dispatch(request),
     callTool,
     doctor: async () => doctorLines(records, hooks, jobs, data.refused),
-    stop: async () => undefined,
+    stop: () => stopHost(),
   };
 
   // 7. Listen: the local listener and every carrier.
@@ -563,21 +564,9 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const listening: Listening[] = [];
   if (options.listen !== undefined) listening.push(await options.listen(running));
   const carriersAbort = new AbortController();
-  let sessionLayer: (import('../contract/session.ts').SessionLayer & { close?(): void }) | undefined;
-  if (options.sessionLayer !== undefined) {
-    sessionLayer = options.sessionLayer({
-      dispatch: request => dispatcher.dispatch(request),
-      upgrade: request => dispatcher.upgrade(request),
-      identity,
-      clock,
-      log: log.child('session'),
-      hooks,
-    });
-    const kernelInvoker = hooks.invokerFor('kernel');
-    for (const [key, carrier] of kernelInvoker.providers(Carriers)) {
-      trace.push(`carrier:${key}`);
-      void carrier.start(sessionLayer, carriersAbort.signal).catch(() => log.warn('a carrier stopped', { carrier: key }));
-    }
+  for (const [key, carrier] of hooks.providers(Carriers)) {
+    trace.push(`carrier:${key}`);
+    void carrier.start(sessionLayer, carriersAbort.signal).catch(() => log.warn('a carrier stopped', { carrier: key }));
   }
 
   // 8. Start jobs in start order.
@@ -588,12 +577,12 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
 
   // 9. Stop in reverse.
   let stopping: Promise<void> | undefined;
-  const stop = (): Promise<void> => {
+  stopHost = (): Promise<void> => {
     stopping ??= (async () => {
       trace.push('stop:listen');
       carriersAbort.abort();
       for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
-      sessionLayer?.close?.();
+      sessionLayer.close();
       stopWatching?.();
       trace.push('stop:jobs');
       await jobs.stop();
@@ -606,8 +595,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     })();
     return stopping;
   };
-  const host: RunningHost = { ...running, stop, ...(sessionLayer === undefined ? {} : { sessionLayer }) };
-  return { kind: 'running', host };
+  return { kind: 'running', host: running };
 }
 
 function refusalText(response: ApiResponse): string {

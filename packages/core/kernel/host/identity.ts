@@ -9,6 +9,8 @@ import type { HostFs } from './adapters/node-fs.ts';
 export interface DaemonIdentity {
   /** base64url SHA-256 of the SPKI DER. */
   readonly fingerprint: string;
+  /** `fy_daemon_<fingerprint>`: the id the pairing QR and the rendezvous claim carry (R17, R41). */
+  readonly daemonId: string;
   readonly publicKeySpki: Uint8Array;
   sign(bytes: Uint8Array): Promise<Uint8Array>;
 }
@@ -43,6 +45,7 @@ async function fromPkcs8(source: Uint8Array): Promise<DaemonIdentity> {
   const signer = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
   return Object.freeze({
     fingerprint,
+    daemonId: `fy_daemon_${fingerprint}`,
     publicKeySpki: spki,
     sign: async (bytes: Uint8Array) => new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, signer, owned(bytes))),
   });

@@ -27,3 +27,6 @@ export * from './roots.ts';
 export * from './router.ts';
 export * from './snapshot.ts';
 export * from './wiring.ts';
+export * as session from './session/index.ts';
+export * as state from './state/index.ts';
+export * as config from './config/index.ts';
