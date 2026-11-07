@@ -1,10 +1,11 @@
 import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { LaunchParts } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import {
   SKILLS_AUDIT,
   SKILLS_CONFIG,
   SKILLS_INSTALLED_STATE,
+  SKILLS_INSTALLS_STATE,
   SKILLS_READ_MODELS,
   SKILLS_WORDS,
   SkillsChanged,
@@ -13,17 +14,13 @@ import {
 
 /**
  * Skills (§2.3): skills as items. Routes are today's `catalogs.ts` skill routes and `local-skill-installs.ts`, descriptor
- * fields copied exactly. Paths follow §3.2/§1.4: `/v1/skill-installs/local…` → `/v1/skills/installs/local…`;
+ * fields copied exactly. Paths: `/v1/skill-installs/local…` keeps today's path (no retired word);
  * `/v1/sessions/:sessionId/skills…` → `/v1/ferrets/:ferretId/skills…`. `/v1/projects` (the other two routes of today's
  * `catalogs.ts` mount) is Projects', not Skills'.
  *
  * Departure: today's `GET /v1/sessions/:sessionId/skills` carries `precedence: 1` to keep a winner over
  * `/v1/sessions/by-request/skills`. That shadow belongs to the old layout; the new path has no such sibling, so the
  * field is dropped (the descriptor-parity harness will say if one turns up).
- *
- * GAP: `permissions.roots` is `imports` only (the copy source the owner names, once). The inventory also reads runtime
- * homes and project folders, and a project apply writes into a project; those need roots (or a Projects port) the lead
- * has not assigned. Left undeclared rather than guessed.
  */
 export default definePlugin({
   id: 'skills',
@@ -34,6 +31,7 @@ export default definePlugin({
   kinds: ['item', 'command', 'view'],
   words: SKILLS_WORDS,
 
+  needs: { ferrets: FerretsPort },
   provides: { skills: SkillsPort },
 
   actions: {
@@ -72,7 +70,7 @@ export default definePlugin({
       }),
 
       // ── copying one skill from this machine (G172–G175): every route a PERSON'S act ───────────────────────────────
-      route('POST /v1/skills/installs/local/project/preview', {
+      route('POST /v1/skill-installs/local/project/preview', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('filesystem', 'use'),
@@ -80,7 +78,7 @@ export default definePlugin({
         audit: { skip: 'a preview writes nothing' },
         guard: { none: 'the files of a skill folder in full, for review; no pane text' },
       }),
-      route('POST /v1/skills/installs/local/runtime/preview', {
+      route('POST /v1/skill-installs/local/runtime/preview', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('filesystem', 'use'),
@@ -88,7 +86,7 @@ export default definePlugin({
         audit: { skip: 'a preview writes nothing' },
         guard: { none: 'the files of a skill folder in full, for review; no pane text' },
       }),
-      route('POST /v1/skills/installs/local/project', {
+      route('POST /v1/skill-installs/local/project', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('filesystem', 'configure'),
@@ -96,7 +94,7 @@ export default definePlugin({
         audit: audit(SKILLS_AUDIT.installProject),
         guard: { none: 'the install record: names, paths and hashes' },
       }),
-      route('POST /v1/skills/installs/local/runtime', {
+      route('POST /v1/skill-installs/local/runtime', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('fleet', 'configure'),
@@ -104,7 +102,7 @@ export default definePlugin({
         audit: audit(SKILLS_AUDIT.installRuntime),
         guard: { none: 'the install record: names, paths and hashes' },
       }),
-      route('GET /v1/skills/installs/local', {
+      route('GET /v1/skill-installs/local', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('fleet', 'use'),
@@ -112,7 +110,7 @@ export default definePlugin({
         audit: { skip: 'a read of install records' },
         guard: { none: 'install records: names, paths and hashes' },
       }),
-      route('DELETE /v1/skills/installs/local/project/:installId', {
+      route('DELETE /v1/skill-installs/local/project/:installId', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('filesystem', 'configure'),
@@ -120,7 +118,7 @@ export default definePlugin({
         audit: audit(SKILLS_AUDIT.removeProject),
         guard: { none: 'the removed name and destination' },
       }),
-      route('DELETE /v1/skills/installs/local/runtime/:installId', {
+      route('DELETE /v1/skill-installs/local/runtime/:installId', {
         minimum: 'operator',
         caller: 'person',
         capability: cap('fleet', 'configure'),
@@ -152,7 +150,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [SKILLS_INSTALLED_STATE],
+    state: [SKILLS_INSTALLED_STATE, SKILLS_INSTALLS_STATE],
     config: [SKILLS_CONFIG],
     readModels: SKILLS_READ_MODELS,
     publishes: [SkillsChanged],
@@ -163,7 +161,7 @@ export default definePlugin({
   },
 
   permissions: {
-    roots: ['imports'],
+    roots: ['work', 'imports'],
     network: [],
     spawn: [],
     secrets: [],
