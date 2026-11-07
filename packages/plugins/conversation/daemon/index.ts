@@ -58,7 +58,7 @@ export default implementDaemon(manifest, {
       ferrets: ctx.needs.ferrets,
       asks: ctx.needs.asks,
       onKept: (ferret, link) => ctx.kernel.events.publish(LinkKept, { ferret, link }),
-      searchSources: () => ctx.hooks.contributions(SearchSources).map(contribution => contribution.item),
+      workSources: () => ctx.hooks.contributions(SearchSources).map(contribution => contribution.item),
     });
     ctx.kernel.lifecycle.onStop(() => {
       a.stop();

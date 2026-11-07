@@ -101,7 +101,7 @@ export function buildReading(deps: {
   readonly asks: Pick<AsksApi, 'open'>;
   readonly onKept: (ferret: FerretId, link: string) => void;
   /** The work other plugins hand the work search through `search.sources` (Board's cards), asked on every use. */
-  readonly searchSources?: () => readonly WorkSource[];
+  readonly workSources?: () => readonly WorkSource[];
 }): ReadingHalf {
   const { kernel, ferrets, asks } = deps;
   const history = kernel.roots.root('harness-history');
@@ -145,7 +145,7 @@ export function buildReading(deps: {
   const search = buildSearch({
     asks,
     redaction: kernel.redaction,
-    ...(deps.searchSources === undefined ? {} : { sources: deps.searchSources }),
+    ...(deps.workSources === undefined ? {} : { sources: deps.workSources }),
     now: () => kernel.clock.nowMs(),
     warn: message => kernel.log.warn(message),
   });
