@@ -189,6 +189,25 @@ describe('ClaudeHarness', () => {
     expect(started.command).toContain(`CLAUDE_CONFIG_DIR=${fresh}`);
   });
 
+  test('S42 homeFor names state/claude-code/agent-homes/<ferret> through its own root, and that home launches', async () => {
+    const { harness } = build();
+    const fy = join(fixture, 'fy-home');
+    expect(await harness.homeFor('f1' as FerretId)).toBe(HOME as never);
+    expect(await harness.homeFor('fresh' as FerretId)).toBe(join(AGENT_HOMES(), 'fresh') as never);
+    expect(await harness.homeFor('f2' as FerretId)).not.toBe(await harness.homeFor('f1' as FerretId));
+    await expect(harness.homeFor('../f2' as FerretId)).rejects.toThrow('plain name');
+    // The home Ferrets used to hand every harness (its own shared agent-homes) is refused before any write.
+    const shared = join(fy, 'state/ferrets/agent-homes');
+    await expect(harness.prepareHome(spec({ ferret: 'fresh', home: shared }))).rejects.toThrow('does not match');
+    // A fresh ferret beside f1 and f2 on the existing agent-homes base launches in exactly homeFor's answer.
+    const home = await harness.homeFor('fresh' as FerretId);
+    await harness.prepareHome(spec({ ferret: 'fresh', home }));
+    const started: { command?: readonly string[] } = {};
+    expect((await harness.start(spec({ ferret: 'fresh', home }), runner(started), {} as never)).ok).toBe(true);
+    expect((await lstat(home)).mode & 0o777).toBe(0o700);
+    expect(started.command).toContain(`CLAUDE_CONFIG_DIR=${home}`);
+  });
+
   test('S42 an existing home is narrowed to 0700, and a home that is a file is refused', async () => {
     const { harness } = build();
     await chmod(HOME, 0o755);

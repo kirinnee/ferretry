@@ -24,6 +24,31 @@ const message = (text: string) =>
   line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
 describe('the registered Codex harness', () => {
+  test('S42 homeFor names state/codex/agent-homes/<ferret> through its own root; the home is made private before any launch and no other home is used', async () => {
+    const box = fixture();
+    const harness = box.build();
+    if (harness.homeFor === undefined) throw new Error('Codex names its own ferret home');
+    expect(await harness.homeFor('f1' as never)).toBe(`${box.base}/f1` as never);
+    expect(await harness.homeFor('f2' as never)).toBe(`${box.base}/f2` as never);
+    await expect(harness.homeFor('../f2' as never)).rejects.toThrow('plain name');
+
+    // The home Ferrets used to hand every harness (its own shared agent-homes) is refused by prepare and by start.
+    const shared = { ...box.spec('f1'), home: `${box.base.replace('/state/codex/', '/state/ferrets/')}` as never };
+    await expect(harness.prepareHome(shared)).rejects.toThrow("not this ferret's Codex home");
+    await expect(harness.start(shared, box.runner, ENV)).rejects.toThrow("not this ferret's Codex home");
+    expect(box.privateDirectories).toEqual([]);
+    expect(box.commands).toEqual([]);
+
+    // A fresh ferret beside an existing one: prepared privately in homeFor's answer, then launched there.
+    await harness.prepareHome({ ...box.spec('f1'), parts: [{ kind: 'instruction', id: 'i', text: 'be brief' }] });
+    const fresh = box.spec('fresh');
+    expect(fresh.home).toBe(await harness.homeFor('fresh' as never));
+    await harness.prepareHome(fresh);
+    expect((await harness.start(fresh, box.runner, ENV)).ok).toBe(true);
+    expect(box.privateDirectories).toEqual([`${box.base}/f1`, `${box.base}/fresh`, `${box.base}/fresh`]);
+    expect(box.commands[0]?.command.slice(0, 2)).toEqual(['env', `CODEX_HOME=${box.base}/fresh`]);
+  });
+
   test('applies the live machine permission mode, trust, notices and no-alt-screen to every start and resume', async () => {
     const box = fixture();
     const harness = box.build();

@@ -11,9 +11,10 @@ const FERRET = 'f1' as FerretId;
 const HOME = '/state/codex/agent-homes/f1' as FencedPath;
 const FOLDER = '/work/project' as FencedPath;
 
-/** A ferret's home that remembers what was written into it. */
+/** A ferret's home that remembers what was written into it, and which folders were made private. */
 function fakeRoots() {
   const written = new Map<string, string>();
+  const privateDirectories: string[] = [];
   const handle = {
     name: 'agent-homes',
     resolve: (relative: string) =>
@@ -22,8 +23,9 @@ function fakeRoots() {
     entries: async () => [],
     stat: async () => undefined,
     writeText: async (path: FencedPath, text: string) => void written.set(path, text),
+    ensurePrivateDirectory: async (path: FencedPath) => void privateDirectories.push(path),
   } as unknown as RootHandle;
-  return { written, roots: { root: () => handle } as unknown as KernelPorts['roots'] };
+  return { written, privateDirectories, roots: { root: () => handle } as unknown as KernelPorts['roots'] };
 }
 
 const specOf = (extra: Partial<LaunchSpec> = {}): LaunchSpec =>
@@ -55,7 +57,7 @@ function fakeRunner() {
 }
 
 const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
-  const { written, roots } = fakeRoots();
+  const { written, privateDirectories, roots } = fakeRoots();
   const harness = codexHarness({
     kernel: {
       roots,
@@ -79,7 +81,7 @@ const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof 
       settled: async () => undefined,
     },
   });
-  return { harness, written };
+  return { harness, written, privateDirectories };
 };
 
 const LOCATED = {
