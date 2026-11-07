@@ -164,6 +164,11 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     reason:
       'enforced by the Vault sign-in lock (`LoginObserver.pageSteer`, `steerOf`); Browsers tells it what a page did',
   },
+  G33: {
+    owner: 'conversation',
+    reason:
+      "the composer action is Conversation's (design D2 #7, lead ruling port-conversation r1 #5): it acts on the draft Conversation holds; Terminals types it and Gate checks terminal/use, so both stay co-owners",
+  },
   G164: {
     owner: 'conversation',
     reason:
