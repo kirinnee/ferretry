@@ -1,9 +1,8 @@
 import type { TerminalIo, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
 import { type IPackIo, PackController } from './controller.ts';
 import { ClientPackGateway, type IPackGateway, type PackClient } from './gateway.ts';
-import { absoluteOf, ambientFerret, nowMsOf, type PackHost, sleepOf } from './host.ts';
+import { absoluteOf, ambientFerret, type PackHost } from './host.ts';
 import { type ICellColour, PackCommandError, PackTableController } from './pack-table.ts';
-import { WaitController } from './wait.ts';
 
 /** The shipped command name, which every printed command and stderr note names. */
 export const BINARY = 'fy';
@@ -19,11 +18,6 @@ export const text = (options: Options, name: string): string | undefined => {
   const value = options[name];
   if (typeof value === 'string') return value;
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;
-};
-
-const number = (options: Options, name: string): number | undefined => {
-  const value = text(options, name);
-  return value === undefined ? undefined : Number(value);
 };
 
 const AMBER = '\u001b[33m';
@@ -90,19 +84,20 @@ export function packVerbs(parts: PackVerbParts) {
   const gateway = parts.gateway ?? new ClientPackGateway(parts.client);
   const absolute = absoluteOf(host);
   const readFile = async (path: string): Promise<string> => {
-    if (host.readFile === undefined) throw new PackCommandError('this terminal cannot read files', 2);
+    if (host.readFile === undefined)
+      throw new PackCommandError(
+        'this terminal cannot read files for a plugin verb yet; pass the text with --prompt',
+        2,
+      );
     return await host.readFile(path);
   };
   const controller = (out: IPackIo): PackController =>
     new PackController({
       gateway,
       out,
-      parent: async () => ambientFerret(host),
-      absolute,
-      cwd: absolute(host.cwd ?? host.env?.PWD ?? '.'),
-      readFile,
+      readFile: async path => await readFile(absolute(path)),
       binaryName: BINARY,
-      sleep: sleepOf(host),
+      ...(host.sleep === undefined ? {} : { sleep: host.sleep }),
     });
   const colour: ICellColour = { amber: cell => (io.isTty ? `${AMBER}${cell}${RESET}` : cell) };
 
@@ -114,56 +109,11 @@ export function packVerbs(parts: PackVerbParts) {
   });
 
   return {
-    'new [words...]': run(io, async (out, { args, options }) => {
-      if (flag(options, 'continue'))
-        throw new PackCommandError(
-          `${BINARY} new --continue is gone: bring an existing conversation on with \`${BINARY} link\``,
-          2,
-        );
-      const mode = text(options, 'mode');
-      await controller(out).newChild(args, {
-        ...(text(options, 'runtime') === undefined ? {} : { runtime: text(options, 'runtime') as string }),
-        ...(text(options, 'model') === undefined ? {} : { model: text(options, 'model') as string }),
-        ...(text(options, 'effort') === undefined ? {} : { effort: text(options, 'effort') as string }),
-        ...(text(options, 'compact-at') === undefined ? {} : { compactAt: text(options, 'compact-at') as string }),
-        ...(flag(options, 'auto') ? { auto: true } : {}),
-        ...(text(options, 'cwd') === undefined ? {} : { cwd: text(options, 'cwd') as string }),
-        ...(text(options, 'name') === undefined ? {} : { name: text(options, 'name') as string }),
-        ...(text(options, 'card') === undefined ? {} : { card: text(options, 'card') as string }),
-        ...(mode === 'auto' || mode === 'interactive' ? { mode } : {}),
-        ...(text(options, 'prompt-file') === undefined ? {} : { promptFile: text(options, 'prompt-file') as string }),
-        ...(flag(options, 'json') ? { json: true } : {}),
-        ...(flag(options, 'allow-scratch') ? { allowScratch: true } : {}),
-      });
-    }),
-    'wait <id>': run(io, async (out, { args, options }) => {
-      const id = args[0];
-      if (id === undefined || id.trim() === '') throw new PackCommandError('missing the ferret id: wait <id>', 2);
-      const marker = host.fileExists;
-      const timeout = number(options, 'timeout');
-      const interval = number(options, 'interval');
-      await new WaitController(
-        gateway,
-        out,
-        { nowMs: nowMsOf(host), sleep: sleepOf(host) },
-        marker === undefined ? undefined : { exists: marker, resolve: absolute },
-        BINARY,
-        ambientFerret(host),
-      ).wait(id, {
-        ...(flag(options, 'json') ? { json: true } : {}),
-        ...(timeout === undefined ? {} : { timeout }),
-        ...(interval === undefined ? {} : { interval }),
-        ...(text(options, 'until-marker') === undefined
-          ? {}
-          : { untilMarker: text(options, 'until-marker') as string }),
-        ...(flag(options, 'keep') ? { keep: true } : {}),
-      });
-    }),
     'recommend [task...]': run(io, async (out, { args, options }) => {
       await controller(out).recommend(args, flag(options, 'json') ? { json: true } : {});
     }),
     'pack [id]': run(io, async (out, { args, options }) => {
-      await new PackTableController(gateway, out, ambientFerret(host), nowMsOf(host), colour).execute(
+      await new PackTableController(gateway, out, ambientFerret(host), host.nowMs, colour).execute(
         args[0],
         flag(options, 'json') ? { json: true } : {},
       );

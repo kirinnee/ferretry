@@ -1,15 +1,11 @@
 import type { Instant } from '@ferretry/std';
-import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import {
   DEFAULT_PACK_CONFIG,
-  type FerretResult,
-  type PackAttempt,
   type PackCleanUpJobResult,
   type PackCleanUpStart,
   type PackCleanUpSuggestion,
   type PackInventory,
   type PackModelOption,
-  type PackNewOutcome,
   type PackRecommendation,
   type PackRoutingWriteResult,
   type PackTable,
@@ -53,41 +49,6 @@ export const packView = (overrides: Partial<PackView> = {}): PackView => ({
   models: [],
   available: [option()],
   cleanUp: { available: true, runtimes: ['claude-work'] },
-  ...overrides,
-});
-
-export const startedFerret = (overrides: { name?: string; runtime?: string } = {}): FerretSummary =>
-  ({
-    id: 'child-1',
-    name: overrides.name ?? 'child-1',
-    role: 'helper',
-    harness: 'claude-code',
-    runner: 'tmux',
-    runtime: overrides.runtime ?? 'claude-work',
-    folder: '/work',
-    state: 'working',
-    createdAt: at('2026-10-22T12:00:00.000Z'),
-    stateAt: at('2026-10-22T12:00:00.000Z'),
-  }) as unknown as FerretSummary;
-
-export const started = (overrides: Partial<Extract<PackNewOutcome, { outcome: 'started' }>> = {}): PackNewOutcome => ({
-  outcome: 'started',
-  ferret: startedFerret(),
-  decidedBy: 'agent',
-  attempts: [],
-  ...overrides,
-});
-
-export const refused = (overrides: Partial<Extract<PackNewOutcome, { outcome: 'refused' }>> = {}): PackNewOutcome => ({
-  outcome: 'refused',
-  refusal: { code: 'limit_reached', message: 'you have 4 running helpers' },
-  attempts: [],
-  ...overrides,
-});
-
-export const attempt = (overrides: Partial<PackAttempt> = {}): PackAttempt => ({
-  runtime: 'claude-work',
-  outcome: 'started',
   ...overrides,
 });
 
@@ -196,7 +157,6 @@ export const JOB = {
 
 export class FakePackGateway implements IPackGateway {
   readonly recommendCalls: Array<Parameters<IPackGateway['recommend']>[0]> = [];
-  readonly newCalls: Array<Parameters<IPackGateway['newChild']>[0]> = [];
   readonly cleanUpCalls: Array<Parameters<IPackGateway['cleanUp']>[0]> = [];
   readonly acceptCalls: Array<Parameters<IPackGateway['accept']>[0]> = [];
   readonly jobCalls: string[] = [];
@@ -209,7 +169,6 @@ export class FakePackGateway implements IPackGateway {
 
   constructor(
     private readonly recommended: PackRecommendation = recommendation(),
-    private readonly outcome: PackNewOutcome = started(),
     private readonly viewed: PackView = packView(),
   ) {}
 
@@ -220,11 +179,6 @@ export class FakePackGateway implements IPackGateway {
   async recommend(request: Parameters<IPackGateway['recommend']>[0]): Promise<PackRecommendation> {
     this.recommendCalls.push(request);
     return this.recommended;
-  }
-
-  async newChild(request: Parameters<IPackGateway['newChild']>[0]): Promise<PackNewOutcome> {
-    this.newCalls.push(request);
-    return this.outcome;
   }
 
   async inventory(): Promise<PackInventory> {
@@ -251,13 +205,7 @@ export class FakePackGateway implements IPackGateway {
     return { outcome: 'nothing', message: 'There is no accepted clean-up to undo.' };
   }
 
-  async result(): Promise<FerretResult> {
-    throw new Error('not used by the Pack controller');
-  }
-
   async table(): Promise<PackTable> {
     throw new Error('not used by the Pack controller');
   }
-
-  async stop(): Promise<void> {}
 }

@@ -1,7 +1,5 @@
 import type { z } from 'zod';
 import {
-  type FerretResult,
-  FerretResultSchema,
   type PackCleanUpJobResult,
   PackCleanUpJobResultSchema,
   type PackCleanUpRequest,
@@ -9,9 +7,6 @@ import {
   PackCleanUpStartSchema,
   type PackInventory,
   PackInventorySchema,
-  type PackNewOutcome,
-  PackNewOutcomeSchema,
-  type PackNewRequest,
   type PackRecommendation,
   PackRecommendationSchema,
   type PackRecommendRequest,
@@ -36,12 +31,8 @@ export interface IPackGateway {
   job(id: string): Promise<PackCleanUpJobResult>;
   accept(request: PackRoutingAcceptRequest): Promise<PackRoutingWriteResult>;
   undo(): Promise<PackRoutingWriteResult>;
-  newChild(request: PackNewRequest): Promise<PackNewOutcome>;
-  /** What a finished ferret reported; `undefined` is never returned here — a missing ferret is a refusal (404). */
-  result(id: string): Promise<FerretResult>;
   /** A lead's one-table view of its pack. */
   table(id: string): Promise<PackTable>;
-  stop(id: string, reason: string): Promise<void>;
 }
 
 /** The generated client, narrowed to the one call the verbs make. */
@@ -77,7 +68,8 @@ export class ClientPackGateway implements IPackGateway {
   }
 
   async cleanUp(request: PackCleanUpRequest): Promise<PackCleanUpStart> {
-    // The start probes the runtime ("reply OK") before it launches the clean-up ferret, so it waits like a start.
+    // The start checks the runtime (it resolves and its login is signed in; not yet today's "reply OK" run) before it
+    // launches the clean-up ferret, so it waits like a start.
     return await this.ask(PackCleanUpStartSchema, 'POST /v1/pack/routing/clean-up', { body: request });
   }
 
@@ -97,19 +89,7 @@ export class ClientPackGateway implements IPackGateway {
     return await this.ask(PackRecommendationSchema, 'POST /v1/pack/recommend', { body: request });
   }
 
-  async newChild(request: PackNewRequest): Promise<PackNewOutcome> {
-    return await this.ask(PackNewOutcomeSchema, 'POST /v1/pack/new', { body: request });
-  }
-
-  async result(id: string): Promise<FerretResult> {
-    return await this.ask(FerretResultSchema, 'GET /v1/ferrets/:ferretId/result', { params: { ferretId: id } });
-  }
-
   async table(id: string): Promise<PackTable> {
     return await this.ask(PackTableSchema, 'GET /v1/ferrets/:ferretId/pack', { params: { ferretId: id } });
-  }
-
-  async stop(id: string, reason: string): Promise<void> {
-    await this.client.call('POST /v1/ferrets/:ferretId/stop', { params: { ferretId: id }, body: { reason } });
   }
 }

@@ -6,7 +6,7 @@ import type { PackCall, PackStartCall, PackStartOutcome } from '../../../app/lib
 import type { TranscriptEntry } from '../../../app/lib/shell-ports.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
-// The shell's primitives (`app/ui.ts`, NEEDS-APP-SHELL.txt) stand in for what the app shell will offer: a Markdown that
+// The shell's primitives (`app/ui.ts`, PENDING.md) stand in for what the app shell will offer: a Markdown that
 // reads bold, a proved name that links to its ferret, a footer, and a tool group that shows the command.
 mock.module('../../../app/ui.ts', () => ({
   Markdown: ({ text, className }: { text: string; className?: string }): ReactNode => (
@@ -26,7 +26,10 @@ mock.module('../../../app/ui.ts', () => ({
   useReferenceSurface: () => ({}),
   cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
 }));
-const { PackCallRow, PackRowsProvider } = await import('../../../app/components/pack-call.tsx');
+// PENDING PORT (ports-pending.json pendingAppPorts: packs pack-call): the card draws with the chat's reference-proved
+// Markdown, PeerName, MessageFooter and ToolGroup, which `@ferretry/app/ui` does not offer yet, and Conversation's
+// transcript row is what hosts it. The card is loaded only inside the skipped cases; each keeps every assertion.
+const card = async () => await import('../../../app/components/pack-call.tsx');
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -77,6 +80,7 @@ const child: PackRow = {
 };
 
 const show = async (pack: PackCall, rows?: readonly PackRow[]) => {
+  const { PackCallRow, PackRowsProvider } = await card();
   view = await mount(
     <PackRowsProvider rows={rows}>
       <PackCallRow entry={row(pack)} pack={pack} rhythm={{}} />
@@ -88,7 +92,7 @@ const show = async (pack: PackCall, rows?: readonly PackRow[]) => {
 const lines = (card: HTMLElement): string[] =>
   [...card.querySelectorAll('.fy-pack-line')].map(line => line.textContent ?? '');
 
-describe('a helper start in the lead’s chat', () => {
+describe.skip('a helper start in the lead’s chat — pending port: pack-call (ports-pending: packs)', () => {
   test('is a "Started helper" card: the proved name, what it runs on, the probe, its live state and brief', async () => {
     const card = await show(start(), [child]);
     expect(card.dataset['packKind']).toBe('start');
@@ -239,7 +243,7 @@ describe('a helper start in the lead’s chat', () => {
   });
 });
 
-describe('a refused start', () => {
+describe.skip('a refused start — pending port: pack-call (ports-pending: packs)', () => {
   test('names the code and message out loud, the remedy, every attempt, and that it tried again', async () => {
     const card = await show(
       start({
@@ -300,7 +304,7 @@ describe('a refused start', () => {
   });
 });
 
-describe('a wait no card started, and a recommendation', () => {
+describe.skip('a wait no card started, and a recommendation — pending port: pack-call (ports-pending: packs)', () => {
   test('a standalone wait names the ferret, how it is doing, and the result', async () => {
     const card = await show(
       {

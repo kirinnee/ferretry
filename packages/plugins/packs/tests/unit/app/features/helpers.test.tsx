@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import type { PackRow } from '../../../contract/index.ts';
-import { type Mounted, mount } from '../support/dom.ts';
-import { uiDoubles } from '../support/ui-doubles.tsx';
+import type { PackRow } from '../../../../contract/index.ts';
+import { type Mounted, mount } from '../../support/dom.ts';
+import { uiDoubles } from '../../support/ui-doubles.tsx';
 
-mock.module('../../../app/ui.ts', () => uiDoubles);
-const { HelperList, HelpersPack, helperItems } = await import('../../../app/components/helpers.tsx');
+mock.module('../../../../app/ui.ts', () => uiDoubles);
+const { HelperList, HelpersPack, helperItems } = await import('../../../../app/components/helpers.tsx');
 
 let view: Mounted | null = null;
 afterEach(async () => {

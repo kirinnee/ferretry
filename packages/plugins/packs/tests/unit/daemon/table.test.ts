@@ -3,7 +3,15 @@ import type { FerretState, FerretSummary, SitrepLine } from '@ferretry/core-ferr
 import type { Instant } from '@ferretry/std';
 import should from 'should';
 import { PACK_ENDED_WINDOW_MS, PackTableSchema } from '../../../contract/index.ts';
-import { buildPackTable, oneLine, packMembers, packRowState } from '../../../daemon/lib/table.ts';
+import {
+  EXCERPT_WITHHELD,
+  oneLine,
+  PACK_TABLE_LIMITS,
+  type PackTableLimits,
+  packMembers,
+  packRowState,
+  readPackTable,
+} from '../../../daemon/lib/table.ts';
 
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
 const at = (minutesAgo: number): Instant => new Date(NOW - minutesAgo * 60_000).toISOString() as Instant;
@@ -25,16 +33,17 @@ const ferret = (
 });
 
 const ROOT = ferret('lead', { role: 'lead' });
-const build = (
+const build = async (
   ferrets: readonly FerretSummary[],
   lines: Readonly<Record<string, readonly SitrepLine[]>> = {},
   blockers: Readonly<Record<string, number>> = {},
+  options: { readonly redact?: (texts: readonly string[]) => Promise<readonly string[]> } = {},
 ) =>
-  buildPackTable({
+  await readPackTable({
     root: ROOT,
     ferrets,
-    lines: id => lines[id] ?? [],
-    blockers: id => blockers[id] ?? 0,
+    sitrep: async id => ({ lines: lines[id] ?? [], blockers: blockers[id] ?? 0 }),
+    redact: options.redact ?? (async texts => texts),
     nowMs: NOW,
   });
 
@@ -107,8 +116,8 @@ describe('packMembers', () => {
   });
 });
 
-describe('buildPackTable', () => {
-  it('should build rows a reader can parse: state, card, newest line and when it ended', () => {
+describe('readPackTable', () => {
+  it('should build rows a reader can parse: state, card, newest line and when it ended', async () => {
     // Arrange
     const ferrets = [
       ferret('w', { parent: 'lead' as FerretSummary['id'], runtime: 'claude-main' as FerretSummary['runtime'] }),
@@ -124,7 +133,7 @@ describe('buildPackTable', () => {
     };
 
     // Act
-    const table = build(ferrets, lines, { i: 1 });
+    const table = await build(ferrets, lines, { i: 1 });
 
     // Assert
     should(PackTableSchema.safeParse(table).success).be.true();
@@ -138,7 +147,104 @@ describe('buildPackTable', () => {
     should(e).containEql({ state: 'ended', endedAt: at(5), ferretState: 'stopped' });
   });
 
-  it('should be an empty table for a lead with no helpers', () => {
-    should(build([]).rows).deepEqual([]);
+  it('should be an empty table for a lead with no helpers', async () => {
+    should((await build([])).rows).deepEqual([]);
+  });
+
+  it('should mask a WHOLE line before cutting it, so a secret that straddles column 100 shows none of itself', async () => {
+    // Arrange: the secret starts at column 85, so the 99-character cut would keep its first 14 characters.
+    const secret = 'sk-live-0123456789abcdefghijklmnopqrstuvwxyz';
+    const text = `${'d'.repeat(85)}${secret} and the rest of the note`;
+    const masked: string[] = [];
+    const redact = async (texts: readonly string[]): Promise<readonly string[]> => {
+      masked.push(...texts);
+      return texts.map(line => line.replaceAll(secret, '[secret]'));
+    };
+
+    // Act
+    const table = await build(
+      [ferret('w', { parent: 'lead' as FerretSummary['id'] })],
+      { w: [{ kind: 'note', text, at: at(1) }] },
+      {},
+      { redact },
+    );
+
+    // Assert: the masker saw the whole line; the row carries no fragment of the secret.
+    should(masked).deepEqual([text]);
+    const last = table.rows[0]?.last?.text ?? '';
+    should(last).startWith('d'.repeat(85));
+    should(last).containEql('[secret]');
+    for (let length = 4; length <= secret.length; length += 1) should(last).not.containEql(secret.slice(0, length));
+  });
+
+  it('should withhold every excerpt, never the raw text, when the redactor fails', async () => {
+    // Arrange
+    const ferrets = [
+      ferret('w', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('v', { parent: 'lead' as FerretSummary['id'] }),
+    ];
+    const lines = {
+      w: [{ kind: 'note', text: 'token sk-abc', at: at(1) }] satisfies SitrepLine[],
+      v: [{ kind: 'doing', text: 'deploying', at: at(2) }] satisfies SitrepLine[],
+    };
+
+    // Act
+    const table = await build(
+      ferrets,
+      lines,
+      {},
+      { redact: async () => await Promise.reject(new Error('vault shut')) },
+    );
+
+    // Assert
+    should(table.rows.map(row => row.last?.text)).deepEqual([EXCERPT_WITHHELD, EXCERPT_WITHHELD]);
+    should(JSON.stringify(table)).not.containEql('sk-abc');
+  });
+
+  it('should read at most `concurrency` sitreps at once, excerpt at most `excerptRows` rows and skip text past the byte budget', async () => {
+    // Arrange
+    const ferrets = Array.from({ length: 6 }, (_, index) =>
+      ferret(`h${String(index)}`, { parent: 'lead' as FerretSummary['id'] }),
+    );
+    let inFlight = 0;
+    let peak = 0;
+    const limits: PackTableLimits = { concurrency: 2, excerptRows: 4, endedRows: 0, textBytes: 25, rowBytes: 20 };
+    const texts: Record<string, string> = {
+      h0: 'short',
+      h1: 'x'.repeat(21),
+      h2: 'ten chars!',
+      h3: 'more than the rest',
+    };
+
+    // Act
+    const table = await readPackTable(
+      {
+        root: ROOT,
+        ferrets,
+        sitrep: async id => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await Promise.resolve();
+          inFlight -= 1;
+          const text = texts[id] ?? `line of ${id}`;
+          return { lines: [{ kind: 'note', text, at: at(1) }], blockers: 0 };
+        },
+        redact: async lines => lines,
+        nowMs: NOW,
+      },
+      limits,
+    );
+
+    // Assert: h1 is longer than one row's budget, h3 no longer fits the table's, h4 and h5 are past excerptRows.
+    should(peak).be.belowOrEqual(2);
+    should(table.rows.map(row => row.last?.text)).deepEqual([
+      'short',
+      undefined,
+      'ten chars!',
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    should(PACK_TABLE_LIMITS).containEql({ concurrency: 4, excerptRows: 64, endedRows: 8 });
   });
 });

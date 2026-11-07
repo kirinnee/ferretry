@@ -1,31 +1,48 @@
 import { describe, expect, test } from 'bun:test';
-import cli from '../../cli/index.ts';
-import type { PackHost } from '../../cli/lib/host.ts';
-import manifest from '../../manifest.ts';
-import { INVENTORY, JOB, packView, recommendation, SUGGESTION, started } from '../unit/cli/fixtures.ts';
+import cli from '../../../cli/index.ts';
+import type { PackHost } from '../../../cli/lib/host.ts';
+import { packVerbs } from '../../../cli/lib/verbs.ts';
+import manifest from '../../../manifest.ts';
+import { INVENTORY, JOB, packView, recommendation, SUGGESTION } from '../cli/fixtures.ts';
 
 type Init = { body?: unknown; params?: Record<string, string> };
 type Answer = unknown | ((init?: Init) => unknown);
 type Verb = (invocation: unknown) => Promise<number>;
 
-/** Builds the CLI half over a fake client that answers by route, and returns what it saw. */
-function harness(answers: Record<string, Answer>, host: PackHost = {}) {
+/**
+ * Builds the CLI half over a fake client that answers by route, and returns what it saw. With no `host` it is the half
+ * exactly as `fy` builds it (`CliContext`: manifest, client, io); with one, the verbs are built over that host, the
+ * parts the shell's context is to carry (lead decision 21).
+ */
+function harness(answers: Record<string, Answer>, host?: PackHost) {
   const calls: { route: string; init?: Init }[] = [];
   let out = '';
   let err = '';
-  const half = (cli as unknown as { build: (context: unknown) => { verbs: Record<string, Verb> } }).build({
-    manifest,
-    client: {
-      call: async (route: string, init?: Init) => {
-        calls.push({ route, ...(init === undefined ? {} : { init }) });
-        const answer = answers[route];
-        if (answer === undefined) throw new Error(`no answer faked for ${route}`);
-        return typeof answer === 'function' ? (answer as (i?: Init) => unknown)(init) : answer;
-      },
+  const client = {
+    call: async <T>(route: string, init?: Init): Promise<T> => {
+      calls.push({ route, ...(init === undefined ? {} : { init }) });
+      const answer = answers[route];
+      if (answer === undefined) throw new Error(`no answer faked for ${route}`);
+      return (typeof answer === 'function' ? (answer as (i?: Init) => unknown)(init) : answer) as T;
     },
-    io: { out: (text: string) => void (out += text), err: (text: string) => void (err += text), isTty: false },
-    ...host,
-  });
+  };
+  const io = {
+    out: (text: string) => {
+      out += text;
+    },
+    err: (text: string) => {
+      err += text;
+    },
+    isTty: false,
+  };
+  const half: { verbs: Record<string, Verb> } =
+    host === undefined
+      ? (cli as unknown as { build: (context: unknown) => { verbs: Record<string, Verb> } }).build({
+          manifest,
+          client,
+          io,
+        })
+      : { verbs: packVerbs({ client, io, host }) as unknown as Record<string, Verb> };
   return {
     calls,
     verbs: half.verbs,
@@ -52,7 +69,7 @@ describe('command parity', () => {
   test('every verb the manifest declares has a handler in the half', () => {
     const declared = Object.keys(harness({}).verbs).toSorted();
 
-    expect(declared).toHaveLength(11);
+    expect(declared).toHaveLength(9);
     expect(declared).toEqual(
       [
         'guide',
@@ -62,10 +79,8 @@ describe('command parity', () => {
         'guide show',
         'guide undo',
         'guide write',
-        'new [words...]',
         'pack [id]',
         'recommend [task...]',
-        'wait <id>',
       ].toSorted(),
     );
   });
@@ -145,6 +160,14 @@ describe('command parity', () => {
     expect(run.calls[0]?.init?.body).toEqual({ prompt: 'from a file' });
   });
 
+  test('V-0274 through the context fy gives a plugin verb (no file read on this base) --prompt-file says so and asks nothing', async () => {
+    const run = harness({});
+
+    expect(await run.run('guide clean-up', [], { 'prompt-file': '/p.txt' })).toBe(2);
+    expect(run.err()).toContain('this terminal cannot read files for a plugin verb yet; pass the text with --prompt');
+    expect(run.calls).toEqual([]);
+  });
+
   test('V-0275 guide inventory reads the inventory; --json prints the payload', async () => {
     const plain = harness({ 'GET /v1/pack/inventory': INVENTORY });
     const json = harness({ 'GET /v1/pack/inventory': INVENTORY });
@@ -211,89 +234,26 @@ describe('command parity', () => {
     expect(ambient.calls[0]?.init?.params).toEqual({ ferretId: 'lead-1' });
     expect(JSON.parse(ambient.out()).rows).toHaveLength(1);
     expect(await bare.run('pack [id]')).toBe(2);
+    expect(bare.err()).toContain('name the ferret whose pack to show');
   });
 
-  test('V-0334 new starts a helper: the brief is the words, the lead is the calling ferret, and the flags travel in the request', async () => {
-    const run = harness({ 'POST /v1/pack/new': started() }, { env: { FY_SESSION_ID: 'lead-1' }, cwd: '/here' });
-
-    const code = await run.run('new [words...]', ['do', 'the', 'thing'], {
-      runtime: 'claude-work',
-      model: 'claude-haiku-5-5',
-      effort: 'low',
-      name: 'Do Thing',
-      'allow-scratch': true,
-    });
-
-    expect(code).toBe(0);
-    const body = run.calls[0]?.init?.body as Record<string, unknown>;
-    expect(body).toMatchObject({
-      task: 'do the thing',
-      parent: 'lead-1',
-      runtime: 'claude-work',
-      model: 'claude-haiku-5-5',
-      effort: 'low',
-      allowScratch: true,
-      name: 'Do Thing',
-    });
-    expect(run.out()).toContain('Started child-1 on claude-work');
-    expect(run.out()).toContain('fy wait child-1');
-  });
-
-  test('V-0334 new from a person’s shell runs in the folder fy was run in, and --auto sends no runtime', async () => {
-    const run = harness({ 'POST /v1/pack/new': started() }, { cwd: '/here' });
-
-    await run.run('new [words...]', ['x'], { auto: true });
-
-    expect(run.calls[0]?.init?.body).toMatchObject({ task: 'x', auto: true, cwd: '/here' });
-    expect(run.calls[0]?.init?.body).not.toHaveProperty('runtime');
-  });
-
-  test('V-0334 --continue is not Packs’ to do', async () => {
-    const run = harness({});
-
-    expect(await run.run('new [words...]', ['x'], { continue: true })).toBe(2);
-    expect(run.err()).toContain('fy link');
-    expect(run.calls).toEqual([]);
-  });
-
-  test('V-0496 wait <id> polls the ferret’s result, prints it, and exits 0 for a ferret that reported', async () => {
-    let asked = 0;
-    const run = harness(
-      {
-        'GET /v1/ferrets/:ferretId/result': () =>
-          ++asked < 2
-            ? { id: 'c1', state: 'working', finished: false }
-            : { id: 'c1', state: 'stopped', finished: true, summary: 'the answer' },
+  test('V-0444 with no terminal clock the table is dated against when the daemon read it', async () => {
+    const run = harness({
+      'GET /v1/ferrets/:ferretId/pack': {
+        ...TABLE,
+        rows: [{ ...TABLE.rows[0], last: { at: '2026-11-03T11:57:00.000Z', source: 'note', text: 'halfway' } }],
       },
-      { sleep: async () => undefined, nowMs: () => 0 },
-    );
+    });
 
-    const code = await run.run('wait <id>', ['c1'], { timeout: '60', interval: '1' });
-
-    expect(code).toBe(0);
-    expect(run.calls.every(call => call.route === 'GET /v1/ferrets/:ferretId/result')).toBe(true);
-    expect(run.out()).toBe('c1 is stopped\n\nthe answer\n');
+    expect(await run.run('pack [id]', ['lead-1'])).toBe(0);
+    expect(run.out()).toContain('[3m] halfway');
   });
 
-  test('V-0496 wait exits 1 for a ferret that ended without reporting, 124 on timeout, and refuses a bad --timeout', async () => {
-    const ended = harness({ 'GET /v1/ferrets/:ferretId/result': { id: 'c1', state: 'stopped', finished: true } });
-    let now = 0;
-    const slow = harness(
-      { 'GET /v1/ferrets/:ferretId/result': { id: 'c1', state: 'working', finished: false } },
-      { sleep: async ms => void (now += ms), nowMs: () => now },
-    );
-    const bad = harness({});
+  test('V-0334 V-0496 new and wait are not Packs’ verbs: fy new is Ferrets’, fy wait Conversation’s', () => {
+    const verbs = Object.keys(harness({}).verbs);
 
-    expect(await ended.run('wait <id>', ['c1'])).toBe(1);
-    expect(await slow.run('wait <id>', ['c1'], { timeout: '3' })).toBe(124);
-    expect(await bad.run('wait <id>', ['c1'], { timeout: 'soon' })).toBe(2);
-    expect(bad.err()).toBe('--timeout must be a positive integer\n');
-  });
-
-  test('V-0496 wait --until-marker needs a terminal that can look for files', async () => {
-    const run = harness({});
-
-    expect(await run.run('wait <id>', ['c1'], { 'until-marker': 'done.md' })).toBe(2);
-    expect(run.err()).toContain('--until-marker needs a terminal');
+    expect(verbs).not.toContain('new [words...]');
+    expect(verbs).not.toContain('wait <id>');
+    expect(manifest.actions?.routes?.map(route => route.key)).not.toContain('POST /v1/pack/new');
   });
 });

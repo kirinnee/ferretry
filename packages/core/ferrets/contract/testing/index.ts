@@ -417,6 +417,14 @@ export class FakeFerrets implements FerretsApi {
     const summary = this.#ferrets.get(ferret);
     return summary === undefined ? undefined : { ferret: summary, lines: [], blockers: [] };
   }
+  readonly #summaries = new Map<FerretId, string>();
+  /** TEST ONLY: what a ferret's `signal done` wrote to its `summary.md`. */
+  setSummary(ferret: FerretId, text: string): void {
+    this.#summaries.set(ferret, text);
+  }
+  async summary(ferret: FerretId): Promise<string | undefined> {
+    return this.#ferrets.has(ferret) ? this.#summaries.get(ferret) : undefined;
+  }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */
   setAgentControl(ferret: FerretId, control: Partial<AgentControl>): void {

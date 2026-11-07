@@ -1,8 +1,8 @@
 /**
  * `packs.yaml` through the shell's configuration-file port (docs/config-files.md): read the file as text with its digest,
  * write it back against that digest. The configuration-file routes are the daemon's generic ones — they are in no plugin's
- * manifest, so this half cannot name them (`contract-consumes`); the shell offers them as `ConfigFiles` (GAP(config-files) in
- * NEEDS-APP-SHELL.txt) together with the YAML editor that keeps comments and key order.
+ * manifest, so this half cannot name them (`contract-consumes`); the shell offers them as `ConfigFiles` (PENDING.md)
+ * together with the YAML editor that keeps comments and key order.
  *
  * An edit that LOOSENS what a ferret may do or spend — Pack on, Jev decides, a limit or Jev's cap raised — is held by the
  * daemon until the owner confirms it; the answer says so (`outcome: 'pending'`) rather than pretending it applied.

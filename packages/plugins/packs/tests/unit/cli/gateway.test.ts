@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ClientPackGateway, type PackClient } from '../../../cli/lib/gateway.ts';
-import { packView, recommendation, started, at } from './fixtures.ts';
+import { packView, recommendation, at } from './fixtures.ts';
 
 type Call = { route: string; init?: Parameters<PackClient['call']>[1] };
 
@@ -79,22 +79,8 @@ describe('ClientPackGateway', () => {
     should(calls).eql([{ route: 'POST /v1/pack/recommend', init: { body: { task: 'rename' } } }]);
   });
 
-  it('should POST a start and parse the outcome', async () => {
+  it('should GET a pack table at the ferret path', async () => {
     // Arrange
-    const { gateway, calls } = build(started());
-
-    // Act
-    const answer = await gateway.newChild({ task: 'x', runtime: 'claude-work' });
-
-    // Assert
-    should(answer.outcome).equal('started');
-    should(calls).eql([{ route: 'POST /v1/pack/new', init: { body: { task: 'x', runtime: 'claude-work' } } }]);
-  });
-
-  it('should GET a result and a pack table at the ferret path', async () => {
-    // Arrange
-    const result = { id: 'a/b', state: 'stopped', finished: true, summary: 'done' };
-    const one = build(result);
     const two = build({
       root: { id: 'a/b', name: 'a' },
       at: at('2026-11-03T12:00:00.000Z'),
@@ -103,29 +89,10 @@ describe('ClientPackGateway', () => {
     });
 
     // Act
-    const answer = await one.gateway.result('a/b');
     const table = await two.gateway.table('a/b');
 
     // Assert
-    should(answer).eql(result);
-    should(one.calls).eql([{ route: 'GET /v1/ferrets/:ferretId/result', init: { params: { ferretId: 'a/b' } } }]);
     should(table.rows).eql([]);
     should(two.calls).eql([{ route: 'GET /v1/ferrets/:ferretId/pack', init: { params: { ferretId: 'a/b' } } }]);
-  });
-
-  it('should stop a ferret with the reason', async () => {
-    // Arrange
-    const { gateway, calls } = build(undefined);
-
-    // Act
-    await gateway.stop('child-1', 'its result was collected');
-
-    // Assert
-    should(calls).eql([
-      {
-        route: 'POST /v1/ferrets/:ferretId/stop',
-        init: { params: { ferretId: 'child-1' }, body: { reason: 'its result was collected' } },
-      },
-    ]);
   });
 });

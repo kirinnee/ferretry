@@ -1,16 +1,10 @@
 import type {
-  PackAttempt,
-  PackChildCard,
   PackModelOption,
-  PackNewOutcome,
   PackRecommendation,
   PackView,
   RoutingPromptView,
   RoutingSuggested,
 } from '../../contract/index.ts';
-
-/** `&F412`: how a card is cited. */
-const cardRef = (id: string): string => `&${id}`;
 
 /**
  * Which routing prompt is in effect, in words: "your routing prompt", "cleaned up by gpt-oss-120b on
@@ -75,79 +69,5 @@ export function renderGuide(view: PackView, bin: string): string {
           '',
           `The prompt before the last accepted clean-up (${view.undo.savedAt.slice(0, 10)}) is kept: ${bin} guide undo puts it back.`,
         ]),
-  ].join('\n');
-}
-
-/**
- * The "reply OK" check of one attempt: `probe OK 640 ms`, `probe OK, cached`, or `probe failed 3436 ms`
- * (`shared` when another start's probe of the same model was already running). A refused attempt that
- * carries a time is one whose probe failed; one without a time passed it and was refused by the start.
- * `start_failed` is the exception: its probe passed (the harness then did not come up) and it carries the time.
- */
-const probeWords = (attempt: PackAttempt): string => {
-  if (attempt.probe === undefined) return '';
-  const cached = attempt.probe === 'cached';
-  if (attempt.outcome === 'refused' && attempt.probeMs !== undefined && attempt.refusal?.code !== 'start_failed')
-    return cached ? ' (probe failed, shared)' : ` (probe failed ${String(attempt.probeMs)} ms)`;
-  if (cached) return ' (probe OK, cached)';
-  return attempt.probeMs === undefined ? ' (probe OK)' : ` (probe OK ${String(attempt.probeMs)} ms)`;
-};
-
-const attemptLine = (attempt: PackAttempt): string => {
-  const model = attempt.model === undefined ? '' : ` ${attempt.model}`;
-  const probe = probeWords(attempt);
-  return attempt.outcome === 'started'
-    ? `  started ${attempt.runtime}${model}${probe}`
-    : `  refused ${attempt.runtime}${model}${probe} — ${attempt.refusal?.code ?? 'refused'}: ${attempt.refusal?.message ?? ''}`;
-};
-
-const DECIDED_BY: Readonly<Record<Extract<PackNewOutcome, { outcome: 'started' }>['decidedBy'], string>> = {
-  agent: 'you',
-  routing: 'the routing prompt',
-  jev: 'jev',
-};
-
-const PARENT_WHY: Readonly<Record<NonNullable<PackChildCard['parentFrom']>, string>> = {
-  brief: 'named in the brief',
-  focus: 'your focus card',
-};
-
-/** Where the card sits: under which card and why, that it already existed, or nothing for a top-level card. */
-function cardWhy(card: PackChildCard): string {
-  const under =
-    card.parent === undefined
-      ? ''
-      : `, under ${cardRef(card.parent)}${card.parentFrom === undefined ? '' : ` (${PARENT_WHY[card.parentFrom]})`}`;
-  return `${card.existing === true ? ' (an existing card, now assigned to it)' : ''}${under}`;
-}
-
-/** What `new` says about the helper's board card: which it is, and what the board could not do. */
-function cardLines(card: PackChildCard | undefined): readonly string[] {
-  if (card === undefined) return [];
-  const where = card.project === undefined ? '' : ` on the ${card.project} board`;
-  return [
-    ...(card.id === undefined ? [] : [`Its card is ${cardRef(card.id)}${where}${cardWhy(card)}.`]),
-    ...(card.note === undefined ? [] : [card.note]),
-  ];
-}
-
-/** What `new` did: the ferret it started and how, or the refusal and every attempt. */
-export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): string {
-  const attempts = outcome.attempts.map(attempt => attemptLine(attempt));
-  if (outcome.outcome === 'refused')
-    return [
-      `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
-      ...(outcome.refusal.remedy === undefined ? [] : [outcome.refusal.remedy]),
-      ...(attempts.length === 0 ? [] : ['', 'Tried:', ...attempts]),
-    ].join('\n');
-  const ferret = outcome.ferret;
-  const who = ferret.name === ferret.id ? ferret.id : `${ferret.name} (${ferret.id})`;
-  const model = outcome.attempts.find(attempt => attempt.outcome === 'started')?.model;
-  return [
-    `Started ${who} on ${ferret.runtime ?? ferret.harness}${model === undefined ? '' : `, ${model}`} — decided by ${DECIDED_BY[outcome.decidedBy]}.`,
-    ...(outcome.note === undefined ? [] : [outcome.note]),
-    ...cardLines(outcome.card),
-    ...attempts,
-    `Wait for its result: ${bin} wait ${ferret.id}`,
   ].join('\n');
 }

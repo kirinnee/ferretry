@@ -1,65 +1,43 @@
 /**
- * THE ONE SEAM to the app shell's shared UI (NEEDS-APP-SHELL.txt). Every component in this half takes its primitives
- * from here and from nowhere else. A plugin half may not import the app package (`context-imports`), and the shell offers
- * a plugin half no primitives yet (GAP(app-shell)): until it does, these are placeholders that say so when used. Names
- * are today's PWA primitives, unchanged.
+ * THE ONE SEAM to the app shell's shared UI. Every component in this half takes its primitives from here and from
+ * nowhere else. `@ferretry/app/ui` is the one home for them (lead decision D2 #4), so what it has is re-exported as is:
+ * Badge, Button, RouteLink and `cn`. The clock is the browser's: a browser app half may read time and set timers
+ * (D2 #4: `banned-globals` bans neither in app halves).
+ *
+ * What the kit does NOT offer yet is not stood in for here. The chat's reference-proved Markdown, PeerName,
+ * MessageFooter and ToolGroup are only used by the transcript card (`components/pack-call.tsx`), which is a pending app
+ * port (ports-pending.json `pendingAppPorts`, with its reason). The configuration-file editor the settings page saves
+ * through is answered `undefined` ({@link useConfigFiles}) and the page says so instead of failing.
  */
+import type { ConfigFiles } from './lib/pack-config.ts';
 
-type Primitive = (props: Record<string, unknown>) => unknown;
+export { Badge, type BadgeTone, Button, cn, RouteLink } from '@ferretry/app/ui';
 
-const missing =
-  (name: string): Primitive =>
-  () => {
-    throw new Error(`The app shell does not provide ${name} to plugin halves yet.`);
-  };
-
-export type BadgeTone = 'ok' | 'warn' | 'err' | 'accent' | 'pend' | 'neutral';
-
-export const Badge: Primitive = missing('Badge');
-export const Button: Primitive = missing('Button');
-export const RouteLink: Primitive = missing('RouteLink');
-/** Markdown with the reference grammar proved (`:name`, `&card`, `@file`), as the chat draws it. */
-export const Markdown: Primitive = missing('Markdown');
-/** The proved-reference options a `Markdown` is given (`useReferenceSurface` in today's chat). */
-export const useReferenceSurface = (): Record<string, unknown> => ({});
-/** A peer's name as a proved `:name` reference. */
-export const PeerName: Primitive = missing('PeerName');
-/** The small time footer under a message. */
-export const MessageFooter: Primitive = missing('MessageFooter');
-/** The collapsed tool-call group of a transcript row. */
-export const ToolGroup: Primitive = missing('ToolGroup');
-
-export const cn = (...parts: readonly (string | false | null | undefined)[]): string =>
-  parts.filter((part): part is string => typeof part === 'string' && part.length > 0).join(' ');
-
-/**
- * The shell's clock and timers (a plugin half reaches time only through the shell: `banned-globals`). `after` and `every`
- * return the function that cancels them.
- */
+/** The clock and timers a view reads time with. `after` and `every` return the function that cancels them. */
 export interface ShellClock {
   now(): number;
   after(ms: number, run: () => void): () => void;
   every(ms: number, run: () => void): () => void;
 }
 
-const unavailableClock: ShellClock = {
-  now: missing('the clock') as unknown as () => number,
-  after: missing('timers') as unknown as ShellClock['after'],
-  every: missing('timers') as unknown as ShellClock['every'],
-};
-
-export const useShellClock = (): ShellClock => unavailableClock;
-
-import type { ConfigFiles } from './lib/pack-config.ts';
-
-const unavailableFiles: ConfigFiles = {
-  text: {
-    read: missing('the configuration files') as unknown as ConfigFiles['text']['read'],
-    edit: missing('the configuration files') as unknown as ConfigFiles['text']['edit'],
+const browserClock: ShellClock = {
+  now: () => Date.now(),
+  after: (ms, run) => {
+    const handle = setTimeout(run, ms);
+    return () => clearTimeout(handle);
   },
-  read: missing('the configuration files') as unknown as ConfigFiles['read'],
-  write: missing('the configuration files') as unknown as ConfigFiles['write'],
+  every: (ms, run) => {
+    const handle = setInterval(run, ms);
+    return () => clearInterval(handle);
+  },
 };
 
-/** The configuration-file routes and the YAML editor, as the shell's settings frame has them. */
-export const useConfigFiles = (): ConfigFiles => unavailableFiles;
+export const useShellClock = (): ShellClock => browserClock;
+
+/**
+ * The configuration-file read and the comment-preserving YAML editor the settings page saves `packs.yaml` through.
+ * GAP: the shell hands plugin halves no configuration-file port yet, and the write it needs is the kernel's config
+ * write port (D2 #16), not on this base. Until both are, this answers `undefined` and the settings page says to edit
+ * `config/packs.yaml` by hand.
+ */
+export const useConfigFiles = (): ConfigFiles | undefined => undefined;

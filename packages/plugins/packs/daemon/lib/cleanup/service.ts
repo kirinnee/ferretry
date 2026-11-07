@@ -8,8 +8,11 @@
  * diff (just "after" when there was nothing before).
  *
  * It runs only when a person asks (`fy guide clean-up`/`write`, the buttons): no timer starts one, and the
- * runtime is probed ("Reply with exactly: OK") first, like any helper, so a login out of quota is skipped
- * rather than started. A run's state is read when somebody asks for it, never polled here.
+ * runtime is checked first (`../probe.ts`), so one that cannot start is skipped rather than started. On this base the
+ * check is the weaker one: the runtime resolves, is switched on and its login is signed in. Today's check also ran the
+ * launcher once and asked the model to "reply OK", which caught a login out of quota; that needs a one-shot harness
+ * run Ferrets or Runtimes does not offer yet (ports-pending). A run's state is read when somebody asks for it, never
+ * polled here.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { Instant } from '@ferretry/std';
@@ -96,8 +99,11 @@ export interface CleanUpPorts {
   runs: CleanUpRunStore;
   now(): string;
   newId(): string;
-  /** The folder the clean-up runs in: the Ferretry home, never a project. */
-  readonly home: string;
+  /**
+   * The folder the clean-up runs in: today's is the Ferretry home, never a project. `undefined` when no port gives it
+   * (none does on this base: the Ferretry home is not a folder a plugin is handed), and Clean up then refuses to start.
+   */
+  readonly home: string | undefined;
   readonly bin: string;
 }
 
@@ -108,6 +114,10 @@ const DRAFT_FILE = 'draft.json';
 
 const refused = (message: string): PackCleanUpStart => ({ outcome: 'refused', message });
 
+/** Why Clean up cannot start where no folder for its ferret is known. */
+export const NO_CLEAN_UP_FOLDER =
+  'Clean up has no folder to run its ferret in on this machine yet (the Ferretry home is not handed to Pack mode), so nothing was started. Edit config/packs.yaml by hand meanwhile.';
+
 export class CleanUpService {
   constructor(private readonly ports: CleanUpPorts) {}
 
@@ -116,10 +126,16 @@ export class CleanUpService {
     const [inventory, runs] = await Promise.all([this.ports.inventory(), this.ports.runs.list()]);
     const ready = readyByHeadroom(inventory.runtimes).map(runtime => runtime.name);
     const job = runs[0]?.job;
+    const reason =
+      this.ports.home === undefined
+        ? NO_CLEAN_UP_FOLDER
+        : ready.length === 0
+          ? noneReady(inventory.runtimes)
+          : undefined;
     return {
-      available: ready.length > 0,
+      available: reason === undefined,
       runtimes: ready,
-      ...(ready.length === 0 ? { reason: noneReady(inventory.runtimes) } : {}),
+      ...(reason === undefined ? {} : { reason }),
       ...(job === undefined ? {} : { job }),
     };
   }
@@ -130,6 +146,8 @@ export class CleanUpService {
    * none — a default is not the owner's to build on).
    */
   async start(request: PackCleanUpRequest): Promise<PackCleanUpStart> {
+    const home = this.ports.home;
+    if (home === undefined) return refused(NO_CLEAN_UP_FOLDER);
     const mode = request.mode ?? 'clean-up';
     const inventory = await this.ports.inventory();
     const rough =
@@ -154,7 +172,7 @@ export class CleanUpService {
           wrapper: runtime.wrapper,
           harness: runtime.harness,
           ...(model === undefined ? {} : { model }),
-          cwd: this.ports.home,
+          cwd: home,
           timeoutMs: probe.timeoutSeconds * 1_000,
         },
         probe.cacheSeconds * 1_000,
@@ -163,9 +181,15 @@ export class CleanUpService {
         failures.push(`${candidate.name}: ${probed.outcome.reason}`);
         continue;
       }
-      return await this.launch({ mode, idea: request.idea ?? '', rough }, candidate.name, runtime, model, inventory);
+      return await this.launch(
+        { mode, idea: request.idea ?? '', rough, home },
+        candidate.name,
+        runtime,
+        model,
+        inventory,
+      );
     }
-    return refused(`No runtime answered a "reply OK" check (${failures.join('; ') || 'none could be resolved'}).`);
+    return refused(`No runtime passed the start check (${failures.join('; ') || 'none could be resolved'}).`);
   }
 
   /** One run, read now: a rewrite written since is checked and kept, and its ferret is stopped. */
@@ -220,13 +244,13 @@ export class CleanUpService {
   }
 
   private async launch(
-    input: { readonly mode: PackBuilderMode; readonly idea: string; readonly rough: string },
+    input: { readonly mode: PackBuilderMode; readonly idea: string; readonly rough: string; readonly home: string },
     name: string,
     runtime: CleanUpRuntime,
     model: string | undefined,
     inventory: PackInventory,
   ): Promise<PackCleanUpStart> {
-    const { mode, idea, rough } = input;
+    const { mode, idea, rough, home } = input;
     const id = this.ports.newId();
     // What the run was shown is kept with it: the rough prompt is the "before" of the review, the inventory is what
     // the rewrite is checked against.
@@ -245,7 +269,7 @@ export class CleanUpService {
       prompt,
       pack: PACK_CLEAN_UP_PACK,
       name: mode === 'generate' ? GENERATE_NAME : CLEAN_UP_NAME,
-      cwd: this.ports.home,
+      cwd: home,
       ...(model === undefined ? {} : { model }),
     });
     const job: PackCleanUpJob = {
@@ -291,6 +315,7 @@ export class CleanUpService {
 /** Why no runtime can run Clean up, in one sentence. */
 function noneReady(runtimes: readonly PackInventoryRuntime[]): string {
   const first = runtimes[0];
-  if (first === undefined) return 'There is no agent runtime on this machine to clean up with.';
+  if (first === undefined)
+    return 'Pack mode lists no agent runtime on this machine to clean up with (Runtimes does not offer Pack mode its catalog yet).';
   return `No runtime can start a ferret now — ${first.refusal?.message ?? `${first.name} is not ready.`}`;
 }

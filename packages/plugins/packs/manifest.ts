@@ -1,17 +1,13 @@
 import { FerretsPort, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
-import { VaultPort } from '@ferretry/core-vault/contract';
-import type { ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import {
-  PACK_JEV_SPEND,
   PACK_REPLACED,
   PACK_RUNS,
   PACK_SWITCHES,
   PACKS,
   PACKS_CONFIG,
   PACKS_WORDS,
-  PackHelperStarted,
   PacksPort,
   packConfigure,
   packUse,
@@ -24,16 +20,17 @@ import {
  * Routes are today's `pack` mount, descriptor for descriptor. Two paths moved: the three per-ferret ones
  * (`/v1/sessions/:sessionId/…` renamed `/v1/ferrets/:ferretId/…`, §1.4) and `…/subtree`, whose word is the lead's PACK now
  * (§1.2), so `GET /v1/ferrets/:ferretId/pack` is the pack table and `PATCH` on the same path is the ferret's own switch.
- * `POST /v1/recommend` (the account recommender) is Runtimes' (`POST /v1/runtimes/recommend`).
+ * `POST /v1/recommend` (R-0321, the account recommender) is still declared by Runtimes on this base, at that path; the
+ * placement lists it with Packs, so where it lives is the lead's to settle (ports-pending). `fy new` is Ferrets' verb and
+ * `fy wait` Conversation's: Packs starts no helper and waits on none.
  *
  * `guard: 'secrets'` on the two routes that carry text a ferret wrote (a result, a pack table's last lines): their
  * bodies are built inside one `Redaction.read` (§7.3). The other answers are model ids, runtime and login NAMES,
  * readiness and quota; the routing prompt is the owner's words.
  *
- * It takes `start.decide` (admission: depth and how many children a parent may have, whichever command started the
- * child) and `launch.parts` (the `FY_PACK` switch and the routing line a launch carries, which Ferrets cannot ask a
- * plugin's port for). Usage and Runtimes are optional: with them off a ferret can still start a helper by hand, there are
- * no recommendations.
+ * It shapes a start only through `start.decide` (admission: depth and how many children a parent may have, whichever
+ * command started the child) and `launch.parts` (the `FY_PACK` switch and the routing line a launch carries, which
+ * Ferrets cannot ask a plugin's port for). Usage and Runtimes are optional: with them off there are no recommendations.
  */
 export default definePlugin({
   id: PACKS,
@@ -44,8 +41,7 @@ export default definePlugin({
   kinds: ['command', 'view'],
   words: PACKS_WORDS,
 
-  // Vault: Jev's key is spent through `authorizeFetch` (one named secret on one request, never read).
-  needs: { ferrets: FerretsPort, vault: VaultPort },
+  needs: { ferrets: FerretsPort },
   uses: { usage: UsagePort, runtimes: RuntimesPort },
   provides: { packs: PacksPort },
 
@@ -107,13 +103,6 @@ export default definePlugin({
         audit: { skip: 'a read: it starts nothing' },
         guard: { none: 'the routing prompt and model ids; no pane text' },
       }),
-      route('POST /v1/pack/new', {
-        minimum: 'operator',
-        caller: 'any',
-        noStore: true,
-        audit: { skip: 'the start is recorded as the ferret it starts; a refusal is an answer' },
-        guard: { none: 'a ferret summary and the attempts made; the brief is not echoed' },
-      }),
       route('GET /v1/ferrets/:ferretId/result', {
         minimum: 'operator',
         caller: 'any',
@@ -138,13 +127,6 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('new [words...]', {
-        summary: 'start a helper on a chosen model (Pack mode; `fy wait <id>` collects its result)',
-      }),
-      verb('wait <id>', {
-        summary:
-          'block until a ferret settles and print its result; exits 0 completed, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
-      }),
       verb('recommend [task...]', {
         summary: 'the routing prompt and the models that can run a piece of work here now (Pack mode)',
       }),
@@ -182,15 +164,15 @@ export default definePlugin({
   },
 
   data: {
-    state: [PACK_RUNS, PACK_REPLACED, PACK_JEV_SPEND, PACK_SWITCHES],
-    config: [PACKS_CONFIG as unknown as ConfigDef],
+    state: [PACK_RUNS, PACK_REPLACED, PACK_SWITCHES],
+    config: [PACKS_CONFIG],
     readModels: ['view', 'recommend', 'routingLine', 'instructed', 'result', 'table'],
-    publishes: [PackHelperStarted],
   },
 
   hooks: { takes: [{ hook: StartDecide }, { hook: LaunchParts }] },
 
-  // Jev ranks the models usable now through Vault's `authorizeFetch`: one named secret on one request to its one host.
-  // The probe and the clean-up ferret run through Runtimes and Ferrets, not a process of Packs.
-  permissions: { roots: ['agent-homes'], network: ['api.typesafe.ai'], spawn: [], secrets: ['JEV_API_KEY'] },
+  // No root, host or secret: a finished ferret's summary is read through Ferrets (`FerretsApi.summary`), the clean-up
+  // ferret's folder comes from the kernel's paths, and the probe and the clean-up ferret run through Runtimes and Ferrets.
+  // Jev's ranking went with `fy new` (it ranked only `new --auto`), so nothing here calls out or spends.
+  permissions: { roots: [], network: [], spawn: [], secrets: [] },
 });

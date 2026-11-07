@@ -4,7 +4,7 @@ import type { ConfigFiles } from '../../../app/lib/pack-config.ts';
 import { clockAt } from './timers.ts';
 
 /**
- * What the app shell will offer a plugin half (`app/ui.ts`, NEEDS-APP-SHELL.txt), as the smallest honest stand-ins: the
+ * What the app shell will offer a plugin half (`app/ui.ts`, PENDING.md), as the smallest honest stand-ins: the
  * same element names and data attributes the real primitives render, so a test reads the half's own markup.
  * A suite installs them with `mock.module('<path to app/ui.ts>', () => uiDoubles)` before importing the component.
  */

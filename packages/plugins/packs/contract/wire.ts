@@ -8,8 +8,8 @@
  *   sub-task, read the same way by the asking ferret and by Jev. Absent means the prompt rendered from the model
  *   catalogs in effect ({@link RoutingFile}).
  * - `POST /v1/pack/recommend` — the routing prompt and the models usable on this machine NOW.
- * - `POST /v1/pack/new` — start one helper, after a probe; a refusal is a closed code a ferret
- *   falls back on ({@link PackRefusalCode}).
+ * - `fy new` is Ferrets' verb; {@link PackNewOutcome} stays only so the app can read the `fy new` answers a transcript
+ *   already holds.
  * - `GET /v1/ferrets/:ferretId/result` — what a finished helper reported.
  * - `PATCH /v1/ferrets/:ferretId/pack` — one ferret's own switch.
  *
@@ -18,7 +18,6 @@
 import { FerretStateSchema, FerretSummarySchema, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { CompactAtSchema } from './compact-at.ts';
 import { CardIdSchema } from './card.ts';
 
 const InteractionModeSchema = z.enum(['auto', 'interactive']);
@@ -47,7 +46,7 @@ export const PackLimitsSchema = z.strictObject({
 });
 export type PackLimits = z.infer<typeof PackLimitsSchema>;
 
-/** The "reply OK" check `fy new` runs before it starts a helper. */
+/** The check run before the clean-up ferret starts (`daemon/lib/probe.ts` says what it proves on this base). */
 export const PackProbeSchema = z.strictObject({
   /** How long one probe may take before it counts as failed. */
   timeoutSeconds: z.number().int().min(5).max(300),
@@ -398,39 +397,6 @@ export const PackRecommendationSchema = z.strictObject({
 });
 export type PackRecommendation = z.infer<typeof PackRecommendationSchema>;
 
-// ── New ──────────────────────────────────────────────────────────────────────────────────────────
-
-export const PackNewRequestSchema = z
-  .strictObject({
-    task: z.string().trim().min(1).max(100_000),
-    /** The ferret asking; its depth and limit apply. Absent: a top-level start by a person. */
-    parent: NonEmpty.optional(),
-    runtime: NonEmpty.optional(),
-    model: NonEmpty.optional(),
-    effort: NonEmpty.optional(),
-    /**
-     * Let the decision mode pick: the models the routing prompt names, in its order, then the ready one
-     * with the most headroom — or Jev's order when Jev decides.
-     */
-    auto: z.boolean().optional(),
-    cwd: NonEmpty.optional(),
-    /** Run in a temporary or scratch folder anyway (`--allow-scratch`); refused `scratch_cwd` otherwise. */
-    allowScratch: z.boolean().optional(),
-    name: NonEmpty.max(120).optional(),
-    mode: InteractionModeSchema.optional(),
-    /** An existing card the helper works on (`--card`): assigned to it, never copied into a second card. */
-    card: CardIdSchema.optional(),
-    /** Where it compacts its conversation (`--compact-at`); absent follows its login's default. */
-    compactAt: CompactAtSchema.optional(),
-  })
-  .superRefine((value, context) => {
-    if (value.auto === true && value.runtime !== undefined)
-      context.addIssue({ code: 'custom', message: '--auto picks the runtime; do not name one', path: ['runtime'] });
-    if (value.auto !== true && value.runtime === undefined)
-      context.addIssue({ code: 'custom', message: 'name a --runtime, or pass --auto', path: ['runtime'] });
-  });
-export type PackNewRequest = z.infer<typeof PackNewRequestSchema>;
-
 /** One candidate tried on the way to a start, in order: what it was and what came of it. */
 export const PackAttemptSchema = z.strictObject({
   runtime: NonEmpty,
@@ -464,7 +430,7 @@ export const PackChildCardSchema = z.strictObject({
 export type PackChildCard = z.infer<typeof PackChildCardSchema>;
 
 /**
- * What `POST /v1/pack/new` answers. A refusal is an ANSWER, not an HTTP error, so a ferret reads the
+ * What a `fy new` answered (its `--json` body), as a transcript holds it. A refusal is an ANSWER, not an HTTP error, so a ferret reads the
  * closed code and every attempt from one body and falls back to the next candidate.
  *
  * `decidedBy`: `agent` — the ferret named the runtime; `routing` — `--auto` took the routing prompt's

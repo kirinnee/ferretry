@@ -33,6 +33,7 @@ import {
   AgentPinsFile,
   FerretDetailsFiles,
   FerretPinFiles,
+  FerretSummaryFiles,
   SessionConfigFiles,
   SessionStateFiles,
 } from './daemon/lib/state.ts';
@@ -357,6 +358,7 @@ export default definePlugin({
       AgentPinsFile,
       FerretPinFiles,
       FerretDetailsFiles,
+      FerretSummaryFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],

@@ -1,18 +1,17 @@
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 
 /**
- * THE START PROBE (docs/pack-mode.md): before `fy new` starts a helper it asks the chosen runtime
- * and model to "reply OK", with a bounded timeout and the lowest effort the CLI lets it set. A runtime
- * that does not answer OK in time is refused `probe_failed` and nothing is started — in both decision
- * modes, because a ferret that cannot answer one line will not do the work either.
+ * THE START CHECK (docs/pack-mode.md): before the clean-up ferret starts, its runtime is checked with a bounded timeout.
+ * A runtime that fails is refused `probe_failed` (or the code its failure names) and nothing is started.
  *
- * It is a REAL round trip — the runtime's own wrapper, with its login's environment, asking the model
- * itself — so quota, sign-in and a missing model all fail it, not only a missing CLI. A failure's output is
- * read for which of those it was (`classifyProbeFailure`), so the refusal names it.
+ * What the check proves depends on the adapter behind {@link PackProbePort}. Today's adapter ran the runtime's launcher
+ * once and asked the model to "reply OK" ({@link PROBE_PROMPT}, {@link probeAnswered}, {@link classifyProbeFailure}), so
+ * quota, sign-in and a missing model all failed it. On this base the adapter (`adapters/launch-probe.ts`) can only ask
+ * Runtimes whether the runtime resolves, is switched on and is signed in: a login that is signed in but out of quota
+ * PASSES. The real round trip needs a one-shot harness run that Ferrets or Runtimes does not offer yet (ports-pending).
  *
- * A probe spends a token or two, and only when a ferret asked for a start. A PASS is kept for
- * `cacheSeconds` per runtime, model and effort, and probes already running are shared, so twenty
- * helpers started at once probe once. A failure is not kept: the next start asks again.
+ * A PASS is kept for `cacheSeconds` per runtime, model and effort, and checks already running are shared. A failure
+ * is not kept: the next start asks again.
  */
 
 /** What one probe asks. */
@@ -38,7 +37,7 @@ export type PackProbeOutcome =
   | { readonly ok: true; readonly ms: number }
   | { readonly ok: false; readonly ms: number; readonly reason: string; readonly code?: ProbeFailureCode };
 
-/** Runs one probe. The adapter starts the runtime's CLI in its one-shot mode. */
+/** Runs one check. Today's adapter ran the runtime's CLI in its one-shot mode; see the header for what this base's does. */
 export interface PackProbePort {
   probe(request: PackProbeRequest): Promise<PackProbeOutcome>;
 }

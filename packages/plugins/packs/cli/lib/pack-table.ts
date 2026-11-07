@@ -81,7 +81,8 @@ export class PackTableController {
     private readonly out: { success(message: string): void },
     /** The ferret this runs inside, when it does. */
     private readonly caller: string | undefined,
-    private readonly nowMs: () => number,
+    /** The terminal's clock; absent, the rows are dated against when the daemon read them (`PackTable.at`). */
+    private readonly nowMs: (() => number) | undefined,
     private readonly colour: ICellColour,
   ) {}
 
@@ -89,13 +90,14 @@ export class PackTableController {
     const root = id?.trim() || this.caller?.trim();
     if (root === undefined || root === '')
       throw new PackCommandError(
-        'name the ferret whose pack to show: pack <id> (it defaults to the calling ferret only inside a ferret)',
+        'name the ferret whose pack to show: pack <id> (it defaults to the calling ferret only inside a ferret whose terminal passes FY_SESSION_ID)',
       );
     const table = await this.gateway.table(root);
     if (flags.json === true) {
       this.out.success(JSON.stringify(table, null, 2));
       return;
     }
-    for (const line of renderPackTable(table, this.nowMs(), this.colour)) this.out.success(line);
+    const nowMs = this.nowMs?.() ?? Date.parse(table.at);
+    for (const line of renderPackTable(table, nowMs, this.colour)) this.out.success(line);
   }
 }

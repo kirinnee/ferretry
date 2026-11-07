@@ -1,26 +1,13 @@
-import {
-  type PackBuilderMode,
-  type PackCleanUpJobResult,
-  type PackCleanUpRequest,
-  type PackCleanUpSuggestion,
-  type PackNewRequest,
-  PackNewRequestSchema,
-  type PackRecommendRequest,
-  parseCompactAt,
+import type {
+  PackBuilderMode,
+  PackCleanUpJobResult,
+  PackCleanUpRequest,
+  PackCleanUpSuggestion,
+  PackRecommendRequest,
 } from '../../contract/index.ts';
-import { titleFromReferencedBrief } from './brief-title.ts';
 import type { IPackGateway } from './gateway.ts';
 import { renderCleanUp, renderInventory } from './guide-render.ts';
-import { renderGuide, renderPackNewOutcome, renderPackRecommendation } from './render.ts';
-
-/** A card the way `--card` takes it: `&F21`, `#F21` or a bare `F21`, in any case. The daemon checks it exists and is the caller's. */
-export function cardId(value: string): string {
-  const trimmed = value.trim();
-  const bare = trimmed.startsWith('&') || trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
-  const id = bare.toUpperCase();
-  if (!/^[BFIC][1-9][0-9]{0,8}$/u.test(id)) throw new Error(`expected a card id like &F21, got "${value}"`);
-  return id;
-}
+import { renderGuide, renderPackRecommendation } from './render.ts';
 
 /** Terminal output for the Pack commands. `success` is stdout; `error` is stderr. */
 export interface IPackIo {
@@ -33,7 +20,7 @@ export interface IPackIo {
   interactive?(): boolean;
 }
 
-/** The exit status of a refused `new`: distinct from a failure, so a ferret knows to try its next candidate. */
+/** The exit status of a refused clean-up start: distinct from a failure. */
 export const PACK_REFUSED_EXIT_CODE = 2;
 
 export interface PackRecommendOptions {
@@ -68,45 +55,21 @@ export interface PackWriteOptions {
 /** How long `guide clean-up` waits on its ferret: a check every few seconds, for up to twenty minutes. */
 export const GUIDE_POLL = { intervalMs: 3_000, attempts: 400 } as const;
 
-export interface PackNewOptions {
-  readonly runtime?: string;
-  readonly model?: string;
-  readonly effort?: string;
-  /** What was typed after `--compact-at` (`auto`, `250k`); parsed in `newChild`. */
-  readonly compactAt?: string;
-  readonly auto?: boolean;
-  readonly cwd?: string;
-  readonly name?: string;
-  /** An existing card the helper works on (`--card`): `&F21`, or `F21`. */
-  readonly card?: string;
-  readonly mode?: 'auto' | 'interactive';
-  readonly promptFile?: string;
-  readonly json?: boolean;
-  /** Run in a temporary or scratch folder anyway; the daemon refuses one `scratch_cwd` otherwise. */
-  readonly allowScratch?: boolean;
-}
-
 export interface PackControllerDeps {
   readonly gateway: IPackGateway;
   readonly out: IPackIo;
-  /**
-   * The ferret this runs inside (`FY_SESSION_ID`), which becomes
-   * the parent; `undefined` for a person's shell. Read only when a start is made.
-   */
-  readonly parent: () => Promise<string | undefined>;
-  /** A folder the caller typed, made absolute against where `fy` was run. */
-  readonly absolute: (path: string) => string;
-  /** Where `fy` was run, the folder a top-level start runs in. */
-  readonly cwd: string;
   readonly readFile: (path: string) => Promise<string>;
   readonly binaryName: string;
-  /** Waits between two looks at a clean-up run. */
+  /**
+   * Waits between two looks at a clean-up run. Absent when the terminal gives the verb no sleep (`CliContext` has none
+   * on this base): the run is looked at once, and a run still working says how to look again.
+   */
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
 const joined = (words: readonly string[]): string => words.join(' ').replaceAll(/\s+/gu, ' ').trim();
 
-/** Drives `fy recommend`, `fy guide` and `fy new` (docs/pack-mode.md): the daemon decides, this asks and prints. */
+/** Drives `fy recommend` and `fy guide` (docs/pack-mode.md): the daemon decides, this asks and prints. */
 export class PackController {
   constructor(private readonly deps: PackControllerDeps) {}
 
@@ -228,8 +191,11 @@ export class PackController {
   /** Looks at a run until it is no longer running, or the wait is up. */
   private async settled(jobId: string): Promise<PackCleanUpJobResult> {
     let result = await this.deps.gateway.job(jobId);
+    const sleep = this.deps.sleep;
+    // No sleep, no loop: asking again at once would only hammer the daemon.
+    if (sleep === undefined) return result;
     for (let attempt = 1; result.job.status === 'running' && attempt < GUIDE_POLL.attempts; attempt += 1) {
-      await (this.deps.sleep ?? (async () => undefined))(GUIDE_POLL.intervalMs);
+      await sleep(GUIDE_POLL.intervalMs);
       result = await this.deps.gateway.job(jobId);
     }
     return result;
@@ -238,42 +204,5 @@ export class PackController {
   private async acceptSuggestion(suggestion: PackCleanUpSuggestion): Promise<void> {
     const written = await this.deps.gateway.accept({ prompt: suggestion.after, suggested: suggestion.suggested });
     this.deps.out.success(written.message);
-  }
-
-  async newChild(words: readonly string[], options: PackNewOptions): Promise<void> {
-    const typed = joined(words);
-    const task = options.promptFile === undefined ? typed : (await this.deps.readFile(options.promptFile)).trim();
-    if (task === '')
-      throw new Error(`give the brief: ${this.deps.binaryName} new --runtime <runtime> "<complete brief>"`);
-    const compactAt = options.compactAt === undefined ? undefined : parseCompactAt(options.compactAt);
-    if (compactAt?.ok === false) throw new Error(`--compact-at: ${compactAt.reason}`);
-    const parent = await this.deps.parent();
-    const name =
-      options.name ?? (await titleFromReferencedBrief(task, path => this.deps.readFile(this.deps.absolute(path))));
-    const request: PackNewRequest = PackNewRequestSchema.parse({
-      task,
-      ...(parent === undefined ? {} : { parent }),
-      ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
-      ...(options.model === undefined ? {} : { model: options.model }),
-      ...(options.effort === undefined ? {} : { effort: options.effort }),
-      ...(options.auto === true ? { auto: true } : {}),
-      ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
-      // A helper runs in its PARENT'S folder — never where the agent's shell happens to be — unless told
-      // otherwise; a person's start runs here. The daemon refuses a named temporary folder (`--allow-scratch`).
-      ...(options.cwd !== undefined
-        ? { cwd: this.deps.absolute(options.cwd) }
-        : parent === undefined
-          ? { cwd: this.deps.cwd }
-          : {}),
-      ...(options.allowScratch === true ? { allowScratch: true } : {}),
-      ...(name === undefined ? {} : { name }),
-      ...(options.card === undefined ? {} : { card: cardId(options.card) }),
-      ...(options.mode === undefined ? {} : { mode: options.mode }),
-    });
-    const outcome = await this.deps.gateway.newChild(request);
-    if (options.json === true) this.deps.out.success(JSON.stringify(outcome, null, 2));
-    else if (outcome.outcome === 'started') this.deps.out.success(renderPackNewOutcome(outcome, this.deps.binaryName));
-    else this.deps.out.error(`${this.deps.binaryName} new: ${renderPackNewOutcome(outcome, this.deps.binaryName)}`);
-    if (outcome.outcome === 'refused') this.deps.out.setExitCode(PACK_REFUSED_EXIT_CODE);
   }
 }

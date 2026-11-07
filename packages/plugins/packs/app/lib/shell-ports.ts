@@ -1,6 +1,6 @@
 /**
  * What the packs app needs from files that live with another owner's app half, kept as the smallest local copy of each
- * (never the whole file) until that owner publishes them through a contract (NEEDS-APP-SHELL.txt).
+ * (never the whole file) until that owner publishes them through a contract (PENDING.md).
  */
 
 import type { PackCall } from './pack-calls.ts';

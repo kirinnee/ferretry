@@ -6,7 +6,7 @@
  * instructions were fixed when it started, so a change takes effect at its next launch and nothing is sent to it; the
  * daemon's own `note` says so, and the host shows it. The machine's own switch and the depth limit still apply on top of it.
  *
- * The daemon has no read of one ferret's switch yet (GAP(packs-contract) in NEEDS-APP-SHELL.txt), so the state shown is
+ * The daemon has no read of one ferret's switch yet (PENDING.md, "One ferret's own switch"), so the state shown is
  * the answer the daemon last gave on this page, and ON — what absent means — until then. The answer is kept, so the toggle
  * never flips back under the reader.
  */
@@ -86,6 +86,7 @@ export function PackSwitchRow({
       <input
         type="checkbox"
         role="switch"
+        aria-checked={on}
         checked={on}
         onChange={event => void control.tap(ferretId, event.currentTarget.checked)}
       />

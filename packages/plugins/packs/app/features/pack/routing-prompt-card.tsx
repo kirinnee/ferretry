@@ -436,7 +436,6 @@ function IdeaField({
   onChange,
   onSubmit,
   disabled,
-  limit,
 }: {
   readonly id: string;
   readonly value: string;

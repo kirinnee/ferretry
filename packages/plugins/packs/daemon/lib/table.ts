@@ -1,14 +1,15 @@
 /**
  * THE PACK TABLE A LEAD READS (`GET /v1/ferrets/:ferretId/pack`, `fy pack`; docs/pack-mode.md). Today's subtree table.
  *
- * Everything here is built from facts the caller hands in — the ferrets Ferrets holds, each one's sitrep lines and its
- * open blockers — in ONE pass. The excerpts are cut to one line; redaction is the route's job (the body is built inside
- * one `Redaction.read`, §7.3), so nothing here reads a secret store.
+ * Everything here is read from facts the caller hands in — the ferrets Ferrets holds, each one's sitrep lines and its
+ * open blockers — in ONE pass, at most {@link PackTableLimits.concurrency} reads at once. THE EXCERPTS ARE MASKED WHOLE
+ * BEFORE THEY ARE CUT, in one redaction batch per table, and a redactor that fails withholds every excerpt
+ * ({@link readPackTable}). Nothing here reads a secret store itself: `redact` is the kernel's `Redaction.read`.
  *
  * Lineage comes from the ferrets' `parent` links and nothing else: the request names only the root.
  */
 import type { FerretState, FerretSummary, SitrepLine } from '@ferretry/core-ferrets/contract';
-import { instantFromEpochMs } from '@ferretry/std';
+import { type Instant, InstantSchema, instantFromEpochMs } from '@ferretry/std';
 import {
   PACK_ENDED_WINDOW_MS,
   PACK_LAST_LINE_MAX,
@@ -16,20 +17,7 @@ import {
   type PackRowState,
   type PackTable,
 } from '../../contract/index.ts';
-
-/** What one table is built from. */
-export interface PackTableFacts {
-  /** The ferret the table is for. */
-  readonly root: FerretSummary;
-  /** Every ferret that may be in the pack (the root's descendants are found by their parent links). */
-  readonly ferrets: readonly FerretSummary[];
-  /** The sitrep lines the plugins added for one ferret. */
-  readonly lines: (ferret: string) => readonly SitrepLine[];
-  /** How many open asks name one ferret as their blocker. */
-  readonly blockers: (ferret: string) => number;
-  readonly nowMs: number;
-  readonly endedWindowMs?: number;
-}
+import { mapBounded } from './bounded.ts';
 
 /** One member of the pack, in tree order. */
 export interface PackMember {
@@ -153,25 +141,34 @@ export function packRowState(state: FerretState, blockers: number): PackRowState
   return 'running';
 }
 
+/** What a row last said, before it is masked or cut: the whole text. */
+export interface LastCandidate {
+  readonly at: Instant;
+  readonly source: 'note' | 'message';
+  readonly text: string;
+}
+
 /** The newer of a ferret's non-card sitrep lines, in full; a note wins a tie. */
-function lastOf(ferret: FerretSummary, lines: readonly SitrepLine[]): PackRow['last'] {
-  const candidates = lines
-    .filter(line => line.kind !== 'card')
-    .map(line => ({
-      at: line.at ?? ferret.stateAt,
-      source: line.kind === 'note' ? ('note' as const) : ('message' as const),
-      text: oneLine(line.text),
-    }))
-    .filter(candidate => candidate.text !== '');
-  return candidates.reduce<PackRow['last']>(
-    (best, next) =>
-      best === undefined ||
-      Date.parse(next.at) > Date.parse(best.at) ||
-      (Date.parse(next.at) === Date.parse(best.at) && next.source === 'note' && best.source !== 'note')
-        ? next
-        : best,
-    undefined,
-  );
+export function newestLine(ferret: FerretSummary, lines: readonly SitrepLine[]): LastCandidate | undefined {
+  // A line with no time of its own is dated by when the ferret last changed state.
+  const changed = InstantSchema.safeParse(ferret.stateAt);
+  return lines
+    .filter(line => line.kind !== 'card' && line.text.trim() !== '')
+    .flatMap((line): LastCandidate[] => {
+      const at = line.at ?? (changed.success ? changed.data : undefined);
+      return at === undefined
+        ? []
+        : [{ at, source: line.kind === 'note' ? ('note' as const) : ('message' as const), text: line.text }];
+    })
+    .reduce<LastCandidate | undefined>(
+      (best, next) =>
+        best === undefined ||
+        Date.parse(next.at) > Date.parse(best.at) ||
+        (Date.parse(next.at) === Date.parse(best.at) && next.source === 'note' && best.source !== 'note')
+          ? next
+          : best,
+      undefined,
+    );
 }
 
 /** The card a ferret works on, from its card sitrep line (the reference it carries). */
@@ -180,15 +177,97 @@ function cardOf(lines: readonly SitrepLine[]): PackRow['card'] {
   return line?.ref === undefined ? undefined : { ref: line.ref };
 }
 
-/** The table for `facts.root`: its live pack and the recently ended. */
-export function buildPackTable(facts: PackTableFacts): PackTable {
-  const members = packMembers(facts.ferrets, facts.root.id.trim(), facts.nowMs, facts.endedWindowMs);
-  const rows = members.map(({ ferret, depth }): PackRow => {
-    const lines = facts.lines(ferret.id);
-    const state = packRowState(ferret.state, facts.blockers(ferret.id));
+/** The text shown in place of an excerpt that could not be masked. */
+export const EXCERPT_WITHHELD = '[excerpt withheld]';
+
+/** The bounds on one table's excerpt work (today's `SUBTREE_LIMITS`). */
+export interface PackTableLimits {
+  /** Sitrep reads at the same time. */
+  readonly concurrency: number;
+  /** Rows that get an excerpt at all; the rest are listed without one. Live rows are served before ended ones. */
+  readonly excerptRows: number;
+  /** Of those rows, how many may be recently ended ones. */
+  readonly endedRows: number;
+  /** Excerpt text, in UTF-8 bytes, masked across the whole table. */
+  readonly textBytes: number;
+  /** Excerpt text, in UTF-8 bytes, for any one row: a longer candidate gets no excerpt rather than a cut one. */
+  readonly rowBytes: number;
+}
+
+export const PACK_TABLE_LIMITS: PackTableLimits = {
+  concurrency: 4,
+  excerptRows: 64,
+  endedRows: 8,
+  textBytes: 8 * 1024 * 1024,
+  rowBytes: 1024 * 1024,
+};
+
+/**
+ * The members that get an excerpt: live ones in tree order up to `excerptRows`, then recently ended ones up to
+ * `endedRows` and whatever room is left. Returns their positions in `members`.
+ */
+export function excerptEligible(members: readonly PackMember[], limits: PackTableLimits): ReadonlySet<number> {
+  const positions = members.map((_, index) => index);
+  const live = positions.filter(index => !isEnded((members[index] as PackMember).ferret));
+  const ended = positions.filter(index => isEnded((members[index] as PackMember).ferret));
+  const liveChosen = live.slice(0, limits.excerptRows);
+  const endedChosen = ended.slice(0, Math.min(limits.endedRows, Math.max(0, limits.excerptRows - liveChosen.length)));
+  return new Set([...liveChosen, ...endedChosen]);
+}
+
+/** What one table is read from. */
+export interface PackTableReads {
+  /** The ferret the table is for. */
+  readonly root: FerretSummary;
+  /** Every ferret that may be in the pack (the root's descendants are found by their parent links). */
+  readonly ferrets: readonly FerretSummary[];
+  /** One member's sitrep lines and how many open asks name it as their blocker; `undefined` when it has none. */
+  sitrep(ferret: string): Promise<{ readonly lines: readonly SitrepLine[]; readonly blockers: number } | undefined>;
+  /**
+   * Masks every secret in each WHOLE text, in order, under ONE vault open. It rejects when it cannot be sure, and the
+   * table then withholds its excerpts rather than show text it did not scrub.
+   */
+  redact(texts: readonly string[]): Promise<readonly string[]>;
+  readonly nowMs: number;
+  readonly endedWindowMs?: number;
+}
+
+/**
+ * The table for `reads.root`: its live pack and the recently ended. THE EXCERPTS ARE MASKED BEFORE THEY ARE CUT (today's
+ * `subtree.ts`): each whole candidate goes through ONE redaction batch for the table and only then to one line, because
+ * masking after the cut misses a secret that straddles it. If the redactor fails, no excerpt is shown at all
+ * ({@link EXCERPT_WITHHELD}), never the raw text. The reads are bounded: {@link PackTableLimits}.
+ */
+export async function readPackTable(
+  reads: PackTableReads,
+  limits: PackTableLimits = PACK_TABLE_LIMITS,
+): Promise<PackTable> {
+  const members = packMembers(reads.ferrets, reads.root.id.trim(), reads.nowMs, reads.endedWindowMs);
+  const sitreps = await mapBounded(members, limits.concurrency, async ({ ferret }) => {
+    try {
+      return await reads.sitrep(ferret.id);
+    } catch {
+      return undefined;
+    }
+  });
+  const eligible = excerptEligible(members, limits);
+  let remaining = limits.textBytes;
+  const candidates = members.map((member, index) => {
+    if (!eligible.has(index)) return undefined;
+    const candidate = newestLine(member.ferret, sitreps[index]?.lines ?? []);
+    if (candidate === undefined) return undefined;
+    const bytes = new TextEncoder().encode(candidate.text).length;
+    if (bytes > limits.rowBytes || bytes > remaining) return undefined;
+    remaining -= bytes;
+    return candidate;
+  });
+  const lasts = await excerpts(candidates, reads.redact);
+  const rows = members.map(({ ferret, depth }, index): PackRow => {
+    const lines = sitreps[index]?.lines ?? [];
+    const state = packRowState(ferret.state, sitreps[index]?.blockers ?? 0);
     const parent = parentOf(ferret);
     const card = cardOf(lines);
-    const last = lastOf(ferret, lines);
+    const last = lasts[index];
     return {
       id: ferret.id,
       name: ferret.name,
@@ -203,9 +282,30 @@ export function buildPackTable(facts: PackTableFacts): PackTable {
     };
   });
   return {
-    root: { id: facts.root.id, name: facts.root.name },
-    at: instantFromEpochMs(facts.nowMs),
-    endedWindowMs: facts.endedWindowMs ?? PACK_ENDED_WINDOW_MS,
+    root: { id: reads.root.id, name: reads.root.name },
+    at: instantFromEpochMs(reads.nowMs),
+    endedWindowMs: reads.endedWindowMs ?? PACK_ENDED_WINDOW_MS,
     rows,
   };
+}
+
+/** Every candidate masked whole in ONE batch, then cut to a line; a redactor that fails withholds them all. */
+async function excerpts(
+  candidates: readonly (LastCandidate | undefined)[],
+  redact: PackTableReads['redact'],
+): Promise<PackRow['last'][]> {
+  const present = candidates.flatMap((candidate, index) => (candidate === undefined ? [] : [{ candidate, index }]));
+  if (present.length === 0) return candidates.map(() => undefined);
+  const masked = await redact(present.map(({ candidate }) => candidate.text)).catch(() => undefined);
+  const safe = masked?.length === present.length ? masked : undefined;
+  const lasts: PackRow['last'][] = candidates.map(() => undefined);
+  present.forEach(({ candidate, index }, position) => {
+    if (safe === undefined) {
+      lasts[index] = { at: candidate.at, source: candidate.source, text: EXCERPT_WITHHELD };
+      return;
+    }
+    const text = oneLine(safe[position] as string);
+    lasts[index] = text === '' ? undefined : { at: candidate.at, source: candidate.source, text };
+  });
+  return lasts;
 }

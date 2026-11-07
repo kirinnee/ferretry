@@ -1,19 +1,19 @@
 /**
  * WHO MAY START A HELPER (docs/pack-mode.md): the limits a parent is held to, decided by the
- * daemon for every start that names a parent — `fy new`, and a plain `fy start` from inside a pane.
+ * daemon for every start that names a parent (`start.decide`), whichever command made it.
  *
  * - Depth: a top-level ferret is depth 0 and its helper 1. A start whose child would be deeper
  *   than `maxDepth` is refused, so with the default 2 a helper may start its own and those may not.
  * - Width: an INTERACTIVE parent (a person at it) may have `interactiveChildren` running at once, an
  *   unattended one `autoChildren`. A child counts while it is not finished.
  *
- * The machine's Pack switch does not gate a plain start: it decides what ferrets are TOLD, and whether
- * `fy new` serves them. The limits hold either way, because a runaway fan-out costs the same whichever
+ * The machine's Pack switch does not gate a start: it decides what ferrets are TOLD.
+ * The limits hold either way, because a runaway fan-out costs the same whichever
  * command made it.
  *
  * Pure: the facts in, a refusal or nothing out.
  */
-import type { PackConfig, PackRefusal } from '../../contract/index.ts';
+import { PACK_CLEAN_UP_PACK, type PackConfig, type PackRefusal } from '../../contract/index.ts';
 
 /** What admission needs to know about the parent. */
 export interface ParentFacts {
@@ -57,7 +57,7 @@ export function admitChild(parent: ParentFacts, limits: PackConfig['limits']): P
     return {
       code: 'limit_reached',
       message: `${parent.id} already has ${String(parent.runningChildren)} running helper${parent.runningChildren === 1 ? '' : 's'}, the most ${parent.interactive ? 'an interactive' : 'an unattended'} ferret may have (${String(limit)}).`,
-      remedy: 'Wait for one to finish (`wait <id>`), stop one, or do this part yourself.',
+      remedy: 'Wait for one to finish, stop one, or do this part yourself.',
     };
   return undefined;
 }
@@ -98,7 +98,7 @@ export async function depthOf(
 
 /** What deciding one ferret's Pack instruction at launch needs, read from its own record. */
 export interface PackLaunchFacts {
-  /** False for a learning miner or a warden's descendant, which are never told. */
+  /** False for the learning miner, the clean-up ferret or a warden's descendant ({@link packEligible}): never told. */
   readonly eligible: boolean;
   /** `config.pack`; absent means on. */
   readonly ownSwitch: boolean | undefined;
@@ -112,4 +112,29 @@ export interface PackLaunchFacts {
  */
 export function packLaunchDefault(config: PackConfig, facts: PackLaunchFacts): '1' | '0' {
   return facts.eligible && packInstructed(config, facts.ownSwitch, facts.depth) ? '1' : '0';
+}
+
+/** Today's `LEARNING_MINER_LABEL` (`adapters/learning/miner.ts`): the label Lessons' miner is started with. */
+export const LEARNING_MINER_LABEL = 'ferretry-learning';
+
+/** Who a ferret is, as {@link packEligible} reads it from its summary. */
+export interface PackEligibilityFacts {
+  readonly label?: string | undefined;
+  readonly pack?: string | undefined;
+  readonly provenance?: { readonly wardenLineage?: boolean | undefined } | undefined;
+}
+
+/**
+ * Whether a ferret is an ORDINARY one, told about Pack mode, rather than one of the daemon's own workers (today's
+ * `ordinaryFerret`, fyd.ts): the learning miner (by its label), the routing prompt's clean-up ferret (its label or its
+ * hidden pack) and a warden's lineage are never told, so none of them can spend on helpers of its own unattended.
+ */
+export function packEligible(ferret: PackEligibilityFacts | undefined): boolean {
+  if (ferret === undefined) return false;
+  return (
+    ferret.label !== LEARNING_MINER_LABEL &&
+    ferret.label !== PACK_CLEAN_UP_PACK &&
+    ferret.pack !== PACK_CLEAN_UP_PACK &&
+    ferret.provenance?.wardenLineage !== true
+  );
 }

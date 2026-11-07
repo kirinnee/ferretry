@@ -1,5 +1,4 @@
-import type { RuntimeId, RuntimesApi } from '@ferretry/plugin-runtimes/contract';
-import type { RuntimeFactsApi } from '../../contract/index.ts';
+import { RuntimeIdSchema, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import type { PackProbeOutcome, PackProbePort, PackProbeRequest, ProbeFailureCode } from '../lib/probe.ts';
 
 const CODES: Readonly<Record<string, ProbeFailureCode | undefined>> = {
@@ -8,15 +7,16 @@ const CODES: Readonly<Record<string, ProbeFailureCode | undefined>> = {
 };
 
 /**
- * The start probe behind {@link PackProbePort}: the Runtimes provider's own answer to "could a start on this runtime
- * launch now?". Today's probe also ran the runtime's launcher once and asked the model to "reply OK"; spawning an
- * arbitrary launcher is outside Packs' permissions (no plugin may spawn `*`), so the real round trip belongs to a
- * one-shot operation on the harness, which Ferrets has not offered. Until it does, a PASS here proves the runtime
- * resolves, is switched on and is signed in, not that the model answers. The probe cache keeps it per runtime.
+ * The start check behind {@link PackProbePort}: the Runtimes provider's own answer to "could a start on this runtime
+ * launch now?" (`RuntimesApi.resolve`). A PASS proves the runtime resolves, is switched on and its login is signed in —
+ * NOT that the model answers: a login that is signed in but out of quota passes. Today's probe also ran the runtime's
+ * launcher once and asked the model to "reply OK"; spawning an arbitrary launcher is outside Packs' permissions, so that
+ * round trip needs a one-shot harness run Ferrets or Runtimes does not offer yet (ports-pending). `request.wrapper` is
+ * the runtime's name here (`CleanUpRuntime.wrapper`). The probe cache keeps a PASS per runtime.
  */
 export class RuntimeLaunchProbe implements PackProbePort {
   constructor(
-    private readonly runtimes: () => (RuntimesApi & Partial<RuntimeFactsApi>) | undefined,
+    private readonly runtimes: () => RuntimesApi | undefined,
     private readonly nowMs: () => number,
   ) {}
 
@@ -25,9 +25,9 @@ export class RuntimeLaunchProbe implements PackProbePort {
     const ms = (): number => Math.max(0, Math.round(this.nowMs() - started));
     const runtimes = this.runtimes();
     if (runtimes === undefined) return { ok: false, ms: ms(), reason: 'Runtimes is off, so nothing can be launched' };
-    const known = (await runtimes.catalog?.())?.find(runtime => runtime.wrapper === request.wrapper);
-    if (known === undefined) return { ok: false, ms: ms(), reason: 'it cannot be launched: no such runtime' };
-    const resolved = await runtimes.resolve(known.id as RuntimeId);
+    const id = RuntimeIdSchema.safeParse(request.wrapper);
+    if (!id.success) return { ok: false, ms: ms(), reason: 'it cannot be launched: no such runtime' };
+    const resolved = await runtimes.resolve(id.data);
     if (resolved.ok) return { ok: true, ms: ms() };
     const code = CODES[resolved.refusal];
     return {

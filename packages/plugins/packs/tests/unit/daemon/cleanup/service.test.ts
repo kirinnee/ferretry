@@ -209,8 +209,7 @@ describe('CleanUpService.start', () => {
     should(fallback.starts[0]).not.have.property('model');
     should(refused).deepEqual({
       outcome: 'refused',
-      message:
-        'No runtime answered a "reply OK" check (claude-atomi: out of quota; claude-kirin: no answer within 45s).',
+      message: 'No runtime passed the start check (claude-atomi: out of quota; claude-kirin: no answer within 45s).',
     });
     should(none.starts).be.empty();
   });
@@ -262,11 +261,12 @@ describe('CleanUpService.start', () => {
     });
     should(await empty.service.start({})).deepEqual({
       outcome: 'refused',
-      message: 'There is no agent runtime on this machine to clean up with.',
+      message:
+        'Pack mode lists no agent runtime on this machine to clean up with (Runtimes does not offer Pack mode its catalog yet).',
     });
     should(await unresolved.service.start({})).deepEqual({
       outcome: 'refused',
-      message: 'No runtime answered a "reply OK" check (none could be resolved).',
+      message: 'No runtime passed the start check (none could be resolved).',
     });
     should(notReady.starts).be.empty();
   });
@@ -605,7 +605,8 @@ describe('CleanUpService.status', () => {
     should(await empty.service.status()).deepEqual({
       available: false,
       runtimes: [],
-      reason: 'There is no agent runtime on this machine to clean up with.',
+      reason:
+        'Pack mode lists no agent runtime on this machine to clean up with (Runtimes does not offer Pack mode its catalog yet).',
     });
   });
 });

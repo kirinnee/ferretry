@@ -1,29 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { GUIDE_POLL, PACK_REFUSED_EXIT_CODE, PackController } from '../../../cli/lib/controller.ts';
+import { GUIDE_POLL, PackController } from '../../../cli/lib/controller.ts';
 import type { IPackGateway } from '../../../cli/lib/gateway.ts';
-import {
-  CapturingPackIo,
-  FakePackGateway,
-  JOB,
-  option,
-  packView,
-  recommendation,
-  refused,
-  SUGGESTION,
-  started,
-  at,
-} from './fixtures.ts';
+import { CapturingPackIo, FakePackGateway, JOB, option, packView, recommendation, SUGGESTION, at } from './fixtures.ts';
 
-function build(options: { parent?: string; gateway?: IPackGateway; files?: Record<string, string> } = {}) {
+function build(options: { gateway?: IPackGateway; files?: Record<string, string> } = {}) {
   const gateway = (options.gateway ?? new FakePackGateway()) as FakePackGateway;
   const out = new CapturingPackIo();
   const controller = new PackController({
     gateway,
     out,
-    parent: async () => options.parent,
-    cwd: '/here',
-    absolute: path => (path.startsWith('/') ? path : `/here/${path}`),
     readFile: async path => options.files?.[path] ?? '',
     binaryName: 'foo',
   });
@@ -35,7 +21,7 @@ describe('PackController.showGuide', () => {
     // Arrange
     const undo = { savedAt: at('2026-10-22T10:00:00.000Z'), source: 'file' as const };
     const plain = build();
-    const undoable = build({ gateway: new FakePackGateway(recommendation(), started(), packView({ undo })) });
+    const undoable = build({ gateway: new FakePackGateway(recommendation(), packView({ undo })) });
 
     // Act
     await plain.controller.showGuide({});
@@ -98,234 +84,6 @@ describe('PackController.recommend', () => {
   });
 });
 
-describe('PackController.newChild', () => {
-  it('should send no cwd when a parent ferret starts it, and the parent instead', async () => {
-    // Arrange
-    const { controller, gateway, out } = build({ parent: 'parent-1' });
-
-    // Act
-    await controller.newChild(['do', 'it'], { runtime: 'claude-work' });
-
-    // Assert
-    should(gateway.newCalls).eql([{ task: 'do it', parent: 'parent-1', runtime: 'claude-work' }]);
-    should(out.out[0]).startWith('Started child-1 on claude-work');
-    should(out.err).be.empty();
-    should(out.exitCode).be.undefined();
-  });
-
-  it('should send a typed --compact-at and refuse one below the floor before asking the daemon', async () => {
-    // Arrange
-    const { controller, gateway } = build();
-
-    // Act
-    await controller.newChild(['do it'], { runtime: 'r', compactAt: '250k' });
-    const refusal = await controller
-      .newChild(['do it'], { runtime: 'r', compactAt: '20k' })
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(gateway.newCalls).have.length(1);
-    should(gateway.newCalls[0]).containDeep({ compactAt: 250_000 });
-    should((refusal as Error).message).equal('--compact-at: 20k is too small: the lowest is 100k.');
-  });
-
-  it('should send the working folder when a person starts it, and every option given', async () => {
-    // Arrange
-    const { controller, gateway } = build();
-
-    // Act
-    await controller.newChild(['do it'], {
-      runtime: 'claude-work',
-      model: 'opus',
-      effort: 'high',
-      name: 'Do It',
-      mode: 'interactive',
-    });
-
-    // Assert
-    should(gateway.newCalls).eql([
-      {
-        task: 'do it',
-        runtime: 'claude-work',
-        model: 'opus',
-        effort: 'high',
-        cwd: '/here',
-        name: 'Do It',
-        mode: 'interactive',
-      },
-    ]);
-  });
-
-  it('should title a pointer brief from the file it points at, and never override --name', async () => {
-    // Arrange
-    const pointer = 'You are an implementer. Read /tmp/brief.md and follow it.';
-    const { controller, gateway } = build({ files: { '/tmp/brief.md': '# Port the Sessions Filter' } });
-
-    // Act
-    await controller.newChild([pointer], { runtime: 'r' });
-    await controller.newChild([pointer], { runtime: 'r', name: 'Mine' });
-
-    // Assert
-    should(gateway.newCalls[0]).have.property('name', 'Port the Sessions Filter');
-    should(gateway.newCalls[1]).have.property('name', 'Mine');
-  });
-
-  it('should make a relative --cwd absolute against where it was run, and pass --allow-scratch on', async () => {
-    // Arrange
-    const { controller, gateway } = build({ parent: 'parent-1' });
-
-    // Act
-    await controller.newChild(['x'], { runtime: 'r', cwd: 'sub/dir', allowScratch: true });
-
-    // Assert
-    should(gateway.newCalls).eql([
-      { task: 'x', parent: 'parent-1', runtime: 'r', cwd: '/here/sub/dir', allowScratch: true },
-    ]);
-  });
-
-  it('should send --card as the existing card the helper works on, in any spelling', async () => {
-    // Arrange
-    const { controller, gateway } = build({ parent: 'parent-1' });
-
-    // Act
-    await controller.newChild(['x'], { runtime: 'r', card: '&F138' });
-    await controller.newChild(['x'], { runtime: 'r', card: 'f9' });
-
-    // Assert
-    should(gateway.newCalls).eql([
-      { task: 'x', parent: 'parent-1', runtime: 'r', card: 'F138' },
-      { task: 'x', parent: 'parent-1', runtime: 'r', card: 'F9' },
-    ]);
-  });
-
-  it('should refuse a --card that is not a card id, before asking the daemon anything', async () => {
-    // Arrange
-    const { controller, gateway } = build({ parent: 'parent-1' });
-
-    // Act
-    const failed = controller.newChild(['x'], { runtime: 'r', card: 'the board' });
-
-    // Assert
-    await should(failed).be.rejectedWith(/expected a card id like &F21/u);
-    should(gateway.newCalls).eql([]);
-  });
-
-  it('should send an explicit --cwd whether or not there is a parent', async () => {
-    // Arrange
-    const person = build();
-    const child = build({ parent: 'p' });
-
-    // Act
-    await person.controller.newChild(['x'], { runtime: 'r', cwd: '/elsewhere' });
-    await child.controller.newChild(['x'], { runtime: 'r', cwd: '/elsewhere' });
-
-    // Assert
-    should(person.gateway.newCalls[0]).have.property('cwd', '/elsewhere');
-    should(child.gateway.newCalls[0]).have.property('cwd', '/elsewhere');
-  });
-
-  it('should let --auto choose, sending no runtime', async () => {
-    // Arrange
-    const { controller, gateway } = build();
-
-    // Act
-    await controller.newChild(['x'], { auto: true });
-
-    // Assert
-    should(gateway.newCalls).eql([{ task: 'x', auto: true, cwd: '/here' }]);
-  });
-
-  it('should read the brief from --prompt-file and trim it, ignoring typed words', async () => {
-    // Arrange
-    const { controller, gateway } = build({ files: { 'brief.md': '\n  the long brief\n\n' } });
-
-    // Act
-    await controller.newChild(['ignored'], { runtime: 'r', promptFile: 'brief.md' });
-
-    // Assert
-    should(gateway.newCalls[0]).have.property('task', 'the long brief');
-  });
-
-  it('should refuse an empty brief, naming the shipped command', async () => {
-    // Arrange
-    const typed = build();
-    const filed = build({ files: { 'empty.md': ' \n' } });
-
-    // Act
-    const fromWords = await typed.controller.newChild([], { runtime: 'r' }).catch((error: unknown) => error);
-    const fromFile = await filed.controller
-      .newChild([], { runtime: 'r', promptFile: 'empty.md' })
-      .catch((error: unknown) => error);
-
-    // Assert
-    for (const failure of [fromWords, fromFile])
-      should(failure)
-        .be.instanceof(Error)
-        .and.have.property('message', 'give the brief: foo new --runtime <runtime> "<complete brief>"');
-    should(typed.gateway.newCalls).be.empty();
-    should(filed.gateway.newCalls).be.empty();
-  });
-
-  it('should reject a request the daemon would refuse before sending it', async () => {
-    // Arrange
-    const { controller, gateway } = build();
-
-    // Act
-    const failure = await controller.newChild(['x'], {}).catch((error: unknown) => error);
-
-    // Assert — neither --runtime nor --auto
-    should(failure).be.instanceof(Error);
-    should(gateway.newCalls).be.empty();
-  });
-
-  it('should write a refusal to stderr with the command name and exit 2', async () => {
-    // Arrange
-    const { controller, out } = build({ gateway: new FakePackGateway(recommendation(), refused()) });
-
-    // Act
-    await controller.newChild(['x'], { runtime: 'r' });
-
-    // Assert
-    should(out.out).be.empty();
-    should(out.err).eql(['foo new: refused (limit_reached): you have 4 running helpers']);
-    should(out.exitCode).equal(PACK_REFUSED_EXIT_CODE);
-    should(PACK_REFUSED_EXIT_CODE).equal(2);
-  });
-
-  it('should write a start whose session failed to stderr as a refusal carrying its reason, and exit non-zero', async () => {
-    // Arrange
-    const reason = 'claude-main did not start: the interactive harness exited (1)';
-    const { controller, out } = build({
-      gateway: new FakePackGateway(recommendation(), refused({ refusal: { code: 'start_failed', message: reason } })),
-    });
-
-    // Act
-    await controller.newChild(['x'], { runtime: 'r' });
-
-    // Assert
-    should(out.out).be.empty();
-    should(out.err).eql([`foo new: refused (start_failed): ${reason}`]);
-    should(out.exitCode).equal(PACK_REFUSED_EXIT_CODE);
-  });
-
-  it('should print the outcome as JSON on stdout, and still exit 2 for a refusal', async () => {
-    // Arrange
-    const ok = build({ gateway: new FakePackGateway(recommendation(), started()) });
-    const no = build({ gateway: new FakePackGateway(recommendation(), refused()) });
-
-    // Act
-    await ok.controller.newChild(['x'], { runtime: 'r', json: true });
-    await no.controller.newChild(['x'], { runtime: 'r', json: true });
-
-    // Assert
-    should(JSON.parse(ok.out.out[0] ?? '')).have.property('outcome', 'started');
-    should(ok.out.exitCode).be.undefined();
-    should(JSON.parse(no.out.out[0] ?? '')).have.property('outcome', 'refused');
-    should(no.out.err).be.empty();
-    should(no.out.exitCode).equal(2);
-  });
-});
-
 describe('PackController guide clean-up', () => {
   function generator(
     setup: (gateway: FakePackGateway) => void = () => undefined,
@@ -338,9 +96,6 @@ describe('PackController guide clean-up', () => {
     const controller = new PackController({
       gateway,
       out,
-      parent: async () => undefined,
-      cwd: '/here',
-      absolute: path => path,
       readFile: async path => options.files?.[path] ?? '',
       binaryName: 'foo',
       sleep: async ms => void sleeps.push(ms),
@@ -606,8 +361,8 @@ describe('PackController guide clean-up', () => {
 });
 
 describe('PackController guide clean-up with no sleep given', () => {
-  it('should look at the run again at once', async () => {
-    // Arrange
+  it('should look at the run once, never in a loop, and say how to look again while it still works', async () => {
+    // Arrange: the terminal gives the verb no sleep (CliContext has none on this base).
     const gateway = new FakePackGateway();
     gateway.runs = [{ job: JOB }, { job: { ...JOB, status: 'suggested' }, suggestion: SUGGESTION }];
     const { controller, out } = build({ gateway });
@@ -616,7 +371,22 @@ describe('PackController guide clean-up with no sleep given', () => {
     await controller.cleanUp({});
 
     // Assert
-    should(gateway.jobCalls).have.length(2);
+    should(gateway.jobCalls).have.length(1);
+    should(out.err[0]).containEql('it is still working; look again with `foo guide accept run-1`');
+    should(out.exitCode).equal(1);
+  });
+
+  it('should show a run that was already done at the one look', async () => {
+    // Arrange
+    const gateway = new FakePackGateway();
+    gateway.runs = [{ job: { ...JOB, status: 'suggested' }, suggestion: SUGGESTION }];
+    const { controller, out } = build({ gateway });
+
+    // Act
+    await controller.cleanUp({});
+
+    // Assert
+    should(gateway.jobCalls).have.length(1);
     should(out.out[0]).startWith('Cleaned up by');
   });
 });

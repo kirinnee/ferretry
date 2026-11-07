@@ -159,6 +159,12 @@ export interface FerretsApi {
   workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined>;
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
   /**
+   * What a finished ferret handed back with `signal done`: its `summary.md` as it wrote it (today's session
+   * `summary.md`), or `undefined` when there is no such ferret or it wrote none. NOT masked: a reader that shows it
+   * masks it inside one `Redaction.read`. Read only.
+   */
+  summary(ferret: FerretId): Promise<string | undefined>;
+  /**
    * What this ferret may control right now (today's "What agents may control"): `limits.yaml`'s `agentControl` over
    * today's defaults, read fresh on every call so a change applies to the ferret's very next action. A ferret this
    * daemon does not know may control nothing.

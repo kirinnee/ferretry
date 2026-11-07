@@ -49,21 +49,6 @@ export const PACK_REPLACED = defineState({
   schema: ReplacedRoutingSchema,
 });
 
-/**
- * `state/packs/jev-spend.json`: Jev's Pack-mode spend, per UTC day. A day that is not today reads as nothing spent; an
- * unreadable document reads as the cap already reached (damaged is not empty), so a broken ledger can never let Jev spend
- * without bound.
- */
-export const JevSpendSchema = z.strictObject({ format: z.literal(1), day: z.string().min(1), usd: z.number().min(0) });
-export type JevSpend = z.infer<typeof JevSpendSchema>;
-export const PACK_JEV_SPEND = defineState({
-  name: 'jev-spend',
-  path: 'jev-spend.json',
-  store: 'json',
-  format: 1,
-  schema: JevSpendSchema,
-});
-
 /** `state/packs/switches.json`: the ferrets whose own Pack switch is off or on (absent means on). */
 export const SwitchesSchema = z.strictObject({
   format: z.literal(1),

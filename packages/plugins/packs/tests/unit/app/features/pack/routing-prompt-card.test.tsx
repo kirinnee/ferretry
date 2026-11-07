@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
+import type { Instant } from '@ferretry/std';
 import {
   MAX_IDEA_CHARS,
   MAX_ROUTING_PROMPT_CHARS,
@@ -70,7 +71,7 @@ describe('the routing prompt card', () => {
       routing: {
         text: SUGGESTION.after,
         source: 'file',
-        suggested: { ...SUGGESTION.suggested, acceptedAt: '2026-10-22T14:31:00.000Z' },
+        suggested: { ...SUGGESTION.suggested, acceptedAt: '2026-10-22T14:31:00.000Z' as Instant },
       },
     });
     expect(sourceOf(root).getAttribute('data-routing-source')).toBe('cleaned-up');
@@ -488,7 +489,7 @@ describe('Write it for me', () => {
       routing: {
         text: WRITTEN_SUGGESTION.after,
         source: 'file',
-        suggested: { ...WRITTEN_SUGGESTION.suggested, acceptedAt: '2026-10-22T14:31:00.000Z' },
+        suggested: { ...WRITTEN_SUGGESTION.suggested, acceptedAt: '2026-10-22T14:31:00.000Z' as Instant },
       },
     });
     expect(textOf(sourceOf(root))).toMatch(/^Written by gpt-6-astra via codex-main, accepted /u);
@@ -578,7 +579,7 @@ describe('undo', () => {
 
     let undone = 0;
     root = await card(
-      { ...OWNER_VIEW, undo: { savedAt: '2026-10-22T14:35:00.000Z', source: 'file' } },
+      { ...OWNER_VIEW, undo: { savedAt: '2026-10-22T14:35:00.000Z' as Instant, source: 'file' } },
       {
         undo: async () => {
           undone += 1;

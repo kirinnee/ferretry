@@ -56,6 +56,10 @@
     // pending app port: runtimes Logins account-picker store/catalog and shell roster polling
     "packages/plugins/runtimes/tests/unit/app/use-account-picker.test.tsx",
     // pending app port: runtimes Runtimes reviewed apply-change screens and machine settings
-    "packages/plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-actions.test.tsx"
+    "packages/plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-actions.test.tsx",
+    // pending app port: packs the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card
+    "packages/plugins/packs/app/components/pack-call.tsx",
+    // pending app port: packs the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card
+    "packages/plugins/packs/tests/unit/app/pack-call.test.tsx"
   ]
 }
