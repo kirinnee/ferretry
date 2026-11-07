@@ -2,15 +2,15 @@ import type {
   BrowserDialogInfo,
   BrowserPageLifecycleReply,
   BrowserPageLifecycleRequest,
-} from './wire/page-lifecycle.ts';
-import type { BrowserElementTarget, BrowserScreenshotFormat, BrowserTarget } from './wire/target.ts';
+} from '../../contract/wire/page-lifecycle.ts';
+import type { BrowserElementTarget, BrowserScreenshotFormat, BrowserTarget } from '../../contract/wire/target.ts';
 import type {
   BrowserInputEvent,
   BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserViewport,
-} from './wire/browser.ts';
+} from '../../contract/wire/browser.ts';
 import type { BrowserProxyStatus } from '../../contract/index.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
 import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
@@ -21,7 +21,7 @@ import type {
   BrowserTypeOptions,
   BrowserUploadMode,
 } from './page-acts.ts';
-import type { PageScript } from './wire/page-script.ts';
+import type { PageScript } from '../../contract/wire/page-script.ts';
 import type { WorkerStagedFile } from '../worker/protocol.ts';
 
 /** What an act answers: the page list, and the dialog the acted page is waiting on, if it has one. */

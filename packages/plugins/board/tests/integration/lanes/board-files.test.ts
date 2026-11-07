@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { StateFileDef } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { type BoardProjectId } from '../../../contract/index.ts';
+import type { BoardProjectId } from '../../../contract/index.ts';
 import { type BoardFile, BoardFiles, BoardSwitchFiles, LaneSetFiles } from '../../../daemon/adapters/lanes/index.ts';
 import {
   BOARD_SWITCH_UNAVAILABLE_MESSAGE,

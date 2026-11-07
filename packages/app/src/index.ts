@@ -77,6 +77,18 @@ export { DaemonCallError, type SocketListeners, type TransportSocket } from './c
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
 
+// ─── a poll beside the event feed (today's feed-aware-poll) ───────────────────────────────────────────────────────
+export {
+  browserFeedAwarePollEnvironment,
+  FEED_EVENT_SETTLE_MS,
+  type FeedAwarePollEnvironment,
+  type FeedAwarePollOptions,
+  type LiveFeedSignal,
+  startFeedAwarePoll,
+  startVisiblePoll,
+  whileVisible,
+} from './poll/feed-aware-poll.ts';
+
 // ─── layout, slots, theme (§5.2, §5.3) ────────────────────────────────────────────────────────────────────────────
 export type { OwnerLayout } from './layout/daemon-layout.ts';
 export { LAYOUTS_PLUGIN } from './layout/daemon-layout.ts';

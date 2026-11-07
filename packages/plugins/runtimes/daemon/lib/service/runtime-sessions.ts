@@ -10,9 +10,9 @@
  *
  * Pure: the records are read and written by the caller.
  */
-import { type HarnessKind } from '../manifest.ts';
+import type { HarnessKind } from '../manifest.ts';
 import { harnessKey, type SessionStatus } from './foreign.ts';
-import { type RunningSession } from '../../../contract/index.ts';
+import type { RunningSession } from '../../../contract/index.ts';
 
 /** A session as a runtime change needs to know it. */
 export interface RuntimeSessionRecord {

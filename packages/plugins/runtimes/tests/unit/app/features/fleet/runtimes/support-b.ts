@@ -5,7 +5,7 @@
 
 import { type LoginList, LoginListSchema } from '@ferretry/plugin-logins/contract';
 import { type MachineView, type RuntimeCatalog, RuntimeCatalogSchema } from '../../../../../../contract/index.ts';
-import { type MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
+import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
 import { DATA, machine, RUNTIMES, type runtime } from '../account-support.ts';
 
 export const credentialsOf = (...items: Record<string, unknown>[]): LoginList =>

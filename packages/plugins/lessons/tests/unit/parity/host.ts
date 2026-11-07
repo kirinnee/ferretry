@@ -36,9 +36,13 @@ const quiet: Log = { debug: () => {}, info: () => {}, warn: () => {}, error: () 
  * The kernel's REAL config writer (`createConfigFiles`, the one the daemon hands every plugin) over an in-memory home
  * that declares `lessons.yaml`: a write edits only the changed keys, refuses a raw secret, keeps the last good version
  * and holds what the owner must confirm. `handEdit` is the owner editing the file outside Ferretry, then the watcher's
- * reload.
+ * reload — a hand edit is never judged, only compared with what is in effect, so one that loosens is HELD. With no judge
+ * a loosening write is held for the owner, as it is for any call Gate's judge does not let put one into effect.
+ * `judge: 'owner-at-machine'` answers what Gate's `judgeConfigWrite` answers the host owner (apply,
+ * `packages/core/gate/daemon/lib/policy/config-judge.ts`); the real one is in Gate's daemon half, which a Lessons test
+ * may not import (context-imports).
  */
-export function realLessonsConfig() {
+export function realLessonsConfig(options: { readonly judge?: 'owner-at-machine' } = {}) {
   const fs = hostState.createMemoryHostFs();
   const path = `${HOME}/config/${LESSONS_CONFIG.file}`;
   const files = hostConfig.createConfigFiles({
@@ -48,6 +52,7 @@ export function realLessonsConfig() {
     log: quiet,
     binary: 'fy',
     defs: [{ plugin: 'lessons', def: LESSONS_CONFIG }],
+    ...(options.judge === undefined ? {} : { judge: () => true }),
   });
   return {
     files,

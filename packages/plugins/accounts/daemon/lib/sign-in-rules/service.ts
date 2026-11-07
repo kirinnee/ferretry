@@ -47,7 +47,7 @@ import { type RuleListing, ruleDrift, samePins, snapshotPins } from './drift.ts'
 import { ineligibleBecause, ruleSurfaceOf, tappedCount } from './eligibility.ts';
 import { checkRuleProof, ruleChallenge, type SignInRuleProofPort } from './proof.ts';
 import { auditText } from './words.ts';
-import { type AuditActor, type AuditDetail } from '@ferretry/core-gate/contract';
+import type { AuditActor, AuditDetail } from '@ferretry/core-gate/contract';
 
 /**
  * STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): one owner-signed permission for Ferretry to fill

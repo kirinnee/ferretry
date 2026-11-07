@@ -1,4 +1,4 @@
-import { type BrowserFirewallFailure, type LoopbackFirewallState } from '../wire/firewall.ts';
+import type { BrowserFirewallFailure, LoopbackFirewallState } from '../wire/firewall.ts';
 import {
   type BrowserPortsSetting,
   LOOPBACK_FIREWALL_CONF_PATH,

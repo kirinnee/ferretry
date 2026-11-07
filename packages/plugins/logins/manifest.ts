@@ -103,6 +103,33 @@ export default definePlugin({
         audit: audit(LOGINS_AUDIT.loginTest),
         guard: { none: 'one fixed sentence per code; a provider body is never returned' },
       }),
+
+      // One login changed (today's reviewed `credential.*` changes; Logins stages and applies its own
+      // `config/logins/<id>.yaml`). Staging holds the change and says what applying it does; applying runs exactly that.
+      route('POST /v1/logins/changes', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: audit(LOGINS_AUDIT.changeStage),
+        guard: { none: 'a staged change names an intent and secret NAMES; a raw secret is refused, no value is held' },
+      }),
+      route('GET /v1/logins/changes/:changeId', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { skip: 'a read of a staged change' },
+        guard: { none: 'a staged change names an intent and secret NAMES; no value is held' },
+      }),
+      route('POST /v1/logins/changes/:changeId/apply', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: audit(LOGINS_AUDIT.changeApply),
+        guard: { none: 'an outcome of writes; it carries no token, only a login as the list shows it' },
+      }),
       route('GET /v1/logins/presets', {
         minimum: 'operator',
         caller: 'any',

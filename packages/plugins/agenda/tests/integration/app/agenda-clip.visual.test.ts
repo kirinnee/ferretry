@@ -4,8 +4,6 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { COMPASS_ROW_PX, COMPASS_SIDE_PX } from '../../../app/features/agenda/agenda-compass.ts';
-import { swipeThreshold } from '../../../app/lib/agenda-inbox.ts';
 import { sharedChromium } from './support/hromium.ts';
 
 const packageRoot = resolve(import.meta.dir, '../..');

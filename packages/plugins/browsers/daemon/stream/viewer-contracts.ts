@@ -1,4 +1,4 @@
-import type { BrowserInputEvent, BrowserScreencastFrame } from '../pages/wire/browser.ts';
+import type { BrowserInputEvent, BrowserScreencastFrame } from '../../contract/wire/browser.ts';
 
 /** A viewer's socket, seen from the domain: binary frame chunks out, a close code at the end. */
 export interface ViewerDownstream {

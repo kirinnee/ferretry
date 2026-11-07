@@ -7,7 +7,7 @@ import {
   type BrowserReadMode,
   type BrowserScreenshotFormat,
   type BrowserTarget,
-} from './wire/target.ts';
+} from '../../contract/wire/target.ts';
 
 /**
  * WHAT THE BROWSER WORKER DOES TO ONE PAGE, over the few Playwright calls it needs.

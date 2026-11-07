@@ -176,7 +176,7 @@ const OPENER_WORDS = Object.values(OPENERS)
   .join('|');
 const ITEM = String.raw`!(A[1-9][0-9]*) «([\s\S]*?)»`;
 const HEADING = new RegExp(String.raw`^\[(${OPENER_WORDS}) (${ITEM}(?:, ${ITEM})*)\](?: |$)`, 'u');
-const HEADING_ITEM = new RegExp(String.raw`${ITEM}(?=, !A[1-9]|$)`, 'gu');
+const HEADING_ITEM = new RegExp(`${ITEM}(?=, !A[1-9]|$)`, 'gu');
 /** Where a batch's next form starts: a blank line, then a heading's opening. */
 const NEXT_FORM = new RegExp(String.raw`\n\n(?=\[(?:${OPENER_WORDS}) !A[1-9][0-9]* «)`, 'u');
 

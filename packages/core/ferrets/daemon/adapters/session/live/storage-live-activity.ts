@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { type SessionCompactionState, type SessionLiveActivity } from '../../../lib/protocol/session-live.ts';
+import type { SessionCompactionState, SessionLiveActivity } from '../../../lib/protocol/session-live.ts';
 import { SessionStateSchema } from '../../../lib/protocol/session.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';

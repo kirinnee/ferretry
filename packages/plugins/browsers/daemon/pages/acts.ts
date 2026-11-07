@@ -2,7 +2,7 @@ import { targetRef } from '@ferretry/core-vault/contract';
 import type { ActRunner, Op, RedactionScope, ResultOf, TargetRef } from '@ferretry/kernel/contract';
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
-import type { BrowserAction, BrowserPageSnapshot, BrowserStatus } from './wire/browser.ts';
+import type { BrowserAction, BrowserPageSnapshot, BrowserStatus } from '../../contract/wire/browser.ts';
 
 /**
  * How a browser act reaches a page through the kernel's act runner (§4.7). Every page act names its `Op`; the kernel

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountIndexDocument, type LoginRecipeProposal, type Place } from '../../../contract/routes/index.ts';
+import type { AccountIndexDocument, LoginRecipeProposal, Place } from '../../../contract/routes/index.ts';
 import should from 'should';
 import { AccountDirectory, LoginDirectory, SecretStoreError } from './lib.ts';
 import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from './support.ts';

@@ -8,7 +8,7 @@
 import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FleetCatalogRefusal, FleetCatalogService } from '../../../daemon/lib/service/catalog-service.ts';
+import { FleetCatalogRefusal, type FleetCatalogService } from '../../../daemon/lib/service/catalog-service.ts';
 import {
   assembleServices,
   UNAVAILABLE,
