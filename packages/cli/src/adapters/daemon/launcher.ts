@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import type { LaunchResult, Probe } from '../../lib/world.ts';
 
 /** The daemon's binary. It ships in the same archive as `fy`, so it is looked for beside `fy` first. */
-const DAEMON_BINARY = 'fyd';
+export const DAEMON_BINARY = 'fyd';
 
 const WAIT_MS = 30_000;
 const LOOK_MS = 200;

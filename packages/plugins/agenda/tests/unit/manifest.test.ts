@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import manifest from '../../manifest.ts';
 
 describe('agenda manifest', () => {
-  test('declares only the owner-facing routes; item routes are Asks’ and push routes are Access’', () => {
+  test('declares only the owner-facing routes; item routes are Asks’ and push subscriptions are Access’; push/seen is Agenda’s', () => {
     const keys = manifest.actions.routes.map(route => route.key);
-    expect(keys).toHaveLength(7);
-    expect(keys.some(key => key.includes('/push'))).toBe(false);
+    expect(keys).toHaveLength(8);
+    expect(keys.filter(key => key.includes('/push'))).toEqual(['POST /v1/push/seen']);
     expect(keys.some(key => /\/agenda(\/|$)/.test(key) && key.includes(':ferret/agenda'))).toBe(false);
   });
   test('the owner-only routes refuse a ferret', () => {
@@ -17,6 +17,7 @@ describe('agenda manifest', () => {
     expect(manifest.data.state.map(file => [file.path, file.format])).toEqual([
       ['seen.json', 1],
       ['buzzes.jsonl', 1],
+      ['modes.json', 1],
     ]);
     expect(manifest.words.map(word => word.word)).toEqual(['agenda', 'buzz']);
   });

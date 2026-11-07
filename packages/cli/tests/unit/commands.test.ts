@@ -144,6 +144,34 @@ describe('fy words', () => {
     should(fake.io.stderr()).containEql('compiled into this fy');
   });
 
+  it('should read the glossary through the guard, and send nothing but the inventory read to a daemon whose Kernel differs', async () => {
+    // Arrange
+    let inventoryReads = 0;
+    const fake = fakeWorld({
+      registry,
+      readInventory: async () => {
+        inventoryReads += 1;
+        return inventoryOf({ id: 'kernel', contract: 'another-kernel' });
+      },
+    });
+
+    // Act
+    const code = await runFy(['words', 'task'], fake.world);
+
+    // Assert
+    should(code).equal(0);
+    should(inventoryReads).be.above(0);
+    should(fake.transport.sent).deepEqual([]);
+    should(fake.io.stdout()).containEql('Board');
+    should(fake.io.stderr()).containEql('compiled into this fy');
+  });
+
+  it('should send the glossary read as the Kernel’s route once the inventory agrees', async () => {
+    const fake = fakeWorld({ registry });
+    await runFy(['words'], fake.world);
+    should(fake.transport.sent).deepEqual([{ method: 'GET', path: '/v1/glossary' }]);
+  });
+
   it('should say the glossary is empty when nothing declares a word', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(), probe: down });
     should(await runFy(['words'], world)).equal(0);
@@ -371,6 +399,36 @@ describe('fy ask', () => {
     should(io.stdout()).containEql('answered a1');
     transport.replies.push({ status: 200, body: { id: 'a1' } });
     should(await runFy(['ask', 'show', 'a1'], world)).equal(0);
+  });
+
+  it('S59 a person-only shell route from a pane is refused before any connection is opened', async () => {
+    // Arrange
+    const { world, io, connects, transport } = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+
+    // Act
+    const code = await runFy(['ask', 'answer', 'a1', 'yes'], world);
+
+    // Assert
+    should(code).equal(1);
+    should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
+    should(connects).deepEqual([]);
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('S59 an open shell route from a pane still connects and is sent', async () => {
+    const { world, connects, transport } = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+    transport.replies.push({ status: 200, body: [] });
+    should(await runFy(['ask', 'list'], world)).equal(0);
+    should(connects).have.length(1);
+    should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/asks' }]);
   });
 
   it('should refuse an answer without an id and text, and an unknown subcommand', async () => {

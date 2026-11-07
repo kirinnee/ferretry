@@ -1,4 +1,5 @@
 import { isAbsolute, join } from 'node:path';
+import { DAEMON_RUN_FILE } from '@ferretry/kernel/contract';
 
 /** The daemon's home: `FY_HOME` when the operator pinned one, else `~/.<product>`. Pure. */
 export function resolveHome(userHome: string, fyHome: string | undefined, product: string): string {
@@ -11,5 +12,5 @@ export function resolveHome(userHome: string, fyHome: string | undefined, produc
 /** Where Gate keeps the admin token (§7.1 `state/gate/admin-token`). */
 export const adminTokenPath = (home: string): string => join(home, 'state', 'gate', 'admin-token');
 
-/** Where the daemon records the address it bound (`config/daemon.json`), the one daemon document this client reads. */
-export const daemonConfigPath = (home: string): string => join(home, 'config', 'daemon.json');
+/** Where the kernel records the listener it bound (`run/daemon.json`), the one daemon document this client reads. */
+export const daemonRunPath = (home: string): string => join(home, DAEMON_RUN_FILE);
