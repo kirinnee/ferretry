@@ -1,16 +1,31 @@
-import type { InventoryEntry } from '../contract/bound.ts';
+import type { InventoryEntry, InventorySurfaces } from '../contract/bound.ts';
 import type { ApiRequest } from '../contract/http.ts';
 import { jsonResponse } from '../contract/http.ts';
 import type { Health, PluginInventory } from '../contract/kernel.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import { PROTOCOL } from '../contract/session.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
-import type { RouteHandler } from '../contract/route.ts';
+import type { RouteHandler, ScopedRoute } from '../contract/route.ts';
+import type { Manifest } from '../manifest/types.ts';
 import type kernelManifest from '../plugin.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
 
-export type { InventoryEntry };
+export type { InventoryEntry, InventorySurfaces };
+
+/**
+ * One plugin's declared surfaces for the inventory projection (§9.6): every route, socket and agent tool, as the
+ * descriptor admission reads (method and path dropped). Read from the manifest only, so a plugin that is off still
+ * has its declarations (the entry's `on` says whether it serves).
+ */
+export function inventorySurfacesOf(manifest: Manifest): readonly Omit<ScopedRoute, 'method' | 'path'>[] {
+  const scope = ({ method: _method, path: _path, ...rest }: ScopedRoute): Omit<ScopedRoute, 'method' | 'path'> => rest;
+  return [
+    ...(manifest.actions?.routes ?? []).map(scope),
+    ...(manifest.actions?.sockets ?? []).map(scope),
+    ...(manifest.actions?.agentTools ?? []),
+  ];
+}
 
 export interface KernelHalfSources {
   readonly version: string;

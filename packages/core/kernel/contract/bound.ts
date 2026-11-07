@@ -54,10 +54,17 @@ export interface Admission<Standing extends object = CallStanding, Member extend
   watch?(listener: () => void): Cancel;
   /**
    * Projects `GET /v1/plugins` for this caller (§9.6): every package for the owner on the host and a ferret; for a
-   * device, core, Access and each plugin with a route, tool or event its grants admit; core and Warden for the remote
-   * warden. Anything not returned is omitted, so a limited device cannot discover it.
+   * device, core, Access and each plugin with a route, socket or agent tool its grants admit (events carry no demand
+   * of their own, so they do not count); core and Warden for the remote
+   * warden. Anything not returned is omitted, so a limited device cannot discover it. `surfaces` is every declared
+   * route, socket and agent tool of each plugin, by plugin id, as the kernel read them from the manifests: the
+   * projection asks the device's grants about them, so without them a device would see only core and Access.
    */
-  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+  inventory(
+    request: ApiRequest,
+    entries: readonly InventoryEntry[],
+    surfaces: InventorySurfaces,
+  ): readonly InventoryEntry[];
   /**
    * The Gate axis of a plugin's own config write (`kernel.config.write`/`remove`): asked only when the edit
    * LOOSENS, with the plain sentences of what widens and the actor of the call in progress (the default actor outside
@@ -107,6 +114,9 @@ export interface RecordedCall {
   /** The answer as built (a route's), for a rule that reads NAMES out of it; absent for a socket. */
   readonly response?: ApiResponse;
 }
+
+/** Every declared route, socket and agent tool of one plugin, as descriptors (no method, no path), by plugin id. */
+export type InventorySurfaces = ReadonlyMap<string, readonly Omit<ScopedRoute, 'method' | 'path'>[]>;
 
 /** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */
 export interface InventoryEntry {

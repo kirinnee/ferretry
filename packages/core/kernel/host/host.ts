@@ -63,7 +63,7 @@ import {
 import { EventBus } from './events.ts';
 import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
-import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
+import { type InventoryEntry, type InventorySurfaces, inventorySurfacesOf, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
@@ -809,6 +809,10 @@ async function bootLocked(
         contract: options.contractHash?.(manifest.id) ?? 'unhashed',
       };
     });
+  // Every declared route, socket and agent tool, by plugin: what Gate asks a device's grants about (§9.6).
+  const surfaces: InventorySurfaces = new Map(
+    manifests.map(manifest => [manifest.id, inventorySurfacesOf(manifest)] as const),
+  );
   const kernelHandlers = kernelRoutes({
     version: options.version,
     inventory,
@@ -816,7 +820,7 @@ async function bootLocked(
       const admission = bound.admission;
       if (admission === undefined) return undefined;
       try {
-        return admission.inventory(request, entries);
+        return admission.inventory(request, entries, surfaces);
       } catch {
         return undefined;
       }

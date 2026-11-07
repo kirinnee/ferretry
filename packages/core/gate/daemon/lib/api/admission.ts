@@ -13,6 +13,7 @@ import {
   errorResponse,
   headerValue,
   type InventoryEntry,
+  type InventorySurfaces,
   jsonResponse,
   type MemberStanding,
   type PluginInventory,
@@ -179,6 +180,7 @@ export class GateAdmission implements Admission {
   }
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
+    // No path parameters on a re-ask: only a warden remedy reads them, and readmit re-asks the descriptor, not one call.
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
   }
 
@@ -257,8 +259,12 @@ export class GateAdmission implements Admission {
     };
   }
 
-  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] {
-    return this.project(request, { protocol: PROTOCOL, plugins: [...entries] }, new Map()).plugins;
+  inventory(
+    request: ApiRequest,
+    entries: readonly InventoryEntry[],
+    surfaces: InventorySurfaces,
+  ): readonly InventoryEntry[] {
+    return this.project(request, { protocol: PROTOCOL, plugins: [...entries] }, surfaces).plugins;
   }
 
   /** §9.6: the inventory as this caller may see it. A refused caller sees nothing. */
