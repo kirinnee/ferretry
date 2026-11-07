@@ -8,6 +8,7 @@ import { jsonResponse } from '../../../contract/http.ts';
 import type { CarrierKey, HolderId } from '../../../contract/ids.ts';
 import type {
   CarrierLink,
+  CarrierConnection,
   CarrierPeer,
   HolderWatch,
   ModeProof,
@@ -226,6 +227,11 @@ export class TestClient {
 
   static open(fx: Fixture, carrier = 'relay', peer?: CarrierPeer): TestClient {
     return new TestClient(fx.layer.open(carrier as CarrierKey, peer), freshSessionId());
+  }
+
+  /** A session on a shared connection (one rendezvous socket carrying many sessions). */
+  static on(connection: CarrierConnection, peer?: CarrierPeer): TestClient {
+    return new TestClient(connection.open(peer), freshSessionId());
   }
 
   /** hs1 → hs2, keyed. */

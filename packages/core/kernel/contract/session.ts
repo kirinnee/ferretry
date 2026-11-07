@@ -195,11 +195,26 @@ export interface IdentitySigner {
 }
 
 /**
+ * One transport connection that carries several sessions (a relay rendezvous socket): the sessions opened on it share
+ * ONE pre-credential bound (six awaiting a credential, today's per-link `MAX_PRE_CREDENTIAL_SESSIONS`), as today's
+ * daemon kept one `RelayLink` per rendezvous connection.
+ */
+export interface CarrierConnection {
+  open(peer?: CarrierPeer): CarrierLink;
+}
+
+/**
  * The kernel side a carrier talks to: open a link per sealed session. A carrier that multiplexes (the relay's
- * rendezvous socket) opens one link per session it announces and routes each session's frames to it.
+ * rendezvous socket) takes one {@link CarrierConnection} per socket and opens one link per session it announces on it.
  */
 export interface SessionLayer {
+  /**
+   * One session on its own connection (a direct socket, a tunnel socket, a data channel): its pre-credential bound is
+   * its own, so unproven peers on different sockets never crowd each other out (the carrier's own admission governs).
+   */
   open(carrier: CarrierKey, peer?: CarrierPeer): CarrierLink;
+  /** A connection that carries many sessions; the six-session pre-credential bound is per connection. */
+  connection(carrier: CarrierKey): CarrierConnection;
   /** The daemon identity's claim and tunnel signer, shared by every carrier; the key never leaves the kernel. */
   readonly signer: IdentitySigner;
 }

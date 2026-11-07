@@ -40,7 +40,7 @@ import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { runInCall } from './call-scope.ts';
+import { currentActor, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import {
   admitCall,
@@ -91,6 +91,14 @@ export interface HostConfig {
   startWatching?(): () => void;
 }
 
+/** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
+export type ConfigJudge = (input: {
+  readonly plugin: string;
+  readonly path: string;
+  readonly removal: boolean;
+  readonly sentences: readonly string[];
+}) => boolean;
+
 export interface HostAdapters {
   readonly clock: Clock;
   readonly logSink: LogSink;
@@ -98,7 +106,10 @@ export interface HostAdapters {
   readonly random: () => string;
   readonly state: (manifest: Manifest) => PluginStateHandle;
   /** The config service over every started plugin's declared files (§7.2); reloaded once before build. */
-  readonly config: (declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[]) => HostConfig;
+  readonly config: (
+    declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
+    judge?: ConfigJudge,
+  ) => HostConfig;
   /** Unrestricted; the host narrows each to the manifest's `permissions`. */
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
@@ -244,8 +255,17 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const manifests: Manifest[] = [kernelManifest, ...[...implementations.values()].map(impl => impl.manifest)];
   // Config: every declared file of every known plugin, so a plugin turned on later finds its file checked.
   trace.push('config');
+  // Gate's judge is read live: Admission is bound after build, and an absent or throwing one holds the edit.
+  const judgeAdmission: { current?: Admission } = {};
   const config = adapters.config(
     manifests.flatMap(manifest => (manifest.data?.config ?? []).map(def => ({ plugin: manifest.id, def }))),
+    input => {
+      try {
+        return judgeAdmission.current?.judgeConfigWrite?.({ ...input, actor: currentActor() }) === 'apply';
+      } catch {
+        return false;
+      }
+    },
   );
   await config.reload();
   const stopWatching = config.startWatching?.();
@@ -473,7 +493,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const workFolders = boundValue(WorkFoldersPort);
   const childEnvironments = boundValue(ChildEnvironmentPort);
   if (childEnvironments !== undefined) bound.childEnvironments = childEnvironments;
-  if (admission !== undefined) bound.admission = admission;
+  if (admission !== undefined) {
+    bound.admission = admission;
+    judgeAdmission.current = admission;
+  }
   if (outputGuard !== undefined) bound.outputGuard = outputGuard;
   if (holds !== undefined) bound.holds = holds;
   if (redactor !== undefined) bound.redaction = redactor;

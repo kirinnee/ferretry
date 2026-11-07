@@ -162,14 +162,23 @@ export interface ConfigPort {
   /** Tells an absent file from an invalid one (and a held one); `name` picks a collection item. */
   fileState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): ConfigFileStatus;
   /**
-   * Writes one of ITS OWN declared files through the same writer Gate's config route uses: only the changed keys are
-   * edited, a raw secret is refused, the last good version is kept, and a loosening is HELD for the owner (a plugin
-   * never confirms one). Another plugin's def is refused `not_declared`.
+   * Writes one of ITS OWN declared files (`name`: the collection item, `undefined` for a file) through the one
+   * kernel config writer Gate's config route also uses: only the changed keys are edited, a raw secret is refused,
+   * the last good version is kept, and a loosening is put into effect only when Gate's judge
+   * (`Admission.judgeConfigWrite`) says this call may; otherwise it is HELD for the owner. Another plugin's def is
+   * refused `not_declared`.
    */
   write(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    name: string | undefined,
     edit: ConfigEdit,
-    options?: { readonly ifMatch?: string; readonly name?: string },
+    options?: { readonly ifMatch?: string },
+  ): Promise<ConfigWriteOutcome>;
+  /** Removes one of its own files; removing what loosens (a budget, a rule) is judged and held like a write. */
+  remove(
+    def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    name: string | undefined,
+    options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
 }
 
