@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { localNote } from '../../../app/lib/local-models.ts';
-import { localModelsFixture, PULL } from './support/local-models.ts';
+import { localNote } from '../../../src/ui/local-models-note.tsx';
+import { localModelsFixture, PULL } from '../../support/local-models.ts';
 
 describe('localNote', () => {
   it('has nothing to say when models were found, or nothing has been read', () => {

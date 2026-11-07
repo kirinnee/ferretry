@@ -12,9 +12,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '../../ui.ts';
-import type { DaemonConnection } from '../../shell.ts';
-import type { FerretView } from '../../shell.ts';
-import { ferretTitles } from '../../shell.ts';
+import { type FerretView, ferretTitles } from '../../lib/callsign.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
 import { FerretLink, ferretName, ReportButton, SectionTitle, WardenChipBadge } from './warden-chips.tsx';
 import type { WardenReportTarget } from './warden-overview-model.ts';
 import {

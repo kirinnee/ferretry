@@ -14,6 +14,9 @@ export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set([
   'access→connections',
   // Lead-approved optional use: Catalogs shares pairing's advertised address and directory facts (P80).
   'catalogs→connections',
+  // Warden settings read the runtime list and whether the Jev key is set (britnee, optional uses).
+  'warden→runtimes', // read-only fact for Warden settings (britnee, optional uses)
+  'warden→voice', // read-only fact for Warden settings (britnee, optional uses)
   'board→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)
   'agenda→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)
   'terminals→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)

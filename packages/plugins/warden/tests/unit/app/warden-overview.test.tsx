@@ -9,10 +9,10 @@ import {
 } from '../../../app/features/warden/warden-overview.tsx';
 import type { WardenReportTarget } from '../../../app/features/warden/warden-overview-model.ts';
 import type { WardenReadState } from '../../../app/hooks/use-warden-poll.ts';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
 import { ferretView } from '../../support/app/ferrets.ts';
-import '../../support/app/shell-parts.ts';
+import { Screens } from '../../support/app/screens.tsx';
 import {
   agendaItem,
   wardenAction,
@@ -25,7 +25,7 @@ import {
 } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
-const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'tok' });
+const connection = daemonConnection({ daemonId: 'daemon-a' });
 
 const ready = <T,>(view: T): WardenReadState<T> => ({ status: 'ready', view });
 
@@ -56,7 +56,11 @@ const props = (overrides: Partial<WardenOverviewProps> = {}): { props: WardenOve
 
 const render = async (overrides: Partial<WardenOverviewProps> = {}) => {
   const built = props(overrides);
-  const view = await mount(<WardenOverview {...built.props} />);
+  const view = await mount(
+    <Screens>
+      <WardenOverview {...built.props} />
+    </Screens>,
+  );
   return { ...view, calls: built.calls };
 };
 

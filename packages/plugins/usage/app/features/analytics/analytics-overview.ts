@@ -19,6 +19,7 @@
  */
 
 import type { AnalyticsRawSession } from '../../../contract/index.ts';
+import { analyticsAxisTicks } from '@ferretry/app/ui';
 
 /** The windows a reader can pick, in days ending today (UTC). */
 export const ANALYTICS_RANGES = [7, 14, 30] as const;
@@ -454,19 +455,6 @@ export const rankTopSessions = (
     if (a === null || b === null) return a === b ? left.id.localeCompare(right.id) : a === null ? 1 : -1;
     return b - a || left.id.localeCompare(right.id);
   });
-
-/**
- * Round y-axis ticks from zero up to at least `max`: a 1, 2, 2.5 or 5 step so every label is a number a
- * person would write, and never fewer than two ticks so an all-zero window still draws an axis.
- */
-export const analyticsAxisTicks = (max: number, count = 4): readonly number[] => {
-  if (!(max > 0)) return [0, 1];
-  const rough = max / (count - 1);
-  const magnitude = 10 ** Math.floor(Math.log10(rough));
-  const step = [1, 2, 2.5, 5, 10].map(factor => factor * magnitude).find(candidate => candidate >= rough)!;
-  const top = Math.ceil(max / step);
-  return Array.from({ length: top + 1 }, (_, index) => Number((index * step).toPrecision(12)));
-};
 
 const USD = new Intl.NumberFormat('en-US', {
   style: 'currency',

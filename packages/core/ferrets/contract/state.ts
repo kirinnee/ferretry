@@ -63,7 +63,7 @@ export const FerretTokensFile = defineState({
   schema: FerretTokensSchema,
   mode: 0o600,
 });
-// ─── callsigns ────────────────────────────────────────────────────────────────────────────────────────────────
+// ─── names.json (today's callsign claim ledger, `adapters/names/file-name-claim-store.ts`) ────────────────────────
 
 /** The longest callsign (today's `lib/names/types.ts`). */
 const MAX_CALLSIGN_LENGTH = 32;
@@ -75,6 +75,33 @@ export function normalizeCallsign(raw: string): string | null {
   if (normalized.length === 0 || normalized.length > MAX_CALLSIGN_LENGTH) return null;
   return CALLSIGN_PATTERN.test(normalized) ? normalized : null;
 }
+
+// STRICT so an unknown field on a ledger row fails closed. Zod's default strip mode would accept the
+// row, drop the extra field, and silently rewrite it on the next successful claim — hiding exactly
+// the tampering or corruption the damaged-ledger cases exist to surface.
+export const NameClaimSchema = z
+  .strictObject({
+    callsign: z.string().refine(callsign => normalizeCallsign(callsign) === callsign, 'callsign is not canonical'),
+    ownerId: z.string().min(1),
+    claimedAtMs: z.number().int().nonnegative(),
+    expiresAtMs: z.number().int().nonnegative(),
+  })
+  .refine(claim => claim.expiresAtMs > claim.claimedAtMs, 'claim expiry must be after its creation');
+
+/**
+ * `names.json`: today's claim ledger, the reservations a start holds on a callsign before its record exists. Today the
+ * file was the bare array of claims; a state document is an object with `format` first, so the claims sit under
+ * `claims`.
+ */
+export const NamesDocumentSchema = z.strictObject({ claims: z.array(NameClaimSchema) });
+export type NamesDocument = z.infer<typeof NamesDocumentSchema>;
+export const NamesFile = defineState({
+  name: 'names',
+  path: 'names.json',
+  store: 'json',
+  format: 1,
+  schema: NamesDocumentSchema,
+});
 
 // ─── archive.json (today's archive registry, `lib/session/archive/registry.ts`) ────────────────────────────────
 

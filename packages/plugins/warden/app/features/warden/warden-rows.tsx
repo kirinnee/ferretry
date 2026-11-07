@@ -8,8 +8,8 @@
 import { WARDEN_LEAVE_DURATIONS, type WardenLeaveDuration, type WardenStatusView } from '../../wire.ts';
 import { useId, useState } from 'react';
 
-import type { DaemonConnection } from '../../shell.ts';
-import type { FerretView } from '../../shell.ts';
+import type { FerretView } from '../../lib/callsign.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
 import { FerretLink, ferretName, ReportButton, SectionTitle, WardenChipBadge } from './warden-chips.tsx';
 import {
   compactAgo,

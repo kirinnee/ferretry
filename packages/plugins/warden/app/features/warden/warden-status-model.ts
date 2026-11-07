@@ -17,7 +17,7 @@ import type {
   WardenStatusView,
   WardenTriageReason,
 } from '../../wire.ts';
-import { displayCallsign } from '../../shell.ts';
+import { displayCallsign } from '../../lib/callsign.ts';
 import { FLAG_CHIPS, layersLabel } from './warden-vocabulary.ts';
 
 const NO_CREDENTIALS = /credentials rejected|no credentials/iu;

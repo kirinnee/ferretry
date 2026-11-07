@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { GrantsView } from '../../../app/shell.ts';
+import type { CapabilityName, GrantRefusal } from '@ferretry/core-gate/contract';
+import type { GrantsView } from '../../../app/lib/grants.ts';
 import {
   ASK_WARDEN_FOCI,
   ASK_WARDEN_NOTES_MAX,
@@ -12,11 +13,9 @@ import {
 } from '../../../app/features/warden/ask-warden-model.ts';
 import { wardenConfig, wardenStatus } from '../../support/app/warden.ts';
 
-type GrantRefusal = 'granted' | 'not-granted' | 'device-not-granted' | 'step-up-required' | 'undetermined';
-
 const CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing'] as const;
 
-const entry = (capability: string, useRefusal: GrantRefusal) => ({
+const entry = (capability: CapabilityName, useRefusal: GrantRefusal) => ({
   capability,
   use: useRefusal === 'granted',
   useRefusal,

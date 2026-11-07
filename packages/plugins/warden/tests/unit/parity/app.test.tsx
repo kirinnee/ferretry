@@ -22,15 +22,13 @@ import { WardenStatsPanel } from '../../../app/features/warden/warden-stats.tsx'
 import { combinedTodayTotals } from '../../../app/features/warden/warden-stats-model.ts';
 import { WardenTotalsSurface } from '../../../app/features/warden/warden-totals-surface.tsx';
 import { WardenPage, type WardenSurfaceProps } from '../../../app/lib/warden-page.tsx';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { fakeWardenClient } from '../../support/app/clients.ts';
 import { wardenConfig, wardenFlag, wardenStatus } from '../../support/app/warden.ts';
-import '../../support/app/shell-parts.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const POLL = { isHidden: () => false, pollMs: 3_600_000 } as const;
-const connection = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
+const connection = (id: string) => daemonConnection({ daemonId: id });
 
 const settle = async (): Promise<void> => {
   for (let turn = 0; turn < 4; turn += 1)

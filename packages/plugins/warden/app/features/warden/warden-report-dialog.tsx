@@ -2,9 +2,9 @@
 
 import { Gavel, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Markdown } from '../../shell.ts';
+import { Markdown } from '@ferretry/app';
+import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDialogFocus } from '../../ui.ts';
-import type { DaemonConnection } from '../../shell.ts';
 import type { WardenVerdictView } from './warden-verdicts.tsx';
 
 export interface WardenReportDialogRequest {

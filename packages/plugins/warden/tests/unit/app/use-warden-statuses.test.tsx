@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useWardenStatuses } from '../../../app/hooks/use-warden-statuses.ts';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { wardenStatus } from '../../support/app/warden.ts';
 
@@ -10,8 +10,8 @@ afterEach(async () => {
   view = null;
 });
 
-const ec2 = daemonConnection({ daemonId: 'daemon-ec2', baseUrl: 'https://ec2.example.test', deviceId: 'a' });
-const mbp = daemonConnection({ daemonId: 'daemon-mbp', baseUrl: 'https://mbp.example.test', deviceId: 'b' });
+const ec2 = daemonConnection({ daemonId: 'daemon-ec2' });
+const mbp = daemonConnection({ daemonId: 'daemon-mbp' });
 const DAEMONS = [ec2, mbp];
 const OPTIONS = { isHidden: () => false, pollMs: 15 } as const;
 
