@@ -6,85 +6,66 @@
  * give today's deck and Settings tab what they were given before (their `dependencies` and `createClient`), calling
  * the same routes the same way, so the views themselves are unchanged.
  *
- * Every answer is parsed with the contract's schema before use, exactly as `web-terminals.ts` parsed it.
+ * Every answer is parsed with the contract's schema before use, exactly as `web-terminals.ts` parses it.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { z } from 'zod';
-import {
-  CloseTerminalResponseSchema,
-  RenameTerminalRequestSchema,
-  TerminalIdSchema,
-  TerminalListViewSchema,
-  TerminalViewSchema,
-} from '../../contract/index.ts';
+import { TerminalIdSchema } from '../../contract/index.ts';
 import type { TerminalDeckDependencies, TerminalDeckHost } from '../components/session-terminal-deck.tsx';
 import type { TerminalSlotsClient } from '../features/settings/terminal-slots-api.ts';
-import type { TerminalStream, TerminalStreamHandlers } from './web-terminals.ts';
-
-/** The shell's client widens the leaf's with sockets (`ShellPluginClient`); a client without them cannot stream. */
-interface SocketListeners {
-  readonly onFrame: (frame: string | Uint8Array) => void;
-  readonly onClose: (reason: string) => void;
-}
-interface ClientSocket {
-  send(frame: string | Uint8Array): void;
-  close(): void;
-}
-export interface SocketPluginClient extends PluginClient {
-  socket(key: string, params: Readonly<Record<string, string>>, listeners: SocketListeners): ClientSocket;
-}
-
-const canStream = (client: PluginClient): client is SocketPluginClient =>
-  typeof (client as Partial<SocketPluginClient>).socket === 'function';
-
-export const TERMINAL_ROUTES = {
-  holders: 'GET /v1/terminals',
-  closeFinished: 'POST /v1/terminals/close-finished',
-  list: 'GET /v1/ferrets/:ferretId/terminals',
-  create: 'POST /v1/ferrets/:ferretId/terminals',
-  rename: 'PATCH /v1/ferrets/:ferretId/terminals/:terminalId',
-  close: 'DELETE /v1/ferrets/:ferretId/terminals/:terminalId',
-  stream: 'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream',
-} as const;
+import {
+  closeSessionTerminal,
+  createSessionTerminal,
+  endSessionQuarantine,
+  listSessionQuarantines,
+  listSessionTerminals,
+  renameSessionTerminal,
+  TERMINAL_ROUTES,
+  type TerminalStream,
+  type TerminalStreamHandlers,
+} from './web-terminals.ts';
 
 /**
- * The close code a carrier drop is handed to the deck as: the browser's own "abnormal closure", which the deck's
- * reopen policy retries with backoff, as it did for a dropped socket before.
+ * The close code a stream is handed to the deck as when the carrier reports none: the browser's own "abnormal
+ * closure", which the deck's reopen policy retries with backoff, as it did for a dropped socket before. A code the
+ * daemon DID end the stream with (`1008` and `1009` are its refusals) is handed over as it came and is final.
  */
 export const STREAM_DROPPED_CODE = 1006;
 
-/** Today's deck dependencies, over the shell client. Holds (quarantines) are Vault's routes and are not listed here. */
+/**
+ * "This daemon is reachable again": the shell client's event feed going live (the client is already that one daemon's, so
+ * the deck's `daemon` argument names nothing more). A pane waiting out its reopen backoff reopens at once.
+ */
+const recoveredOn =
+  (feed: NonNullable<PluginClient['feed']>): NonNullable<TerminalDeckDependencies['onRecovered']> =>
+  (_daemon, listener) =>
+    feed.subscribeLive(live => {
+      if (live) listener();
+    });
+
+/** Today's deck dependencies, over the shell client. */
 export const pluginTerminalDeckDependencies = (
   client: PluginClient,
   host: TerminalDeckHost,
 ): TerminalDeckDependencies => ({
-  list: async (_daemon, scope) =>
-    TerminalListViewSchema.parse(await client.call(TERMINAL_ROUTES.list, { params: { ferretId: scope.sessionId } })),
-  create: async (_daemon, scope) =>
-    TerminalViewSchema.parse(
-      await client.call(TERMINAL_ROUTES.create, { params: { ferretId: scope.sessionId }, body: {} }),
-    ),
-  rename: async (_daemon, scope, id, title) =>
-    TerminalViewSchema.parse(
-      await client.call(TERMINAL_ROUTES.rename, {
-        params: { ferretId: scope.sessionId, terminalId: TerminalIdSchema.parse(id) },
-        body: RenameTerminalRequestSchema.parse({ title }),
-      }),
-    ),
-  close: async (_daemon, scope, id) =>
-    CloseTerminalResponseSchema.parse(
-      await client.call(TERMINAL_ROUTES.close, {
-        params: { ferretId: scope.sessionId, terminalId: TerminalIdSchema.parse(id) },
-      }),
-    ),
+  list: (daemon, scope) => listSessionTerminals(client, daemon, scope),
+  create: (daemon, scope) => createSessionTerminal(client, daemon, scope),
+  rename: (daemon, scope, id, title) => renameSessionTerminal(client, daemon, scope, id, title),
+  close: (daemon, scope, id) => closeSessionTerminal(client, daemon, scope, id),
   attach: async (_daemon, scope, terminalId, handlers) =>
     openPluginStream(client, scope.sessionId, TerminalIdSchema.parse(terminalId), handlers),
+  ...(client.feed === undefined ? {} : { onRecovered: recoveredOn(client.feed) }),
+  quarantines: (daemon, scope) => listSessionQuarantines(client, daemon, scope),
+  endQuarantine: (daemon, scope, key) => endSessionQuarantine(client, daemon, scope, key),
   ...host,
 });
 
 /**
  * One terminal's stream as one socket on the shell client. Bytes are the shell's output; a text frame on this route
  * is the daemon speaking a shape this stream does not have, so it is dropped rather than drawn (today's rule).
+ *
+ * The viewer is told it is open when the daemon ACCEPTS the stream (a frame sent before is dropped), and told how it
+ * closed with the stream's own code: a close the carrier reports without one is a drop and is retried.
  */
 export function openPluginStream(
   client: PluginClient,
@@ -92,22 +73,22 @@ export function openPluginStream(
   terminalId: string,
   handlers: TerminalStreamHandlers,
 ): TerminalStream {
-  if (!canStream(client)) throw new Error('this client cannot open a terminal stream');
+  if (client.socket === undefined) throw new Error('this client cannot open a terminal stream');
   const socket = client.socket(
     TERMINAL_ROUTES.stream,
     { ferretId, terminalId },
     {
+      onOpen: () => handlers.onOpen(),
       onFrame: frame => {
         if (frame instanceof Uint8Array) handlers.onBytes(frame);
       },
-      onClose: reason => handlers.onClosed(STREAM_DROPPED_CODE, reason),
+      onClose: (reason, code) => handlers.onClosed(code ?? STREAM_DROPPED_CODE, reason),
     },
   );
-  handlers.onOpen();
   return {
     write: bytes => socket.send(bytes),
     control: text => socket.send(text),
-    close: () => socket.close(),
+    close: (code, reason) => socket.close(code, reason),
   };
 }
 

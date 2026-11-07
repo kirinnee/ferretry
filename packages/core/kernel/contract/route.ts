@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 import type { CapabilityAxis, PolicyRef } from './policy.ts';
 
@@ -112,6 +113,10 @@ export interface MemberRouteDescriptor extends RoutePattern {
   readonly noStore: true;
   readonly audit: AuditDeclaration;
   readonly guard: GuardDeclaration;
+  /** The body this route parses, when it takes one. Part of the member-surface hash (§9.6), so a change to it moves that hash. */
+  readonly request?: z.ZodType;
+  /** The body this route answers, when it has a schema. Part of the member-surface hash (§9.6). */
+  readonly response?: z.ZodType;
 }
 
 /** Filled by Gate's contract like {@link CallStanding}: the member standing a member handler reads. */

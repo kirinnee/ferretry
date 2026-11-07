@@ -6,6 +6,7 @@ import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 import { err, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import {
   type LoginChange,
+  type LoginChangesApi,
   LoginChangeError,
   type LoginChangeOutcome,
   type LoginChangeView,
@@ -51,6 +52,10 @@ export interface FakeLogins extends LoginsApi {
   readonly spends: { readonly loginId: string; readonly variable: string; readonly hosts: readonly string[] }[];
   /** What `authorizeFetch` answers next (default `refused`). */
   answerSpend(outcome: AuthorizedOutcome): void;
+}
+
+/** The change path as a fake: it records what was staged and applied, and refuses on request. */
+export interface FakeLoginChanges extends LoginChangesApi {
   /** Every change staged through `changes.stage`, in order. */
   readonly staged: readonly LoginChange[];
   /** Every id applied through `changes.apply`, in order. */
@@ -60,23 +65,27 @@ export interface FakeLogins extends LoginsApi {
   /** Refuse the next `stage` (or every one, until cleared with `undefined`) the way the real service does. */
   refuseStage(error: LoginChangeError | undefined): void;
   refuseApply(error: LoginChangeError | undefined): void;
+  /** The `usersMovedFirst` of every `stage`, in order. */
+  readonly movedFirst: readonly (readonly string[])[];
+  /** Every id discarded, in order. */
+  readonly discarded: readonly string[];
 }
 
 const FAKE_EXPIRY = instantFromEpochMs(4_070_908_800_000);
 
-export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
-  let logins = [...initial];
-  let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
-  const spends: FakeLogins['spends'] = [];
-  const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
+export function fakeLoginChanges(): FakeLoginChanges {
   const staged: LoginChange[] = [];
+  const movedFirst: (readonly string[])[] = [];
   const applied: string[] = [];
+  const discarded: string[] = [];
   let outcome: LoginChangeOutcome = { outcome: 'applied' };
   let stageRefusal: LoginChangeError | undefined;
   let applyRefusal: LoginChangeError | undefined;
   return {
     staged,
     applied,
+    movedFirst,
+    discarded,
     setOutcome: next => {
       outcome = next;
     },
@@ -86,25 +95,36 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     refuseApply: error => {
       applyRefusal = error;
     },
-    changes: {
-      stage: async change => {
-        if (stageRefusal !== undefined) throw stageRefusal;
-        staged.push(change);
-        return {
-          id: `change-${String(staged.length)}`,
-          change,
-          summary: `fake ${change.kind} ${change.id}`,
-          consequences: [],
-          expiresAt: FAKE_EXPIRY,
-          state: 'pending',
-        } satisfies LoginChangeView;
-      },
-      apply: async id => {
-        if (applyRefusal !== undefined) throw applyRefusal;
-        applied.push(id);
-        return outcome;
-      },
+    stage: async (change, options) => {
+      if (stageRefusal !== undefined) throw stageRefusal;
+      staged.push(change);
+      movedFirst.push(options?.usersMovedFirst ?? []);
+      return {
+        id: `change-${String(staged.length)}`,
+        change,
+        summary: `fake ${change.kind} ${change.id}`,
+        consequences: [],
+        expiresAt: FAKE_EXPIRY,
+        state: 'pending',
+      } satisfies LoginChangeView;
     },
+    apply: async id => {
+      if (applyRefusal !== undefined) throw applyRefusal;
+      applied.push(id);
+      return outcome;
+    },
+    discard: async id => {
+      discarded.push(id);
+    },
+  };
+}
+
+export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
+  let logins = [...initial];
+  let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
+  const spends: FakeLogins['spends'] = [];
+  const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
+  return {
     list: async () => list(),
     get: async id => logins.find(login => login.id === id),
     quota: async id => logins.find(login => login.id === id)?.usage,

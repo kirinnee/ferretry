@@ -1,5 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { LoginsPort } from '@ferretry/plugin-logins/contract';
+import { LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { UsagePort } from '@ferretry/plugin-usage/contract';
 import { MOVE_ACCOUNT_SLOT, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
@@ -34,7 +34,8 @@ export default definePlugin({
   kinds: ['runtime', 'command', 'view'],
   words: RUNTIMES_WORDS,
 
-  needs: { ferrets: FerretsPort, logins: LoginsPort },
+  // Logins is one plugin: reading it (`logins`) and changing it (`loginChanges`) are two ports, and only Runtimes holds the second.
+  needs: { ferrets: FerretsPort, logins: LoginsPort, loginChanges: LoginChangesPort },
   // Optional (§2.4): the account picker shows each runtime's quota from Usage's feed. Usage off = the picker without quota.
   uses: { usage: UsagePort },
   provides: { runtimes: RuntimesPort },
@@ -237,6 +238,9 @@ export default definePlugin({
     publishes: [RuntimesChanged, RuntimesDefaultChanged],
     // `items` stays empty: it lists items this package SHIPS. Runtimes are items the owner (or a catalog) installs.
   },
+
+  // Logins asks which runtimes use a login before it removes one; Runtimes is the only plugin that knows.
+  hooks: { takes: [{ hook: LoginsUsedBy, key: 'runtimes' }] },
 
   onboarding: [{ id: 'runtimes', title: 'Name your runtimes', order: 40 }],
   doctor: ['runtimes-config'],
