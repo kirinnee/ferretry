@@ -29,13 +29,12 @@ const OTHER = 'mvv6b4qw-49d0158e';
 const PROJECT = '0b4cbd4a-6f1c-4d3c-9d55-2a3f5f1c9e01';
 const LOGIN = { sessionId: SESSION, project: undefined, roles: ['username', 'password'] as const, now: NOW };
 
-function grants(w: World, options: { advertised?: boolean; project?: string; terminal?: boolean | 'absent' } = {}) {
+function grants(w: World, options: { project?: string; terminal?: boolean | 'absent' } = {}) {
   const ledger = new SignInGrantLedger();
   const source = new RuleSignInGrants({
     rules: w.service,
     ledger,
     keys: async () => KEY as AccountKey,
-    advertised: () => options.advertised ?? true,
     ...(options.terminal === 'absent' ? {} : { terminal: () => options.terminal !== false }),
     stampedProject: async () => options.project,
     clock: { now: () => w.clock.now },
@@ -82,12 +81,6 @@ describe('RuleSignInGrants: what a fill reads of a rule', () => {
     await approved(late);
     late.clock.now = NOW + 31 * 86_400_000;
     should(grants(late).source.of(SESSION)[0]?.expiresAt).be.belowOrEqual(late.clock.now);
-  });
-
-  it('should offer no rule at all while `sign-in-rules.1` is not advertised (invariant 32, at the composite)', async () => {
-    const w = await world();
-    await approved(w);
-    should(grants(w, { advertised: false }).source.enabled()).be.false();
   });
 
   it('should forget a rule’s attempts when it is approved again (a resumed rule starts fresh), and never a plan’s', async () => {
@@ -389,7 +382,6 @@ describe('RuleSignInGrants: every answer of the rule service, refused as it shou
       rules,
       ledger,
       keys: async account => (account === 'GITHUB_WORK' ? (KEY as AccountKey) : Promise.reject(new Error('down'))),
-      advertised: () => true,
       stampedProject: async () => undefined,
       clock: { now: () => NOW },
       ...extra,

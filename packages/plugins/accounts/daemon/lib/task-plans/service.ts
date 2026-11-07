@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type AccountId, type AccountKey, type CopyPlan, type CopyPlanItem, copyPlanOf, type GrantMissReason, type SignInChoiceContext, type SignInId, TASK_PLAN_DEFAULT_LIFETIME_SECONDS, TASK_PLAN_ERROR_CODES, TASK_PLAN_MAX_LIVE_PER_SESSION, TASK_PLAN_MAX_PENDING_PER_SESSION, TASK_PLAN_MAX_PROPOSALS_PER_HOUR, TASK_PLAN_STAGE_TTL_SECONDS, TASK_PLAN_WHY_MAX_CHARS, type TaskPlan, type TaskPlanApproval, type TaskPlanApprovalAnswer, TaskPlanApprovalSchema, TaskPlanCallSchema, type TaskPlanConfirming, type TaskPlanLine, type TaskPlanLineAsk, type TaskPlanLinePins, TaskPlanSchema, type TaskPlanSelectedLine, type TaskPlanStaged, type TaskPlanStageId, type TaskPlanStageState, type TaskPlanStageView, type TaskPlanState, taskPlanApprovalSubject, taskPlanLineOfCopyItem, taskPlanLinesOfCopyItems, taskPlanSelection, taskPlanSelectionNeedsPasskey } from '../../../contract/routes/index.ts';
+import { type AccountId, type AccountKey, type CopyPlan, copyPlanOf, type GrantMissReason, type SignInChoiceContext, type SignInId, TASK_PLAN_DEFAULT_LIFETIME_SECONDS, TASK_PLAN_ERROR_CODES, TASK_PLAN_MAX_LIVE_PER_SESSION, TASK_PLAN_MAX_PENDING_PER_SESSION, TASK_PLAN_MAX_PROPOSALS_PER_HOUR, TASK_PLAN_STAGE_TTL_SECONDS, TASK_PLAN_WHY_MAX_CHARS, type TaskPlan, type TaskPlanApproval, type TaskPlanApprovalAnswer, TaskPlanApprovalSchema, TaskPlanCallSchema, type TaskPlanConfirming, type TaskPlanLine, type TaskPlanLineAsk, type TaskPlanLinePins, TaskPlanSchema, type TaskPlanSelectedLine, type TaskPlanStaged, type TaskPlanStageId, type TaskPlanStageState, type TaskPlanStageView, type TaskPlanState, taskPlanApprovalSubject, taskPlanLineOfCopyItem, taskPlanSelection, taskPlanSelectionNeedsPasskey } from '../../../contract/routes/index.ts';
 import type { AuditSink } from '../local-ports.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../secure-copy/rules.ts';
@@ -300,18 +300,6 @@ export class TaskPlanService {
     slot.kept();
     await this.#auditRaised(plan);
     return plan;
-  }
-
-  /** A paste plan (`secure.preapprove`), through the same {@link propose}: paste lines of one use each. */
-  async proposePastes(sessionId: string, items: readonly CopyPlanItem[], expiresInSeconds?: number): Promise<CopyPlan> {
-    if (items.length === 0) throw new SecureCopyError('bad_request', 'a plan lists 1 to 10 pastes');
-    const plan = await this.propose(sessionId, {
-      lines: [...taskPlanLinesOfCopyItems(items)],
-      ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
-    });
-    const projected = copyPlanOf(plan);
-    if (projected === undefined) throw new SecureCopyError('bad_request', 'a plan lists 1 to 10 pastes');
-    return projected;
   }
 
   // ── The owner reads ───────────────────────────────────────────────────────────────────────────────

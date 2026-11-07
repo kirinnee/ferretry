@@ -75,7 +75,7 @@ describe('CombinedSignInGrants', () => {
     );
     should(both.of(SESSION).map(each => each.id)).deepEqual(['rule:sr_1:1', 'plan:ab:0']);
     should(both.enabled()).be.true();
-    // `sign-in-rules.1` not advertised: no rule grant at all (invariant 32), the plan lines as before.
+    // A source switched off whole: none of its grants at all, the other source as before.
     const plansOnly = new CombinedSignInGrants(
       fake('plan', ledger, [plan]).source,
       fake('rule', ledger, [rule], false).source,

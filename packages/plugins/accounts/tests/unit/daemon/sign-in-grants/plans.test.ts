@@ -34,7 +34,6 @@ function source(lines: ApprovedSignInLine[]) {
   return new PlanSignInGrants(
     plans,
     async () => undefined,
-    () => true,
     new SignInGrantLedger(),
   );
 }

@@ -38,8 +38,6 @@ export interface RuleGrantPorts {
   readonly rules: RuleGrantRules;
   readonly ledger: SignInGrantLedger;
   readonly keys: (account: AccountId) => Promise<AccountKey | undefined>;
-  /** Whether the daemon reports `sign-in-rules.1` (it does, since R3c-6): while it does not, no rule fills. */
-  readonly advertised: () => boolean;
   /**
    * Whether terminal rules are offered (`terminalRulesOffered`: `sign-in-rules-terminal.1` beside `sign-in-rules.1`):
    * until they are, no terminal rule (sudo, su, doas) is offered to the matcher or holds at the write, whatever the
@@ -85,7 +83,7 @@ export class RuleSignInGrants implements SignInGrantSource {
   }
 
   enabled(): boolean {
-    return this.ports.advertised();
+    return true;
   }
 
   /**

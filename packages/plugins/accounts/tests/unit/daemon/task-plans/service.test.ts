@@ -845,17 +845,6 @@ describe('TaskPlanService: the paste-plan routes, kept', () => {
     should(w.rules.list(HOST)).eql([]);
     should(w.service.approvedSignIns(SESSION)).eql([]);
   });
-
-  it('should answer secure.preapprove through the same propose, in the old shape', async () => {
-    const w = world();
-    await w.rules.load();
-
-    const plan = await w.service.proposePastes(SESSION, [{ from: GH, to: PASTE.to, why: 'the token' }], 600);
-
-    should(CopyPlanSchema.parse(plan)).match({ state: 'pending', items: [{ why: 'the token' }] });
-    should(w.service.get(HOST, SESSION, plan.id).lines).match([{ kind: 'paste', uses: 1 }]);
-    should((await refused(w.service.approveCopyItems(HOST, SESSION, 'c'.repeat(32), [0]))).code).equal('not_found');
-  });
 });
 
 describe('TaskPlanService: the audit', () => {
@@ -1138,14 +1127,6 @@ describe('TaskPlanService: secrev-1261', () => {
     should(first.status).equal('fulfilled');
     should(second.status).equal('rejected');
     should(w.rules.list(HOST)).have.length(1);
-  });
-
-  it('should refuse an empty paste plan, raising no card', async () => {
-    const w = world();
-    await w.rules.load();
-
-    should((await refused(w.service.proposePastes(SESSION, []))).code).equal('bad_request');
-    should(w.cards).eql([]);
   });
 
   it('should decline the whole plan, sign-in lines included, when the paste-plan route ticks nothing', async () => {

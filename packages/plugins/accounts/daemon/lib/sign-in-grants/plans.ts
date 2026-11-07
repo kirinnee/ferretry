@@ -33,8 +33,8 @@ export type GrantVerdict = { readonly ok: true } | { readonly ok: false; readonl
 export interface SignInGrantSource {
   /**
    * Whether grant fills run at all. A grant fill closes the card itself, and an app that can't show that would refuse
-   * the request list, so a source fills only while the daemon reports its feature (`task-plan.1`, `sign-in-rules.1`;
-   * this build reports both).
+   * the request list; there is no older peer in 5.0 (I209, I219 removed), so both sources answer true. The method stays
+   * so a source the Vault reads can still be switched off whole.
    */
   enabled(): boolean;
   /** The grants that are about a sign-in in this session: in force, spent or stopped, the soonest to expire first. */
@@ -91,12 +91,11 @@ export class PlanSignInGrants implements SignInGrantSource {
   constructor(
     private readonly plans: PlanGrantLines,
     private readonly keys: (account: AccountId) => Promise<AccountKey | undefined>,
-    private readonly advertised: () => boolean,
     readonly ledger: SignInGrantLedger,
   ) {}
 
   enabled(): boolean {
-    return this.advertised();
+    return true;
   }
 
   of(sessionId: string): readonly SignInGrant[] {
