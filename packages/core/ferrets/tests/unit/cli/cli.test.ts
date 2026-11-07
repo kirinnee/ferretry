@@ -29,7 +29,16 @@ function run(answers: Readonly<Record<string, unknown>> = {}, fail?: Error) {
     },
     subscribe: () => () => undefined,
   };
-  const half = cli.build?.({ manifest, client, io: { out: t => out.push(t), err: t => err.push(t), isTty: false } });
+  let time = 0;
+  const half = cli.build?.({
+    manifest,
+    client,
+    io: { out: t => out.push(t), err: t => err.push(t), isTty: false },
+    clock: { now: () => '2026-11-06T09:00:00.000Z' as never, nowMs: () => time },
+    sleep: async delay => {
+      time += Number(delay);
+    },
+  });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
   const verb = async (line: string, args: readonly string[] = [], options: VerbInvocation['options'] = {}) => {
@@ -319,9 +328,53 @@ describe('the ferrets cli half', () => {
     expect(err.at(-1)).toBe(`refusing to remove ${WORKTREE_PATH} without a confirmation — pass --yes to authorize it`);
   });
 
+  test('R502 ps keeps one last list per connection: the second read names its etag and a 304 serves the held list', async () => {
+    const named: (string | undefined)[] = [];
+    const out: string[] = [];
+    const client: PluginClient = {
+      call: async () => {
+        throw new Error('a list read goes through the conditional read when the shell has one');
+      },
+      subscribe: () => () => undefined,
+      conditional: async (key, _params, init) => {
+        expect(key).toBe(FERRET_ROUTES.list);
+        named.push(init?.ifNoneMatch);
+        return init?.ifNoneMatch === undefined
+          ? { status: 200, etag: '"t1"', body: [ferret] }
+          : { status: 304, etag: '"t1"' };
+      },
+    };
+    const half = cli.build?.({ manifest, client, io: { out: t => out.push(t), err: () => undefined, isTty: false } });
+    const ps = (half?.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>).ps;
+    if (ps === undefined) throw new Error('ps is implemented');
+    expect(await ps({ args: [], options: {} })).toBe(0);
+    expect(await ps({ args: [], options: {} })).toBe(0);
+    expect(named).toEqual([undefined, '"t1"']);
+    expect(out.filter(text => text.includes('wren')).length).toBe(2);
+  });
+
   test('a shell refusal goes back to the shell with its own exit code, never re-worded', async () => {
     const refusal = new ShellRefusal('Ferrets is paused on this daemon');
     const { verb } = run({}, refusal);
     expect(await verb('ps').catch((error: unknown) => error)).toBe(refusal);
+  });
+});
+
+describe('wait and instructions', () => {
+  test('V-wait reads GET /v1/ferrets/:id until the ferret settles and exits with the way it settled', async () => {
+    const done = sessionView({ id: 'lead', name: 'wren', state: 'stopped', finishedAt: '2026-11-06T09:00:00.000Z' as never });
+    const finished = run({ [FERRET_ROUTES.get]: done });
+    expect(await finished.verb('wait <id>', ['lead'])).toBe(0);
+    expect(finished.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } }]);
+    expect(finished.out).toEqual(['lead is stopped']);
+    const ended = run({ [FERRET_ROUTES.get]: sessionView({ id: 'lead', state: 'stopped' }) });
+    expect(await ended.verb('wait <id>', ['lead'])).toBe(1);
+    expect(ended.err.join('')).toContain('fy wait: the ferret ended as stopped');
+  });
+
+  test('V-instructions answers from the environment the shell handed over, and says so when there is none', async () => {
+    const { verb, out } = run();
+    expect(await verb('instructions')).toBe(0);
+    expect(out.join('\n')).toContain('not running inside a ferret');
   });
 });

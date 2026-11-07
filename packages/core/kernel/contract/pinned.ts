@@ -314,6 +314,15 @@ export interface SessionRootPinner {
 export interface PinOptions {
   /** Refuse this root (`FsError` `denied`) before anything beneath it is reached: listings, content, Git alike. */
   readonly refuseRoot?: (rootReal: string) => boolean;
+  /**
+   * Whose read the pin serves beneath an owner's root (S47, today's `agentFence`: present for an agent, absent for a
+   * person). `'agent'`, the default so a caller that says nothing is fenced: every walk and probe beneath the held root
+   * is judged against the state-home fence — a name or object inside the home, or one of its pinned key files and
+   * folders, is refused `fenced`, and a file with more than one name `hard_link` unless proven immutable. `'none'` is a
+   * PERSON's read, unfenced as today: nothing beneath the held root is refused for the home or for a hard link. The
+   * root itself is checked by the root either way (§7.7), and {@link HeldRoot.fenced} answers either way.
+   */
+  readonly fence?: 'agent' | 'none';
 }
 
 /**
@@ -322,4 +331,17 @@ export interface PinOptions {
  */
 export interface HeldRoot extends PinnedRoot {
   readonly policyCwd: PinnedWorkingDirectory;
+  /**
+   * The NAME verdict (S47, today's `fenceRefusal`), for output that never passes through {@link PinnedRoot.open} — Git's
+   * names, a `HEAD` blob: for each root-relative name in `rels`, in order, whether it is inside the state home or is
+   * one of the home's pinned key files and folders. Judged by name (the home as configured and as resolved, and every
+   * `-before-` folder), then, where the path exists, by IDENTITY: the nearest existing folder at or above it is walked
+   * through the held descriptor and every component compared by device and inode, and the leaf itself (never
+   * followed) likewise — so a bind mount or hard link of the home or a key file answers `true` under an innocent name.
+   * A home that cannot be identified, or a folder the walk would not open for a reason other than its kind, answers
+   * `true`. Beneath an internal root (which lives inside the home by design and reaches only its own subtree) every
+   * answer is `false`. A verdict, never a licence: no bytes come from here, and it answers whatever the pin's
+   * {@link PinOptions.fence}.
+   */
+  fenced(rels: readonly string[]): Promise<readonly boolean[]>;
 }

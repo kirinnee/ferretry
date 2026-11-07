@@ -1,7 +1,17 @@
 import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, join, posix, relative } from 'node:path';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
+import {
+  type ComponentIdentity,
+  FsError,
+  type FsErrorCode,
+  type HeldRoot,
+  type PinnedFileKind,
+  type PinnedFileProbe,
+  type PinnedOpenOptions,
+  type PinnedTarget,
+} from '../contract/pinned.ts';
 import { insideFence } from '../contract/home.ts';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import type {
@@ -27,7 +37,7 @@ import {
   same,
   within,
 } from './fence-guard.ts';
-import type { PinRegistry } from './pins.ts';
+import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
@@ -547,6 +557,192 @@ interface HandleSetup {
   readonly pins: PinRegistry | undefined;
 }
 
+/** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
+interface PinFenceSetup {
+  readonly fs: HostFs;
+  readonly home: string;
+  readonly immutable: () => Promise<readonly string[]>;
+}
+
+/** A walk refusal about the path's KIND or absence: the verdict looks one folder up. Any other refusal is a doubt. */
+const NOT_THERE: ReadonlySet<FsErrorCode> = new Set([
+  'invalid_path',
+  'not_found',
+  'not_a_directory',
+  'not_a_file',
+  'escapes_root',
+]);
+
+/** The fence now: recomputed on every ask, so a home that cannot be identified refuses (`undefined` answers fenced). */
+const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
+  await fenceOf(setup.fs, setup.home).catch(() => undefined);
+
+const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean =>
+  identities.some(entry => fence.identities.some(held => held.device === entry.dev && held.inode === entry.ino));
+
+/**
+ * Whether each root-relative FOLDER is in the fence by identity, walked through the held descriptor once and
+ * remembered (today's `inHome`): every component the walk opened is compared by device and inode with the home, its
+ * `-before-` folders and its pinned key paths. A folder that is not there, or not a folder, is judged by the nearest
+ * one above it that is; one the walk would not open for any other reason answers fenced.
+ */
+function folderVerdict(pinned: UnjudgedRoot, fence: Fence): (folder: string) => Promise<boolean> {
+  const known = new Map<string, Promise<boolean>>();
+  const judge = async (folder: string): Promise<boolean> => {
+    let target: PinnedTarget;
+    try {
+      target = await pinned.open(folder, { wantDirectory: true });
+    } catch (error) {
+      if (!(error instanceof FsError) || !NOT_THERE.has(error.code) || folder === '') return true;
+      return await ask(parentOf(folder));
+    }
+    try {
+      return heldByFence(fence, target.identities);
+    } finally {
+      await target.close();
+    }
+  };
+  const ask = (folder: string): Promise<boolean> => {
+    let verdict = known.get(folder);
+    if (verdict === undefined) {
+      verdict = judge(folder);
+      known.set(folder, verdict);
+    }
+    return verdict;
+  };
+  return ask;
+}
+
+/** The folder a root-relative name sits in; `''` is the root. */
+const parentOf = (rel: string): string => {
+  const parent = posix.dirname(rel);
+  return parent === '.' || parent === '/' ? '' : parent;
+};
+
+/**
+ * {@link HeldRoot.fenced} for an owner's root (S47, today's `fenceRefusal` by name and `identityHome` by identity):
+ * by name first, then the folder each name sits in by identity through the held walk, then — `leaf` — the entry at
+ * the name itself, never followed (`lstat`), so a key file bind-mounted or hard-linked under an innocent name answers
+ * fenced. A leaf that cannot be looked at answers fenced.
+ */
+function fenceVerdict(
+  pinned: UnjudgedRoot,
+  setup: PinFenceSetup,
+  leaf: boolean,
+): (rels: readonly string[], folders?: (folder: string) => Promise<boolean>) => Promise<readonly boolean[]> {
+  return async (rels, given) => {
+    const fence = await fenceNow(setup);
+    if (fence === undefined) return rels.map(() => true);
+    const folders = given ?? folderVerdict(pinned, fence);
+    const answers: boolean[] = [];
+    for (const rel of rels) {
+      const named = join(pinned.rootReal, rel);
+      if (fencedByName(fence, named) || (await folders(parentOf(rel)))) {
+        answers.push(true);
+        continue;
+      }
+      if (!leaf) {
+        answers.push(false);
+        continue;
+      }
+      const entry = await setup.fs.identity(named).then(
+        found => ({ found }),
+        () => undefined,
+      );
+      answers.push(
+        entry === undefined || (entry.found !== undefined && heldByFence(fence, [toComponent(entry.found)])),
+      );
+    }
+    return answers;
+  };
+}
+
+const toComponent = (identity: FileIdentity): ComponentIdentity => ({
+  dev: identity.device,
+  ino: identity.inode,
+  ctimeNs: 0n,
+  mode: identity.mode,
+});
+
+/**
+ * A held owner's root whose every walk is judged against the fence AGAIN (S40, S47) — for an AGENT's read
+ * (`PinOptions.fence` `'agent'`, the default). The root itself was checked at the pin, but a root can be an ancestor
+ * of the home (a ferret working in `~`), and the descriptor walk beneath it knows nothing of the home. So each `open`
+ * and each `probe` asks, like every other op of an owner's root: the fence is recomputed (a home that cannot be
+ * identified refuses), the path is refused by name before the walk starts, and every component the walk opened is
+ * refused by device and inode — the home, its `-before-` folders and its pinned key files and folders (a bind mount
+ * or alias a name would miss) — the walk never serves a byte from, or lists, the home. A file with several names is
+ * refused unless it is proven immutable (S49), as `withCheckedFile` does. The probe calls a name in the fence
+ * `unsupported` without walking it, by name and by the identity of the folder it sits in (today's `inHome`). Same
+ * `policyCwd`, the object the registry minted.
+ */
+function fencedPin(pinned: UnjudgedRoot, setup: PinFenceSetup): HeldRoot {
+  const { fs, immutable } = setup;
+  const named = (rel: string): string => join(pinned.rootReal, rel);
+  const byFolder = fenceVerdict(pinned, setup, false);
+  return Object.freeze({
+    rootReal: pinned.rootReal,
+    policyCwd: pinned.policyCwd,
+    fenced: fenceVerdict(pinned, setup, true),
+    open: async (rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget> => {
+      const fence = (await fenceNow(setup)) ?? refuse('fenced');
+      if (fencedByName(fence, named(rel))) return refuse('fenced');
+      const target = await pinned.open(rel, options);
+      try {
+        const real = join(pinned.rootReal, target.canonical);
+        if (fencedByName(fence, real) || heldByFence(fence, target.identities)) return refuse('fenced');
+        if (
+          target.metadata.type === 'file' &&
+          (target.metadata.links ?? 1) > 1 &&
+          !(await hardLinkAllowed(fs, await immutable(), real))
+        )
+          return refuse('hard_link');
+      } catch (error) {
+        await target.close();
+        throw error;
+      }
+      return target;
+    },
+    probe: (): PinnedFileProbe => {
+      const inner = pinned.probe();
+      // Each folder is walked once for the probe's life, as today's `fencedRoot` remembered it.
+      let folders: { readonly fence: Fence; readonly ask: (folder: string) => Promise<boolean> } | undefined;
+      return {
+        // A verdict on names: one in the fence is `unsupported` (nothing a read would serve) without being walked.
+        classify: async (rels, budget) => {
+          const fence = (await fenceNow(setup)) ?? refuse('fenced');
+          if (folders?.fence.real !== fence.real) folders = { fence, ask: folderVerdict(pinned, fence) };
+          const asked = await byFolder(rels, folders.ask);
+          const kinds = await inner.classify(
+            rels.filter((_, index) => !asked[index]),
+            budget,
+          );
+          const out: PinnedFileKind[] = [];
+          let next = 0;
+          for (let index = 0; index < rels.length && (asked[index] || next < kinds.length); index += 1)
+            out.push(asked[index] ? 'unsupported' : (kinds[next++] as PinnedFileKind));
+          return out;
+        },
+        close: () => inner.close(),
+      };
+    },
+    close: () => pinned.close(),
+  });
+}
+
+/**
+ * A PERSON's read of an owner's root (`PinOptions.fence` `'none'`, today's absent fence): nothing beneath the held root
+ * is refused for the home or for a hard link, and {@link HeldRoot.fenced} still answers, for a caller that asks.
+ */
+function unfencedPin(pinned: UnjudgedRoot, setup: PinFenceSetup): HeldRoot {
+  return Object.freeze({ ...pinned, fenced: fenceVerdict(pinned, setup, true) });
+}
+
+/** An internal root's pin: it lives inside the home by design and reaches only its own subtree, so nothing is fenced. */
+function internalPin(pinned: UnjudgedRoot): HeldRoot {
+  return Object.freeze({ ...pinned, fenced: async (rels: readonly string[]) => rels.map(() => false) });
+}
+
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
@@ -752,7 +948,11 @@ function rootHandle(setup: HandleSetup): RootHandle {
         await pinned.close();
         throw error;
       }
-      return pinned;
+      if (scope.base.fence === undefined) return internalPin(pinned);
+      // Caller-scoped (S47): an agent's read is fenced beneath the root, a person's is not; saying nothing is fenced.
+      return options?.fence === 'none'
+        ? unfencedPin(pinned, { fs, home, immutable })
+        : fencedPin(pinned, { fs, home, immutable });
     },
   };
   HANDLES.set(handle, { plugin, real: path => real(path), realParent: path => realParent(path) });

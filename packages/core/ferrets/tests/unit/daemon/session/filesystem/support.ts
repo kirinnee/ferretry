@@ -1,3 +1,5 @@
+import { posix } from 'node:path';
+import type { PinOptions } from '@ferretry/kernel/contract';
 import {
   type ComponentIdentity,
   type DiffSide,
@@ -19,6 +21,7 @@ import {
   type SessionRootPinner,
   type SpawnBudget,
   type WorkBudget,
+  withinFolder,
 } from '../../../../../daemon/lib/session/filesystem/index.ts';
 
 /**
@@ -123,7 +126,25 @@ export interface FakeRootOptions {
   readonly onOpen?: (rel: string, attempt: number, tree: FakeTree) => void;
   /** Raised by every probe `classify`, so a test can stage a probe that cannot answer at all. */
   readonly probeError?: Error;
+  /**
+   * The state home this fake world keeps, standing in for the kernel's fence (`HeldRoot.fenced` and the agent pin's
+   * refusals): absolute home names, and the identities of the home and its pinned key paths. Unset, nothing is fenced.
+   */
+  readonly fence?: FakeFence;
 }
+
+export interface FakeFence {
+  readonly homes: readonly string[];
+  readonly identities: readonly { readonly dev: bigint; readonly ino: bigint }[];
+}
+
+const NO_FENCE: FakeFence = { homes: [], identities: [] };
+
+/** The parent of a root-relative name; `''` is the root. */
+const parentOf = (rel: string): string => {
+  const parent = posix.dirname(rel);
+  return parent === '.' ? '' : parent;
+};
 
 class FakePinnedRoot implements PinnedRoot {
   readonly opens: string[] = [];
@@ -136,7 +157,42 @@ class FakePinnedRoot implements PinnedRoot {
     private readonly tree: FakeTree,
     private readonly onOpen: FakeRootOptions['onOpen'],
     private readonly probeError?: Error,
+    private readonly fence: FakeFence = NO_FENCE,
+    /** An agent's pin (the kernel's default): every walk and probe beneath the root is fenced, as the kernel's is. */
+    private readonly walkFenced = false,
   ) {}
+
+  private byName(rel: string): boolean {
+    const named = rel === '' ? this.rootReal : posix.join(this.rootReal, rel);
+    return this.fence.homes.some(home => withinFolder(home, named));
+  }
+
+  private byIdentity(identities: readonly ComponentIdentity[] | undefined): boolean {
+    return (identities ?? []).some(entry =>
+      this.fence.identities.some(held => held.dev === entry.dev && held.ino === entry.ino),
+    );
+  }
+
+  /** The nearest folder at or above `folder` that the tree holds, by identity — the kernel's folder walk. */
+  private folderFenced(folder: string): boolean {
+    const node = this.tree.get(folder);
+    if (node === undefined) return folder === '' ? false : this.folderFenced(parentOf(folder));
+    return this.byIdentity(node.identities ?? identitiesFor(folder));
+  }
+
+  /** The kernel's `HeldRoot.fenced`, over the fake tree. */
+  async fenced(rels: readonly string[]): Promise<readonly boolean[]> {
+    this.verdicts.push([...rels]);
+    return rels.map(
+      rel =>
+        this.byName(rel) ||
+        this.folderFenced(parentOf(rel)) ||
+        (this.tree.get(rel)?.identities !== undefined && this.byIdentity(this.tree.get(rel)?.identities)),
+    );
+  }
+
+  /** Every batch the verdict was asked, in order. */
+  readonly verdicts: string[][] = [];
 
   get policyCwd(): string {
     return FAKE_POLICY_CWD;
@@ -148,9 +204,14 @@ class FakePinnedRoot implements PinnedRoot {
     this.opens.push(rel);
     this.onOpen?.(rel, attempt, this.tree);
 
+    if (this.walkFenced && this.byName(rel)) throw new FsError('denied', 'that path is inside the state home');
     const node = this.tree.get(rel);
     if (node === undefined) throw new FsError('not_found', `no such path: ${rel}`);
     if (node.error) throw node.error;
+    if (this.walkFenced && this.byIdentity(node.identities ?? identitiesFor(rel)))
+      throw new FsError('denied', 'that path is inside the state home');
+    if (this.walkFenced && (node.type ?? 'file') === 'file' && (node.links ?? 1) > 1)
+      throw new FsError('denied', 'that file has more than one name');
 
     const bytes = node.bytes ?? new Uint8Array();
     const target = new FakePinnedTarget(
@@ -184,6 +245,11 @@ class FakePinnedRoot implements PinnedRoot {
         const kinds: PinnedFileKind[] = [];
         for (const rel of rels) {
           if (budget?.expired() === true) break;
+          // The kernel's agent probe: a name in the home, by name or by its folder's identity, is not walked.
+          if (this.walkFenced && (this.byName(rel) || this.folderFenced(parentOf(rel)))) {
+            kinds.push('unsupported');
+            continue;
+          }
           let target: PinnedTarget;
           try {
             target = await this.open(rel);
@@ -220,18 +286,23 @@ class FakePinnedRoot implements PinnedRoot {
 
 export class FakeRootPinner implements SessionRootPinner {
   readonly pinnedCwds: string[] = [];
+  /** The options each pin was taken with, in order. */
+  readonly pinOptions: (PinOptions | undefined)[] = [];
   readonly roots: FakePinnedRoot[] = [];
 
   constructor(private readonly options: FakeRootOptions = {}) {}
 
-  async pin(cwd: string): Promise<PinnedRoot> {
+  async pin(cwd: string, options?: PinOptions): Promise<PinnedRoot> {
     this.pinnedCwds.push(cwd);
+    this.pinOptions.push(options);
     if (this.options.pinError) throw this.options.pinError;
     const root = new FakePinnedRoot(
       this.options.rootReal ?? FAKE_ROOT,
       this.options.tree ?? new Map(),
       this.options.onOpen,
       this.options.probeError,
+      this.options.fence,
+      this.options.fence !== undefined && options?.fence !== 'none',
     );
     this.roots.push(root);
     return root;

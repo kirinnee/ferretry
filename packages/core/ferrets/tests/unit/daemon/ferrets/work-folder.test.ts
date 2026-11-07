@@ -19,7 +19,7 @@ const record: FerretRecord = {
 };
 
 /** The service with only the seams `workFolder` reads; nothing else may be reached. */
-const service = (realPath?: (folder: string) => Promise<string | undefined>) =>
+const service = (realPath?: (ferret: FerretId, folder: string) => Promise<string | undefined>) =>
   new FerretsService(new FerretRegistry([record]), new FerretTokenDirectory(), {
     ready: async () => undefined,
     ...(realPath === undefined ? {} : { realPath }),
@@ -28,12 +28,13 @@ const service = (realPath?: (folder: string) => Promise<string | undefined>) =>
 describe('a ferret’s work folder (Accounts’ sign-in ordering)', () => {
   test('a recorded folder that is still its own real path is answered', async () => {
     const asked: string[] = [];
-    const answer = await service(async folder => {
-      asked.push(folder);
+    const answer = await service(async (ferret, folder) => {
+      asked.push(`${ferret} ${folder}`);
       return folder;
     }).workFolder(record.id);
     expect(answer).toEqual({ folder: '/home/owner/work/project' });
-    expect(asked).toEqual(['/home/owner/work/project']);
+    // The ferret travels with the question: its own work root decides, never another ferret's.
+    expect(asked).toEqual(['f1 /home/owner/work/project']);
   });
 
   test('a folder swapped for a symlink elsewhere, or one that cannot be resolved, answers nothing', async () => {
@@ -47,7 +48,7 @@ describe('a ferret’s work folder (Accounts’ sign-in ordering)', () => {
   });
 
   test('an unknown ferret, or no real-path seam bound, answers nothing', async () => {
-    expect(await service(async folder => folder).workFolder('nobody' as FerretId)).toBeUndefined();
+    expect(await service(async (_ferret, folder) => folder).workFolder('nobody' as FerretId)).toBeUndefined();
     expect(await service().workFolder(record.id)).toBeUndefined();
   });
 });
