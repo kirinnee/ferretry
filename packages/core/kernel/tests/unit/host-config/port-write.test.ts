@@ -62,6 +62,28 @@ describe('ConfigPort.fileState: absent, valid, invalid and held are told apart',
 });
 
 describe('ConfigPort.write / remove: a plugin writes its own files through the one writer', () => {
+  test('remove checks ifMatch inside its serialized mutation when a write races it', async () => {
+    const h = configHarness();
+    await h.files.write('updates', updatesDef, undefined, 'limit: 20\n', { confirmedLoosening: true });
+    const view = await h.files.read('updates', updatesDef);
+    if (view === undefined) throw new Error('expected the initial config view');
+    const port = h.files.port('updates');
+    const [removed, written] = await Promise.all([
+      port.remove(updatesDef, undefined, { ifMatch: view.etag }),
+      port.write(updatesDef, undefined, 'limit: 15\n'),
+    ]);
+    expect(removed.kind).toBe('written');
+    expect(written.kind).toBe('held');
+    // The removal queued first: a later write must survive it (and be judged against defaults).
+    expect(h.fs.snapshot().get(h.path('updates.yaml'))).toBe('limit: 15\n');
+
+    const stale = await port.remove(updatesDef, undefined, { ifMatch: view.etag });
+    expect(stale).toEqual({ kind: 'conflict' });
+    expect(h.fs.snapshot().get(h.path('updates.yaml'))).toBe('limit: 15\n');
+    await h.fs.remove(h.path('updates.yaml'));
+    expect(await port.remove(updatesDef, undefined, { ifMatch: view.etag })).toEqual({ kind: 'conflict' });
+  });
+
   test('its own def is written; a patch edits only the changed keys and keeps comments', async () => {
     const h = configHarness();
     await h.files.write('updates', updatesDef, undefined, '# kept\nlimit: 5\nnote: hi\n');

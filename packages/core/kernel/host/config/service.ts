@@ -120,7 +120,7 @@ export type ConfigWriteResult =
 export type ConfigRemoveResult =
   | { readonly kind: 'applied'; readonly loosened: readonly string[] }
   | { readonly kind: 'held'; readonly id: string; readonly sentences: readonly string[] }
-  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' };
+  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' | 'conflict' };
 
 export interface ConfigFileView {
   readonly path: string;
@@ -652,6 +652,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name' };
     return await serial(async () => {
       await load();
+      const disk = await readDisk(slot.path);
+      const etag = disk.kind === 'text' ? digest(disk.text) : ABSENT_CONFIG_ETAG;
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etag)
+        return { kind: 'refused', reason: 'conflict' };
       const current = settled.get(slot.path);
       const defaults = defaultsOf(def);
       const sentences =
@@ -683,14 +687,11 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     name: string | undefined,
     writeOptions: ConfigWriteOptions,
   ): Promise<ConfigWriteOutcome> => {
-    if (writeOptions.ifMatch !== undefined) {
-      const view = await read(plugin, def, name);
-      if (view !== undefined && view.etag !== writeOptions.ifMatch) return { kind: 'conflict' };
-    }
     const removed = await remove(plugin, def, name, writeOptions);
     if (removed.kind === 'applied') return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
     if (removed.kind === 'held')
       return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
+    if (removed.reason === 'conflict') return { kind: 'conflict' };
     return { kind: 'refused', reason: removed.reason, issues: [] };
   };
 

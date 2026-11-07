@@ -133,7 +133,7 @@ import {
   UNKNOWN_HOLDER_KEY,
   type AccessLeasePolicy,
 } from './limits.ts';
-import { createIdentitySigner } from './signer.ts';
+import { createIdentitySigner, signerFor } from './signer.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -204,7 +204,7 @@ export function createSessionLayer(deps: SessionLayerDeps): SessionLayerHost {
       const connection = {};
       return { open: peer => shared.open(carrier, peer, connection) };
     },
-    signer: createIdentitySigner(deps.identity),
+    signer: signerFor('connections', createIdentitySigner(deps.identity)),
     report: () => shared.report(),
     endMode: mode => shared.endMode(mode),
     close: () => shared.close(),

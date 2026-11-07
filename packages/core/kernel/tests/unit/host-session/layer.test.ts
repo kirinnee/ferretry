@@ -34,6 +34,22 @@ const req = (id: number, extra: Record<string, unknown> = {}): Record<string, un
   ...extra,
 });
 
+test('a carrier signer enforces SIGNER_USERS: claims and tunnels only, never catalogs or secret offers', async () => {
+  const { layer } = await fixture();
+  const signer = layer.signer;
+  const nonce = toBase64Url(relayCrypto.randomBytes(32));
+  expect((await signer.sign({ host: 'relay.example.test', nonce })).signature).not.toBe('');
+  expect((await signer.signTunnel({ action: 'release', host: 'relay.example.test', nonce })).signature).not.toBe('');
+  await expect(signer.signCatalog({ kind: 'manifest', canonical: utf8Bytes('{}') })).rejects.toThrow(
+    'connections may not ask',
+  );
+  await expect(
+    signer.signSecretOffer({ v: 1, importId: 'offer', publicKey: 'public', expiresAt: '2026-11-07T10:00:00Z' }),
+  ).rejects.toThrow('connections may not ask');
+  expect(Object.isFrozen(signer)).toBe(true);
+  layer.close();
+});
+
 describe('the session layer: arrival and principal', () => {
   test('G15 a carried request is never local, whatever the carrier, and nothing in a record changes that', async () => {
     const fx = await fixture();
