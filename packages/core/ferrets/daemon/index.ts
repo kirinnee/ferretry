@@ -367,7 +367,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     provides: { ferrets: service, workFolders },
     hooks: {
       'bearers:ferret': {
-        ferretFor: (digest: BearerDigest) => tokens.ferretFor(digest),
+        ferretFor: (digest: BearerDigest) => {
+          const ferret = tokens.ferretFor(digest);
+          const record = ferret === undefined ? undefined : registry.get(ferret);
+          // A failed token-store write may leave an old live digest on disk. A stopped (or absent) ferret still
+          // authenticates nobody after restart, even when that stale digest survived process-failure cleanup.
+          return record === undefined || record.state === 'stopped' ? undefined : ferret;
+        },
         generation: () => tokens.generation(),
       },
     },
