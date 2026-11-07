@@ -252,6 +252,8 @@ export interface InputJournal {
   /** A quarantine starting or ending: names and an end time, so a restart keeps it. */
   quarantine(sessionId: string, event: InputQuarantineEvent): Promise<void>;
   quarantines(sessionId: string): Promise<readonly InputQuarantineEvent[]>;
+  /** A separate durable hold log can discover sessions even when their request records are gone. */
+  quarantineSessions?(): Promise<readonly string[]>;
 }
 
 export interface InputAuditEntry {

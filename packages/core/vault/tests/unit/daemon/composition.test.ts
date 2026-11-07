@@ -11,7 +11,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest';
 import { ferret, owner, standInAdmission, type TestHost, testHost } from '@ferretry/kernel/testing';
-import { InputHoldsPort, InputTargets, OutputGuardPort, RedactionPort, VaultPort } from '../../../contract/index.ts';
+import { HoldsFile, InputRequestFiles, InputHoldsPort, InputTargets, OutputGuardPort, RedactionPort, VaultPort } from '../../../contract/index.ts';
 import { FakeInputTarget } from '../../../contract/testing/index.ts';
 import vault from '../../../daemon/index.ts';
 import { type InputRequest, padInputValue } from '../../../daemon/lib/inputs/wire.ts';
@@ -109,6 +109,25 @@ async function setup(beforeRestore?: (host: TestHost) => void) {
 }
 
 describe('the composed Vault input half', () => {
+  for (const damage of ['damaged', 'missing'] as const) {
+    test(`I82 durable hold evidence survives a ${damage} request record independently`, async () => {
+      const { host, deliver, id } = await setup();
+      expect((await deliver()).status).toBe(200);
+      const folder = host.state('vault');
+      expect(folder.raw(HoldsFile)).toContain('began');
+      if (damage === 'damaged') folder.plant(InputRequestFiles, '{broken', id);
+      else folder.files.delete(`input-requests/${id}.json`);
+      const restarted = await host.restart();
+      hosts.push(restarted);
+      if (damage === 'damaged') await expect(restarted.runJob('inputs-restore')).rejects.toThrow();
+      else await restarted.runJob('inputs-restore');
+      expect(restarted.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
+      // A global fallback alone is insufficient: the original durable holds must have been recovered too.
+      const response = await restarted.request('GET', `/v1/ferrets/${FERRET}/input-quarantines`);
+      expect(response.status).toBe(200);
+      expect(response.body).toContain('dev');
+    });
+  }
   test('I53 owner-dismissed asks cancel the current pending input and prevent any later delivery', async () => {
     const { host, asks, gate, api, id, request, target, deliver } = await setup();
     const askId = AskIdSchema.parse(request.agendaItemId);

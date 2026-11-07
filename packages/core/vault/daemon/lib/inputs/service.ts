@@ -1547,10 +1547,16 @@ export class InputRequestService {
    */
   async restore(): Promise<void> {
     const now = this.deps.clock.now();
-    const sessionIds = await this.deps.sessions.all().catch((error: unknown) => {
+    const durable = await (this.deps.journal.quarantineSessions?.() ?? Promise.resolve([])).catch((error: unknown) => {
       this.deps.quarantine.lock(now + QUARANTINE_MS);
       throw error;
     });
+    let damaged: { readonly error: unknown } | undefined;
+    const requested = await this.deps.sessions.all().catch((error: unknown) => {
+      damaged = { error };
+      return [];
+    });
+    const sessionIds = [...new Set([...durable, ...requested])];
     // Every quarantine comes back before any request does, and before any reader is let in: a slow
     // observation of one request must not leave a held terminal open, and a journal that cannot be read
     // holds that session's terminals instead.
@@ -1566,9 +1572,11 @@ export class InputRequestService {
     // A hold that was unresolved when the daemon stopped (a write may have landed) runs a full window from now.
     // Only the holds THIS replay brought back: a delivery admitted while it ran owns its hold and settles it itself.
     const settled = unresolved.map(hold => ({ hold, until: this.deps.quarantine.settle(hold) }));
-    this.deps.quarantine.unlock();
+    if (damaged === undefined) this.deps.quarantine.unlock();
+    else this.deps.quarantine.lock(now + QUARANTINE_MS);
     for (const { hold, until } of settled)
       await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, until).catch(() => undefined);
+    if (damaged !== undefined) throw damaged.error;
     for (const sessionId of sessionIds) {
       const latest = new Map<string, InputEvent>();
       for (const event of await this.deps.journal.history(sessionId)) {

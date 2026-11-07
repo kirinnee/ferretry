@@ -178,7 +178,8 @@ async function ferretsWithRequests(state: InputsContext['kernel']['state']): Pro
   const ferrets: string[] = [];
   for (const name of await state.list(InputRequestFiles)) {
     const read = await state.read(InputRequestFiles, name);
-    if (read.ok && read.value !== undefined) ferrets.push(read.value.ferret);
+    if (!read.ok || read.value === undefined) throw new Error('input request record cannot be read');
+    ferrets.push(read.value.ferret);
   }
   return ferrets;
 }

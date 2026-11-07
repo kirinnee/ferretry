@@ -146,6 +146,8 @@ export type InputAskRef = z.infer<typeof InputAskRefSchema>;
 /** One line of `state/vault/holds.jsonl`: evidence of a hold, never a value (today's quarantine events). */
 export const HoldEvidenceSchema = z.strictObject({
   format: z.literal(1),
+  /** Durable ownership: holds survive a missing or damaged mutable request record. */
+  ferret: z.string().min(1).max(128),
   at: InstantSchema,
   target: z.strictObject({ kind: z.string().min(1).max(32), key: z.string().min(1).max(128) }),
   event: z.enum(['began', 'ended', 'revealed']),

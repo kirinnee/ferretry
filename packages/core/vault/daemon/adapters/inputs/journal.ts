@@ -105,11 +105,12 @@ export class InputStateJournal implements InputJournal {
     return events;
   }
 
-  async quarantine(_sessionId: string, event: InputQuarantineEvent): Promise<void> {
+  async quarantine(sessionId: string, event: InputQuarantineEvent): Promise<void> {
     const request = event.hold.split('/')[0];
     for (const name of event.names) {
       const line: HoldEvidence = {
         format: 1,
+        ferret: sessionId,
         at: event.at as HoldEvidence['at'],
         target: { kind: 'terminal', key: name },
         event: event.type === INPUT_QUARANTINE_EVENT_TYPES.started ? 'began' : 'ended',
@@ -121,14 +122,9 @@ export class InputStateJournal implements InputJournal {
   }
 
   async quarantines(sessionId: string): Promise<readonly InputQuarantineEvent[]> {
-    const mine = new Set<string>();
-    for (const name of await this.state.list(InputRequestFiles)) {
-      const record = await this.record(name);
-      if (record?.ferret === sessionId) mine.add(record.id);
-    }
     const events: InputQuarantineEvent[] = [];
     for await (const line of this.state.lines(HoldsFile)) {
-      if (line.request === undefined || !mine.has(line.request) || line.event === 'revealed') continue;
+      if (line.ferret !== sessionId || line.event === 'revealed') continue;
       events.push({
         type: line.event === 'began' ? INPUT_QUARANTINE_EVENT_TYPES.started : INPUT_QUARANTINE_EVENT_TYPES.ended,
         sessionId,
@@ -142,6 +138,13 @@ export class InputStateJournal implements InputJournal {
     return events;
   }
 
+  /** The hold log owns its session identities; request records are never needed to discover or replay it. */
+  async quarantineSessions(): Promise<readonly string[]> {
+    const sessions = new Set<string>();
+    for await (const line of this.state.lines(HoldsFile)) sessions.add(line.ferret);
+    return [...sessions];
+  }
+
   /** The prompt a request was raised with, for its card after a restart. */
   async promptOf(requestId: string): Promise<string | undefined> {
     return (await this.record(requestId))?.raise.prompt;
@@ -149,7 +152,8 @@ export class InputStateJournal implements InputJournal {
 
   private async record(id: string): Promise<InputRequestRecord | undefined> {
     const read = await this.state.read(InputRequestFiles, id);
-    return read.ok ? read.value : undefined;
+    if (!read.ok) throw new Error('input request record cannot be read');
+    return read.value;
   }
 }
 
