@@ -1,7 +1,7 @@
 /**
  * The Pack cards of one transcript row, from what Conversation's `conversation.row` slot hands a panel.
  *
- * The slot offers a `tool` row's SHELL commands only (`ConversationRowToolCall`: the command line and the text it
+ * The slot offers a `tool` row's commands that run `fy` only (`ConversationRowToolCall`: the command line and the text it
  * printed). `projectPackCalls` reads a command's words, not the tool that ran it, so each is given back as the `Bash`
  * call it reads (`shellCommandOf`). The projection sees one row at a time: a `wait` is folded into the start card that
  * stands in the SAME row, and a refused start is marked retried only by a later start in the same row; a `wait` whose

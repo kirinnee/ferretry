@@ -43,7 +43,7 @@ function Cards({
 /**
  * The Pack card (`conversation.row` › `pack-call`): beside a transcript row that holds a Pack command the ferret ran
  * (`fy new`, `fy wait`, `fy recommend`), what it started, was refused, collected or was told. It reads the row Conversation
- * offers (the shell commands of a tool row, masked as the daemon masked the transcript) and the lead's pack table, so a
+ * offers (the `fy` commands of a tool row, masked as the daemon masked the transcript) and the lead's pack table, so a
  * started helper's state stays live. A row with no Pack command draws nothing and reads nothing.
  */
 export const createPanel = (client: PacksClient): ((props: RowPanelProps) => ReactNode) => {

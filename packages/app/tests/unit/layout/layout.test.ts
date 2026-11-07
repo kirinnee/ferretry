@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Manifest } from '@ferretry/kernel/manifest';
+import { COMPACT_LAYOUT } from '@ferretry/plugin-layouts/contract';
 import { planFrame, viewsOf } from '../../../src/layout/engine.ts';
 import {
   checkLayout,
@@ -36,8 +37,10 @@ const surfaces = [
     panels: [{ id: 'usage', slot: 'ferret.side', order: 3 }],
   }),
   plugin('conversation', { panels: [{ id: 'sitrep', slot: 'ferret.side', order: 2 }] }),
-  plugin('voice', { panels: [{ id: 'mic', slot: 'composer.tools', order: 1 }] }),
-  plugin('conversation-files', { panels: [{ id: 'attach', slot: 'composer.tools', order: 2 }] }),
+  // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, usage).
+  plugin('voice', { panels: [{ id: 'dictation', slot: 'composer.tools', order: 20 }] }),
+  plugin('conversation-files', { panels: [{ id: 'attachments', slot: 'composer.tools', order: 10 }] }),
+  plugin('quota', { panels: [{ id: 'composer-quota', slot: 'composer.tools', order: 90 }] }),
 ];
 const views = viewsOf(surfaces);
 
@@ -154,6 +157,17 @@ describe('the owner layout and this device (§5.3)', () => {
 });
 
 describe('the frame plan', () => {
+  test('every built-in layout draws the three composer.tools panels, in the order the composer always drew them', () => {
+    for (const layout of [DEFAULT_LAYOUT, COMPACT_LAYOUT]) {
+      for (const viewport of ['wide', 'phone'] as const) {
+        const ids = planFrame(resolveLayout(layout, viewport), views)
+          .panels('composer.tools')
+          .map(panel => panel.id);
+        expect(ids).toEqual(['attachments', 'dictation', 'composer-quota']);
+      }
+    }
+  });
+
   test('places nav entries, the side column and panels in layout order', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(e => (e.kind === 'screen' ? `${e.screen.plugin}.${e.screen.id}` : e.item))).toEqual([
@@ -165,7 +179,7 @@ describe('the frame plan', () => {
     ]);
     expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { plugin: 'ferrets', id: 'ferret' } });
     expect(plan.panels('ferret.side').map(p => p.id)).toEqual(['cards-of-ferret', 'sitrep', 'usage']);
-    expect(plan.panels('composer.tools').map(p => p.id)).toEqual(['mic', 'attach']);
+    expect(plan.panels('composer.tools').map(p => p.id)).toEqual(['attachments', 'dictation', 'composer-quota']);
   });
 
   test('a slot the layout does not list shows every declared panel by order', () => {

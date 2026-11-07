@@ -3,7 +3,7 @@ id: default
 nav: { side: left, style: rail, items: [agenda, ferrets, board, insights, settings] }
 side: { show: wide-only, holds: ferret }
 top: [daemon-picker, search]
-composer.tools: [mic, attach]
+composer.tools: [attachments, dictation, composer-quota]
 panels:
   ferret.side: [cards-of-ferret, sitrep, usage]
 density: comfortable

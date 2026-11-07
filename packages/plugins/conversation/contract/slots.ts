@@ -4,7 +4,7 @@
  * the row's entry in its props and the ferret as its `subject`. Conversation imports nothing of a contributor.
  *
  *   - `conversation.row` ........ beside a row of the transcript; the panel sees only {id, kind, text, at?, label?, tools?}; `tools`
- *                                 are a tool row's shell commands and their text answers, never another tool's input.
+ *                                 are a tool row's commands that run `fy`, and their text answers; never another command or tool.
  *   - `conversation.row-actions`  in an assistant message's footer: Voice offers "Read aloud" on the message.
  */
 
@@ -29,9 +29,10 @@ export interface ConversationRowEntry {
   readonly at?: number;
   readonly label?: string;
   /**
-   * A `tool` row's SHELL commands and what they printed, for a contributor that reads a ferret's own commands (Packs draws
-   * the helpers a ferret started). Only a call to a shell tool (Bash, exec_command, shell, local_shell) is offered, and only
-   * the command and the text of its answer: no other tool's input, no image, no attachment. Built from the daemon's
+   * A `tool` row's commands that run the product's own CLI (`fy`) and what they printed, for a contributor that reads what
+   * a ferret asked of it (Packs draws the helpers a ferret started). Only a call to a shell tool (Bash, exec_command,
+   * shell, local_shell) whose command runs `fy` is offered, and only the command and the text of its answer: no other
+   * command, no other tool's input, no image, no attachment. Built from the daemon's
    * redacted reading like `text`, so a value Vault masks is masked here too. Absent on every other row, and on a row that
    * is a send a ferret made.
    */
@@ -58,4 +59,29 @@ export const ROW_TOOL_TEXT_LIMIT = 100_000;
 /** The props every panel in a Conversation slot receives, beside its `subject` (the ferret). */
 export interface ConversationRowProps {
   readonly entry: ConversationRowEntry;
+}
+
+/** The slot the composer's context row offers (Voice's dictation, Conversation's attachments, Usage's quota). */
+export const COMPOSER_TOOLS_SLOT = 'composer.tools' as const;
+
+/**
+ * What the ferret a composer belongs to says about the account it runs on: the account's name (`agent`, the name a usage
+ * feed row carries) and the usage the ferret's own monitor stamped on its state. Only these facts are handed to a
+ * `composer.tools` panel; no credential is among them.
+ */
+export interface ComposerAccount {
+  readonly agent: string;
+  readonly usage?: {
+    readonly usageAuthOk?: boolean;
+    readonly usage5hPercent?: number;
+    readonly usageWeeklyPercent?: number;
+    readonly usageAtLimit?: boolean;
+    readonly usage5hResetAt?: number;
+    readonly usageWeeklyResetAt?: number;
+  };
+}
+
+/** The props every panel in `composer.tools` receives, beside its `subject` (the ferret); absent outside a ferret's chat. */
+export interface ComposerToolsProps {
+  readonly account?: ComposerAccount;
 }

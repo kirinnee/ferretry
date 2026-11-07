@@ -166,6 +166,42 @@ describe('the shell commands a tool row offers a slot', () => {
     expect(JSON.stringify(offered)).not.toContain(SECRET);
   });
 
+  test('a plain shell command and what it printed never reach a slot; a command that runs fy does', () => {
+    const offered = rowSlotEntry(
+      shellRow([
+        { key: 'a', use: { name: 'Bash', input: { command: 'ls ~/.ssh && cat id_rsa' } }, result: { text: SECRET } },
+        { key: 'b', use: { name: 'Bash', input: { command: 'env' } }, result: { text: `TOKEN=${SECRET}` } },
+        { key: 'c', use: { name: 'Bash', input: { command: `echo "fy new" ${SECRET}` } }, result: { text: SECRET } },
+        {
+          key: 'd',
+          use: { name: 'shell', input: { command: ['bash', '-lc', 'cat .env.local'] } },
+          result: { text: SECRET },
+        },
+        {
+          key: 'e',
+          use: { name: 'Bash', input: { command: 'cd /repo && direnv exec . fy new --auto "go"' } },
+          result: { text: 'Started nadia' },
+        },
+        {
+          key: 'f',
+          use: { name: 'exec_command', input: { cmd: '/usr/local/bin/fy wait nadia' } },
+          result: { text: 'done' },
+        },
+      ] as never),
+    );
+    expect(offered?.tools?.map(call => call.key)).toEqual(['e', 'f']);
+    expect(JSON.stringify(offered)).not.toContain(SECRET);
+  });
+
+  test('a row whose only shell commands are not fy has no tools key', () => {
+    const offered = rowSlotEntry(
+      shellRow([
+        { key: 'a', use: { name: 'Bash', input: { command: 'cat .env' } }, result: { text: SECRET } },
+      ] as never),
+    );
+    expect(offered).toEqual({ id: 'tools:1', kind: 'tool', text: 'ran a tool' });
+  });
+
   test('a send a ferret made offers no tools, and no other row kind does either', () => {
     const call = { key: 'k', use: { name: 'Bash', input: { command: `fy send x "${SECRET}"` } } };
     expect(rowSlotEntry(shellRow([call] as never, { sent: { to: 'x' } }))?.tools).toBeUndefined();
@@ -177,7 +213,7 @@ describe('the shell commands a tool row offers a slot', () => {
       shellRow([
         {
           key: 'k',
-          use: { name: 'Bash', input: { command: 'x' } },
+          use: { name: 'Bash', input: { command: 'fy wait x' } },
           result: { text: 'a'.repeat(ROW_TOOL_TEXT_LIMIT + 5) },
         },
       ] as never),
