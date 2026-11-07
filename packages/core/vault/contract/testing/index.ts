@@ -668,6 +668,7 @@ export class FakeSealedDocuments implements SealedDocumentsApi {
       return name;
     };
     return {
+      names: async () => [...entries().keys()],
       put: async (name, value) => {
         entries().set(named(name), typeof value === 'string' ? new TextEncoder().encode(value) : value.slice());
       },
@@ -698,6 +699,29 @@ export function sealedDocumentsConformance(
   const VALUE = 'rt-test-0123456789abcdef';
   const ENTRY = 'MCP_DOCS_REFRESH' as SealedName;
   describe(`sealed documents conformance: ${name}`, () => {
+    test('names lists exactly this document’s stored names, never values or another plugin’s names', async () => {
+      const { port, mine, theirs, document } = await make();
+      const own = port.open(mine, document);
+      const other = port.open(theirs, document);
+      const bytesName = 'lnk_bytes-1' as SealedName;
+      const otherName = 'OTHER_PLUGIN_ONLY' as SealedName;
+      expect(await own.names()).toEqual([]);
+      await other.put(otherName, 'other-plugin-value');
+      await own.put(ENTRY, VALUE);
+      await own.put(bytesName, new Uint8Array([0, 1, 254, 255]));
+      await own.put(ENTRY, `${VALUE}-rotated`);
+
+      const names = await port.open(mine, document).names();
+      expect([...names].sort()).toEqual([ENTRY, bytesName].sort());
+      expect(names.every(entry => typeof entry === 'string')).toBe(true);
+      expect(JSON.stringify(names).includes(VALUE)).toBe(false);
+      expect(await other.names()).toEqual([otherName]);
+
+      await own.delete(ENTRY);
+      expect(await own.names()).toEqual([bytesName]);
+      await own.delete(bytesName);
+      expect(await own.names()).toEqual([]);
+    });
     test('a plugin puts, gets and deletes its own sealed values', async () => {
       const { port, mine, document } = await make();
       const own = port.open(mine, document);
