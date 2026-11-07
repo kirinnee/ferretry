@@ -29,7 +29,10 @@ test('I78 I84 page probe and field clear retain the target adapter receiver and 
   const job: ClearJob = { navigationId: 'n1', fields: [{ frameId: 'frame-1', backendNodeId: 10 }] };
   expect(await through.probe(ferret, target, seen.facts, ['value'])).toBe('hidden');
   expect(await through.clear(ferret, target, job)).toBe('cleared');
-  expect(page.checked).toEqual([[ferret, target, seen.facts, ['value']], [ferret, target, job]]);
+  expect(page.checked).toEqual([
+    [ferret, target, seen.facts, ['value']],
+    [ferret, target, job],
+  ]);
   const absent = new PageTargetThroughHook(() => undefined);
   expect(await absent.probe(ferret, target, seen.facts, ['value'])).toBe('aborted');
   expect(await absent.clear(ferret, target, job)).toBe('unknown');

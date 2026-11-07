@@ -33,7 +33,9 @@ export class PageTargetThroughHook implements InputTargetPort {
 
   async observe(sessionId: string, target: InputTarget, fields: readonly InputTargetField[]): Promise<ObserveResult> {
     const page = this.provider('page');
-    return page === undefined ? { ok: false, reason: 'unsupported' } : await page.observe(ferretOf(sessionId), target, fields);
+    return page === undefined
+      ? { ok: false, reason: 'unsupported' }
+      : await page.observe(ferretOf(sessionId), target, fields);
   }
 
   async refind(
@@ -108,6 +110,13 @@ export class TerminalTargetThroughHook implements TerminalInputTargetPort {
     const terminal = this.provider('terminal');
     return terminal === undefined
       ? 'target_gone'
-      : await terminal.type(ferretOf(sessionId), target, [{ field: INPUT_SINGLE_FIELD_ID, text }], submit, expected, options);
+      : await terminal.type(
+          ferretOf(sessionId),
+          target,
+          [{ field: INPUT_SINGLE_FIELD_ID, text }],
+          submit,
+          expected,
+          options,
+        );
   }
 }

@@ -317,7 +317,12 @@ describe('InputHolds.observed, the acts the sign-in lock hears', () => {
     const observer = observerAt();
     const sessions: string[] = [];
     const acts = new HeardActs(observer, () => sessions);
-    const holds = new InputHoldsOverService(noCards, { sessions: () => [], until: () => undefined, replayUntil: () => undefined }, () => NOW, acts);
+    const holds = new InputHoldsOverService(
+      noCards,
+      { sessions: () => [], until: () => undefined, replayUntil: () => undefined },
+      () => NOW,
+      acts,
+    );
     const steer = acts.view(observer);
 
     // A script before the ferret holds anything: no session to file it under, so the page itself is kept.

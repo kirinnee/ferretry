@@ -270,7 +270,7 @@ describe('a page field', () => {
   });
 
   it('I95 should ignore a terminal’s saved OBSERVED proof and use only the card’s current facts for its lock', () => {
-    for (const facts of [sudo({ echo: 'on' }), sudo({ trustedProgram: false }), sudo()]) {
+    for (const facts of [sudo({ echo: 'on' }), sudo({ canonical: false }), sudo()]) {
       const observed: LoginObserved = {
         ...proven(facts),
         at: 'sudo',

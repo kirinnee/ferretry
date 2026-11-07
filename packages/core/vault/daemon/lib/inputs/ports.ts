@@ -1,5 +1,23 @@
-import type { AccountList, CopyMeta, CopyName, CopyOrigin, LoginEntryId, LoginFieldRole, SignInChoiceContext, TwoFactorId } from './borrowed.ts';
-import type { AgendaId, InputActor, InputAuditDetail, InputAuditEvent, InputEvent, InputFieldElement, InputQuarantineEvent, InputRequest } from './wire.ts';
+import type {
+  AccountList,
+  CopyMeta,
+  CopyName,
+  CopyOrigin,
+  LoginEntryId,
+  LoginFieldRole,
+  SignInChoiceContext,
+  TwoFactorId,
+} from './borrowed.ts';
+import type {
+  AgendaId,
+  InputActor,
+  InputAuditDetail,
+  InputAuditEvent,
+  InputEvent,
+  InputFieldElement,
+  InputQuarantineEvent,
+  InputRequest,
+} from './wire.ts';
 import type { InputShot, InputTarget, InputTargetFacts } from '../../../contract/index.ts';
 import type { ClearJob, ClearOutcome } from '../../../contract/index.ts';
 
