@@ -631,12 +631,34 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     if (entry.decl.input !== undefined && !entry.decl.input.safeParse(input).success)
       return { text: `The input for ${name} does not fit.`, isError: true };
     const handle = entry.handle;
-    const call = { request, params: new Map(), ...decision.standing } as Parameters<ToolHandler>[0];
+    const params = new Map<string, string>();
+    const call = { request, params, ...decision.standing } as Parameters<ToolHandler>[0];
+    let result: ToolResult;
+    let status: number;
     try {
-      return await runInCall({ actor: decision.actor }, () => handle(call, input));
+      result = await runInCall({ actor: decision.actor }, () => handle(call, input));
+      status = result.isError === true ? 500 : 200;
     } catch (error) {
-      return { text: error instanceof ApiError ? error.message : 'The tool failed.', isError: true };
+      result = { text: error instanceof ApiError ? error.message : 'The tool failed.', isError: true };
+      status = error instanceof ApiError ? error.status : 500;
     }
+    if ('record' in entry.decl.audit) {
+      try {
+        bindings.admission()?.recorded?.({
+          table: 'tool',
+          descriptor,
+          request,
+          params,
+          standing: decision.standing,
+          actor: decision.actor,
+          ...(request.principal === undefined ? {} : { principal: request.principal }),
+          status,
+        });
+      } catch {
+        // The record is Gate's; the tool's answer stands.
+      }
+    }
+    return result;
   };
 
   // The session layer: one per daemon; every carrier opens a link per session on it (§4.8).
