@@ -12,6 +12,7 @@
  */
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { looksLikeRawSecret, RAW_SECRET_FIX, RAW_SECRET_MESSAGE } from './raw-secret.ts';
 
 // ─── foreign pieces, inlined ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -329,6 +330,13 @@ export const McpEnvSchema = z.record(z.string(), z.string()).check(ctx => {
         message:
           'not a secret reference: a secret name is uppercase letters, digits and underscores, as in ${secret:WORK_KEY}',
         input: value,
+        path: [name],
+      });
+    if (looksLikeRawSecret(name, value))
+      ctx.issues.push({
+        code: 'custom',
+        message: `${RAW_SECRET_MESSAGE}: ${RAW_SECRET_FIX}`,
+        input: undefined,
         path: [name],
       });
   }
