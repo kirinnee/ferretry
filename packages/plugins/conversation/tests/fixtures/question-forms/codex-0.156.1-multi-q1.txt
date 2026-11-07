@@ -1,0 +1,14 @@
+  chose.
+
+
+
+  Question 1/2 (2 unanswered)
+  Which colour should the banner use?
+
+  › 1. Red (Recommended)  Warm and loud.
+    2. Blue               Calm and quiet.
+    3. None of the above  Optionally, add details in notes (tab).
+
+  tab to add notes | enter to submit answer | ←/→ to navigate questions
+  esc to interrupt
+

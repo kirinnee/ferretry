@@ -105,6 +105,12 @@ export function fakeConversation(options: { readonly now?: () => Instant } = {})
     logPage: async ferret => ok({ v: 1, ferret, log: '', start: 0, file: 'fake' }),
     logSearch: async (ferret, query) => ok({ v: 1, ferret, query, file: 'fake', matches: [], truncated: false }),
 
+    question: async ferret => {
+      const toolUseId = questions.get(ferret);
+      return toolUseId === undefined
+        ? undefined
+        : { format: 1, toolUseId, text: 'A question', options: [], multiple: false, askedAt: now() };
+    },
     answer: async (ferret, request) => {
       if (questions.get(ferret) !== request.toolUseId) return refuse('not_found', 'no such question is waiting');
       questions.delete(ferret);

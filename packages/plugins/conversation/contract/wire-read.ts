@@ -95,7 +95,3 @@ export const HandoffSchema = z.strictObject({
   text: z.string(),
 });
 export type Handoff = z.infer<typeof HandoffSchema>;
-
-/** `GET /v1/ferrets/:ferretId/events` is a server-sent feed; each event is an opaque control record the app reads by name. */
-export const FerretEventSchema = z.strictObject({ name: z.string().min(1), data: z.unknown() });
-export type FerretEvent = z.infer<typeof FerretEventSchema>;
