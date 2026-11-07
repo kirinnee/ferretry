@@ -1,4 +1,3 @@
-// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
 /**
  * THE PICKABLE RUNTIME ROSTER OF ONE DAEMON.
  *

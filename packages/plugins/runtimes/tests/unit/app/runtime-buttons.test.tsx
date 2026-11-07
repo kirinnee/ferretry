@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ChosenRuntime, RuntimeButtons } from '../../../app/components/runtime-buttons.tsx';
 import { AccountPickerStore } from '../../../app/lib/account-picker-store.ts';
-import type { AccountUsageRow } from '../../../app/lib/daemon-picker-model.ts';
+import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
 import { interact, mount, must } from '../support/dom.ts';
 import { healthMap, pickerAccount, pickerHealth } from './support/picker.ts';
 
@@ -30,7 +30,7 @@ interface Harness {
   chosen: ChosenRuntime | null;
 }
 
-const host = (store: AccountPickerStore, state: Harness, extra: { usage?: AccountUsageRow[] } = {}) => {
+const host = (store: AccountPickerStore, state: Harness, extra: { usage?: UsageAccountView[] } = {}) => {
   const element = (
     <RuntimeButtons
       store={store}

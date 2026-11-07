@@ -1,4 +1,3 @@
-// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
 /**
  * The pickable runtime roster of ONE daemon, and each login's health beside it.
  *

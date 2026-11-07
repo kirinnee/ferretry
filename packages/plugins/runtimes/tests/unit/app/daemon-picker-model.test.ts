@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-
+import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
 import {
-  type AccountUsageRow,
   accountLabel,
   accountPickerOptions,
   findAccountOption,
@@ -49,7 +48,7 @@ const codexAccount = (overrides: Partial<Account> = {}): Account => ({
   ...overrides,
 });
 
-const usageRow = (overrides: Partial<AccountUsageRow> = {}): AccountUsageRow => ({
+const usageRow = (overrides: Partial<UsageAccountView> = {}): UsageAccountView => ({
   agent: 'claude-auto-atelier',
   ...overrides,
 });

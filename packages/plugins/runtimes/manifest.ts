@@ -1,5 +1,7 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
+import { UsagePort } from '@ferretry/plugin-usage/contract';
+import { MOVE_ACCOUNT_SLOT, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
@@ -33,6 +35,8 @@ export default definePlugin({
   words: RUNTIMES_WORDS,
 
   needs: { ferrets: FerretsPort, logins: LoginsPort },
+  // Optional (§2.4): the account picker shows each runtime's quota from Usage's feed. Usage off = the picker without quota.
+  uses: { usage: UsagePort },
   provides: { runtimes: RuntimesPort },
 
   actions: {
@@ -218,8 +222,13 @@ export default definePlugin({
       settingsTab('profiles', { label: 'Profiles', order: 11 }),
       settingsTab('model-sets', { label: 'Model sets', order: 12 }),
     ],
-    // The runtime picker above the composer (today's runtime controls on a new ferret).
-    panels: [panel('composer.tools', { id: 'runtime-picker', order: 10 })],
+    // The model and effort switches above the composer, and the account picker (with its health and quota) that
+    // Ferrets' new-ferret and move pages OFFER as slots: Runtimes contributes, Ferrets imports nothing of it.
+    panels: [
+      panel('composer.tools', { id: 'runtime-picker', order: 10 }),
+      panel(NEW_FERRET_ACCOUNT_SLOT, { id: 'new-ferret-account', order: 10 }),
+      panel(MOVE_ACCOUNT_SLOT, { id: 'move-account', order: 10 }),
+    ],
   },
 
   data: {

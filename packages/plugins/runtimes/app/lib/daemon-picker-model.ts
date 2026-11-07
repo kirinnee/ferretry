@@ -1,5 +1,3 @@
-// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
-// GAP(usage): a hand copy of Usage's contract; it must read Usage's contract when mounted.
 /**
  * PURE PROJECTION FOR THE RUNTIME PICKER.
  *
@@ -18,21 +16,8 @@
  * `defaultModel`).
  */
 
+import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
 import type { PickerAccount, PickerAccountHealth } from './account-picker-catalog.ts';
-
-/**
- * The cached quota feed's own row, narrowed to what a picker renders. The Usage plugin owns that feed; the caller
- * hands its rows in, so this half names only the fields it reads.
- */
-export interface AccountUsageRow {
-  readonly agent: string;
-  readonly fiveHourPercent?: number;
-  readonly weeklyPercent?: number;
-  readonly fiveHourResetAt?: number;
-  readonly weeklyResetAt?: number;
-  readonly atLimit?: boolean;
-  readonly authOk?: boolean;
-}
 
 export interface AccountPickerOption {
   /** Stable option identity: the runtime's id. */
@@ -54,7 +39,7 @@ export interface AccountPickerOption {
   readonly available: boolean;
   readonly unavailableReason: string | null;
   /** The cached quota row joined by `wrapper`, or `null` when the feed has none. */
-  readonly quota: AccountUsageRow | null;
+  readonly quota: UsageAccountView | null;
   /** The login's status joined by `credentialId`, or `null` while it is unread. */
   readonly health: PickerAccountHealth | null;
   /** Lowercased haystack: display name, harness, wrapper, default model, declared model ids. */
@@ -112,7 +97,7 @@ const accountSearchText = (account: PickerAccount): string =>
 
 const accountPickerOption = (
   account: PickerAccount,
-  usage: readonly AccountUsageRow[],
+  usage: readonly UsageAccountView[],
   health: ReadonlyMap<string, PickerAccountHealth> | null,
 ): AccountPickerOption => ({
   key: account.id,
@@ -142,7 +127,7 @@ const accountPickerOption = (
  */
 export const accountPickerOptions = (
   accounts: readonly PickerAccount[] | null,
-  usage: readonly AccountUsageRow[],
+  usage: readonly UsageAccountView[],
   health: ReadonlyMap<string, PickerAccountHealth> | null,
 ): readonly AccountPickerOption[] | null =>
   accounts === null ? null : accounts.map(account => accountPickerOption(account, usage, health));

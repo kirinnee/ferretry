@@ -1,4 +1,3 @@
-// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
 /**
  * THE NEW-SESSION RUNTIME CHOICE: one button per runtime, split Claude and Codex.
  *
@@ -25,22 +24,23 @@
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { Check } from 'lucide-react';
+import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
+import { Activity, Check } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo } from 'react';
 import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { accountHealthView } from '../lib/account-health-view.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import type { AccountPickerStore } from '../lib/account-picker-store.ts';
-import { QuotaReadout } from './quota-readout.tsx';
-import { cn } from '../ui.ts';
+import { quotaParts } from '../lib/quota-text.ts';
+import { Button, cn } from '../ui.ts';
 import {
   type AccountPickerOption,
-  type AccountUsageRow,
   accountLabel,
   accountPickerOptions,
   firstUsableAccountOption,
   fleetHarnessLabel,
   hintedAccountOption,
+  sameHarnessAccountOptions,
   sessionCapableAccountOptions,
 } from '../lib/daemon-picker-model.ts';
 
@@ -57,6 +57,8 @@ const HEALTH_TONE = {
   muted: 'text-faint',
 } as const;
 
+const QUOTA_TONE = { muted: 'text-faint', warn: 'text-warn', err: 'text-err' } as const;
+
 /** A runtime the form chose. The client the store reads through belongs to one daemon, so it names no pairing. */
 export interface ChosenRuntime {
   readonly account: AccountPickerOption;
@@ -69,8 +71,8 @@ export interface RuntimeButtonsProps {
   readonly client: Pick<PluginClient, 'subscribe'>;
   /** The instant the quota readouts are judged against, in epoch milliseconds: the shell's clock, never this file's. */
   readonly now: number;
-  /** The daemon's CACHED quota rows, joined by wrapper. Rows, not a store: the app already polls them. */
-  readonly usage: readonly AccountUsageRow[];
+  /** Usage's quota rows for this daemon, joined by wrapper (empty when Usage is off). */
+  readonly usage: readonly UsageAccountView[];
   /** Why the cached quota feed is missing, if it is. Never fails the roster. */
   readonly usageError: string | null;
   /** The typed draft: the wrapper a session would start on. */
@@ -82,6 +84,10 @@ export interface RuntimeButtonsProps {
   readonly noAccounts: ReactNode;
   /** A Launch button's runtime, used only when offered and usable. */
   readonly preferred?: string;
+  /** Narrow the offer to one harness (a move stays within its harness). */
+  readonly harness?: PickerAccount['kind'];
+  /** Offer "Check now", the one place the host is asked to check each login again. Never done on mount. */
+  readonly offerHealthCheck?: boolean;
   /** The id the typed fallback input takes, so the field's own label keeps pointing at it. */
   readonly fallbackId: string;
   /** The element naming this field, for the radiogroup. */
@@ -116,7 +122,7 @@ function RuntimeButton({
   readonly onChoose: () => void;
 }): ReactNode {
   const health = account.health === null ? null : accountHealthView(account.health, now);
-  const hasQuota = account.quota !== null;
+  const quota = quotaParts(account.quota, now);
   return (
     <label
       className={cn(
@@ -142,9 +148,18 @@ function RuntimeButton({
         <span className="min-w-0 break-words text-ui font-semibold text-fg">{account.displayName}</span>
       </span>
       <span className="mono min-w-0 break-words text-meta text-muted">{runtimeHint(account)}</span>
-      {hasQuota || health !== null ? (
+      {quota.length > 0 || health !== null ? (
         <span className="flex flex-wrap items-center gap-x-2 text-2xs">
-          <QuotaReadout className="text-2xs" quota={account.quota} />
+          {quota.map(part => (
+            <span
+              className={cn('mono shrink-0', QUOTA_TONE[part.tone])}
+              data-runtime-quota=""
+              key={part.text}
+              {...(part.title === undefined ? {} : { title: part.title })}
+            >
+              {part.text}
+            </span>
+          ))}
           {health === null ? null : (
             <span className={cn('mono', HEALTH_TONE[health.tone])} title={health.detail}>
               {health.label.toLowerCase()}
@@ -177,6 +192,8 @@ export function RuntimeButtons({
   onChosen,
   noAccounts,
   preferred,
+  harness,
+  offerHealthCheck = false,
   fallbackId,
   labelId,
   fallbackPlaceholder,
@@ -185,10 +202,10 @@ export function RuntimeButtons({
   const published = slice.catalog?.accounts ?? null;
   const health = slice.health;
   // Only an agent runtime can run a session; the person's own CLI is published too and is refused.
-  const offered = useMemo(
-    () => sessionCapableAccountOptions(accountPickerOptions(published, usage, health)),
-    [published, usage, health],
-  );
+  const offered = useMemo(() => {
+    const capable = sessionCapableAccountOptions(accountPickerOptions(published, usage, health));
+    return harness === undefined ? capable : sameHarnessAccountOptions(capable, harness);
+  }, [published, usage, health, harness]);
   const suggested = hintedAccountOption(offered, preferred) ?? firstUsableAccountOption(offered);
   const selected = useMemo(
     () => offered?.find(option => option.available && option.wrapper === value) ?? null,
@@ -253,6 +270,23 @@ export function RuntimeButtons({
           </fieldset>
         ))}
       </div>
+      {offerHealthCheck ? (
+        <div className="flex flex-wrap items-center gap-sm" data-picker-health={slice.healthStatus}>
+          <Button
+            aria-busy={slice.healthStatus === 'loading' || undefined}
+            disabled={slice.healthStatus === 'loading'}
+            onClick={() => void store.checkHealth().catch(() => undefined)}
+            size="sm"
+            type="button"
+          >
+            <Activity aria-hidden="true" className="shrink-0" size={14} />
+            {slice.healthStatus === 'loading' ? 'Checking…' : 'Check now'}
+          </Button>
+          <span className="min-w-0 text-meta leading-base text-muted">
+            Checks sign-ins and read-only provider status. It does not ask a model and uses no inference quota.
+          </span>
+        </div>
+      ) : null}
       {slice.status === 'error' && slice.error !== null ? (
         <p className="m-0 text-meta leading-base text-warn" role="status">
           {slice.error} The runtimes shown may be out of date.

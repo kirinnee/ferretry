@@ -10,7 +10,7 @@
 
 import type { LoginStatusWord, ProviderQuotaReading, ProviderQuotaWindow } from '@ferretry/plugin-logins/contract';
 import { cn } from '../../../ui.ts';
-import { formatQuotaMoney, quotaResetsIn } from '../../../components/quota-readout.tsx';
+import { formatQuotaMoney, quotaResetsIn } from '../../../lib/quota-text.ts';
 
 interface AccountStatusDefinition {
   readonly glyph: string;
