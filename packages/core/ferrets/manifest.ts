@@ -380,5 +380,5 @@ export default definePlugin({
     ],
     takes: [{ hook: Bearers, key: 'ferret' }],
   },
-  permissions: { roots: ['agent-homes', 'worktrees', 'work'] },
+  permissions: { roots: ['worktrees', 'work'] },
 });
