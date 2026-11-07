@@ -149,6 +149,26 @@ export function implementDaemon<const M extends Manifest>(
 
 // ─── app half ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** One open socket route, from the plugin's side (the app shell's `TransportSocket`). */
+export interface PluginSocket {
+  send(frame: string | Uint8Array): void;
+  close(): void;
+}
+
+/** What a plugin hears on a socket route (the app shell's `SocketListeners`). */
+export interface PluginSocketListeners {
+  readonly onFrame: (frame: string | Uint8Array) => void;
+  readonly onClose: (reason: string) => void;
+}
+
+/**
+ * The only headers a half may set on a call (lead decision 7): today's idempotency id for a move or a fork. Anything
+ * else is the shell's (credentials, the contract hash).
+ */
+export interface PluginCallHeaders {
+  readonly 'x-fy-request-id'?: string;
+}
+
 /** The per-daemon generated client a half talks through (§9.6). It checks the plugin's inventory entry first. */
 export interface PluginClient {
   call<Answer = unknown>(
@@ -157,9 +177,16 @@ export interface PluginClient {
       readonly params?: Readonly<Record<string, string>>;
       readonly query?: Readonly<Record<string, string>>;
       readonly body?: unknown;
+      /** Allow-listed: `x-fy-request-id` only, through the same contract-hash guard as the call. */
+      readonly headers?: PluginCallHeaders;
     },
   ): Promise<Answer>;
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;
+  /**
+   * A guarded duplex socket route (F2): `key` is a socket the manifest (or a contract it imports) declares, opened
+   * through the same contract-hash guard as `call`. Optional until the app shell and the CLI fill it in.
+   */
+  socket?(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
 }
 
 /** A UI component, framework-neutral here; the app shell narrows it to React. */
