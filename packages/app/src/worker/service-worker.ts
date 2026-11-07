@@ -28,7 +28,6 @@ import { answerReleaseRequest, parseReleaseRequest, ReleaseKeeper } from '../rel
 import { isLoopbackHost } from '../release/loopback.ts';
 import type { ReleaseRewrite } from '../release/manifest.ts';
 import { CacheStorageReleaseCaches, FetchReleaseNetwork, IndexedDbReleaseState } from '../release/storage.ts';
-import { workerExtensions } from './extension-list.ts';
 import { extensionScope, type WorkerGlobals, WorkerExtensionHost } from './extensions.ts';
 
 declare const __FY_RELEASE_KEY__: string;
@@ -83,21 +82,27 @@ const keeper = new ReleaseKeeper({
 });
 
 worker.addEventListener('install', event => {
+  event.stopImmediatePropagation();
   // An install never FAILS on a refused release: a worker that failed to install could not raise
   // the alarm about the next one, and the network still serves the page exactly as it would have.
   event.waitUntil(keeper.update().catch(() => undefined));
 });
 
 worker.addEventListener('activate', event => {
+  event.stopImmediatePropagation();
   event.waitUntil(worker.clients.claim());
 });
 
 worker.addEventListener('fetch', event => {
+  // Own EVERY response before any extension is evaluated. A later listener cannot replace it.
+  event.stopImmediatePropagation();
   const { request } = event;
-  if (request.method !== 'GET') return;
   const url = new URL(request.url);
   // Not this site: a daemon, a relay, anything else. Never touched.
-  if (url.origin !== origin) return;
+  if (request.method !== 'GET' || url.origin !== origin) {
+    event.respondWith(globalThis.fetch(request));
+    return;
+  }
   const navigate = request.mode === 'navigate';
   // Every page load also re-checks the site (two small files; one check at a time). That is what
   // keeps a release a page put back from outliving one load after the worker starts: the check
@@ -138,11 +143,14 @@ worker.addEventListener('message', event => {
 
 // ─── plugin worker extensions (after every release listener) ──────────────────────────────────────────────────────
 
-const extensions = new WorkerExtensionHost(workerExtensions);
+// This must stay dynamic: a static import evaluates plugin module initializers BEFORE the listeners above.
+// The build validates the complete extension import graph before compiling it into this signed file.
+const extensions = import('./extension-list.ts')
+  .then(({ workerExtensions }) => new WorkerExtensionHost(workerExtensions))
+  .catch(() => new WorkerExtensionHost([]));
 const scope = (): ReturnType<typeof extensionScope> =>
   extensionScope({
     origin,
-    indexedDB: globalThis.indexedDB,
     now: () => Date.now(),
     registration: worker.registration,
     clients: worker.clients,
@@ -155,11 +163,15 @@ worker.addEventListener('push', event => {
   } catch {
     payload = null;
   }
-  event.waitUntil(extensions.push({ payload }, scope()).catch(() => undefined));
+  event.waitUntil(extensions.then(host => host.push(Object.freeze({ payload }), scope())).catch(() => undefined));
 });
 
 worker.addEventListener('notificationclick', event => {
   event.notification.close();
   const { tag, data } = event.notification;
-  event.waitUntil(extensions.notificationClick({ tag, data, action: event.action }, scope()).catch(() => undefined));
+  event.waitUntil(
+    extensions
+      .then(host => host.notificationClick(Object.freeze({ tag, data, action: event.action }), scope()))
+      .catch(() => undefined),
+  );
 });

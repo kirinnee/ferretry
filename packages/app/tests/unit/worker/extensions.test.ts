@@ -16,7 +16,6 @@ function globals(windows: WorkerWindow[] = []) {
   const opened: string[] = [];
   const value: WorkerGlobals = {
     origin: ORIGIN,
-    indexedDB: {} as IDBFactory,
     now: () => 7,
     registration: {
       scope: `${ORIGIN}/`,
@@ -128,10 +127,34 @@ describe('the worker extension point', () => {
 
   test('the scope carries no fetch, caches or registration control', () => {
     const scope = extensionScope(globals().value) as unknown as Record<string, unknown>;
-    for (const name of ['fetch', 'caches', 'skipWaiting', 'update', 'unregister', 'registration', 'clients']) {
+    for (const name of [
+      'fetch',
+      'caches',
+      'indexedDB',
+      'skipWaiting',
+      'update',
+      'unregister',
+      'registration',
+      'clients',
+    ]) {
       expect(scope[name]).toBeUndefined();
     }
     expect(Object.isFrozen(scope)).toBe(true);
     expect(onThisOrigin('//evil.example.test/x', ORIGIN)).toBeUndefined();
+  });
+
+  test('only a boolean true claims an event; a Response is never accepted as an extension answer', async () => {
+    const g = globals();
+    const host = new WorkerExtensionHost([
+      defineWorkerExtension({
+        id: 'probe',
+        push: (() => new Response('unsigned')) as never,
+        notificationClick: (() => new Response('unsigned')) as never,
+      }),
+    ]);
+    await host.push({ payload: null }, extensionScope(g.value));
+    expect(g.shown).toEqual([{ title: UNHANDLED_PUSH.title, body: UNHANDLED_PUSH.body }]);
+    await host.notificationClick({ tag: 'probe', data: null, action: '' }, extensionScope(g.value));
+    expect(g.opened).toEqual([`${ORIGIN}/app/`]);
   });
 });

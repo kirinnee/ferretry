@@ -34,6 +34,39 @@ const BANNED_MODULES = new Map<string, string>([
   ['child_process', 'use kernel.spawn'],
 ]);
 
+const WORKER_GLOBALS = new Set([
+  'addEventListener',
+  'respondWith',
+  'caches',
+  'indexedDB',
+  'importScripts',
+  'self',
+  'globalThis',
+  'fetch',
+  'onfetch',
+  'oninstall',
+  'onactivate',
+  'onmessage',
+  'eval',
+  'Function',
+]);
+
+/** Worker extensions (and their imported initializers) have no release-serving capabilities. */
+export function workerGlobalsIn(file: string, where = file): Finding[] {
+  const parsed = parseFile(file);
+  const findings: Finding[] = [];
+  walk(parsed.program, node => {
+    const name = node.type === 'Identifier' ? node.name : node.type === 'Literal' ? node.value : undefined;
+    if ((typeof name !== 'string' || !WORKER_GLOBALS.has(name)) && node.type !== 'ImportExpression') return;
+    findings.push({
+      check: 'banned-globals',
+      where: `${where}:${parsed.line(node.start)}`,
+      message: `worker extension uses ${node.type === 'ImportExpression' ? 'dynamic import' : name}: use only the frozen extension scope`,
+    });
+  });
+  return findings;
+}
+
 function bareModule(specifier: string): string {
   return specifier.startsWith('node:') ? specifier.slice(5) : specifier;
 }
@@ -41,7 +74,7 @@ function bareModule(specifier: string): string {
 /** Findings for one file. Pure over its source; the planted-violation tests call it directly. */
 export function bannedIn(file: string, where = file): Finding[] {
   const check = 'banned-globals';
-  const findings: Finding[] = [];
+  const findings: Finding[] = /[\\/]app[\\/]worker\.ts$/u.test(file) ? workerGlobalsIn(file, where) : [];
   const parsed = parseFile(file);
   const add = (node: AstNode, what: string, fix: string): void => {
     findings.push({ check, where: `${where}:${parsed.line(node.start)}`, message: `${what}: ${fix}` });

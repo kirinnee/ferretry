@@ -10,7 +10,7 @@
  * WHAT AN EXTENSION CAN NEVER DO, so the signed-release rules hold whatever a plugin writes:
  * - see a `fetch`, `install`, `activate` or `message` event: those are the release check's alone, and they are
  *   registered before any extension exists;
- * - load code: nothing is imported or `importScripts`-ed at run time, and an extension gets no `fetch`;
+ * - load code: the build validates every imported module and compiles it into the signed file;
  * - touch the release caches, its state or the registration itself (no `skipWaiting`, no `update`, no `unregister`);
  * - open another origin: {@link WorkerExtensionScope.openWindow} and `navigate` refuse any URL not on this origin.
  * It gets a narrow {@link WorkerExtensionScope} instead. An extension that throws costs only its own event.
@@ -62,8 +62,6 @@ export interface WorkerExtensionScope {
   readonly origin: string;
   /** The registration's scope URL (`/` app-wide, or `/push/<daemonId>/` for one machine's push subscription). */
   readonly registrationScope: string;
-  /** IndexedDB, for an owner's own `fy-<id>` database (a service worker cannot read localStorage). */
-  readonly indexedDB: IDBFactory;
   now(): number;
   showNotification(title: string, options: WorkerNotificationOptions): Promise<void>;
   getNotifications(filter?: { readonly tag?: string }): Promise<readonly WorkerNotification[]>;
@@ -125,7 +123,7 @@ export class WorkerExtensionHost {
     for (const extension of this.#extensions) {
       if (extension.push === undefined) continue;
       try {
-        if (await extension.push(push, scope)) return;
+        if ((await extension.push(push, scope)) === true) return;
       } catch {
         // That extension's event only; the next one still gets the push.
       }
@@ -137,7 +135,7 @@ export class WorkerExtensionHost {
     for (const extension of this.#extensions) {
       if (extension.notificationClick === undefined) continue;
       try {
-        if (await extension.notificationClick(tap, scope)) return;
+        if ((await extension.notificationClick(tap, scope)) === true) return;
       } catch {
         // As above.
       }
@@ -152,7 +150,6 @@ export class WorkerExtensionHost {
 /** The worker globals {@link extensionScope} narrows, typed here rather than through the WebWorker lib. */
 export interface WorkerGlobals {
   readonly origin: string;
-  readonly indexedDB: IDBFactory;
   readonly now: () => number;
   readonly registration: {
     readonly scope: string;
@@ -171,7 +168,6 @@ export function extensionScope(globals: WorkerGlobals): WorkerExtensionScope {
   const scope: WorkerExtensionScope = {
     origin: globals.origin,
     registrationScope: globals.registration.scope,
-    indexedDB: globals.indexedDB,
     now: () => globals.now(),
     showNotification: (title, options) => globals.registration.showNotification(title, options),
     getNotifications: filter => globals.registration.getNotifications(filter),

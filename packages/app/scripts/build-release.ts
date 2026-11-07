@@ -28,6 +28,7 @@
 import { spawnSync } from 'node:child_process';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
+import { workerGlobalsIn } from '../../../scripts/validate/banned-globals.ts';
 import {
   RELEASE_MANIFEST_FILE,
   RELEASE_SIGNATURE_FILE,
@@ -90,6 +91,36 @@ const extensionListSource = (files: readonly string[]): string =>
     `export const workerExtensions: readonly WorkerExtension[] = [${files.map((_, index) => `extension${index}`).join(', ')}];`,
   ].join('\n');
 
+/** Validate initializers throughout each extension's import graph, not just its app/worker.ts entry point. */
+export async function validateWorkerExtensions(files: readonly string[]): Promise<void> {
+  if (files.length === 0) return;
+  const result = await Bun.build({
+    entrypoints: [...files],
+    target: 'browser',
+    // This is the one trusted, capability-limited API. Do not pull its host implementation into the scan.
+    external: ['@ferretry/app/worker'],
+    plugins: [
+      {
+        name: 'fy-worker-capabilities',
+        setup(build) {
+          build.onResolve({ filter: /^(?:https?:|data:|blob:|node:)/u }, ({ path }) => {
+            throw new Error(`worker extension cannot import external code: ${path}`);
+          });
+          build.onLoad({ filter: /\.[cm]?[jt]sx?$/u }, ({ path }) => {
+            const findings = workerGlobalsIn(path, relative(repositoryRoot, path));
+            if (findings.length > 0) throw new Error(findings.map(f => `${f.where}: ${f.message}`).join('\n'));
+            return undefined;
+          });
+        },
+      },
+    ],
+  }).catch((error: unknown) => {
+    const details = error instanceof AggregateError ? error.errors.map(String).join('\n') : String(error);
+    return fail(`worker extension capabilities refused:\n${details}`);
+  });
+  if (!result.success) fail(`worker extension capabilities refused:\n${result.logs.join('\n')}`);
+}
+
 /** The arguments that are neither a `--flag` nor a flag's value. */
 const positionals = (args: readonly string[]): string[] =>
   args.filter((arg, index) => !arg.startsWith('--') && !(args[index - 1] ?? '').startsWith('--'));
@@ -117,7 +148,9 @@ const buildRelease = async (
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
   if (headers.length === 0) fail('public/_headers names no header rules');
 
-  const extensionList = extensionListSource(await workerExtensionFiles());
+  const extensionFiles = await workerExtensionFiles();
+  await validateWorkerExtensions(extensionFiles);
+  const extensionList = extensionListSource(extensionFiles);
   const worker = await Bun.build({
     entrypoints: [join(packageRoot, 'src/worker/service-worker.ts')],
     plugins: [
