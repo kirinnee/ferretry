@@ -1,14 +1,10 @@
 import { afterEach, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
-import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
 import { GitTransferWorkspaceProbe } from '../../../../daemon/adapters/transfer/git-transfer-workspace-probe.ts';
-import {
-  GitWorktreeGateway,
-  NodeWorktreeFileSystem,
-  SystemWorktreeClock,
-} from '../../../../daemon/adapters/worktrees/index.ts';
+import { GitWorktreeGateway } from '../../../../daemon/adapters/worktrees/index.ts';
 import type { GitExecution, GitInvocation, GitRunner } from '../../../../daemon/lib/worktrees/ports.ts';
+import { NodeWorktreeFileSystem, testGitRunner, TestWorktreeClock } from '../../../support/daemon/host-io.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRepository } from '../support/repository.ts';
 
 /**
@@ -20,9 +16,9 @@ import { cleanupTempDirectories, setupGit, tempDirectory, tempRepository } from 
  */
 
 const files = new NodeWorktreeFileSystem();
-const clock = new SystemWorktreeClock();
+const clock = new TestWorktreeClock();
 
-const probe = (runner: GitRunner = new BunGitRunner()): GitTransferWorkspaceProbe =>
+const probe = (runner: GitRunner = testGitRunner()): GitTransferWorkspaceProbe =>
   new GitTransferWorkspaceProbe(new GitWorktreeGateway(runner, files, clock));
 
 /** Records every Git invocation and otherwise lets real Git answer. */
@@ -33,7 +29,7 @@ class RecordingGitRunner implements GitRunner {
 
   async run(invocation: GitInvocation): Promise<GitExecution> {
     this.invocations.push(invocation);
-    return this.reply(invocation) ?? (await new BunGitRunner().run(invocation));
+    return this.reply(invocation) ?? (await testGitRunner().run(invocation));
   }
 }
 

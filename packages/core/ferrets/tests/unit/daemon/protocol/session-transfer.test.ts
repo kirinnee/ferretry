@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import * as records from '../../../../contract/records.ts';
 import * as transfer from '../../../../contract/transfer.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
@@ -113,8 +114,8 @@ const plan = {
 };
 
 const cases: SchemaCase[] = [
-  { name: 'message point', schema: transfer.ConversationMessagePointSchema, value: point },
-  { name: 'exact message point', schema: transfer.ExactConversationMessagePointSchema, value: point },
+  { name: 'message point', schema: records.ConversationMessagePointSchema, value: point },
+  { name: 'exact message point', schema: records.ExactConversationMessagePointSchema, value: point },
   // A case of its OWN, never folded into the conversation facet that contains it. The read row
   // extends this base, so two exported schemas describe a message now and one case cannot stand for
   // both: the facet's case would keep passing while this base drifted underneath it.
@@ -126,7 +127,7 @@ const cases: SchemaCase[] = [
   { name: 'lineage facet', schema: transfer.LineageFacetSchema, value: lineage },
   { name: 'omission reason', schema: transfer.TransferOmissionReasonSchema, value: 'session_scoped' },
   { name: 'omission', schema: transfer.TransferOmissionSchema, value: omission },
-  { name: 'transfer edge', schema: transfer.SessionTransferEdgeSchema, value: edge },
+  { name: 'transfer edge', schema: records.SessionTransferEdgeSchema, value: edge },
   { name: 'transfer plan', schema: transfer.SessionTransferPlanSchema, value: plan },
 ];
 
@@ -134,29 +135,32 @@ describe('session transfer protocol', () => {
   it('should round-trip every exported schema through strict durable values', () => {
     // Act + Assert
     assertRoundTrips(cases);
-    assertCoversEverySchema(transfer, cases);
+    // The fork receipt's schemas live in this contract file too, but the receipt is the fork's fact: they are
+    // exercised by the receipt store's tests (tests/integration/daemon/forks), not restated here.
+    const transferOnly = Object.fromEntries(Object.entries(transfer).filter(([name]) => !name.startsWith('SessionFork')));
+    assertCoversEverySchema(transferOnly, cases);
   });
 
   it('should keep blockIndex optional without accepting another point spelling', () => {
     // Act
-    const actual = transfer.ConversationMessagePointSchema.parse({ v: 1, byteOffset: 0 });
+    const actual = records.ConversationMessagePointSchema.parse({ v: 1, byteOffset: 0 });
 
     // Assert
     should(actual).deepEqual({ v: 1, byteOffset: 0 });
     assertRejects([
       {
         name: 'missing version',
-        schema: transfer.ConversationMessagePointSchema,
+        schema: records.ConversationMessagePointSchema,
         value: { byteOffset: 0 },
       },
       {
         name: 'string coordinate',
-        schema: transfer.ConversationMessagePointSchema,
+        schema: records.ConversationMessagePointSchema,
         value: { v: 1, byteOffset: '0:1' },
       },
       {
         name: 'UI identity',
-        schema: transfer.ConversationMessagePointSchema,
+        schema: records.ConversationMessagePointSchema,
         value: { v: 1, byteOffset: 0, blockId: 'record|message|uuid|0' },
       },
     ]);
@@ -267,7 +271,7 @@ describe('session transfer protocol', () => {
       },
       {
         name: 'handover edge with cut',
-        schema: transfer.SessionTransferEdgeSchema,
+        schema: records.SessionTransferEdgeSchema,
         value: { ...edge, kind: 'handover' },
       },
       {

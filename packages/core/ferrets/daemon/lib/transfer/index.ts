@@ -7,3 +7,4 @@ export * from './facets/workspace.ts';
 export * from './import.ts';
 export * from './prepare.ts';
 export * from './types.ts';
+export type * from './ports.ts';

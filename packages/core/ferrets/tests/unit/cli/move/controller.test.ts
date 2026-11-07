@@ -1,8 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { MoveController, renderConversionPreview } from '../../../../cli/lib/move/controller.ts';
-import { RecordingProgress } from '../progress/fixtures.ts';
-import { moveHarness, READY_PREVIEW, RecordingMoveGateway } from './fixtures.ts';
+import { moveHarness, READY_PREVIEW, RecordingMoveGateway, RecordingProgress } from './fixtures.ts';
 
 describe('session move', () => {
   it('should trim and pass the complete move request through the daemon gate', async () => {
@@ -68,7 +67,7 @@ describe('session move', () => {
     ]);
   });
 
-  it('should print the schema-parsed session under --json', async () => {
+  it('should print the schema-parsed ferret summary under --json', async () => {
     // Arrange
     const { gateway, io, presenter } = moveHarness();
     const subject = new MoveController(gateway, presenter);
@@ -77,7 +76,7 @@ describe('session move', () => {
     await subject.execute('ses-1', { agent: 'codex-secondary', json: true });
 
     // Assert
-    should(JSON.parse(io.out[0] ?? '')).have.properties('config', 'state', 'directory');
+    should(JSON.parse(io.out[0] ?? '')).have.properties('id', 'state', 'folder');
   });
 
   it('should reject blank required values before the destructive call', async () => {

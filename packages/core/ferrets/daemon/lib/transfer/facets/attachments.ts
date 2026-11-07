@@ -14,7 +14,7 @@
  *    and the new session re-prompts.
  */
 
-import type { AttachmentView } from '@ferretry/protocol';
+import type { TransferAttachmentView } from '../ports.ts';
 import type { AttachmentFacet, TransferOmission } from '../../../../contract/transfer.ts';
 import type {
   TransferAttachmentReader,
@@ -37,7 +37,7 @@ export interface AttachmentTransferBudget {
 
 type PlannedAttachment = AttachmentFacet['attachments'][number];
 
-function plan(view: AttachmentView): PlannedAttachment {
+function plan(view: TransferAttachmentView): PlannedAttachment {
   return {
     id: view.id,
     filename: view.filename,
@@ -50,7 +50,7 @@ function plan(view: AttachmentView): PlannedAttachment {
   };
 }
 
-function credentialOmission(view: AttachmentView): TransferOmission {
+function credentialOmission(view: TransferAttachmentView): TransferOmission {
   return {
     facet: 'attachments',
     subject: view.filename,
@@ -61,7 +61,7 @@ function credentialOmission(view: AttachmentView): TransferOmission {
   };
 }
 
-function droppedOmission(view: AttachmentView): TransferOmission {
+function droppedOmission(view: TransferAttachmentView): TransferOmission {
   return {
     facet: 'attachments',
     subject: view.filename,
@@ -78,14 +78,14 @@ export class AttachmentFacetContributor implements TransferFacetContributor<Atta
     private readonly budget?: AttachmentTransferBudget,
   ) {}
 
-  private withinBudget(views: readonly AttachmentView[]): {
-    readonly carried: readonly AttachmentView[];
-    readonly dropped: readonly AttachmentView[];
+  private withinBudget(views: readonly TransferAttachmentView[]): {
+    readonly carried: readonly TransferAttachmentView[];
+    readonly dropped: readonly TransferAttachmentView[];
   } {
     const budget = this.budget;
     if (budget === undefined) return { carried: views, dropped: [] };
-    const carried: AttachmentView[] = [];
-    const dropped: AttachmentView[] = [];
+    const carried: TransferAttachmentView[] = [];
+    const dropped: TransferAttachmentView[] = [];
     let bytes = 0;
     for (const view of views) {
       if (carried.length >= budget.maxCount || bytes + view.size > budget.maxTotalBytes) {

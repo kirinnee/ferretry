@@ -1,50 +1,60 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
   FileSessionTransferTargetPlanStore,
 } from '../../../../../daemon/adapters/transfer/index.ts';
-import { createFoundationPaths, resolveStateHome } from '../../../../src/lib/index.ts';
-import { builtTransfer } from './fixture.ts';
+import { transferPorts } from '../../../../../daemon/modules/transfer.ts';
+import { TransferBriefFiles, TransferPlanFiles } from '../../../../../contract/transfer-state.ts';
+import type { TransferAttachmentStore } from '../../../../../daemon/lib/transfer/ports.ts';
 
 /**
- * THE FORK'S TRANSFER-ONLY PORTS (fix round 1 of the extraction).
+ * THE FORK'S TRANSFER-ONLY PORTS.
  *
- * `TransferProvides.transferPorts` is the construction `createForkSubsystem` used to do inline for the target plan store,
- * the brief writer and the attachment copier. It must stay a FACTORY the fork calls at its old construction point, so
- * these tests pin that building the module constructs none of them, and that calling the factory constructs them over the
- * given path facts and touches nothing: no file, no directory, no timer.
+ * `transferPorts` is the construction `createForkSubsystem` does for the target plan store, the brief writer and the
+ * attachment copier. It must stay a FACTORY the fork calls at its construction point, so these tests pin that calling
+ * it constructs them over the given ports and touches nothing: no state file is read or written, and the attachment
+ * store (the attachment owner's, an unbound port) is not asked anything.
  */
 
-const STATE_HOME = '/nonexistent/transfer-ports-state-home';
+function parts(): { readonly folder: MemoryStateFolder; readonly asked: string[]; readonly state: ReturnType<MemoryStateFolder['port']>; readonly attachments: TransferAttachmentStore } {
+  const folder = new MemoryStateFolder();
+  const asked: string[] = [];
+  const unusedStore: TransferAttachmentStore = {
+    read: async (sessionId, attachmentId, file) => {
+      asked.push(`read ${sessionId}/${attachmentId}/${file}`);
+      return undefined;
+    },
+    write: async (sessionId, attachmentId, file) => {
+      asked.push(`write ${sessionId}/${attachmentId}/${file}`);
+    },
+    parseManifest: () => {
+      throw new Error('not asked');
+    },
+  };
+  return { folder, asked, state: folder.port([TransferPlanFiles, TransferBriefFiles]), attachments: unusedStore };
+}
 
 describe('transfer module ports factory', () => {
-  test('calling the factory makes the three ports over the given paths and resolver, and leaves nothing behind', () => {
-    const asked: string[] = [];
-    const paths = createFoundationPaths(resolveStateHome({ fyHome: STATE_HOME, homeDirectory: '/unused' }));
-    const ports = builtTransfer().provides.transferPorts({
-      paths,
-      attachmentOriginals: id => {
-        asked.push(id);
-        return `${STATE_HOME}/attachments/${id}`;
-      },
-    });
+  test('calling the factory makes the three ports over the given ports, and leaves nothing behind', () => {
+    const { folder, asked, state, attachments } = parts();
+
+    const ports = transferPorts({ state, attachments });
 
     expect(ports.planStore).toBeInstanceOf(FileSessionTransferTargetPlanStore);
     expect(ports.briefWriter).toBeInstanceOf(FileSessionTransferBriefWriter);
     expect(ports.attachmentCopier).toBeInstanceOf(FileSessionAttachmentCopier);
-    // Construction only captures the resolver: it is not asked about a session and nothing is created on disk.
+    // Construction only captures the ports: the owner's store is not asked and nothing is written to state.
     expect(asked).toEqual([]);
-    expect(existsSync(STATE_HOME)).toBe(false);
+    expect(folder.files.size).toBe(0);
+    expect(folder.bytes.size).toBe(0);
   });
 
   test('every call constructs new ports, so the fork owns the instances it was handed', () => {
-    const paths = createFoundationPaths(resolveStateHome({ fyHome: STATE_HOME, homeDirectory: '/unused' }));
-    const provides = builtTransfer().provides;
-    const parts = { paths, attachmentOriginals: (id: string) => `${STATE_HOME}/${id}` };
-    const first = provides.transferPorts(parts);
-    const second = provides.transferPorts(parts);
+    const given = parts();
+    const first = transferPorts({ state: given.state, attachments: given.attachments });
+    const second = transferPorts({ state: given.state, attachments: given.attachments });
 
     expect(second.planStore).not.toBe(first.planStore);
     expect(second.briefWriter).not.toBe(first.briefWriter);

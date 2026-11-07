@@ -1,82 +1,30 @@
-import { afterEach, describe, it } from 'bun:test';
-import { type FileHandle, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { describe, it } from 'bun:test';
+import type { StatePort } from '@ferretry/kernel/contract';
+import { MemoryStateFolder, SimulatedCrash } from '@ferretry/kernel/testing';
+import should from 'should';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { SessionTransferPlanSchema } from '../../../../contract/transfer.ts';
-import should from 'should';
+import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import {
   FileSessionTransferTargetPlanStore,
-  fsyncTransferPlanDirectory,
-  fsyncTransferPlanFile,
   SessionTransferPlanConflictError,
   SessionTransferPlanCorruptError,
 } from '../../../../daemon/adapters/transfer/plan-store.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { deriveTransferPlanId } from '../../../../daemon/lib/transfer/prepare.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
- * The target-session plan copy, on a real filesystem: installed once and idempotently, refused when a
- * second plan claims the same target, written privately and atomically, and made durable parent-first.
+ * The target-session plan copy, over the kernel's state port: installed once and idempotently, refused when a
+ * second plan claims the same target, and made durable again on an exact replay.
  *
- * Everything here runs inside a throwaway directory; no state home is resolved.
+ * The file mechanics (atomic write, flush of the file and its name, one update chain per file, no write over a
+ * damaged document) are the port's and are pinned by the kernel; what is pinned here is the DECISION this store makes
+ * on top of them, and that every path that vouches for a plan went through the port's durable write.
  */
 
 const SOURCE = 'source-session';
 const REQUEST = 'req-1';
 const PLAN_ID = deriveTransferPlanId(SOURCE, REQUEST);
-const TARGET_PLAN_FILE = 'transfer-plan.json';
-
-/** Deterministic temporary suffixes, so an atomic write is provable rather than incidental. */
-function counter(): () => string {
-  let n = 0;
-  return () => {
-    n += 1;
-    return `t${n}`;
-  };
-}
-
-/** Records completed directory flushes while still performing the real IO; this proves ordering, not power loss. */
-function recordingDirectorySync(paths: string[]): (path: string) => Promise<void> {
-  return async path => {
-    await fsyncTransferPlanDirectory(path);
-    paths.push(path);
-  };
-}
-
-interface PinnedFileSyncObservation {
-  readonly path: string;
-  readonly inode: number;
-  readonly unreadAfterParse: string;
-}
-
-/** Records a strict flush of the same open handle whose bytes were read and parsed. */
-function recordingFileSync(
-  paths: string[],
-  observations: PinnedFileSyncObservation[] = [],
-): (handle: FileHandle, path: string) => Promise<void> {
-  return async (handle, path) => {
-    const inode = (await handle.stat()).ino;
-    // `readFile` advances a FileHandle's position. EOF here is deterministic proof that this is the
-    // handle the store already read to parse its decision, rather than one it reopened by path.
-    const unreadAfterParse = await handle.readFile('utf8');
-    await fsyncTransferPlanFile(handle);
-    observations.push({ path, inode, unreadAfterParse });
-    paths.push(path);
-  };
-}
-
-function errno(code: string): Error & { readonly code: string } {
-  return Object.assign(new Error(`injected ${code}`), { code });
-}
-
-function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
-  let resolve!: () => void;
-  const promise = new Promise<void>(done => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
 
 /** Resolves to the rejection reason, failing loudly if the call unexpectedly resolved. */
 async function reject(promise: Promise<unknown>): Promise<unknown> {
@@ -160,13 +108,14 @@ function makePlan(overrides: {
 
 interface Harness {
   readonly subject: FileSessionTransferTargetPlanStore;
-  readonly home: string;
+  readonly folder: MemoryStateFolder;
+  readonly state: StatePort;
 }
 
-async function harness(label: string): Promise<Harness> {
-  const home = await tempDirectory(label);
-  const subject = new FileSessionTransferTargetPlanStore(id => join(home, 'sessions', id, TARGET_PLAN_FILE), counter());
-  return { subject, home };
+function harness(): Harness {
+  const folder = new MemoryStateFolder();
+  const state = folder.port([TransferPlanFiles]);
+  return { subject: new FileSessionTransferTargetPlanStore(state), folder, state };
 }
 
 describe('deriveTransferPlanId', () => {
@@ -179,11 +128,9 @@ describe('deriveTransferPlanId', () => {
 });
 
 describe('FileSessionTransferTargetPlanStore install (target plan copy)', () => {
-  afterEach(async () => await cleanupTempDirectories());
-
-  it('installs the plan into the target session directory after create, idempotently', async () => {
+  it('installs the plan under the target ferret after create, idempotently', async () => {
     // Arrange
-    const { subject, home } = await harness('transfer-plan-install');
+    const { subject, folder } = harness();
     const target = parseSessionId('target-session');
     const frozen = makePlan({});
 
@@ -191,314 +138,177 @@ describe('FileSessionTransferTargetPlanStore install (target plan copy)', () => 
     const first = await subject.install(target, frozen);
     const second = await subject.install(target, frozen);
 
-    // Assert — a replay re-installs the same plan id and leaves the file untouched.
+    // Assert — a replay re-installs the same plan id and the document holds the same plan.
     should(first.status).equal('installed');
     should(second.status).equal('present');
-    should(subject.targetPlanPath(target)).equal(join(home, 'sessions', 'target-session', TARGET_PLAN_FILE));
-    const onDisk = SessionTransferPlanSchema.parse(JSON.parse(await readFile(subject.targetPlanPath(target), 'utf8')));
+    const { format, ...stored } = JSON.parse(folder.raw(TransferPlanFiles, target) ?? 'null') as { format: number };
+    should(format).equal(1);
+    const onDisk = SessionTransferPlanSchema.parse(stored);
     should(onDisk.planId).equal(PLAN_ID);
+    should(await subject.load(target)).eql(frozen);
+  });
+
+  it('declares the plan private and leaves a damaged one to refuse rather than read as absent', () => {
+    // Assert — mode 0600; the default damaged policy answers the damage, where a narrower reading would answer
+    // "absent" and let a fresh install write over the evidence.
+    should(TransferPlanFiles.mode).equal(0o600);
+    should(TransferPlanFiles.onDamaged).equal('subsystem');
+    should(TransferPlanFiles.path).equal('*/transfer-plan.json');
   });
 
   it('refuses a different frozen plan even when it reuses the same plan id', async () => {
-    const { subject } = await harness('transfer-plan-same-id-drift');
+    const { subject, folder } = harness();
     const target = parseSessionId('target-session');
     await subject.install(target, makePlan({}));
+    const before = folder.raw(TransferPlanFiles, target);
 
     const error = await reject(subject.install(target, makePlan({ preparedAt: '2025-08-08T00:00:00+00:00' })));
 
     should(error).be.instanceOf(SessionTransferPlanConflictError);
     should((error as SessionTransferPlanConflictError).conflict).equal('session_claimed');
+    should(folder.raw(TransferPlanFiles, target)).equal(before);
   });
 
   it('refuses to install a second plan id into a target one transfer already created', async () => {
     // Arrange
-    const { subject } = await harness('transfer-plan-claim');
+    const { subject, folder } = harness();
     const target = parseSessionId('target-session');
     await subject.install(target, makePlan({}));
+    const before = folder.raw(TransferPlanFiles, target);
 
     // Act + Assert — a different plan id cannot supplant the target's provenance.
     const otherPlanId = deriveTransferPlanId(SOURCE, 'req-2');
     const error = await reject(subject.install(target, makePlan({ planId: otherPlanId })));
     should(error).be.instanceOf(SessionTransferPlanConflictError);
     should((error as SessionTransferPlanConflictError).conflict).equal('session_claimed');
+    should(folder.raw(TransferPlanFiles, target)).equal(before);
   });
 
-  it('surfaces a plan path that cannot be opened rather than reading it as no plan', async () => {
-    // Arrange — a regular FILE where the target directory should be makes `open` fail with ENOTDIR,
-    // a cause that holds for root as well (unlike a permission failure).
-    const home = await tempDirectory('transfer-plan-unopenable');
-    const target = parseSessionId('target-session');
-    await mkdir(join(home, 'sessions'), { recursive: true });
-    await writeFile(join(home, 'sessions', target), 'not a directory\n', 'utf8');
-    const subject = new FileSessionTransferTargetPlanStore(
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-    );
-
-    // Act
-    const error = await reject(subject.install(target, makePlan({})));
-
-    // Assert — only ENOENT means "no plan"; anything else must not be mistaken for it and overwritten.
-    should((error as NodeJS.ErrnoException).code).equal('ENOTDIR');
-  });
-
-  it('writes the target plan privately, with no temporary file left beside it', async () => {
+  it('keeps each target its own: one ferret\'s plan never answers for another\'s', async () => {
     // Arrange
-    const { subject } = await harness('transfer-plan-atomic');
-    const target = parseSessionId('target-session');
-    const directory = dirname(subject.targetPlanPath(target));
+    const { subject } = harness();
+    const first = parseSessionId('target-one');
+    const second = parseSessionId('target-two');
 
     // Act
-    await subject.install(target, makePlan({}));
+    await subject.install(first, makePlan({}));
 
     // Assert
-    should((await readdir(directory)).sort()).deepEqual([TARGET_PLAN_FILE]);
-    should((await stat(subject.targetPlanPath(target))).mode & 0o777).equal(0o600);
+    should(await subject.load(second)).equal(undefined);
+    should((await subject.install(second, makePlan({ planId: deriveTransferPlanId(SOURCE, 'req-2') }))).status).equal(
+      'installed',
+    );
   });
 
-  it('syncs every target directory entry it creates parent-first before syncing the published plan', async () => {
-    // Arrange — this exercises the defensive recursive-mkdir path. Production normally receives an
-    // already-created session directory from lifecycle creation.
-    const home = await tempDirectory('transfer-target-plan-created-sync-order');
-    const sessions = join(home, 'sessions');
+  it('serialises two installs of one plan, so exactly one installs and the other finds it present', async () => {
+    // Arrange
+    const { subject } = harness();
     const target = parseSessionId('target-session');
-    const targetDirectory = join(sessions, target);
-    const syncs: string[] = [];
-    const subject = new FileSessionTransferTargetPlanStore(
-      id => join(sessions, id, TARGET_PLAN_FILE),
-      counter(),
-      recordingDirectorySync(syncs),
-    );
 
     // Act
+    const outcomes = await Promise.all([subject.install(target, makePlan({})), subject.install(target, makePlan({}))]);
+
+    // Assert
+    should(outcomes.map(outcome => outcome.status).sort()).eql(['installed', 'present']);
+  });
+
+  it('lets only one of two racing different plans claim the target', async () => {
+    // Arrange
+    const { subject } = harness();
+    const target = parseSessionId('target-session');
+    const other = makePlan({ planId: deriveTransferPlanId(SOURCE, 'req-2') });
+
+    // Act
+    const settled = await Promise.allSettled([subject.install(target, makePlan({})), subject.install(target, other)]);
+
+    // Assert
+    should(settled.map(result => result.status).sort()).eql(['fulfilled', 'rejected']);
+    const rejected = settled.find(result => result.status === 'rejected') as PromiseRejectedResult;
+    should(rejected.reason).be.instanceOf(SessionTransferPlanConflictError);
+  });
+
+  it('surfaces a plan the port cannot read rather than reading it as no plan', async () => {
+    // Arrange — the port answers an I/O damage for the plan file (the analogue of a path that cannot be opened).
+    const { state, folder } = harness();
+    const damaged: StatePort = {
+      ...state,
+      read: async file => ({
+        ok: false,
+        error: { file: file.path, reason: 'io', sentence: `${file.path} cannot be used: it cannot be read.` },
+      }),
+      update: async file => ({
+        ok: false,
+        error: { file: file.path, reason: 'io', sentence: `${file.path} cannot be used: it cannot be read.` },
+      }),
+    };
+    const subject = new FileSessionTransferTargetPlanStore(damaged);
+    const target = parseSessionId('target-session');
+
+    // Act
+    const installError = await reject(subject.install(target, makePlan({})));
+    const loadError = await reject(subject.load(target));
+
+    // Assert — only a missing file means "no plan"; anything else must not be mistaken for it and overwritten.
+    should(installError).be.instanceOf(SessionTransferPlanCorruptError);
+    should(loadError).be.instanceOf(SessionTransferPlanCorruptError);
+    should(folder.raw(TransferPlanFiles, target)).equal(undefined);
+  });
+});
+
+describe('FileSessionTransferTargetPlanStore durability', () => {
+  it('survives a crash right after the plan landed: the replay finds it present', async () => {
+    // Arrange — the write lands and then the process "dies" before install can return.
+    const { subject, folder } = harness();
+    const target = parseSessionId('target-session');
+    folder.armCrash();
+    const crash = await reject(subject.install(target, makePlan({})));
+    should(crash).be.instanceOf(SimulatedCrash);
+    folder.revive();
+
+    // Act
+    const replay = await subject.install(target, makePlan({}));
+
+    // Assert — the document the first attempt left is the plan, and the replay accepts it as the very same one.
+    should(replay.status).equal('present');
+    should((await subject.load(target))?.planId).equal(PLAN_ID);
+  });
+
+  it('writes an exact replay through the port again, so a visible plan is made durable before it is vouched for', async () => {
+    // Arrange — an earlier attempt left the plan visible; the next process cannot know it was flushed.
+    const { subject, folder } = harness();
+    const target = parseSessionId('target-session');
     await subject.install(target, makePlan({}));
+    folder.armCrash();
 
-    // Assert — the names `sessions` and `target-session` live in home and sessions respectively;
-    // the final target-directory flush follows rename and persists the plan entry itself.
-    should(syncs).deepEqual([home, sessions, targetDirectory]);
+    // Act — the crash is armed for the NEXT write the port lands: a replay that declined to write would never
+    // consume it, and would be vouching for bytes it had not made durable.
+    const replay = await reject(subject.install(target, makePlan({})));
+
+    // Assert
+    should(replay).be.instanceOf(SimulatedCrash);
+    folder.revive();
+    should((await subject.load(target))?.planId).equal(PLAN_ID);
   });
 
-  it('persists the full state-anchored target chain on first write and exact replay without replacing it', async () => {
-    // Arrange — even an established target can have been made visible by a lifecycle attempt that has
-    // not completed its own parent barriers, so this store persists the whole name chain for itself.
-    const home = await tempDirectory('transfer-target-plan-steady-sync-order');
-    const sessions = join(home, 'sessions');
+  it('writes nothing when it refuses a conflicting plan', async () => {
+    // Arrange
+    const { subject, folder } = harness();
     const target = parseSessionId('target-session');
-    const targetDirectory = join(sessions, target);
-    await mkdir(targetDirectory, { recursive: true, mode: 0o700 });
-    const syncs: string[] = [];
-    const fileSyncs: PinnedFileSyncObservation[] = [];
-    const subject = new FileSessionTransferTargetPlanStore(
-      id => join(sessions, id, TARGET_PLAN_FILE),
-      counter(),
-      recordingDirectorySync(syncs),
-      recordingFileSync(syncs, fileSyncs),
-    );
-    const frozen = makePlan({});
+    await subject.install(target, makePlan({}));
+    folder.armCrash();
 
-    // Act + Assert — state and sessions first, then the target after rename publishes the plan.
-    await subject.install(target, frozen);
-    should(syncs).deepEqual([home, sessions, targetDirectory]);
+    // Act — a refusal must not land a write (and so must not consume the armed crash).
+    const error = await reject(subject.install(target, makePlan({ preparedAt: '2025-08-08T00:00:00+00:00' })));
 
-    const planFile = subject.targetPlanPath(target);
-    const beforeReplay = await stat(planFile);
-    syncs.length = 0;
-    await subject.install(target, frozen);
-    should(syncs).deepEqual([planFile, home, sessions, targetDirectory]);
-    should(fileSyncs).deepEqual([{ path: planFile, inode: beforeReplay.ino, unreadAfterParse: '' }]);
-    const afterReplay = await stat(planFile);
-    should(afterReplay.ino).equal(beforeReplay.ino);
-    should(afterReplay.mtimeMs).equal(beforeReplay.mtimeMs);
-  });
-
-  it('stops owning a temporary immediately after rename, before a failing directory sync can yield', async () => {
-    // Arrange — the state/sessions parent barriers complete before publication. Pause specifically at
-    // the target-directory barrier after rename, reuse the now-vacant deterministic temporary name
-    // from another writer, then fail the first operation. Its finally must not unlink a name its
-    // successful rename already consumed.
-    const home = await tempDirectory('transfer-target-plan-temp-reuse');
-    const sessions = join(home, 'sessions');
-    const target = parseSessionId('target-session');
-    const targetDirectory = join(sessions, target);
-    await mkdir(targetDirectory, { recursive: true, mode: 0o700 });
-    const planFile = join(targetDirectory, TARGET_PLAN_FILE);
-    const reusedTemporary = `${planFile}.fixed.tmp`;
-    const syncEntered = deferred();
-    const releaseSync = deferred();
-    const failure = errno('EIO');
-    const subject = new FileSessionTransferTargetPlanStore(
-      id => join(sessions, id, TARGET_PLAN_FILE),
-      () => 'fixed',
-      async path => {
-        if (path !== targetDirectory) {
-          await fsyncTransferPlanDirectory(path);
-          return;
-        }
-        syncEntered.resolve();
-        await releaseSync.promise;
-        throw failure;
-      },
-    );
-    const failedInstall = reject(subject.install(target, makePlan({})));
-    await syncEntered.promise;
-
-    // Act — this is genuinely between rename and the first writer's rejected return.
-    try {
-      await writeFile(reusedTemporary, 'another writer\n', { encoding: 'utf8', mode: 0o600 });
-    } finally {
-      releaseSync.resolve();
-    }
-    const error = await failedInstall;
-
-    // Assert — publication is visible despite the failed durability barrier, and cleanup leaves the
-    // independently owned reused name intact for its real owner.
-    should(error).equal(failure);
-    should(SessionTransferPlanSchema.parse(JSON.parse(await readFile(planFile, 'utf8'))).planId).equal(PLAN_ID);
-    should(await readFile(reusedTemporary, 'utf8')).equal('another writer\n');
-  });
-
-  it('tolerates exactly the unsupported errnos across directory open and sync, and propagates others', async () => {
-    // A platform that cannot fsync directories degrades only name durability; refusing cannot repair
-    // that platform limit. Each case still exercises a real directory open/close around the injected
-    // handle-sync error, then proves the install semantics completed.
-    for (const code of ['EINVAL', 'ENOTSUP', 'EPERM']) {
-      const home = await tempDirectory(`transfer-target-plan-dir-${code.toLowerCase()}`);
-      const target = parseSessionId('target-session');
-      const sessions = join(home, 'sessions');
-      const targetDirectory = join(sessions, target);
-      await mkdir(targetDirectory, { recursive: true, mode: 0o700 });
-      const syncs: string[] = [];
-      const subject = new FileSessionTransferTargetPlanStore(
-        id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-        counter(),
-        async path => {
-          syncs.push(path);
-          await fsyncTransferPlanDirectory(path, async () => {
-            throw errno(code);
-          });
-        },
-      );
-
-      const outcome = await subject.install(target, makePlan({}));
-
-      should(outcome.status).equal('installed');
-      should(syncs).deepEqual([home, sessions, targetDirectory]);
-      should((await subject.load(target))?.planId).equal(PLAN_ID);
-    }
-
-    // A real failure is not a platform capability answer and must stop the operation.
-    const home = await tempDirectory('transfer-target-plan-dir-eio');
-    const target = parseSessionId('target-session');
-    const targetDirectory = join(home, 'sessions', target);
-    await mkdir(targetDirectory, { recursive: true, mode: 0o700 });
-    const failure = errno('EIO');
-    const strict = new FileSessionTransferTargetPlanStore(
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-      async path =>
-        await fsyncTransferPlanDirectory(path, async () => {
-          throw failure;
-        }),
-    );
-
-    const error = await reject(strict.install(target, makePlan({})));
-
-    should(error).equal(failure);
-
-    // The same policy covers filesystems that refuse the DIRECTORY OPEN rather than its later fsync.
-    // This runs through the production function and the real store operation, not a catch in the test.
-    const openHome = await tempDirectory('transfer-target-plan-dir-open-eperm');
-    const openSessions = join(openHome, 'sessions');
-    const openTarget = parseSessionId('target-session');
-    const openTargetDirectory = join(openSessions, openTarget);
-    await mkdir(openTargetDirectory, { recursive: true, mode: 0o700 });
-    const openSyncs: string[] = [];
-    const unsupportedOpen = new FileSessionTransferTargetPlanStore(
-      id => join(openSessions, id, TARGET_PLAN_FILE),
-      counter(),
-      async path => {
-        openSyncs.push(path);
-        await fsyncTransferPlanDirectory(path, fsyncTransferPlanFile, async () => {
-          throw errno('EPERM');
-        });
-      },
-    );
-
-    const openedOutcome = await unsupportedOpen.install(openTarget, makePlan({}));
-
-    should(openedOutcome.status).equal('installed');
-    should(openSyncs).deepEqual([openHome, openSessions, openTargetDirectory]);
-
-    // An open refusal outside the exact capability set remains a real failure and stops publication.
-    const strictOpenHome = await tempDirectory('transfer-target-plan-dir-open-eio');
-    const strictOpenSessions = join(strictOpenHome, 'sessions');
-    const strictOpenTarget = parseSessionId('target-session');
-    await mkdir(join(strictOpenSessions, strictOpenTarget), { recursive: true, mode: 0o700 });
-    const openFailure = errno('EIO');
-    const strictOpen = new FileSessionTransferTargetPlanStore(
-      id => join(strictOpenSessions, id, TARGET_PLAN_FILE),
-      counter(),
-      async path =>
-        await fsyncTransferPlanDirectory(path, fsyncTransferPlanFile, async () => {
-          throw openFailure;
-        }),
-    );
-
-    const openError = await reject(strictOpen.install(strictOpenTarget, makePlan({})));
-
-    should(openError).equal(openFailure);
-    should(await strictOpen.load(strictOpenTarget)).equal(undefined);
-  });
-
-  it('propagates a pinned file-sync failure and never begins the directory barrier', async () => {
-    // Arrange — EINVAL is deliberately tolerated for a DIRECTORY sync and never for a file. The
-    // exact replay has already read and parsed the plan when its pinned handle fails to flush.
-    const home = await tempDirectory('transfer-target-plan-file-sync-strict');
-    const sessions = join(home, 'sessions');
-    const target = parseSessionId('target-session');
-    const targetDirectory = join(sessions, target);
-    await mkdir(targetDirectory, { recursive: true, mode: 0o700 });
-    const planFile = join(targetDirectory, TARGET_PLAN_FILE);
-    const frozen = makePlan({});
-    await new FileSessionTransferTargetPlanStore(id => join(sessions, id, TARGET_PLAN_FILE), counter()).install(
-      target,
-      frozen,
-    );
-    const beforeReplay = await stat(planFile);
-    const directorySyncs: string[] = [];
-    const failure = errno('EINVAL');
-    let unreadAfterParse: string | undefined;
-    const restarted = new FileSessionTransferTargetPlanStore(
-      id => join(sessions, id, TARGET_PLAN_FILE),
-      counter(),
-      recordingDirectorySync(directorySyncs),
-      async handle => {
-        unreadAfterParse = await handle.readFile('utf8');
-        throw failure;
-      },
-    );
-
-    // Act
-    const error = await reject(restarted.install(target, frozen));
-
-    // Assert — strict file failure first; no parent or leaf directory sync follows it, and no rewrite
-    // took place while trying to repair an exact visible plan.
-    should(error).equal(failure);
-    should(unreadAfterParse).equal('');
-    should(directorySyncs).deepEqual([]);
-    should((await stat(planFile)).ino).equal(beforeReplay.ino);
+    // Assert
+    should(error).be.instanceOf(SessionTransferPlanConflictError);
+    should(folder.crashed).equal(false);
   });
 });
 
 describe('FileSessionTransferTargetPlanStore capability boundary', () => {
-  afterEach(async () => await cleanupTempDirectories());
-
   it('owns only the target plan and exposes no global receipt writer or path', async () => {
-    const home = await tempDirectory('transfer-target-plan-only');
-    const subject = new FileSessionTransferTargetPlanStore(
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-    );
+    const { subject } = harness();
     const target = parseSessionId('target-session');
 
     should(Object.getOwnPropertyNames(Object.getPrototypeOf(subject))).not.containEql('record');
@@ -506,38 +316,32 @@ describe('FileSessionTransferTargetPlanStore capability boundary', () => {
     should(await subject.load(target)).equal(undefined);
     should((await subject.install(target, makePlan({}))).status).equal('installed');
     should((await subject.load(target))?.planId).equal(PLAN_ID);
-    should(subject.targetPlanPath(target)).equal(join(home, 'sessions', 'target-session', TARGET_PLAN_FILE));
   });
 });
 
 describe('FileSessionTransferTargetPlanStore unreadable and corrupt documents', () => {
-  afterEach(async () => await cleanupTempDirectories());
-
   it('refuses a target plan document that is not valid JSON or not a valid plan, rather than reporting it absent', async () => {
     // Arrange
-    const { subject } = await harness('transfer-target-plan-corrupt');
+    const { subject, folder } = harness();
     const target = parseSessionId('20260806-target');
-    const file = subject.targetPlanPath(target);
-    await mkdir(dirname(file), { recursive: true });
 
     // Act + Assert
-    await writeFile(file, '{ not json');
+    folder.plant(TransferPlanFiles, '{ not json', target);
     await should(subject.load(target)).be.rejectedWith(SessionTransferPlanCorruptError);
-    await writeFile(file, JSON.stringify({ v: 1 }));
+    folder.plant(TransferPlanFiles, JSON.stringify({ format: 1, v: 1 }), target);
     await should(subject.load(target)).be.rejectedWith(SessionTransferPlanCorruptError);
     await should(subject.install(target, makePlan({}))).be.rejectedWith(SessionTransferPlanCorruptError);
+    // The evidence is never rewritten.
+    should(folder.raw(TransferPlanFiles, target)).equal(JSON.stringify({ format: 1, v: 1 }));
   });
 
-  it('reports a target plan location that cannot be read as itself, not as an absent plan', async () => {
-    // Arrange — the plan file's name is held by a directory.
-    const { subject, home } = await harness('transfer-target-plan-unreadable');
+  it('refuses a plan of another document format, never reading it as this one', async () => {
+    // Arrange
+    const { subject, folder } = harness();
     const target = parseSessionId('20260806-target');
-    await mkdir(join(home, 'sessions', target, TARGET_PLAN_FILE), { recursive: true });
+    folder.plant(TransferPlanFiles, JSON.stringify({ format: 2, ...makePlan({}) }), target);
 
-    // Act
-    const error = await reject(subject.load(target));
-
-    // Assert
-    should((error as NodeJS.ErrnoException).code).equal('EISDIR');
+    // Act + Assert
+    await should(subject.load(target)).be.rejectedWith(SessionTransferPlanCorruptError);
   });
 });

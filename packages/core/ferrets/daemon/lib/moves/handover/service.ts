@@ -19,7 +19,6 @@
  */
 
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
-import { isTerminalStatus } from '../warden/types.ts';
 import {
   derivedStepId,
   handoverEligibility,
@@ -30,6 +29,7 @@ import {
   type HandoverStep,
   type HandoverWorld,
   isTerminalHandoverPhase,
+  isTerminalStatus,
   nextPhase,
   receiptIsIrreversible,
 } from './policy.ts';

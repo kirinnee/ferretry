@@ -1,20 +1,20 @@
-import { afterEach, describe, it } from 'bun:test';
+import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
-import { dirname, join, parse, relative } from 'node:path';
-import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
-import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
+import type { StatePort } from '@ferretry/kernel/contract';
+import { MemoryStateFolder, SimulatedCrash } from '@ferretry/kernel/testing';
 import should from 'should';
+import { TransferBriefFiles } from '../../../../contract/transfer-state.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
 import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
 import {
-  type DurableArtifactIo,
-  fsyncArtifactPath,
+  type PublishableArtifact,
   TransferArtifactDurability,
 } from '../../../../daemon/adapters/transfer/durable-artifact.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import { SessionTransferImporter } from '../../../../daemon/lib/transfer/import.ts';
 import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { MemoryAttachmentStore } from './memory-attachment-store.ts';
 
 /**
  * The durability contract the fork receipt is allowed to rely on.
@@ -23,14 +23,13 @@ import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts'
  * finds that phase skips import and REFUSES a target it cannot prove rather than repairing it. So the
  * one property this file exists to hold is that `importPlan` cannot resolve until every artifact the
  * import claims — the deterministic brief and each plan-pinned attachment original plus its verbatim
- * manifest — is on the medium under its final name.
+ * manifest — has been written through its port (which flushes before it resolves) and confirmed under its
+ * final name.
  *
- * The two writers are the REAL adapters and the flushes are the REAL `fsync` calls, wrapped rather
- * than replaced: a recorder that only pretended to flush would make the claim vacuous. What is
- * injected is the observation point.
+ * The two writers are the REAL adapters over the kernel's state folder and the attachment store fake; what is
+ * injected is the observation point, and the crash (`armCrash`) is the state folder's own.
  */
 
-const DAEMON = 'daemon-1';
 const SOURCE = 'source-session';
 const TARGET = 'target-session';
 const AT = '2026-08-06T07:00:00.000Z';
@@ -44,74 +43,12 @@ const PROVENANCE: TranscriptProvenance = {
   file: '/home/agent/.claude/projects/x/harness-1.jsonl',
 };
 
-function counter(): () => string {
-  let n = 0;
-  return () => {
-    n += 1;
-    return `t${n}`;
-  };
-}
+const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+const decode = (bytes: Uint8Array | undefined): string | undefined =>
+  bytes === undefined ? undefined : new TextDecoder().decode(bytes);
 
-/** The brief target's paths, plus a writer factory that can take a substituting IO. */
-function briefTarget(root: string): {
-  readonly turns: string;
-  readonly file: string;
-  readonly writer: (io?: DurableArtifactIo) => FileSessionTransferBriefWriter;
-} {
-  const sessions = join(root, 'state', 'sessions');
-  const turns = join(sessions, TARGET, 'turns');
-  return {
-    turns,
-    file: join(turns, 'turn-001.md'),
-    writer: io => new FileSessionTransferBriefWriter(sessionId => join(sessions, sessionId), counter(), io),
-  };
-}
-
-interface FlushLedger {
-  /** `dev:ino` of every inode a REAL file flush was performed on. */
-  readonly flushedInodes: Set<string>;
-  readonly io: DurableArtifactIo;
-}
-
-/**
- * Records the identity of every inode that was really file-flushed, and lets a test drop a concurrent
- * writer into the directory-flush window.
- *
- * Byte equality is the trap this exists to close: a foreign inode carrying the same bytes reads as
- * correct while nothing in this process ever synced it, so the assertions ask which INODE the final
- * name resolves to and whether THAT one was flushed.
- */
-function flushLedger(atDirectorySync: (path: string) => Promise<void> = async () => undefined): FlushLedger {
-  const flushedInodes = new Set<string>();
-  return {
-    flushedInodes,
-    io: {
-      syncDirectory: async path => {
-        await atDirectorySync(path);
-        await fsyncArtifactPath(path);
-      },
-      syncOpenFile: async handle => {
-        const info = await handle.stat();
-        flushedInodes.add(`${info.dev}:${info.ino}`);
-        await handle.sync();
-      },
-    },
-  };
-}
-
-/** The `dev:ino` a name resolves to right now. */
-async function identityOfName(file: string): Promise<string> {
-  const info = await stat(file);
-  return `${info.dev}:${info.ino}`;
-}
-
-/** Renames a byte-identical foreign file over `file`, as a concurrent writer that never flushed it would. */
-async function substitute(directory: string, file: string, bytes: string, tag: string): Promise<string> {
-  const foreign = join(directory, `concurrent-${tag}`);
-  await Bun.write(foreign, bytes);
-  await rename(foreign, file);
-  return await identityOfName(file);
-}
+/** Lets the event loop run, so a write nobody awaited would resolve inside the yield. */
+const yieldLoop = async (): Promise<void> => await new Promise<void>(resolve => setTimeout(resolve, 0));
 
 async function reject(promise: Promise<unknown>): Promise<unknown> {
   try {
@@ -128,8 +65,8 @@ interface SourceAttachment {
   readonly manifest: SessionTransferPlan['facets']['attachments']['attachments'][number];
 }
 
-/** Writes one source attachment in the exact layout `SessionAttachmentStore` uses. */
-async function mintSourceAttachment(home: string): Promise<SourceAttachment> {
+/** Puts one source attachment into the store in the owner's layout. */
+function mintSourceAttachment(store: MemoryAttachmentStore): SourceAttachment {
   const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const id = `att_${sha256}`;
@@ -141,9 +78,8 @@ async function mintSourceAttachment(home: string): Promise<SourceAttachment> {
     sha256,
     createdAt: AT,
   };
-  const directory = join(home, 'attachments', DAEMON, SOURCE, id);
-  await Bun.write(join(directory, 'original'), bytes);
-  await Bun.write(join(directory, 'manifest.json'), JSON.stringify(stored));
+  store.put(SOURCE, id, 'original', bytes);
+  store.put(SOURCE, id, 'manifest', JSON.stringify(stored));
   return { id, bytes, manifest: { ...stored, encrypted: null } };
 }
 
@@ -201,30 +137,42 @@ function plan(attachment: SourceAttachment): SessionTransferPlan {
   };
 }
 
-describe('transfer artifact durability before receipt advancement', () => {
-  afterEach(async () => await cleanupTempDirectories());
+/** A brief writer over a state folder whose every write is observed (and may be slowed), plus the folder. */
+function briefOver(
+  folder: MemoryStateFolder,
+  observe: (event: string) => Promise<void> = async () => undefined,
+): FileSessionTransferBriefWriter {
+  const real = folder.port([TransferBriefFiles]);
+  const state: StatePort = {
+    ...real,
+    write: async (file, value, name) => {
+      await observe(`brief:write`);
+      await real.write(file, value, name);
+    },
+  };
+  return new FileSessionTransferBriefWriter(state);
+}
 
-  it('cannot resolve importPlan, so no receipt can advance, until every artifact flush has completed', async () => {
-    // Arrange — the real brief writer and the real attachment copier, both observed through the same
-    // injected flush seam. `settled` flips the instant `importPlan` resolves, and every flush asserts
-    // it is still false AFTER handing the event loop back: a flush the writer forgot to await would
-    // let import resolve inside that yield, which is exactly the window a receipt would commit in.
-    const home = await tempDirectory('transfer-import-durability');
-    const attachment = await mintSourceAttachment(home);
+describe('transfer artifact durability before receipt advancement', () => {
+  it('cannot resolve importPlan, so no receipt can advance, until every artifact write has completed', async () => {
+    // Arrange — the real brief writer and the real attachment copier, both observed at the write seam of their
+    // ports. `settled` flips the instant `importPlan` resolves, and every write asserts it is still false AFTER
+    // handing the event loop back: a write the adapter forgot to await would let import resolve inside that
+    // yield, which is exactly the window a receipt would commit in.
+    const folder = new MemoryStateFolder();
+    const store = new MemoryAttachmentStore();
+    const attachment = mintSourceAttachment(store);
     const journal: string[] = [];
     const settled = { value: false };
-    // The temporary home stands in for `<state>`, so `.` is the attachment chain's declared anchor.
-    const name = (path: string): string => relative(home, path) || '.';
-    const hold = async (label: string, flush: () => Promise<void>): Promise<void> => {
+    const hold = async (label: string): Promise<void> => {
       journal.push(label);
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      await yieldLoop();
       should(settled.value).equal(false);
-      await flush();
     };
-    const io: DurableArtifactIo = {
-      syncDirectory: async path => await hold(`dir:${name(path)}`, async () => await fsyncArtifactPath(path)),
-      syncOpenFile: async (handle, path) =>
-        await hold(path.endsWith('.tmp') ? 'temp:fsync' : `file:${name(path)}`, async () => await handle.sync()),
+    const writeThrough = store.write.bind(store);
+    store.write = async (sessionId, attachmentId, file, bytes) => {
+      await hold(`attachment:${file}`);
+      await writeThrough(sessionId, attachmentId, file, bytes);
     };
     const importer = new SessionTransferImporter(
       {
@@ -241,16 +189,8 @@ describe('transfer artifact durability before receipt advancement', () => {
             journal.push('envelope:applied');
           },
         },
-        attachments: new FileSessionAttachmentCopier(
-          sessionId => join(home, 'attachments', DAEMON, sessionId),
-          counter(),
-          io,
-        ),
-        brief: new FileSessionTransferBriefWriter(
-          sessionId => join(home, 'state', 'sessions', sessionId),
-          counter(),
-          io,
-        ),
+        attachments: new FileSessionAttachmentCopier(store),
+        brief: briefOver(folder, hold),
       },
       'fork',
     );
@@ -267,314 +207,282 @@ describe('transfer artifact durability before receipt advancement', () => {
     const outcome = await importing;
     await stamp;
 
-    // Assert — every flush of both artifacts precedes the stamp, in publication order: the attachment's
-    // parent chain, its original, its verbatim manifest, then the brief's chain and the brief itself.
-    const target = join('attachments', DAEMON, TARGET, attachment.id);
+    // Assert — every write of both artifacts precedes the stamp, in publication order: the attachment's original,
+    // its verbatim manifest, then the brief.
     should(journal).deepEqual([
       'envelope:applied',
-      // The attachment chain is anchored at the state root, because the attachments root below it is
-      // created lazily by the attachment store with no parent flush of its own.
-      'dir:.',
-      'dir:attachments',
-      `dir:${join('attachments', DAEMON)}`,
-      `dir:${join('attachments', DAEMON, TARGET)}`,
-      'temp:fsync',
-      `dir:${target}`,
-      'temp:fsync',
-      `dir:${target}`,
-      // The brief chain is anchored at the state root for the same reason: nobody flushes the entry
-      // naming `<sessions>` inside it.
-      'dir:state',
-      `dir:${join('state', 'sessions')}`,
-      `dir:${join('state', 'sessions', TARGET)}`,
-      'temp:fsync',
-      `dir:${join('state', 'sessions', TARGET, 'turns')}`,
+      'attachment:original',
+      'attachment:manifest',
+      'brief:write',
       'receipt:imported',
     ]);
     // And the artifacts the receipt now vouches for are the plan's, complete, with nothing half-written.
     should(outcome.copiedAttachmentIds).deepEqual([attachment.id]);
-    should(outcome.briefPath).equal(join(home, 'state', 'sessions', TARGET, 'turns', 'turn-001.md'));
-    should(await readFile(outcome.briefPath, 'utf8')).containEql('carried.pdf');
-    should(new Uint8Array(await readFile(join(home, target, 'original')))).deepEqual(attachment.bytes);
-    should((await readdir(join(home, target))).sort()).deepEqual(['manifest.json', 'original']);
+    should(outcome.briefPath.endsWith(`${TARGET}/turns/turn-001.md`)).be.true();
+    should(decode(folder.rawBytes(TransferBriefFiles, TARGET))).containEql('carried.pdf');
+    should(store.bytes(TARGET, attachment.id, 'original')).deepEqual(attachment.bytes);
+    should(store.bytes(TARGET, attachment.id, 'manifest')).deepEqual(store.bytes(SOURCE, attachment.id, 'manifest'));
   });
 
-  it('returns from a first publication only on the inode it flushed itself', async () => {
-    // The baseline the two substitution cases below are measured against: with nobody racing, the name
-    // resolves to the temporary this attempt wrote, flushed and renamed — not merely to equal bytes.
-    // Arrange
-    const root = await tempDirectory('transfer-artifact-publication-confirmed');
-    const document = '# Frozen transfer brief\n';
-    const { file, writer } = briefTarget(root);
-    const ledger = flushLedger();
+  it('survives a crash right after the brief landed: the replay of the import completes and vouches for it', async () => {
+    // Arrange — the brief is the LAST import step. The process dies after its write landed, before importPlan could
+    // return, so no receipt advanced; the replay must accept what the first attempt left and finish.
+    const folder = new MemoryStateFolder();
+    const store = new MemoryAttachmentStore();
+    const attachment = mintSourceAttachment(store);
+    const importer = (): SessionTransferImporter =>
+      new SessionTransferImporter(
+        {
+          conversation: {
+            digestPinned: async () => ({ sessionId: SOURCE, through: CUT, messages: [{ point: CUT, role: 'user', text: 'ship it', timestamp: AT }], omissions: [] }),
+          },
+          envelope: { apply: async () => undefined },
+          attachments: new FileSessionAttachmentCopier(store),
+          brief: briefOver(folder),
+        },
+        'fork',
+      );
+    store.afterWrite = written => {
+      // the attachment manifest is the last attachment write; arm the crash for the very next write the port lands
+      if (written.file === 'manifest') folder.armCrash();
+    };
 
     // Act
-    const written = await writer(ledger.io).write(TARGET, document);
+    const crashed = await reject(importer().importPlan(plan(attachment), TARGET));
+    folder.revive();
+    store.afterWrite = () => undefined;
+    const replayed = await importer().importPlan(plan(attachment), TARGET);
 
     // Assert
-    should(written).equal(file);
-    should(ledger.flushedInodes.has(await identityOfName(file))).be.true();
+    should(crashed).be.instanceOf(SimulatedCrash);
+    should(replayed.copiedAttachmentIds).deepEqual([attachment.id]);
+    should(decode(folder.rawBytes(TransferBriefFiles, TARGET))).containEql('carried.pdf');
+  });
+});
+
+/** An in-memory artifact whose reads and writes are logged and whose bytes a test can replace at will. */
+interface MemoryArtifact extends PublishableArtifact {
+  held: Uint8Array | undefined;
+  afterWrite: () => void;
+  read: () => Promise<Uint8Array | undefined>;
+  write: (bytes: Uint8Array) => Promise<void>;
+}
+
+function memoryArtifact(
+  log: string[],
+  name: string,
+  proves: (bytes: Uint8Array) => boolean,
+  initial?: string,
+): MemoryArtifact {
+  const artifact: MemoryArtifact = {
+    held: initial === undefined ? undefined : encode(initial),
+    afterWrite: () => undefined,
+    read: async () => {
+      log.push(`read ${name}`);
+      return artifact.held === undefined ? undefined : new Uint8Array(artifact.held);
+    },
+    write: async (bytes: Uint8Array) => {
+      log.push(`write ${name}`);
+      artifact.held = new Uint8Array(bytes);
+      artifact.afterWrite();
+    },
+    proves,
+  };
+  return artifact;
+}
+
+const isText =
+  (expected: string) =>
+  (bytes: Uint8Array): boolean =>
+    decode(bytes) === expected;
+
+describe('TransferArtifactDurability', () => {
+  it('returns from a first publication only after reading the name back holding the bytes it wrote', async () => {
+    // Arrange
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'));
+
+    // Act
+    await new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]);
+
+    // Assert
+    should(log).deepEqual(['write brief', 'read brief']);
   });
 
-  it('never returns on a name that stopped resolving to the inode it proved', async () => {
-    // Arrange — the name disappears between the proof and the return. Flushing an inode says nothing
-    // about what its NAME means afterwards, so the replay may not vouch for it; it republishes the
-    // frozen document instead, which it can always do.
-    const root = await tempDirectory('transfer-artifact-name-gone');
-    const document = '# Frozen transfer brief\n';
-    const { turns, file, writer } = briefTarget(root);
-    await writer().write(TARGET, document);
+  it('never returns on a name that vanished between the proof and the return: it republishes', async () => {
+    // Arrange — the replay proves the artifact, republishes it, and the name is gone before it is confirmed. Having
+    // flushed bytes says nothing about what their NAME means afterwards, so the replay may not vouch for it.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'), 'frozen');
     let removals = 0;
-    const ledger = flushLedger(async path => {
-      if (path !== turns || removals > 0) return;
-      removals += 1;
-      await rm(file);
-    });
-
-    // Act
-    const written = await writer(ledger.io).write(TARGET, document);
-
-    // Assert — republished, returned on an inode this attempt flushed, and nothing left behind.
-    should(await readFile(written, 'utf8')).equal(document);
-    should(ledger.flushedInodes.has(await identityOfName(file))).be.true();
-    should(await readdir(turns)).deepEqual(['turn-001.md']);
-  });
-
-  it('re-proves and FLUSHES the substituted inode when a rename beats its replay proof', async () => {
-    // Arrange — a concurrent writer of the same frozen document lands its own copy over the name
-    // between the proof and the return, and never flushes it. One substitution is a race worth
-    // re-reading: the second proof flushes the inode that is actually there, on that inode's own
-    // handle, so nothing needs republishing — and the return is about a file this attempt made durable.
-    const root = await tempDirectory('transfer-artifact-substituted-once');
-    const document = '# Frozen transfer brief\n';
-    const { turns, file, writer } = briefTarget(root);
-    await writer().write(TARGET, document);
-    let substitutions = 0;
-    let substituted = '';
-    const ledger = flushLedger(async path => {
-      if (path !== turns || substitutions > 0) return;
-      substitutions += 1;
-      substituted = await substitute(turns, file, document, 'replay');
-    });
-
-    // Act
-    const written = await writer(ledger.io).write(TARGET, document);
-
-    // Assert — returned on the substituted inode, and that inode was itself file-flushed.
-    should(await readFile(written, 'utf8')).equal(document);
-    should(await identityOfName(file)).equal(substituted);
-    should(ledger.flushedInodes.has(substituted)).be.true();
-    should(await readdir(turns)).deepEqual(['turn-001.md']);
-  });
-
-  it('re-proves and FLUSHES the substituted inode when a rename beats its own publication', async () => {
-    // Arrange — this is the hole a publication that only renamed and flushed the directory would leave:
-    // a concurrent writer replaces the just-published name inside the artifact-directory flush window
-    // with byte-identical content it never synced. The publication therefore CONFIRMS its name, sees
-    // the substitution, and re-proves what is there on its own handle before returning.
-    const root = await tempDirectory('transfer-artifact-substituted-publication');
-    const document = '# Frozen transfer brief\n';
-    const { turns, file, writer } = briefTarget(root);
-    let substitutions = 0;
-    let substituted = '';
-    const ledger = flushLedger(async path => {
-      if (path !== turns || substitutions > 0) return;
-      substitutions += 1;
-      substituted = await substitute(turns, file, document, 'publication');
-    });
-
-    // Act — nothing is published yet, so the first flush of `turns` is this publication's own.
-    const written = await writer(ledger.io).write(TARGET, document);
-
-    // Assert — the name resolves to the foreign inode, and this attempt flushed THAT inode rather than
-    // returning because the bytes happened to match.
-    should(await readFile(written, 'utf8')).equal(document);
-    should(await identityOfName(file)).equal(substituted);
-    should(ledger.flushedInodes.has(substituted)).be.true();
-    should(await readdir(turns)).deepEqual(['turn-001.md']);
-  });
-
-  it('confirms the SET: an earlier artifact substituted during a later publication is caught', async () => {
-    // Arrange — the two-artifact case a per-file confirmation cannot cover. `original` is published and
-    // confirmed first; the manifest's whole publication is then a window in which a concurrent writer
-    // renames a byte-identical, never-flushed inode onto `original`. The manifest confirms its own name
-    // happily, so only a WHOLE-SET check before returning can see that the set is no longer durable.
-    const home = await tempDirectory('transfer-artifact-set-substituted');
-    const attachment = await mintSourceAttachment(home);
-    const target = join(home, 'attachments', DAEMON, TARGET, attachment.id);
-    const original = join(target, 'original');
-    const manifest = join(target, 'manifest.json');
-    let artifactFlushes = 0;
-    let substituted = '';
-    const ledger = flushLedger(async path => {
-      if (path !== target) return;
-      artifactFlushes += 1;
-      // Flush 1 publishes `original`; flush 2 is inside the MANIFEST's publication.
-      if (artifactFlushes !== 2) return;
-      const foreign = join(target, 'concurrent-original');
-      await Bun.write(foreign, attachment.bytes);
-      await rename(foreign, original);
-      substituted = await identityOfName(original);
-    });
-    const copier = new FileSessionAttachmentCopier(
-      sessionId => join(home, 'attachments', DAEMON, sessionId),
-      counter(),
-      ledger.io,
-    );
-
-    // Act
-    await copier.copyOriginal({
-      fromSessionId: SOURCE,
-      newSessionId: TARGET,
-      expectedManifest: attachment.manifest,
-    });
-
-    // Assert — the substituted inode is what `original` names, and this attempt proved and FLUSHED that
-    // inode before returning rather than returning because its bytes happened to match.
-    should(await identityOfName(original)).equal(substituted);
-    should(ledger.flushedInodes.has(substituted)).be.true();
-    should(ledger.flushedInodes.has(await identityOfName(manifest))).be.true();
-    should(new Uint8Array(await readFile(original))).deepEqual(attachment.bytes);
-    should((await readdir(target)).sort()).deepEqual(['manifest.json', 'original']);
-  });
-
-  it('FAILS rather than returning when every publication and re-proof is substituted', async () => {
-    // Arrange — substitution on EVERY directory flush, always with byte-identical content that is
-    // never synced. There is no inode this attempt can honestly vouch for, so the honest outcome is a
-    // rejection: the import stays retryable and no receipt may advance. Returning here — which byte
-    // equality alone would have allowed — is the defect this case exists to forbid.
-    const root = await tempDirectory('transfer-artifact-substituted-always');
-    const document = '# Frozen transfer brief\n';
-    const { turns, file, writer } = briefTarget(root);
-    let substitutions = 0;
-    const ledger = flushLedger(async path => {
-      if (path !== turns) return;
-      substitutions += 1;
-      await substitute(turns, file, document, `${substitutions}`);
-    });
-
-    // Act
-    const error = await reject(writer(ledger.io).write(TARGET, document));
-
-    // Assert — refused, with the bound pinned: two publish-then-re-prove rounds, each re-proof taking
-    // its own two attempts, and then it stops instead of chasing another writer for ever.
-    should((error as Error).message).containEql('renamed over by another writer');
-    should(substitutions).equal(6);
-    // The foreign inode is what the name holds, and no temporary of this attempt was left behind.
-    should(await readFile(file, 'utf8')).equal(document);
-    should(await readdir(turns)).deepEqual(['turn-001.md']);
-  });
-
-  it('cleans up only the temporary it created when a publication cannot complete', async () => {
-    // Arrange — the final name is taken by a non-empty directory, so the atomic rename cannot succeed.
-    const root = await tempDirectory('transfer-artifact-publish-failure');
-    const directory = join(root, 'artifacts');
-    const durability = new TransferArtifactDurability(() => 'mine');
-    await durability.ensureDirectory(directory, root);
-    const file = join(directory, 'original');
-    await mkdir(file, { recursive: true });
-    await Bun.write(join(file, 'occupied'), 'not ours');
-
-    // Act
-    const error = await reject(durability.publish(directory, file, new Uint8Array([1, 2, 3])));
-
-    // Assert — our own temporary is gone, and the colliding entry is exactly as it was.
-    should(error).be.instanceOf(Error);
-    should(await readdir(directory)).deepEqual(['original']);
-    should(await readdir(file)).deepEqual(['occupied']);
-  });
-
-  it('tolerates a filesystem that cannot flush a directory, and only those three codes', async () => {
-    // The repo-standard tolerance (`StateFileSystem`, the session effect ledger): some filesystems
-    // cannot fsync a directory at all, and refusing to publish there would make the daemon unusable
-    // rather than safer. The consequence is narrow and stated: the NAME degrades to page-cache
-    // visibility. Any other failure is a real one and is never swallowed.
-    const root = await tempDirectory('transfer-artifact-directory-tolerance');
-    const directory = join(root, 'artifacts');
-    const failing = (code: string): DurableArtifactIo => ({
-      syncDirectory: async () => {
-        throw Object.assign(new Error(`directory flush answered ${code}`), { code });
-      },
-      syncOpenFile: async handle => await handle.sync(),
-    });
-
-    for (const code of ['EINVAL', 'ENOTSUP', 'EPERM']) {
-      const durability = new TransferArtifactDurability(() => code, failing(code));
-      const file = join(directory, `tolerated-${code}`);
-      await durability.ensureDirectory(directory, root);
-      // Confirmed as well as published: a tolerated directory flush is still a publication, and the
-      // name it answers with is the inode it flushed.
-      should(await durability.publish(directory, file, `published despite ${code}\n`)).equal(
-        await identityOfName(file),
-      );
-      should(await readFile(file, 'utf8')).equal(`published despite ${code}\n`);
-    }
-
-    // Anything else fails the publication, so no receipt can advance behind it.
-    const strict = new TransferArtifactDurability(() => 'eio', failing('EIO'));
-    const error = await reject(strict.ensureDirectory(directory, root));
-    should((error as { code?: string }).code).equal('EIO');
-  });
-
-  it('never tolerates a failed file flush: the publication fails and cleans up its own temporary', async () => {
-    // A file flush is where the BYTES become durable, so swallowing its failure is the one thing that
-    // would let a receipt vouch for an artifact nothing had persisted.
-    const root = await tempDirectory('transfer-artifact-file-strictness');
-    const directory = join(root, 'artifacts');
-    const io: DurableArtifactIo = {
-      syncDirectory: async path => await fsyncArtifactPath(path),
-      syncOpenFile: async () => {
-        // Deliberately one of the codes a DIRECTORY flush tolerates: the asymmetry is the point.
-        throw Object.assign(new Error('file flush answered EINVAL'), { code: 'EINVAL' });
-      },
+    artifact.afterWrite = () => {
+      if (removals++ === 0) artifact.held = undefined;
     };
-    const durability = new TransferArtifactDurability(() => 'mine', io);
-    await durability.ensureDirectory(directory, root);
+    const subject = new TransferArtifactDurability();
 
-    const error = await reject(durability.publish(directory, join(directory, 'original'), new Uint8Array([1])));
+    // Act
+    const durable = await subject.proveDurable([artifact]);
+    const rebuilt = await subject.proveDurable([artifact]);
 
-    should((error as { code?: string }).code).equal('EINVAL');
-    // Nothing published, and the temporary this attempt created is gone.
-    should(await readdir(directory)).deepEqual([]);
+    // Assert — the first replay answers false (the caller then publishes its own bytes); nothing was vouched for.
+    should(durable).equal(false);
+    should(rebuilt).equal(false);
+  });
+
+  it('recovers when different bytes are put under a name once, and republishes its own', async () => {
+    // Arrange — another writer lands DIFFERENT bytes after this attempt's write.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'));
+    let substitutions = 1;
+    artifact.afterWrite = () => {
+      if (substitutions-- > 0) artifact.held = encode('someone else');
+    };
+
+    // Act
+    await new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]);
+
+    // Assert — the second round stands.
+    should(decode(artifact.held)).equal('frozen');
+  });
+
+  it('confirms the SET: an earlier artifact replaced during a later publication is caught', async () => {
+    // Arrange — the two-artifact case a per-file confirmation cannot cover. `original` is published first; the
+    // manifest's whole publication is then a window in which another writer replaces `original`. The manifest
+    // confirms its own name happily, so only a WHOLE-SET check before returning can see the set is no longer whole.
+    const log: string[] = [];
+    const original = memoryArtifact(log, 'original', isText('bytes'));
+    const manifest = memoryArtifact(log, 'manifest', isText('manifest'));
+    let substituted = false;
+    manifest.afterWrite = () => {
+      if (substituted) return;
+      substituted = true;
+      original.held = encode('replaced');
+    };
+
+    // Act
+    await new TransferArtifactDurability().materialize('attachment', [
+      { ...original, bytes: 'bytes' },
+      { ...manifest, bytes: 'manifest' },
+    ]);
+
+    // Assert — the set was published again until every name held what was published.
+    should(decode(original.held)).equal('bytes');
+    should(decode(manifest.held)).equal('manifest');
+    should(log.filter(entry => entry === 'write original')).have.length(2);
+  });
+
+  it('FAILS rather than returning when every publication and re-proof is replaced', async () => {
+    // Arrange — a different value lands under the name after EVERY write. There is no bytes this attempt can
+    // honestly vouch for, so the honest outcome is a rejection: the import stays retryable and no receipt may
+    // advance. Returning here is the defect this case exists to forbid.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'));
+    artifact.afterWrite = () => {
+      artifact.held = encode('someone else');
+    };
+
+    // Act
+    const error = await reject(new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]));
+
+    // Assert — refused, with the bound pinned: two publish-then-re-prove rounds, and then it stops instead of
+    // chasing another writer for ever.
+    should((error as Error).message).containEql('replaced by another writer');
+    should(log.filter(entry => entry === 'write brief')).have.length(2);
+  });
+
+  it('proves the WHOLE set before it writes anything, so a failed proof persists nothing', async () => {
+    // Arrange — the manifest proves, the original does not.
+    const log: string[] = [];
+    const manifest = memoryArtifact(log, 'manifest', isText('manifest'), 'manifest');
+    const original = memoryArtifact(log, 'original', isText('bytes'), 'torn');
+
+    // Act
+    const durable = await new TransferArtifactDurability().proveDurable([manifest, original]);
+
+    // Assert
+    should(durable).equal(false);
+    should(log).deepEqual(['read manifest', 'read original']);
+  });
+
+  it('republishes exactly the bytes it proved, in the order the artifacts were given', async () => {
+    // Arrange
+    const log: string[] = [];
+    const manifest = memoryArtifact(log, 'manifest', isText('manifest'), 'manifest');
+    const original = memoryArtifact(log, 'original', isText('bytes'), 'bytes');
+
+    // Act
+    const durable = await new TransferArtifactDurability().proveDurable([manifest, original]);
+
+    // Assert — proof of each, then each written back, then each name confirmed.
+    should(durable).equal(true);
+    should(log).deepEqual([
+      'read manifest',
+      'read original',
+      'write manifest',
+      'write original',
+      'read manifest',
+      'read original',
+    ]);
+  });
+
+  it('reads without writing when it only proves visibility', async () => {
+    // Arrange
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'), 'frozen');
+
+    // Act
+    const visible = await new TransferArtifactDurability().proveVisible([artifact]);
+
+    // Assert
+    should(visible).equal(true);
+    should(log).deepEqual(['read brief']);
   });
 
   it('surfaces an unreadable published artifact instead of silently republishing over it', async () => {
-    // `prove` answers false for "absent" and for "not what the plan says". An IO failure is neither,
-    // and treating it as "rebuild" would overwrite a target nobody could read.
-    const root = await tempDirectory('transfer-artifact-unreadable');
-    await Bun.write(join(root, 'not-a-directory'), 'a file, not a directory');
-
-    const error = await reject(
-      new TransferArtifactDurability().prove(join(root, 'not-a-directory', 'original'), () => true),
-    );
-
-    should((error as { code?: string }).code).equal('ENOTDIR');
-  });
-
-  it('widens the persisted chain to the filesystem root when the declared ancestor is not on the path', async () => {
-    // Arrange — the claim here is which directories the chain NAMES and in what order, so this is the
-    // one place a pure recorder is honest: flushing every ancestor of a throwaway directory, up to and
-    // including the filesystem root, would prove nothing extra about the walk.
-    const root = await tempDirectory('transfer-artifact-chain');
-    const directory = join(root, 'one', 'two');
-    const flushed: string[] = [];
-    const recorder: DurableArtifactIo = {
-      syncDirectory: async path => {
-        flushed.push(path);
-      },
-      syncOpenFile: async () => undefined,
+    // `prove` answers false for "absent" and for "not what the plan says". An IO failure is neither, and treating
+    // it as "rebuild" would overwrite a target nobody could read.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'));
+    artifact.read = async () => {
+      throw Object.assign(new Error('ENOTDIR'), { code: 'ENOTDIR' });
     };
 
-    // Act — an ancestor that is not on this path must widen the chain, never walk forever.
-    await new TransferArtifactDurability(() => 'x', recorder).ensureDirectory(
-      directory,
-      join(root, 'not', 'an', 'ancestor'),
-    );
+    const error = await reject(new TransferArtifactDurability().proveDurable([artifact]));
 
-    // Assert — parent-first from the filesystem root down to the artifact directory's own parent.
-    should(flushed[0]).equal(parse(directory).root);
-    should(flushed[flushed.length - 1]).equal(join(root, 'one'));
-    should(flushed.every((path, index) => index === 0 || dirname(path) === flushed[index - 1])).be.true();
-    should((await readdir(join(root, 'one'))).sort()).deepEqual(['two']);
+    should((error as { code?: string }).code).equal('ENOTDIR');
+    should(log).deepEqual([]);
+  });
+
+  it('never tolerates a failed write: the publication fails so no receipt can advance behind it', async () => {
+    // A write is where the BYTES become durable, so swallowing its failure is the one thing that would let a
+    // receipt vouch for an artifact nothing had persisted.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'));
+    artifact.write = async () => {
+      throw Object.assign(new Error('write answered EIO'), { code: 'EIO' });
+    };
+
+    const error = await reject(new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]));
+
+    should((error as { code?: string }).code).equal('EIO');
+  });
+
+  it('surfaces a name that cannot be read for a reason other than being absent while confirming', async () => {
+    // Arrange: the artifact is proved and republished, then reading the name back fails.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', isText('frozen'), 'frozen');
+    let reads = 0;
+    const read = artifact.read;
+    artifact.read = async () => {
+      reads += 1;
+      if (reads > 1) throw Object.assign(new Error('ENOTDIR'), { code: 'ENOTDIR' });
+      return await read();
+    };
+
+    // Act
+    const error = await reject(new TransferArtifactDurability().proveDurable([artifact]));
+
+    // Assert — not a lost race: the failure surfaces as the port's own error rather than a vouched return.
+    should((error as { code?: string }).code).equal('ENOTDIR');
   });
 });

@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { ApiError, type CallContext, type CallStanding, errorResponse } from '@ferretry/kernel/contract';
 import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
   type SessionHandoverFailure,
@@ -7,27 +9,24 @@ import {
   type SessionHandoverRequest,
 } from '../../../../../contract/handover.ts';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import manifest from '../../../../../manifest.ts';
 import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
 import {
   type SessionHandoverSubsystem,
   sessionHandoverRoutes,
 } from '../../../../../daemon/lib/runtime/mounts/session-handover.ts';
-import { bodyReads, request } from '../../api/support.ts';
+import { ferretId } from '../../../../../contract/testing/index.ts';
 import { receiptAt } from '../../moves/handover/support.ts';
-import { agentIn, CREDENTIALS, FERRET_SESSION, fromFerret, human } from './support.ts';
 
 /**
  * The handover surface: what a caller may ask for, what each refusal answers, and what comes back.
  *
- * Every case goes through the real dispatcher and the real credentials, because the scope each route
- * is served under is the point of half of them: a handover creates a privileged session and changes
- * board membership, so the writes are as closed as the start and the stop, while the read of what
- * happened is a lesser thing a paired device may do. The subsystem behind the routes is a fake — the
- * state machine it drives has its own coverage — so what is proved here is the route table, the
- * credential policy, the request-id contract, the refusal-to-HTTP mapping, and the receipt read.
+ * Every case calls the mounted handler with the standing Gate would have stamped (an owner, or a ferret). The scope
+ * each route is served under is the kernel's, from `manifest.ts`, and the case below pins that declaration: a handover
+ * creates a privileged session and changes board membership, so the writes are as closed as the start and the stop,
+ * while the read of what happened is a lesser thing a paired device may do. The subsystem behind the routes is a fake —
+ * the state machine it drives has its own coverage — so what is proved here is the route table, the declared scope, the
+ * request-id contract, the ferret-only-for-itself rule, the refusal-to-HTTP mapping, and the receipt read.
  */
 
 /**
@@ -150,8 +149,70 @@ class FakeSessionHandover implements SessionHandoverSubsystem {
   }
 }
 
-function dispatcher(subsystem: SessionHandoverSubsystem = new FakeSessionHandover()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionHandoverRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+/** The session a ferret caller is, for the cases that address itself. */
+const FERRET_SESSION = 'ferret-7';
+const human = {} as const;
+
+/** What one case sends. */
+interface Sent {
+  readonly method: 'GET' | 'POST';
+  readonly template: string;
+  readonly sessionId: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body?: string;
+  /** The body read fails outright, as a connection that vanished mid-request does. */
+  readonly unreadableBody?: boolean;
+  /** Where the bounded reads are recorded, so a case can show the route asked for a bound. */
+  readonly reads?: { readonly limits: Array<number | undefined> };
+  readonly standing: CallStanding;
+}
+
+function bodyReads(): { readonly limits: Array<number | undefined> } {
+  return { limits: [] };
+}
+
+/** The mounted handler for the request, answered the way the kernel's dispatcher answers a thrown refusal. */
+class Dispatcher {
+  constructor(private readonly subsystem: SessionHandoverSubsystem) {}
+
+  async dispatch(sent: Sent): Promise<{ readonly status: number; readonly body: string }> {
+    const route = sessionHandoverRoutes(this.subsystem).find(
+      candidate => candidate.method === sent.method && candidate.path === sent.template,
+    );
+    if (route === undefined) throw new Error(`no handover route ${sent.method} ${sent.template}`);
+    const text = async (limit?: number): Promise<string> => {
+      sent.reads?.limits.push(limit);
+      if (sent.unreadableBody === true) throw new Error('the connection went away');
+      const body = sent.body ?? '';
+      if (limit !== undefined && new TextEncoder().encode(body).byteLength > limit)
+        throw new ApiError(413, `the request body is over the ${limit}-byte limit`, 'body_too_large');
+      return body;
+    };
+    const call = {
+      params: new Map([['ferretId', sent.sessionId]]),
+      request: {
+        method: sent.method,
+        path: sent.template.replace(':ferretId', sent.sessionId),
+        headers: new Headers(sent.headers),
+        query: new Map<string, readonly string[]>(),
+        text,
+      },
+      ...sent.standing,
+    } as unknown as CallContext;
+    try {
+      const response = await route.handle(call);
+      return { status: response.status, body: response.body };
+    } catch (error) {
+      // The kernel's dispatcher answers anything that is not a stated refusal as a bare 500, with no code of ours.
+      if (!(error instanceof ApiError)) return { status: 500, body: JSON.stringify({ error: 'internal error', code: 'internal' }) };
+      const response = errorResponse(error.status, error.message, error.code);
+      return { status: response.status, body: response.body };
+    }
+  }
+}
+
+function dispatcher(subsystem: SessionHandoverSubsystem = new FakeSessionHandover()): Dispatcher {
+  return new Dispatcher(subsystem);
 }
 
 /** Every POST below that is not ABOUT the request id carries one, so the cases that test something else
@@ -167,35 +228,37 @@ function beginRequest(
   sessionId: string,
   headers: Readonly<Record<string, string>> = human,
   body: unknown = VALID_BODY,
-): Parameters<ApiDispatcher['dispatch']>[0] {
+  standing: CallStanding = ownerStanding(),
+): Sent {
   const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
-  return request({
+  return {
     method: 'POST',
-    path: `/v1/ferrets/${sessionId}/handover`,
+    template: '/v1/ferrets/:ferretId/handover',
+    sessionId,
     headers: supplied,
     body: typeof body === 'string' ? body : JSON.stringify(body),
-  });
+    standing,
+  };
 }
 
-function getRequest(
-  sessionId: string,
-  headers: Readonly<Record<string, string>> = human,
-): Parameters<ApiDispatcher['dispatch']>[0] {
-  return request({ method: 'GET', path: `/v1/ferrets/${sessionId}/handover`, headers });
+function getRequest(sessionId: string, standing: CallStanding = ownerStanding()): Sent {
+  return { method: 'GET', template: '/v1/ferrets/:ferretId/handover', sessionId, headers: {}, standing };
 }
 
 function cancelRequest(
   sessionId: string,
   headers: Readonly<Record<string, string>> = human,
   body: unknown = {},
-): Parameters<ApiDispatcher['dispatch']>[0] {
+): Sent {
   const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
-  return request({
+  return {
     method: 'POST',
-    path: `/v1/ferrets/${sessionId}/handover/cancel`,
+    template: '/v1/ferrets/:ferretId/handover/cancel',
+    sessionId,
     headers: supplied,
     body: typeof body === 'string' ? body : JSON.stringify(body),
-  });
+    standing: ownerStanding(),
+  };
 }
 
 describe('the session handover mount', () => {
@@ -295,14 +358,10 @@ describe('the session handover mount', () => {
     const subject = dispatcher(subsystem);
 
     // Act
-    const vanished = await subject.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/ferrets/s1/handover/cancel',
-        headers: withRequestId(human, 'req-gone'),
-        unreadableBody: true,
-      }),
-    );
+    const vanished = await subject.dispatch({
+      ...cancelRequest('s1', withRequestId(human, 'req-gone')),
+      unreadableBody: true,
+    });
     const unparseable = await subject.dispatch(cancelRequest('s1', withRequestId(human, 'req-junk'), 'not json'));
     const nullBody = await subject.dispatch(cancelRequest('s1', withRequestId(human, 'req-null'), 'null'));
     const arrayBody = await subject.dispatch(cancelRequest('s1', withRequestId(human, 'req-array'), '[]'));
@@ -330,22 +389,16 @@ describe('the session handover mount', () => {
     const oversized = `{"${'x'.repeat(4096)}":1}`;
 
     // Act
-    const response = await subject.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/ferrets/s1/handover/cancel',
-        headers: withRequestId(human, 'req-big'),
-        body: oversized,
-        // In installments, so the refusal can be shown to happen before the whole body is materialised.
-        bodyPieceBytes: 256,
-        reads,
-      }),
-    );
+    const response = await subject.dispatch({
+      ...cancelRequest('s1', withRequestId(human, 'req-big'), oversized),
+      reads,
+    });
 
     // Assert
     should(response.status).equal(413);
     should((JSON.parse(response.body) as { code: string }).code).equal('body_too_large');
     // The route asked for a bound rather than an unbounded read...
+    should(reads.limits.length).be.above(0);
     should(reads.limits).not.containEql(undefined);
     // ...and nothing reached the subsystem, so no handover was cancelled to produce this answer.
     should(subsystem.cancels).be.empty();
@@ -385,48 +438,66 @@ describe('the session handover mount', () => {
     should(subsystem.begins).be.empty();
   });
 
-  it('should refuse anonymously and refuse a warden token on the writes, but read over any credential', async () => {
+  it('should serve the writes to an operator only and the read to any credential, as the manifest declares', () => {
     // A handover creates a privileged session and changes board membership, so the writes are operator
-    // scope; the read is authenticated, because reading what happened is a lesser thing.
+    // scope; the read is authenticated, because reading what happened is a lesser thing. The kernel enforces
+    // the scope (a missing credential is its 401, a warden token its 403); what this daemon owns is the
+    // declaration, which a ferret may reach on all three (it hands over only ITSELF, below).
     // Arrange
-    const subsystem = new FakeSessionHandover();
-    const subject = dispatcher(subsystem);
+    const declared = (key: string) => manifest.actions?.routes?.find(route => route.key === key);
 
-    // Act
-    const anonymousWrite = await subject.dispatch(beginRequest('s1', {}));
-    const wardenWrite = await subject.dispatch(beginRequest('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
-    const peerWrite = await subject.dispatch(beginRequest('s9', agentIn('s9')));
-    const anonymousRead = await subject.dispatch(getRequest('s1', {}));
-    const pairedRead = await subject.dispatch(getRequest('s1', agentIn('s9')));
+    // Act / Assert
+    should(declared('POST /v1/ferrets/:ferretId/handover')).containEql({
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+    });
+    should(declared('GET /v1/ferrets/:ferretId/handover')).containEql({
+      minimum: 'authenticated',
+      caller: 'any',
+      noStore: true,
+    });
+    should(declared('POST /v1/ferrets/:ferretId/handover/cancel')).containEql({
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+    });
+    // Neither POST is audited from the route layer: the session journal records a handover.
+    should(declared('POST /v1/ferrets/:ferretId/handover')?.audit).have.property('skip');
+    should(declared('POST /v1/ferrets/:ferretId/handover/cancel')?.audit).have.property('skip');
+  });
+
+  it('should mount exactly the three handover routes the manifest names', () => {
+    // Arrange
+    const mounted = sessionHandoverRoutes(new FakeSessionHandover()).map(route => `${route.method} ${route.path}`);
 
     // Assert
-    should(anonymousWrite.status).equal(401);
-    should(wardenWrite.status).equal(403);
-    // An agent on the admin token with its own session header may hand over ITSELF.
-    should(peerWrite.status).equal(202);
-    // GET is authenticated: anonymous is refused, a paired device is not.
-    should(anonymousRead.status).equal(401);
-    should(pairedRead.status).equal(200);
-    should(subsystem.begins).have.length(1);
-    should(subsystem.reads).deepEqual(['s1']);
+    should(mounted).deepEqual([
+      'POST /v1/ferrets/:ferretId/handover',
+      'GET /v1/ferrets/:ferretId/handover',
+      'POST /v1/ferrets/:ferretId/handover/cancel',
+    ]);
+    for (const key of mounted) should(manifest.actions?.routes?.some(route => route.key === key)).be.true();
   });
 
   it('should let a ferret hand over only its own session, never another ferret’s or the owner’s', async () => {
     // Arrange — a handover starts a new top-level session in place of the source.
     const subsystem = new FakeSessionHandover();
     const subject = dispatcher(subsystem);
+    const ferret = ferretStanding(ferretId(FERRET_SESSION));
 
     // Act
-    const other = await subject.dispatch(fromFerret(beginRequest('s1')));
-    const otherByHeader = await subject.dispatch(beginRequest('s1', agentIn('s9')));
-    const own = await subject.dispatch(fromFerret(beginRequest(FERRET_SESSION)));
+    const other = await subject.dispatch(beginRequest('s1', human, VALID_BODY, ferret));
+    const own = await subject.dispatch(beginRequest(FERRET_SESSION, human, VALID_BODY, ferret));
     const owner = await subject.dispatch(beginRequest('s1'));
+    const read = await subject.dispatch(getRequest('s1', ferret));
 
     // Assert
     should([other.status, JSON.parse(other.body).code]).deepEqual([403, 'owner_only']);
-    should([otherByHeader.status, JSON.parse(otherByHeader.body).code]).deepEqual([403, 'owner_only']);
     should([own.status, owner.status]).deepEqual([202, 202]);
     should(subsystem.begins.map(([id]) => id)).deepEqual([FERRET_SESSION, 's1']);
+    // The read is not the act: a ferret may read any receipt its credential reaches.
+    should(read.status).equal(200);
   });
 
   it('should answer each refusal the subsystem raises with its own status and code', async () => {
@@ -501,17 +572,22 @@ describe('the session handover mount', () => {
     const subject = dispatcher(subsystem);
 
     // Act
-    const beginWithoutId = await subject.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/ferrets/s1/handover',
-        headers: human,
-        body: JSON.stringify(VALID_BODY),
-      }),
-    );
-    const cancelWithoutId = await subject.dispatch(
-      request({ method: 'POST', path: '/v1/ferrets/s1/handover/cancel', headers: human, body: '{}' }),
-    );
+    const beginWithoutId = await subject.dispatch({
+      method: 'POST',
+      template: '/v1/ferrets/:ferretId/handover',
+      sessionId: 's1',
+      headers: human,
+      body: JSON.stringify(VALID_BODY),
+      standing: ownerStanding(),
+    });
+    const cancelWithoutId = await subject.dispatch({
+      method: 'POST',
+      template: '/v1/ferrets/:ferretId/handover/cancel',
+      sessionId: 's1',
+      headers: human,
+      body: '{}',
+      standing: ownerStanding(),
+    });
 
     // Assert
     should(beginWithoutId.status).equal(400);

@@ -8,13 +8,19 @@ import {
 } from '../../../../daemon/lib/moves/harness-provenance.ts';
 import { descendantsOf, inventoryProcesses, parseProcessTable } from '../../../../daemon/lib/moves/process-table.ts';
 
-const fixture = (name: string): string => readFileSync(`${import.meta.dir}/../../fixtures/ps/${name}`, 'utf8');
+const fixture = (name: string): string => readFileSync(`${import.meta.dir}/../../../fixtures/ps/${name}`, 'utf8');
 
 const NO_SERVERS: readonly ConfiguredServer[] = [];
 
 function inventory(name: string, rootPid: number, configuredServers: readonly ConfiguredServer[] = NO_SERVERS) {
   const rows = descendantsOf(rootPid, parseProcessTable(fixture(name)));
-  const provenance: Provenance = { rootPid, binaryName: 'fy', configuredServers };
+  const provenance: Provenance = {
+    rootPid,
+    binaryName: 'fy',
+    toolsServerArguments: ['mcp', 'serve'],
+    statuslineSubcommand: 'statusline',
+    configuredServers,
+  };
   const known = identifyKnownProcesses(rows, provenance);
   return {
     known,
@@ -114,6 +120,8 @@ describe('the processes a harness starts for itself', () => {
     const provenance: Provenance = {
       rootPid: 1,
       binaryName: 'fy',
+      toolsServerArguments: ['mcp', 'serve'],
+      statuslineSubcommand: 'statusline',
       configuredServers: [{ name: 'lite', command: '/opt/bin/lsp-lite', args: [] }],
     };
 
@@ -138,7 +146,13 @@ describe('the processes a harness starts for itself', () => {
     );
 
     // Act
-    const known = identifyKnownProcesses(rows, { rootPid: 1, binaryName: 'fy', configuredServers: NO_SERVERS });
+    const known = identifyKnownProcesses(rows, {
+      rootPid: 1,
+      binaryName: 'fy',
+      toolsServerArguments: ['mcp', 'serve'],
+      statuslineSubcommand: 'statusline',
+      configuredServers: NO_SERVERS,
+    });
 
     // Assert
     should([...known.keys()]).deepEqual([14]);

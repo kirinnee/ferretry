@@ -1,3 +1,14 @@
+import { isFerretCall, OWNER_ONLY_CODE, ferretOf } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiRequest,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  headerValue,
+  jsonResponse,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
 import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
 import {
   type SessionHandoverFailure,
@@ -5,14 +16,10 @@ import {
   type SessionHandoverRequest,
   SessionHandoverRequestSchema,
 } from '../../../../contract/handover.ts';
-import { agentSessionOf, isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiRequest, type ApiResponse, BodyTooLargeError, decodeParameter, headerValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { BodyTooLargeError, parseBody } from '../../http/body.ts';
 import { HandoverError } from '../../moves/handover/types.ts';
-import type { ModuleContribution } from '../modules.ts';
+
+type RouteContext = CallContext;
 
 /**
  * Handing a top-level session to a different harness: three routes under
@@ -42,7 +49,7 @@ import type { ModuleContribution } from '../modules.ts';
  * nullable so a reader never confuses a boardless root with a missing section.
  *
  * THE REFUSAL TABLE MAPS ONE PROTOCOL-OWNED SET. There is no second enumeration here: every
- * actionable cause the daemon can raise is `SessionHandoverFailure` from `@ferretry/protocol`, and the
+ * actionable cause the daemon can raise is `SessionHandoverFailure` from this package's contract (`contract/handover.ts`), and the
  * table below exhaustively maps each one to the HTTP status and code a caller acts on. The terminal
  * CATEGORY (`refused` / `abandoned` / `stranded` / `failed`) lives on `receipt.phase`, not on the
  * failure code, so a `stranded` receipt still reads through GET with the specific cause that stranded
@@ -205,7 +212,7 @@ async function begin(subsystem: SessionHandoverSubsystem, context: RouteContext)
   const sessionId = pathSessionId(context);
   // A handover starts a NEW top-level session in place of the source, so a ferret may hand over only ITSELF: never
   // replace another ferret, or the owner's own session, with a session of its making.
-  if (isAgentCaller(context) && agentSessionOf(context) !== sessionId)
+  if (isFerretCall(context) && ferretOf(context) !== sessionId)
     throw new ApiError(403, 'a ferret hands over only its own session; ask the owner', OWNER_ONLY_CODE);
   const target = await parseBody(context.request, SessionHandoverRequestSchema);
   const id = requestId(context.request);
@@ -252,7 +259,7 @@ async function cancelBodyText(request: ApiRequest): Promise<string> {
   try {
     return await request.text(MAX_CANCEL_BODY_BYTES);
   } catch (error) {
-    if (error instanceof BodyTooLargeError) throw new ApiError(413, error.message, 'body_too_large');
+    if (error instanceof ApiError && error.status === 413) throw new BodyTooLargeError(MAX_CANCEL_BODY_BYTES);
     throw new ApiError(400, 'the request body could not be read', 'unreadable_body');
   }
 }
@@ -285,56 +292,45 @@ async function cancel(subsystem: SessionHandoverSubsystem, context: RouteContext
   return jsonResponse(receipt, 202);
 }
 
+/** One handover handler, keyed the way the manifest names its route (method and path). */
+export interface HandoverRoute {
+  readonly method: 'GET' | 'POST';
+  readonly path: string;
+  readonly handle: RouteHandler;
+}
+
 /**
  * The handover surface.
  *
  * Both POSTs are `operator` scope, for the same reason the move is: a handover creates a privileged
  * session and changes board membership. The GET is `authenticated`, because reading what happened is a
  * lesser thing than causing it, and a paired device may do the former where it may not do the latter.
- *
  * `noStore` on every route, because a receipt's phase advances under the reconciler and a cached one
- * would freeze a live handover at the phase a stale response happened to capture.
+ * would freeze a live handover at the phase a stale response happened to capture. The descriptors
+ * (scope, `caller: 'any'`, no-store, the audit skip) are `manifest.ts`'s; this table is only the handlers.
+ *
+ * The handover registers immediately after the move it is the cross-family counterpart of, so the two operations a
+ * caller chooses between sit together. Its three paths are one and two segments under `/v1/ferrets/:ferretId` ending in
+ * the literal `handover` — and `handover/cancel` beneath it — so none can shadow or be shadowed by the move or the
+ * deeper per-session subsystems.
  */
-export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): readonly ApiRoute[] {
+export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): readonly HandoverRoute[] {
   return [
-    {
-      method: 'POST',
-      path: '/v1/ferrets/:ferretId/handover',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await begin(subsystem, context),
-    },
-    {
-      method: 'GET',
-      path: '/v1/ferrets/:ferretId/handover',
-      minimum: 'authenticated',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await read(subsystem, context),
-    },
+    { method: 'POST', path: '/v1/ferrets/:ferretId/handover', handle: async context => await begin(subsystem, context) },
+    { method: 'GET', path: '/v1/ferrets/:ferretId/handover', handle: async context => await read(subsystem, context) },
     {
       method: 'POST',
       path: '/v1/ferrets/:ferretId/handover/cancel',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
       handle: async context => await cancel(subsystem, context),
     },
   ];
 }
 
-/**
- * What the session-handover module adds to the daemon: the three handover routes.
- *
- * The handover registers immediately after the move it is the cross-family counterpart of, so the two operations a
- * caller chooses between sit together. Its three paths are one and two segments under `/v1/ferrets/:ferretId` ending in
- * the literal `handover` — and `handover/cancel` beneath it, registered in the same table after its parent — so none can
- * shadow or be shadowed by the move or the deeper per-session subsystems.
- *
- * It contributes no audit rule: the two POSTs are listed as not audited in the module's contract fragment, because the
- * session journal records them.
- */
-export function sessionHandoverContribution(subsystem: SessionHandoverSubsystem): ModuleContribution {
+/** What the session-handover module adds to the daemon: the three handover routes. */
+export interface HandoverContribution {
+  readonly routes: readonly HandoverRoute[];
+}
+
+export function sessionHandoverContribution(subsystem: SessionHandoverSubsystem): HandoverContribution {
   return { routes: sessionHandoverRoutes(subsystem) };
 }

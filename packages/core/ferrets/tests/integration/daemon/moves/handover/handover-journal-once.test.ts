@@ -1,30 +1,19 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it } from 'bun:test';
 import should from 'should';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { appendHandoverEventOnce } from '../../../../../daemon/modules/session-handover.ts';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../src/adapters/index.ts';
-import { parseSessionId } from '../../../src/lib/index.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
 
 /**
  * The handover's completion journal, written at most once per side.
  *
  * WHY THIS TIER AND NOT A UNIT TEST. The contract is about what survives a crash, and the thing that
- * has to survive it is a FILE. Completion appends to two journals in a fixed order — the predecessor's,
+ * has to survive it is a DOCUMENT. Completion appends to two journals in a fixed order — the predecessor's,
  * then the replacement's — and a crash between them replays the whole step. A guard held in the process
  * would be empty again after exactly the event it exists to catch (the restart), so the deduplication
- * has to be read back from the same durable document it is written to, and only a real storage over a
- * real directory proves that it is.
+ * has to be read back from the same durable document it is written to, and only a real storage over the kernel's
+ * state port (here its in-memory folder, which outlives the storage) proves that it is.
  *
  * The failure this prevents is not cosmetic: a doubled `session.handover_completed` makes the fleet's
  * own history claim one session was handed over twice, and the journal is the evidence a human reads
@@ -36,46 +25,23 @@ const SOURCE = parseSessionId('source-1');
 const REPLACEMENT = parseSessionId('replacement-1');
 const COMPLETED = 'session.handover_completed';
 
-const homes = new Set<string>();
-
 /**
  * The composition root's own per-session queue for this journal.
  *
- * One instance for the whole file, exactly as `bin/fyd.ts` holds one for the life of the daemon: a
+ * One instance for the whole file, exactly as the module holds one for the life of the daemon: a
  * serializer constructed per call would serialize nothing, which is the failure the concurrency case
  * below exists to catch.
  */
 const serial = new KeyedSerialExecutor();
 
+/** A real storage over a memory state folder, with the two sessions' documents a completion appends to. */
 async function openStorage() {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-handover-journal-'));
-  homes.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return await factory.open();
+  const opened = await memoryStorage({ clock: { now: () => NOW } });
+  return opened;
 }
 
 function config(id: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id,
-    name: 'A handover subject',
-    agent: '/opt/fleet/bin/claude-auto-loge',
-    command: ['/opt/fleet/bin/claude-auto-loge'],
-    cwd: '/workspace/project',
-    mode: 'auto',
-    turn: 1,
-    tmuxSession: `fy-${id}`,
-    createdAt: NOW,
-    updatedAt: NOW,
-    ...overrides,
-  };
+  return sessionConfig(id, { createdAt: NOW, updatedAt: NOW, ...overrides });
 }
 
 /**
@@ -106,25 +72,21 @@ async function completions(
   let after = 0;
   for (;;) {
     const page = await storage.replay(id, after, 1_000);
-    found.push(...page.events.filter(event => event.type === COMPLETED));
+    found.push(...page.events.filter((event: { readonly type: string }) => event.type === COMPLETED));
     if (!page.hasMore || page.nextSequence === undefined) return found;
     after = page.nextSequence;
   }
 }
 
-afterEach(async () => {
-  for (const home of homes) await rm(home, { recursive: true, force: true });
-  homes.clear();
-});
 
 describe('the handover completion journal', () => {
   it('should write one event per side, in source-then-replacement order, when a crash replays the step', async () => {
     // Arrange: two real sessions in a real state home, and the two operation ids one completion uses.
     const opened = await openStorage();
     await opened.storage.writeConfig(SOURCE, config('source-1'));
-    await opened.storage.writeState(SOURCE, { id: 'source-1', status: 'running' });
+    await opened.storage.writeState(SOURCE, sessionState('source-1'));
     await opened.storage.writeConfig(REPLACEMENT, config('replacement-1'));
-    await opened.storage.writeState(REPLACEMENT, { id: 'replacement-1', status: 'running' });
+    await opened.storage.writeState(REPLACEMENT, sessionState('replacement-1'));
     const sourceAppend = {
       sessionId: 'source-1',
       operationId: 'handover-op:source',
@@ -176,7 +138,7 @@ describe('the handover completion journal', () => {
     // Arrange
     const opened = await openStorage();
     await opened.storage.writeConfig(SOURCE, config('source-1'));
-    await opened.storage.writeState(SOURCE, { id: 'source-1', status: 'running' });
+    await opened.storage.writeState(SOURCE, sessionState('source-1'));
 
     // Act
     const base = { sessionId: 'source-1', type: COMPLETED, data: {} };
@@ -204,7 +166,7 @@ describe('the handover completion journal', () => {
     // Arrange: more than one page of ordinary events, then the completion.
     const opened = await openStorage();
     await opened.storage.writeConfig(SOURCE, config('source-1'));
-    await opened.storage.writeState(SOURCE, { id: 'source-1', status: 'running' });
+    await opened.storage.writeState(SOURCE, sessionState('source-1'));
     for (let index = 0; index < 1_050; index += 1) {
       await opened.storage.append(SOURCE, 'session.turn', { index });
     }
@@ -236,7 +198,7 @@ describe('the handover completion journal', () => {
     // Arrange
     const opened = await openStorage();
     await opened.storage.writeConfig(SOURCE, config('source-1'));
-    await opened.storage.writeState(SOURCE, { id: 'source-1', status: 'running' });
+    await opened.storage.writeState(SOURCE, sessionState('source-1'));
     const append = {
       sessionId: 'source-1',
       operationId: 'handover-op:source',
@@ -264,7 +226,7 @@ describe('the handover completion journal', () => {
     // Arrange
     const opened = await openStorage();
     await opened.storage.writeConfig(SOURCE, config('source-1'));
-    await opened.storage.writeState(SOURCE, { id: 'source-1', status: 'running' });
+    await opened.storage.writeState(SOURCE, sessionState('source-1'));
 
     // Act
     await appendHandoverEventOnce(opened.storage, serial, {

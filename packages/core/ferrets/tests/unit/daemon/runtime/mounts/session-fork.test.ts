@@ -7,13 +7,13 @@ import {
   type ForkSessionPlanSummary,
   type ForkSessionRequest,
 } from '../../../../../contract/fork.ts';
+import { ownerStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallContext, RouteHandler } from '@ferretry/kernel/contract';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import manifest from '../../../../../manifest.ts';
 import { SessionForkRefusal, sessionForkRoutes } from '../../../../../daemon/lib/runtime/mounts/session-fork.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, fromFerret, human } from './support.ts';
+import { refusalOf } from '../../support/calls.ts';
+import { jsonOf, requestOf } from '../../support/requests.ts';
 
 /**
  * The fork surface: what a caller may ask for, what each refusal answers, and what comes back.
@@ -106,33 +106,36 @@ class LeakingSessionFork {
   }
 }
 
-function dispatcher(subsystem: { fork: FakeSessionFork['fork'] } = new FakeSessionFork()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionForkRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+const ROUTE = 'POST /v1/ferrets/:ferretId/fork';
+
+function handlerOf(subsystem: { fork: FakeSessionFork['fork'] } = new FakeSessionFork()): RouteHandler {
+  const route = sessionForkRoutes(subsystem).find(candidate => `${candidate.method} ${candidate.path}` === ROUTE);
+  if (route === undefined) throw new Error('the fork route is not mounted');
+  return route.handle;
 }
 
-const withRequestId = (headers: Readonly<Record<string, string>>, requestId = 'req-1') => ({
-  ...headers,
-  [FY_REQUEST_ID_HEADER]: requestId,
-});
+const BODY = { through: POINT, selectionBinding: 'selection-binding-1', agent: 'codex-auto' };
 
-function forkRequest(
-  sessionId: string,
-  headers: Readonly<Record<string, string>> = human,
-  body: unknown = { through: POINT, selectionBinding: 'selection-binding-1', agent: 'codex-auto' },
-): Parameters<ApiDispatcher['dispatch']>[0] {
-  const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
-  return request({
+/** One call of the fork route, as the kernel hands it to the handler once Gate has admitted the owner. */
+function forkCall(
+  ferretId: string,
+  headers: Readonly<Record<string, string>> = { [FY_REQUEST_ID_HEADER]: 'req-1' },
+  body: unknown = BODY,
+): CallContext {
+  return requestOf({
     method: 'POST',
-    path: `/v1/ferrets/${sessionId}/fork`,
-    headers: supplied,
-    body: typeof body === 'string' ? body : JSON.stringify(body),
+    path: `/v1/ferrets/${ferretId}/fork`,
+    params: { ferretId },
+    headers,
+    body,
+    standing: ownerStanding(),
   });
 }
 
-const codeOf = (response: { readonly body: string }): string => (JSON.parse(response.body) as { code: string }).code;
+const withRequestId = (requestId: string): Readonly<Record<string, string>> => ({ [FY_REQUEST_ID_HEADER]: requestId });
 
 describe('the session fork mount', () => {
-  it('should serve exactly one operator-scoped, uncached fork route', () => {
+  it('should serve exactly one fork route', () => {
     // The route table is the daemon's own statement of what exists, and the protocol client dials
     // this exact address; a rename on either side is the shipped-404 shape the repository gates for.
     // Act
@@ -142,18 +145,29 @@ describe('the session fork mount', () => {
     should(routes).have.length(1);
     should(routes[0]?.method).equal('POST');
     should(routes[0]?.path).equal('/v1/ferrets/:ferretId/fork');
-    should(routes[0]?.minimum).equal('operator');
-    should(routes[0]?.noStore).be.true();
+  });
+
+  it('should be declared as an operator-scoped, person-only, uncached route in the manifest', () => {
+    // The scope is the kernel's, from `manifest.ts`: a fork launches an agent wrapper holding this daemon's own
+    // privileges under an account the caller chose (operator), and a fork's target descends from NOTHING, so a ferret
+    // that could fork would start a parent-less session past its sub-ferret limits (person).
+    // Act
+    const declared = manifest.actions?.routes?.find(route => route.key === ROUTE);
+
+    // Assert
+    should(declared?.minimum).equal('operator');
+    should(declared?.caller).equal('person');
+    should(declared?.noStore).be.true();
   });
 
   it('should fork a session and answer with the fresh session and the plan that built it', async () => {
     // Arrange
     const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
+    const handler = handlerOf(forker);
 
     // Act
-    const response = await subject.dispatch(
-      forkRequest('s1', human, {
+    const response = await handler(
+      forkCall('s1', withRequestId('req-1'), {
         through: POINT,
         selectionBinding: 'selection-binding-1',
         agent: 'codex-auto',
@@ -166,7 +180,7 @@ describe('the session fork mount', () => {
     should(response.status).equal(200);
     // Parsed with the protocol's own schema: a body the client would refuse is a fork that happened
     // and could not tell anybody what it did or did not carry.
-    const outcome = ForkSessionOutcomeSchema.parse(JSON.parse(response.body));
+    const outcome = ForkSessionOutcomeSchema.parse(jsonOf(response));
     should(outcome.session.id).equal('s1-fork');
     should(outcome.session.agent).equal('codex-auto');
     should(outcome.plan.notCarried).deepEqual(PLAN.notCarried);
@@ -177,11 +191,11 @@ describe('the session fork mount', () => {
     // default, because "the caller stated no model" is what the target resolver reads.
     // Arrange
     const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
+    const handler = handlerOf(forker);
 
     // Act
-    const full = await subject.dispatch(
-      forkRequest('s1', withRequestId(human, 'req-full'), {
+    const full = await handler(
+      forkCall('s1', withRequestId('req-full'), {
         through: POINT,
         selectionBinding: 'selection-binding-full',
         agent: 'codex-auto',
@@ -189,8 +203,8 @@ describe('the session fork mount', () => {
         effort: 'high',
       }),
     );
-    const bare = await subject.dispatch(
-      forkRequest('s1', withRequestId(human, 'req-bare'), {
+    const bare = await handler(
+      forkCall('s1', withRequestId('req-bare'), {
         through: { v: 1, byteOffset: 0, blockIndex: 0 },
         selectionBinding: 'selection-binding-bare',
         agent: 'claude-auto',
@@ -230,11 +244,11 @@ describe('the session fork mount', () => {
     // must therefore pass a repeated id straight through and let the service replay it.
     // Arrange
     const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
+    const handler = handlerOf(forker);
 
     // Act
-    const first = await subject.dispatch(forkRequest('s1', withRequestId(human, 'req-same')));
-    const second = await subject.dispatch(forkRequest('s1', withRequestId(human, 'req-same')));
+    const first = await handler(forkCall('s1', withRequestId('req-same')));
+    const second = await handler(forkCall('s1', withRequestId('req-same')));
 
     // Assert
     should([first.status, second.status]).deepEqual([200, 200]);
@@ -244,49 +258,41 @@ describe('the session fork mount', () => {
   it('should refuse a fork that carries no request id, rather than one it cannot recognise twice', async () => {
     // Arrange
     const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
+    const handler = handlerOf(forker);
 
     // Act
-    const missing = await subject.dispatch(forkRequest('s1', { ...human, [FY_REQUEST_ID_HEADER]: '' }));
-    const blank = await subject.dispatch(forkRequest('s1', { ...human, [FY_REQUEST_ID_HEADER]: '   ' }));
+    const missing = await refusalOf(handler(forkCall('s1', {})));
+    const blank = await refusalOf(handler(forkCall('s1', withRequestId('   '))));
 
     // Assert
-    should([missing.status, blank.status]).deepEqual([400, 400]);
-    should([codeOf(missing), codeOf(blank)]).deepEqual(['missing_request_id', 'missing_request_id']);
+    should([missing, blank]).deepEqual([
+      { status: 400, code: 'missing_request_id' },
+      { status: 400, code: 'missing_request_id' },
+    ]);
     should(forker.forks).be.empty();
   });
 
   it('should refuse a body that is not a fork, including a field the wire does not carry', async () => {
     // Arrange
     const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
+    const handler = handlerOf(forker);
+    const bodies: unknown[] = [
+      '',
+      {},
+      { through: POINT },
+      { agent: 'codex-auto' },
+      { through: POINT, agent: 'codex-auto' },
+      { through: '4096:2', selectionBinding: 'selection-binding-1', agent: 'codex-auto' },
+      { ...BODY, undeclared: 'a field the wire does not carry' },
+    ];
 
     // Act
-    const empty = await subject.dispatch(forkRequest('s1', human, ''));
-    const braces = await subject.dispatch(forkRequest('s1', human, {}));
-    const noAgent = await subject.dispatch(forkRequest('s1', human, { through: POINT }));
-    const noPoint = await subject.dispatch(forkRequest('s1', human, { agent: 'codex-auto' }));
-    const noBinding = await subject.dispatch(forkRequest('s1', human, { through: POINT, agent: 'codex-auto' }));
-    const stringPoint = await subject.dispatch(
-      forkRequest('s1', human, {
-        through: '4096:2',
-        selectionBinding: 'selection-binding-1',
-        agent: 'codex-auto',
-      }),
-    );
-    const board = await subject.dispatch(
-      forkRequest('s1', human, {
-        through: POINT,
-        selectionBinding: 'selection-binding-1',
-        agent: 'codex-auto',
-        undeclared: 'a field the wire does not carry',
-      }),
+    const answers = await Promise.all(
+      bodies.map(async body => await refusalOf(handler(forkCall('s1', withRequestId('req-1'), body)))),
     );
 
     // Assert
-    should([empty, braces, noAgent, noPoint, noBinding, stringPoint, board].map(answer => answer.status)).deepEqual([
-      400, 400, 400, 400, 400, 400, 400,
-    ]);
+    should(answers.map(answer => answer?.status)).deepEqual([400, 400, 400, 400, 400, 400, 400]);
     should(forker.forks).be.empty();
   });
 
@@ -294,36 +300,14 @@ describe('the session fork mount', () => {
     // A session id is a directory name downstream, and a fork reads a transcript out of one.
     // Arrange
     const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
+    const handler = handlerOf(forker);
 
     // Act
-    const traversal = await subject.dispatch(forkRequest('%2e%2e%2fetc'));
+    const traversal = await refusalOf(handler(forkCall('%2e%2e%2fetc')));
 
     // Assert
-    should(traversal.status).equal(400);
-    should(codeOf(traversal)).equal('invalid_session_id');
+    should(traversal).deepEqual({ status: 400, code: 'invalid_session_id' });
     should(forker.forks).be.empty();
-  });
-
-  it('should refuse anonymously, a warden token and every ferret, because a fork is a session with no parent', async () => {
-    // Arrange
-    const forker = new FakeSessionFork();
-    const subject = dispatcher(forker);
-
-    // Act
-    const anonymous = await subject.dispatch(forkRequest('s1', {}));
-    const warden = await subject.dispatch(forkRequest('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
-    const peer = await subject.dispatch(forkRequest('s1', agentIn('s9')));
-    const own = await subject.dispatch(fromFerret(forkRequest('s1', human)));
-    const owner = await subject.dispatch(forkRequest('s1', human));
-
-    // Assert — a ferret starts sessions only as its own children, and a fork's target descends from nothing.
-    should(anonymous.status).equal(401);
-    should(warden.status).equal(403);
-    should([peer.status, jsonBody(peer).code]).deepEqual([403, 'owner_only']);
-    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
-    should(owner.status).equal(200);
-    should(forker.forks).have.length(1);
   });
 
   it('should answer each refusal with its own status and with the failure as the wire code', async () => {
@@ -350,7 +334,7 @@ describe('the session fork mount', () => {
       reused: 'request_id_reused',
       stuck: 'session_fork_failed',
     };
-    const subject = dispatcher(
+    const handler = handlerOf(
       new FakeSessionFork(
         Object.fromEntries(
           Object.entries(refusals).map(([id, failure]) => [id, new SessionForkRefusal(failure, `refused: ${failure}`)]),
@@ -359,10 +343,10 @@ describe('the session fork mount', () => {
     );
 
     // Act
-    const answers = await Promise.all(Object.keys(refusals).map(async id => await subject.dispatch(forkRequest(id))));
+    const answers = await Promise.all(Object.keys(refusals).map(async id => await refusalOf(handler(forkCall(id)))));
 
     // Assert — the code IS the protocol failure, so a client branches on the declared closed set.
-    should(answers.map(answer => [answer.status, codeOf(answer)])).deepEqual([
+    should(answers.map(answer => [answer?.status, answer?.code])).deepEqual([
       [400, 'invalid_session_id'],
       [404, 'source_not_found'],
       [409, 'selection_stale'],
@@ -390,52 +374,54 @@ describe('the session fork mount', () => {
     // completely different things to the person who clicked a message.
     // Arrange
     const detail = 'byte offset 4096 is past the end of the transcript this session has on disk';
-    const subject = dispatcher(new FakeSessionFork({ s1: new SessionForkRefusal('target_not_found', detail) }));
+    const handler = handlerOf(new FakeSessionFork({ s1: new SessionForkRefusal('target_not_found', detail) }));
 
     // Act
-    const response = await subject.dispatch(forkRequest('s1'));
+    const thrown = await handler(forkCall('s1')).catch((error: unknown) => error);
 
     // Assert
-    should(response.status).equal(404);
-    should((JSON.parse(response.body) as { error: string }).error).equal(detail);
+    should((thrown as { status?: number }).status).equal(404);
+    should((thrown as Error).message).equal(detail);
   });
 
   it('should let an error that is not a stated refusal surface as itself', async () => {
     // A defect must not be dressed up as a refusal the caller could act on: the taxonomy covers what
     // a fork decides, and anything else is this daemon being broken.
     // Arrange
-    const subject = dispatcher(new FakeSessionFork({ s1: new Error('the transcript index was closed') }));
+    const defect = new Error('the transcript index was closed');
+    const handler = handlerOf(new FakeSessionFork({ s1: defect }));
 
     // Act
-    const response = await subject.dispatch(forkRequest('s1'));
+    const thrown = await handler(forkCall('s1')).catch((error: unknown) => error);
 
-    // Assert
-    should(response.status).equal(500);
-    should(codeOf(response)).not.equal('session_fork_failed');
+    // Assert — the very error, not an `ApiError` carrying a code a client could branch on.
+    should(thrown).equal(defect);
   });
 
   it('should refuse to report an outcome the wire does not describe', async () => {
     // Arrange
-    const subject = dispatcher(new LyingSessionFork() as unknown as FakeSessionFork);
+    const handler = handlerOf(new LyingSessionFork() as unknown as FakeSessionFork);
 
     // Act
-    const response = await subject.dispatch(forkRequest('s1'));
+    const thrown = await handler(forkCall('s1')).catch((error: unknown) => error);
 
-    // Assert — a 500, not a 200 carrying a body the client would throw on.
-    should(response.status).equal(500);
+    // Assert — a thrown schema error (the kernel answers 500), not a 200 carrying a body the client would throw on.
+    should(thrown).be.instanceOf(Error);
+    should((thrown as { status?: number }).status).be.undefined();
   });
 
   it('should refuse daemon-local fields instead of silently stripping them on the way out', async () => {
     // Arrange
-    const subject = dispatcher(new LeakingSessionFork() as unknown as FakeSessionFork);
+    const handler = handlerOf(new LeakingSessionFork() as unknown as FakeSessionFork);
 
     // Act
-    const response = await subject.dispatch(forkRequest('s1'));
+    const thrown = await handler(forkCall('s1')).catch((error: unknown) => error);
 
     // Assert — strict outbound parsing catches the producing defect before it becomes a 200 leak.
-    should(response.status).equal(500);
-    should(response.body).not.containEql('/daemon/work');
-    should(response.body).not.containEql('private-account');
-    should(response.body).not.containEql('private-proof');
+    should(thrown).be.instanceOf(Error);
+    const message = (thrown as Error).message;
+    should(message).not.containEql('/daemon/work');
+    should(message).not.containEql('private-account');
+    should(message).not.containEql('private-proof');
   });
 });

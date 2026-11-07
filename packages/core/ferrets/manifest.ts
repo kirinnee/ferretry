@@ -16,6 +16,10 @@ import {
   FerretsPort,
   FerretTokensFile,
   ForkFiles,
+  HandoverFiles,
+  MoveInflightFiles,
+  TransferBriefFiles,
+  TransferPlanFiles,
   Harnesses,
   LaunchParts,
   LimitsAppliedFile,
@@ -433,6 +437,10 @@ export default definePlugin({
       FerretPinFiles,
       FerretDetailsFiles,
       FerretSummaryFiles,
+      HandoverFiles,
+      TransferPlanFiles,
+      TransferBriefFiles,
+      MoveInflightFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],
@@ -452,5 +460,11 @@ export default definePlugin({
     ],
     takes: [{ hook: Bearers, key: 'ferret' }],
   },
-  permissions: { roots: ['agent-homes', 'worktrees', 'work'] },
+  // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
+  // pane's process tree through `ps`/`tmux` and procfs.
+  permissions: {
+    roots: ['agent-homes', 'worktrees', 'work', 'harness-history'],
+    spawn: ['ps', 'tmux'],
+    hostFacts: true,
+  },
 });

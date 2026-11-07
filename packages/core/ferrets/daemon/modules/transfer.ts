@@ -1,62 +1,33 @@
-import { join } from 'node:path';
-import { decryptPdfInMemory, FileAttachmentOriginals } from '../../src/adapters/attachments/index.ts';
+import type { StatePort } from '@ferretry/kernel/contract';
 import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
   FileSessionTransferTargetPlanStore,
 } from '../adapters/transfer/index.ts';
-import {
-  attachmentDirectory,
-  createSessionPaths,
-  type FoundationPaths,
-  parseSessionId,
-  SessionAttachmentStore,
-  sessionScopedAttachments,
-} from '../../src/lib/index.ts';
-import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { sessionAttachmentRoutes } from '../../src/lib/runtime/mounts/session-attachments.ts';
+import type { TransferAttachmentStore } from '../lib/transfer/ports.ts';
 
 /**
- * The files a session carries with it: the durable attachment originals, the process-local unlock state over them and the
- * four attachment routes (upload, download, unlock, lock).
+ * The three ports a fork needs to leave a transferred session behind: the target's plan, its first-turn brief and
+ * its attachment copies.
  *
- * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
- * `DaemonWorld` carries: the originals adapter and the in-memory PDF decryption are fixed production adapters; the state
- * directory, the daemon identity and the session directory are needs), no jobs and no releases of its own: the store holds
- * no timer until a document is unlocked (the eviction is armed by that unlock, unref'd, never by the build), so the build
- * only captures its inputs. It claims no audit rule and no protocol feature.
+ * See `./session-fork.ts` for the composition that calls {@link transferPorts}. This file has no module of its own any
+ * more: the attachment store, its originals adapter and the four attachment routes are Conversation's, not a
+ * transfer's, so they are no longer built here. What stays is the construction of the three transfer-only ports, all
+ * of which need nothing but the state port (the plan and the brief live under the target ferret's own folder) and
+ * the attachment owner's store (a port: the originals are Conversation's, GAP "unbound: TransferAttachmentStore —
+ * owner Conversation").
  *
- * THE SESSION TRANSFER SEAM IS COMPOSED BY THE FORK, NOT BUILT HERE. Its only production composition is the fork's
- * (`createForkSubsystem` in `fyd.ts`), which is session code and stays with the sessions: the preparer, the envelope
- * writer (it takes the session storage), the target resolver, the binder and the service. What is transfer-only is the three
- * ports that need nothing but a path resolver (the target plan store, the brief writer and the attachment copier);
- * {@link TransferProvides.transferPorts} constructs them. It is a FACTORY, called by `createForkSubsystem` at the point it
- * always made them, rather than built eagerly with the module, so their construction order and timing are unchanged.
- *
- * What it provides is read by code that stays in `fyd.ts`: the board's attachment carrier, the session control that zeroes
- * a stopped session's plaintext, the fork's attachment reader and copier, the send's attachment delivery and the agent
- * tools' file access. They take {@link TransferProvides.store} and {@link TransferProvides.originals}.
+ * IT IS A FACTORY, called by the fork composition at the point it always made them, rather than built eagerly,
+ * so their construction order and timing are unchanged. Pure construction: each call makes new instances,
+ * touches no file and starts nothing.
  */
 
-/** What the transfer module is built from. */
-export interface TransferNeeds {
-  /** The state home's directory: the attachment tree lives under it, `<state>/attachments/<daemonId>/<sessionId>`. */
-  readonly stateDirectory: string;
-  /**
-   * This daemon's durable pairing identity, already proven by the caller (`fyd.ts` throws "pairing identity was not
-   * opened before attachment mounting" before the build when it is not open yet).
-   */
-  readonly daemonId: string;
-  /** The session directory: a route answers `not_found` for a session it no longer holds. */
-  readonly sessions: { readonly get: (sessionId: string) => Promise<unknown> };
-}
-
-/** What {@link TransferProvides.transferPorts} is built from: the two fork-side path facts the ports address. */
+/** What {@link TransferProvides.transferPorts} is built from. */
 export interface TransferPortsParts {
-  /** The foundation paths: the target plan and the brief live in the session's own private directory. */
-  readonly paths: FoundationPaths;
-  /** The ONE resolver for the attachment tree (`TransferProvides.originals`) the copier writes into. */
-  readonly attachmentOriginals: (sessionId: string) => string;
+  /** Ferrets' own state: the target plan (`transfer-plan.json`) and the brief (`turns/turn-001.md`) live under it. */
+  readonly state: StatePort;
+  /** The attachment owner's store: the source originals are read from it and the target's are written into it. */
+  readonly attachments: TransferAttachmentStore;
 }
 
 /** The transfer-only ports the fork composition hands its binder. */
@@ -66,69 +37,26 @@ export interface TransferPorts {
   readonly attachmentCopier: FileSessionAttachmentCopier;
 }
 
-/** What other code may use from the transfer module. */
+/** What other code may use from the transfer seam. */
 export interface TransferProvides {
-  /** The attachment store itself: the board, the session control, the fork, the send delivery and the agent tools read it. */
-  readonly store: SessionAttachmentStore;
   /**
-   * The ONE resolver for this daemon's attachment tree: the store's originals adapter and the fork's copier both take it,
-   * so neither can address a directory the other never reads.
-   */
-  readonly originals: (sessionId: string) => string;
-  /**
-   * Constructs the fork's target plan store, brief writer and attachment copier. Pure construction over the given paths:
-   * each call makes new instances, touches no file and starts nothing.
+   * Constructs the fork's target plan store, brief writer and attachment copier. Pure construction over the given
+   * ports: each call makes new instances, touches no file and starts nothing.
    */
   readonly transferPorts: (parts: TransferPortsParts) => TransferPorts;
 }
 
-/** The moved fork wiring, verbatim; see {@link TransferProvides.transferPorts}. */
+/**
+ * The fork wiring.
+ *
+ * TARGET-ONLY BY CONSTRUCTION. `FileSessionTransferTargetPlanStore` holds nothing but the target's own
+ * `transfer-plan.json`, so the fork composition has no global transfer-receipt capability at all — the durable
+ * fork receipt is `FileSessionForkReceiptStore`, and it is the single owner of that fact.
+ */
 export function transferPorts(parts: TransferPortsParts): TransferPorts {
-  /**
-   * The target's own `transfer-plan.json`, installed before import and re-read on every replay.
-   *
-   * TARGET-ONLY BY CONSTRUCTION. `FileSessionTransferTargetPlanStore` holds nothing but this
-   * document, so the fork composition has no global transfer-receipt capability at all — the durable
-   * fork receipt is `FileSessionForkReceiptStore`, and it is the single owner of that fact.
-   */
-  const planStore = new FileSessionTransferTargetPlanStore(id =>
-    join(createSessionPaths(parts.paths, id).directory, 'transfer-plan.json'),
-  );
-  const briefWriter = new FileSessionTransferBriefWriter(
-    id => createSessionPaths(parts.paths, parseSessionId(id)).directory,
-  );
-  const attachmentCopier = new FileSessionAttachmentCopier(parts.attachmentOriginals);
-  return { planStore, briefWriter, attachmentCopier };
+  return {
+    planStore: new FileSessionTransferTargetPlanStore(parts.state),
+    briefWriter: new FileSessionTransferBriefWriter(parts.state),
+    attachmentCopier: new FileSessionAttachmentCopier(parts.attachments),
+  };
 }
-
-export const transferModule: DaemonModule<void, TransferNeeds, TransferProvides> = {
-  id: 'transfer',
-  build: needs => {
-    const originals = (id: string): string => attachmentDirectory(needs.stateDirectory, needs.daemonId, id);
-    const store = new SessionAttachmentStore({
-      daemonId: needs.daemonId,
-      originals: new FileAttachmentOriginals(originals),
-      decrypt: decryptPdfInMemory,
-      // An unlocked plaintext nobody reads again is still zeroed at its expiry, not at process exit.
-      // Unref'd, so a pending eviction never holds the daemon open.
-      scheduleEviction: (delayMs, evict) => {
-        setTimeout(evict, delayMs).unref();
-      },
-    });
-    // A session that is gone, or is stopped through the control route, has its plaintext zeroed.
-    const sessionAttachments = sessionScopedAttachments(
-      store,
-      async id => (await needs.sessions.get(id)) !== undefined,
-    );
-    return {
-      id: 'transfer',
-      provides: { store, originals, transferPorts },
-      jobs: {},
-      contributes: {
-        // Attachment routes are mounted before sends may honour attachment ids. Their
-        // deeper unlock path cannot shadow this one-segment upload route.
-        routes: sessionAttachmentRoutes(sessionAttachments),
-      },
-    };
-  },
-};

@@ -20,7 +20,7 @@
  */
 
 import type { LineageFacet } from '../../../../contract/transfer.ts';
-import { WARDEN_LABEL } from '../../warden/types.ts';
+import { WARDEN_LABEL } from '../../session/peers/warden-lifecycle.ts';
 import {
   type TransferFacetContribution,
   type TransferFacetContributor,

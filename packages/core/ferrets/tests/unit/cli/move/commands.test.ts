@@ -1,15 +1,19 @@
 import { describe, it } from 'bun:test';
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import should from 'should';
-import { moveVerb } from '../../../../cli/lib/move/commands.ts';
+import { moveOptions } from '../../../../cli/lib/move/commands.ts';
 import { MoveController } from '../../../../cli/lib/move/controller.ts';
 import { moveHarness } from './fixtures.ts';
 
 /** What the fy shell hands the verb after `fy ferret move` (see packages/cli/src/lib/argv.ts). */
 function run(args: string[], options: VerbInvocation['options']) {
   const { gateway, io, presenter } = moveHarness();
-  const handler = moveVerb(new MoveController(gateway, presenter));
-  return { parsed: handler({ args, options }), gateway, io };
+  const controller = new MoveController(gateway, presenter);
+  const parsed = (async () => {
+    await controller.execute(args[0] ?? '', moveOptions({ args, options }));
+    return 0;
+  })();
+  return { parsed, gateway, io };
 }
 
 describe('fy ferret move verb', () => {
@@ -35,7 +39,7 @@ describe('fy ferret move verb', () => {
       forceInflight: false,
       conversation: 'fresh',
     });
-    should(JSON.parse(io.out[0] ?? '')).have.property('config');
+    should(JSON.parse(io.out[0] ?? '')).have.property('id');
   });
 
   it('should require the target account', async () => {

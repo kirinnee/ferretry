@@ -39,24 +39,23 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { JsonValue } from '@ferretry/std';
+import { type TranscriptProvenance, TranscriptProvenanceSchema } from '../../../contract/records.ts';
 import { type SessionTransferPlan } from '../../../contract/transfer.ts';
-import {
-  type SessionConfig,
-  SessionConfigSchema,
-  type SessionView,
-  type TranscriptProvenance,
-} from '../../lib/protocol/session.ts';
-import type { CoreAccount } from '../../lib/core/inventory.ts';
-import type { SessionPlanner } from '../../lib/core/session-planner.ts';
+import { type SessionConfig, SessionConfigSchema, type SessionView } from '../../lib/protocol/session.ts';
+import type { ForkHarnessFacts, ForkTranscriptCaptures } from '../../lib/forks/ports.ts';
 import type {
   SessionForkBoundTarget,
   SessionForkTargetBinder as SessionForkTargetBinderPort,
 } from '../../lib/forks/types.ts';
 import type { ClockPort } from '../../lib/ports.ts';
-import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
-import { startupModelArguments } from '../../lib/session/harness/startup.ts';
 import { assignedTaskDocument, lifecyclePhase } from '../../lib/session/lifecycle/policy.ts';
-import { handoffReadArguments } from '../../lib/session/send/handoff.ts';
+import type { CoreAccount, SessionPlanner } from '../../lib/session/peers/core.ts';
+import {
+  claudeSessionArguments,
+  codexCorrelationArguments,
+  handoffReadArguments,
+} from '../../lib/session/peers/transcript-launch.ts';
 import type { SessionRuntimeStartupHeldPort } from '../../lib/session/runtime-control/types.ts';
 import {
   type LifecycleSessionStatus,
@@ -65,11 +64,8 @@ import {
   type SessionEnvironmentStore,
   type SessionLifecycleRecord,
 } from '../../lib/session/lifecycle/types.ts';
-import { claudeSessionArguments, claudeTranscriptFile } from '../../lib/session/transcript/claude-path.ts';
-import { codexCorrelationArguments } from '../../lib/session/transcript/codex-rollout.ts';
 import type { SessionLifecycleService } from '../../lib/session/lifecycle/service.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
-import type { TranscriptProvenanceCapture } from '../../lib/session/transcript/provenance.ts';
 import { renderTransferBrief } from '../../lib/transfer/brief.ts';
 import { transferTargetLabel } from '../../lib/transfer/facets/lineage.ts';
 import { SessionTransferImporter } from '../../lib/transfer/import.ts';
@@ -85,14 +81,12 @@ import {
   forkStartupRuntimeRequest,
   resolveForkTargetAccount,
 } from './session-fork-target-resolver.ts';
-import { storedTranscriptProvenance } from '../session/transcript/storage-transcript-provenance.ts';
 import { transferSpawnProvenance } from '../transfer/storage-transfer-envelope-writer.ts';
 import {
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
 } from '../session/lifecycle/storage-session-lifecycle-repository.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
-import type { JsonValue } from '../../lib/json.ts';
 import { SessionAttachmentCopyError } from '../transfer/attachment-copier.ts';
 
 /**
@@ -168,7 +162,12 @@ export interface SessionForkTargetBinderPorts {
    * Declared as the capture METHOD rather than the class, because that is the whole of what a fork
    * needs and a narrower port is a narrower thing to get wrong.
    */
-  readonly transcripts: Pick<TranscriptProvenanceCapture, 'capture'>;
+  readonly transcripts: ForkTranscriptCaptures;
+  /**
+   * The harness plugins' answers a fork reads: the quirk rows, how a model reaches a launch argv and where Claude
+   * writes a transcript. Pure facts of the harness, so the binder holds no copy of any of them.
+   */
+  readonly harnessFacts: ForkHarnessFacts;
   /**
    * The importer's port set: a pinned conversation validator, a hash and size verifying attachment
    * copier, an atomic brief writer and the target-only envelope writer. No board, no child grant, no
@@ -252,6 +251,15 @@ function canonical(value: unknown): string {
     .filter(([, held]) => held !== undefined)
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   return `{${entries.map(([key, held]) => `${JSON.stringify(key)}:${canonical(held)}`).join(',')}}`;
+}
+
+/**
+ * The transcript provenance a stored configuration carries, parsed rather than trusted (the conversation plugin's
+ * `storedTranscriptProvenance`, which is this one parse of the contract's own schema).
+ */
+function storedTranscriptProvenance(config: unknown): TranscriptProvenance | undefined {
+  const parsed = TranscriptProvenanceSchema.safeParse(fields(config).transcript);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** A JSON document as a plain field bag; anything else contributes no fields. */
@@ -508,7 +516,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         // Its own turn documents and attachments, readable without a permission prompt and nothing more.
         ...handoffReadArguments(resolved.account.kind, this.ports.readableHandoffs?.(id) ?? []),
         ...plan.durable.harnessFlags,
-        ...startupModelArguments(planned.model),
+        ...this.ports.harnessFacts.startupModelArguments(planned.model),
       ],
       prompt: forkOpeningTurn(plan),
       tmuxSession: this.ports.tmuxSession(id),
@@ -1010,7 +1018,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
           'provenance and never copies the one it read',
       );
     const argv = Array.isArray(command) ? (command as readonly unknown[]) : [];
-    const mints = !harnessQuirks(shape.account.kind).mintsOwnSessionIds;
+    const mints = !this.ports.harnessFacts.quirks(shape.account.kind).mintsOwnSessionIds;
     // Codex's argv carries the correlation root its capture declares. A target captured before
     // launches declared one carries the bare command, and is still this fork's own record.
     const accepted = mints
@@ -1036,7 +1044,11 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
             recorded.file,
             recorded.harnessSessionId === undefined
               ? undefined
-              : claudeTranscriptFile(recorded.home, plan.durable.cwd, recorded.harnessSessionId),
+              : this.ports.harnessFacts.claudeTranscriptFile(
+                  recorded.home,
+                  plan.durable.cwd,
+                  recorded.harnessSessionId,
+                ),
           )
         : undefined,
       demand(
@@ -1066,7 +1078,12 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
    */
   private async start(id: SessionId, plan: SessionTransferPlan): Promise<SessionView> {
     await this.proveCaptured(id, plan, ['created', 'starting', 'running', 'failed']);
-    const startup = forkStartupRuntimeRequest(plan.target.harness, plan.target.model, plan.target.effort);
+    const startup = forkStartupRuntimeRequest(
+      this.ports.harnessFacts,
+      plan.target.harness,
+      plan.target.model,
+      plan.target.effort,
+    );
     await this.ports.createLifecycle(id).start(
       id,
       startup === undefined

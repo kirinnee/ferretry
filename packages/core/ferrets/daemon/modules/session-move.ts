@@ -1,6 +1,52 @@
-import { realpath } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { HarnessKind } from '@ferretry/fleet';
+import { isAbsolute, join, relative } from 'node:path';
+import type { Clock, FerretId, RootsPort, SpawnPort, StatePort } from '@ferretry/kernel/contract';
+import { jsonObject, milliseconds } from '@ferretry/std';
+import type { z } from 'zod';
+import {
+  type AskToStopJobsResult,
+  type ConversionPreview,
+  type ConversionSummary as ConversionSummaryView,
+  type MoveConversation,
+} from '../../contract/move.ts';
+import { HistoryConversationFiles } from '../adapters/moves/history-conversation-files.ts';
+import { KernelProcessProbe, type ProcessHostFacts } from '../adapters/moves/process-inventory.ts';
+import { StateMoveReportStore } from '../adapters/moves/state-move-report.ts';
+import { lifecycleConfigDocument } from '../adapters/session/lifecycle/index.ts';
+import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
+import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
+import { type AgentJobControl, AgentJobStopper } from '../lib/moves/stop-jobs.ts';
+import { agentJobsMessage, agentJobsMessageId } from '../lib/moves/agent-jobs.ts';
+import {
+  type ConversationFilesPort,
+  planConversationCarry,
+  previousConversation,
+} from '../lib/moves/conversation-carry.ts';
+import {
+  type ConversationConvert,
+  type ConversionCheckPort,
+  codexModelProvider,
+  type HarnessVersionPort,
+  needsRolloutFormatProbe,
+  planConversationConvert,
+  type RolloutFormatPort,
+} from '../lib/moves/conversation-convert.ts';
+import { harnessConversionRefusal, harnessMoveRefusal } from '../lib/moves/harness-compatibility.ts';
+import type { ObservedSession } from '../lib/moves/outcome-render.ts';
+import type { MovePreflight } from '../lib/moves/preflight-service.ts';
+import type { ProcRow } from '../lib/moves/process-table.ts';
+import type { MoveReportStore } from '../lib/moves/report-store.ts';
+import {
+  AccountResolutionError,
+  type ContextWindowForSession,
+  type ConvertedConversationSummary,
+  type MoveAccountResolver,
+  type MoveCodexRollouts,
+  type MoveTranscriptProvenance,
+  type MoveTranscriptTail,
+  type PersistedReasoningEffort,
+  type ProcessSignalPort,
+  type TranscriptToolkit,
+} from '../lib/moves/ports.ts';
 import { type Harness } from '../lib/protocol/session-base.ts';
 import {
   SessionConfigSchema,
@@ -9,138 +55,121 @@ import {
   type TranscriptProvenance,
 } from '../lib/protocol/session.ts';
 import {
-  type AskToStopJobsResult,
-  type ConversionPreview,
-  type ConversionSummary as ConversionSummaryView,
-  type MoveConversation,
-} from '../../contract/move.ts';
-import type { z } from 'zod';
-import { deliverStopSignal, KeyedSerialExecutor, type SystemClock, BunProcessProbe } from '../../src/adapters/index.ts';
-import { FileConversationFiles } from '../adapters/moves/file-conversation-files.ts';
-import { FileMoveReportStore } from '../adapters/moves/file-move-report.ts';
-import { readPersistedReasoningEffort } from '../../src/adapters/session/harness/index.ts';
-import { lifecycleConfigDocument } from '../adapters/session/lifecycle/index.ts';
-import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
-import { CliConversionCheck, CliHarnessVersion } from '../../src/adapters/transcript/conversion-check.ts';
-import { CliRolloutFormatProbe } from '../../src/adapters/transcript/rollout-format-probe.ts';
-import { resolveStartAccount } from '../lib/fleet/start-resolution.ts';
-import {
-  HANDOFF_READ_MAX_BYTES,
-  type HandoffDocuments,
-  isReadableHandoff,
-} from '../../src/lib/imports/conversation-text.ts';
-import {
-  type AccountInventoryPort,
-  type AgentJobControl,
-  AgentJobStopper,
-  agentJobsMessage,
-  agentJobsMessageId,
-  authorizeSessionCommand,
-  buildLaunchArgv,
-  type CodexRolloutIndex,
-  type ConversationConvert,
-  type ConversationFilesPort,
-  type ConversionCheckPort,
-  type ConversionSummary as ConvertedConversationSummary,
-  canServeModel,
-  codexModelProvider,
-  contextWindowForSession,
-  createSessionPaths,
-  currentLaunchCompactAt,
-  currentLaunchEffort,
-  currentLaunchModel,
-  declaredModel,
-  defaultSessionLifecycleSettings,
-  type ExecutableResolverPort,
-  type FoundationPaths,
-  findAccountByAgent,
-  type HarnessVersionPort,
-  handoffPointerPaths,
-  harnessConversionRefusal,
-  harnessMoveRefusal,
-  jsonObject,
-  type MovePreflight,
-  type MoveReportStore,
-  needsRolloutFormatProbe,
-  type ObservedSession,
-  type ProcRow,
-  planConversationCarry,
-  planConversationConvert,
-  previousConversation,
-  ResumeRefused,
-  type RolloutFormatPort,
-  SessionControlError,
-  type SessionControlFailure,
-  type SessionDirectorySubsystem,
-  type SessionId,
-  type SessionLaunchService,
-  SessionLifecycleConfigSchema,
   SessionMoveError,
   type SessionMoveFailure,
   type SessionMoveSubsystem,
-  type SessionPlanner,
-  type SessionResumeService,
-  type SessionTranscriptReader,
-  type TranscriptProvenanceCapture,
-  transcriptLaunchArguments,
-  tryParseSessionId,
-} from '../../src/lib/index.ts';
-import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
+} from '../lib/runtime/mounts/session-move.ts';
 import { sessionMoveContribution } from '../lib/runtime/mounts/session-move.ts';
+import {
+  buildLaunchArgv,
+  currentLaunchCompactAt,
+  currentLaunchEffort,
+  currentLaunchModel,
+  type SessionLaunchService,
+  transcriptLaunchArguments,
+} from '../lib/session/launch/index.ts';
+import { authorizeSessionCommand } from '../lib/session/lifecycle/policy.ts';
+import { defaultSessionLifecycleSettings } from '../lib/session/lifecycle/settings.ts';
+import { SessionLifecycleConfigSchema } from '../lib/session/lifecycle/types.ts';
+import {
+  type AccountInventoryPort,
+  canServeModel,
+  declaredModel,
+  findAccountByAgent,
+  type SessionPlanner,
+} from '../lib/session/peers/core.ts';
+import type { HarnessKind } from '../lib/session/peers/fleet.ts';
+import type { SessionDirectorySubsystem } from '../lib/session/directory/subsystem.ts';
+import { ResumeRefused, type SessionResumeService } from '../lib/session/resume/index.ts';
 import {
   restoreRestamped,
   settleRejectedRelaunch,
   settleUnrevivedRelaunch,
 } from '../lib/session/resume/unrevived-relaunch.ts';
+import { type SessionId, tryParseSessionId } from '../lib/session-id.ts';
 
 /**
  * Moving a live session onto another account: `POST /v1/ferrets/:ferretId/move`, its safety gate, the conversion
  * preview, the relaunch settings and the "ask the agent to stop its background jobs" route, over the service that drives
  * them ({@link createSessionMoveSubsystem}).
  *
- * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
- * `DaemonWorld` carries: the process probe, the report store, the conversation files, the conversion checks and the serial
- * executor are fixed production adapters; every owner the move borrows is a need), no jobs, no releases of its own and
- * no protocol features: every constructor in the build is pure, so the single build sits where the move was always
- * assembled.
+ * This module has no `Seams`, no jobs, no releases of its own and no protocol features: every constructor in the build
+ * is pure, so the single build sits where the move was always assembled. Its adapters (the report store, the process
+ * probe the job stopper follows a pid with, the conversation files, the serial executor) are fixed, built here over the
+ * kernel ports it is handed; every owner the move borrows is a need.
  *
- * Session lifecycle, launch, resume and account resolution are session code that stays in `fyd.ts` (the session-resume PR
- * moves restart/resume), so they reach this module only as typed {@link SessionMoveNeeds}: the very locals the old call
- * passed. Every value the old code read LATE (the queue, the pane registration, the launch settings, the harness discovery)
- * is a closure written at the call site in `fyd.ts`, so each is read at the same moment it always was.
+ * Session lifecycle, launch, resume and account resolution are session code (Ferrets' own, and the Runtimes plugin's
+ * account inventory), so they reach this module only as typed {@link SessionMoveNeeds}. Every value the old code read
+ * LATE (the queue, the pane registration, the launch settings, the harness discovery) is a closure bound at the call
+ * site, so each is read at the same moment it always was.
  *
- * What it provides is the service itself: the restart service and the Warden call it directly, and its four routes are the
- * module's contribution.
+ * What it provides is the service itself: the restart service and the Warden call it directly, and its four routes are
+ * the module's contribution.
  */
 
-/** What the session-move module is built from. */
+/**
+ * What the session-move module is built from. Every field is either a kernel port, a Ferrets owner, or a port named for
+ * a piece of ANOTHER plugin that Ferrets (core) cannot import (`lib/moves/ports.ts`); the host binds each, and an
+ * unbound one is a fail-closed skeleton that refuses the move before it writes anything.
+ */
 export interface SessionMoveNeeds {
-  /** The state home's directories: the report store and a session's private directory are beneath them. */
-  readonly paths: FoundationPaths;
+  // ─── kernel ports ───
+  /** The move report is a declared state file (`MoveInflightFiles`) beneath it. */
+  readonly state: StatePort;
+  /** The `harness-history` root, fenced to one login's harness home per call. */
+  readonly roots: RootsPort;
+  /** Runs `ps`, which a pid is followed through when procfs does not list it. */
+  readonly spawn: SpawnPort;
+  /** The machine's `/proc` facts, plus where a process is working. */
+  readonly host: ProcessHostFacts;
+  readonly clock: Clock;
+  // ─── Ferrets' own ───
   readonly storage: DaemonStorage;
   readonly sessions: SessionDirectorySubsystem;
-  /** The SAME service the revive uses — see `createSessionResume` in `fyd.ts`. */
+  /** The SAME service the revive uses. */
   readonly resume: SessionResumeService;
+  /** The SAME rebuild a revive runs, asked whether it would change anything. */
+  readonly launch: SessionLaunchService;
   readonly preflight: MovePreflight;
   /** Puts one Ferretry-authored message in the session's queue (a closure over the queue and its deliverer). */
   readonly askAgent: SessionMoveParts['askAgent'];
   readonly planner: SessionPlanner;
+  /** The session's own private directory, which is what a Codex rollout is correlated by. */
+  readonly sessionDirectory: SessionMoveParts['sessionDirectory'];
+  /** A fresh harness conversation id for a converted conversation (today: `crypto.randomUUID`). */
+  readonly conversationId: SessionMoveParts['conversationId'];
+  // ─── other plugins' pieces (unbound until their owner lands) ───
+  /** Runtimes: the published accounts. */
   readonly accounts: AccountInventoryPort;
-  readonly executables: ExecutableResolverPort;
-  readonly clock: SystemClock;
-  /** The transcript reader factory the daemon builds each reader from (`createTranscriptReader` in `fyd.ts`). */
-  readonly createTranscriptReader: (storage: DaemonStorage) => SessionTranscriptReader;
-  readonly transcriptProvenance: TranscriptProvenanceCapture;
-  /** The Codex rollout index the conversation files correlate a rollout by. */
-  readonly codexRollouts: CodexRolloutIndex;
+  /** Runtimes: the start's own account resolution. */
+  readonly accountResolver: MoveAccountResolver;
+  /** Conversation: the session's own transcript tail. */
+  readonly transcripts: MoveTranscriptTail;
+  /** Conversation: the target's transcript evidence. */
+  readonly transcriptProvenance: MoveTranscriptProvenance;
+  /** Codex: the rollout index the conversation files correlate a rollout by. */
+  readonly codexRollouts: MoveCodexRollouts;
+  /** Claude Code and Codex: where each harness writes a transcript, and the converter. */
+  readonly toolkit: TranscriptToolkit;
+  /** The validation run a converted conversation must pass before a cross-harness move switches. */
+  readonly conversionCheck: ConversionCheckPort;
+  /** The version each harness CLI reports, which the converter is gated on. */
+  readonly harnessVersion: HarnessVersionPort;
+  /** The rollout format an untested Codex version writes, which lets the converter accept it. */
+  readonly rolloutFormat: RolloutFormatPort;
   /** The harness CLI itself, discovered the SAME way a start's readiness check and the doctor do. */
   readonly locateHarness: SessionMoveParts['locateHarness'];
   readonly readableHandoffs: SessionMoveParts['readableHandoffs'];
   readonly fixedSettings: SessionMoveParts['fixedSettings'];
+  /** Terminals: the registered pane's identity. */
   readonly paneIdentity: SessionMoveParts['paneIdentity'];
-  /** The launch-service factory the daemon builds each launch service from (`createSessionLaunch` in `fyd.ts`). */
-  readonly createSessionLaunch: (storage: DaemonStorage) => SessionLaunchService;
-  /** The binary name a person drives, which an account resolution is typed with (`CLIENT_NAME` in `fyd.ts`). */
+  /** The harness plugins: the reasoning effort a harness last persisted in a home. */
+  readonly persistedReasoningEffort: PersistedReasoningEffort;
+  /** The window a session runs in (today's `lib/core/context-window.ts`). */
+  readonly contextWindowForSession: ContextWindowForSession;
+  /** The host: signals one pid, and names the pids never signalled. */
+  readonly signals: ProcessSignalPort;
+  /** The binary name a person drives, which an account resolution is typed with. */
   readonly clientName: string;
 }
 
@@ -165,8 +194,8 @@ interface SessionMoveParts {
   readonly reports: MoveReportStore;
   readonly planner: SessionPlanner;
   readonly accounts: AccountInventoryPort;
-  readonly executables: ExecutableResolverPort;
-  readonly clock: SystemClock;
+  readonly accountResolver: MoveAccountResolver;
+  readonly clock: Clock;
   /**
    * The session's own transcript, which is what the preflight joins its open tool ids against.
    *
@@ -175,11 +204,13 @@ interface SessionMoveParts {
    * what it was. With provenance persisted the join has real evidence, and a session that still has
    * no locatable transcript degrades to exactly the previous behaviour rather than to a guess.
    */
-  readonly transcripts: SessionTranscriptReader;
+  readonly transcripts: MoveTranscriptTail;
   /** The target account's own transcript evidence, taken before the relaunch argv is authorized. */
-  readonly transcriptProvenance: TranscriptProvenanceCapture;
+  readonly transcriptProvenance: MoveTranscriptProvenance;
   /** The transcripts a move reads and carries into the target login's home. */
   readonly conversationFiles: ConversationFilesPort;
+  /** Where each harness writes a transcript, and the converter. */
+  readonly toolkit: TranscriptToolkit;
   /** The validation run a converted conversation must pass before a cross-harness move switches. */
   readonly conversionCheck: ConversionCheckPort;
   /** The version each harness CLI reports, which the converter is gated on. */
@@ -192,12 +223,21 @@ interface SessionMoveParts {
   readonly conversationId: () => string;
   /** The session's own private directory, which is what a Codex rollout is correlated by. */
   readonly sessionDirectory: (id: SessionId) => string;
+  /**
+   * The working directory with its links resolved. The CLI derives where a conversation lives from it, so a converted
+   * Claude file written under a symlinked spelling (macOS `/tmp`, `/var`) is never found. Falls back to the path as
+   * given when it cannot be resolved.
+   */
+  readonly resolveDirectory: (id: SessionId, cwd: string) => Promise<string>;
   /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
   readonly readableHandoffs: (id: SessionId) => readonly string[];
   /** The text of the fixed `--settings` file a Claude wrapper launches under, which a compaction trigger replaces. */
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
   /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
   readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
+  readonly persistedReasoningEffort: PersistedReasoningEffort;
+  readonly contextWindowForSession: ContextWindowForSession;
+  readonly signals: ProcessSignalPort;
   /** Serializes whole moves of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
   /** The SAME rebuild a revive runs, asked whether it would change anything. */
@@ -215,7 +255,7 @@ interface MoveSubject {
 
 /** How each account-resolution refusal is restated in the move's own taxonomy. The resolver is
  *  shared with the start, and its vocabulary is the start's. */
-const MOVE_RESOLUTION_REFUSALS: Partial<Record<SessionControlFailure, SessionMoveFailure>> = {
+const MOVE_RESOLUTION_REFUSALS: Partial<Record<string, SessionMoveFailure>> = {
   unknown_agent: 'unknown_agent',
   unavailable: 'unavailable',
 };
@@ -238,11 +278,12 @@ function moveRelaunchRefusal(error: unknown): never {
  * harness output strips away.
  */
 export function currentContextWindow(
+  contextWindowFor: ContextWindowForSession,
   config: z.infer<typeof SessionConfigSchema>,
   state: z.infer<typeof SessionStateSchema>,
   declaredWindow?: number,
 ) {
-  return contextWindowForSession({
+  return contextWindowFor({
     configuredModel: config.model,
     modelHint: config.modelHint,
     observedModel: state.observedModel,
@@ -326,45 +367,48 @@ async function planConversion(
     };
   const sessionDirectory = parts.sessionDirectory(id);
   const documents = new Map<string, string>();
-  for (const path of handoffPointerPaths(sourceText ?? '')) {
+  for (const path of parts.toolkit.handoffPointerPaths(sourceText ?? '')) {
     // Only this session's own hand-off documents: the transcript is the agent's, and the agent does
     // not get to choose what the daemon reads.
-    if (!isReadableHandoff(path, { roots: [sessionDirectory], coordinatorHomes: [] })) continue;
-    const document = await parts.conversationFiles.read(path, HANDOFF_READ_MAX_BYTES);
+    if (!parts.toolkit.isReadableHandoff(path, { roots: [sessionDirectory], coordinatorHomes: [] })) continue;
+    const document = await parts.conversationFiles.read(path, parts.toolkit.handoffReadMaxBytes);
     if (document !== undefined) documents.set(path, document);
   }
   const targetHome = await parts.transcriptProvenance.home(harness, executable);
   const binary = parts.locateHarness(harness);
   const targetVersion = binary === undefined ? undefined : await parts.harnessVersion.version(binary);
   const targetFormat =
-    binary !== undefined && needsRolloutFormatProbe(harness, targetVersion)
+    binary !== undefined && needsRolloutFormatProbe(harness, targetVersion, parts.toolkit)
       ? await parts.rolloutFormat.classify(binary, targetVersion)
       : undefined;
   const targetModelProvider =
     harness === 'codex' && targetHome !== undefined
       ? codexModelProvider(await parts.conversationFiles.read(join(targetHome, 'config.toml'), CODEX_CONFIG_MAX_BYTES))
       : undefined;
-  return planConversationConvert({
-    sourceHarness: config.harness,
-    targetHarness: harness,
-    source,
-    sourceText,
-    documents: documents satisfies HandoffDocuments,
-    targetHome,
-    targetVersion,
-    ...(targetFormat === undefined ? {} : { targetFormat }),
-    ...(targetModelProvider === undefined ? {} : { targetModelProvider }),
-    targetAgent: subject.targetAgent,
-    targetModel: subject.targetModel,
-    targetWindow: subject.targetWindow,
-    // Resolved: the CLI derives where a conversation lives from its resolved working directory, so a
-    // converted Claude file written under a symlinked spelling (macOS `/tmp`, `/var`) is never found.
-    cwd: await realpath(config.cwd).catch(() => config.cwd),
-    sessionDirectory,
-    conversationId: parts.conversationId(),
-    at: parts.clock.now(),
-    ...(nativeShell ? {} : { nativeShell: false }),
-  });
+  return planConversationConvert(
+    {
+      sourceHarness: config.harness,
+      targetHarness: harness,
+      source,
+      sourceText,
+      documents,
+      targetHome,
+      targetVersion,
+      ...(targetFormat === undefined ? {} : { targetFormat }),
+      ...(targetModelProvider === undefined ? {} : { targetModelProvider }),
+      targetAgent: subject.targetAgent,
+      targetModel: subject.targetModel,
+      targetWindow: subject.targetWindow,
+      // Resolved: the CLI derives where a conversation lives from its resolved working directory, so a
+      // converted Claude file written under a symlinked spelling (macOS `/tmp`, `/var`) is never found.
+      cwd: await parts.resolveDirectory(id, config.cwd).catch(() => config.cwd),
+      sessionDirectory,
+      conversationId: parts.conversationId(),
+      at: parts.clock.now(),
+      ...(nativeShell ? {} : { nativeShell: false }),
+    },
+    parts.toolkit,
+  );
 }
 
 /**
@@ -404,7 +448,7 @@ async function convertRelaunchConversation(
   return {
     kind: 'convert',
     provenance: planned.provenance,
-    launchArguments: transcriptLaunchArguments(subject.harness, planned.provenance, []),
+    launchArguments: transcriptLaunchArguments(subject.harness, planned.provenance),
     transcript: planned.transcript,
     files: planned.files,
     summary: planned.summary,
@@ -486,16 +530,19 @@ async function decideRelaunchConversation(
     if (rebound.kind === 'unresumable') return rebound;
     source = rebound.provenance;
   }
-  const planned = planConversationCarry({
-    harness,
-    source,
-    sourceWritten: source?.file !== undefined && (await parts.conversationFiles.written(source.file)),
-    targetHome: await parts.transcriptProvenance.home(harness, executable),
-    targetAgent: subject.targetAgent,
-    cwd: config.cwd,
-  });
+  const planned = planConversationCarry(
+    {
+      harness,
+      source,
+      sourceWritten: source?.file !== undefined && (await parts.conversationFiles.written(source.file)),
+      targetHome: await parts.transcriptProvenance.home(harness, executable),
+      targetAgent: subject.targetAgent,
+      cwd: config.cwd,
+    },
+    parts.toolkit,
+  );
   if (planned.kind === 'unresumable') return planned;
-  return { ...planned, launchArguments: transcriptLaunchArguments(harness, planned.provenance, []) };
+  return { ...planned, launchArguments: transcriptLaunchArguments(harness, planned.provenance) };
 }
 
 /**
@@ -590,8 +637,8 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
 
   /** The account a move names, resolved with the start's own rule, its refusals in the move's words. */
   const resolveTarget = async (agent: string) =>
-    await resolveStartAccount(parts.accounts, agent, parts.executables, parts.clientName).catch((error: unknown) => {
-      if (!(error instanceof SessionControlError)) throw error;
+    await parts.accountResolver.resolve(agent).catch((error: unknown) => {
+      if (!(error instanceof AccountResolutionError)) throw error;
       const failure = MOVE_RESOLUTION_REFUSALS[error.failure];
       if (failure === undefined) throw error;
       throw new SessionMoveError(failure, error.message);
@@ -719,6 +766,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     // selector in its configured model, then what its account's catalog declares for it.
     const sourceAccount = findAccountByAgent(await parts.accounts.accounts(), config.agent);
     const window = currentContextWindow(
+      parts.contextWindowForSession,
       config,
       state,
       sourceAccount === undefined ? undefined : declaredModel(sourceAccount, config.model ?? '')?.context,
@@ -771,7 +819,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     const generation = config.runtimeGeneration + 1;
     // The level the session is on carries over; with none known, the target's own settings decide.
     const launchEffort =
-      effort ?? (await readPersistedReasoningEffort(account.kind, relaunchConversation.provenance?.home));
+      effort ?? (await parts.persistedReasoningEffort(account.kind, relaunchConversation.provenance?.home));
     // A converted conversation, written before the record that points at it: its attachments first,
     // then the transcript the target CLI already accepted in the validation run.
     if (relaunchConversation.kind === 'convert') {
@@ -1027,11 +1075,11 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
           await new AgentJobStopper({
             inspect: async () => await inspect(id, target),
             lookup: async pids => await parts.processes.lookup(pids),
-            signal: deliverStopSignal,
+            signal: (pid, signal) => parts.signals.signal(pid, signal),
             // Never these, whatever a pane's tree claims: init, this daemon, and what started it.
-            protectedPids: new Set([1, process.pid, process.ppid]),
-            sleep: async milliseconds => await Bun.sleep(milliseconds),
-            nowMs: () => Date.now(),
+            protectedPids: parts.signals.protectedPids(),
+            sleep: async ms => await parts.clock.sleep(milliseconds(ms)),
+            nowMs: () => parts.clock.nowMs(),
           }).stop(),
       );
     },
@@ -1069,60 +1117,50 @@ function priorMoves(config: Readonly<Record<string, unknown>>): { from: string; 
   return [...(parsed.data.moves ?? [])];
 }
 
-export const sessionMoveModule: DaemonModule<void, SessionMoveNeeds, SessionMoveProvides> = {
+export const sessionMoveModule: SessionMoveModule = {
   id: 'sessionMove',
   build: (needs, _seams, _lifecycle) => {
-    const {
-      paths,
-      storage,
-      sessions,
-      resume,
-      preflight,
-      askAgent,
-      planner,
-      accounts,
-      executables,
-      clock,
-      createTranscriptReader,
-      transcriptProvenance,
-      codexRollouts,
-      locateHarness,
-      readableHandoffs,
-      fixedSettings,
-      paneIdentity,
-      createSessionLaunch,
-      clientName,
-    } = needs;
+    const { state, roots, spawn, host, clock, accounts } = needs;
     // Hoisted so the handover and restart subsystems share this exact mover.
     const sessionMove = createSessionMoveSubsystem({
-      storage,
-      processes: new BunProcessProbe(Bun.which('ps') ?? undefined),
-      sessions,
-      resume,
-      preflight,
-      askAgent,
-      reports: new FileMoveReportStore(id => createSessionPaths(paths, id).directory),
-      planner,
+      storage: needs.storage,
+      processes: new KernelProcessProbe(spawn, host, clock),
+      sessions: needs.sessions,
+      resume: needs.resume,
+      preflight: needs.preflight,
+      askAgent: needs.askAgent,
+      reports: new StateMoveReportStore(state),
+      planner: needs.planner,
       accounts,
-      executables,
+      accountResolver: needs.accountResolver,
       clock,
-      transcripts: createTranscriptReader(storage),
-      transcriptProvenance,
-      conversationFiles: new FileConversationFiles(codexRollouts),
-      conversionCheck: new CliConversionCheck(),
-      harnessVersion: new CliHarnessVersion(),
-      rolloutFormat: new CliRolloutFormatProbe(),
-      locateHarness,
-      conversationId: () => crypto.randomUUID(),
-      sessionDirectory: id => createSessionPaths(paths, id).directory,
-      readableHandoffs,
-      fixedSettings,
-      paneIdentity,
+      transcripts: needs.transcripts,
+      transcriptProvenance: needs.transcriptProvenance,
+      conversationFiles: new HistoryConversationFiles(
+        roots,
+        async () => (await accounts.accounts()).map(account => account.home),
+        needs.codexRollouts,
+        needs.toolkit,
+      ),
+      toolkit: needs.toolkit,
+      conversionCheck: needs.conversionCheck,
+      harnessVersion: needs.harnessVersion,
+      rolloutFormat: needs.rolloutFormat,
+      locateHarness: needs.locateHarness,
+      conversationId: needs.conversationId,
+      sessionDirectory: needs.sessionDirectory,
+      resolveDirectory: async (id, cwd) => await resolveInWorkFolder(roots, id, cwd),
+      readableHandoffs: needs.readableHandoffs,
+      fixedSettings: needs.fixedSettings,
+      paneIdentity: needs.paneIdentity,
+      persistedReasoningEffort: needs.persistedReasoningEffort,
+      contextWindowForSession: needs.contextWindowForSession,
+      signals: needs.signals,
       // Its own queue: a move holds its lock across a pane kill and a relaunch, and must not
       // make every unrelated document write in the process wait behind it.
       serial: new KeyedSerialExecutor(),
-      launch: createSessionLaunch(storage),
-      clientName,
+      launch: needs.launch,
+      clientName: needs.clientName,
     });
     return {
       id: 'sessionMove',
@@ -1132,3 +1170,37 @@ export const sessionMoveModule: DaemonModule<void, SessionMoveNeeds, SessionMove
     };
   },
 };
+
+/** The module's build contract, as `daemon/moves.ts` composes it: built once with its needs, providing the mover and contributing its routes. */
+export interface SessionMoveModule {
+  readonly id: 'sessionMove';
+  build(
+    needs: SessionMoveNeeds,
+    seams: undefined,
+    lifecycle: unknown,
+  ): {
+    readonly id: 'sessionMove';
+    readonly provides: SessionMoveProvides;
+    readonly jobs: Record<string, never>;
+    readonly contributes: ReturnType<typeof sessionMoveContribution>;
+  };
+}
+
+/**
+ * The working directory with its links resolved, through the ferret's own `work` root: the path is taken relative to
+ * the folder the ferret works in, resolved and fenced there, and a directory outside it (or any refusal) is answered
+ * as given.
+ */
+async function resolveInWorkFolder(roots: RootsPort, id: SessionId, cwd: string): Promise<string> {
+  try {
+    const work = roots.root('work', { ferret: id as unknown as FerretId });
+    const base = work.resolve('.');
+    if (!base.ok) return cwd;
+    const inside = relative(base.value, cwd);
+    if (inside.startsWith('..') || isAbsolute(inside)) return cwd;
+    const resolved = work.resolve(inside === '' ? '.' : inside);
+    return resolved.ok ? await work.realPath(resolved.value) : cwd;
+  } catch {
+    return cwd;
+  }
+}

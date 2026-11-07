@@ -10,7 +10,7 @@
  * the replacement can act, and only then retires the predecessor.
  *
  * THE WIRE VOCABULARY IS NOT OWNED HERE. The phase set, the failure set, the request and the durable
- * receipt are `@ferretry/protocol`'s, because the daemon, the command-line client and the browser all
+ * receipt are this package's contract (`contract/handover.ts`), because the daemon, the command-line client and the browser all
  * read the same document — and a fact two independently deployable programs must agree on is defined
  * once, above every consumer. This module aliases them and adds only what never leaves this daemon:
  * the ports, the world snapshot, and the resolved target.
@@ -41,7 +41,7 @@ export type HandoverPhase = SessionHandoverPhase;
 /** The protocol's actionable refusal causes. The terminal PHASE is the coarse category, not a cause. */
 export type HandoverFailure = SessionHandoverFailure;
 
-/** The durable document, owned by the predecessor at `state/sessions/<sourceSessionId>/handover.json`. */
+/** The durable document, owned by the predecessor at `<sourceSessionId>/handover.json` (the contract's `HandoverFiles`). */
 export type HandoverReceipt = SessionHandoverReceipt;
 
 /** What the caller asked for, exactly as the route parsed it. */

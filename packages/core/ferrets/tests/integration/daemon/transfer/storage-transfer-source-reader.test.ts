@@ -1,22 +1,12 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
+import { describe, it } from 'bun:test';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../src/adapters/index.ts';
 import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import { SessionConfigFiles, SessionStateFiles } from '../../../../daemon/lib/state.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
 
 /**
  * The complete source projection, off real session documents.
@@ -28,26 +18,17 @@ import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
  */
 
 const NOW = '2026-08-06T09:00:00.000Z';
-const directories = new Set<string>();
 
-afterEach(async () => {
-  for (const directory of directories) await rm(directory, { recursive: true, force: true });
-  directories.clear();
-});
+/**
+ * Plants a session document exactly as given: the declared schema would refuse the half-written and the damaged
+ * documents several of these cases need, and a damaged document on disk is precisely what they are about.
+ */
+function plantConfig(folder: MemoryStateFolder, id: string, document: unknown): void {
+  folder.plant(SessionConfigFiles, JSON.stringify({ format: 1, ...(document as object) }), id);
+}
 
-async function openTemporaryStorage(): Promise<DaemonStorage> {
-  const home = await mkdtemp(join(tmpdir(), 'fy-transfer-source-'));
-  directories.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return (await factory.open()).storage;
+function plantState(folder: MemoryStateFolder, id: string, document: unknown): void {
+  folder.plant(SessionStateFiles, JSON.stringify({ format: 1, ...(document as object) }), id);
 }
 
 const transcript: TranscriptProvenance = {
@@ -127,9 +108,9 @@ function watched(storage: DaemonStorage): { readonly storage: DaemonStorage; rea
 describe('StorageTransferSourceReader', () => {
   it('should project every durable field a transfer plan is built from', async () => {
     // Arrange
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const id = parseSessionId('20260806-source');
-    await storage.writeConfig(id, configuration(id));
+    await plantConfig(folder, id, configuration(id));
 
     // Act
     const source = await new StorageTransferSourceReader(storage).read(id);
@@ -160,15 +141,14 @@ describe('StorageTransferSourceReader', () => {
       transcriptProvenance: transcript,
       provenance: stamp,
     });
-    await storage.close();
   });
 
   it('should read the source and be unable to do anything else to it', async () => {
     // Arrange
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const id = parseSessionId('20260806-readonly');
-    await storage.writeConfig(id, configuration(id, { model: undefined }));
-    await storage.writeState(id, { id, status: 'running', turn: 1 });
+    await plantConfig(folder, id, configuration(id, { model: undefined }));
+    await plantState(folder, id, { id, status: 'running', turn: 1 });
     const observed = watched(storage);
 
     // Act
@@ -181,15 +161,14 @@ describe('StorageTransferSourceReader', () => {
       'observedModel',
       'read',
     ]);
-    await storage.close();
   });
 
   it('should fall back to the model the harness was observed running, and treat blanks as absent', async () => {
     // Arrange: a session started from a hint carries no configured model.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const id = parseSessionId('20260806-observed');
-    await storage.writeConfig(id, configuration(id, { model: undefined, teammate: '', label: '   ' }));
-    await storage.writeState(id, { id, status: 'running', turn: 4, observedModel: 'claude-opus-5-1m' });
+    await plantConfig(folder, id, configuration(id, { model: undefined, teammate: '', label: '   ' }));
+    await plantState(folder, id, { id, status: 'running', turn: 4, observedModel: 'claude-opus-5-1m' });
 
     // Act
     const source = await new StorageTransferSourceReader(storage).read(id);
@@ -198,17 +177,16 @@ describe('StorageTransferSourceReader', () => {
     should(source?.model).equal('claude-opus-5-1m');
     should(source?.teammate).be.null();
     should(source?.label).be.null();
-    await storage.close();
   });
 
   it('should answer a null model rather than invent one when nothing records it', async () => {
     // Arrange: no configured model, and a state document that has never seen the harness say.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const withoutState = parseSessionId('20260806-nostate');
     const damagedState = parseSessionId('20260806-badstate');
-    await storage.writeConfig(withoutState, configuration(withoutState, { model: undefined }));
-    await storage.writeConfig(damagedState, configuration(damagedState, { model: undefined }));
-    await storage.writeState(damagedState, { id: damagedState, status: 'not-a-status' });
+    await plantConfig(folder, withoutState, configuration(withoutState, { model: undefined }));
+    await plantConfig(folder, damagedState, configuration(damagedState, { model: undefined }));
+    await plantState(folder, damagedState, { id: damagedState, status: 'not-a-status' });
 
     // Act
     const reader = new StorageTransferSourceReader(storage);
@@ -219,29 +197,28 @@ describe('StorageTransferSourceReader', () => {
     should(missing?.model).be.null();
     should(damaged?.model).be.null();
     should(damaged?.name).equal('Port The Transfer Seam');
-    await storage.close();
   });
 
   it('should refuse a source whose warden stamp is present and unreadable', async () => {
     // Arrange: three stamps that are THERE and do not parse — one whose lineage disagrees with its
     // own evidence, one claiming descent it cannot attribute, and one that is not a record at all.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const inconsistent = parseSessionId('20260806-badstamp');
     const untraceable = parseSessionId('20260806-unnamedwarden');
     const nonsense = parseSessionId('20260806-stampnonsense');
-    await storage.writeConfig(
+    await plantConfig(folder, 
       inconsistent,
       configuration(inconsistent, {
         provenance: { v: 1, at: NOW, origin: 'warden', wardenLineage: true, lineageSource: 'none' },
       }),
     );
-    await storage.writeConfig(
+    await plantConfig(folder, 
       untraceable,
       configuration(untraceable, {
         provenance: { v: 1, at: NOW, origin: 'warden', wardenLineage: true, lineageSource: 'parent_stamp' },
       }),
     );
-    await storage.writeConfig(nonsense, configuration(nonsense, { provenance: 'warden' }));
+    await plantConfig(folder, nonsense, configuration(nonsense, { provenance: 'warden' }));
 
     // Act
     const reader = new StorageTransferSourceReader(storage);
@@ -251,16 +228,15 @@ describe('StorageTransferSourceReader', () => {
     should(await reader.read(inconsistent)).be.undefined();
     should(await reader.read(untraceable)).be.undefined();
     should(await reader.read(nonsense)).be.undefined();
-    await storage.close();
   });
 
   it('should carry a session that was never stamped, and the exact stamp of one that was', async () => {
     // Arrange: never stamped is a different fact from stamped-and-damaged, and only this one crosses.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const unstamped = parseSessionId('20260806-unstamped');
     const shielded = parseSessionId('20260806-shielded');
-    await storage.writeConfig(unstamped, configuration(unstamped, { provenance: undefined }));
-    await storage.writeConfig(shielded, configuration(shielded));
+    await plantConfig(folder, unstamped, configuration(unstamped, { provenance: undefined }));
+    await plantConfig(folder, shielded, configuration(shielded));
 
     // Act
     const reader = new StorageTransferSourceReader(storage);
@@ -271,14 +247,13 @@ describe('StorageTransferSourceReader', () => {
     should(withoutStamp).not.be.undefined();
     should(withoutStamp?.provenance).be.undefined();
     should(withStamp?.provenance).eql(stamp);
-    await storage.close();
   });
 
   it('should answer nothing for a session that cannot be described completely', async () => {
     // Arrange
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const partial = parseSessionId('20260806-partial');
-    await storage.writeConfig(partial, { id: partial, harness: 'claude' });
+    await plantConfig(folder, partial, { id: partial, harness: 'claude' });
 
     // Act
     const reader = new StorageTransferSourceReader(storage);
@@ -290,17 +265,16 @@ describe('StorageTransferSourceReader', () => {
     should(unusable).be.undefined();
     should(absent).be.undefined();
     should(incomplete).be.undefined();
-    await storage.close();
   });
 
   it('should distinguish a session with no transcript record from one whose record is damaged', async () => {
     // Arrange: a session started before its rollout was correlated simply has no record. A
     // hand-edited one is different, and must never be read as a file a byte offset can address.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const unresolved = parseSessionId('20260806-notranscript');
     const damaged = parseSessionId('20260806-badtranscript');
-    await storage.writeConfig(unresolved, configuration(unresolved, { transcript: undefined }));
-    await storage.writeConfig(damaged, configuration(damaged, { transcript: { v: 1, identity: 'correlated' } }));
+    await plantConfig(folder, unresolved, configuration(unresolved, { transcript: undefined }));
+    await plantConfig(folder, damaged, configuration(damaged, { transcript: { v: 1, identity: 'correlated' } }));
 
     // Act
     const reader = new StorageTransferSourceReader(storage);
@@ -310,6 +284,5 @@ describe('StorageTransferSourceReader', () => {
     // Assert: no record is a null the plan can carry; a damaged one refuses the whole source.
     should(withoutTranscript?.transcriptProvenance).be.null();
     should(withDamagedTranscript).be.undefined();
-    await storage.close();
   });
 });

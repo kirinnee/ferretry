@@ -1,4 +1,3 @@
-import { FERRETRY_MCP_ARGS, STATUSLINE_SUBCOMMAND } from '@ferretry/fleet';
 import type { ProcRow } from './process-table.ts';
 
 /** Why a process in the pane's tree is the agent's own and therefore restarts with its CLI. */
@@ -22,6 +21,10 @@ export interface Provenance {
   readonly rootPid: number;
   /** The CLI's binary name (`fy`), single-sourced by the composition root. */
   readonly binaryName: string;
+  /** The arguments after the binary that start the tools server (`mcp serve`), as the fleet writes them into every runtime. */
+  readonly toolsServerArguments: readonly string[];
+  /** The subcommand the status line runs (`statusline`), as the fleet writes it into every Claude runtime. */
+  readonly statuslineSubcommand: string;
   readonly configuredServers: readonly ConfiguredServer[];
 }
 
@@ -56,10 +59,14 @@ export function isHarnessCommand(argv: string): boolean {
 }
 
 /** `fy mcp serve`, however the runtime was spelled: `fy`, `/nix/store/…/bin/fy`, `bun …/fy.ts`. */
-function isToolsServer(values: readonly string[], binaryName: string): boolean {
+function isToolsServer(
+  values: readonly string[],
+  binaryName: string,
+  toolsServerArguments: readonly string[],
+): boolean {
   const at = values.findIndex(value => stem(value) === binaryName);
   if (at === -1 || at > 2) return false;
-  return FERRETRY_MCP_ARGS.every((word, offset) => values[at + 1 + offset] === word);
+  return toolsServerArguments.every((word, offset) => values[at + 1 + offset] === word);
 }
 
 /** A word as the shell would read it: `ps` shows `sh -c 'fy' statusline` with the quotes the command was written with. */
@@ -72,10 +79,10 @@ const unquoted = (word: string): string => word.replace(/^'(.*)'$/u, '$1');
  * subcommand, wherever the shell or a runtime put them: `sh -c 'fy' statusline`, `fy statusline`,
  * `bun …/fy.ts statusline`.
  */
-function isStatusLine(values: readonly string[], binaryName: string): boolean {
+function isStatusLine(values: readonly string[], binaryName: string, statuslineSubcommand: string): boolean {
   const words = values.map(unquoted);
   const at = words.findIndex(value => stem(value) === binaryName);
-  return at !== -1 && at <= 3 && words[at + 1] === STATUSLINE_SUBCOMMAND;
+  return at !== -1 && at <= 3 && words[at + 1] === statuslineSubcommand;
 }
 
 function containsSequence(values: readonly string[], wanted: readonly string[]): boolean {
@@ -96,10 +103,11 @@ function matchesConfigured(values: readonly string[], server: ConfiguredServer):
 }
 
 function identify(values: readonly string[], provenance: Provenance): KnownProcess | undefined {
-  if (isToolsServer(values, provenance.binaryName))
+  if (isToolsServer(values, provenance.binaryName, provenance.toolsServerArguments))
     return { kind: 'ferretry-tools', label: 'The Ferretry tools server' };
   // Before the harness check: the person's own status line it chains can be named anything at all.
-  if (isStatusLine(values, provenance.binaryName)) return { kind: 'status-line', label: 'The agent’s status line' };
+  if (isStatusLine(values, provenance.binaryName, provenance.statuslineSubcommand))
+    return { kind: 'status-line', label: 'The agent’s status line' };
   if (isHarnessCli(values)) return { kind: 'harness', label: 'The agent’s own CLI' };
   const head = stem(program(values));
   if (LANGUAGE_SERVERS.has(head)) return { kind: 'language-server', label: `The ${head} language server` };

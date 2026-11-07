@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import type { AttachmentView } from '@ferretry/protocol';
+import type { TransferAttachmentView as AttachmentView } from '../../../../daemon/lib/transfer/ports.ts';
 import { AttachmentFacetContributor } from '../../../../daemon/lib/transfer/facets/attachments.ts';
 import { LineageFacetContributor } from '../../../../daemon/lib/transfer/facets/lineage.ts';
 import { ReferenceFacetContributor } from '../../../../daemon/lib/transfer/facets/references.ts';
 import { WorkspaceFacetContributor } from '../../../../daemon/lib/transfer/facets/workspace.ts';
 import { TransferPrepareError, type TransferReferenceInventory } from '../../../../daemon/lib/transfer/types.ts';
-import { WARDEN_LABEL } from '../../../src/lib/warden/types.ts';
+import { WARDEN_LABEL } from '../../../../daemon/lib/session/peers/warden-lifecycle.ts';
 import { AT, request, sourceSession, target } from './fixtures.ts';
 
 const input = (source = sourceSession(), overrides: Parameters<typeof request>[0] = {}) => ({

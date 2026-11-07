@@ -2,7 +2,7 @@
  * The source session's durable attachment inventory, read through the store that owns it.
  *
  * Implements `TransferAttachmentReader` (the attachments facet's only port). It is a thin binding on
- * purpose: `SessionAttachmentStore` already owns the on-disk layout, the manifest parse and the
+ * purpose: the attachment store (Conversation) already owns the on-disk layout, the manifest parse and the
  * content-address rule, and a transfer that re-derived any of them would be a second definition of
  * the same durable format — the failure mode being an inventory that disagrees with the store the
  * bytes are actually copied out of.
@@ -21,14 +21,18 @@
  * `TransferAttachmentCopier`, against the identity this inventory pinned.
  */
 
-import type { AttachmentView } from '@ferretry/protocol';
-import type { SessionAttachmentStore } from '../../lib/attachments/session-attachments.ts';
+import type { TransferAttachmentView } from '../../lib/transfer/ports.ts';
 import type { TransferAttachmentReader } from '../../lib/transfer/types.ts';
 
-export class SessionAttachmentTransferReader implements TransferAttachmentReader {
-  constructor(private readonly store: SessionAttachmentStore) {}
+/** The attachment owner's inventory of one session: the part of its store this binding reads. */
+export interface AttachmentInventory {
+  list(sessionId: string): Promise<readonly TransferAttachmentView[]>;
+}
 
-  async list(sessionId: string): Promise<readonly AttachmentView[]> {
+export class SessionAttachmentTransferReader implements TransferAttachmentReader {
+  constructor(private readonly store: AttachmentInventory) {}
+
+  async list(sessionId: string): Promise<readonly TransferAttachmentView[]> {
     return await this.store.list(sessionId);
   }
 }

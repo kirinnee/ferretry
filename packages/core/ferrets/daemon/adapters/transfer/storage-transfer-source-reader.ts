@@ -44,11 +44,11 @@
  * document can describe completely.
  */
 
-import { SessionConfigSchema, SessionStateSchema } from '../../lib/protocol/session.ts';
+import { TranscriptProvenanceSchema } from '../../../contract/records.ts';
+import { SessionConfigSchema, SessionStateSchema, type TranscriptProvenance } from '../../lib/protocol/session.ts';
 import type { TransferSourceReader, TransferSourceSession } from '../../lib/transfer/types.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
-import { storedTranscriptProvenance } from '../session/transcript/storage-transcript-provenance.ts';
 
 /**
  * An empty string is not a name, a model or a label.
@@ -59,6 +59,19 @@ import { storedTranscriptProvenance } from '../session/transcript/storage-transc
  */
 function present(value: string | undefined): string | null {
   return value === undefined || value.trim() === '' ? null : value;
+}
+
+/**
+ * The provenance a stored configuration carries, parsed rather than trusted: the ONE parse of the `transcript` record
+ * of a configuration document (its schema is the contract's, `contract/records.ts`).
+ */
+export function storedTranscriptProvenance(config: unknown): TranscriptProvenance | undefined {
+  const record =
+    typeof config === 'object' && config !== null && !Array.isArray(config)
+      ? (config as Readonly<Record<string, unknown>>)
+      : {};
+  const parsed = TranscriptProvenanceSchema.safeParse(record.transcript);
+  return parsed.success ? parsed.data : undefined;
 }
 
 export class StorageTransferSourceReader implements TransferSourceReader {

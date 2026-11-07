@@ -1,14 +1,11 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFile, rm, truncate } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { FerretHistoryFiles } from '../../../../contract/index.ts';
+import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import { type SessionTransferPlan } from '../../../../contract/transfer.ts';
-import {
-  type RuntimeControlRequest,
-  SessionConfigSchema,
-  SessionStateSchema,
-  type SessionView,
-} from '../../../../daemon/lib/protocol/session.ts';
+import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import type { JsonValue } from '@ferretry/std';
 import should from 'should';
 import {
   SessionForkTargetBinder,
@@ -20,7 +17,6 @@ import {
   SessionForkTargetResolutionError,
   type SessionForkTargetAccount,
 } from '../../../../daemon/adapters/forks/session-fork-target-resolver.ts';
-import { FileSessionTaskStore } from '../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
 import { NodeWorkingDirectoryResolver } from '../../../../daemon/adapters/session/lifecycle/node-working-directory-resolver.ts';
 import {
   type SessionProtocolEnvelope,
@@ -31,22 +27,23 @@ import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfe
 import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
 import { FileSessionTransferTargetPlanStore } from '../../../../daemon/adapters/transfer/plan-store.ts';
 import { StorageTransferEnvelopeWriter } from '../../../../daemon/adapters/transfer/storage-transfer-envelope-writer.ts';
-import { KeyedSerialExecutor } from '../../../src/adapters/index.ts';
+import { KeyedSerialExecutor } from '../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import type { SessionForkBoundTarget } from '../../../../daemon/lib/forks/types.ts';
-import type { SessionEffectKey, SessionEffectLedger } from '../../../../daemon/lib/session/effects/index.ts';
 import { assignedTaskDocument } from '../../../../daemon/lib/session/lifecycle/policy.ts';
 import { sessionTmuxName } from '../../../../daemon/lib/session/lifecycle/policy.ts';
-import { startupModelArguments } from '../../../src/lib/session/harness/startup.ts';
-import { claudeSessionArguments, claudeTranscriptFile } from '../../../src/lib/session/transcript/claude-path.ts';
-import { codexCorrelationArguments } from '../../../src/lib/session/transcript/codex-rollout.ts';
+import {
+  claudeSessionArguments,
+  codexCorrelationArguments,
+} from '../../../../daemon/lib/session/peers/transcript-launch.ts';
 import { SessionLifecycleService } from '../../../../daemon/lib/session/lifecycle/service.ts';
 import { defaultSessionLifecycleSettings } from '../../../../daemon/lib/session/lifecycle/settings.ts';
 import {
   MAX_ASSIGNED_TASK_LENGTH,
   SESSION_BOARD_CAPABILITY_VARIABLE,
 } from '../../../../daemon/lib/session/lifecycle/types.ts';
-import type { JsonValue } from '../../../src/lib/json.ts';
 import type { SessionLifecycleRecord } from '../../../../daemon/lib/session/lifecycle/types.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
+import { SessionConfigFiles, SessionStateFiles } from '../../../../daemon/lib/state.ts';
 import { type SessionId, parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import type { TransferConversationValidator } from '../../../../daemon/lib/transfer/types.ts';
 import {
@@ -55,6 +52,10 @@ import {
   TARGET_ID,
   account,
   cleanup,
+  harnessFacts,
+  MemoryAttachmentStore,
+  memoryEffectLedger,
+  runtimeEffectFingerprint,
   openStorage,
   plan,
   planner,
@@ -77,47 +78,9 @@ const TARGET_HARNESS_HOME = '/fleet/homes/zelda';
 const TARGET_HARNESS_SESSION = 'harness-target';
 const LAUNCH_ARGUMENTS = claudeSessionArguments(TARGET_HARNESS_SESSION);
 
-/** A fixture-local durable-effect stand-in: every lifecycle rebuilt by one harness shares it. */
-function memoryEffectLedger(): SessionEffectLedger {
-  const held = new Map<string, { readonly fingerprint: string; readonly settled: boolean }>();
-  const identity = (key: SessionEffectKey): string => JSON.stringify([key.sessionId, key.effectId]);
-
-  return {
-    inspect: async (key, fingerprint) => {
-      const effect = held.get(identity(key));
-      if (effect === undefined) return 'unclaimed';
-      if (effect.fingerprint !== fingerprint) return 'conflict';
-      return effect.settled ? 'settled' : 'unsettled';
-    },
-    begin: async (key, fingerprint) => {
-      const effect = held.get(identity(key));
-      if (effect !== undefined) {
-        if (effect.fingerprint !== fingerprint) return 'conflict';
-        return effect.settled ? 'settled' : 'unsettled';
-      }
-      held.set(identity(key), { fingerprint, settled: false });
-      return 'perform';
-    },
-    settle: async (key, fingerprint) => {
-      const effect = held.get(identity(key));
-      if (effect === undefined || effect.fingerprint !== fingerprint)
-        throw new Error(`cannot settle unclaimed or conflicting effect ${key.effectId}`);
-      held.set(identity(key), { fingerprint, settled: true });
-    },
-  };
-}
-
-/** The runtime subsystem's opaque comparison, repeated only by this stateful port stand-in. */
-function runtimeEffectFingerprint(request: RuntimeControlRequest): string {
-  return JSON.stringify([
-    request.action,
-    request.action === 'model' || request.action === 'effort' ? (request.effort ?? null) : null,
-    request.action === 'model' ? (request.model ?? null) : null,
-  ]);
-}
-
 interface Harness {
   readonly ports: SessionForkTargetBinderPorts;
+  /** The session store as it is NOW: a restart replaces it, over the same state. */
   readonly storage: DaemonStorage;
   readonly plan: SessionTransferPlan;
   readonly target: SessionId;
@@ -125,6 +88,19 @@ interface Harness {
   /** Everything the launcher and the runtime path did, in the order it happened. */
   readonly happened: string[];
   readonly plans: FileSessionTransferTargetPlanStore;
+  /** The kernel test host's state, where the journal, the plan and the brief of every session live. */
+  readonly folder: MemoryStateFolder;
+  /** The attachment owner's store, which a fork reads the source from and copies the target into. */
+  readonly attachments: MemoryAttachmentStore;
+  /** The opening-turn document as it is held, or undefined when none is. */
+  brief(): string | undefined;
+  /** Replaces the opening-turn document, as somebody rewriting it would. */
+  plantBrief(text: string): void;
+  /**
+   * A daemon restart: a fresh session store over the very same state files. `forgetIndex` also loses the event index,
+   * which is what a crash BEFORE the index caught up with a write leaves — the index is a cache of the journals.
+   */
+  restart(options?: { readonly forgetIndex?: boolean }): Promise<void>;
   bind(): SessionForkBoundTarget;
   counts(): { readonly captures: number; readonly creates: number };
   /** Makes the published fleet answer differently between two attempts at one fork. */
@@ -145,6 +121,7 @@ async function harness(
   } = {},
 ): Promise<Harness> {
   const opened = await openStorage(label);
+  let storage = opened.storage;
   const cwd = await realTemporaryDirectory(`fy-fork-${label}-cwd-`);
   const base = plan(cwd);
   const frozen = overrides.plan === undefined ? base : overrides.plan(base);
@@ -158,17 +135,19 @@ async function harness(
   let resolved: SessionForkTargetAccount = { account: account(), executable: '/fleet/bin/claude-auto-zelda' };
   let environment: Readonly<Record<string, string>> = {};
 
-  const plans = new FileSessionTransferTargetPlanStore(id => join(opened.sessionDirectory(id), 'transfer-plan.json'));
-  const briefWriter = new FileSessionTransferBriefWriter(id => opened.sessionDirectory(id));
-  const attachmentCopier = new FileSessionAttachmentCopier(id => join(opened.sessionDirectory(id), 'attachments'));
-  const tasks = new FileSessionTaskStore(id => opened.sessionDirectory(id));
+  const plans = new FileSessionTransferTargetPlanStore(opened.state);
+  const briefWriter = new FileSessionTransferBriefWriter(opened.state);
+  const attachments = new MemoryAttachmentStore();
+  const attachmentCopier = new FileSessionAttachmentCopier(attachments);
 
   const ports: SessionForkTargetBinderPorts = {
-    storage: opened.storage,
+    get storage() {
+      return storage;
+    },
     createLifecycle: (id: SessionId, envelope?: SessionProtocolEnvelope) =>
       new SessionLifecycleService(
         {
-          repository: new StorageSessionLifecycleRepository(opened.storage, envelope),
+          repository: new StorageSessionLifecycleRepository(storage, envelope),
           launcher: {
             alive: async () => terminalAlive,
             launch: async () => {
@@ -194,7 +173,9 @@ async function harness(
                 happened.push('task:write-failed');
                 throw new Error('the one-shot task persistence failed');
               }
-              return await tasks.writeAssignedTask(held, document);
+              // The lifecycle's turn-one document IS the brief file: both are the one `turns/turn-001.md` the new
+              // agent is pointed at, so whichever writes last, the bytes it reads are identical.
+              return await briefWriter.write(held, document);
             },
           },
           effects,
@@ -241,7 +222,7 @@ async function harness(
             home: TARGET_HARNESS_HOME,
             harnessSessionId: TARGET_HARNESS_SESSION,
             identity: 'minted',
-            file: claudeTranscriptFile(TARGET_HARNESS_HOME, request.cwd, TARGET_HARNESS_SESSION),
+            file: harnessFacts.claudeTranscriptFile(TARGET_HARNESS_HOME, request.cwd, TARGET_HARNESS_SESSION),
             resolvedAt: AT,
           },
           launchArguments: [...claudeSessionArguments(TARGET_HARNESS_SESSION)],
@@ -249,7 +230,9 @@ async function harness(
       },
     },
     importPorts: {
-      envelope: new StorageTransferEnvelopeWriter(opened.storage),
+      get envelope() {
+        return new StorageTransferEnvelopeWriter(storage);
+      },
       brief: briefWriter,
       attachments: attachmentCopier,
       conversation: overrides.validator ?? frozenValidator(frozen),
@@ -287,8 +270,9 @@ async function harness(
         await effects.settle(key, fingerprint, AT);
       },
     },
-    view: async id => await view(opened.storage, opened.sessionDirectory, id).catch(() => undefined),
+    view: async id => await view(storage, opened.sessionDirectory, id).catch(() => undefined),
     sessionDirectory: id => opened.sessionDirectory(id),
+    harnessFacts,
     readableHandoffs: id => [`${opened.sessionDirectory(id)}/turns`],
     clock: { now: () => AT },
   };
@@ -303,12 +287,26 @@ async function harness(
 
   return {
     ports,
-    storage: opened.storage,
+    get storage() {
+      return storage;
+    },
     plan: frozen,
     target,
     sessionDirectory: opened.sessionDirectory,
     happened,
     plans,
+    folder: opened.folder,
+    attachments,
+    brief: () => {
+      const held = opened.folder.rawBytes(TransferBriefFiles, TARGET_ID);
+      return held === undefined ? undefined : new TextDecoder().decode(held);
+    },
+    plantBrief: next => opened.folder.plantBytes(TransferBriefFiles, new TextEncoder().encode(next), TARGET_ID),
+    restart: async options => {
+      if (options?.forgetIndex === true)
+        for (const database of opened.folder.databases.keys()) opened.folder.databases.delete(database);
+      storage = (await memoryStorage({ folder: opened.folder, clock: { now: () => AT } })).storage;
+    },
     bind: () => new SessionForkTargetBinder(ports).bind(TARGET_ID, frozen),
     counts: () => ({ captures: counters.captures, creates: counters.creates }),
     publish: (next: SessionForkTargetAccount) => {
@@ -337,6 +335,19 @@ async function view(
   const config = SessionConfigSchema.parse(await storage.readConfig(id));
   const state = SessionStateSchema.parse(await storage.readState(id));
   return { config, state, directory: sessionDirectory(id) };
+}
+
+/**
+ * Damages a held session document the way a hand edit or a bad disk would: planted straight into the state, because the
+ * session store itself refuses to WRITE a document its declared schema rejects.
+ */
+function damage(
+  subject: Harness,
+  file: typeof SessionConfigFiles | typeof SessionStateFiles,
+  change: (document: Record<string, unknown>) => Record<string, unknown>,
+): void {
+  const held = JSON.parse(subject.folder.raw(file, TARGET_ID) ?? '{}') as Record<string, unknown>;
+  subject.folder.plant(file, JSON.stringify(change(held)), TARGET_ID);
 }
 
 async function refusal(promise: Promise<unknown>): Promise<SessionForkTargetBindingError> {
@@ -388,7 +399,9 @@ async function journal(subject: Harness): Promise<readonly { type: string; data:
  */
 async function targetWithEmptyJournal(subject: Harness): Promise<void> {
   await subject.bind().lifecycle.create(subject.plan);
-  await truncate(join(subject.sessionDirectory(TARGET_ID), 'events.jsonl'), 0);
+  subject.folder.plant(FerretHistoryFiles, '', TARGET_ID);
+  // A crash leaves a daemon that starts over: its index has never heard of a journal for this target.
+  await subject.restart({ forgetIndex: true });
 }
 
 describe('SessionForkTargetBinder', () => {
@@ -431,7 +444,7 @@ describe('SessionForkTargetBinder', () => {
       // Its own turn documents, readable without a permission prompt, ahead of the operator's flags.
       `--allowedTools=Read(/${subject.sessionDirectory(TARGET_ID)}/turns/**)`,
       '--dangerously-skip-permissions',
-      ...startupModelArguments('claude-opus-5'),
+      ...harnessFacts.startupModelArguments('claude-opus-5'),
       ...LAUNCH_ARGUMENTS,
     ]);
     // The plan is durable beneath the target, so a later replay reads it rather than the source.
@@ -650,14 +663,14 @@ describe('SessionForkTargetBinder', () => {
   it('should write one set of opening-turn bytes for both the importer and the lifecycle', async () => {
     // Arrange
     const subject = await harness('brief-bytes');
-    const file = join(subject.sessionDirectory(TARGET_ID), 'turns', 'turn-001.md');
+    const file = subject.ports.imported.brief.file(TARGET_ID);
 
     // Act
     const bound = subject.bind();
     await bound.lifecycle.create(subject.plan);
     await bound.plans.persist(subject.plan);
     const outcome = await bound.importer.importPlan(subject.plan, TARGET_ID);
-    const imported = await readFile(file, 'utf8');
+    const imported = subject.brief();
     await bound.lifecycle.captureTranscriptProvenance();
     await bound.lifecycle.start();
 
@@ -665,7 +678,7 @@ describe('SessionForkTargetBinder', () => {
     // converges on the same bytes rather than oscillating between two spellings of one brief.
     should(outcome.briefPath).equal(file);
     should(imported).equal(assignedTaskDocument(forkOpeningTurn(subject.plan)));
-    should(await readFile(file, 'utf8')).equal(imported);
+    should(subject.brief()).equal(imported);
     should(imported).match(/Prior context carried into this session by a fork/u);
     should(imported).match(/conversation time was rewound but filesystem state was not/u);
   });
@@ -820,9 +833,9 @@ describe('SessionForkTargetBinder', () => {
       type: 'session.created',
       data: { agent: held.config.agent, mode: held.config.mode, cwd: held.config.cwd },
     };
-    const file = join(subject.sessionDirectory(TARGET_ID), 'events.jsonl');
-    await Bun.write(file, `${JSON.stringify(forged)}\n`);
-    const before = await readFile(file, 'utf8');
+    subject.folder.plant(FerretHistoryFiles, `${JSON.stringify({ format: 1, ...forged })}\n`, TARGET_ID);
+    await subject.restart({ forgetIndex: true });
+    const before = subject.folder.raw(FerretHistoryFiles, TARGET_ID);
 
     // Act
     const refused = await refusal(subject.bind().lifecycle.create(subject.plan));
@@ -830,7 +843,7 @@ describe('SessionForkTargetBinder', () => {
     // Assert: refusal is about the missing first boundary, and the forged journal is untouched.
     should(refused.message).match(/creation boundary has sequence 2/u);
     should(refused.message).match(/first lifecycle event must have sequence 1/u);
-    should(await readFile(file, 'utf8')).equal(before);
+    should(subject.folder.raw(FerretHistoryFiles, TARGET_ID)).equal(before);
   });
 
   it('should refuse a journal that has moved past creation while its state still says created', async () => {
@@ -889,7 +902,7 @@ describe('SessionForkTargetBinder', () => {
           snapshot: async () => undefined,
           stop: async () => undefined,
         },
-        tasks: new FileSessionTaskStore(id => subject.sessionDirectory(id)),
+        tasks: { writeAssignedTask: async held => subject.ports.imported.brief.file(held) },
         effects: memoryEffectLedger(),
         directories: new NodeWorkingDirectoryResolver(),
         ids: { next: () => subject.target },
@@ -944,17 +957,14 @@ describe('SessionForkTargetBinder', () => {
     // Arrange
     const subject = await harness('corrupt-config');
     await subject.bind().lifecycle.create(subject.plan);
-    await subject.storage.updateConfig(subject.target, current => {
-      const document = { ...(current as Record<string, unknown>) };
-      delete document.retry;
-      return document as JsonValue;
-    });
+    damage(subject, SessionConfigFiles, ({ retry: _retry, ...document }) => document);
 
     // Act
     const refused = await refusal(subject.bind().lifecycle.create(subject.plan));
 
-    // Assert
-    should(refused.message).match(/does not satisfy the protocol/u);
+    // Assert — the state port holds every session document to its declared schema on every read, so a document the
+    // protocol rejects is refused where the record is read, before it can be reconciled against the plan.
+    should(refused.message).match(/cannot be read, so this fork cannot prove it is the target it reserved/u);
   });
 
   it('should refuse a target already holding a different transfer plan', async () => {
@@ -974,7 +984,7 @@ describe('SessionForkTargetBinder', () => {
     // Arrange
     const subject = await harness('corrupt-plan');
     await subject.bind().lifecycle.create(subject.plan);
-    await Bun.write(subject.plans.targetPlanPath(subject.target), '{ not json');
+    subject.folder.plant(TransferPlanFiles, '{ not json', TARGET_ID);
 
     // Act
     const refused = await refusal(subject.bind().lifecycle.create(subject.plan));
@@ -1038,7 +1048,7 @@ describe('SessionForkTargetBinder', () => {
             home: TARGET_HARNESS_HOME,
             harnessSessionId: 'harness-somebody-else',
             identity: 'minted',
-            file: claudeTranscriptFile(TARGET_HARNESS_HOME, '/work/elsewhere', 'harness-somebody-else'),
+            file: harnessFacts.claudeTranscriptFile(TARGET_HARNESS_HOME, '/work/elsewhere', 'harness-somebody-else'),
             resolvedAt: AT,
           },
         }) as JsonValue,
@@ -1140,16 +1150,13 @@ describe('SessionForkTargetBinder', () => {
     // Arrange: a fork that finished, whose state document has since become unparseable.
     const subject = await harness('unreadable-view');
     await drive(subject);
-    await subject.storage.updateState(
-      subject.target,
-      current => ({ ...(current as Record<string, unknown>), turn: 'many' }) as JsonValue,
-    );
+    damage(subject, SessionStateFiles, document => ({ ...document, turn: 'many' }));
 
     // Act
     const refused = await refusal(subject.bind().lifecycle.view());
 
-    // Assert
-    should(refused.message).match(/do not satisfy the protocol, so this fork cannot be reported/u);
+    // Assert — refused where the record is first re-proved, before a view could be built from it.
+    should(refused.message).match(/cannot be read, so this fork cannot prove it is the target it reserved/u);
   });
 
   it('should re-prove a completed target before reporting it, rather than simply reading the view', async () => {
@@ -1219,15 +1226,17 @@ describe('SessionForkTargetBinder', () => {
     const bound = subject.bind();
     await bound.lifecycle.create(subject.plan);
     await bound.plans.persist(subject.plan);
-    await Bun.write(
-      subject.plans.targetPlanPath(subject.target),
+    subject.folder.plant(
+      TransferPlanFiles,
       `${JSON.stringify({
+        format: 1,
         ...subject.plan,
         facets: {
           ...subject.plan.facets,
           workspace: { ...subject.plan.facets.workspace, head: '0'.repeat(40) },
         },
       })}\n`,
+      TARGET_ID,
     );
 
     // Act
@@ -1290,8 +1299,8 @@ describe('SessionForkTargetBinder', () => {
       // Arrange: the edge and every artifact are on the target; only the receipt advance was lost.
       const subject = await harness('replayed-import');
       await imported(subject);
-      const file = join(subject.sessionDirectory(TARGET_ID), 'turns', 'turn-001.md');
-      const before = await readFile(file, 'utf8');
+      const file = subject.ports.imported.brief.file(TARGET_ID);
+      const before = subject.brief();
       const replay = bindWith(subject, {
         importPorts: {
           ...subject.ports.importPorts,
@@ -1309,7 +1318,7 @@ describe('SessionForkTargetBinder', () => {
       // Assert
       should(outcome.briefPath).equal(file);
       should(outcome.copiedAttachmentIds).eql(subject.plan.facets.attachments.attachments.map(item => item.id));
-      should(await readFile(file, 'utf8')).equal(before);
+      should(subject.brief()).equal(before);
     });
 
     it('should refuse to create when the account no longer serves the context window the plan froze', async () => {
@@ -1397,8 +1406,7 @@ describe('SessionForkTargetBinder', () => {
       // Arrange
       const subject = await harness('brief-drift');
       const bound = await imported(subject);
-      const file = subject.ports.imported.brief.file(TARGET_ID);
-      await Bun.write(file, 'somebody rewrote the opening turn');
+      subject.plantBrief('somebody rewrote the opening turn');
 
       // Act
       const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
@@ -1407,7 +1415,7 @@ describe('SessionForkTargetBinder', () => {
 
       // Assert: a later phase refuses the drift, the import phase re-drives the frozen plan over it.
       should(refused.message).match(/opening-turn document does not match persisted transfer plan plan-fork-1/u);
-      should(await readFile(file, 'utf8')).equal(assignedTaskDocument(forkOpeningTurn(subject.plan)));
+      should(subject.brief()).equal(assignedTaskDocument(forkOpeningTurn(subject.plan)));
       should(subject.counts().captures).equal(1);
     });
 
@@ -1431,9 +1439,13 @@ describe('SessionForkTargetBinder', () => {
             facets: { ...base.facets, attachments: { attachments: [{ ...manifest, encrypted: null }] } },
           }),
         });
-        const source = join(subject.sessionDirectory(SOURCE_ID), 'attachments', ATTACHMENT_ID);
-        await Bun.write(join(source, 'manifest.json'), JSON.stringify(manifest));
-        await Bun.write(join(source, 'original'), BYTES);
+        await subject.attachments.write(
+          SOURCE_ID,
+          ATTACHMENT_ID,
+          'manifest',
+          new TextEncoder().encode(JSON.stringify(manifest)),
+        );
+        await subject.attachments.write(SOURCE_ID, ATTACHMENT_ID, 'original', new Uint8Array(BYTES));
         return subject;
       }
 
@@ -1441,9 +1453,9 @@ describe('SessionForkTargetBinder', () => {
         // Arrange
         const subject = await withAttachment('attachment-missing');
         const bound = await imported(subject);
-        const copied = join(subject.sessionDirectory(TARGET_ID), 'attachments', ATTACHMENT_ID, 'original');
-        should(await readFile(copied)).eql(BYTES);
-        await rm(copied);
+        const copied = `${TARGET_ID}/${ATTACHMENT_ID}/original`;
+        should(Buffer.from(subject.attachments.files.get(copied) ?? [])).eql(BYTES);
+        subject.attachments.files.delete(copied);
 
         // Act
         const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
@@ -1455,7 +1467,7 @@ describe('SessionForkTargetBinder', () => {
           new RegExp(`imported attachment ${ATTACHMENT_ID} does not match persisted transfer plan plan-fork-1`, 'u'),
         );
         should(outcome.copiedAttachmentIds).eql([ATTACHMENT_ID]);
-        should(await readFile(copied)).eql(BYTES);
+        should(Buffer.from(subject.attachments.files.get(copied) ?? [])).eql(BYTES);
         should(subject.counts().captures).equal(1);
       });
 
@@ -1506,7 +1518,11 @@ describe('SessionForkTargetBinder', () => {
           home: TARGET_HARNESS_HOME,
           harnessSessionId: TARGET_HARNESS_SESSION,
           identity: 'minted',
-          file: claudeTranscriptFile(TARGET_HARNESS_HOME, subject.plan.durable.cwd, TARGET_HARNESS_SESSION),
+          file: harnessFacts.claudeTranscriptFile(
+            TARGET_HARNESS_HOME,
+            subject.plan.durable.cwd,
+            TARGET_HARNESS_SESSION,
+          ),
           resolvedAt: AT,
         });
       });
@@ -1571,25 +1587,6 @@ describe('SessionForkTargetBinder', () => {
 
         // Assert
         should(refused.message).match(/transcript provenance was not durable after capture/u);
-      });
-
-      it('should record only its own evidence when the document under the lock is no longer an object', async () => {
-        // Arrange: another writer replaces the configuration between the proof and the write.
-        const subject = await harness('capture-foreign-document');
-        await imported(subject);
-        const racing = storageWithUpdateConfig(subject.storage, async (id, transform) => {
-          await subject.storage.updateConfig(id, () => 'not a document');
-          return await subject.storage.updateConfig(id, transform);
-        });
-        const bound = bindWith(subject, { storage: racing });
-
-        // Act
-        await bound.lifecycle.captureTranscriptProvenance();
-
-        // Assert: nothing of the vanished document is invented around the capture.
-        const written = (await subject.storage.readConfig(subject.target)) as Record<string, unknown>;
-        should(Object.keys(written).sort()).eql(['command', 'transcript']);
-        should((written.command as string[]).slice(-LAUNCH_ARGUMENTS.length)).eql([...LAUNCH_ARGUMENTS]);
       });
 
       it('should refuse a minted record that names no harness session', async () => {

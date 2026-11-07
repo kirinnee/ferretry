@@ -1,78 +1,246 @@
 import { describe, it } from 'bun:test';
+import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { ApiError, type ApiResponse, type CallStanding } from '@ferretry/kernel/contract';
+import should from 'should';
+import {
+  AskToStopJobsResultSchema,
+  type AskToStopJobsResult,
+  type ConversionPreview,
+  ConversionPreviewSchema,
+  type MoveRefusal,
+} from '../../../../../contract/move.ts';
+import { FerretSummarySchema } from '../../../../../contract/ids.ts';
+import { ferretId } from '../../../../../contract/testing/index.ts';
+import manifest from '../../../../../manifest.ts';
 import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
   type SessionRelaunchSettings,
   SessionRelaunchSettingsSchema,
   type SessionView,
-  SessionViewSchema,
 } from '../../../../../daemon/lib/protocol/session.ts';
 import {
-  AskToStopJobsResultSchema,
-  type ConversionPreview,
-  ConversionPreviewSchema,
-  type MoveRefusal,
-  MoveRefusedBodySchema,
-} from '../../../../../contract/move.ts';
-import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { moverOf, SessionMoveError, sessionMoveRoutes } from '../../../../../daemon/lib/runtime/mounts/session-move.ts';
-import { request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, FakeSessionMove, human } from './support.ts';
+  moverOf,
+  SESSION_MOVE_ROUTES,
+  SessionMoveError,
+  type SessionMoveSubsystem,
+  sessionMoveRoutes,
+} from '../../../../../daemon/lib/runtime/mounts/session-move.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
+import { jsonOf, requestOf } from '../../support/requests.ts';
 
 /**
  * The move surface: what a caller may ask for, what each refusal answers, and what comes back.
  *
- * Every case goes through the real dispatcher and the real credentials, because the scope this route
- * is served under is the point of half of them: a move kills one privileged process and starts
- * another under a different account, so it must be as closed as the start and the stop.
+ * Every case calls the mounted handler the way the kernel does, with the standing Gate would have put on the call. Who
+ * may reach the routes at all (an operator, any caller, never cached) is the manifest's descriptor, so it is asserted
+ * against the manifest here and enforced by the kernel's dispatcher, not re-tested through a credential table.
  */
 
-function dispatcher(subsystem = new FakeSessionMove()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionMoveRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+/**
+ * A fake mover: answers what a move answers and records what the routes asked of it. Its refusals are keyed by session,
+ * so every HTTP answer the mount can give is reachable without a preflight, a pane or a fleet manifest behind it.
+ */
+class FakeSessionMove implements SessionMoveSubsystem {
+  /** Every move that reached the subsystem, as the session and the request it carried. */
+  readonly moves: Array<readonly [string, Parameters<SessionMoveSubsystem['move']>[1]]> = [];
+  /** Every session asked about, in order. */
+  readonly relaunchReads: string[] = [];
+  /** Every preview asked for, as the session and the request it carried. */
+  readonly previews: Array<readonly [string, { readonly agent: string; readonly model?: string }]> = [];
+  /** Every session the agent was asked to stop its jobs in, in order. */
+  readonly jobAsks: string[] = [];
+
+  constructor(
+    /** Sessions that exist, so a move has something to move. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Session ids mapped to the refusal asking about them raises. */
+    private readonly refusals: Readonly<Record<string, SessionMoveError>> = {},
+  ) {}
+
+  private check(sessionId: string): void {
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionMoveError('not_found', `no session ${sessionId}`);
+  }
+
+  async move(sessionId: string, request: Parameters<SessionMoveSubsystem['move']>[1]): Promise<SessionView> {
+    this.moves.push([sessionId, request]);
+    this.check(sessionId);
+    // The agent the caller asked for, in the view: a move that answered with the old account would be
+    // indistinguishable from a read.
+    return sessionView(sessionId, { agent: request.agent }, { status: 'running', turn: 2 });
+  }
+
+  async relaunchSettings(sessionId: string): Promise<SessionRelaunchSettings> {
+    this.relaunchReads.push(sessionId);
+    this.check(sessionId);
+    return { current: false, reasons: ['settings'] };
+  }
+
+  async conversionPreview(
+    sessionId: string,
+    request: { readonly agent: string; readonly model?: string },
+  ): Promise<ConversionPreview> {
+    this.previews.push([sessionId, request]);
+    this.check(sessionId);
+    if (request.agent === 'claude-same') return { kind: 'refused', targetAgent: request.agent, reason: 'same harness' };
+    return {
+      kind: 'ready',
+      targetAgent: request.agent,
+      targetModel: request.model ?? 'gpt-5.5',
+      summary: {
+        converter: 1,
+        sourceHarness: 'claude',
+        sourceVersion: '2.1.281',
+        targetHarness: 'codex',
+        targetVersion: '0.163.0',
+        turns: 4,
+        keptTurns: 4,
+        omittedTurns: 0,
+        cutNewest: false,
+        messages: 8,
+        nativeToolCalls: 1,
+        toolCallsAsText: 2,
+        attachments: 0,
+        dropped: { reasoning: 1, sidechains: 0, internal: 3, compactions: 0 },
+        estimatedTokens: 120,
+        budgetTokens: 154800,
+      },
+    };
+  }
+
+  async askToStopJobs(sessionId: string): Promise<AskToStopJobsResult> {
+    this.jobAsks.push(sessionId);
+    this.check(sessionId);
+    const jobs = [{ pid: 4242, command: 'bash /tmp/merge-all.sh 765', age: '3m' }];
+    return { messageId: 'move-jobs-4242', jobs, alreadyAsked: this.jobAsks.length > 1 };
+  }
+}
+
+type Route = (typeof SESSION_MOVE_ROUTES)[number];
+
+/** The mounted handler for a route, over a subsystem; the replay ledger is the mount's, so one mount is one ledger. */
+function mount(subsystem: SessionMoveSubsystem, maxReplayEntries?: number) {
+  const routes = sessionMoveRoutes(subsystem, maxReplayEntries);
+  return (route: Route['path'], method: Route['method']) => {
+    const found = routes.find(candidate => candidate.path === route && candidate.method === method);
+    if (found === undefined) throw new Error(`no handler for ${method} ${route}`);
+    return found.handle;
+  };
+}
+
+/** What a handler threw, as the ApiError the kernel turns into the answer, or undefined when it answered. */
+async function thrown(work: Promise<unknown>): Promise<ApiError | undefined> {
+  try {
+    await work;
+    return undefined;
+  } catch (error) {
+    if (error instanceof ApiError) return error;
+    throw error;
+  }
 }
 
 /**
- * A move must name its logical request id, so the default headers carry one: every case below
- * that is not ABOUT the id is about something else, and should not be re-testing the id's absence.
- * A test that wants a specific id, or none, passes its own headers.
+ * A move must name its logical request id, so the default headers carry one: every case below that is not ABOUT the id
+ * is about something else, and should not be re-testing the id's absence.
  */
-const withRequestId = (headers: Readonly<Record<string, string>>, requestId = 'req-1') => ({
-  ...headers,
+const withRequestId = (requestId = 'req-1'): Readonly<Record<string, string>> => ({
   [FY_REQUEST_ID_HEADER]: requestId,
 });
 
-function moveRequest(
+const MOVE = '/v1/ferrets/:ferretId/move' as const;
+const owner = ownerStanding();
+
+function moveCall(
   sessionId: string,
-  headers: Readonly<Record<string, string>> = human,
+  headers: Readonly<Record<string, string>> = withRequestId(),
   body: unknown = { agent: 'claude-auto-other' },
-): Parameters<ApiDispatcher['dispatch']>[0] {
-  const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
-  return request({
+  standing: CallStanding = owner,
+) {
+  return requestOf({
     method: 'POST',
     path: `/v1/ferrets/${sessionId}/move`,
-    headers: supplied,
-    body: typeof body === 'string' ? body : JSON.stringify(body),
+    params: { ferretId: sessionId },
+    headers,
+    body,
+    standing,
   });
 }
 
+/** The code a refusal carries, or the status of what was answered. */
+const codeOf = async (work: Promise<ApiResponse>): Promise<[number, string | undefined]> => {
+  const refusal = await thrown(work);
+  return refusal === undefined ? [200, undefined] : [refusal.status, refusal.code];
+};
+
+/** What a case reads of an answer: the status, and the body as the wire would carry it (a refusal as its `error` and `code`). */
+interface Answer {
+  readonly status: number;
+  readonly body: string;
+}
+
+/**
+ * The mount as one dispatcher: picks the handler a call's path names and answers either what it answered or the refusal
+ * it threw, in the wire shape. The standing is the case's own, as Gate would have put it on the call.
+ */
+function dispatcherOf(subsystem: SessionMoveSubsystem, maxReplayEntries?: number) {
+  const handle = mount(subsystem, maxReplayEntries);
+  return {
+    dispatch: async (call: ReturnType<typeof moveCall>): Promise<Answer> => {
+      const path = call.request.path;
+      const handler = path.endsWith('/move/ask-to-stop-jobs')
+        ? handle('/v1/ferrets/:ferretId/move/ask-to-stop-jobs', 'POST')
+        : handle(MOVE, 'POST');
+      try {
+        const response = await handler(call);
+        return {
+          status: response.status,
+          body: typeof response.body === 'string' ? response.body : JSON.stringify(response.body),
+        };
+      } catch (error) {
+        if (!(error instanceof ApiError)) throw error;
+        return {
+          status: error.status,
+          body: JSON.stringify({ error: error.message, code: error.code, ...(error.extra ?? {}) }),
+        };
+      }
+    },
+  };
+}
+
 describe('the session move mount', () => {
-  it('should move a session and answer with the view the read surface serves', async () => {
+  it('should be declared as four operator-scoped, any-caller, uncached routes in the manifest', () => {
+    // The scope is the kernel's, from `manifest.ts`: a move kills one agent process holding this daemon's own
+    // privileges and launches another under a different account, so it is as closed as the start and the stop.
+    // Act
+    const declared = SESSION_MOVE_ROUTES.map(route =>
+      manifest.actions?.routes?.find(candidate => candidate.key === `${route.method} ${route.path}`),
+    );
+
+    // Assert
+    should(declared.every(route => route !== undefined)).be.true();
+    should(declared.map(route => route?.minimum)).deepEqual(['operator', 'operator', 'operator', 'operator']);
+    should(declared.map(route => route?.caller)).deepEqual(['any', 'any', 'any', 'any']);
+    should(declared.every(route => route?.noStore === true)).be.true();
+  });
+
+  it('should move a session and answer with the ferret summary the command line parses', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const response = await subject.dispatch(moveRequest('s1', human, { agent: 'codex-auto', model: 'gpt-5.6-terra' }));
+    const response = await handle(
+      MOVE,
+      'POST',
+    )(moveCall('s1', withRequestId(), { agent: 'codex-auto', model: 'gpt-5.6-terra' }));
 
     // Assert
     should(response.status).equal(200);
-    // Parsed with the protocol's own schema: a body the client would refuse is a move that
-    // moved a session and then could not tell anybody where it went.
-    const view = SessionViewSchema.parse(JSON.parse(response.body));
-    should(view.config.id).equal('s1');
-    should(view.config.agent).equal('codex-auto');
+    // Parsed with the contract's own schema: a body the client would refuse is a move that moved a session and then
+    // could not tell anybody where it went.
+    const summary = FerretSummarySchema.parse(jsonOf(response));
+    should(summary).match({ id: 's1', runtime: 'codex-auto', state: 'working', folder: '/work/ferretry' });
     should(mover.moves).deepEqual([
       [
         's1',
@@ -90,17 +258,21 @@ describe('the session move mount', () => {
   it('should record who asked: the owner, or the ferret that called', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-owner')));
-    await subject.dispatch(moveRequest('s1', withRequestId(agentIn('s9'), 'req-peer')));
+    await handle(MOVE, 'POST')(moveCall('s1', withRequestId('req-owner')));
+    await handle(
+      MOVE,
+      'POST',
+    )(moveCall('s1', withRequestId('req-peer'), { agent: 'claude-auto-other' }, ferretStanding(ferretId('s9'))));
 
     // Assert
     should(mover.moves.map(([, sent]) => sent.movedBy)).deepEqual(['owner', 'session:s9']);
-    should(moverOf('peer:')).equal('session');
-    should(moverOf(undefined)).equal('owner');
-    should(moverOf('device:d1')).equal('owner');
+    should(moverOf(ferretStanding(ferretId('s9')))).equal('session:s9');
+    should(moverOf({})).equal('owner');
+    should(moverOf(owner)).equal('owner');
+    should(moverOf(deviceStanding('d1'))).equal('owner');
   });
 
   it('should pass an unstated context downgrade through as a refusal rather than as consent', async () => {
@@ -109,17 +281,15 @@ describe('the session move mount', () => {
     // decide correctly if the mount hands it `false` rather than `undefined`.
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act. Two request ids, because these are two different moves: stating consent to a smaller
     // window is not a replay of declining to.
-    const silent = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-silent')));
-    const accepted = await subject.dispatch(
-      moveRequest('s1', withRequestId(human, 'req-accepted'), {
-        agent: 'claude-auto-other',
-        allowContextDowngrade: true,
-      }),
-    );
+    const silent = await handle(MOVE, 'POST')(moveCall('s1', withRequestId('req-silent')));
+    const accepted = await handle(
+      MOVE,
+      'POST',
+    )(moveCall('s1', withRequestId('req-accepted'), { agent: 'claude-auto-other', allowContextDowngrade: true }));
 
     // Assert
     should(silent.status).equal(200);
@@ -132,15 +302,15 @@ describe('the session move mount', () => {
     // move with a default — it names nothing to move to.
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const empty = await subject.dispatch(moveRequest('s1', human, ''));
-    const braces = await subject.dispatch(moveRequest('s1', human, {}));
-    const blank = await subject.dispatch(moveRequest('s1', human, { agent: '' }));
+    const empty = await codeOf(handle(MOVE, 'POST')(moveCall('s1', withRequestId(), '')));
+    const braces = await codeOf(handle(MOVE, 'POST')(moveCall('s1', withRequestId(), {})));
+    const blank = await codeOf(handle(MOVE, 'POST')(moveCall('s1', withRequestId(), { agent: '' })));
 
     // Assert
-    should([empty.status, braces.status, blank.status]).deepEqual([400, 400, 400]);
+    should([empty[0], braces[0], blank[0]]).deepEqual([400, 400, 400]);
     should(mover.moves).be.empty();
   });
 
@@ -149,39 +319,23 @@ describe('the session move mount', () => {
     // overridden through this route; accepting and ignoring it would let them believe that.
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const forced = await subject.dispatch(moveRequest('s1', human, { agent: 'claude-auto-other', force: true }));
+    const forced = await codeOf(
+      handle(MOVE, 'POST')(moveCall('s1', withRequestId(), { agent: 'claude-auto-other', force: true })),
+    );
 
     // Assert
-    should(forced.status).equal(400);
+    should(forced[0]).equal(400);
     should(mover.moves).be.empty();
-  });
-
-  it('should refuse anonymously and refuse a warden token, because a move replaces an agent', async () => {
-    // Arrange
-    const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
-
-    // Act
-    const anonymous = await subject.dispatch(moveRequest('s1', {}));
-    const warden = await subject.dispatch(moveRequest('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
-    const peer = await subject.dispatch(moveRequest('s1', agentIn('s9')));
-
-    // Assert
-    should(anonymous.status).equal(401);
-    should(warden.status).equal(403);
-    // A peer holds the admin token, so it reaches the subsystem exactly as the start and stop allow.
-    should(peer.status).equal(200);
-    should(mover.moves).have.length(1);
   });
 
   it('should answer each refusal the move raises with its own status and code', async () => {
     // These are genuinely different next actions: wait for the work to finish, pick another account,
     // accept the smaller window, or read the session's record to see what the relaunch did.
     // Arrange
-    const subject = dispatcher(
+    const handle = mount(
       new FakeSessionMove(['s1'], {
         busy: new SessionMoveError('refused', 'refused: a destructive command is in flight'),
         broken: new SessionMoveError('unusable', 'the documents for session broken do not satisfy the protocol'),
@@ -195,18 +349,29 @@ describe('the session move mount', () => {
         stuck: new SessionMoveError('failed', 'the replacement pane never became ready'),
         amnesia: new SessionMoveError('unresumable', 'this session has no recorded conversation'),
         weird: new SessionMoveError('invalid', '"weird" is not a usable session id'),
+        unserved: new SessionMoveError('unservable_model', 'the account does not serve that model'),
       }),
     );
 
     // Act
     const answers = await Promise.all(
-      ['busy', 'broken', 'nosuch', 'spent', 'smaller', 'crossed', 'stuck', 'amnesia', 'weird', 'absent'].map(
-        async id => await subject.dispatch(moveRequest(id)),
-      ),
+      [
+        'busy',
+        'broken',
+        'nosuch',
+        'spent',
+        'smaller',
+        'crossed',
+        'stuck',
+        'amnesia',
+        'weird',
+        'unserved',
+        'absent',
+      ].map(async id => await codeOf(handle(MOVE, 'POST')(moveCall(id)))),
     );
 
     // Assert
-    should(answers.map(response => [response.status, (JSON.parse(response.body) as { code: string }).code])).deepEqual([
+    should(answers).deepEqual([
       [409, 'move_refused'],
       [409, 'session_unusable'],
       [404, 'unknown_agent'],
@@ -219,6 +384,7 @@ describe('the session move mount', () => {
       // The conversation cannot go with it, and only the person may choose to start a fresh one.
       [409, 'conversation_unresumable'],
       [400, 'invalid_session_id'],
+      [409, 'unservable_model'],
       [404, 'not-found'],
     ]);
   });
@@ -229,19 +395,23 @@ describe('the session move mount', () => {
     // Two request ids, because forcing is a different request, not a replay of declining.
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const plain = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-plain')));
-    const forced = await subject.dispatch(
-      moveRequest('s1', withRequestId(human, 'req-forced'), { agent: 'claude-auto-other', forceInflight: true }),
-    );
-    const malformed = await subject.dispatch(
-      moveRequest('s1', withRequestId(human, 'req-bad'), { agent: 'claude-auto-other', forceInflight: 'yes' }),
+    const plain = await handle(MOVE, 'POST')(moveCall('s1', withRequestId('req-plain')));
+    const forced = await handle(
+      MOVE,
+      'POST',
+    )(moveCall('s1', withRequestId('req-forced'), { agent: 'claude-auto-other', forceInflight: true }));
+    const malformed = await codeOf(
+      handle(
+        MOVE,
+        'POST',
+      )(moveCall('s1', withRequestId('req-bad'), { agent: 'claude-auto-other', forceInflight: 'yes' })),
     );
 
     // Assert
-    should([plain.status, forced.status, malformed.status]).deepEqual([200, 200, 400]);
+    should([plain.status, forced.status, malformed[0]]).deepEqual([200, 200, 400]);
     should(mover.moves.map(([, sent]) => sent.forceInflight)).deepEqual([false, true]);
   });
 
@@ -265,7 +435,7 @@ describe('the session move mount', () => {
         },
       ],
     };
-    const subject = dispatcher(
+    const handle = mount(
       new FakeSessionMove(['s1'], {
         s1: new SessionMoveError('refused', 'refused: a program', { inflight }),
         s2: new SessionMoveError('refused', 'refused: ps failed'),
@@ -273,30 +443,34 @@ describe('the session move mount', () => {
     );
 
     // Act
-    const withData = await subject.dispatch(moveRequest('s1'));
-    const without = await subject.dispatch(moveRequest('s2'));
+    const withData = await thrown(handle(MOVE, 'POST')(moveCall('s1')));
+    const without = await thrown(handle(MOVE, 'POST')(moveCall('s2')));
 
     // Assert
-    should(JSON.parse(withData.body)).deepEqual({ error: 'refused: a program', code: 'move_refused', inflight });
-    should(MoveRefusedBodySchema.parse(JSON.parse(withData.body)).inflight?.items).have.length(1);
-    should(JSON.parse(without.body)).deepEqual({ error: 'refused: ps failed', code: 'move_refused' });
+    should(withData?.message).equal('refused: a program');
+    should(withData?.code).equal('move_refused');
+    should(withData?.extra).deepEqual({ inflight });
+    should(without?.message).equal('refused: ps failed');
+    should(without?.extra).be.undefined();
   });
 
   it('should carry the two windows of a context downgrade as data, never as an API field name', async () => {
     // Arrange
     const downgrade = { model: 'claude-sonnet-5', targetWindow: 200_000, currentWindow: 1_000_000 };
-    const subject = dispatcher(
+    const handle = mount(
       new FakeSessionMove(['s1'], {
         s1: new SessionMoveError('context_downgrade', 'cut off', { downgrade }),
       }),
     );
 
     // Act
-    const response = await subject.dispatch(moveRequest('s1'));
+    const refusal = await thrown(handle(MOVE, 'POST')(moveCall('s1')));
 
     // Assert
-    should(response.status).equal(409);
-    should(JSON.parse(response.body)).deepEqual({ error: 'cut off', code: 'context_downgrade_refused', downgrade });
+    should(refusal?.status).equal(409);
+    should(refusal?.message).equal('cut off');
+    should(refusal?.code).equal('context_downgrade_refused');
+    should(refusal?.extra).deepEqual({ downgrade });
   });
 
   it('should carry the whole in-flight inventory in the refusal, because a bare 409 is unactionable', async () => {
@@ -307,14 +481,14 @@ describe('the session move mount', () => {
     const inventory =
       'refused: a destructive command is in flight\nin-flight inventory — status running, turn 3, worst: DESTRUCTIVE\n' +
       '  proc  [DESTRUCTIVE] pid 4242 (2m): git push origin main';
-    const subject = dispatcher(new FakeSessionMove(['s1'], { s1: new SessionMoveError('refused', inventory) }));
+    const handle = mount(new FakeSessionMove(['s1'], { s1: new SessionMoveError('refused', inventory) }));
 
     // Act
-    const response = await subject.dispatch(moveRequest('s1'));
+    const refusal = await thrown(handle(MOVE, 'POST')(moveCall('s1')));
 
     // Assert
-    should(response.status).equal(409);
-    should((JSON.parse(response.body) as { error: string }).error).equal(inventory);
+    should(refusal?.status).equal(409);
+    should(refusal?.message).equal(inventory);
   });
 
   it('should refuse a path parameter that would regain a separator', async () => {
@@ -322,14 +496,14 @@ describe('the session move mount', () => {
     // directory before anything else happens.
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const traversal = await subject.dispatch(moveRequest('%2e%2e%2fetc'));
+    const traversal = await thrown(handle(MOVE, 'POST')(moveCall('%2e%2e%2fetc')));
 
     // Assert
-    should(traversal.status).equal(400);
-    should((JSON.parse(traversal.body) as { code: string }).code).equal('invalid_session_id');
+    should(traversal?.status).equal(400);
+    should(traversal?.code).equal('invalid_session_id');
     should(mover.moves).be.empty();
   });
 
@@ -337,7 +511,7 @@ describe('the session move mount', () => {
     // A defect must not be dressed up as a refusal the caller could act on: the taxonomy covers what
     // the move decides, and anything else is this daemon being broken.
     // Arrange
-    const subject = dispatcher(
+    const handle = mount(
       new FakeSessionMove(['s1'], {
         // Not a SessionMoveError: the cast is the point of the case.
         s1: new Error('the storage index was closed') as SessionMoveError,
@@ -345,67 +519,74 @@ describe('the session move mount', () => {
     );
 
     // Act
-    const response = await subject.dispatch(moveRequest('s1'));
+    const failure = await handle(
+      MOVE,
+      'POST',
+    )(moveCall('s1')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     // Assert
-    should(response.status).equal(500);
-    should((JSON.parse(response.body) as { code: string }).code).not.equal('move_refused');
+    should(failure).be.instanceOf(Error);
+    should(failure).not.be.instanceOf(ApiError);
+    should((failure as Error).message).equal('the storage index was closed');
   });
 });
 
 /**
  * The stale-settings read: whether a Restart would relaunch this session on different settings.
  *
- * It lives on the move's mount because a Restart IS a move onto the same account, so it is
- * served under the same credential floor and answers the same refusals for an id it cannot use.
+ * It lives on the move's mount because a Restart IS a move onto the same account, so it answers the same refusals for an
+ * id it cannot use.
  */
 describe('the session relaunch-settings read', () => {
-  const read = (sessionId: string, headers: Readonly<Record<string, string>> = human) =>
-    request({ method: 'GET', path: `/v1/ferrets/${sessionId}/relaunch-settings`, headers });
+  const RELAUNCH = '/v1/ferrets/:ferretId/relaunch-settings' as const;
+  const read = (sessionId: string) =>
+    requestOf({
+      method: 'GET',
+      path: `/v1/ferrets/${sessionId}/relaunch-settings`,
+      params: { ferretId: sessionId },
+      standing: owner,
+    });
 
   it('should answer what the subsystem says, in the protocol shape', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const response = await subject.dispatch(read('s1'));
+    const response = await handle(RELAUNCH, 'GET')(read('s1'));
 
     // Assert
     should(response.status).equal(200);
-    should(SessionRelaunchSettingsSchema.parse(JSON.parse(response.body))).deepEqual({
-      current: false,
-      reasons: ['settings'],
-    });
+    should(SessionRelaunchSettingsSchema.parse(jsonOf(response))).deepEqual({ current: false, reasons: ['settings'] });
     should(mover.relaunchReads).deepEqual(['s1']);
     // A read moves nothing.
     should(mover.moves).be.empty();
   });
 
-  it('should answer an unknown session as not found, and refuse anonymously', async () => {
+  it('should answer an unknown session as not found', async () => {
     // Arrange
-    const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(new FakeSessionMove());
 
     // Act
-    const absent = await subject.dispatch(read('s404'));
-    const anonymous = await subject.dispatch(read('s1', {}));
+    const absent = await codeOf(handle(RELAUNCH, 'GET')(read('s404')));
 
     // Assert
-    should(absent.status).equal(404);
-    should(anonymous.status).equal(401);
+    should(absent).deepEqual([404, 'not-found']);
   });
 
   it('should refuse a path parameter that would regain a separator', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const traversal = await subject.dispatch(read('%2e%2e%2fetc'));
+    const traversal = await codeOf(handle(RELAUNCH, 'GET')(read('%2e%2e%2fetc')));
 
     // Assert
-    should(traversal.status).equal(400);
+    should(traversal).deepEqual([400, 'invalid_session_id']);
     should(mover.relaunchReads).be.empty();
   });
 });
@@ -413,32 +594,34 @@ describe('the session relaunch-settings read', () => {
 /**
  * The conversion preview: what a cross-harness move would carry, asked before anything moves.
  *
- * A read with a body. Served under the move's own floor and refusals, needing no request id
- * because nothing is written, and answering a refusal as a 200 `refused` the sheet shows in place.
+ * A read with a body. Needing no request id because nothing is written, and answering a refusal as a 200 `refused` the
+ * sheet shows in place.
  */
 describe('the session conversion-preview read', () => {
-  const preview = (sessionId: string, body: unknown, headers: Readonly<Record<string, string>> = human) =>
-    request({
+  const PREVIEW = '/v1/ferrets/:ferretId/conversion-preview' as const;
+  const preview = (sessionId: string, body: unknown) =>
+    requestOf({
       method: 'POST',
       path: `/v1/ferrets/${sessionId}/conversion-preview`,
-      headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      params: { ferretId: sessionId },
+      body,
+      standing: owner,
     });
 
   it('should answer the subsystem preview in the protocol shape, passing the account and model through', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(mover);
 
     // Act
-    const ready = await subject.dispatch(preview('s1', { agent: 'codex-a', model: 'gpt-5.5' }));
-    const refused = await subject.dispatch(preview('s1', { agent: 'claude-same' }));
+    const ready = await handle(PREVIEW, 'POST')(preview('s1', { agent: 'codex-a', model: 'gpt-5.5' }));
+    const refused = await handle(PREVIEW, 'POST')(preview('s1', { agent: 'claude-same' }));
 
     // Assert
     should(ready.status).equal(200);
-    should(ConversionPreviewSchema.parse(JSON.parse(ready.body))).match({ kind: 'ready', targetAgent: 'codex-a' });
+    should(ConversionPreviewSchema.parse(jsonOf(ready))).match({ kind: 'ready', targetAgent: 'codex-a' });
     should(refused.status).equal(200);
-    should(ConversionPreviewSchema.parse(JSON.parse(refused.body))).deepEqual({
+    should(ConversionPreviewSchema.parse(jsonOf(refused))).deepEqual({
       kind: 'refused',
       targetAgent: 'claude-same',
       reason: 'same harness',
@@ -450,20 +633,17 @@ describe('the session conversion-preview read', () => {
     should(mover.moves).be.empty();
   });
 
-  it('should refuse a body with no account, an unknown session, and an anonymous caller', async () => {
+  it('should refuse a body with no account, and an unknown session', async () => {
     // Arrange
-    const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const handle = mount(new FakeSessionMove());
 
     // Act
-    const noAgent = await subject.dispatch(preview('s1', {}));
-    const absent = await subject.dispatch(preview('s404', { agent: 'codex-a' }));
-    const anonymous = await subject.dispatch(preview('s1', { agent: 'codex-a' }, {}));
+    const noAgent = await codeOf(handle(PREVIEW, 'POST')(preview('s1', {})));
+    const absent = await codeOf(handle(PREVIEW, 'POST')(preview('s404', { agent: 'codex-a' })));
 
     // Assert
-    should(noAgent.status).equal(400);
-    should(absent.status).equal(404);
-    should(anonymous.status).equal(401);
+    should(noAgent[0]).equal(400);
+    should(absent[0]).equal(404);
   });
 });
 
@@ -508,8 +688,7 @@ describe('the session move mount, replayed', () => {
     }
   }
 
-  const mounted = (subsystem: CountingMove) =>
-    new ApiDispatcher(new ApiRouter(sessionMoveRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  const mounted = (subsystem: CountingMove) => dispatcherOf(subsystem);
 
   it('should refuse a move that carries no request id, and destroy nothing', async () => {
     // Arrange
@@ -517,14 +696,7 @@ describe('the session move mount, replayed', () => {
     const subject = mounted(mover);
 
     // Act
-    const response = await subject.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/ferrets/s1/move',
-        headers: human,
-        body: JSON.stringify({ agent: 'claude-auto-other' }),
-      }),
-    );
+    const response = await subject.dispatch(moveCall('s1', {}, { agent: 'claude-auto-other' }));
 
     // Assert
     should(response.status).equal(400);
@@ -536,11 +708,11 @@ describe('the session move mount, replayed', () => {
     // Arrange
     const mover = new CountingMove();
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-replay');
+    const headers = withRequestId('req-replay');
 
     // Act
-    const first = await subject.dispatch(moveRequest('s1', headers));
-    const replay = await subject.dispatch(moveRequest('s1', headers));
+    const first = await subject.dispatch(moveCall('s1', headers));
+    const replay = await subject.dispatch(moveCall('s1', headers));
 
     // Assert
     should(first.status).equal(200);
@@ -555,8 +727,8 @@ describe('the session move mount, replayed', () => {
     const subject = mounted(mover);
 
     // Act
-    await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-a')));
-    await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-b')));
+    await subject.dispatch(moveCall('s1', withRequestId('req-a')));
+    await subject.dispatch(moveCall('s1', withRequestId('req-b')));
 
     // Assert
     should(mover.calls).equal(2);
@@ -568,11 +740,11 @@ describe('the session move mount, replayed', () => {
     // Arrange
     const mover = new CountingMove([new SessionMoveError('refused', 'in-flight work refuses this'), 'ok']);
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-retry');
+    const headers = withRequestId('req-retry');
 
     // Act
-    const refused = await subject.dispatch(moveRequest('s1', headers));
-    const retried = await subject.dispatch(moveRequest('s1', headers));
+    const refused = await subject.dispatch(moveCall('s1', headers));
+    const retried = await subject.dispatch(moveCall('s1', headers));
 
     // Assert
     should(refused.status).equal(409);
@@ -593,11 +765,11 @@ describe('the session move mount, replayed', () => {
       'ok',
     ]);
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-crossed');
+    const headers = withRequestId('req-crossed');
 
     // Act
-    const refused = await subject.dispatch(moveRequest('s1', headers, { agent: 'codex-auto-target' }));
-    const corrected = await subject.dispatch(moveRequest('s1', headers, { agent: 'claude-auto-target' }));
+    const refused = await subject.dispatch(moveCall('s1', headers, { agent: 'codex-auto-target' }));
+    const corrected = await subject.dispatch(moveCall('s1', headers, { agent: 'claude-auto-target' }));
 
     // Assert
     should(refused.status).equal(409);
@@ -612,11 +784,11 @@ describe('the session move mount, replayed', () => {
     // Arrange
     const mover = new CountingMove([new SessionMoveError('failed', 'the relaunch under the new account failed'), 'ok']);
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-committed');
+    const headers = withRequestId('req-committed');
 
     // Act
-    const failed = await subject.dispatch(moveRequest('s1', headers));
-    const replay = await subject.dispatch(moveRequest('s1', headers));
+    const failed = await subject.dispatch(moveCall('s1', headers));
+    const replay = await subject.dispatch(moveCall('s1', headers));
 
     // Assert
     should(failed.status).equal(500);
@@ -632,11 +804,11 @@ describe('the session move mount, replayed', () => {
     // Arrange
     const mover = new CountingMove();
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-reused');
+    const headers = withRequestId('req-reused');
 
     // Act
-    await subject.dispatch(moveRequest('s1', headers, { agent: 'codex-auto' }));
-    const reused = await subject.dispatch(moveRequest('s1', headers, { agent: 'codex-auto-other' }));
+    await subject.dispatch(moveCall('s1', headers, { agent: 'codex-auto' }));
+    const reused = await subject.dispatch(moveCall('s1', headers, { agent: 'codex-auto-other' }));
 
     // Assert
     should(reused.status).equal(409);
@@ -649,13 +821,13 @@ describe('the session move mount, replayed', () => {
     // Arrange
     const mover = new CountingMove();
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-same');
+    const headers = withRequestId('req-same');
 
     // Act
     const stated = await subject.dispatch(
-      moveRequest('s1', headers, { agent: 'codex-auto', allowContextDowngrade: false }),
+      moveCall('s1', headers, { agent: 'codex-auto', allowContextDowngrade: false }),
     );
-    const omitted = await subject.dispatch(moveRequest('s1', headers, { agent: 'codex-auto' }));
+    const omitted = await subject.dispatch(moveCall('s1', headers, { agent: 'codex-auto' }));
 
     // Assert
     should(stated.status).equal(200);
@@ -667,11 +839,11 @@ describe('the session move mount, replayed', () => {
     // Arrange
     const mover = new CountingMove();
     const subject = mounted(mover);
-    const headers = withRequestId(human, 'req-shared');
+    const headers = withRequestId('req-shared');
 
     // Act
-    await subject.dispatch(moveRequest('s1', headers));
-    await subject.dispatch(moveRequest('s2', headers));
+    await subject.dispatch(moveCall('s1', headers));
+    await subject.dispatch(moveCall('s2', headers));
 
     // Assert
     should(mover.calls).equal(2);
@@ -682,16 +854,12 @@ describe('the session move mount, replayed', () => {
     // A caller minting fresh request ids forever meets this wall instead of the daemon's heap.
     // Arrange: a mount that admits exactly two moves.
     const mover = new CountingMove();
-    const subject = new ApiDispatcher(
-      new ApiRouter(sessionMoveRoutes(mover, 2)),
-      CREDENTIALS,
-      NO_GOVERNED_ROUTES_GUARD,
-    );
+    const subject = dispatcherOf(mover, 2);
 
     // Act
-    await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-1')));
-    await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-2')));
-    const full = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-3')));
+    await subject.dispatch(moveCall('s1', withRequestId('req-1')));
+    await subject.dispatch(moveCall('s1', withRequestId('req-2')));
+    const full = await subject.dispatch(moveCall('s1', withRequestId('req-3')));
 
     // Assert
     should(full.status).equal(503);
@@ -709,17 +877,13 @@ describe('the session move mount, replayed', () => {
     // re-destruction hazard the limit exists to prevent.
     // Arrange
     const mover = new CountingMove();
-    const subject = new ApiDispatcher(
-      new ApiRouter(sessionMoveRoutes(mover, 1)),
-      CREDENTIALS,
-      NO_GOVERNED_ROUTES_GUARD,
-    );
-    const held = withRequestId(human, 'req-held');
+    const subject = dispatcherOf(mover, 1);
+    const held = withRequestId('req-held');
 
     // Act
-    const first = await subject.dispatch(moveRequest('s1', held));
-    const refused = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-new')));
-    const replay = await subject.dispatch(moveRequest('s1', held));
+    const first = await subject.dispatch(moveCall('s1', held));
+    const refused = await subject.dispatch(moveCall('s1', withRequestId('req-new')));
+    const replay = await subject.dispatch(moveCall('s1', held));
 
     // Assert
     should(first.status).equal(200);
@@ -733,16 +897,12 @@ describe('the session move mount, replayed', () => {
     // A refused preflight destroyed nothing, so it holds no receipt and its slot returns to the pool.
     // Arrange: one admission, and a subsystem that refuses first and then succeeds.
     const mover = new CountingMove([new SessionMoveError('refused', 'in-flight work refuses this'), 'ok']);
-    const subject = new ApiDispatcher(
-      new ApiRouter(sessionMoveRoutes(mover, 1)),
-      CREDENTIALS,
-      NO_GOVERNED_ROUTES_GUARD,
-    );
+    const subject = dispatcherOf(mover, 1);
 
     // Act
-    const refusedPreflight = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-blocked')));
-    const admitted = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-after')));
-    const full = await subject.dispatch(moveRequest('s1', withRequestId(human, 'req-third')));
+    const refusedPreflight = await subject.dispatch(moveCall('s1', withRequestId('req-blocked')));
+    const admitted = await subject.dispatch(moveCall('s1', withRequestId('req-after')));
+    const full = await subject.dispatch(moveCall('s1', withRequestId('req-third')));
 
     // Assert
     should(refusedPreflight.status).equal(409);
@@ -756,18 +916,19 @@ describe('the session move mount, replayed', () => {
 });
 
 describe('asking the agent to stop its background jobs', () => {
-  const ask = (sessionId: string, headers: Readonly<Record<string, string>> = human, body?: string) =>
-    request({
+  const ask = (sessionId: string, body?: unknown) =>
+    requestOf({
       method: 'POST',
       path: `/v1/ferrets/${sessionId}/move/ask-to-stop-jobs`,
-      headers,
+      params: { ferretId: sessionId },
+      standing: owner,
       ...(body === undefined ? {} : { body }),
     });
 
   it('should answer with the jobs the agent was asked about, with no body and no request id needed', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const subject = dispatcherOf(mover);
 
     // Act
     const response = await subject.dispatch(ask('s1'));
@@ -781,28 +942,13 @@ describe('asking the agent to stop its background jobs', () => {
     should(mover.moves).be.empty();
   });
 
-  it('should refuse anonymously and refuse a warden token, as sending the agent a message does', async () => {
-    // Arrange
-    const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
-
-    // Act
-    const anonymous = await subject.dispatch(ask('s1', {}));
-    const warden = await subject.dispatch(ask('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
-
-    // Assert
-    should(anonymous.status).equal(401);
-    should(warden.status).equal(403);
-    should(mover.jobAsks).be.empty();
-  });
-
   it('should refuse a body that names anything, because the daemon decides what to ask about', async () => {
     // Arrange
     const mover = new FakeSessionMove();
-    const subject = dispatcher(mover);
+    const subject = dispatcherOf(mover);
 
     // Act
-    const response = await subject.dispatch(ask('s1', human, JSON.stringify({ pids: [1] })));
+    const response = await subject.dispatch(ask('s1', { pids: [1] }));
 
     // Assert
     should(response.status).equal(400);
@@ -811,7 +957,7 @@ describe('asking the agent to stop its background jobs', () => {
 
   it('should answer 409 no_background_jobs when there is nothing of the agent’s left to ask about', async () => {
     // Arrange
-    const subject = dispatcher(
+    const subject = dispatcherOf(
       new FakeSessionMove(['s1'], {
         gone: new SessionMoveError('no_jobs', 'none of the agent’s own background jobs is in the way any more'),
       }),

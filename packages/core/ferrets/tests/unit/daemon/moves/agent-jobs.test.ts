@@ -17,10 +17,16 @@ import {
   parseProcessTable,
 } from '../../../../daemon/lib/moves/process-table.ts';
 
-const fixture = (name: string): string => readFileSync(`${import.meta.dir}/../../fixtures/ps/${name}`, 'utf8');
+const fixture = (name: string): string => readFileSync(`${import.meta.dir}/../../../fixtures/ps/${name}`, 'utf8');
 
 function inventoryOf(rows: readonly ProcRow[], rootPid: number) {
-  const known = identifyKnownProcesses(rows, { rootPid, binaryName: 'fy', configuredServers: [] });
+  const known = identifyKnownProcesses(rows, {
+    rootPid,
+    binaryName: 'fy',
+    toolsServerArguments: ['mcp', 'serve'],
+    statuslineSubcommand: 'statusline',
+    configuredServers: [],
+  });
   const jobs = identifyAgentJobs(rows, rootPid, known);
   return { jobs, processes: inventoryProcesses(rows, new Map(), known, new Set(), jobs) };
 }

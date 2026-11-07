@@ -1,120 +1,35 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
-import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
+import { describe, it } from 'bun:test';
+import type { Redaction, RedactionScope } from '@ferretry/kernel/contract';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../src/adapters/index.ts';
-import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import { StorageTransferConversationReader } from '../../../../daemon/adapters/transfer/storage-transfer-conversation-reader.ts';
 import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
-import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
-import { ConversationDigestError } from '../../../src/lib/session/transcript/digest.ts';
-import type { TranscriptDigestJournal } from '../../../src/lib/session/transcript/reader.ts';
+import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
+import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
-import type {
-  TranscriptBatch,
-  TranscriptEvent,
-  TranscriptHarness,
-  TranscriptRawRecord,
-  TranscriptSource,
-} from '../../../src/lib/transcript/types.ts';
 import { ConversationFacetContributor } from '../../../../daemon/lib/transfer/facets/conversation.ts';
-
-const identityRedactor = NO_REDACTION;
+import {
+  type ConversationDigest,
+  ConversationDigestError,
+  isConversationDigestError,
+  type PinnedTranscriptDigests,
+} from '../../../../daemon/lib/transfer/ports.ts';
+import type { Harness } from '../../../../daemon/lib/protocol/session-base.ts';
+import { SessionConfigFiles } from '../../../../daemon/lib/state.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
 
 /**
- * The one conversation cut, over the file a plan PINS rather than the file a session currently
- * points at.
+ * The one conversation cut, over the file a plan PINS rather than the file a session currently points at.
  *
- * The parser is faked so the byte coordinates are exact and the file each read opened is
- * observable — which is the whole subject here. What is real is the source snapshot read from
- * storage, the `SessionTranscriptReader` the adapter delegates through, and `digestConversation`.
+ * The transcript reader, its journal proof and the harness parsers are the conversation owner's
+ * (`PinnedTranscriptDigests`, an injected port), so what is observable here is exactly this adapter's own decisions:
+ * which file and harness it asks the owner about (the snapshot it was handed, never the live configuration), that an
+ * undiscovered transcript is asked about nothing, that only the import re-read scrubs, and that the owner's refusals
+ * reach the caller unchanged. The real source snapshot is still read from storage.
  */
 
 const NOW = '2026-08-06T09:00:00.000Z';
-const directories = new Set<string>();
-
-afterEach(async () => {
-  for (const directory of directories) await rm(directory, { recursive: true, force: true });
-  directories.clear();
-});
-
-async function openTemporaryStorage(): Promise<DaemonStorage> {
-  const home = await mkdtemp(join(tmpdir(), 'fy-transfer-conversation-'));
-  directories.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return (await factory.open()).storage;
-}
 
 const point = (byteOffset: number, blockIndex = 0): ConversationMessagePoint => ({ v: 1, byteOffset, blockIndex });
-
-const message = (byteOffset: number, text: string, blockIndex = 0): TranscriptEvent => ({
-  kind: 'message',
-  harness: 'claude',
-  role: 'user',
-  text,
-  byteOffset,
-  blockIndex,
-});
-
-const batch = (
-  harness: TranscriptHarness,
-  file: string,
-  events: readonly TranscriptEvent[],
-  rawRecords?: readonly TranscriptRawRecord[],
-): TranscriptBatch => ({
-  harness,
-  file,
-  reset: false,
-  cursor: { byteOffset: 0, pendingBytes: 0, nextLine: 1 },
-  events,
-  observedInputs: [],
-  issues: [],
-  ...(rawRecords === undefined ? {} : { rawRecords }),
-});
-
-/** A parser for one harness that records every file it was asked to open. */
-function recordingSource(
-  harness: TranscriptHarness,
-  events: (file: string) => readonly TranscriptEvent[],
-  opened: string[],
-  rawRecords?: readonly TranscriptRawRecord[],
-): TranscriptSource {
-  return {
-    harness,
-    read: async file => {
-      opened.push(`${harness}:${file}`);
-      return batch(harness, file, events(file), rawRecords);
-    },
-    follow: () => {
-      throw new Error('a transfer never follows a transcript');
-    },
-    window: () => {
-      throw new Error('a transfer reads a whole transcript, never a window of one');
-    },
-  };
-}
-
-const journal = (): TranscriptDigestJournal => ({ assertReadable: async () => {} });
 
 const provenance = (file: string): TranscriptProvenance => ({
   v: 1,
@@ -125,33 +40,57 @@ const provenance = (file: string): TranscriptProvenance => ({
   resolvedAt: NOW,
 });
 
-/** The two records every cut in this file is made against. */
-const conversation = [message(0, 'the first thing said'), message(120, 'the message the fork is cut at')];
+const scopeOf = (text: (value: string) => string): RedactionScope => ({
+  text,
+  cells: grid => grid,
+  lines: lines => lines,
+});
+const identityRedactor: Redaction = { read: async work => await work(scopeOf(value => value)) };
 
-/**
- * Exact source bytes for the preparation case, supplied independently of the normalized messages.
- * The first valid JSONL record is space-padded to 120 bytes including LF, so the second physical
- * record truthfully begins at the cut coordinate rather than reconstructing evidence from a row.
- */
-const firstRawRecordBody = Buffer.from('{"fixture":"source-a-first"}', 'utf8');
-const conversationRawRecords: readonly TranscriptRawRecord[] = [
-  {
-    byteOffset: 0,
-    bytes: Buffer.concat([
-      firstRawRecordBody,
-      Buffer.alloc(119 - firstRawRecordBody.byteLength, 0x20),
-      Buffer.from('\n', 'utf8'),
-    ]),
-  },
-  { byteOffset: 120, bytes: Buffer.from('{"fixture":"source-a-cut"}\n', 'utf8') },
-];
+/** The two records every cut in this file is made against. */
+const messages = [
+  { point: point(0), role: 'user', text: 'the first thing said' },
+  { point: point(120), role: 'user', text: 'the message the fork is cut at' },
+] as const;
+
+/** The owner's digest of a cut: the messages through the coordinate, with the cut's raw-prefix evidence. */
+const digestThrough = (sessionId: string, through: ConversationMessagePoint): ConversationDigest => ({
+  sessionId,
+  through,
+  messages: messages.filter(carried => carried.point.byteOffset <= through.byteOffset),
+  omissions: [],
+  selectionEvidence: { point: through, rawPrefix: new Uint8Array(32).fill(7) },
+});
+
+interface Asked {
+  readonly harness: Harness;
+  readonly sessionId: string;
+  readonly file: string;
+  readonly through: ConversationMessagePoint;
+}
+
+/** An owner that records every question and answers from `answer`. */
+function owner(
+  asked: Asked[],
+  answer: (question: Asked) => ConversationDigest | undefined = question =>
+    digestThrough(question.sessionId, question.through),
+): PinnedTranscriptDigests {
+  return {
+    digest: async (target, file, through) => {
+      const question = { harness: target.harness, sessionId: target.sessionId, file, through };
+      asked.push(question);
+      return answer(question);
+    },
+  };
+}
 
 describe('StorageTransferConversationReader', () => {
   it('should keep preparation on source snapshot A after current configuration changes to B', async () => {
     // Arrange: source preparation reads A once.
-    const storage = await openTemporaryStorage();
+    const { storage, folder } = await memoryStorage();
     const id = parseSessionId('20260806-prepare');
     const configA = {
+      format: 1,
       id,
       incarnation: 'i1',
       runtimeGeneration: 1,
@@ -176,26 +115,23 @@ describe('StorageTransferConversationReader', () => {
       transcript: provenance('/home/agent/.claude/projects/source.jsonl'),
       retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
     } as const;
-    await storage.writeConfig(id, configA);
+    folder.plant(SessionConfigFiles, JSON.stringify(configA), id);
     const source = await new StorageTransferSourceReader(storage).read(id);
     if (source === undefined) throw new Error('the source fixture must be readable');
 
     // The live configuration then moves to B before the conversation contributor runs.
-    await storage.writeConfig(id, {
-      ...configA,
-      harness: 'codex',
-      agent: 'codex-auto',
-      transcript: provenance('/home/agent/.codex/sessions/replacement.jsonl'),
-    });
-    const opened: string[] = [];
-    const reader = new StorageTransferConversationReader(
-      [
-        recordingSource('claude', () => conversation, opened, conversationRawRecords),
-        recordingSource('codex', () => [], opened),
-      ],
-      journal(),
-      identityRedactor,
+    folder.plant(
+      SessionConfigFiles,
+      JSON.stringify({
+        ...configA,
+        harness: 'codex',
+        agent: 'codex-auto',
+        transcript: provenance('/home/agent/.codex/sessions/replacement.jsonl'),
+      }),
+      id,
     );
+    const asked: Asked[] = [];
+    const reader = new StorageTransferConversationReader(owner(asked), identityRedactor);
 
     // Act: the contributor can pass only the already-read source snapshot to the digest adapter.
     const contribution = await new ConversationFacetContributor(reader, identityRedactor).contribute({
@@ -217,35 +153,25 @@ describe('StorageTransferConversationReader', () => {
       source,
     });
 
-    // Assert: B is never opened; the carried messages and the later plan source both describe A.
-    should(opened).eql(['claude:/home/agent/.claude/projects/source.jsonl']);
+    // Assert: B is never asked about; the carried messages and the later plan source both describe A.
+    should(asked).eql([
+      { harness: 'claude', sessionId: id, file: '/home/agent/.claude/projects/source.jsonl', through: point(120) },
+    ]);
     should(source.harness).equal('claude');
     should(source.transcriptProvenance?.file).equal('/home/agent/.claude/projects/source.jsonl');
     should(contribution.value?.messages.map(carried => carried.text)).eql([
       'the first thing said',
       'the message the fork is cut at',
     ]);
-    await storage.close();
   });
 
-  it('should validate an import against the plan-pinned provenance, never the current one', async () => {
+  it('should validate an import against the plan-pinned provenance, never the current one, and scrub it', async () => {
     // Arrange
-    const opened: string[] = [];
-    const reader = new StorageTransferConversationReader(
-      [
-        recordingSource('claude', () => conversation, opened),
-        recordingSource('codex', () => [message(0, 'somebody else conversation')], opened),
-      ],
-      journal(),
-      {
-        batch: async work =>
-          work({
-            text: text => text.replace('the message the fork is cut at', '[redacted:cut]'),
-            data: value => value,
-            cover: () => [],
-          }),
-      },
-    );
+    const asked: Asked[] = [];
+    const reader = new StorageTransferConversationReader(owner(asked), {
+      read: async work =>
+        await work(scopeOf(text => text.replace('the message the fork is cut at', '[redacted:cut]'))),
+    });
 
     // Act
     const digest = await reader.digestPinned({
@@ -255,27 +181,48 @@ describe('StorageTransferConversationReader', () => {
       through: point(120),
     });
 
-    // Assert: only the plan's file was opened, and only its parser answered.
-    should(opened).eql(['claude:/home/agent/.claude/projects/source.jsonl']);
+    // Assert: only the plan's file and harness were asked about, and the re-read text is scrubbed.
+    should(asked).eql([
+      {
+        harness: 'claude',
+        sessionId: '20260806-repinned',
+        file: '/home/agent/.claude/projects/source.jsonl',
+        through: point(120),
+      },
+    ]);
     should(digest?.messages).have.length(2);
     should(digest?.through).eql(point(120));
     should(digest?.messages.at(-1)?.text).equal('[redacted:cut]');
   });
 
-  it('should still validate a pinned cut after the source has been appended to', async () => {
-    // Arrange: the source kept talking; the frozen prefix must read exactly as it did.
-    const opened: string[] = [];
-    const reader = new StorageTransferConversationReader(
-      [
-        recordingSource(
-          'claude',
-          () => [...conversation, message(300, 'said after the plan was made'), message(420, 'and again')],
-          opened,
-        ),
-      ],
-      journal(),
-      identityRedactor,
-    );
+  it('should leave scrubbing of the preparation cut to the facet, which scrubs it once', async () => {
+    // Arrange: the preparation read must not scrub (the contributor does, before the plan is built).
+    const asked: Asked[] = [];
+    let opens = 0;
+    const reader = new StorageTransferConversationReader(owner(asked), {
+      read: async work => {
+        opens += 1;
+        return await work(scopeOf(() => '[scrubbed]'));
+      },
+    });
+
+    // Act
+    const digest = await reader.digest({
+      sourceSessionId: 'source',
+      sourceHarness: 'claude',
+      transcriptProvenance: provenance('/pinned.jsonl'),
+      through: point(120),
+    });
+
+    // Assert
+    should(opens).equal(0);
+    should(digest?.messages.map(carried => carried.text)).eql(['the first thing said', 'the message the fork is cut at']);
+  });
+
+  it('should hand the owner the frozen coordinate unchanged, whatever was appended to the source since', async () => {
+    // Arrange: the source kept talking; the frozen prefix must be asked for exactly as it was pinned.
+    const asked: Asked[] = [];
+    const reader = new StorageTransferConversationReader(owner(asked), identityRedactor);
 
     // Act
     const digest = await reader.digestPinned({
@@ -285,15 +232,17 @@ describe('StorageTransferConversationReader', () => {
       through: point(120),
     });
 
-    // Assert: growth past the cut is invisible to the validation.
+    // Assert: the point the plan pinned is the one handed on, and growth past it is the owner's to ignore.
+    should(asked.map(question => question.through)).eql([point(120)]);
     should(digest?.messages.map(carried => carried.point)).eql([point(0), point(120)]);
   });
 
-  it('should refuse a pinned cut whose message is no longer at that coordinate', async () => {
+  it('should let the owner refuse a pinned cut whose message is no longer at that coordinate', async () => {
     // Arrange: the transcript was rewritten, so the frozen offset addresses nothing.
     const reader = new StorageTransferConversationReader(
-      [recordingSource('claude', () => [message(0, 'the only record left')], [])],
-      journal(),
+      owner([], () => {
+        throw new ConversationDigestError('target_not_found', 'no message at that coordinate');
+      }),
       identityRedactor,
     );
 
@@ -310,106 +259,53 @@ describe('StorageTransferConversationReader', () => {
         (error: unknown) => error,
       );
 
-    // Assert
-    should(failure).be.instanceof(ConversationDigestError);
+    // Assert: the refusal reaches the caller unchanged, so the seam can map it.
+    should(isConversationDigestError(failure)).be.true();
     should(failure).have.property('failure', 'target_not_found');
   });
 
-  it('should answer nothing when the pinned provenance names no file at all', async () => {
+  it('should answer nothing, and ask the owner nothing, when the pinned provenance names no file at all', async () => {
     // Arrange: an undiscovered transcript is a session with no cuttable conversation, not a failure.
-    const opened: string[] = [];
+    const asked: Asked[] = [];
+    const reader = new StorageTransferConversationReader(owner(asked), identityRedactor);
+    const undiscovered: TranscriptProvenance = { v: 1, home: '/home/agent/.claude', identity: 'undiscovered' };
+
+    // Act
+    const pinned = await reader.digestPinned({
+      sourceSessionId: 'anything',
+      sourceHarness: 'claude',
+      transcriptProvenance: undiscovered,
+      through: point(120),
+    });
+    const prepared = await reader.digest({
+      sourceSessionId: 'source-with-undiscovered-transcript',
+      sourceHarness: 'claude',
+      transcriptProvenance: undiscovered,
+      through: point(0),
+    });
+
+    // Assert
+    should(pinned).be.undefined();
+    should(prepared).be.undefined();
+    should(asked).be.empty();
+  });
+
+  it('should pass on the owner answering that no transcript can be named', async () => {
+    // Arrange: the owner has no transcript for the pinned file.
     const reader = new StorageTransferConversationReader(
-      [recordingSource('claude', () => conversation, opened)],
-      journal(),
+      owner([], () => undefined),
       identityRedactor,
     );
 
     // Act
     const digest = await reader.digestPinned({
       sourceSessionId: 'anything',
-      sourceHarness: 'claude',
-      transcriptProvenance: { v: 1, home: '/home/agent/.claude', identity: 'undiscovered' },
+      sourceHarness: 'codex',
+      transcriptProvenance: provenance('/pinned.jsonl'),
       through: point(120),
     });
 
     // Assert
     should(digest).be.undefined();
-    should(opened).be.empty();
-  });
-
-  it('should answer nothing when preparation pins an undiscovered transcript', async () => {
-    // Arrange
-    const opened: string[] = [];
-    const reader = new StorageTransferConversationReader(
-      [recordingSource('claude', () => conversation, opened)],
-      journal(),
-      identityRedactor,
-    );
-
-    // Act
-    const digest = await reader.digest({
-      sourceSessionId: 'source-with-undiscovered-transcript',
-      sourceHarness: 'claude',
-      transcriptProvenance: { v: 1, home: '/home/agent/.claude', identity: 'undiscovered' },
-      through: point(0),
-    });
-
-    // Assert
-    should(digest).be.undefined();
-    should(opened).be.empty();
-  });
-
-  it('should refuse rather than guess when no parser speaks the pinned harness', async () => {
-    // Arrange: a build with no codex parser must not answer a codex cut from the claude one.
-    const reader = new StorageTransferConversationReader(
-      [recordingSource('claude', () => conversation, [])],
-      journal(),
-      identityRedactor,
-    );
-
-    // Act
-    const failure = await reader
-      .digestPinned({
-        sourceSessionId: 'anything',
-        sourceHarness: 'codex',
-        transcriptProvenance: provenance('/pinned.jsonl'),
-        through: point(120),
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-
-    // Assert
-    should(failure).have.property('failure', 'incomplete_transcript');
-  });
-
-  it('should not make a cut a session has no daemon journal to prove', async () => {
-    // Arrange: the digest primitive owns that rule; the adapter must not route around it.
-    const reader = new StorageTransferConversationReader(
-      [recordingSource('claude', () => conversation, [])],
-      {
-        assertReadable: async sessionId => {
-          throw new ConversationDigestError('incomplete_transcript', `${sessionId} has no readable journal`);
-        },
-      },
-      identityRedactor,
-    );
-
-    // Act
-    const failure = await reader
-      .digestPinned({
-        sourceSessionId: 'unjournaled',
-        sourceHarness: 'claude',
-        transcriptProvenance: provenance('/pinned.jsonl'),
-        through: point(120),
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-
-    // Assert
-    should(failure).have.property('failure', 'incomplete_transcript');
   });
 });

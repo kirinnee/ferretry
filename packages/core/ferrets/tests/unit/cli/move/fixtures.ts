@@ -1,4 +1,5 @@
-import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import type { FerretSummary } from '../../../../contract/ids.ts';
+import type { IProgress } from '../../../../cli/lib/progress/ports.ts';
 import type { ConversionPreview, MoveConversation } from '../../../../contract/move.ts';
 import type { IMoveGateway } from '../../../../cli/lib/move/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
@@ -44,11 +45,7 @@ export class RecordingMoveGateway implements IMoveGateway {
   readonly previews: { readonly id: string; readonly agent: string; readonly model?: string }[] = [];
 
   constructor(
-    private readonly response: SessionView = sessionView({
-      agent: 'codex-secondary',
-      model: 'gpt-5.6-sol',
-      runtimeGeneration: 2,
-    }),
+    private readonly response: FerretSummary = sessionView({ runtime: 'codex-secondary', model: 'gpt-5.6-sol' }),
     private readonly preview: ConversionPreview = READY_PREVIEW,
   ) {}
 
@@ -65,7 +62,7 @@ export class RecordingMoveGateway implements IMoveGateway {
     requestId?: string,
     forceInflight?: boolean,
     conversation?: MoveConversation,
-  ): Promise<SessionView> {
+  ): Promise<FerretSummary> {
     this.calls.push({
       id,
       agent,
@@ -76,6 +73,29 @@ export class RecordingMoveGateway implements IMoveGateway {
       ...(conversation === undefined ? {} : { conversation }),
     });
     return Promise.resolve(this.response);
+  }
+}
+
+/** Progress that writes its calls down, so a test can assert what a person would have been shown. */
+export class RecordingProgress implements IProgress {
+  readonly events: string[] = [];
+  start(label: string): void {
+    this.events.push(`start ${label}`);
+  }
+  detail(text: string): void {
+    this.events.push(`detail ${text}`);
+  }
+  succeed(text?: string): void {
+    this.events.push(text === undefined ? 'succeed' : `succeed ${text}`);
+  }
+  fail(text?: string): void {
+    this.events.push(text === undefined ? 'fail' : `fail ${text}`);
+  }
+  pause(): void {
+    this.events.push('pause');
+  }
+  stop(): void {
+    this.events.push('stop');
   }
 }
 

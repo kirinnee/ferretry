@@ -1,26 +1,21 @@
-import { SystemClock } from '../../../../src/adapters/index.ts';
-import { createFoundationPaths, resolveStateHome } from '../../../../src/lib/index.ts';
-import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { HandoverFiles } from '../../../../../contract/handover-state.ts';
 import {
-  type SessionHandoverJobs,
+  type BuiltSessionHandover,
+  type SessionHandoverLifecycle,
   type SessionHandoverNeeds,
-  type SessionHandoverProvides,
   sessionHandoverModule,
 } from '../../../../../daemon/modules/session-handover.ts';
 
 /**
- * THE `session-handover` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).
+ * THE `session-handover` MODULE'S TEST CONSTRUCTION.
  *
- * The REAL `sessionHandoverModule.build(needs, seams, lifecycle)` over test inputs, so the route snapshot and the contract
- * checks consume what production builds. Only the INPUTS are doubles: a state home that does not exist, and ports that
- * REFUSE to be used (each answers any call with a throw naming it, because the build only captures its inputs and the
- * fixture never begins a handover). Building starts nothing — the reconcile loop's interval is created by `jobs.arm()`,
- * which the fixture never calls — so there is nothing to leave behind in the shared unit process (CI runs every non-PWA
- * unit test in ONE process, and a leftover timer breaks `unit-determinism.test.ts`).
+ * The REAL `sessionHandoverModule.build(needs, seams, lifecycle)` over test inputs, so the route snapshot and the
+ * contract checks consume what production builds. Only the INPUTS are doubles: a memory state folder holding no
+ * receipt, and ports that REFUSE to be used (each answers any call with a throw naming it, because the build only
+ * captures its inputs and the fixture never begins a handover). Building starts nothing — the reconcile loop's timers
+ * are created by `jobs.arm()` on the injected `every`, which the fixture arms only where a case says so.
  */
-
-/** A state home that does not exist: every handover receipt reads as absent. */
-const FIXTURE_HOME = '/nonexistent/session-handover-fixture-state-home';
 
 /** A port that throws, naming itself, the moment any member of it is called. */
 function refusing<T extends object>(name: string): T {
@@ -31,18 +26,17 @@ function refusing<T extends object>(name: string): T {
   });
 }
 
-/** The inputs `fyd.ts` hands the module, over doubles. */
+/** The inputs the host hands the module, over doubles. */
 export function sessionHandoverNeedsForTest(overrides: Partial<SessionHandoverNeeds> = {}): SessionHandoverNeeds {
   return {
-    paths: createFoundationPaths(resolveStateHome({ fyHome: FIXTURE_HOME, homeDirectory: '/unused' })),
+    state: new MemoryStateFolder().port([HandoverFiles]),
     storage: refusing('storage'),
     sessions: refusing('sessions'),
-    accounts: refusing('accounts'),
-    executables: refusing('executables'),
+    startAccount: async () => {
+      throw new Error('startAccount is not exercised by the session-handover fixture');
+    },
     planner: refusing('planner'),
-    clock: new SystemClock(),
-    clientName: 'fy',
-    activities: undefined,
+    clock: { now: () => '2026-02-01T00:00:00.000Z' },
     every: () => {
       throw new Error('the reconcile timer is not armed by the session-handover fixture');
     },
@@ -50,9 +44,9 @@ export function sessionHandoverNeedsForTest(overrides: Partial<SessionHandoverNe
   };
 }
 
-const LIFECYCLE: ModuleLifecycle = { onRelease: () => undefined, releasing: () => false };
+const LIFECYCLE: SessionHandoverLifecycle = { onRelease: () => undefined };
 
 /** The module as production builds it, over the fixture's inputs. */
-export function builtSessionHandover(): BuiltModule<SessionHandoverProvides, SessionHandoverJobs> {
+export function builtSessionHandover(): BuiltSessionHandover {
   return sessionHandoverModule.build(sessionHandoverNeedsForTest(), undefined, LIFECYCLE);
 }

@@ -6,13 +6,17 @@ import {
   type ForkSessionRequest,
   ForkSessionRequestSchema,
 } from '../../../../contract/fork.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { AuditedRouteRule } from '../../audit/routes.ts';
-import type { ModuleContribution } from '../modules.ts';
+import {
+  ApiError,
+  type ApiRequest,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  headerValue,
+  jsonResponse,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import { parseBody } from '../../http/body.ts';
 
 /**
  * Forking a conversation from an exact message: `POST /v1/ferrets/:ferretId/fork`.
@@ -131,7 +135,7 @@ function refuse(error: unknown): never {
 }
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
-function pathSessionId(context: RouteContext): string {
+function pathSessionId(context: CallContext): string {
   const raw = context.params.get('ferretId') ?? '';
   const decoded = decodeParameter(raw);
   if (decoded === undefined || decoded === '')
@@ -152,7 +156,7 @@ function requestId(request: ApiRequest): string {
 }
 
 /** Forks a session, or answers a stated refusal — at most one fresh session per logical request id. */
-async function fork(subsystem: SessionForkSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function fork(subsystem: SessionForkSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, ForkSessionRequestSchema);
   const id = requestId(context.request);
@@ -163,13 +167,28 @@ async function fork(subsystem: SessionForkSubsystem, context: RouteContext): Pro
   return jsonResponse(ForkSessionOutcomeSchema.parse(outcome));
 }
 
+/** The one route key this mount serves, exactly as `manifest.ts` declares it. */
+export const SESSION_FORK_ROUTE_KEY = 'POST /v1/ferrets/:ferretId/fork';
+
+/** One mounted route: the method and path it answers and its handler. The descriptor is the manifest's. */
+export interface SessionForkRoute {
+  readonly method: 'POST';
+  readonly path: '/v1/ferrets/:ferretId/fork';
+  readonly handle: RouteHandler;
+}
+
 /**
+ * The fork handler.
+ *
+ * THE DESCRIPTOR IS THE MANIFEST'S, not this file's: `operator` minimum, `caller: 'person'`, `noStore`, and the
+ * audit record `session.opened` are declared once on `POST /v1/ferrets/:ferretId/fork` in `manifest.ts`, so the
+ * dispatcher and the gate read one declaration. What each of them decides, kept here for the reader of the handler:
+ *
  * `operator` scope: a fork launches an agent wrapper holding this daemon's own privileges, under an
  * account the caller chose, in the source session's working directory.
  *
  * The body is MANDATORY. A fork with no `through` is not a fork with a default — there is no obvious
- * message to cut at, and guessing the newest one would silently copy a conversation the caller never
- * looked at.
+ * message to cut at, and guessing the newest one would silently copy a conversation the caller never looked at.
  *
  * `noStore` because the answer names a session that did not exist a moment ago, together with the
  * decision that built it; a cached one would describe a different fork entirely.
@@ -178,36 +197,24 @@ async function fork(subsystem: SessionForkSubsystem, context: RouteContext): Pro
  * by design — so a ferret that could fork would start a parent-less session past its sub-ferret limits and
  * depth. A ferret starts sessions only as its own children (`POST /v1/sessions`, `POST /v1/pack/new`).
  */
-export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly ApiRoute[] {
+export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly SessionForkRoute[] {
   return [
     {
       method: 'POST',
       path: '/v1/ferrets/:ferretId/fork',
-      minimum: 'operator',
-      caller: 'person',
-      noStore: true,
       handle: async context => await fork(subsystem, context),
     },
   ];
 }
 
-/** The security log's rule for the fork route: a fork opens a brand-new session, and is kept as that. */
-const SESSION_FORK_AUDIT_RULES: readonly AuditedRouteRule[] = [
-  {
-    method: 'POST',
-    path: '/v1/ferrets/:ferretId/fork',
-    event: 'session.opened',
-    subject: 'ferretId',
-    detail: { action: 'fork' },
-  },
-];
-
 /**
- * What the session-fork module adds to the daemon: the one fork route and its audit rule.
+ * What the session-fork module adds to the daemon: the one fork route.
  *
  * The literal `fork` is the final segment of a two-segment pattern under `/v1/ferrets/:ferretId`, so it can neither
  * shadow nor be shadowed by a sibling subsystem, nor by the shallower session read.
  */
-export function sessionForkContribution(subsystem: SessionForkSubsystem): ModuleContribution {
-  return { routes: sessionForkRoutes(subsystem), audit: { routes: SESSION_FORK_AUDIT_RULES } };
+export function sessionForkContribution(subsystem: SessionForkSubsystem): {
+  readonly routes: readonly SessionForkRoute[];
+} {
+  return { routes: sessionForkRoutes(subsystem) };
 }

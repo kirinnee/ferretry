@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import type { Redaction, RedactionScope } from '@ferretry/kernel/contract';
 import {
   type ConversationDigest,
   ConversationDigestError,
   type ConversationDigestFailure,
-} from '../../../src/lib/session/transcript/digest.ts';
-import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
+} from '../../../../daemon/lib/transfer/ports.ts';
 import { ConversationFacetContributor } from '../../../../daemon/lib/transfer/facets/conversation.ts';
 import {
   type TransferConversationReadInput,
@@ -21,7 +21,12 @@ const point = (byteOffset: number, blockIndex = 0): ConversationMessagePoint => 
 });
 
 const rawPrefix = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
-const identityRedactor = NO_REDACTION;
+const scopeOf = (text: (value: string) => string): RedactionScope => ({
+  text,
+  cells: grid => grid,
+  lines: lines => lines,
+});
+const identityRedactor: Redaction = { read: async work => await work(scopeOf(value => value)) };
 
 const reader = (
   answer: (input: TransferConversationReadInput) => Promise<ConversationDigest | undefined>,
@@ -68,14 +73,7 @@ describe('ConversationFacetContributor', () => {
     };
     const contributor = new ConversationFacetContributor(
       reader(async () => digest),
-      {
-        batch: async work =>
-          work({
-            text: text => text.replace('secret TOKEN', '[redacted:TOKEN]'),
-            data: value => value,
-            cover: () => [],
-          }),
-      },
+      { read: async work => await work(scopeOf(text => text.replace('secret TOKEN', '[redacted:TOKEN]'))) },
     );
 
     const contribution = await contributor.contribute(input());

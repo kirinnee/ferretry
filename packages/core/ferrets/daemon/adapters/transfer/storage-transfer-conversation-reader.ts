@@ -7,9 +7,8 @@
  * implementations would eventually disagree, and the whole point of the import re-read is that it
  * can only refuse a plan a preparation already made.
  *
- * THE FILE IS PINNED, NEVER DISCOVERED. `SessionTranscriptReader` is constructed here over a
- * resolver that answers one already-decided path, rather than over the resolving one the live daemon
- * uses. Two different reasons, both mandatory:
+ * THE FILE IS PINNED, NEVER DISCOVERED. The owner's reader is asked for one
+ * already-decided path, rather than the resolving one the live daemon uses. Two different reasons, both mandatory:
  *
  * - Preparation must not write. The discovering resolver correlates a rollout and RECORDS the
  *   attribution back into the session's configuration, which is a write into the source (I1).
@@ -20,8 +19,8 @@
  *   selecting current provenance instead would validate whichever file the source is attributed to
  *   NOW, which is precisely the substitution the re-read exists to catch.
  *
- * Everything below the resolver is the code that already owns these decisions: the one
- * `SessionTranscriptReader`, its journal proof, the harness's own parser, and `digestConversation`.
+ * Everything below the pinned file is the conversation owner's: the one transcript reader, its journal
+ * proof, the harness's own parser and its digest primitive (`PinnedTranscriptDigests`, an injected port).
  * No second parser and no second durable point shape appear here — the exact
  * `{ v: 1, byteOffset, blockIndex }` handed in is the one handed on.
  *
@@ -31,13 +30,10 @@
  * instead, and the two answers stay distinct all the way to the caller.
  */
 
+import type { Redaction } from '@ferretry/kernel/contract';
 import type { Harness } from '../../lib/protocol/session-base.ts';
 import type { ConversationMessagePoint } from '../../lib/protocol/session-transfer-edge.ts';
-import type { ConversationDigest } from '../../lib/session/transcript/digest.ts';
-import { SessionTranscriptReader } from '../../lib/session/transcript/reader.ts';
-import type { TranscriptDigestJournal } from '../../lib/session/transcript/reader.ts';
-import type { TranscriptSource } from '../../lib/transcript/types.ts';
-import type { TextRedactor } from '../../lib/secrets/redaction.ts';
+import type { ConversationDigest, PinnedTranscriptDigests } from '../../lib/transfer/ports.ts';
 import type {
   TransferConversationReadInput,
   TransferConversationReader,
@@ -47,9 +43,8 @@ import type {
 
 export class StorageTransferConversationReader implements TransferConversationReader, TransferConversationValidator {
   constructor(
-    private readonly sources: readonly TranscriptSource[],
-    private readonly journal: TranscriptDigestJournal,
-    private readonly redactor: Pick<TextRedactor, 'batch'>,
+    private readonly digests: PinnedTranscriptDigests,
+    private readonly redaction: Pick<Redaction, 'read'>,
   ) {}
 
   /**
@@ -79,13 +74,12 @@ export class StorageTransferConversationReader implements TransferConversationRe
     through: ConversationMessagePoint,
     scrub: boolean,
   ): Promise<ConversationDigest | undefined> {
-    const reader = new SessionTranscriptReader(this.sources, { file: async () => file }, this.journal);
-    const digest = await reader.digest({ sessionId, harness }, through);
+    const digest = await this.digests.digest({ sessionId, harness }, file, through);
     if (!scrub || digest === undefined) return digest;
     return {
       ...digest,
       // One vault open for the whole digest, not one per message.
-      messages: await this.redactor.batch(scrub =>
+      messages: await this.redaction.read(scrub =>
         digest.messages.map(message => ({ ...message, text: scrub.text(message.text) })),
       ),
     };

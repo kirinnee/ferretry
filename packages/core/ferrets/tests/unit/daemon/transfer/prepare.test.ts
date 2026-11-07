@@ -21,10 +21,6 @@ import {
   type TransferSourceSession,
 } from '../../../../daemon/lib/transfer/types.ts';
 import { request, sourceSession, target } from './fixtures.ts';
-import {
-  verifySessionTranscriptMessageToken,
-  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-} from '../../../src/lib/session/transcript/message-token.ts';
 
 const NO_REFERENCES: ReferenceFacet = {
   counts: { agent: 0, file: 0, task: 0, attention: 0, skill: 0, terminal: 0, browser: 0 },
@@ -126,31 +122,12 @@ describe('deriveTransferPlanId', () => {
 });
 
 describe('SessionTransferPreparer', () => {
-  it('refuses a legacy fork picker through selection_stale so the app can ask for one refresh', async () => {
-    // Arrange: legacy bindings are never reinterpreted under the new framing.
+  it('refuses a stale selection binding through selection_stale so the app can ask for one refresh', async () => {
+    // Arrange: the owner of the binding codec answers false for a binding it does not accept.
     const { preparer: subject } = preparer(
       sourceSession(),
       {},
-      {
-        verifySelection: async (evidence, binding) =>
-          (await verifySessionTranscriptMessageToken(
-            {
-              tag: async () => new Uint8Array(32),
-              matches: async () => {
-                throw new Error('legacy token reached the v2 codec');
-              },
-            },
-            SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-            {
-              sessionId: evidence.sourceSessionId,
-              incarnation: evidence.sourceIncarnation,
-              provenance: evidence.transcriptProvenance,
-            },
-            evidence.through,
-            evidence.rawPrefix,
-            binding,
-          )) === 'accepted',
-      },
+      { verifySelection: async () => false },
     );
     // Act
     const actual = await subject

@@ -6,8 +6,11 @@ import type {
   HandoverReceipt,
   HandoverReceiptStore,
 } from '../../../../../daemon/lib/moves/handover/types.ts';
-import { type SessionDirectorySubsystem, SessionReadError } from '../../../../../daemon/lib/runtime/mounts/sessions.ts';
-import { sessionView } from '../../unit/runtime/mounts/support.ts';
+import {
+  type SessionDirectorySubsystem,
+  SessionReadError,
+} from '../../../../../daemon/lib/session/directory/subsystem.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
 
 /**
  * The composition root's session-read adapter: MISSING IS NOT UNREADABLE.
@@ -37,14 +40,13 @@ const emptyReceipts: HandoverReceiptStore = {
 function readPort(sessions: SessionDirectorySubsystem): HandoverPorts['sessions'] {
   const service = createSessionHandoverSubsystem(
     {
-      paths: { home: '/state', sessions: '/state/sessions' } as never,
       storage: {} as never,
       sessions,
-      accounts: { accounts: async () => [] },
-      executables: {} as never,
+      startAccount: async () => {
+        throw new Error('this case never resolves an account');
+      },
       planner: {} as never,
-      clock: { now: () => '2026-02-01T00:00:00.000Z' } as never,
-      clientName: 'fy',
+      clock: { now: () => '2026-02-01T00:00:00.000Z' },
       journalSerial: { run: async <T>(_key: string, work: () => Promise<T>) => await work() } as never,
     },
     emptyReceipts,

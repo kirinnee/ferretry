@@ -1,53 +1,48 @@
-import type { SessionView } from '../lib/protocol/session.ts';
+import type { Redaction, StatePort } from '@ferretry/kernel/contract';
 import {
-  FileSessionForkReceiptStore,
   forkOpeningTurnRefusal,
-  forkReceiptFile,
   type SessionForkStartAccountResolver,
   SessionForkTargetBinder,
   SessionForkTargetResolver,
+  StateSessionForkReceiptStore,
 } from '../adapters/forks/index.ts';
-import { KeyedSerialExecutor } from '../../src/adapters/index.ts';
-import type { FileSessionEnvironmentStore, SessionProtocolEnvelope } from '../adapters/session/lifecycle/index.ts';
-import { StorageTranscriptDigestJournal } from '../../src/adapters/session/transcript/index.ts';
+import type { SessionProtocolEnvelope } from '../adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import {
   GitTransferWorkspaceProbe,
-  SessionAttachmentTransferReader,
-  StorageTransferConversationReader,
   StorageTransferEnvelopeWriter,
   StorageTransferSourceReader,
 } from '../adapters/transfer/index.ts';
 import type { GitWorktreeGateway } from '../adapters/worktrees/index.ts';
 import {
+  type ForkHarnessFacts,
+  type ForkSelectionTokens,
+  type ForkTranscriptCaptures,
   SessionForkFacade,
   type SessionForkIdFactory,
   SessionForkService,
   sessionForkKey,
 } from '../lib/forks/index.ts';
+import type { ClockPort } from '../lib/ports.ts';
+import type { SessionView } from '../lib/protocol/session.ts';
 import {
-  type ClockPort,
-  type CodexRuntimeCatalogCache,
-  createSessionPaths,
-  defaultSessionLifecycleSettings,
-  type FoundationPaths,
-  type HarnessQuirkService,
-  handoffFolders,
-  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-  type SecretRedactor,
-  type SessionAttachmentStore,
-  type SessionId,
-  type SessionLifecycleService,
-  type SessionPlanner,
-  type SessionRuntimeStartupHeldPort,
-  type SessionTranscriptMessageTokenCodec,
-  type TranscriptProvenanceCapture,
-  type TranscriptSource,
-  verifySessionTranscriptMessageToken,
-} from '../../src/lib/index.ts';
-import type { TransferProvides } from './transfer.ts';
-import { type SessionForkSubsystem, sessionForkContribution } from '../lib/runtime/mounts/session-fork.ts';
+  type SessionForkRoute,
+  type SessionForkSubsystem,
+  sessionForkContribution,
+} from '../lib/runtime/mounts/session-fork.ts';
+import type { SessionId } from '../lib/session-id.ts';
 import { sessionTmuxName } from '../lib/session/lifecycle/policy.ts';
+import type { SessionLifecycleService } from '../lib/session/lifecycle/service.ts';
+import { defaultSessionLifecycleSettings } from '../lib/session/lifecycle/settings.ts';
+import type { SessionEnvironmentStore } from '../lib/session/lifecycle/types.ts';
+import type { SessionPlanner } from '../lib/session/peers/core.ts';
+import type {
+  CodexRuntimeCatalogCache,
+  HarnessQuirkService,
+  HarnessRuntimeCatalogs,
+} from '../lib/session/peers/harness.ts';
+import type { SessionRuntimeStartupHeldPort } from '../lib/session/runtime-control/types.ts';
 import {
   AttachmentFacetContributor,
   ConversationFacetContributor,
@@ -57,27 +52,37 @@ import {
   TransferPrepareError,
   WorkspaceFacetContributor,
 } from '../lib/transfer/index.ts';
-import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
+import type { TransferAttachmentStore } from '../lib/transfer/ports.ts';
+import type {
+  TransferAttachmentReader,
+  TransferConversationReader,
+  TransferConversationValidator,
+} from '../lib/transfer/types.ts';
+import type { TransferProvides } from './transfer.ts';
 
 /**
  * Forking a conversation from an exact message: the one route `POST /v1/ferrets/:ferretId/fork` and the whole
  * restart-safe machine behind it (the preparer, the target resolver and binder, the durable receipt store and the
  * service that drives them).
  *
- * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
- * `DaemonWorld` carries: the receipt store, the preparer and its contributors, the binder and the serial executor are
+ * This module has no seams (the receipt store, the preparer and its contributors, the binder and the serial executor are
  * fixed production adapters; every owner the fork borrows is a need), no jobs and no releases of its own: every
  * constructor in {@link createForkSubsystem} is pure (it captures its inputs and reads nothing), so the single build sits
  * where the fork was always assembled — after the runtime and move dependencies it borrows from and before the
  * subsystem literal that mounts it. It claims no protocol feature.
  *
  * THE FORK STAYS COMPOSED OF THE SESSIONS' OWNERS. Session lifecycle, launch, account resolution, planning, the runtime
- * and the transcript capture are session code that stays in `fyd.ts` (each later wave-E PR moves one of those), so they
- * reach this module only as typed {@link SessionForkNeeds}: the very locals the old call passed, and every value the old
- * code read LATE (the account resolution, the lifecycle factory and the session view are closures over `fyd.ts` locals,
- * read per call) is still handed in as that closure, so each is read at the same moment it always was. The transfer
- * module's {@link TransferProvides.transferPorts} factory is still injected and still CALLED inside the build, at the
- * point those ports were always constructed.
+ * and the transcript capture are session code, so they reach this module only as typed {@link SessionForkNeeds}: every
+ * value the old code read LATE (the account resolution, the lifecycle factory and the session view are closures over the
+ * host's locals, read per call) is still handed in as that closure, so each is read at the same moment it always was. The
+ * transfer module's {@link TransferProvides.transferPorts} factory is still injected and still CALLED inside the build,
+ * at the point those ports were always constructed.
+ *
+ * WHAT IS NOT FERRETS' IS A PORT. The owners outside Ferrets (core) are reached through the smallest structural
+ * interface the fork uses, and the host binds each: the conversation reader and validator, the attachment inventory,
+ * the message-token selection verifier, the transcript capture and the harness facts (owners: the conversation and the
+ * harness plugins), and the redaction port (owner: the vault). A host that has none of them binds a fail-closed
+ * skeleton, so an unbound fork refuses rather than guesses.
  *
  * What it provides is the subsystem itself, read by nothing but its own route.
  */
@@ -93,42 +98,57 @@ import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
  * start, or read a second catalogue, would launch an agent this daemon was wrong about.
  */
 export interface SessionForkNeeds {
+  /** Ferrets' own state: the fork receipts (`state/ferrets/forks/<planId>.json`, the contract's `ForkFiles`). */
+  readonly state: StatePort;
   readonly storage: DaemonStorage;
-  readonly paths: FoundationPaths;
-  readonly attachmentStore: SessionAttachmentStore;
+  /** A target's private directory: the string its rollout is later correlated by. */
+  readonly sessionDirectory: (id: SessionId) => string;
   /**
-   * Where one session's attachment originals live: `attachmentDirectory`'s
-   * `<state>/attachments/<daemonId>/<sessionId>`, the same resolver the store's originals adapter reads.
-   *
-   * It is a PARAMETER rather than something derived here, and that is the whole point. The daemon id
-   * is only known after pairing opens, and the copier and the store must address one tree: a copier
-   * writing under the session's own private directory puts real bytes on disk that
-   * `attachmentStore.download` and `unlock` cannot see, so a forked session shows its attachments in
-   * the manifest and fails to open any of them. Wired from the same two values that construct the
-   * store, in the one place that holds both.
+   * The attachment owner's store (owner: the conversation plugin): the source originals are read from it and the
+   * target's are written into it, so a forked session shows its attachments in the manifest AND can open them. The
+   * copier and the store address one tree because they are the same store.
    */
-  readonly attachmentOriginals: (sessionId: string) => string;
+  readonly attachmentStore: TransferAttachmentStore;
   /**
    * The transfer module's factory for the target plan store, the brief writer and the attachment copier. It is CALLED
    * inside `createForkSubsystem` at the point those ports were always constructed, never ahead of it.
    */
   readonly transferPorts: TransferProvides['transferPorts'];
-  readonly transcriptSources: readonly TranscriptSource[];
+  /**
+   * The attachment inventory the preparation reads (owner: the conversation plugin's attachment store).
+   * Read-only: preparation has no writer.
+   */
+  readonly attachments: TransferAttachmentReader;
+  /**
+   * The conversation cut, made against one exact transcript file at preparation and again at import (owner: the
+   * conversation plugin's transcript reader). One object answers both halves, because two implementations would
+   * eventually disagree about the same cut.
+   */
+  readonly conversation: TransferConversationReader & TransferConversationValidator;
+  /** The same fail-closed redaction the operator transcript reads use, narrowed to the one-vault-open batch read. */
+  readonly redactor: Pick<Redaction, 'read'>;
+  /** The one daemon-private message-token verification shared with the operator message read surface. */
+  readonly selection: ForkSelectionTokens;
   readonly gateway: GitWorktreeGateway;
   readonly accounts: SessionForkStartAccountResolver;
   readonly planner: SessionPlanner;
   readonly harness: Pick<HarnessQuirkService, 'planSwitch'>;
   readonly catalog: CodexRuntimeCatalogCache;
+  /** The harness plugins' catalogue projection into the switch planner's context, narrowed to what a fork reaches. */
+  readonly catalogs: Pick<HarnessRuntimeCatalogs, 'codexSwitchContext'>;
+  /** The harness quirk rows, the launch model argument and Claude's transcript file name. */
+  readonly harnessFacts: ForkHarnessFacts;
   readonly createLifecycle: (id: SessionId, envelope?: SessionProtocolEnvelope) => SessionLifecycleService;
-  readonly transcripts: Pick<TranscriptProvenanceCapture, 'capture'>;
-  /** The one daemon-private codec shared with the operator message read surface. */
-  readonly messageTokens: SessionTranscriptMessageTokenCodec;
-  /** The same fail-closed redactor used by operator transcript reads. */
-  readonly redactor: Pick<SecretRedactor, 'batch'>;
-  readonly environment: Pick<FileSessionEnvironmentStore, 'read'>;
+  readonly transcripts: ForkTranscriptCaptures;
+  readonly environment: Pick<SessionEnvironmentStore, 'read'>;
   /** The startup half only — the intermediate annotation must not erase it. */
   readonly runtime: SessionRuntimeStartupHeldPort;
   readonly view: (id: SessionId) => Promise<SessionView | undefined>;
+  /**
+   * The folders a session's agent is pointed into to read what it was sent: its turn documents, its queued messages, its
+   * attachments and the copies a send delivers (`handoffFolders`, over the session directory and the attachment root).
+   */
+  readonly readableHandoffs: (id: SessionId) => readonly string[];
   readonly ids: SessionForkIdFactory;
   readonly clock: ClockPort;
 }
@@ -156,18 +176,11 @@ export interface SessionForkNeeds {
  */
 function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
   const forkQueue = new KeyedSerialExecutor();
-  const conversation = new StorageTransferConversationReader(
-    parts.transcriptSources,
-    new StorageTranscriptDigestJournal(parts.storage),
-    parts.redactor,
-  );
   const preparer = new SessionTransferPreparer({
     source: new StorageTransferSourceReader(parts.storage),
     selection: {
       verifySelection: async (evidence, binding) =>
-        (await verifySessionTranscriptMessageToken(
-          parts.messageTokens,
-          SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+        (await parts.selection.verifySelection(
           {
             sessionId: evidence.sourceSessionId,
             incarnation: evidence.sourceIncarnation,
@@ -179,16 +192,16 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
         )) === 'accepted',
     },
     contributors: {
-      conversation: new ConversationFacetContributor(conversation, parts.redactor),
-      attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(parts.attachmentStore)),
+      conversation: new ConversationFacetContributor(parts.conversation, parts.redactor),
+      attachments: new AttachmentFacetContributor(parts.attachments),
       references: new ReferenceFacetContributor(),
       workspace: new WorkspaceFacetContributor(new GitTransferWorkspaceProbe(parts.gateway)),
       lineage: new LineageFacetContributor(),
     },
   });
   const { planStore, briefWriter, attachmentCopier } = parts.transferPorts({
-    paths: parts.paths,
-    attachmentOriginals: parts.attachmentOriginals,
+    state: parts.state,
+    attachments: parts.attachmentStore,
   });
   /**
    * ONE resolver instance, handed to both halves.
@@ -207,6 +220,8 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
     // froze, rather than at resolution time — resolution runs before anything has read the source,
     // so the target's own directory is not known to it yet.
     catalog: parts.catalog,
+    catalogs: parts.catalogs,
+    harnessFacts: parts.harnessFacts,
   });
   const binder = new SessionForkTargetBinder({
     runtimeChoice: resolver,
@@ -222,6 +237,7 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
       install: async (id, plan) => await planStore.install(id, plan),
     },
     transcripts: parts.transcripts,
+    harnessFacts: parts.harnessFacts,
     importPorts: {
       envelope: new StorageTransferEnvelopeWriter(parts.storage),
       brief: briefWriter,
@@ -229,21 +245,20 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
       // real files that `attachmentStore.download` and `unlock` cannot find, so a forked session
       // would list its attachments and fail to open a single one.
       attachments: attachmentCopier,
-      conversation,
+      conversation: parts.conversation,
     },
     imported: { brief: briefWriter, attachments: attachmentCopier },
     environment: parts.environment,
     tmuxSession: id => sessionTmuxName(id, defaultSessionLifecycleSettings),
     runtime: parts.runtime,
     view: parts.view,
-    sessionDirectory: id => createSessionPaths(parts.paths, id).directory,
-    readableHandoffs: id =>
-      handoffFolders(createSessionPaths(parts.paths, id).directory, parts.attachmentOriginals(id)),
+    sessionDirectory: parts.sessionDirectory,
+    readableHandoffs: parts.readableHandoffs,
     clock: parts.clock,
   });
   return new SessionForkFacade(
     new SessionForkService({
-      receipts: new FileSessionForkReceiptStore(key => forkReceiptFile(parts.paths.state, key)),
+      receipts: new StateSessionForkReceiptStore(parts.state),
       resolver,
       preparer,
       /**
@@ -275,7 +290,24 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
   );
 }
 
-export const sessionForkModule: DaemonModule<void, SessionForkNeeds, SessionForkSubsystem> = {
+/** The part of the host's module lifecycle this module is handed: a release that runs when the daemon stops. */
+export interface SessionForkLifecycle {
+  readonly onRelease: (label: string, release: () => void | Promise<void>) => unknown;
+  readonly releasing?: () => boolean;
+}
+
+/** What building the module yields: the subsystem, no jobs, and the one route's handler. */
+export interface BuiltSessionFork {
+  readonly id: 'sessionFork';
+  readonly provides: SessionForkSubsystem;
+  readonly jobs: Readonly<Record<string, never>>;
+  readonly contributes: { readonly routes: readonly SessionForkRoute[] };
+}
+
+export const sessionForkModule: {
+  readonly id: 'sessionFork';
+  readonly build: (needs: SessionForkNeeds, seams?: undefined, lifecycle?: SessionForkLifecycle) => BuiltSessionFork;
+} = {
   id: 'sessionFork',
   build: needs => {
     const sessionFork = createForkSubsystem(needs);

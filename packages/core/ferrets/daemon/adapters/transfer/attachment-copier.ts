@@ -1,14 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { type AttachmentFacet, AttachmentFacetSchema } from '../../../contract/transfer.ts';
-import { parseStoredAttachmentManifest, type StoredAttachment } from '../../lib/attachments/index.ts';
+import type { AttachmentFile, TransferAttachmentStore, TransferStoredManifest } from '../../lib/transfer/ports.ts';
 import type { TransferAttachmentCopier, TransferAttachmentCopyInput } from '../../lib/transfer/types.ts';
-import { type DurableArtifactIo, TransferArtifactDurability } from './durable-artifact.ts';
+import { type PublishableArtifact, TransferArtifactDurability } from './durable-artifact.ts';
 
 const ATTACHMENT_ID = /^att_[0-9a-f]{64}$/;
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SAFE_NAME = /^[^/\\\0]+$/;
+
+const decoder = new TextDecoder();
 
 export type AttachmentCopyFailure = 'invalid' | 'not_found' | 'corrupt';
 
@@ -41,34 +41,27 @@ type PlannedAttachment = AttachmentFacet['attachments'][number];
  * `credential` omission upstream for each encrypted attachment copied.
  *
  * SOURCE IMMUTABILITY IS THE WHOLE CONSTRAINT (I1). This adapter only ever READS the source
- * directory — no handle is opened for writing, no byte is restamped — so the source session and its
- * descendants/waiters/pointers stay byte-for-byte untouched.
+ * tree — it never writes to the source session's key, no byte is restamped — so the source session
+ * and its descendants/waiters/pointers stay byte-for-byte untouched.
  *
  * PUBLICATION IS POWER-LOSS DURABLE (I5 with the receipt that follows it). The fork advances its
- * durable receipt to `imported` as soon as import returns, so a copy that was merely renamed could
- * leave a durable `imported` in front of a target attachment whose bytes — or whose directory entry —
- * never reached the medium, and the replay refuses that target instead of rebuilding it. Both
- * artifacts and the directory that names them are therefore flushed before this returns, through the
- * same {@link TransferArtifactDurability} the brief writer uses: the two artifacts one receipt
- * vouches for cannot be published under different guarantees. A target-first replay that already
- * matches the plan re-flushes what it found — on the handle it proved it from, then confirming both
- * names still resolve to those inodes — rather than trusting that reading it back means it is on the
- * medium.
+ * durable receipt to `imported` as soon as import returns, so a copy that was merely visible could
+ * leave a durable `imported` in front of a target attachment whose bytes never reached the medium,
+ * and the replay refuses that target instead of rebuilding it. Both artifacts are therefore written
+ * through the attachment store (whose `write` is atomic and durable when it resolves) and confirmed
+ * before this returns, through the same {@link TransferArtifactDurability} the brief writer uses: the
+ * two artifacts one receipt vouches for cannot be published under different guarantees. A target-first
+ * replay that already matches the plan republishes what it found — then confirms both names still hold
+ * those bytes — rather than trusting that reading it back means it is on the medium.
  *
- * INTEGRATION NOTE: construct it with the per-session resolver the store's own originals adapter
- * uses — `sessionId => attachmentDirectory(paths.state, daemonId, sessionId)` — so the explicit
- * `newSessionId` lands in the exact tree a later `download` / `unlock` reads.
+ * WHERE THE BYTES LIVE IS THE ATTACHMENT OWNER'S. The store is injected (`TransferAttachmentStore`): the
+ * explicit `newSessionId` lands in the exact tree a later `download` / `unlock` reads because it is the owner's
+ * own writer that puts it there.
  */
 export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
-  private readonly durability: TransferArtifactDurability;
+  private readonly durability = new TransferArtifactDurability();
 
-  constructor(
-    private readonly attachmentsDirectory: (sessionId: string) => string,
-    uniqueId: () => string = randomUUID,
-    io?: DurableArtifactIo,
-  ) {
-    this.durability = new TransferArtifactDurability(uniqueId, io);
-  }
+  constructor(private readonly store: TransferAttachmentStore) {}
 
   async copyOriginal(input: TransferAttachmentCopyInput): Promise<void> {
     this.assertSessionId(input.fromSessionId, 'source session');
@@ -77,30 +70,25 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
     if (input.fromSessionId === input.newSessionId) {
       throw new SessionAttachmentCopyError('invalid', 'source and target sessions must differ');
     }
-    const sourceDirectory = join(this.attachmentsDirectory(input.fromSessionId), expected.id);
-    const targetDirectory = join(this.attachmentsDirectory(input.newSessionId), expected.id);
-    const durableAncestor = this.durableAncestorOf(input.newSessionId);
 
     // Replay checks the already-materialised target FIRST. If an earlier attempt copied this file
     // and a later attachment then failed, retry remains possible even when the source subsequently
-    // disappears: the durable plan, not the mutable source directory, owns the expected bytes.
+    // disappears: the durable plan, not the mutable source tree, owns the expected bytes.
     //
-    // An earlier attempt may also have published these exact bytes and died before flushing any of
-    // them, so this proof PERSISTS what it proves — each file on the very handle its bytes were read
-    // from — then persists the names and confirms both paths still resolve to the inodes it proved.
-    // This return is what a receipt commits `imported` behind. Anything short of that falls through to
-    // a rebuild from the plan-verified source rather than vouching for bytes it never flushed.
-    const proofs = this.targetProofs(targetDirectory, expected);
-    if (await this.durability.proveDurable(targetDirectory, durableAncestor, [proofs.manifest, proofs.original])) {
-      return;
-    }
+    // An earlier attempt may also have published these exact bytes and died before they were durable,
+    // so this proof PERSISTS what it proves — the proved bytes are republished through the store and
+    // both names are confirmed to still hold them. This return is what a receipt commits `imported`
+    // behind. Anything short of that falls through to a rebuild from the plan-verified source rather
+    // than vouching for bytes it never made durable.
+    const proofs = this.targetProofs(input.newSessionId, expected);
+    if (await this.durability.proveDurable([proofs.manifest, proofs.original])) return;
 
-    const manifestBytes = await this.readRequired(sourceDirectory, 'manifest.json');
+    const manifestBytes = await this.readRequired(input.fromSessionId, expected.id, 'manifest');
     const stored = this.parseManifest(manifestBytes, expected.id);
     if (!sameManifest(this.plannedManifest(stored), expected)) {
       throw new SessionAttachmentCopyError('corrupt', 'source attachment manifest does not match the transfer plan');
     }
-    const originalBytes = await this.readRequired(sourceDirectory, 'original');
+    const originalBytes = await this.readRequired(input.fromSessionId, expected.id, 'original');
     if (originalBytes.byteLength !== expected.size || hash(originalBytes) !== expected.sha256) {
       throw new SessionAttachmentCopyError('corrupt', 'source attachment original does not match the transfer plan');
     }
@@ -111,10 +99,10 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
     // createdAt and the encrypted-pdf fact) is preserved exactly; locked state is the absence of a
     // decrypted cache, which the target never receives.
     //
-    // Each publication also confirms its name still resolves to the inode it flushed, and refuses to
-    // return on one a concurrent writer substituted — identical bytes included, because nothing here
-    // synced THOSE bytes and a receipt would be recorded behind this call.
-    await this.durability.materialize(targetDirectory, durableAncestor, [
+    // Each publication is also confirmed to still hold the bytes it published, and the call refuses to
+    // return on a name another writer substituted, because nothing here made THOSE bytes durable and a
+    // receipt would be recorded behind this call.
+    await this.durability.materialize(`${input.newSessionId}/${expected.id}`, [
       { ...proofs.original, bytes: originalBytes },
       { ...proofs.manifest, bytes: manifestBytes },
     ]);
@@ -122,15 +110,14 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
 
   /**
    * Proves an already-imported target still holds the exact plan-owned manifest and original bytes.
-   * Unlike `copyOriginal`, this is read-only — it neither repairs nor flushes: a later fork phase
+   * Unlike `copyOriginal`, this is read-only — it neither repairs nor writes: a later fork phase
    * refuses drift instead of repairing it immediately before an agent is launched against evidence the
    * receipt claimed was complete.
    */
   async verifyTarget(input: Pick<TransferAttachmentCopyInput, 'newSessionId' | 'expectedManifest'>): Promise<void> {
     this.assertSessionId(input.newSessionId, 'target session');
     const expected = this.parseExpectedManifest(input.expectedManifest);
-    const directory = join(this.attachmentsDirectory(input.newSessionId), expected.id);
-    const proofs = this.targetProofs(directory, expected);
+    const proofs = this.targetProofs(input.newSessionId, expected);
     if (!(await this.durability.proveVisible([proofs.manifest, proofs.original]))) {
       throw new SessionAttachmentCopyError(
         'corrupt',
@@ -145,15 +132,15 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
     }
   }
 
-  private async readRequired(directory: string, name: string): Promise<Buffer> {
-    try {
-      return await readFile(join(directory, name));
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
-        throw new SessionAttachmentCopyError('not_found', `source attachment ${name} was not found`);
-      }
-      throw error;
+  private async readRequired(sessionId: string, attachmentId: string, file: AttachmentFile): Promise<Uint8Array> {
+    const bytes = await this.store.read(sessionId, attachmentId, file);
+    if (bytes === undefined) {
+      throw new SessionAttachmentCopyError(
+        'not_found',
+        `source attachment ${file === 'original' ? 'original' : 'manifest.json'} was not found`,
+      );
     }
+    return bytes;
   }
 
   private parseExpectedManifest(manifest: TransferAttachmentCopyInput['expectedManifest']): PlannedAttachment {
@@ -172,23 +159,23 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
     return expected;
   }
 
-  private parseManifest(bytes: Buffer, attachmentId: string): StoredAttachment {
+  private parseManifest(bytes: Uint8Array, attachmentId: string): TransferStoredManifest {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(bytes.toString('utf8'));
+      parsed = JSON.parse(decoder.decode(bytes));
     } catch {
       throw new SessionAttachmentCopyError('corrupt', 'source attachment manifest is not valid JSON');
     }
     // The raw source manifest is copied verbatim, so it is parsed by the one parser the store reads it
     // with — durable keys only, so an unplanned field cannot cross into the target unseen.
     try {
-      return parseStoredAttachmentManifest(parsed, attachmentId);
+      return this.store.parseManifest(parsed, attachmentId);
     } catch {
       throw new SessionAttachmentCopyError('corrupt', 'source attachment manifest is invalid');
     }
   }
 
-  private plannedManifest(stored: StoredAttachment): PlannedAttachment {
+  private plannedManifest(stored: TransferStoredManifest): PlannedAttachment {
     return {
       id: stored.id,
       filename: stored.filename,
@@ -209,56 +196,35 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
    * and both matter: proofs run manifest-first (it is published last, so a target missing it is one to
    * rebuild), publication runs original-first (a loss between them must read as unmatched).
    *
-   * A proved manifest beside an unproved original is rebuilt from the source as a whole, so the
-   * manifest flush that already happened is wasted work rather than a wrong claim: no name is
-   * persisted on a failed proof, and the caller republishes both artifacts.
+   * A proved manifest beside an unproved original is rebuilt from the source as a whole: nothing is
+   * written on a failed proof, and the caller republishes both artifacts.
    */
   private targetProofs(
-    directory: string,
+    sessionId: string,
     expected: PlannedAttachment,
-  ): {
-    readonly manifest: { readonly file: string; readonly proves: (bytes: Buffer) => boolean };
-    readonly original: { readonly file: string; readonly proves: (bytes: Buffer) => boolean };
-  } {
+  ): { readonly manifest: PublishableArtifact; readonly original: PublishableArtifact } {
+    const artifact = (file: AttachmentFile, proves: (bytes: Uint8Array) => boolean): PublishableArtifact => ({
+      read: async () => await this.store.read(sessionId, expected.id, file),
+      write: async bytes => await this.store.write(sessionId, expected.id, file, bytes),
+      proves,
+    });
     return {
-      manifest: {
-        file: join(directory, 'manifest.json'),
-        proves: (bytes: Buffer): boolean => {
-          let stored: StoredAttachment;
-          try {
-            stored = this.parseManifest(bytes, expected.id);
-          } catch {
-            // parseManifest only ever refuses with a 'corrupt' SessionAttachmentCopyError; a torn or
-            // malformed target is recoverable because source verification replaces it atomically.
-            return false;
-          }
-          return sameManifest(this.plannedManifest(stored), expected);
-        },
-      },
-      original: {
-        file: join(directory, 'original'),
-        proves: (bytes: Buffer): boolean => bytes.byteLength === expected.size && hash(bytes) === expected.sha256,
-      },
+      manifest: artifact('manifest', (bytes: Uint8Array): boolean => {
+        let stored: TransferStoredManifest;
+        try {
+          stored = this.parseManifest(bytes, expected.id);
+        } catch {
+          // parseManifest only ever refuses with a 'corrupt' SessionAttachmentCopyError; a torn or
+          // malformed target is recoverable because source verification replaces it atomically.
+          return false;
+        }
+        return sameManifest(this.plannedManifest(stored), expected);
+      }),
+      original: artifact(
+        'original',
+        (bytes: Uint8Array): boolean => bytes.byteLength === expected.size && hash(bytes) === expected.sha256,
+      ),
     };
-  }
-
-  /**
-   * The ancestor whose own directory entry is taken as already durable: the STATE ROOT.
-   *
-   * The layout this adapter is composed against is `<state>/attachments/<daemonId>/<sessionId>`, so
-   * the anchor is three levels above it. The attachments root is deliberately NOT the anchor, even
-   * though a source attachment was read from under it: `SessionAttachmentStore` creates that whole
-   * tree with a lazy recursive `mkdir` and no parent flush, so reading a source attachment proves the
-   * root is VISIBLE and says nothing about whether its own name is on the medium. Anchoring there
-   * would make this copy's durability depend on a flush nobody performs. Everything below the state
-   * root is therefore persisted parent-first on the way down.
-   *
-   * Naming a higher ancestor is the safe direction: any ancestor of the artifact directory exists once
-   * the tree is ensured, so a resolver composed at a different depth only widens the flushed chain —
-   * it can never name a directory that is not there.
-   */
-  private durableAncestorOf(newSessionId: string): string {
-    return dirname(dirname(dirname(this.attachmentsDirectory(newSessionId))));
   }
 }
 

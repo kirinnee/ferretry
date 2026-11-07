@@ -1,4 +1,5 @@
-import { afterEach, describe, it } from 'bun:test';
+import { describe, it } from 'bun:test';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import type { SessionTransferEdge } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
 import should from 'should';
 import {
@@ -13,7 +14,9 @@ import {
 } from '../../../../daemon/lib/session/provenance/index.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
-import { AT, SOURCE_ID, TARGET_ID, cleanup, openStorage, plan } from '../forks/fixtures.ts';
+import { SessionConfigFiles } from '../../../../daemon/lib/state.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
+import { AT, SOURCE_ID, TARGET_ID, plan } from './fixtures.ts';
 
 /**
  * The transfer envelope, against real session documents.
@@ -70,6 +73,14 @@ function created(id: string, overrides: Record<string, unknown> = {}): Record<st
   };
 }
 
+/**
+ * Plants a configuration document exactly as given: several cases need a damaged or foreign one, which the declared
+ * schema would refuse to write.
+ */
+function plantConfig(folder: MemoryStateFolder, id: string, document: unknown): void {
+  folder.plant(SessionConfigFiles, JSON.stringify({ format: 1, ...(document as object) }), id);
+}
+
 async function refusal(promise: Promise<unknown>): Promise<SessionTransferEnvelopeError> {
   try {
     await promise;
@@ -81,13 +92,11 @@ async function refusal(promise: Promise<unknown>): Promise<SessionTransferEnvelo
 }
 
 describe('StorageTransferEnvelopeWriter', () => {
-  afterEach(async () => await cleanup());
-
   it('should write the durable decision, the target-only edge and a fresh warden stamp', async () => {
     // Arrange
-    const { storage } = await openStorage('envelope-apply');
+    const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, created(TARGET_ID));
+    plantConfig(folder, target, created(TARGET_ID));
     const applied = envelope('/work/forked');
 
     // Act
@@ -120,9 +129,9 @@ describe('StorageTransferEnvelopeWriter', () => {
 
   it('should produce identical bytes on a replay, so a crash around it converges', async () => {
     // Arrange
-    const { storage } = await openStorage('envelope-replay');
+    const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, created(TARGET_ID));
+    plantConfig(folder, target, created(TARGET_ID));
     const subject = new StorageTransferEnvelopeWriter(storage);
     const applied = envelope('/work/forked');
 
@@ -146,9 +155,9 @@ describe('StorageTransferEnvelopeWriter', () => {
    */
   it('should keep a forked warden descendant shielded across a later revive', async () => {
     // Arrange: the fork writes the stamp, then the recorder runs with nothing left in the fleet.
-    const { storage } = await openStorage('envelope-revive');
+    const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, created(TARGET_ID));
+    plantConfig(folder, target, created(TARGET_ID));
     await new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, envelope('/work/forked'));
     const store = new StorageSessionProvenanceStore(storage);
     const recorder = new SessionProvenanceRecorder(
@@ -175,9 +184,9 @@ describe('StorageTransferEnvelopeWriter', () => {
 
   it('should record no warden descent when the transfer carried none', async () => {
     // Arrange
-    const { storage } = await openStorage('envelope-lineage');
+    const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, created(TARGET_ID));
+    plantConfig(folder, target, created(TARGET_ID));
     const clean = envelope('/work/forked', { lineage: { wardenLineage: false, warden: null } });
 
     // Act
@@ -194,9 +203,9 @@ describe('StorageTransferEnvelopeWriter', () => {
     // Arrange: a fresh target has no spawn history, so a well-formed foreign stamp is evidence that
     // something else owns this id — and adopting its shield would exempt this session from warden
     // escalation on the strength of somebody else's ancestry.
-    const { storage } = await openStorage('envelope-foreign-warden');
+    const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(
+    plantConfig(folder, 
       target,
       created(TARGET_ID, {
         provenance: {
@@ -220,28 +229,30 @@ describe('StorageTransferEnvelopeWriter', () => {
   });
 
   it('should refuse a malformed spawn stamp rather than write over it', async () => {
-    // Arrange
-    const { storage } = await openStorage('envelope-damaged-stamp');
-    const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, created(TARGET_ID, { provenance: { v: 1, wardenLineage: 'yes' } }));
+    // Arrange: the declared schema cannot hold this stamp, so the state port reads the whole document as damaged.
+    const { storage, folder } = await memoryStorage();
+    plantConfig(folder, TARGET_ID, created(TARGET_ID, { provenance: { v: 1, wardenLineage: 'yes' } }));
+    const before = folder.raw(SessionConfigFiles, TARGET_ID);
 
     // Act
-    const refused = await refusal(new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, envelope('/work/x')));
+    const failure = await new StorageTransferEnvelopeWriter(storage)
+      .apply(TARGET_ID, envelope('/work/x'))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
     // Assert: a record that cannot be parsed is not the same as no record, and treating it as one
-    // would erase whatever wrote it.
-    should(refused.message).match(/a spawn stamp this transfer could not have written/u);
-    should(((await storage.readConfig(target)) as Record<string, unknown>).provenance).eql({
-      v: 1,
-      wardenLineage: 'yes',
-    });
+    // would erase whatever wrote it. The refusal is the port's damage, and the bytes are untouched.
+    should(failure).be.instanceOf(Error);
+    should(folder.raw(SessionConfigFiles, TARGET_ID)).equal(before);
   });
 
   it('should drop a label the transfer does not carry', async () => {
     // Arrange
-    const { storage } = await openStorage('envelope-label');
+    const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, created(TARGET_ID));
+    plantConfig(folder, target, created(TARGET_ID));
     const unlabelled = envelope('/work/forked');
 
     // Act
@@ -255,27 +266,26 @@ describe('StorageTransferEnvelopeWriter', () => {
     should(Object.hasOwn((await storage.readConfig(target)) as Record<string, unknown>, 'label')).equal(false);
   });
 
-  it('should build the document from the envelope alone when the stored configuration is not an object', async () => {
-    // Arrange
-    const { storage } = await openStorage('envelope-non-object');
-    const target = parseSessionId(TARGET_ID);
-    await storage.writeConfig(target, ['not', 'a', 'document']);
-    const applied = envelope('/work/forked');
+  it('should refuse a target that has no stored configuration rather than invent one', async () => {
+    // Arrange: nothing was planted under the target, so there is no fresh session to write into.
+    const { storage, folder } = await memoryStorage();
 
     // Act
-    await new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, applied);
+    const failure = await new StorageTransferEnvelopeWriter(storage)
+      .apply(TARGET_ID, envelope('/work/forked'))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
-    // Assert: nothing of the array leaks into the merged document, and the envelope's fields land.
-    const document = (await storage.readConfig(target)) as Record<string, unknown>;
-    should(Array.isArray(document)).equal(false);
-    should(document.cwd).equal('/work/forked');
-    should(document.transferredFrom).eql(applied.transferredFrom);
-    should(Object.hasOwn(document, '0')).equal(false);
+    // Assert: the envelope is applied to the session the lifecycle reserved, never to a document it made up.
+    should(failure).be.instanceOf(Error);
+    should(folder.raw(SessionConfigFiles, TARGET_ID)).be.undefined();
   });
 
   it('should refuse a target key that is not a usable session id', async () => {
     // Arrange
-    const { storage } = await openStorage('envelope-invalid');
+    const { storage } = await memoryStorage();
 
     // Act
     const refused = await refusal(new StorageTransferEnvelopeWriter(storage).apply('../escape', envelope('/work/x')));
@@ -286,9 +296,9 @@ describe('StorageTransferEnvelopeWriter', () => {
 
   it('should refuse to be applied to the very source its edge names', async () => {
     // Arrange
-    const { storage } = await openStorage('envelope-source');
+    const { storage, folder } = await memoryStorage();
     const source = parseSessionId(SOURCE_ID);
-    await storage.writeConfig(source, created(SOURCE_ID));
+    plantConfig(folder, source, created(SOURCE_ID));
     const before = JSON.stringify(await storage.readConfig(source));
 
     // Act

@@ -12,14 +12,14 @@
  * shorter conversation with no explanation is lost history pretending to be a short one.
  */
 
+import type { Redaction } from '@ferretry/kernel/contract';
 import type { ConversationFacet, TransferOmission } from '../../../../contract/transfer.ts';
-import type { TextRedactor } from '../../secrets/redaction.ts';
 import {
   type ConversationDigest,
-  ConversationDigestError,
+  isConversationDigestError,
   type ConversationDigestOmission,
   sameConversationMessagePoint,
-} from '../../session/transcript/digest.ts';
+} from '../ports.ts';
 import {
   type TransferConversationReader,
   type TransferConversationContribution,
@@ -52,10 +52,10 @@ function toOmission(omission: ConversationDigestOmission): TransferOmission {
   };
 }
 
-async function facetOf(digest: ConversationDigest, redactor: Pick<TextRedactor, 'batch'>): Promise<ConversationFacet> {
+async function facetOf(digest: ConversationDigest, redactor: Pick<Redaction, 'read'>): Promise<ConversationFacet> {
   return {
     // One vault open for the whole conversation, not one per message.
-    messages: await redactor.batch(scrub =>
+    messages: await redactor.read(scrub =>
       digest.messages.map(message => ({
         point: message.point,
         role: message.role,
@@ -73,7 +73,7 @@ export class ConversationFacetContributor implements TransferConversationContrib
 
   constructor(
     private readonly reader: TransferConversationReader,
-    private readonly redactor: Pick<TextRedactor, 'batch'>,
+    private readonly redactor: Pick<Redaction, 'read'>,
   ) {}
 
   async contribute(input: TransferPrepareInput): Promise<TransferConversationContribution> {
@@ -105,7 +105,7 @@ export class ConversationFacetContributor implements TransferConversationContrib
        * failure through unchanged keeps the route's refusal and the only code that can produce it
        * speaking one language.
        */
-      if (error instanceof ConversationDigestError) throw new TransferPrepareError(error.failure, error.message);
+      if (isConversationDigestError(error)) throw new TransferPrepareError(error.failure, error.message);
       throw error;
     }
 

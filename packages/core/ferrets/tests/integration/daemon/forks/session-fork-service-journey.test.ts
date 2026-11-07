@@ -1,20 +1,16 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { type ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import { createHash } from 'node:crypto';
+import type { Redaction } from '@ferretry/kernel/contract';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
+import should from 'should';
+import type { JsonValue } from '@ferretry/std';
+import { ForkFiles } from '../../../../contract/index.ts';
+import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import { type SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
-  type RuntimeControlRequest,
-  type RuntimeModelChoice,
-  SessionConfigSchema,
-  SessionStateSchema,
-  type SessionView,
-} from '../../../../daemon/lib/protocol/session.ts';
-import should from 'should';
-import {
-  FileSessionForkReceiptStore,
-  forkReceiptFile,
-} from '../../../../daemon/adapters/forks/file-session-fork-receipt-store.ts';
+  forkReceiptName,
+  StateSessionForkReceiptStore,
+} from '../../../../daemon/adapters/forks/state-session-fork-receipt-store.ts';
 import {
   SessionForkTargetBinder,
   SessionForkTargetBindingError,
@@ -25,116 +21,115 @@ import {
   type SessionForkTargetAccount,
   SessionForkTargetResolver,
 } from '../../../../daemon/adapters/forks/session-fork-target-resolver.ts';
-import { BunGitRunner } from '../../../../daemon/adapters/git/index.ts';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../src/adapters/index.ts';
-import { FileSessionEffectLedger } from '../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
-import { FileSessionEnvironmentStore } from '../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
-import { FileSessionTaskStore } from '../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
-import { NodeSessionCredentialIssuer } from '../../../../daemon/adapters/session/lifecycle/node-session-credential-issuer.ts';
 import { NodeWorkingDirectoryResolver } from '../../../../daemon/adapters/session/lifecycle/node-working-directory-resolver.ts';
 import {
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
 } from '../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { FileHarnessWrapperSource } from '../../../src/adapters/session/transcript/file-harness-wrapper-source.ts';
-import {
-  FileSessionTranscriptMessageTokenCodec,
-  sessionMessageTokenKeyFile,
-} from '../../../src/adapters/session/transcript/file-message-token-codec.ts';
-import { StorageTranscriptDigestJournal } from '../../../src/adapters/session/transcript/storage-transcript-digest-journal.ts';
+import { KeyedSerialExecutor } from '../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
-import { NodeTranscriptSource } from '../../../src/adapters/transcript/index.ts';
 import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
 import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
-import { GitTransferWorkspaceProbe } from '../../../../daemon/adapters/transfer/git-transfer-workspace-probe.ts';
 import { FileSessionTransferTargetPlanStore } from '../../../../daemon/adapters/transfer/plan-store.ts';
 import { SessionAttachmentTransferReader } from '../../../../daemon/adapters/transfer/session-attachment-reader.ts';
 import { StorageTransferConversationReader } from '../../../../daemon/adapters/transfer/storage-transfer-conversation-reader.ts';
 import { StorageTransferEnvelopeWriter } from '../../../../daemon/adapters/transfer/storage-transfer-envelope-writer.ts';
 import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
-import {
-  GitWorktreeGateway,
-  NodeWorktreeFileSystem,
-  SystemWorktreeClock,
-} from '../../../../daemon/adapters/worktrees/index.ts';
-import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
-import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
-import { codexCorrelationArguments } from '../../../src/lib/session/transcript/codex-rollout.ts';
 import { SessionForkRequestConflictError } from '../../../../daemon/lib/forks/failures.ts';
 import { type SessionForkCommand, type SessionForkKey, sessionForkKey } from '../../../../daemon/lib/forks/identity.ts';
 import { SessionForkService } from '../../../../daemon/lib/forks/service.ts';
 import type { SessionForkPorts, SessionForkResult } from '../../../../daemon/lib/forks/types.ts';
-import type { JsonValue } from '../../../src/lib/json.ts';
-import { type FoundationPaths, createSessionPaths, temporaryFilePath } from '../../../src/lib/paths.ts';
-import { CodexRuntimeCatalogCache } from '../../../src/lib/session/harness/codex-catalog-cache.ts';
-import { planRuntimeSwitch } from '../../../src/lib/session/harness/runtime-switch.ts';
-import { startupModelArguments } from '../../../src/lib/session/harness/startup.ts';
+import { type ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import {
+  type RuntimeModelChoice,
+  SessionConfigSchema,
+  SessionStateSchema,
+  type SessionView,
+} from '../../../../daemon/lib/protocol/session.ts';
+import { type SessionId, parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { assignedTaskDocument, sessionTmuxName } from '../../../../daemon/lib/session/lifecycle/policy.ts';
 import { SessionLifecycleService } from '../../../../daemon/lib/session/lifecycle/service.ts';
 import { defaultSessionLifecycleSettings } from '../../../../daemon/lib/session/lifecycle/settings.ts';
-import { SessionRuntimeError } from '../../../../daemon/lib/session/runtime-control/types.ts';
-import { claudeSessionArguments } from '../../../src/lib/session/transcript/claude-path.ts';
-import { sameConversationMessagePoint } from '../../../src/lib/session/transcript/digest.ts';
+import type { CodexRuntimeCatalogCache } from '../../../../daemon/lib/session/peers/harness.ts';
 import {
-  issueSessionTranscriptMessageToken,
-  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-  verifySessionTranscriptMessageToken,
-} from '../../../src/lib/session/transcript/message-token.ts';
-import { TranscriptProvenanceCapture } from '../../../src/lib/session/transcript/provenance.ts';
-import { type SessionId, parseSessionId } from '../../../../daemon/lib/session-id.ts';
-import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
-import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
+  claudeSessionArguments,
+  codexCorrelationArguments,
+} from '../../../../daemon/lib/session/peers/transcript-launch.ts';
+import { SessionRuntimeError } from '../../../../daemon/lib/session/runtime-control/types.ts';
 import { AttachmentFacetContributor } from '../../../../daemon/lib/transfer/facets/attachments.ts';
 import { ConversationFacetContributor } from '../../../../daemon/lib/transfer/facets/conversation.ts';
 import { LineageFacetContributor } from '../../../../daemon/lib/transfer/facets/lineage.ts';
 import { ReferenceFacetContributor } from '../../../../daemon/lib/transfer/facets/references.ts';
 import { WorkspaceFacetContributor } from '../../../../daemon/lib/transfer/facets/workspace.ts';
 import { SessionTransferPreparer } from '../../../../daemon/lib/transfer/prepare.ts';
+import {
+  type ConversationDigest,
+  ConversationDigestError,
+  type ConversationMessage,
+  type PinnedTranscriptDigests,
+  sameConversationMessagePoint,
+  type TransferAttachmentView,
+} from '../../../../daemon/lib/transfer/ports.ts';
 import { TransferImportError, TransferPrepareError } from '../../../../daemon/lib/transfer/types.ts';
-import { WARDEN_LABEL } from '../../../src/lib/warden/types.ts';
-import { AT, SOURCE_ID, account, cleanup, planner, realTemporaryDirectory } from './fixtures.ts';
+import { WARDEN_LABEL } from '../../../../daemon/lib/session/peers/warden-lifecycle.ts';
+import { harnessCatalogs } from '../../../unit/daemon/session/runtime-control/harness-fixture/catalogs.ts';
+import { planRuntimeSwitch } from '../../../unit/daemon/session/runtime-control/harness-fixture/runtime-switch.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
+import {
+  AT,
+  SOURCE_ID,
+  account,
+  cleanup,
+  harnessFacts,
+  MemoryAttachmentStore,
+  memoryEffectLedger,
+  openStorage,
+  planner,
+  realTemporaryDirectory,
+  runtimeEffectFingerprint,
+} from './fixtures.ts';
 
 /**
- * ONE FORK, END TO END, OVER THE PRODUCTION COMPOSITION — a real state home, a real transcript file
- * on disk, the real preparer and its facet contributors, the real receipt store, target plan store,
- * envelope/brief/attachment writers, the real binder, and the real service driving all of them.
+ * ONE FORK, END TO END, OVER THE PRODUCTION COMPOSITION — the kernel's state port, the real preparer and its facet
+ * contributors, the real receipt store, target plan store, envelope/brief/attachment writers, the real binder, and the
+ * real service driving all of them.
  *
- * WHY THIS FILE HAS TO BE REAL. Every adapter suite beside it proves its own bytes against a fixture
- * written to expect them, and each of those fixtures is a second statement of a layout, a point or a
- * plan. What a fork actually promises are properties of the COMPOSITION, and none of them is visible
- * in any single adapter: that the message a caller pointed at is the one that crosses, that the
- * session it was read from is byte-for-byte as it was afterwards, that a process boundary anywhere in
- * the sequence finishes THAT fork rather than starting a second one, and that a target something else
- * damaged is refused rather than launched. A fake preparer or a fake binder proves only that this
- * file agrees with itself.
+ * WHY THIS FILE IS A COMPOSITION AND NOT A UNIT. Every adapter suite beside it proves its own bytes against a fixture
+ * written to expect them, and each of those fixtures is a second statement of a layout, a point or a plan. What a fork
+ * actually promises are properties of the COMPOSITION, and none of them is visible in any single adapter: that the
+ * message a caller pointed at is the one that crosses, that the session it was read from is byte-for-byte as it was
+ * afterwards, that a process boundary anywhere in the sequence finishes THAT fork rather than starting a second one,
+ * and that a target something else damaged is refused rather than launched. A fake preparer or a fake binder proves
+ * only that this file agrees with itself.
  *
- * WHAT IS STUBBED, AND WHY NONE OF IT IS THE SUBJECT. The fleet account resolution and the live Codex
- * catalogue are external inventories this host does not have; the tmux launcher and the mounted
- * runtime path drive a real pane. Two one-shot levers reproduce crashes without crashing: the source
- * transcript may be mutated between preparation and import, which is the race a frozen plan exists
- * for, and the target's transcript capture may be made to throw, which is a death between recording
- * `imported` and capturing the target's own identity. Everything the fork itself decides or writes is
- * the shipped code.
+ * WHAT IS STUBBED, AND WHY NONE OF IT IS THE SUBJECT. Everything Ferrets does not own is a structural port with a small
+ * stand-in, because core imports no plugin:
  *
- * THE CUT IS AN EXACT BYTE OFFSET IN A REAL FILE. The seeded transcript's second record begins at
- * byte 512 exactly, and that record carries TWO content blocks — so `{ v: 1, byteOffset: 512,
- * blockIndex: 0 }` names one message and `blockIndex: 1` names a different one. A journey that
- * carried "everything up to the last record" would satisfy every other assertion here and fail that.
+ *   - the TRANSCRIPT READER (`PinnedTranscriptDigests`, the conversation plugin's): a stand-in that reads the seeded
+ *     JSONL itself, byte offsets included, and authenticates the raw prefix of the record it was cut at. It is the
+ *     plugin's parser that a real deployment exercises; what is exercised here is that every fork decision is taken from
+ *     its answer;
+ *   - the SELECTION BINDING (`ForkSelectionTokens`, the conversation plugin's message-token codec): a keyed hash of the
+ *     exact source, transcript and raw prefix, which accepts exactly what it issued;
+ *   - the TRANSCRIPT CAPTURE (`ForkTranscriptCaptures`, the harness plugins'): the Claude arm mints an id and names the
+ *     file, the Codex arm declares a correlation token, both with the launch argv that makes the record true;
+ *   - the attachment owner's store (an in-memory `TransferAttachmentStore`), the fleet's account resolution, the live
+ *     Codex catalogue, and the terminal launcher.
+ *
+ * Two one-shot levers reproduce crashes without crashing: the source transcript may be mutated between preparation and
+ * import, which is the race a frozen plan exists for, and the target's transcript capture may be made to throw, which
+ * is a death between recording `imported` and capturing the target's own identity. Everything the fork itself decides
+ * or writes is the shipped code, over the kernel's own state port.
+ *
+ * THE CUT IS AN EXACT BYTE OFFSET IN A TRANSCRIPT. The seeded transcript's second record begins at byte 512 exactly,
+ * and that record carries TWO content blocks — so `{ v: 1, byteOffset: 512, blockIndex: 0 }` names one message and
+ * `blockIndex: 1` names a different one. A journey that carried "everything up to the last record" would satisfy every
+ * other assertion here and fail that.
  */
 
 const CUT: ConversationMessagePoint = { v: 1, byteOffset: 512, blockIndex: 0 };
 const DESCENDANT_ID = '20260806-descendant';
 const FIRST_TARGET = '20260806-target-1';
-const DAEMON_ID = 'daemon-journey';
 const WARDEN_ID = '20260806-warden';
 const SOURCE_NAME = 'Port The Transfer Seam';
 const SOURCE_HARNESS_SESSION = 'harness-source';
@@ -298,32 +293,138 @@ function sessionState(id: string): Record<string, unknown> {
 
 // ─── the journey harness ────────────────────────────────────────────────────────────────────────
 
-/** A recursive map of relative path to hex-encoded content: bytes, never parsed values. */
+/** Everything the source side holds, as hex-encoded bytes keyed by where it lives: bytes, never parsed values. */
 type Snapshot = Record<string, string>;
-
-async function snapshotTree(root: string, prefix: string, into: Snapshot): Promise<Snapshot> {
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    const path = join(root, entry.name);
-    const key = `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) await snapshotTree(path, key, into);
-    else into[key] = (await readFile(path)).toString('hex');
-  }
-  return into;
-}
 
 /** The same snapshot with the transcript blanked, for a case that rewrote the transcript itself. */
 function besideTheTranscript(snapshot: Snapshot): Snapshot {
   return { ...snapshot, transcript: '' };
 }
 
-/** The runtime subsystem's opaque comparison, repeated only by this stateful port stand-in. */
-function runtimeEffectFingerprint(request: RuntimeControlRequest): string {
-  return JSON.stringify([
-    request.action,
-    request.action === 'model' || request.action === 'effort' ? (request.effort ?? null) : null,
-    request.action === 'model' ? (request.model ?? null) : null,
-  ]);
+const hex = (bytes: Uint8Array | string): string => Buffer.from(bytes).toString('hex');
+
+/** The one transcript path the source's provenance pins. A name, never a place on disk. */
+const TRANSCRIPT_FILE = '/fleet/homes/source/projects/source.jsonl';
+const TARGET_HARNESS_HOME = '/fleet/homes/zelda';
+
+// ─── the conversation owner's side, over the seeded transcript ──────────────────────────────────
+
+interface Carried extends ConversationMessage {
+  /** Where this message's physical record ends, so the raw prefix an authentication covers is exact. */
+  readonly recordEnd: number;
+}
+
+/** The messages of a Claude-shaped JSONL transcript, each at the byte offset of its record and its block index. */
+function readTranscript(text: string): readonly Carried[] {
+  const found: Carried[] = [];
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    const length = Buffer.byteLength(line);
+    if (line !== '') {
+      const record = JSON.parse(line) as {
+        type: 'user' | 'assistant';
+        timestamp: string;
+        message: { content: readonly { text: string }[] };
+      };
+      record.message.content.forEach((block, blockIndex) =>
+        found.push({
+          point: { v: 1, byteOffset: offset, blockIndex },
+          role: record.type,
+          text: block.text,
+          timestamp: record.timestamp,
+          recordEnd: offset + length + 1,
+        }),
+      );
+    }
+    offset += length + 1;
+  }
+  return found;
+}
+
+/** The exact bytes of the physical record a cut was made at and everything before it. */
+function rawPrefixOf(text: string, recordEnd: number): Uint8Array {
+  return new Uint8Array(createHash('sha256').update(Buffer.from(text).subarray(0, recordEnd)).digest());
+}
+
+/**
+ * The conversation plugin's pinned digest, over the one seeded transcript.
+ *
+ * It answers `undefined` for a file nobody named and refuses a cut that addresses nothing, as the plugin's does; the
+ * messages it hands back are the prefix through the cut, and the raw-prefix evidence is the digest of the bytes up to
+ * the end of the cut's record.
+ */
+function transcriptOwner(read: () => string): PinnedTranscriptDigests {
+  return {
+    digest: async (target, file, through): Promise<ConversationDigest | undefined> => {
+      if (file !== TRANSCRIPT_FILE) return undefined;
+      const text = read();
+      const messages = readTranscript(text);
+      const index = messages.findIndex(message => sameConversationMessagePoint(message.point, through));
+      const cut = messages[index];
+      if (cut === undefined)
+        throw new ConversationDigestError(
+          'target_not_found',
+          `no message at byte ${through.byteOffset} block ${through.blockIndex}`,
+        );
+      return {
+        sessionId: target.sessionId,
+        through,
+        messages: messages
+          .slice(0, index + 1)
+          .map(({ point, role, text: said, timestamp }) => ({ point, role, text: said, timestamp })),
+        omissions: [],
+        selectionEvidence: { point: through, rawPrefix: rawPrefixOf(text, cut.recordEnd) },
+      };
+    },
+  };
+}
+
+/**
+ * The selection binding the read surface issues and a fork verifies: a hash of the exact source, transcript, point and
+ * raw prefix. It accepts exactly what it issued, so a replaced row or an earlier record rewritten under it is stale.
+ */
+function bindingFor(evidence: {
+  readonly sourceSessionId: string;
+  readonly sourceIncarnation: string;
+  readonly transcriptProvenance: { readonly file?: string | undefined };
+  readonly through: ConversationMessagePoint;
+  readonly rawPrefix: Uint8Array;
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        evidence.sourceSessionId,
+        evidence.sourceIncarnation,
+        evidence.transcriptProvenance.file ?? null,
+        evidence.through,
+        hex(evidence.rawPrefix),
+      ]),
+    )
+    .digest('hex');
+}
+
+/** The vault's one-open batch read, with a redactor that can be told to scrub. */
+function redaction(scrub: (text: string) => string): Pick<Redaction, 'read'> {
+  return { read: async work => await work({ text: scrub, cells: grid => grid, lines: lines => lines }) };
+}
+
+/** The attachment inventory over the attachment owner's store: what a manifest holds, and whether it is encrypted. */
+function inventoryOf(store: MemoryAttachmentStore): {
+  list(sessionId: string): Promise<readonly TransferAttachmentView[]>;
+} {
+  return {
+    list: async sessionId => {
+      const views: TransferAttachmentView[] = [];
+      for (const key of store.files.keys()) {
+        const [session, attachment, file] = key.split('/');
+        if (session !== sessionId || file !== 'manifest' || attachment === undefined) continue;
+        const bytes = await store.read(session, attachment, 'manifest');
+        if (bytes === undefined) continue;
+        views.push(JSON.parse(new TextDecoder().decode(bytes)) as TransferAttachmentView);
+      }
+      return views;
+    },
+  };
 }
 
 interface JourneyOptions {
@@ -345,48 +446,54 @@ interface Journey {
   /** The absolute wrapper the target account is launched through. */
   readonly executable: string;
   readonly transcriptFile: string;
-  /** Opaque evidence issued by a real initial transcript read under this state home's durable key. */
+  /** Opaque evidence issued by an initial transcript read, standing in for the read surface's message token. */
   readonly selectionBinding: string;
   /** Everything the preparer, the launcher and the runtime path were observed doing, in order. */
   readonly happened: string[];
   /** Every target id this fork's id factory was asked for. A second entry is a second target. */
   readonly minted: string[];
   fork(key: SessionForkKey, command: SessionForkCommand): Promise<SessionForkResult>;
-  /** Closes the state home and reopens it, rebuilding every adapter: a real process boundary. */
+  /** A process boundary: a fresh session store (and the loss of its in-memory index) over the very same state. */
   restart(): Promise<void>;
   storage(): DaemonStorage;
   directory(id: string): string;
-  attachments(): SessionAttachmentStore;
+  /** Where the target's opening-turn document is, as the brief writer names it. */
+  briefPath(id: string): string;
+  /** The attachment owner's store: the source's originals are read from it and the target's written into it. */
+  readonly attachments: MemoryAttachmentStore;
   /** Rewrites the source transcript ONCE, after preparation has frozen its plan and before import. */
   moveSourceAfterPrepare(text: string): void;
   /** Makes the target's transcript capture throw, reproducing a death just after the import. */
   breakCapture(broken: boolean): void;
-  writeTranscript(text: string): Promise<void>;
+  writeTranscript(text: string): void;
   snapshotSource(): Promise<Snapshot>;
   /** The durable event pointers of the source and its descendant, resolved through the index. */
   pointers(): Promise<string>;
   receipt(requestId: string): Promise<Record<string, unknown>>;
   hasReceipt(requestId: string): Promise<boolean>;
   /** The plan copy beneath the target, which exists from `plan_persisted` onwards. */
-  targetPlan(id: string): Promise<string>;
+  targetPlan(id: string): string;
+  /** Replaces the plan copy beneath the target with a different decision under the same id. */
+  replaceTargetPlan(id: string, change: (held: SessionTransferPlan) => SessionTransferPlan): void;
   target(id: string): Promise<{
     readonly config: Record<string, unknown>;
     readonly plan: string;
     readonly brief: string;
   }>;
-  close(): Promise<void>;
 }
 
 async function journey(label: string, options: JourneyOptions = {}): Promise<Journey> {
   const targetHarness = options.targetHarness ?? 'claude';
-  const home = await realTemporaryDirectory(`fy-journey-${label}-`);
   const cwd = await realTemporaryDirectory(`fy-journey-${label}-cwd-`);
-  const fleet = await realTemporaryDirectory(`fy-journey-${label}-fleet-`);
-  const harnessHome = await realTemporaryDirectory(`fy-journey-${label}-harness-`);
-  const transcriptDirectory = await realTemporaryDirectory(`fy-journey-${label}-transcript-`);
-  const transcriptFile = join(transcriptDirectory, 'source.jsonl');
+  const opened = await openStorage(label);
+  const folder: MemoryStateFolder = opened.folder;
+  let storage = opened.storage;
+  const attachments = new MemoryAttachmentStore();
   const happened: string[] = [];
   const minted: string[] = [];
+  const environments = new Map<string, Readonly<Record<string, string>>>();
+  const effects = memoryEffectLedger();
+  let transcript = '';
   let brokenCapture = false;
   let moveAfterPrepare: string | undefined;
   let harnessSessions = 0;
@@ -394,15 +501,9 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
   let loseRuntimeOutcome = options.loseRuntimeOutcomeOnce === true;
   let loseImportStamp = options.loseImportStampOnce === true;
 
-  /**
-   * The published fleet: two accounts and their wrappers, written as the real scripts a fleet
-   * publishes, so the production wrapper reader learns each harness home from a file rather than
-   * from a fake that agrees with this test by construction.
-   */
-  const claudeExecutable = join(fleet, 'claude-auto-zelda');
-  const codexExecutable = join(fleet, 'codex-auto-terra');
-  await writeFile(claudeExecutable, `#!/bin/sh\nexport CLAUDE_CONFIG_DIR=${harnessHome}\nexec claude "$@"\n`);
-  await writeFile(codexExecutable, `#!/bin/sh\nexport CODEX_HOME=${harnessHome}\nexec codex "$@"\n`);
+  /** The published fleet: two accounts, as the fleet manifest declares them. */
+  const claudeExecutable = '/fleet/bin/claude-auto-zelda';
+  const codexExecutable = '/fleet/bin/codex-auto-terra';
   const published: readonly SessionForkTargetAccount[] = [
     { account: account({ wrapper: claudeExecutable }), executable: claudeExecutable },
     {
@@ -411,7 +512,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         agent: 'codex-auto-terra',
         kind: 'codex',
         wrapper: codexExecutable,
-        home: harnessHome,
+        home: TARGET_HARNESS_HOME,
         displayName: 'Terra',
         defaultModel: 'gpt-5.6-terra',
         models: [{ id: 'gpt-5.6-terra', available: true }],
@@ -422,32 +523,10 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
   const chosen = published[targetHarness === 'claude' ? 0 : 1];
   if (chosen === undefined) throw new Error('the journey fleet is missing its target account');
 
-  let opened = await openStorageAt(home);
-  const createMessageTokens = (paths: FoundationPaths): FileSessionTranscriptMessageTokenCodec => {
-    const keyFile = sessionMessageTokenKeyFile(paths.state);
-    return new FileSessionTranscriptMessageTokenCodec(keyFile, writerId => temporaryFilePath(paths, keyFile, writerId));
-  };
-  let messageTokens = createMessageTokens(opened.paths);
-  const directory = (id: string): string => createSessionPaths(opened.paths, parseSessionId(id)).directory;
-  const effects = new FileSessionEffectLedger(id => directory(id));
-  const attachments = (): SessionAttachmentStore =>
-    new SessionAttachmentStore({
-      daemonId: DAEMON_ID,
-      originals: new FileAttachmentOriginals(id => attachmentDirectory(opened.paths.state, DAEMON_ID, id)),
-      decrypt: async () => {
-        throw new Error('no unlock is exercised here');
-      },
-      now: () => new Date(AT),
-    });
-  /** The target's private credential file: written by the lifecycle, proved by the binder. */
-  const environments = (): FileSessionEnvironmentStore => new FileSessionEnvironmentStore(id => directory(id));
-
-  const conversationReader = (storage: DaemonStorage): StorageTransferConversationReader =>
-    new StorageTransferConversationReader(
-      [new NodeTranscriptSource(new ClaudeTranscriptParser()), new NodeTranscriptSource(new CodexTranscriptParser())],
-      new StorageTranscriptDigestJournal(storage),
-      { batch: async work => work({ text: options.redact ?? (text => text), data: value => value, cover: () => [] }) },
-    );
+  const directory = (id: string): string => opened.sessionDirectory(id);
+  const redactor = redaction(options.redact ?? (text => text));
+  const owner = transcriptOwner(() => transcript);
+  const conversation = new StorageTransferConversationReader(owner, redactor);
 
   /** The composition root's own start-account resolution, over the two published accounts. */
   async function resolveAccount(agent: string): Promise<SessionForkTargetAccount> {
@@ -459,11 +538,17 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     return found;
   }
 
+  // ONE brief writer and ONE copier, handed to the import half as writers and to the proof half as readers: two
+  // instances over one layout would be two answers to where the target's bytes are.
+  const brief = new FileSessionTransferBriefWriter(opened.state);
+  const copier = new FileSessionAttachmentCopier(attachments);
+  const plans = new FileSessionTransferTargetPlanStore(opened.state);
+
   /** The lifecycle every other create goes through, with only its terminal seam replaced. */
   function lifecycle(id: SessionId, envelope?: SessionProtocolEnvelope): SessionLifecycleService {
     return new SessionLifecycleService(
       {
-        repository: new StorageSessionLifecycleRepository(opened.storage, envelope),
+        repository: new StorageSessionLifecycleRepository(storage, envelope),
         launcher: {
           alive: async () => terminalAlive,
           launch: async () => {
@@ -482,7 +567,8 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
             terminalAlive = false;
           },
         },
-        tasks: new FileSessionTaskStore(held => directory(held)),
+        // The lifecycle's turn-one document IS the brief file: both are the one document the new agent is pointed at.
+        tasks: { writeAssignedTask: async (held, document) => await brief.write(held, document) },
         effects,
         directories: new NodeWorkingDirectoryResolver(),
         ids: {
@@ -493,74 +579,81 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         },
         clock: { now: () => AT },
         serial: new KeyedSerialExecutor(),
-        // The production issuer and the production environment store, because the binder proves the
-        // record's hash against the credential really on disk before it launches anything.
-        credentials: new NodeSessionCredentialIssuer(),
-        environment: environments(),
+        // The binder proves the record's hash against the credential really held before it launches anything.
+        credentials: {
+          issue: () => ({
+            capability: `capability-${id}`,
+            hash: createHash('sha256').update(`capability-${id}`).digest('hex'),
+          }),
+        },
+        environment: {
+          write: async (held, variables) => {
+            environments.set(held, { ...variables });
+          },
+          read: async held => environments.get(held) ?? {},
+        },
       },
       defaultSessionLifecycleSettings,
     );
   }
 
+  /** The conversation plugin's capture, Claude arm and Codex arm, with the argv that makes each record true. */
+  const capture = async (request: {
+    readonly harness: 'claude' | 'codex';
+    readonly cwd: string;
+    readonly correlationToken: string;
+  }): Promise<{
+    provenance: SessionView['config']['transcript'];
+    launchArguments: readonly string[];
+  }> => {
+    if (request.harness === 'codex')
+      return {
+        provenance: {
+          v: 1,
+          home: TARGET_HARNESS_HOME,
+          identity: 'undiscovered',
+          correlationToken: request.correlationToken,
+        },
+        launchArguments: codexCorrelationArguments(request.correlationToken),
+      };
+    harnessSessions += 1;
+    const harnessSessionId = `harness-target-${String(harnessSessions)}`;
+    return {
+      provenance: {
+        v: 1,
+        home: TARGET_HARNESS_HOME,
+        harnessSessionId,
+        identity: 'minted',
+        file: harnessFacts.claudeTranscriptFile(TARGET_HARNESS_HOME, request.cwd, harnessSessionId),
+        resolvedAt: AT,
+      },
+      launchArguments: claudeSessionArguments(harnessSessionId),
+    };
+  };
+
+  const codexCatalog: CodexRuntimeCatalogCache = { get: async () => CODEX_CATALOG };
+
   /** The one place the production adapter set is built, so a restart rebuilds all of it. */
   function ports(): SessionForkPorts {
-    const storage = opened.storage;
-    const paths = opened.paths;
-    const conversation = conversationReader(storage);
     const preparer = new SessionTransferPreparer({
       source: new StorageTransferSourceReader(storage),
-      selection: {
-        verifySelection: async (evidence, binding) =>
-          (await verifySessionTranscriptMessageToken(
-            messageTokens,
-            SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-            {
-              sessionId: evidence.sourceSessionId,
-              incarnation: evidence.sourceIncarnation,
-              provenance: evidence.transcriptProvenance,
-            },
-            evidence.through,
-            evidence.rawPrefix,
-            binding,
-          )) === 'accepted',
-      },
+      selection: { verifySelection: async (evidence, binding) => bindingFor(evidence) === binding },
       contributors: {
-        conversation: new ConversationFacetContributor(conversation, {
-          batch: async work => work({ text: options.redact ?? (text => text), data: value => value, cover: () => [] }),
-        }),
-        attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(attachments())),
+        conversation: new ConversationFacetContributor(conversation, redactor),
+        attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(inventoryOf(attachments))),
         references: new ReferenceFacetContributor(),
-        workspace: new WorkspaceFacetContributor(
-          new GitTransferWorkspaceProbe(
-            new GitWorktreeGateway(new BunGitRunner(), new NodeWorktreeFileSystem(), new SystemWorktreeClock()),
-          ),
-        ),
+        workspace: new WorkspaceFacetContributor({ probe: async () => ({ head: null, status: null }) }),
         lineage: new LineageFacetContributor(),
       },
     });
-    const plans = new FileSessionTransferTargetPlanStore(id => join(directory(id), 'transfer-plan.json'));
     const resolver = new SessionForkTargetResolver({
       accounts: resolveAccount,
       planner: planner(),
       harness: { planSwitch: planRuntimeSwitch },
-      catalog: new CodexRuntimeCatalogCache(async () => CODEX_CATALOG),
+      catalog: codexCatalog,
+      catalogs: harnessCatalogs,
+      harnessFacts,
     });
-    const capture = new TranscriptProvenanceCapture(
-      new FileHarnessWrapperSource(),
-      {
-        next: () => {
-          harnessSessions += 1;
-          return `harness-target-${String(harnessSessions)}`;
-        },
-      },
-      { ids: async () => [] },
-      {},
-    );
-    // ONE brief writer and ONE copier, handed to the import half as writers and to the proof half as
-    // readers: two instances over one layout would be two answers to where the target's bytes are.
-    const brief = new FileSessionTransferBriefWriter(id => directory(id));
-    // The store's OWN tree, spelled exactly as the composition root spells it.
-    const copier = new FileSessionAttachmentCopier(id => join(paths.state, 'attachments', DAEMON_ID, id));
     const binder = new SessionForkTargetBinder({
       storage,
       createLifecycle: (id, envelope) => lifecycle(id, envelope),
@@ -572,18 +665,18 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         install: async (id, plan) => await plans.install(id, plan),
       },
       transcripts: {
-        // The crash lever: a fork that died between recording `imported` and capturing the target's
-        // own transcript identity. Everything either side of it is the production capture.
+        // The crash lever: a fork that died between recording `imported` and capturing the target's own transcript
+        // identity. Everything either side of it is the capture.
         capture: async request => {
           if (brokenCapture) throw new Error('the harness home could not be read');
-          return await capture.capture(request);
+          return await capture(request);
         },
       },
       importPorts: { envelope: new StorageTransferEnvelopeWriter(storage), brief, attachments: copier, conversation },
-      // The same two writers, read-only: a later phase proves the brief and the copied original are
-      // still what the receipt claimed rather than repairing either just before a launch.
+      // The same two writers, read-only: a later phase proves the brief and the copied original are still what the
+      // receipt claimed rather than repairing either just before a launch.
       imported: { brief, attachments: copier },
-      environment: environments(),
+      environment: { read: async id => environments.get(id) ?? {} },
       tmuxSession: id => sessionTmuxName(id, defaultSessionLifecycleSettings),
       runtime: {
         startupWhileHeld: async (sessionId, request, requestId) => {
@@ -619,12 +712,14 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
           await effects.settle(key, fingerprint, AT);
         },
       },
-      view: async id => await view(storage, paths, id).catch(() => undefined),
+      view: async id => await view(storage, directory, id).catch(() => undefined),
       sessionDirectory: id => directory(id),
+      harnessFacts,
+      readableHandoffs: id => [`${directory(id)}/turns`],
       clock: { now: () => AT },
     });
     const queue = new KeyedSerialExecutor();
-    const receipts = new FileSessionForkReceiptStore(held => forkReceiptFile(paths.state, held));
+    const receipts = new StateSessionForkReceiptStore(opened.state);
     return {
       receipts: {
         read: async key => await receipts.read(key),
@@ -642,10 +737,10 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         prepare: async request => {
           happened.push(`prepare:${JSON.stringify(request.cutMessagePoint)}`);
           const plan = await preparer.prepare(request);
-          // The source moves on between the decision and the import, which is precisely the race a
-          // frozen plan and the import's re-read exist to survive. One shot, so the retry is clean.
+          // The source moves on between the decision and the import, which is precisely the race a frozen plan and
+          // the import's re-read exist to survive. One shot, so the retry is clean.
           if (moveAfterPrepare !== undefined) {
-            await writeFile(transcriptFile, moveAfterPrepare);
+            transcript = moveAfterPrepare;
             moveAfterPrepare = undefined;
           }
           return plan;
@@ -671,55 +766,66 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
   }
 
   /**
-   * The source, its descendant, its waiters, its journal, its locked attachment and its transcript.
+   * The source, its descendant, its journal, its locked attachment and its transcript.
    *
-   * Written through the production stores, so the snapshot a later assertion compares is a snapshot
-   * of documents this daemon really produces rather than of literals this file invented.
+   * Written through the production stores, so the snapshot a later assertion compares is a snapshot of documents this
+   * daemon really produces rather than of literals this file invented.
    */
   async function seed(): Promise<void> {
     const source = parseSessionId(SOURCE_ID);
     const descendant = parseSessionId(DESCENDANT_ID);
     const warden = options.warden === true;
-    await writeFile(transcriptFile, sourceTranscript());
-    await opened.storage.writeConfig(source, sourceConfiguration({ id: SOURCE_ID, cwd, transcriptFile, warden }));
-    await opened.storage.writeState(source, sessionState(SOURCE_ID));
-    await opened.storage.append(source, 'session.created', { agent: 'claude-auto-source' });
-    await opened.storage.append(source, 'session.turn', { turn: 12 });
-    // A descendant of the source, so "a fork never restamps the tree hanging off what it read" has
-    // something real to be true about.
-    await opened.storage.writeConfig(descendant, {
-      ...sourceConfiguration({ id: DESCENDANT_ID, cwd, transcriptFile, warden }),
+    transcript = sourceTranscript();
+    await storage.writeConfig(
+      source,
+      sourceConfiguration({ id: SOURCE_ID, cwd, transcriptFile: TRANSCRIPT_FILE, warden }),
+    );
+    await storage.writeState(source, sessionState(SOURCE_ID));
+    await storage.append(source, 'session.created', { agent: 'claude-auto-source' });
+    await storage.append(source, 'session.turn', { turn: 12 });
+    // A descendant of the source, so "a fork never restamps the tree hanging off what it read" has something real to
+    // be true about.
+    await storage.writeConfig(descendant, {
+      ...sourceConfiguration({ id: DESCENDANT_ID, cwd, transcriptFile: TRANSCRIPT_FILE, warden }),
       parent: SOURCE_ID,
       teammate: 'savana',
     });
-    await opened.storage.writeState(descendant, sessionState(DESCENDANT_ID));
-    await opened.storage.append(descendant, 'session.created', { parent: SOURCE_ID });
-    // Waiter, channel and coordination artefacts, in the exact files their own adapters own.
-    const held = directory(SOURCE_ID);
-    await mkdir(join(held, 'channel'), { recursive: true, mode: 0o700 });
-    await mkdir(join(held, 'checks'), { recursive: true, mode: 0o700 });
-    await mkdir(join(held, 'turns'), { recursive: true, mode: 0o700 });
-    await writeFile(join(held, 'channel', 'inbox.jsonl'), `${JSON.stringify({ at: AT, from: 'alistair' })}\n`);
-    await writeFile(
-      join(held, 'channel', 'sends.jsonl'),
-      `${JSON.stringify({ sendId: 'send-1', at: AT, awaitingReply: true })}\n`,
+    await storage.writeState(descendant, sessionState(DESCENDANT_ID));
+    await storage.append(descendant, 'session.created', { parent: SOURCE_ID });
+    // The source's own first turn, in the very file the target's opening turn is written to under ITS id.
+    await brief.write(parseSessionId(SOURCE_ID), '# The source own first turn\n');
+    // The locked original and its manifest, in the attachment owner's store.
+    const sha256 = createHash('sha256').update(LOCKED_PDF).digest('hex');
+    const id = `att_${sha256}`;
+    await attachments.write(
+      SOURCE_ID,
+      id,
+      'manifest',
+      new TextEncoder().encode(
+        JSON.stringify({
+          id,
+          filename: 'brief.pdf',
+          mime: 'application/pdf',
+          size: LOCKED_PDF.byteLength,
+          sha256,
+          createdAt: AT,
+          encrypted: { kind: 'pdf' },
+        }),
+      ),
     );
-    await writeFile(join(held, 'checks', 'waiting.json'), `${JSON.stringify({ since: AT, condition: 'a reply' })}\n`);
-    await writeFile(join(held, 'turns', 'turn-001.md'), '# The source own first turn\n');
-    await writeFile(join(held, 'attention.json'), `${JSON.stringify({ v: 1, entries: [] })}\n`);
-    await attachments().upload(SOURCE_ID, { filename: 'brief.pdf', mime: 'application/pdf', bytes: LOCKED_PDF });
+    await attachments.write(SOURCE_ID, id, 'original', LOCKED_PDF);
   }
 
   /**
-   * What a real GET messages read would hand back for the cut: one transcript pass, then one opaque
-   * tag under the same durable codec preparation receives. The raw prefix never leaves this helper.
+   * What a real GET messages read would hand back for the cut: one transcript pass, then one opaque tag. The raw
+   * prefix never leaves this helper.
    */
   async function issueInitialSelectionBinding(): Promise<string> {
-    const config = SessionConfigSchema.parse(await opened.storage.readConfig(parseSessionId(SOURCE_ID)));
+    const config = SessionConfigSchema.parse(await storage.readConfig(parseSessionId(SOURCE_ID)));
     const provenance = config.transcript;
     if (provenance === undefined || provenance.identity === 'undiscovered')
       throw new Error('the source fixture must carry completed transcript provenance');
-    const digest = await conversationReader(opened.storage).digest({
+    const digest = await conversation.digest({
       sourceSessionId: SOURCE_ID,
       sourceHarness: config.harness,
       transcriptProvenance: provenance,
@@ -730,37 +836,47 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
       throw new Error('the initial transcript read did not produce private raw-prefix evidence for the cut');
     if (!sameConversationMessagePoint(evidence.point, CUT))
       throw new Error('the initial transcript read returned evidence for a different message point');
-    return await issueSessionTranscriptMessageToken(
-      messageTokens,
-      SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-      { sessionId: SOURCE_ID, incarnation: config.incarnation, provenance },
-      CUT,
-      evidence.rawPrefix,
-    );
+    return bindingFor({
+      sourceSessionId: SOURCE_ID,
+      sourceIncarnation: config.incarnation,
+      transcriptProvenance: provenance,
+      through: CUT,
+      rawPrefix: evidence.rawPrefix,
+    });
   }
 
   await seed();
   const selectionBinding = await issueInitialSelectionBinding();
+
+  const planText = (id: string): string => {
+    const held = folder.raw(TransferPlanFiles, id);
+    if (held === undefined) throw new Error(`target ${id} holds no plan copy`);
+    return held;
+  };
+  /** The plan copy as the plan, without the state document's own format stamp. */
+  const planOf = (id: string): SessionTransferPlan => {
+    const { format: _format, ...held } = JSON.parse(planText(id)) as Record<string, unknown>;
+    return held as unknown as SessionTransferPlan;
+  };
 
   return {
     cwd,
     agent: chosen.account.agent,
     model: chosen.account.defaultModel ?? '',
     executable: chosen.executable,
-    transcriptFile,
+    transcriptFile: TRANSCRIPT_FILE,
     selectionBinding,
     happened,
     minted,
     fork: async (held, command_) => await new SessionForkService(ports()).fork(held, command_),
     restart: async () => {
-      await opened.storage.close();
-      opened = await openStorageAt(home);
-      // A process boundary forgets the in-memory key promise; the new codec must adopt the durable
-      // winner and still verify the binding issued before the restart.
-      messageTokens = createMessageTokens(opened.paths);
+      // A process boundary forgets every in-memory index; the state it was a cache of is all that survives.
+      for (const database of folder.databases.keys()) folder.databases.delete(database);
+      storage = (await memoryStorage({ folder, clock: { now: () => AT } })).storage;
     },
-    storage: () => opened.storage,
+    storage: () => storage,
     directory,
+    briefPath: id => brief.file(parseSessionId(id)),
     attachments,
     moveSourceAfterPrepare: text => {
       moveAfterPrepare = text;
@@ -768,58 +884,53 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     breakCapture: broken => {
       brokenCapture = broken;
     },
-    writeTranscript: async text => await writeFile(transcriptFile, text),
+    writeTranscript: text => {
+      transcript = text;
+    },
     snapshotSource: async () => {
-      const into: Snapshot = { transcript: (await readFile(transcriptFile)).toString('hex') };
-      await snapshotTree(directory(SOURCE_ID), 'source', into);
-      await snapshotTree(directory(DESCENDANT_ID), 'descendant', into);
-      await snapshotTree(join(opened.paths.state, 'attachments', DAEMON_ID, SOURCE_ID), 'attachments', into);
+      const into: Snapshot = { transcript: hex(transcript) };
+      for (const [key, text] of folder.files)
+        if (key.startsWith(`${SOURCE_ID}/`) || key.startsWith(`${DESCENDANT_ID}/`)) into[key] = hex(text);
+      for (const [key, bytes] of folder.bytes)
+        if (key.startsWith(`${SOURCE_ID}/`) || key.startsWith(`${DESCENDANT_ID}/`)) into[key] = hex(bytes);
+      for (const [key, bytes] of attachments.files)
+        if (key.startsWith(`${SOURCE_ID}/`)) into[`attachments/${key}`] = hex(bytes);
       return into;
     },
     pointers: async () =>
       JSON.stringify([
-        await opened.storage.replay(parseSessionId(SOURCE_ID)),
-        await opened.storage.replay(parseSessionId(DESCENDANT_ID)),
+        await storage.replay(parseSessionId(SOURCE_ID)),
+        await storage.replay(parseSessionId(DESCENDANT_ID)),
       ]),
     receipt: async requestId =>
-      JSON.parse(
-        await readFile(forkReceiptFile(opened.paths.state, { sourceSessionId: SOURCE_ID, requestId }), 'utf8'),
-      ) as Record<string, unknown>,
+      JSON.parse(folder.raw(ForkFiles, forkReceiptName({ sourceSessionId: SOURCE_ID, requestId })) ?? 'null') as Record<
+        string,
+        unknown
+      >,
     hasReceipt: async requestId =>
-      await readFile(forkReceiptFile(opened.paths.state, { sourceSessionId: SOURCE_ID, requestId })).then(
-        () => true,
-        () => false,
-      ),
-    targetPlan: async id => await readFile(join(directory(id), 'transfer-plan.json'), 'utf8'),
+      folder.raw(ForkFiles, forkReceiptName({ sourceSessionId: SOURCE_ID, requestId })) !== undefined,
+    targetPlan: id => JSON.stringify(planOf(id)),
+    replaceTargetPlan: (id, change) => {
+      const held = JSON.parse(planText(id)) as Record<string, unknown>;
+      folder.plant(TransferPlanFiles, `${JSON.stringify({ ...held, ...change(planOf(id)) })}\n`, id);
+    },
     target: async id => ({
-      config: (await opened.storage.readConfig(parseSessionId(id))) as Record<string, unknown>,
-      plan: await readFile(join(directory(id), 'transfer-plan.json'), 'utf8'),
-      brief: await readFile(join(directory(id), 'turns', 'turn-001.md'), 'utf8'),
+      config: (await storage.readConfig(parseSessionId(id))) as Record<string, unknown>,
+      plan: JSON.stringify(planOf(id)),
+      brief: new TextDecoder().decode(folder.rawBytes(TransferBriefFiles, id)),
     }),
-    close: async () => await opened.storage.close(),
   };
 }
 
-/** A real, locked state home with a real SQLite index behind it, at an EXISTING home path. */
-async function openStorageAt(home: string): Promise<{ storage: DaemonStorage; paths: FoundationPaths }> {
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(AT)),
-    () => new KeyedSerialExecutor(),
-  );
-  const opened = await factory.open();
-  return { storage: opened.storage, paths: opened.paths };
-}
-
-async function view(storage: DaemonStorage, paths: FoundationPaths, id: SessionId): Promise<SessionView> {
+async function view(
+  storage: DaemonStorage,
+  sessionDirectory: (id: string) => string,
+  id: SessionId,
+): Promise<SessionView> {
   return {
     config: SessionConfigSchema.parse(await storage.readConfig(id)),
     state: SessionStateSchema.parse(await storage.readState(id)),
-    directory: createSessionPaths(paths, id).directory,
+    directory: sessionDirectory(id),
   };
 }
 
@@ -862,21 +973,20 @@ describe('the fork journey over real storage', () => {
 
     // Assert FIRST that the snapshot is a proof of anything: an empty map compares equal to an empty
     // map, so a path typo anywhere in it would turn the immutability assertion below into a no-op.
+    // The waiters, channel and attention files belong to other modules and are not part of this state; what a fork
+    // could touch of the source is its documents, its journal, its first turn, its attachments and its transcript.
     should(Object.keys(before)).containDeep([
       'transcript',
-      'source/config.json',
-      'source/state.json',
-      'source/events.jsonl',
-      'source/session-version',
-      'source/attention.json',
-      'source/channel/inbox.jsonl',
-      'source/channel/sends.jsonl',
-      'source/checks/waiting.json',
-      'source/turns/turn-001.md',
-      'descendant/config.json',
-      'descendant/state.json',
-      'descendant/events.jsonl',
+      `${SOURCE_ID}/config.json`,
+      `${SOURCE_ID}/state.json`,
+      `${SOURCE_ID}/history.jsonl`,
+      `${DESCENDANT_ID}/config.json`,
+      `${DESCENDANT_ID}/state.json`,
+      `${DESCENDANT_ID}/history.jsonl`,
     ]);
+    should(Object.keys(before).filter(path => path.startsWith(`${SOURCE_ID}/`) && path.includes('turn'))).have.length(
+      1,
+    );
     // The locked original and its manifest, in the store's own tree.
     should(Object.keys(before).filter(path => path.startsWith('attachments/'))).have.length(2);
     should(Object.values(before).filter(bytes => bytes === '')).eql([]);
@@ -953,8 +1063,10 @@ describe('the fork journey over real storage', () => {
       '--rc',
       '--remote-control-session-name-prefix',
       `fyrc-${outcome.targetSessionId}`,
+      // Its own turn documents, readable without a permission prompt, ahead of the operator's flags.
+      `--allowedTools=Read(/${subject.directory(outcome.targetSessionId)}/turns/**)`,
       SOURCE_FLAG,
-      ...startupModelArguments('claude-opus-5'),
+      ...harnessFacts.startupModelArguments('claude-opus-5'),
       ...claudeSessionArguments('harness-target-1'),
     ]);
 
@@ -964,15 +1076,15 @@ describe('the fork journey over real storage', () => {
     should(held.brief).equal(assignedTaskDocument(forkOpeningTurn(outcome.plan)));
     should(held.brief).match(/Prior context carried into this session by a fork/u);
     should(held.brief).match(new RegExp(CARRIED, 'u'));
-    should(outcome.report.briefPath).equal(join(subject.directory(outcome.targetSessionId), 'turns', 'turn-001.md'));
+    should(outcome.report.briefPath).equal(subject.briefPath(outcome.targetSessionId));
 
     // Assert: the locked original is copied byte for byte into the tree the store itself reads.
     const attachmentId = outcome.plan.facets.attachments.attachments[0]?.id ?? '';
     should(outcome.report.copiedAttachmentIds).eql([attachmentId]);
-    const copied = await subject.attachments().download(outcome.targetSessionId, attachmentId);
-    should(copied.bytes).eql(LOCKED_PDF);
-    should(copied.attachment.encrypted).eql({ kind: 'pdf', locked: true });
-    should((await subject.attachments().list(outcome.targetSessionId)).map(entry => entry.id)).eql([attachmentId]);
+    const copied = await subject.attachments.read(outcome.targetSessionId, attachmentId, 'original');
+    should(copied).eql(LOCKED_PDF);
+    const manifest = await subject.attachments.read(outcome.targetSessionId, attachmentId, 'manifest');
+    should(JSON.parse(new TextDecoder().decode(manifest)).encrypted).eql({ kind: 'pdf' });
     should(outcome.plan.notCarried.filter(omission => omission.reason === 'credential')).have.length(1);
     // Same family, so the operator's own launch arguments cross rather than being dropped.
     should(outcome.plan.notCarried.filter(omission => omission.reason === 'harness_incompatible')).eql([]);
@@ -981,7 +1093,6 @@ describe('the fork journey over real storage', () => {
     // are byte-for-byte what they were, and its durable event pointers still resolve identically.
     should(await subject.snapshotSource()).eql(before);
     should(await subject.pointers()).equal(pointersBefore);
-    await subject.close();
   });
 
   it('should launch, apply the planned reasoning level and only then deliver the opening turn', async () => {
@@ -999,7 +1110,6 @@ describe('the fork journey over real storage', () => {
       `runtime:{"action":"effort","effort":"high"}:${outcome.plan.planId}:startup-runtime`,
       'deliver:turn-one',
     ]);
-    await subject.close();
   });
 
   it('should refuse a replay whose startup runtime action began but never settled', async () => {
@@ -1033,7 +1143,6 @@ describe('the fork journey over real storage', () => {
     ]);
     should(times(subject, 'runtime')).equal(1);
     should(times(subject, 'deliver')).equal(0);
-    await subject.close();
   });
 
   it('should ask for no runtime control at all when the fork chose no reasoning level', async () => {
@@ -1050,7 +1159,6 @@ describe('the fork journey over real storage', () => {
       'launch',
       'deliver:turn-one',
     ]);
-    await subject.close();
   });
 
   it('should fork across harness families at the same point, dropping the flags its plan names', async () => {
@@ -1098,7 +1206,7 @@ describe('the fork journey over real storage', () => {
     // translated into one it might accept.
     should(held.config.command).eql([
       subject.executable,
-      ...startupModelArguments('gpt-5.6-terra'),
+      ...harnessFacts.startupModelArguments('gpt-5.6-terra'),
       ...codexCorrelationArguments(subject.directory(outcome.targetSessionId)),
     ]);
     should(subject.happened.filter(step => step.startsWith('runtime:'))).eql([
@@ -1109,7 +1217,6 @@ describe('the fork journey over real storage', () => {
 
     // Assert: the source it read is untouched by having been read across families.
     should(await subject.snapshotSource()).eql(before);
-    await subject.close();
   });
 
   it('should reuse one target and one frozen plan after a lost response and a restart', async () => {
@@ -1139,7 +1246,6 @@ describe('the fork journey over real storage', () => {
     should(after.config).eql(held.config);
     should(await subject.snapshotSource()).eql(before);
     should((await subject.receipt('lost')).phase).equal('completed');
-    await subject.close();
   });
 
   it('should recover a lost import receipt stamp from the complete target after the source becomes unreadable', async () => {
@@ -1159,7 +1265,7 @@ describe('the fork journey over real storage', () => {
 
     // The pinned source can no longer answer the cut. A replay that entered SessionTransferImporter
     // again would now refuse `cut_unreadable`; only target-first proof can close the lost boundary.
-    await subject.writeTranscript(truncatedTranscript());
+    subject.writeTranscript(truncatedTranscript());
     await subject.restart();
 
     // Act
@@ -1171,7 +1277,7 @@ describe('the fork journey over real storage', () => {
     should(replay.targetSessionId).equal(targetId);
     should(replay.plan).eql(frozen);
     should(replay.report).eql({
-      briefPath: join(subject.directory(targetId), 'turns', 'turn-001.md'),
+      briefPath: subject.briefPath(targetId),
       copiedAttachmentIds: frozen.facets.attachments.attachments.map(attachment => attachment.id),
     });
     should((await subject.receipt('lost-import-stamp')).phase).equal('completed');
@@ -1180,7 +1286,6 @@ describe('the fork journey over real storage', () => {
     should(times(subject, 'create')).equal(1);
     should(times(subject, 'launch')).equal(1);
     should(times(subject, 'deliver')).equal(1);
-    await subject.close();
   });
 
   it('should refuse a changed payload under a spent request id without preparing or writing anything', async () => {
@@ -1202,7 +1307,6 @@ describe('the fork journey over real storage', () => {
     should(times(subject, 'prepare')).equal(1);
     should((await subject.target(first.targetSessionId)).config).eql(held.config);
     should(await subject.snapshotSource()).eql(before);
-    await subject.close();
   });
 
   it('should stale same-point and earlier-prefix replacements before claiming a receipt or minting a target', async () => {
@@ -1213,9 +1317,9 @@ describe('the fork journey over real storage', () => {
 
     // Act: first replace the selected row at the same durable point, then restore that row while
     // replacing only an earlier record. Both still parse and both still contain CUT.
-    await subject.writeTranscript(rewrittenTranscript());
+    subject.writeTranscript(rewrittenTranscript());
     const samePoint = await refused(subject.fork(key('selection-same-point'), command(subject)));
-    await subject.writeTranscript(earlierRewrittenTranscript());
+    subject.writeTranscript(earlierRewrittenTranscript());
     const earlierPrefix = await refused(subject.fork(key('selection-earlier-prefix'), command(subject)));
 
     // Assert: one public refusal for either mismatch, at preparation's read-only boundary. The id
@@ -1232,7 +1336,6 @@ describe('the fork journey over real storage', () => {
     // Apart from the transcript mutations this case deliberately made, preparation changed no
     // source, descendant, coordination or attachment byte.
     should(besideTheTranscript(await subject.snapshotSource())).eql(besideTheTranscript(before));
-    await subject.close();
   });
 
   it('should refuse while the pinned message has been rewritten or removed, and reserve one target', async () => {
@@ -1244,7 +1347,7 @@ describe('the fork journey over real storage', () => {
 
     // Act
     const rewritten = await refused(subject.fork(key('moving'), command(subject)));
-    await subject.writeTranscript(truncatedTranscript());
+    subject.writeTranscript(truncatedTranscript());
     await subject.restart();
     const removed = await refused(subject.fork(key('moving'), command(subject)));
 
@@ -1261,7 +1364,6 @@ describe('the fork journey over real storage', () => {
     should((await subject.receipt('moving')).phase).equal('plan_persisted');
     // Everything except the transcript this test moved itself is byte-for-byte as it was.
     should(besideTheTranscript(await subject.snapshotSource())).eql(besideTheTranscript(before));
-    await subject.close();
   });
 
   it('should complete the same fork once the source has only been appended to beyond the cut', async () => {
@@ -1272,7 +1374,7 @@ describe('the fork journey over real storage', () => {
     should((await subject.receipt('growing')).phase).equal('plan_persisted');
 
     // Act: the pinned prefix reads as it always did, and the session has kept talking past it.
-    await subject.writeTranscript(appendedTranscript());
+    subject.writeTranscript(appendedTranscript());
     await subject.restart();
     const replay = await subject.fork(key('growing'), command(subject));
 
@@ -1286,7 +1388,6 @@ describe('the fork journey over real storage', () => {
     should(times(subject, 'create')).equal(1);
     should(times(subject, 'deliver')).equal(1);
     should((await subject.receipt('growing')).phase).equal('completed');
-    await subject.close();
   });
 
   it('should refuse a replay whose persisted target plan was replaced after it was recorded', async () => {
@@ -1296,17 +1397,13 @@ describe('the fork journey over real storage', () => {
     subject.moveSourceAfterPrepare(rewrittenTranscript());
     await refused(subject.fork(key('substituted'), command(subject)));
     const before = await subject.snapshotSource();
-    const substitute = JSON.parse(await subject.targetPlan(FIRST_TARGET)) as SessionTransferPlan;
-    await writeFile(
-      join(subject.directory(FIRST_TARGET), 'transfer-plan.json'),
-      `${JSON.stringify({
-        ...substitute,
-        facets: { ...substitute.facets, workspace: { ...substitute.facets.workspace, head: '0'.repeat(40) } },
-      })}\n`,
-    );
+    subject.replaceTargetPlan(FIRST_TARGET, held => ({
+      ...held,
+      facets: { ...held.facets, workspace: { ...held.facets.workspace, head: '0'.repeat(40) } },
+    }));
 
     // Act: the pinned cut reads honestly again, so the substituted plan is the only thing left wrong.
-    await subject.writeTranscript(sourceTranscript());
+    subject.writeTranscript(sourceTranscript());
     await subject.restart();
     const rejected = await refused(subject.fork(key('substituted'), command(subject)));
 
@@ -1317,7 +1414,6 @@ describe('the fork journey over real storage', () => {
     should(times(subject, 'launch')).equal(0);
     should((await subject.receipt('substituted')).phase).equal('plan_persisted');
     should(besideTheTranscript(await subject.snapshotSource())).eql(besideTheTranscript(before));
-    await subject.close();
   });
 
   it('should refuse a replay whose target spawn stamp was replaced after the import', async () => {
@@ -1357,7 +1453,6 @@ describe('the fork journey over real storage', () => {
     should(subject.minted).eql([FIRST_TARGET]);
     should(times(subject, 'launch')).equal(0);
     should(await subject.snapshotSource()).eql(before);
-    await subject.close();
   });
 
   it('redacts transcript text in the durable plan, receipt and imported opening document', async () => {
@@ -1373,6 +1468,5 @@ describe('the fork journey over real storage', () => {
 
     should(serialized).not.containEql(CARRIED);
     should(serialized).containEql('[redacted:SECRET]');
-    await subject.close();
   });
 });

@@ -1,5 +1,4 @@
-import { readdir, readFile, readlink } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import type { Clock, HostFactsPort, SpawnPort } from '@ferretry/kernel/contract';
 import { identifyAgentJobs } from '../../lib/moves/agent-jobs.ts';
 import { type ConfiguredServersPort, configuredServersOf } from '../../lib/moves/configured-servers.ts';
 import { identifyKnownProcesses } from '../../lib/moves/harness-provenance.ts';
@@ -11,27 +10,42 @@ import type {
   ProcessTableRead,
 } from '../../lib/moves/process-inventory-port.ts';
 import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } from '../../lib/moves/process-table.ts';
-import { capturePaneArguments, hasSessionArguments } from '../../lib/tmux/commands.ts';
-import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
-import { paneProofArguments, parsePaneSighting } from '../../lib/tmux/pane-proof.ts';
+import { capturePaneArguments } from '../../lib/moves/pane-commands.ts';
+import {
+  hasSessionArguments,
+  paneProofArguments,
+  parsePaneSighting,
+  type TmuxCommandPort,
+} from '../../lib/session/peers/tmux-lifecycle.ts';
 
 const processTableArguments = ['-Ao', 'pid=,ppid=,etime=,args='] as const;
 
 /** `USER_HZ`: the unit of `/proc/<pid>/stat`'s start time. 100 on every Linux architecture userspace sees. */
 const CLOCK_TICKS_PER_SECOND = 100;
 
+/**
+ * What the probe reads of the machine: the kernel's host facts, plus the one read they do not offer yet — where a
+ * process is working (`readlink /proc/<pid>/cwd`). Throws as the read does (a vanished process, a process of another
+ * user), and the probe keeps its own catch.
+ */
+export interface ProcessHostFacts
+  extends Pick<
+    HostFactsPort,
+    'platform' | 'procFile' | 'procSystemFile' | 'procTasks' | 'procTaskChildren' | 'procFds' | 'procFdLink'
+  > {
+  procWorkingDirectory(pid: number): Promise<string>;
+}
+
 export interface ProcessProbeOptions {
   /**
-   * Where procfs is mounted, on a host whose kernel lists each task's children there; `undefined` where
-   * there is none. Linux defaults to `/proc`, every other platform to none.
+   * Whether procfs lists each task's children on this host. Linux defaults to yes, every other platform to no.
    */
-  readonly procRoot?: string;
+  readonly procfs?: boolean;
   /**
    * How long one read of the full table answers every later ask. Zero — the default — reads it every
    * time; a caller that asks about several panes in one pass, and can live with a table that old, sets it.
    */
   readonly tableTtlMs?: number;
-  readonly nowMs?: () => number;
 }
 
 function detail(error: unknown): string {
@@ -39,28 +53,30 @@ function detail(error: unknown): string {
 }
 
 /**
- * Bun-backed process probe. The `ps` executable must be an absolute path so the probe can never
- * resolve an attacker-planted binary from `$PATH`; an unresolved one is reported as a failed read
- * rather than assumed empty.
+ * Kernel-backed process probe. `ps` is a program the manifest declares in `permissions.spawn`, which the kernel
+ * resolves itself, so the probe can never run an attacker-planted binary from `$PATH`; a `ps` that cannot be run is
+ * reported as a failed read rather than assumed empty.
  *
  * WHERE PROCFS LISTS CHILDREN, NO `ps` RUNS AT ALL. `ps -Ao` reads three files for every process on
  * the machine — eleven thousand opens a second on a busy box when the liveness monitor asked about each
  * ferret — to answer a question about one pane's handful of descendants. {@link descendants} walks
  * that subtree alone through `/proc/<pid>/task/<tid>/children`, in the order the table walk produced.
  */
-export class BunProcessProbe implements ProcessProbePort {
+export class KernelProcessProbe implements ProcessProbePort {
   private table: { readonly atMs: number; readonly read: ProcessTableRead } | undefined;
-  private readonly procRoot: string | undefined;
+  private readonly procfs: boolean;
 
   constructor(
-    private readonly psExecutable: string | undefined,
+    private readonly spawn: Pick<SpawnPort, 'run'>,
+    private readonly host: ProcessHostFacts,
+    private readonly clock: Pick<Clock, 'nowMs'>,
     private readonly options: ProcessProbeOptions = {},
   ) {
-    this.procRoot = 'procRoot' in options ? options.procRoot : process.platform === 'linux' ? '/proc' : undefined;
+    this.procfs = options.procfs ?? host.platform === 'linux';
   }
 
   async processTable(): Promise<ProcessTableRead> {
-    const nowMs = this.options.nowMs?.() ?? Date.now();
+    const nowMs = this.clock.nowMs();
     const ttl = this.options.tableTtlMs ?? 0;
     if (this.table !== undefined && nowMs - this.table.atMs < ttl) return this.table.read;
     const read = await this.readTable();
@@ -73,11 +89,10 @@ export class BunProcessProbe implements ProcessProbePort {
    * there is no procfs, the root cannot be read, or this kernel does not list children.
    */
   async descendants(rootPid: number): Promise<readonly ProcRow[] | undefined> {
-    const proc = this.procRoot;
-    if (proc === undefined) return undefined;
+    if (!this.procfs) return undefined;
     try {
-      const uptime = Number((await readFile(join(proc, 'uptime'), 'utf8')).split(' ')[0]);
-      if (!Number.isFinite(uptime)) return undefined;
+      const clock = await this.clockFacts();
+      if (clock === undefined) return undefined;
       const rows: ProcRow[] = [];
       const queue = [rootPid];
       const seen = new Set(queue);
@@ -85,14 +100,14 @@ export class BunProcessProbe implements ProcessProbePort {
         const parent = queue[index] as number;
         // The root must be readable — that is the whole question; a descendant that exited mid-walk
         // simply has no children left, exactly as a table read a moment later would show.
-        const children = await childrenOf(proc, parent).catch(error => {
+        const children = await this.childrenOf(parent).catch(error => {
           if (index === 0) throw error;
           return [];
         });
         for (const pid of children) {
           if (seen.has(pid)) continue;
           seen.add(pid);
-          const row = await procRow(proc, pid, uptime);
+          const row = await this.procRow(pid, clock);
           if (row === undefined) continue;
           rows.push(row);
           queue.push(pid);
@@ -111,12 +126,11 @@ export class BunProcessProbe implements ProcessProbePort {
    */
   async lookup(pids: readonly number[]): Promise<ReadonlyMap<number, ProcRow>> {
     const found = new Map<number, ProcRow>();
-    const proc = this.procRoot;
-    if (proc !== undefined) {
-      const uptime = Number((await readFile(join(proc, 'uptime'), 'utf8')).split(' ')[0]);
-      if (!Number.isFinite(uptime)) throw new Error('procfs gave no usable uptime');
+    if (this.procfs) {
+      const clock = await this.clockFacts();
+      if (clock === undefined) throw new Error('procfs gave no usable boot time');
       for (const pid of pids) {
-        const row = await procRow(proc, pid, uptime);
+        const row = await this.procRow(pid, clock);
         if (row !== undefined) found.set(pid, row);
       }
       return found;
@@ -129,15 +143,8 @@ export class BunProcessProbe implements ProcessProbePort {
   }
 
   private async readTable(): Promise<ProcessTableRead> {
-    if (this.psExecutable === undefined || !isAbsolute(this.psExecutable))
-      return { kind: 'failed', reason: 'no absolute ps executable is available to read the process table' };
     try {
-      const child = Bun.spawn([this.psExecutable, ...processTableArguments], { stdout: 'pipe', stderr: 'pipe' });
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-        child.exited,
-      ]);
+      const { exitCode: code, stdout, stderr } = await this.spawn.run('ps', processTableArguments);
       return code === 0
         ? { kind: 'read', stdout }
         : { kind: 'failed', reason: `ps exited ${code}: ${stderr.trim() || 'no output'}` };
@@ -152,19 +159,18 @@ export class BunProcessProbe implements ProcessProbePort {
    * procfs; a process that exits or is not ours to read simply holds none.
    */
   async listening(pids: readonly number[]): Promise<ReadonlySet<number> | undefined> {
-    const proc = this.procRoot;
-    if (proc === undefined) return undefined;
+    if (!this.procfs) return undefined;
     const inodes = new Set<string>();
-    for (const table of ['tcp', 'tcp6']) {
-      const text = await readFile(join(proc, 'net', table), 'utf8').catch(() => '');
+    for (const table of ['net/tcp', 'net/tcp6'] as const) {
+      const text = await this.host.procSystemFile(table).catch(() => '');
       for (const inode of listeningInodes(text)) inodes.add(inode);
     }
     const found = new Set<number>();
     if (inodes.size === 0) return found;
     for (const pid of pids) {
-      const fds = await readdir(join(proc, String(pid), 'fd')).catch(() => []);
+      const fds = await this.host.procFds(pid).catch(() => []);
       for (const fd of fds) {
-        const link = await readlink(join(proc, String(pid), 'fd', fd)).catch(() => '');
+        const link = await this.host.procFdLink(pid, fd).catch(() => '');
         const inode = /^socket:\[(\d+)\]$/u.exec(link)?.[1];
         if (inode !== undefined && inodes.has(inode)) {
           found.add(pid);
@@ -175,10 +181,63 @@ export class BunProcessProbe implements ProcessProbePort {
     return found;
   }
 
+  /** When the machine booted and what time it is, to turn a process's start tick into an age. `undefined` when procfs gives no boot time. */
+  private async clockFacts(): Promise<{ readonly bootSeconds: number; readonly nowSeconds: number } | undefined> {
+    const bootSeconds = Number(/^btime\s+(\d+)$/mu.exec(await this.host.procSystemFile('stat'))?.[1]);
+    return Number.isFinite(bootSeconds) ? { bootSeconds, nowSeconds: this.clock.nowMs() / 1000 } : undefined;
+  }
+
+  /** Every child of every thread of `pid`, ascending — the order a pid-sorted table lists them in. */
+  private async childrenOf(pid: number): Promise<readonly number[]> {
+    const tasks = await this.host.procTasks(pid);
+    const children = new Set<number>();
+    for (const task of tasks) {
+      const listed = await this.host.procTaskChildren(pid, Number(task));
+      for (const word of listed.split(' ')) if (/^\d+$/u.test(word)) children.add(Number(word));
+    }
+    return [...children].sort((left, right) => left - right);
+  }
+
+  /**
+   * One process as a `ps -o pid=,ppid=,etime=,args=` row: `args` is the command line with its NULs as
+   * spaces and control characters as `?`, and `[comm]` for a process with none, as procps prints them.
+   */
+  private async procRow(
+    pid: number,
+    clock: { readonly bootSeconds: number; readonly nowSeconds: number },
+  ): Promise<ProcRow | undefined> {
+    try {
+      const stat = await this.host.procFile(pid, 'stat');
+      const close = stat.lastIndexOf(')');
+      const comm = stat.slice(stat.indexOf('(') + 1, close);
+      const fields = stat.slice(close + 2).split(' ');
+      const ppid = Number(fields[1]);
+      const startTicks = Number(fields[19]);
+      const cmdline = await this.host.procFile(pid, 'cmdline');
+      const words = cmdline.split('\0');
+      if (words.at(-1) === '') words.pop();
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: procps prints every control character as `?`.
+      const argv = words.join(' ').replace(/[\u0000-\u001f\u007f]/gu, '?');
+      if (pid <= 1 || !Number.isSafeInteger(ppid) || !Number.isFinite(startTicks)) return undefined;
+      return {
+        pid,
+        ppid,
+        startedSecondsAgo: Math.max(
+          0,
+          Math.floor(clock.nowSeconds - clock.bootSeconds - startTicks / CLOCK_TICKS_PER_SECOND),
+        ),
+        argv: argv === '' ? `[${comm}]` : argv,
+      };
+    } catch {
+      // Exited between being listed and being read: a table read a moment later would not show it either.
+      return undefined;
+    }
+  }
+
   /** Reads `/proc`, so a platform without it degrades to an unknown directory rather than failing. */
   async workingDirectory(pid: number): Promise<string | undefined> {
     try {
-      return await readlink(`/proc/${pid}/cwd`);
+      return await this.host.procWorkingDirectory(pid);
     } catch {
       // A process may exit, or belong to another user, between the table read and this call.
       return undefined;
@@ -196,47 +255,6 @@ export function listeningInodes(table: string): readonly string[] {
   return inodes;
 }
 
-/** Every child of every thread of `pid`, ascending — the order a pid-sorted table lists them in. */
-async function childrenOf(proc: string, pid: number): Promise<readonly number[]> {
-  const tasks = await readdir(join(proc, String(pid), 'task'));
-  const children = new Set<number>();
-  for (const task of tasks) {
-    const listed = await readFile(join(proc, String(pid), 'task', task, 'children'), 'utf8');
-    for (const word of listed.split(' ')) if (/^\d+$/u.test(word)) children.add(Number(word));
-  }
-  return [...children].sort((left, right) => left - right);
-}
-
-/**
- * One process as a `ps -o pid=,ppid=,etime=,args=` row: `args` is the command line with its NULs as
- * spaces and control characters as `?`, and `[comm]` for a process with none, as procps prints them.
- */
-async function procRow(proc: string, pid: number, uptime: number): Promise<ProcRow | undefined> {
-  try {
-    const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8');
-    const close = stat.lastIndexOf(')');
-    const comm = stat.slice(stat.indexOf('(') + 1, close);
-    const fields = stat.slice(close + 2).split(' ');
-    const ppid = Number(fields[1]);
-    const startTicks = Number(fields[19]);
-    const cmdline = await readFile(join(proc, String(pid), 'cmdline'), 'utf8');
-    const words = cmdline.split('\0');
-    if (words.at(-1) === '') words.pop();
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: procps prints every control character as `?`.
-    const argv = words.join(' ').replace(/[\u0000-\u001f\u007f]/gu, '?');
-    if (pid <= 1 || !Number.isSafeInteger(ppid) || !Number.isFinite(startTicks)) return undefined;
-    return {
-      pid,
-      ppid,
-      startedSecondsAgo: Math.max(0, Math.floor(uptime - startTicks / CLOCK_TICKS_PER_SECOND)),
-      argv: argv === '' ? `[${comm}]` : argv,
-    };
-  } catch {
-    // Exited between being listed and being read: a table read a moment later would not show it either.
-    return undefined;
-  }
-}
-
 /**
  * Reads a pane's descendant tree.
  *
@@ -247,7 +265,12 @@ export class PaneProcessInventory implements ProcessInventoryPort {
   constructor(
     private readonly tmux: TmuxCommandPort,
     private readonly probe: ProcessProbePort,
-    private readonly provenance: { readonly binaryName: string; readonly servers: ConfiguredServersPort },
+    private readonly provenance: {
+      readonly binaryName: string;
+      readonly toolsServerArguments: readonly string[];
+      readonly statuslineSubcommand: string;
+      readonly servers: ConfiguredServersPort;
+    },
   ) {}
 
   async collect(tmuxSession: string): Promise<ProcessObservation> {
@@ -286,6 +309,8 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       const known = identifyKnownProcesses(rows, {
         rootPid: panePid,
         binaryName: this.provenance.binaryName,
+        toolsServerArguments: this.provenance.toolsServerArguments,
+        statuslineSubcommand: this.provenance.statuslineSubcommand,
         configuredServers,
       });
       // Only what provenance left unexplained: the harness and its own helpers are never servers to keep.
@@ -340,11 +365,18 @@ export class TmuxPaneSnapshot implements PaneSnapshotPort {
   }
 }
 
+/** Reads a project file by absolute path, or answers nothing when it is missing or not the daemon's to read. */
+export interface ProjectFileReader {
+  readText(path: string): Promise<string | undefined>;
+}
+
 /** Reads `<directory>/.mcp.json`. A missing, unreadable or malformed file explains no process. */
 export class ProjectMcpServers implements ConfiguredServersPort {
+  constructor(private readonly files: ProjectFileReader) {}
+
   async read(directory: string) {
     try {
-      return configuredServersOf(await readFile(join(directory, '.mcp.json'), 'utf8'));
+      return configuredServersOf((await this.files.readText(`${directory}/.mcp.json`)) ?? null);
     } catch {
       // No file, or one this daemon may not read: nothing is configured as far as the inventory can tell.
       return [];

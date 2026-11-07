@@ -38,7 +38,7 @@
 
 import { type SessionTransferEdge, SessionTransferEdgeSchema } from '../protocol/session-transfer-edge.ts';
 import { type SessionTransferPlan } from '../../../contract/transfer.ts';
-import { ConversationDigestError } from '../session/transcript/digest.ts';
+import { isConversationDigestError } from './ports.ts';
 import { renderTransferBrief } from './brief.ts';
 import { type SessionTransferImportOutcome, type SessionTransferImportPorts, TransferImportError } from './types.ts';
 
@@ -148,7 +148,7 @@ export class SessionTransferImporter {
         through: cut,
       });
     } catch (error) {
-      if (error instanceof ConversationDigestError)
+      if (isConversationDigestError(error))
         throw new TransferImportError(
           'cut_unreadable',
           `plan ${plan.planId} pinned a message in ${plan.source.sessionId} that no longer reads as one ` +

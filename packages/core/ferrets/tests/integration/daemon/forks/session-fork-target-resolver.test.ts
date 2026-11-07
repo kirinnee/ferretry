@@ -7,14 +7,15 @@ import {
   type SessionForkTargetAccount,
   forkStartupRuntimeRequest,
 } from '../../../../daemon/adapters/forks/session-fork-target-resolver.ts';
-import { CodexRuntimeCatalogCache } from '../../../src/lib/session/harness/codex-catalog-cache.ts';
-import {
-  type HarnessRuntimeSwitchContext,
-  type HarnessRuntimeSwitchRequest,
-  planRuntimeSwitch,
-} from '../../../src/lib/session/harness/runtime-switch.ts';
+import type {
+  CodexRuntimeCatalogCache,
+  HarnessRuntimeSwitchContext,
+  HarnessRuntimeSwitchRequest,
+} from '../../../../daemon/lib/session/peers/harness.ts';
 import type { TransferTargetChoice } from '../../../../daemon/lib/transfer/types.ts';
-import { account, cleanup, planner } from './fixtures.ts';
+import { harnessCatalogs } from '../../../unit/daemon/session/runtime-control/harness-fixture/catalogs.ts';
+import { planRuntimeSwitch } from '../../../unit/daemon/session/runtime-control/harness-fixture/runtime-switch.ts';
+import { account, cleanup, harnessFacts, planner } from './fixtures.ts';
 
 /**
  * What a fork's target actually resolves to, and — just as load-bearing — what it refuses.
@@ -60,12 +61,30 @@ function switchPlanner(): {
   };
 }
 
+/**
+ * The harness plugin's held Codex catalogue, as a stand-in with its one observable rule: one live probe per
+ * `(executable, working directory)`, answered from memory afterwards. The real cache is the harness plugin's, and
+ * is tested there; what is asserted here is that the resolver asks the ONE injected cache, in the plan's directory.
+ */
+class HeldCatalogue implements CodexRuntimeCatalogCache {
+  private readonly held = new Map<string, Promise<readonly RuntimeModelChoice[]>>();
+
+  constructor(private readonly read: (binary: string, cwd: string) => Promise<readonly RuntimeModelChoice[]>) {}
+
+  async get(binary: string, cwd: string): Promise<readonly RuntimeModelChoice[]> {
+    const key = JSON.stringify([binary, cwd]);
+    const held = this.held.get(key) ?? this.read(binary, cwd);
+    this.held.set(key, held);
+    return await held;
+  }
+}
+
 function probe(choices: readonly RuntimeModelChoice[] = CATALOG): {
-  readonly cache: CodexRuntimeCatalogCache;
+  readonly cache: HeldCatalogue;
   readonly calls: { binary: string; cwd: string }[];
 } {
   const calls: { binary: string; cwd: string }[] = [];
-  const cache = new CodexRuntimeCatalogCache(async (binary, cwd) => {
+  const cache = new HeldCatalogue(async (binary, cwd) => {
     calls.push({ binary, cwd });
     return choices;
   });
@@ -84,6 +103,8 @@ function resolver(
     planner: planner(),
     harness: parts.harness ?? switchPlanner().harness,
     catalog: parts.catalog ?? probe().cache,
+    catalogs: harnessCatalogs,
+    harnessFacts,
   });
 }
 
@@ -344,7 +365,7 @@ describe('SessionForkTargetResolver.validate', () => {
 
   it('should refuse when the live catalogue cannot be read at all', async () => {
     // Arrange
-    const cache = new CodexRuntimeCatalogCache(async () => {
+    const cache = new HeldCatalogue(async () => {
       throw new Error('app-server handshake timed out');
     });
 
@@ -413,15 +434,18 @@ describe('SessionForkTargetResolver.validate', () => {
 describe('forkStartupRuntimeRequest', () => {
   it('should follow the harness rather than the caller, and ask for nothing when no effort was chosen', () => {
     // Act & assert: one owner for what the resolver validates and what the binder later applies.
-    should(forkStartupRuntimeRequest('claude', 'claude-opus-5', 'high')).eql({ action: 'effort', effort: 'high' });
-    should(forkStartupRuntimeRequest('codex', 'gpt-5.6-terra', 'high')).eql({
+    should(forkStartupRuntimeRequest(harnessFacts, 'claude', 'claude-opus-5', 'high')).eql({
+      action: 'effort',
+      effort: 'high',
+    });
+    should(forkStartupRuntimeRequest(harnessFacts, 'codex', 'gpt-5.6-terra', 'high')).eql({
       action: 'model',
       model: 'gpt-5.6-terra',
       effort: 'high',
     });
     // A picker harness with no model still names the level it must reach; the switch planner refuses
     // it, which is why the resolver asks before anything is created.
-    should(forkStartupRuntimeRequest('codex', null, 'high')).eql({ action: 'model', effort: 'high' });
-    should(forkStartupRuntimeRequest('claude', 'claude-opus-5', null)).equal(undefined);
+    should(forkStartupRuntimeRequest(harnessFacts, 'codex', null, 'high')).eql({ action: 'model', effort: 'high' });
+    should(forkStartupRuntimeRequest(harnessFacts, 'claude', 'claude-opus-5', null)).equal(undefined);
   });
 });

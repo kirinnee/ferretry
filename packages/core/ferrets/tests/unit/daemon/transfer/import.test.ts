@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { ConversationDigest } from '../../../src/lib/session/transcript/digest.ts';
-import { ConversationDigestError } from '../../../src/lib/session/transcript/digest.ts';
+import type { ConversationDigest } from '../../../../daemon/lib/transfer/ports.ts';
+import { ConversationDigestError } from '../../../../daemon/lib/transfer/ports.ts';
 import { SessionTransferImporter } from '../../../../daemon/lib/transfer/import.ts';
 import type {
   SessionTransferEnvelope,

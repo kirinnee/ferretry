@@ -1,8 +1,21 @@
-import { parseMcpProjectFile } from '../session-mcp/project-file.ts';
 import type { ConfiguredServer } from './harness-provenance.ts';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * A project's `.mcp.json` as data. `null` (no file) and blank text are an empty document; text that is not JSON, is not
+ * an object, or whose `mcpServers` is not an object is refused (the MCP plugin's own parser refuses the same three,
+ * and a refusal here explains no process).
+ */
+function parseProjectFile(text: string | null): Readonly<Record<string, unknown>> {
+  if (text === null || text.trim() === '') return {};
+  const parsed: unknown = JSON.parse(text);
+  if (!isRecord(parsed)) throw new Error('.mcp.json is not a JSON object');
+  if (parsed.mcpServers !== undefined && !isRecord(parsed.mcpServers))
+    throw new Error('.mcp.json has an "mcpServers" that is not an object');
+  return parsed;
+}
 
 /** Reads the stdio servers a project's `.mcp.json` asks the harness to start. */
 export interface ConfiguredServersPort {
@@ -18,7 +31,7 @@ export interface ConfiguredServersPort {
 export function configuredServersOf(text: string | null): readonly ConfiguredServer[] {
   let document: Readonly<Record<string, unknown>>;
   try {
-    document = parseMcpProjectFile(text);
+    document = parseProjectFile(text);
   } catch {
     return [];
   }

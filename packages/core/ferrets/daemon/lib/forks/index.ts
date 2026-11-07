@@ -4,3 +4,4 @@ export * from './receipt.ts';
 export * from './service.ts';
 export * from './subsystem.ts';
 export * from './types.ts';
+export * from './ports.ts';

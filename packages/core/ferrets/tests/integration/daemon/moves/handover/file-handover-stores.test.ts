@@ -1,10 +1,12 @@
-import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'bun:test';
+import { beforeEach, describe, it } from 'bun:test';
+import type { StatePort } from '@ferretry/kernel/contract';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { err } from '@ferretry/std';
 import type { SessionHandoverReceipt } from '../../../../../contract/handover.ts';
 import type { SessionTransferPlan } from '../../../../../contract/transfer.ts';
 import should from 'should';
+import { HandoverFiles } from '../../../../../contract/handover-state.ts';
+import { memoryHandoverState } from '../../../../support/daemon/handover-state.ts';
 import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { handoverPlanId } from '../../../../../daemon/lib/moves/handover/policy.ts';
 import { HandoverReceiptDamagedError } from '../../../../../daemon/lib/moves/handover/types.ts';
@@ -21,18 +23,17 @@ const ACCOUNT = {
   contextWindow: 400_000,
 } as const;
 
-let home = '';
-let sessions = '';
+let folder: MemoryStateFolder;
+let state: StatePort;
 
-beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'fy-handover-'));
-  sessions = join(home, 'state', 'sessions');
-  await mkdir(join(sessions, 'source-1'), { recursive: true });
+beforeEach(() => {
+  ({ folder, state } = memoryHandoverState());
 });
 
-afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
-});
+/** Plants a document as the kernel stores one: the format number first, then the body. */
+function plant(name: string, body: unknown): void {
+  folder.plant(HandoverFiles, JSON.stringify({ format: 1, ...(body as object) }), name);
+}
 
 function receipt(overrides: Partial<SessionHandoverReceipt> = {}): SessionHandoverReceipt {
   return {
@@ -108,44 +109,58 @@ function plan(planId = PLAN_ID): SessionTransferPlan {
 }
 
 describe('FileHandoverReceiptStore', () => {
-  it('round-trips a receipt through an atomic write, leaving no temporary behind', async () => {
-    const store = new FileHandoverReceiptStore(sessions, () => 'fixed');
+  it('should round-trip a receipt through the state port, stored with its format first', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
     should(await store.read('source-1')).be.null();
+
+    // Act
     await store.write(receipt());
+
+    // Assert
     should(await store.read('source-1')).deepEqual(receipt());
-    await should(stat(`${store.file('source-1')}.fixed.tmp`)).be.rejected();
-    should((await stat(store.file('source-1'))).mode & 0o777).equal(0o600);
+    should(folder.raw(HandoverFiles, 'source-1')).startWith('{"format":1,');
   });
 
-  it('parses on the way out, so this daemon cannot write a document a later one refuses', async () => {
-    const store = new FileHandoverReceiptStore(sessions);
-    // A history that does not end at the current phase is exactly what the durable schema forbids.
+  it('should parse on the way out, so this daemon cannot write a document a later one refuses', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
+
+    // Act / Assert — a history that does not end at the current phase is exactly what the durable schema forbids.
     await should(store.write(receipt({ phase: 'invited' }))).be.rejected();
     should(await store.read('source-1')).be.null();
+    should(folder.raw(HandoverFiles, 'source-1')).be.undefined();
   });
 
-  it('refuses a damaged document rather than reading it as absence', async () => {
-    const store = new FileHandoverReceiptStore(sessions);
-    await writeFile(store.file('source-1'), '{ not json', 'utf8');
+  it('should refuse a damaged document rather than reading it as absence', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
+    folder.plant(HandoverFiles, '{ not json', 'source-1');
+
+    // Act / Assert
     await should(store.read('source-1')).be.rejectedWith(HandoverReceiptDamagedError);
-    await writeFile(store.file('source-1'), JSON.stringify({ requestId: 'req-1' }), 'utf8');
+    plant('source-1', { requestId: 'req-1' });
     const error = await store.read('source-1').catch((thrown: unknown) => thrown);
     should(error).be.instanceof(HandoverReceiptDamagedError);
-    should((error as HandoverReceiptDamagedError).file).equal(store.file('source-1'));
+    should((error as HandoverReceiptDamagedError).file).equal('source-1/handover.json');
   });
 
-  it('refuses a read the filesystem answered with anything but absence', async () => {
-    const store = new FileHandoverReceiptStore(sessions);
-    // A directory where the document should be: readable path, unreadable document.
-    await mkdir(store.file('source-1'));
+  it('should refuse a read the state port answered with anything but absence', async () => {
+    // Arrange — the port reports an io fault: a document that is there but cannot be read.
+    const broken: StatePort = {
+      ...state,
+      read: async () =>
+        err({ file: '*/handover.json', reason: 'io', sentence: '*/handover.json cannot be used: it cannot be read.' }),
+    };
+    const store = new FileHandoverReceiptStore(broken);
+
+    // Act / Assert
     await should(store.read('source-1')).be.rejectedWith(HandoverReceiptDamagedError);
   });
 
-  it('lists only the sessions whose handover has not finished', async () => {
-    const store = new FileHandoverReceiptStore(sessions);
-    await mkdir(join(sessions, 'source-2'), { recursive: true });
-    await mkdir(join(sessions, 'source-3'), { recursive: true });
-    await writeFile(join(sessions, 'not-a-session'), 'a file, not a directory', 'utf8');
+  it('should list only the sessions whose handover has not finished', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
     await store.write(receipt());
     await store.write(
       receipt({
@@ -163,55 +178,81 @@ describe('FileHandoverReceiptStore', () => {
         refusal: { failure: 'board_busy', message: 'the board already carries an outstanding invitation' },
       }),
     );
+
+    // Act / Assert — a session with no receipt at all is simply not on the roster.
     should(await store.pendingSourceSessionIds()).deepEqual(['source-1']);
   });
 
-  it('refuses a receipt found in another session directory, and keeps it off the roster', async () => {
-    const store = new FileHandoverReceiptStore(sessions);
-    await mkdir(join(sessions, 'source-2'), { recursive: true });
-    await writeFile(join(sessions, 'source-2', 'handover.json'), JSON.stringify(receipt()), 'utf8');
+  it('should refuse a receipt found in another session directory, and keep it off the roster', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
+    plant('source-2', receipt());
+
+    // Act / Assert
     await should(store.read('source-2')).be.rejectedWith(HandoverReceiptDamagedError);
     await should(store.pendingSourceSessionIds()).be.rejectedWith(HandoverReceiptDamagedError);
   });
 
-  it('refuses a receipt whose plan id is not the one its own source and request derive', async () => {
-    const store = new FileHandoverReceiptStore(sessions);
+  it('should refuse a roster that has a damaged receipt in it, rather than skipping the one most in need of finishing', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
+    await store.write(receipt());
+    folder.plant(HandoverFiles, '{ not json', 'source-2');
+
+    // Act / Assert
+    await should(store.pendingSourceSessionIds()).be.rejectedWith(HandoverReceiptDamagedError);
+  });
+
+  it('should refuse a receipt whose plan id is not the one its own source and request derive', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
     const forged = handoverPlanId('somebody-else', 'req-1');
-    await writeFile(
-      store.file('source-1'),
-      // Both copies agree with each other, which is exactly what a swapped plan would look like.
-      JSON.stringify(receipt({ planId: forged, plan: plan(forged) })),
-      'utf8',
-    );
+    // Both copies agree with each other, which is exactly what a swapped plan would look like.
+    plant('source-1', receipt({ planId: forged, plan: plan(forged) }));
+
+    // Act
     const error = await store.read('source-1').catch((thrown: unknown) => thrown);
+
+    // Assert
     should(error).be.instanceof(HandoverReceiptDamagedError);
     should((error as HandoverReceiptDamagedError).detail).match(/is not the one handover req-1 of source-1 derives/u);
   });
 
-  it('refuses to build a path out of a session id it does not recognise', () => {
-    const store = new FileHandoverReceiptStore(sessions);
-    should(() => store.file('../escape')).throw(/not a session id/u);
-    should(() => store.file('')).throw(/not a session id/u);
+  it('should refuse to build a path out of a session id it does not recognise', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
+
+    // Act / Assert
+    await should(store.read('../escape')).be.rejectedWith(/not a session id/u);
+    await should(store.read('')).be.rejectedWith(/not a session id/u);
+    await should(store.write(receipt({ sourceSessionId: '../escape' }))).be.rejected();
   });
 
-  it('answers an empty roster when no sessions directory exists yet', async () => {
-    const store = new FileHandoverReceiptStore(join(home, 'state', 'nothing-here'));
+  it('should answer an empty roster when no session holds a receipt yet', async () => {
+    // Arrange
+    const store = new FileHandoverReceiptStore(state);
+
+    // Act / Assert
     should(await store.pendingSourceSessionIds()).be.empty();
   });
 
-  it('refuses a sessions directory the filesystem cannot list, rather than answering an empty roster', async () => {
-    // Arrange — the sessions directory's place is taken by a file, so listing fails with something other than absence.
-    const blocker = join(home, 'state', 'sessions-file');
-    await writeFile(blocker, 'not a directory');
-    const store = new FileHandoverReceiptStore(blocker);
+  it('should refuse a roster the state port cannot list, rather than answering an empty one', async () => {
+    // Arrange
+    const broken: StatePort = {
+      ...state,
+      list: async () => {
+        throw new Error('the state folder could not be listed');
+      },
+    };
+    const store = new FileHandoverReceiptStore(broken);
 
     // Act
     const failure = await store.pendingSourceSessionIds().then(
       () => undefined,
-      (error: unknown) => error as NodeJS.ErrnoException,
+      (error: unknown) => error as Error,
     );
 
     // Assert
-    should(failure?.code).equal('ENOTDIR');
+    should(failure?.message).equal('the state folder could not be listed');
   });
 });

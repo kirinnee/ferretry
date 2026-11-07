@@ -23,8 +23,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { HarnessSchema } from '../../protocol/session-base.ts';
-import { isTerminalStatus } from '../warden/types.ts';
+import { HarnessSchema, type SessionStatus } from '../../protocol/session-base.ts';
 import type {
   HandoverBoardMembership,
   HandoverBoardObservation,
@@ -35,6 +34,35 @@ import type {
   HandoverResolvedTarget,
   HandoverSessionView,
 } from './types.ts';
+
+/**
+ * Statuses a session never leaves. The Warden keeps the same list for its own sweep, but Ferrets (core) may not read a
+ * plugin, so the handover states it here over the contract's own status union; keyed exhaustively so a status added
+ * to the contract cannot default to either answer.
+ */
+const TERMINAL_SESSION_STATUS = {
+  created: false,
+  starting: false,
+  running: false,
+  thinking: false,
+  tool_running: false,
+  awaiting_question: false,
+  awaiting_user: false,
+  interrupted: false,
+  rate_limited: false,
+  retrying: false,
+  waiting: false,
+  completed: true,
+  failed: true,
+  stalled: true,
+  stopped: true,
+  kill_failed: true,
+} as const satisfies { readonly [K in SessionStatus]: boolean };
+
+/** Whether a session has reached a status it never leaves. */
+export function isTerminalStatus(status: SessionStatus): boolean {
+  return TERMINAL_SESSION_STATUS[status];
+}
 
 /** The protocol's family union, as the eligibility check proves it. */
 type HandoverHarness = ReturnType<typeof HarnessSchema.parse>;

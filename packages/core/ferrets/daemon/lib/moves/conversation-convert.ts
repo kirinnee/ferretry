@@ -1,18 +1,15 @@
 import { join } from 'node:path';
 import type { Harness } from '../protocol/session-base.ts';
 import type { TranscriptProvenance } from '../protocol/session.ts';
-import type { HandoffDocuments } from '../imports/conversation-text.ts';
-import { claudeTranscriptFile } from '../session/transcript/claude-path.ts';
-import { codexCorrelationArguments } from '../session/transcript/codex-rollout.ts';
-import {
-  type ConversionResult,
-  type ConversionSummary,
-  type ConvertedFile,
-  convertConversation,
-} from '../transcript/convert/convert.ts';
-import type { RolloutFormatVerdict } from '../transcript/convert/rollout-format.ts';
-import { harnessVersionRefusal } from '../transcript/convert/versions.ts';
-import { codexRolloutRelativePath } from '../transcript/convert/write-codex.ts';
+import { codexCorrelationArguments } from '../session/peers/transcript-launch.ts';
+import type {
+  ConversionResult,
+  ConvertedConversationSummary as ConversionSummary,
+  ConvertedFile,
+  HandoffDocuments,
+  RolloutFormatVerdict,
+  TranscriptToolkit,
+} from './ports.ts';
 
 /**
  * Moving a session onto the OTHER harness by converting its conversation: the plan, and the ports it
@@ -108,7 +105,10 @@ const unconvertible = (reason: string): ConversationNotConvertible => ({
   reason: `${reason} ${NOTHING_CHANGED}`,
 });
 
-export function planConversationConvert(request: ConversationConvertRequest): ConversationConvert {
+export function planConversationConvert(
+  request: ConversationConvertRequest,
+  toolkit: TranscriptToolkit,
+): ConversationConvert {
   const { source, targetHome } = request;
   if (request.sourceHarness === request.targetHarness)
     return unconvertible(
@@ -127,7 +127,7 @@ export function planConversationConvert(request: ConversationConvertRequest): Co
   const attachmentDirectory = join(request.sessionDirectory, CONVERSION_ATTACHMENTS, request.conversationId);
   const sourceText = request.sourceText;
   const render = (place: ConversionPlace): ConversionResult =>
-    convertConversation({
+    toolkit.convertConversation({
       source: { harness: request.sourceHarness, text: sourceText, documents: request.documents },
       target: {
         harness: request.targetHarness,
@@ -152,8 +152,8 @@ export function planConversationConvert(request: ConversationConvertRequest): Co
   if (converted.kind === 'refused') return unconvertible(converted.reason);
   const file =
     request.targetHarness === 'claude'
-      ? claudeTranscriptFile(targetHome, request.cwd, request.conversationId)
-      : join(targetHome, codexRolloutRelativePath(request.conversationId, request.at));
+      ? toolkit.claudeTranscriptFile(targetHome, request.cwd, request.conversationId)
+      : join(targetHome, toolkit.codexRolloutRelativePath(request.conversationId, request.at));
   const provenance: TranscriptProvenance =
     request.targetHarness === 'claude'
       ? {
@@ -226,8 +226,14 @@ export interface RolloutFormatPort {
 }
 
 /** Whether a target's rollout format has to be probed: a Codex whose version the converter's table does not list. */
-export const needsRolloutFormatProbe = (harness: Harness, version: string | undefined): version is string =>
-  harness === 'codex' && version !== undefined && harnessVersionRefusal('codex', version, 'target') !== undefined;
+export const needsRolloutFormatProbe = (
+  harness: Harness,
+  version: string | undefined,
+  toolkit: Pick<TranscriptToolkit, 'harnessVersionRefusal'>,
+): version is string =>
+  harness === 'codex' &&
+  version !== undefined &&
+  toolkit.harnessVersionRefusal('codex', version, 'target') !== undefined;
 
 /**
  * The model provider a Codex home's `config.toml` selects at top level, or `undefined` when it names

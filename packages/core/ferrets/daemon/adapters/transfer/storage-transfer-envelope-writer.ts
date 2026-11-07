@@ -38,8 +38,8 @@
  */
 
 import type { SessionTransferEdge } from '../../lib/protocol/session-transfer-edge.ts';
+import type { JsonValue } from '@ferretry/std';
 import type { LineageFacet } from '../../../contract/transfer.ts';
-import type { JsonValue } from '../../lib/json.ts';
 import { type SessionProvenance, SessionProvenanceSchema } from '../../lib/session/provenance/types.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
 import { transferTargetLabel } from '../../lib/transfer/facets/lineage.ts';

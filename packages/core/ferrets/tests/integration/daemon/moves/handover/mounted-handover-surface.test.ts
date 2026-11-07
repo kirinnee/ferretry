@@ -1,19 +1,15 @@
-import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { beforeEach, describe, it } from 'bun:test';
+import { ownerStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallContext, StatePort } from '@ferretry/kernel/contract';
 import {
   type SessionHandoverReceipt,
   SessionHandoverReceiptSchema,
 } from '../../../../../contract/handover.ts';
 import should from 'should';
 import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
-import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { HandoverReconcileLoop, RememberedHandoverReceipts } from '../../../../../daemon/lib/moves/handover/index.ts';
 import { sessionHandoverRoutes } from '../../../../../daemon/lib/runtime/mounts/session-handover.ts';
-import { request } from '../../unit/api/support.ts';
+import { memoryHandoverState } from '../../../../support/daemon/handover-state.ts';
 import {
   CODEX_ACCOUNT,
   planIdFor,
@@ -23,8 +19,8 @@ import {
 } from '../../../../unit/daemon/moves/handover/support.ts';
 
 /**
- * The handover as the daemon actually mounts it: the real receipt store over a real directory, the
- * real route table, the real dispatcher, and the real reconcile loop.
+ * The handover as the daemon actually mounts it: the real receipt store over the state port, the
+ * real route table, and the real reconcile loop.
  *
  * WHAT THIS TIER ADDS over the mount's unit cases. Those prove the route table against a fake
  * subsystem — the statuses, the credential policy, the refusal mapping. This proves the pieces the
@@ -62,20 +58,10 @@ function receipt(sourceSessionId: string): SessionHandoverReceipt {
 }
 
 describe('the mounted handover surface', () => {
-  let home: string;
-  let sessions: string;
+  let sessions: StatePort;
 
-  beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), 'fy-handover-'));
-    sessions = join(home, 'sessions');
-    // The store writes INTO a session's own directory and does not create one, exactly as the daemon
-    // layout has it: a receipt only ever exists for a session that already does.
-    await mkdir(join(sessions, 'source-1'), { recursive: true });
-    await mkdir(join(sessions, 'source-2'), { recursive: true });
-  });
-
-  afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
+  beforeEach(() => {
+    sessions = memoryHandoverState().state;
   });
 
   it('should serve back over GET the exact receipt the store holds on disk', async () => {
@@ -85,34 +71,26 @@ describe('the mounted handover surface', () => {
     const store = new FileHandoverReceiptStore(sessions);
     const written = receipt('source-1');
     await store.write(written);
-    const dispatcher = new ApiDispatcher(
-      new ApiRouter(
-        sessionHandoverRoutes({
-          begin: async () => written,
-          receipt: async sessionId => {
-            const found = await store.read(sessionId);
-            if (found === null) throw new Error('unreachable in this case');
-            return found;
-          },
-          cancel: async () => written,
-        }),
-      ),
-      { admin: 'admin-secret', warden: 'warden-secret' },
-      NO_GOVERNED_ROUTES_GUARD,
-    );
+    const read = sessionHandoverRoutes({
+      begin: async () => written,
+      receipt: async sessionId => {
+        const found = await store.read(sessionId);
+        if (found === null) throw new Error('unreachable in this case');
+        return found;
+      },
+      cancel: async () => written,
+    }).find(route => route.method === 'GET');
 
     // Act
-    const response = await dispatcher.dispatch(
-      request({
-        method: 'GET',
-        path: '/v1/ferrets/source-1/handover',
-        headers: { authorization: 'Bearer admin-secret' },
-      }),
-    );
+    const response = await read?.handle({
+      params: new Map([['ferretId', 'source-1']]),
+      request: { method: 'GET', path: '/v1/ferrets/source-1/handover', headers: new Headers(), query: new Map() },
+      ...ownerStanding(),
+    } as unknown as CallContext);
 
     // Assert
-    should(response.status).equal(200);
-    should(SessionHandoverReceiptSchema.parse(JSON.parse(response.body))).deepEqual(written);
+    should(response?.status).equal(200);
+    should(SessionHandoverReceiptSchema.parse(JSON.parse(response?.body ?? ''))).deepEqual(written);
   });
 
   it('should roster exactly the receipts that are not yet terminal, through the store the routes use', async () => {
@@ -158,7 +136,7 @@ describe('the mounted handover surface', () => {
   });
 
   it('should stop driving handovers once the disarm the composition root registered is called', async () => {
-    // `bin/fyd.ts` pushes this disarm onto its cleanup list, so a stopped daemon does not leave a timer
+    // the host registers this disarm as a release, so a stopped daemon does not leave a timer
     // advancing handovers at closed storage. A disarm that did not actually cancel would leave exactly
     // that, and nothing else in the tree would notice.
     // Arrange

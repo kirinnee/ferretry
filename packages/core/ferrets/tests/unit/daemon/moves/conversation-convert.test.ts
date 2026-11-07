@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
+import { testToolkit } from '../../../support/daemon/move-toolkit.ts';
 import {
   type ConversationConvertRequest,
   codexModelProvider,
@@ -10,8 +11,12 @@ import {
 
 /**
  * The plan for a cross-harness move: what is written where, under which id, and every refusal that
- * leaves the session untouched. The conversion itself is measured in `transcript/convert.test.ts`.
+ * leaves the session untouched. The conversion itself belongs to the harness plugins and is measured there; here the
+ * converter is the recording stand-in of `support/daemon/move-toolkit.ts`, so what is measured is the request the plan
+ * builds for it and what the plan derives from its answer.
  */
+
+const toolkit = testToolkit();
 
 const AT = '2026-10-20T08:00:00.000Z';
 const NEW_ID = '22222222-3333-4444-8555-666666666666';
@@ -63,7 +68,7 @@ const base: ConversationConvertRequest = {
 describe('planning a cross-harness conversion', () => {
   it('should write a Codex rollout under a fresh thread id, adopted and correlated by the session directory', () => {
     // Act
-    const plan = planConversationConvert({ ...base, targetModelProvider: 'fleet' });
+    const plan = planConversationConvert({ ...base, targetModelProvider: 'fleet' }, toolkit);
 
     // Assert
     if (plan.kind !== 'convert') throw new Error(plan.reason);
@@ -79,13 +84,14 @@ describe('planning a cross-harness conversion', () => {
       resolvedAt: AT,
     });
     should(plan.transcript.file).equal(file);
-    const meta = JSON.parse(plan.transcript.text.split('\n')[0] ?? '');
-    should(meta.payload).match({
-      id: NEW_ID,
+    should(toolkit.conversions.at(-1)?.target).match({
+      harness: 'codex',
+      conversationId: NEW_ID,
       cwd: '/work/repo',
-      model_provider: 'fleet',
-      runtime_workspace_roots: ['/work/repo', '/state/sessions/s1/codex-correlation/unreachable'],
+      modelProvider: 'fleet',
+      workspaceRoots: ['/state/sessions/s1/codex-correlation/unreachable'],
     });
+    should(toolkit.conversions.at(-1)?.attachmentDirectory).equal(`/state/sessions/s1/conversions/${NEW_ID}`);
     should(plan.files).deepEqual([{ file: `/state/sessions/s1/conversions/${NEW_ID}/attachment-1.png`, data: 'AAAA' }]);
     should(plan.summary.target).deepEqual({ harness: 'codex', version: '0.163.0', conversationId: NEW_ID });
   });
@@ -95,16 +101,19 @@ describe('planning a cross-harness conversion', () => {
     const untested = { ...base, targetVersion: 'codex-cli 0.170.2' };
 
     // Act
-    const same = planConversationConvert({ ...untested, targetFormat: { kind: 'same' } });
-    const different = planConversationConvert({
-      ...untested,
-      targetFormat: { kind: 'different', reason: 'it no longer writes session_meta/- records' },
-    });
-    const unprobed = planConversationConvert(untested);
+    const same = planConversationConvert({ ...untested, targetFormat: { kind: 'same' } }, toolkit);
+    const different = planConversationConvert(
+      {
+        ...untested,
+        targetFormat: { kind: 'different', reason: 'it no longer writes session_meta/- records' },
+      },
+      toolkit,
+    );
+    const unprobed = planConversationConvert(untested, toolkit);
 
     // Assert
     if (same.kind !== 'convert') throw new Error(same.reason);
-    should(same.summary.formatNote).containEql('unchanged from the one validated on Codex 0.165');
+    should(same.summary.formatNote).containEql('unchanged from the one validated');
     should(different.kind).equal('unconvertible');
     should((different as { reason: string }).reason).containEql('it no longer writes session_meta/- records');
     should(unprobed.kind).equal('unconvertible');
@@ -112,7 +121,7 @@ describe('planning a cross-harness conversion', () => {
 
   it('should render the same conversion elsewhere for the validation run, with the place deciding cwd, id and provider', () => {
     // Arrange
-    const plan = planConversationConvert(base);
+    const plan = planConversationConvert(base, toolkit);
     if (plan.kind !== 'convert') throw new Error(plan.reason);
 
     // Act
@@ -121,12 +130,10 @@ describe('planning a cross-harness conversion', () => {
 
     // Assert
     if (elsewhere.kind !== 'converted' || defaulted.kind !== 'converted') throw new Error('refused');
-    should(JSON.parse(elsewhere.transcript.split('\n')[0] ?? '').payload).match({
-      id: 'check-id',
-      cwd: '/tmp/check/work',
-      model_provider: 'fy_check',
-    });
-    should(JSON.parse(defaulted.transcript.split('\n')[0] ?? '').payload.model_provider).equal('openai');
+    const [placed, unplaced] = toolkit.conversions.slice(-2);
+    should(placed?.target).match({ conversationId: 'check-id', cwd: '/tmp/check/work', modelProvider: 'fy_check' });
+    should(unplaced?.target.conversationId).equal('check-id');
+    should(unplaced?.target.modelProvider).be.undefined();
   });
 
   it('should write a Claude transcript at the path Claude derives, minted under the new id, recording the target model', () => {
@@ -142,16 +149,19 @@ describe('planning a cross-harness conversion', () => {
       .join('\n');
 
     // Act
-    const plan = planConversationConvert({
-      ...base,
-      sourceHarness: 'codex',
-      targetHarness: 'claude',
-      source: { ...CLAUDE_SOURCE, home: '/homes/codex', harnessSessionId: 'thread-1' },
-      sourceText: codexText,
-      targetHome: '/homes/claude-b',
-      targetVersion: '2.1.304 (Claude Code)',
-      targetModel: 'claude-opus-5-5',
-    });
+    const plan = planConversationConvert(
+      {
+        ...base,
+        sourceHarness: 'codex',
+        targetHarness: 'claude',
+        source: { ...CLAUDE_SOURCE, home: '/homes/codex', harnessSessionId: 'thread-1' },
+        sourceText: codexText,
+        targetHome: '/homes/claude-b',
+        targetVersion: '2.1.304 (Claude Code)',
+        targetModel: 'claude-opus-5-5',
+      },
+      toolkit,
+    );
 
     // Assert
     if (plan.kind !== 'convert') throw new Error(plan.reason);
@@ -163,18 +173,24 @@ describe('planning a cross-harness conversion', () => {
       file: `/homes/claude-b/projects/-work-repo/${NEW_ID}.jsonl`,
       resolvedAt: AT,
     });
-    should(JSON.parse(plan.transcript.text.split('\n')[0] ?? '')).match({ sessionId: NEW_ID, version: '2.1.304' });
+    should(toolkit.conversions.at(-1)?.target).match({
+      harness: 'claude',
+      conversationId: NEW_ID,
+      version: '2.1.304 (Claude Code)',
+      model: 'claude-opus-5-5',
+    });
+    should(toolkit.conversions.at(-1)?.target.workspaceRoots).be.undefined();
   });
 
   it('should refuse, naming what is missing, before anything is written', () => {
     // Act
     const reasons = [
-      planConversationConvert({ ...base, targetHarness: 'claude' }),
-      planConversationConvert({ ...base, source: undefined }),
-      planConversationConvert({ ...base, source: { v: 1, home: '/h', identity: 'undiscovered' } }),
-      planConversationConvert({ ...base, sourceText: undefined }),
-      planConversationConvert({ ...base, targetHome: undefined }),
-      planConversationConvert({ ...base, targetVersion: undefined }),
+      planConversationConvert({ ...base, targetHarness: 'claude' }, toolkit),
+      planConversationConvert({ ...base, source: undefined }, toolkit),
+      planConversationConvert({ ...base, source: { v: 1, home: '/h', identity: 'undiscovered' } }, toolkit),
+      planConversationConvert({ ...base, sourceText: undefined }, toolkit),
+      planConversationConvert({ ...base, targetHome: undefined }, toolkit),
+      planConversationConvert({ ...base, targetVersion: undefined }, toolkit),
     ].map(plan => (plan.kind === 'unconvertible' ? plan.reason : 'converted'));
 
     // Assert
@@ -205,9 +221,9 @@ describe("reading a Codex home's model provider", () => {
 describe('deciding whether a target needs its rollout format probed', () => {
   it('should probe only a Codex whose version the converter was not measured on', () => {
     // Act + Assert
-    should(needsRolloutFormatProbe('codex', 'codex-cli 0.165.0')).be.false();
-    should(needsRolloutFormatProbe('codex', 'codex-cli 0.170.2')).be.true();
-    should(needsRolloutFormatProbe('codex', undefined)).be.false();
-    should(needsRolloutFormatProbe('claude', '9.9.9')).be.false();
+    should(needsRolloutFormatProbe('codex', 'codex-cli 0.165.0', toolkit)).be.false();
+    should(needsRolloutFormatProbe('codex', 'codex-cli 0.170.2', toolkit)).be.true();
+    should(needsRolloutFormatProbe('codex', undefined, toolkit)).be.false();
+    should(needsRolloutFormatProbe('claude', '9.9.9', toolkit)).be.false();
   });
 });

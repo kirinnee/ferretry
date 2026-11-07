@@ -28,7 +28,7 @@
  * handover stops its source afterwards, in a separate leg this code cannot reach.
  */
 
-import type { AttachmentView } from '@ferretry/protocol';
+import type { ConversationDigest, TransferAttachmentView } from './ports.ts';
 import type { Harness } from '../protocol/session-base.ts';
 import type { ConversationMessagePoint, SessionTransferEdge } from '../protocol/session-transfer-edge.ts';
 import type {
@@ -42,7 +42,6 @@ import type {
 } from '../../../contract/transfer.ts';
 import type { InteractionMode, TranscriptProvenance } from '../protocol/session.ts';
 import type { SessionProvenance } from '../session/provenance/types.ts';
-import type { ConversationDigest } from '../session/transcript/digest.ts';
 
 /**
  * The source session as preparation is allowed to see it.
@@ -226,7 +225,7 @@ export interface TransferConversationValidator {
 
 /** The source's attachment manifests. Bytes are copied at import, never read through here. */
 export interface TransferAttachmentReader {
-  list(sessionId: string): Promise<readonly AttachmentView[]>;
+  list(sessionId: string): Promise<readonly TransferAttachmentView[]>;
 }
 
 /** Evidence about a working directory. Deliberately not a restoration mechanism. */

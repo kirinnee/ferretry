@@ -34,15 +34,17 @@
 
 import type { ForkSessionFailure } from '../../../contract/fork.ts';
 import type { RuntimeControlRequest, RuntimeModelChoice } from '../../lib/protocol/session.ts';
-import type { CodexRuntimeCatalogCache } from '../../lib/session/harness/codex-catalog-cache.ts';
-import { codexSwitchContext } from '../../lib/session/harness/model-catalog.ts';
-import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
-import type { HarnessRuntimeSwitchRequest } from '../../lib/session/harness/runtime-switch.ts';
-import type { HarnessQuirkService } from '../../lib/session/harness/service.ts';
-import type { CoreAccount, HarnessKind } from '../../lib/core/inventory.ts';
-import type { SessionPlanner } from '../../lib/core/session-planner.ts';
 import type { SessionForkCommand } from '../../lib/forks/identity.ts';
+import type { ForkHarnessFacts } from '../../lib/forks/ports.ts';
 import type { SessionForkTargetResolver as SessionForkTargetResolverPort } from '../../lib/forks/types.ts';
+import type { CoreAccount, SessionPlanner } from '../../lib/session/peers/core.ts';
+import type { HarnessKind } from '../../lib/session/peers/fleet.ts';
+import type {
+  CodexRuntimeCatalogCache,
+  HarnessQuirkService,
+  HarnessRuntimeCatalogs,
+  HarnessRuntimeSwitchRequest,
+} from '../../lib/session/peers/harness.ts';
 import type { TransferTargetChoice } from '../../lib/transfer/types.ts';
 
 /**
@@ -106,6 +108,13 @@ export interface SessionForkTargetResolverPorts {
   readonly harness: Pick<HarnessQuirkService, 'planSwitch'>;
   /** The ONE held Codex catalogue. A second cache is a second probe against a live account. */
   readonly catalog: CodexRuntimeCatalogCache;
+  /**
+   * The harness plugins' projection of a live catalogue into the switch planner's context (today's
+   * `codexSwitchContext`), narrowed to the only member a fork reaches.
+   */
+  readonly catalogs: Pick<HarnessRuntimeCatalogs, 'codexSwitchContext'>;
+  /** The harness quirk table, which decides how an effort is expressed (`effortIsRuntimeCommand`). */
+  readonly harnessFacts: Pick<ForkHarnessFacts, 'quirks'>;
 }
 
 /**
@@ -132,12 +141,13 @@ const RESOLUTION_PROBE_ID = 'fork-target-resolution';
  * given the model with it, because the picker cannot be driven to a level without a row to select.
  */
 export function forkStartupRuntimeRequest(
+  facts: Pick<ForkHarnessFacts, 'quirks'>,
   harness: HarnessKind,
   model: string | null,
   effort: string | null,
 ): RuntimeControlRequest | undefined {
   if (effort === null) return undefined;
-  if (harnessQuirks(harness).effortIsRuntimeCommand) return { action: 'effort', effort };
+  if (facts.quirks(harness).effortIsRuntimeCommand) return { action: 'effort', effort };
   return { action: 'model', ...(model === null ? {} : { model }), effort };
 }
 
@@ -214,7 +224,7 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
    * and not a reason to refuse a fork the account can serve.
    */
   async validate(target: TransferTargetChoice, cwd: string): Promise<void> {
-    const startup = forkStartupRuntimeRequest(target.harness, target.model, target.effort);
+    const startup = forkStartupRuntimeRequest(this.ports.harnessFacts, target.harness, target.model, target.effort);
     // A startup request exists only when an effort was chosen, so the null test narrows the type and nothing more.
     if (startup === undefined || target.effort === null) return;
     const resolved = await resolveForkTargetAccount(this.ports.accounts, target.agent);
@@ -235,7 +245,9 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
       // a harness that takes the effort as a command needs no catalogue, and probing for one would
       // make a fork fail on an account whose catalogue is momentarily unreadable but whose effort
       // vocabulary is fixed.
-      ...(wanted.model === undefined ? {} : { catalog: codexSwitchContext(await this.choices(resolved, cwd)) }),
+      ...(wanted.model === undefined
+        ? {}
+        : { catalog: this.ports.catalogs.codexSwitchContext(await this.choices(resolved, cwd)) }),
     });
     if (plan.kind === 'refused')
       throw new SessionForkTargetResolutionError(

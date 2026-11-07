@@ -1,3 +1,16 @@
+import { ferretOf } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiRequest,
+  type ApiResponse,
+  type CallContext,
+  decodeParameter,
+  headerValue,
+  jsonResponse,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import { parseBody, parseOptionalBody } from '../../http/body.ts';
+import { ferretSummaryOfSessionView } from '../../moves/ferret-view.ts';
 import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
 import { type SessionRelaunchSettings, type SessionView } from '../../protocol/session.ts';
 import {
@@ -10,20 +23,14 @@ import {
   type MoveConversation,
   type MoveRefusal,
 } from '../../../../contract/move.ts';
-import type { AuditedRouteRule } from '../../audit/routes.ts';
-import { parseActor } from '../../api/actor.ts';
-import { parseBody, parseOptionalBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   MOVE_REPLAY_MAX_ENTRIES,
   MoveReplayCapacityError,
   MoveReplayGuard,
   MoveReplayMismatchError,
 } from '../../moves/replay-guard.ts';
-import type { ModuleContribution } from '../modules.ts';
+
+type RouteContext = CallContext;
 
 /**
  * Moving a live session onto another account: `POST /v1/ferrets/:ferretId/move`.
@@ -232,11 +239,13 @@ function committedAfterDestruction(error: unknown): boolean {
   return error instanceof SessionMoveError ? error.failure === 'failed' : true;
 }
 
-/** Who a request came from, in the words the journal keeps: a calling ferret's session, else the owner. */
-export function moverOf(actor: string | undefined): string {
-  const { kind, id } = parseActor(actor ?? '');
-  if (kind === 'peer') return id === undefined || id === '' ? 'session' : `session:${id}`;
-  return 'owner';
+/**
+ * Who a request came from, in the words the journal keeps: a calling ferret's session, else the owner. The ferret is
+ * the one Gate's standing names (its credential, else its actor), never a field of the request.
+ */
+export function moverOf(call: Parameters<typeof ferretOf>[0]): string {
+  const ferret = ferretOf(call);
+  return ferret === undefined ? 'owner' : `session:${ferret}`;
 }
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
@@ -282,7 +291,7 @@ async function move(
     allowContextDowngrade: request.allowContextDowngrade,
     forceInflight: request.forceInflight,
     ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
-    movedBy: moverOf(context.actor),
+    movedBy: moverOf(context),
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests
@@ -297,49 +306,59 @@ async function move(
   const view = await guard
     .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.move(sessionId, target))
     .catch(refuse);
-  return jsonResponse(view);
+  // The wire answers the ferret's summary; the ledger keeps the view, so every replay answers the same summary.
+  return jsonResponse(ferretSummaryOfSessionView(view));
+}
+
+/** The four route keys, exactly as `manifest.ts` declares them. */
+export const SESSION_MOVE_ROUTES = [
+  { method: 'GET', path: '/v1/ferrets/:ferretId/relaunch-settings' },
+  { method: 'POST', path: '/v1/ferrets/:ferretId/conversion-preview' },
+  { method: 'POST', path: '/v1/ferrets/:ferretId/move' },
+  { method: 'POST', path: '/v1/ferrets/:ferretId/move/ask-to-stop-jobs' },
+] as const;
+
+/** A mounted handler, keyed by method and path; the descriptors (operator, no-store, audit, guard) are the manifest's. */
+export interface SessionMoveRoute {
+  readonly method: (typeof SESSION_MOVE_ROUTES)[number]['method'];
+  readonly path: (typeof SESSION_MOVE_ROUTES)[number]['path'];
+  readonly handle: RouteHandler;
 }
 
 /**
- * `admin` scope, for the same reason the start, the stop and the revive are: a move kills one
- * agent process holding the daemon's own privileges and launches another under a different account.
+ * The four handlers. Their descriptors live in `manifest.ts`, field for field as today's: `operator` for all four, for
+ * the same reason the start, the stop and the revive are `admin` scope — a move kills one agent process holding the
+ * daemon's own privileges and launches another under a different account — and `noStore` because the answer is a live
+ * ferret whose agent, model and state are exactly what the call changed; a cached one describes the account the ferret
+ * just left. The ask-to-stop-jobs route is audited `agent.prompted`: it puts Ferretry's words in the agent's queue, so
+ * it prompts the agent as a send does and is recorded the same way.
  *
- * The body is MANDATORY here, unlike the revive's: a move with no target agent is not a
- * move with a default, it is a request that names nothing to move to.
+ * The body is MANDATORY on the move, unlike the revive's: a move with no target agent is not a move with a default, it
+ * is a request that names nothing to move to.
  *
- * `noStore` because the answer is a live session view whose agent, model and status are exactly what
- * the call changed; a cached one describes the account the session just left.
- *
- * `maxReplayEntries` exists so a test can reach the ledger's admission limit in three requests instead
- * of four thousand. Production never passes it.
+ * `maxReplayEntries` exists so a test can reach the ledger's admission limit in three requests instead of four
+ * thousand. Production never passes it.
  */
 export function sessionMoveRoutes(
   subsystem: SessionMoveSubsystem,
   maxReplayEntries: number = MOVE_REPLAY_MAX_ENTRIES,
-): readonly ApiRoute[] {
+): readonly SessionMoveRoute[] {
   // One guard per mount, so it lives as long as the daemon does. A guard created per request would
   // recognise nothing, which is the bug this route had.
   const guard = new MoveReplayGuard(committedAfterDestruction, maxReplayEntries);
   return [
     {
       // A read of what a Restart (a move onto the same account) would change, so it lives with
-      // the move. `operator`, as the move is: the answer describes how this session's
-      // process was launched, which is the move's own business.
+      // the move: the answer describes how this session's process was launched, which is the move's own business.
       method: 'GET',
       path: '/v1/ferrets/:ferretId/relaunch-settings',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
       handle: async context => jsonResponse(await subsystem.relaunchSettings(pathSessionId(context)).catch(refuse)),
     },
     {
-      // A read, though a POST: it names an account and a model. `operator` like the move it previews,
-      // and no request id, because it writes nothing and a repeat costs only the read.
+      // A read, though a POST: it names an account and a model. No request id, because it writes nothing and a
+      // repeat costs only the read.
       method: 'POST',
       path: '/v1/ferrets/:ferretId/conversion-preview',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, ConversionPreviewRequestSchema);
         return jsonResponse(
@@ -355,19 +374,13 @@ export function sessionMoveRoutes(
     {
       method: 'POST',
       path: '/v1/ferrets/:ferretId/move',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
       handle: async context => await move(subsystem, guard, context),
     },
     {
-      // `operator`, as sending the agent a message is: that is all this does. No request id, because the
-      // queue id is derived from the jobs themselves, so a repeat answers with the message already queued.
+      // No request id, because the queue id is derived from the jobs themselves, so a repeat answers with the
+      // message already queued.
       method: 'POST',
       path: '/v1/ferrets/:ferretId/move/ask-to-stop-jobs',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
       handle: async context => {
         await parseOptionalBody(context.request, AskToStopJobsRequestSchema);
         return jsonResponse(await subsystem.askToStopJobs(pathSessionId(context)).catch(refuse));
@@ -377,26 +390,14 @@ export function sessionMoveRoutes(
 }
 
 /**
- * The security log's rule for the ask-to-stop-jobs route: a refused move's "ask the agent to stop its background jobs"
- * puts Ferretry's words in the agent's queue, so it prompts the agent as a send does and is recorded the same way.
- */
-const SESSION_MOVE_AUDIT_RULES: readonly AuditedRouteRule[] = [
-  {
-    method: 'POST',
-    path: '/v1/ferrets/:ferretId/move/ask-to-stop-jobs',
-    event: 'agent.prompted',
-    subject: 'ferretId',
-    detail: { action: 'ask-to-stop-jobs' },
-  },
-];
-
-/**
- * What the session-move module adds to the daemon: the four move routes and the ask-to-stop-jobs audit rule.
+ * What the session-move module adds to the daemon: the four move routes.
  *
  * The move registers beside the revive it is built on: both are one-segment patterns under `/v1/ferrets/:ferretId`
  * that differ only in their final literal, so neither can shadow the other, and both belong above the deeper per-session
  * subsystems.
  */
-export function sessionMoveContribution(subsystem: SessionMoveSubsystem): ModuleContribution {
-  return { routes: sessionMoveRoutes(subsystem), audit: { routes: SESSION_MOVE_AUDIT_RULES } };
+export function sessionMoveContribution(subsystem: SessionMoveSubsystem): {
+  readonly routes: readonly SessionMoveRoute[];
+} {
+  return { routes: sessionMoveRoutes(subsystem) };
 }

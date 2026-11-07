@@ -1,12 +1,14 @@
 import { describe, it } from 'bun:test';
 import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
+import { testToolkit } from '../../../support/daemon/move-toolkit.ts';
 import {
   type ConversationCarryRequest,
   planConversationCarry,
   previousConversation,
 } from '../../../../daemon/lib/moves/conversation-carry.ts';
 
+const toolkit = testToolkit();
 const CWD = '/work/repo';
 const ID = 'cc4c82a7-0000-4000-8000-000000000001';
 const CLAUDE: TranscriptProvenance = {
@@ -41,7 +43,7 @@ const request = (overrides: Partial<ConversationCarryRequest>): ConversationCarr
 describe('planConversationCarry', () => {
   it('should resume the same conversation in place on a Restart, copying nothing', () => {
     // Act
-    const carry = planConversationCarry(request({}));
+    const carry = planConversationCarry(request({}), toolkit);
 
     // Assert
     should(carry).deepEqual({ kind: 'carry', provenance: CLAUDE });
@@ -49,7 +51,7 @@ describe('planConversationCarry', () => {
 
   it('should copy a Claude conversation into another login at the path that login resumes it from', () => {
     // Act
-    const carry = planConversationCarry(request({ targetHome: '/homes/target' }));
+    const carry = planConversationCarry(request({ targetHome: '/homes/target' }), toolkit);
 
     // Assert
     const to = `/homes/target/projects/-work-repo/${ID}.jsonl`;
@@ -62,7 +64,7 @@ describe('planConversationCarry', () => {
 
   it('should keep the id of a Claude conversation the harness never wrote, with nothing to copy', () => {
     // Act
-    const carry = planConversationCarry(request({ targetHome: '/homes/target', sourceWritten: false }));
+    const carry = planConversationCarry(request({ targetHome: '/homes/target', sourceWritten: false }), toolkit);
 
     // Assert
     should(carry).match({ kind: 'carry', provenance: { harnessSessionId: ID, home: '/homes/target' } });
@@ -71,7 +73,10 @@ describe('planConversationCarry', () => {
 
   it('should carry a Codex rollout to the same place under the target home', () => {
     // Act
-    const carry = planConversationCarry(request({ harness: 'codex', source: CODEX, targetHome: '/homes/codex-b' }));
+    const carry = planConversationCarry(
+      request({ harness: 'codex', source: CODEX, targetHome: '/homes/codex-b' }),
+      toolkit,
+    );
 
     // Assert
     const to = `/homes/codex-b/sessions/2026/10/20/rollout-${ID}.jsonl`;
@@ -94,7 +99,7 @@ describe('planConversationCarry', () => {
     ];
 
     // Act
-    const answers = refusals.map(planConversationCarry);
+    const answers = refusals.map(each => planConversationCarry(each, toolkit));
 
     // Assert
     should(answers.map(answer => answer.kind)).deepEqual(Array(refusals.length).fill('unresumable'));

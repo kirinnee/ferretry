@@ -1,25 +1,22 @@
-import { afterEach, describe, it } from 'bun:test';
+import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
 import type { AttachmentFacet } from '../../../../contract/transfer.ts';
 import should from 'should';
 import {
   FileSessionAttachmentCopier,
   SessionAttachmentCopyError,
 } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
-import { type DurableArtifactIo, fsyncArtifactPath } from '../../../../daemon/adapters/transfer/durable-artifact.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { MemoryAttachmentStore } from './memory-attachment-store.ts';
 
 /**
- * Daemon-local attachment copying on a real filesystem. Every call names the explicit NEW session,
- * copies verified original bytes and the manifest under the same content address, carries locked
- * state, copies NO decrypted plaintext, and leaves the source byte-for-byte untouched.
+ * Daemon-local attachment copying through the attachment owner's store. Every call names the explicit NEW session,
+ * copies verified original bytes and the manifest under the same content address, carries locked state, copies NO
+ * decrypted plaintext, and leaves the source byte-for-byte untouched.
  *
- * Everything here runs inside a throwaway directory; no state home is resolved.
+ * The store is a fake (the port is unbound; its real implementation is Conversation's). It records each call so the
+ * tests can pin what the copier asked of it, in what order, and for which session.
  */
 
-const DAEMON = 'daemon-1';
 const SOURCE = 'source-session';
 const TARGET = 'target-session';
 
@@ -27,31 +24,21 @@ function sha(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-/** Deterministic temporary suffixes, so an atomic write is provable rather than incidental. */
-function counter(): () => string {
-  let n = 0;
-  return () => {
-    n += 1;
-    return `t${n}`;
-  };
-}
-
 interface Minted {
   readonly id: string;
-  readonly directory: string;
   readonly bytes: Uint8Array;
+  readonly manifest: Record<string, unknown>;
   readonly expectedManifest: AttachmentFacet['attachments'][number];
 }
 
-/** Writes a source attachment in the exact layout SessionAttachmentStore uses, and returns it. */
-async function mintAttachment(
-  root: string,
+/** Puts a source attachment into the store in the owner's layout, and returns it. */
+function mintAttachment(
+  store: MemoryAttachmentStore,
   sessionId: string,
   bytes: Uint8Array,
   options: { encrypted?: boolean; filename?: string } = {},
-): Promise<Minted> {
+): Minted {
   const id = `att_${sha(bytes)}`;
-  const directory = join(root, 'attachments', DAEMON, sessionId, id);
   const manifest = {
     id,
     filename: options.filename ?? 'report.pdf',
@@ -61,12 +48,12 @@ async function mintAttachment(
     createdAt: '2025-01-01T00:00:00+00:00',
     ...(options.encrypted ? { encrypted: { kind: 'pdf' } } : {}),
   };
-  await Bun.write(join(directory, 'original'), bytes);
-  await Bun.write(join(directory, 'manifest.json'), JSON.stringify(manifest));
+  store.put(sessionId, id, 'original', bytes);
+  store.put(sessionId, id, 'manifest', JSON.stringify(manifest));
   return {
     id,
-    directory,
     bytes,
+    manifest,
     expectedManifest: {
       id,
       filename: manifest.filename,
@@ -75,67 +62,8 @@ async function mintAttachment(
       sha256: manifest.sha256,
       createdAt: manifest.createdAt,
       encrypted: options.encrypted ? { kind: 'pdf', locked: true } : null,
-    },
+    } as AttachmentFacet['attachments'][number],
   };
-}
-
-/** The target-keyed copier, constructed once and given the fresh id on every import write. */
-function copier(root: string, io?: DurableArtifactIo): FileSessionAttachmentCopier {
-  return new FileSessionAttachmentCopier(sessionId => join(root, 'attachments', DAEMON, sessionId), counter(), io);
-}
-
-interface DurabilityLedger {
-  readonly events: string[];
-  readonly io: DurableArtifactIo;
-}
-
-/**
- * Records every flush in order while still performing the REAL one.
- *
- * A stand-in recorder would make the durability assertions vacuous, so each hook calls through and
- * the optional callbacks are how a test inspects the filesystem — or simulates a power loss — at an
- * exact point in the publication sequence.
- */
-function ledger(
-  root: string,
-  hooks: {
-    readonly atDirectorySync?: (path: string) => Promise<void>;
-    readonly atOpenFileSync?: () => Promise<void>;
-  } = {},
-): DurabilityLedger {
-  const events: string[] = [];
-  // The temporary root stands in for `<state>`, so `.` is the declared durable anchor itself.
-  const name = (path: string): string => relative(root, path) || '.';
-  return {
-    events,
-    io: {
-      syncDirectory: async path => {
-        events.push(`dir:${name(path)}`);
-        await hooks.atDirectorySync?.(path);
-        await fsyncArtifactPath(path);
-      },
-      syncOpenFile: async (handle, path) => {
-        // A temporary being published, or an already-published file a replay proved from this handle.
-        events.push(path.endsWith('.tmp') ? 'temp:fsync' : `file:${name(path)}`);
-        await hooks.atOpenFileSync?.();
-        await handle.sync();
-      },
-    },
-  };
-}
-
-/**
- * The parent-first chain every target attachment publication persists.
- *
- * It starts at the STATE ROOT (`.` here), because the attachments root is itself created lazily by
- * `SessionAttachmentStore` with a recursive `mkdir` and no parent flush: reading a source attachment
- * from under it proves it is visible, never that its own name is on the medium. Every level below the
- * state root is therefore an entry this publication must persist.
- */
-function chain(): readonly string[] {
-  return ['.', join('attachments'), join('attachments', DAEMON), join('attachments', DAEMON, TARGET)].map(
-    path => `dir:${path}`,
-  );
 }
 
 function planned(minted: Minted, newSessionId: string = TARGET) {
@@ -156,120 +84,126 @@ async function reject(promise: Promise<unknown>): Promise<unknown> {
   throw new Error('expected the call to reject, but it resolved');
 }
 
-describe('FileSessionAttachmentCopier', () => {
-  afterEach(async () => await cleanupTempDirectories());
+function setup(): { readonly store: MemoryAttachmentStore; readonly subject: FileSessionAttachmentCopier } {
+  const store = new MemoryAttachmentStore();
+  return { store, subject: new FileSessionAttachmentCopier(store) };
+}
 
+/** Rewrites the source manifest with extra or changed fields. */
+function reMint(store: MemoryAttachmentStore, minted: Minted, changes: Record<string, unknown>): void {
+  store.put(SOURCE, minted.id, 'manifest', JSON.stringify({ ...minted.manifest, ...changes }));
+}
+
+describe('FileSessionAttachmentCopier', () => {
   it('preserves the content address and original bytes, carrying locked state and no decrypted cache', async () => {
     // An encrypted attachment is copied as-is into the explicit target: same att_<sha> id, same original
     // bytes (still encrypted — never decrypted), manifest carrying encrypted:{kind:'pdf'}. The target
     // begins LOCKED because the decrypted-plaintext cache is process-local and session-keyed, so
     // nothing of it is (or could be) copied.
     // Arrange
-    const home = await tempDirectory('transfer-attachment-copy');
+    const { store, subject } = setup();
     const encrypted = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x99, 0xaa, 0xff]); // not valid plaintext
-    const minted = await mintAttachment(home, SOURCE, encrypted, { encrypted: true });
+    const minted = mintAttachment(store, SOURCE, encrypted, { encrypted: true });
 
     // Act
-    await copier(home).copyOriginal(planned(minted));
+    await subject.copyOriginal(planned(minted));
 
     // Assert — id and bytes preserved verbatim.
-    const targetDirectory = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    const targetOriginal = join(targetDirectory, 'original');
-    const targetManifest = join(targetDirectory, 'manifest.json');
-    should(new Uint8Array(await readFile(targetOriginal))).deepEqual(encrypted);
+    should(store.bytes(TARGET, minted.id, 'original')).deepEqual(encrypted);
     // Locked state + metadata carried: the manifest still names an encrypted pdf, and ONLY original +
-    // manifest exist (no decrypted plaintext file was written).
-    const manifest = JSON.parse(await readFile(targetManifest, 'utf8'));
-    should((manifest as { encrypted: { kind: string } }).encrypted).deepEqual({ kind: 'pdf' });
-    should((await readdir(targetDirectory)).sort()).deepEqual(['manifest.json', 'original']);
+    // manifest exist under the target (no decrypted plaintext file was written).
+    const manifest = JSON.parse(store.text(TARGET, minted.id, 'manifest') ?? 'null') as { encrypted: unknown };
+    should(manifest.encrypted).deepEqual({ kind: 'pdf' });
+    should([...store.files.keys()].filter(file => file.startsWith(`${TARGET}/`)).sort()).deepEqual([
+      `${TARGET}/${minted.id}/manifest`,
+      `${TARGET}/${minted.id}/original`,
+    ]);
   });
 
-  it('leaves the source byte-for-byte untouched', async () => {
-    // Source immutability is seam invariant I1. The copier only ever READS the source, so its original,
-    // manifest and directory listing are identical after a copy — and so are the mtimes.
+  it('copies the manifest verbatim, byte for byte', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-source');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
-    const sourceOriginal = join(minted.directory, 'original');
-    const sourceManifest = join(minted.directory, 'manifest.json');
-    const beforeOriginal = await readFile(sourceOriginal);
-    const beforeManifest = await readFile(sourceManifest);
-    const beforeMtime = (await stat(sourceOriginal)).mtimeMs;
-
-    // Act
-    await copier(home).copyOriginal(planned(minted));
-
-    // Assert — source content and listing unchanged.
-    should(await readFile(sourceOriginal)).deepEqual(beforeOriginal);
-    should(await readFile(sourceManifest)).deepEqual(beforeManifest);
-    should((await readdir(minted.directory)).sort()).deepEqual(['manifest.json', 'original']);
-    should((await stat(sourceOriginal)).mtimeMs).equal(beforeMtime);
-  });
-
-  it('is idempotent from the plan: a verified target survives later source mutation untouched', async () => {
-    // A restart re-runs import, so a target that already holds the same bytes is not rewritten.
-    // Arrange
-    const home = await tempDirectory('transfer-attachment-idempotent');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([10, 20, 30]));
-    const subject = copier(home);
-
-    // Act
-    await subject.copyOriginal(planned(minted));
-    const targetDirectory = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    const mtimeBefore = (await stat(join(targetDirectory, 'original'))).mtimeMs;
-    // A previously copied target is independently proved against the plan. Replay does not become
-    // impossible merely because the source changed after a later attachment failed.
-    await Bun.write(join(minted.directory, 'original'), new Uint8Array([99, 98, 97, 96]));
-    await subject.copyOriginal(planned(minted));
-
-    // Assert — second call did not throw and did not rewrite.
-    should((await stat(join(targetDirectory, 'original'))).mtimeMs).equal(mtimeBefore);
-  });
-
-  it('repairs a torn target from source bytes that still match the plan', async () => {
-    // Arrange
-    const home = await tempDirectory('transfer-attachment-torn-target');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([8, 7, 6, 5]));
-    const subject = copier(home);
-    await subject.copyOriginal(planned(minted));
-    const targetOriginal = join(home, 'attachments', DAEMON, TARGET, minted.id, 'original');
-    await Bun.write(targetOriginal, new Uint8Array([0]));
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([1, 2, 3]), { encrypted: true });
 
     // Act
     await subject.copyOriginal(planned(minted));
 
     // Assert
-    should(new Uint8Array(await readFile(targetOriginal))).deepEqual(minted.bytes);
+    should(store.bytes(TARGET, minted.id, 'manifest')).deepEqual(store.bytes(SOURCE, minted.id, 'manifest'));
+  });
+
+  it('leaves the source byte-for-byte untouched', async () => {
+    // Source immutability is seam invariant I1. The copier only ever READS the source: it never writes to the
+    // source session's key, so its original and manifest are identical after a copy.
+    // Arrange
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+    const beforeOriginal = new Uint8Array(store.bytes(SOURCE, minted.id, 'original') ?? []);
+    const beforeManifest = store.text(SOURCE, minted.id, 'manifest');
+
+    // Act
+    await subject.copyOriginal(planned(minted));
+
+    // Assert — source content unchanged and no write ever named the source session.
+    should(store.bytes(SOURCE, minted.id, 'original')).deepEqual(beforeOriginal);
+    should(store.text(SOURCE, minted.id, 'manifest')).equal(beforeManifest);
+    should(store.writesOf(SOURCE)).deepEqual([]);
+  });
+
+  it('is idempotent from the plan: a verified target survives later source mutation untouched', async () => {
+    // A restart re-runs import, so a target that already holds the same bytes is accepted.
+    // Arrange
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([10, 20, 30]));
+
+    // Act
+    await subject.copyOriginal(planned(minted));
+    // A previously copied target is independently proved against the plan. Replay does not become
+    // impossible merely because the source changed after a later attachment failed.
+    store.put(SOURCE, minted.id, 'original', new Uint8Array([99, 98, 97, 96]));
+    await subject.copyOriginal(planned(minted));
+
+    // Assert — second call did not throw and the target still holds the planned bytes.
+    should(store.bytes(TARGET, minted.id, 'original')).deepEqual(minted.bytes);
+  });
+
+  it('repairs a torn target from source bytes that still match the plan', async () => {
+    // Arrange
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([8, 7, 6, 5]));
+    await subject.copyOriginal(planned(minted));
+    store.put(TARGET, minted.id, 'original', new Uint8Array([0]));
+
+    // Act
+    await subject.copyOriginal(planned(minted));
+
+    // Assert
+    should(store.bytes(TARGET, minted.id, 'original')).deepEqual(minted.bytes);
   });
 
   it('copies several attachments under their respective content addresses', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-many');
-    const one = await mintAttachment(home, SOURCE, new Uint8Array([1, 1, 1]));
-    const two = await mintAttachment(home, SOURCE, new Uint8Array([2, 2, 2]));
-    const subject = copier(home);
+    const { store, subject } = setup();
+    const one = mintAttachment(store, SOURCE, new Uint8Array([1, 1, 1]));
+    const two = mintAttachment(store, SOURCE, new Uint8Array([2, 2, 2]));
 
     // Act
     await subject.copyOriginal(planned(one));
     await subject.copyOriginal(planned(two));
 
     // Assert
-    should(new Uint8Array(await readFile(join(home, 'attachments', DAEMON, TARGET, one.id, 'original')))).deepEqual(
-      one.bytes,
-    );
-    should(new Uint8Array(await readFile(join(home, 'attachments', DAEMON, TARGET, two.id, 'original')))).deepEqual(
-      two.bytes,
-    );
+    should(store.bytes(TARGET, one.id, 'original')).deepEqual(one.bytes);
+    should(store.bytes(TARGET, two.id, 'original')).deepEqual(two.bytes);
   });
 
   it('refuses a missing source attachment with a not_found failure', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-missing');
+    const { subject } = setup();
     const phantom = 'att_0000000000000000000000000000000000000000000000000000000000000000';
 
     // Act + Assert
     const error = await reject(
-      copier(home).copyOriginal({
+      subject.copyOriginal({
         fromSessionId: SOURCE,
         newSessionId: TARGET,
         expectedManifest: {
@@ -289,34 +223,29 @@ describe('FileSessionAttachmentCopier', () => {
 
   it('refuses a source whose original no longer matches its manifest with a corrupt failure', async () => {
     // Arrange — the manifest names one sha, the original holds different bytes.
-    const home = await tempDirectory('transfer-attachment-corrupt');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([1, 2, 3]));
-    await Bun.write(join(minted.directory, 'original'), new Uint8Array([9, 9, 9]));
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([1, 2, 3]));
+    store.put(SOURCE, minted.id, 'original', new Uint8Array([9, 9, 9]));
 
     // Act + Assert
-    const error = await reject(copier(home).copyOriginal(planned(minted)));
+    const error = await reject(subject.copyOriginal(planned(minted)));
     should((error as SessionAttachmentCopyError).failure).equal('corrupt');
+    should(store.writesOf(TARGET)).deepEqual([]);
   });
 
   it('refuses a source coherently rewritten after planning even when its new bytes match its new manifest', async () => {
     // Arrange — this is the adversarial gap a manifest-only check misses: both source files agree,
     // but they no longer agree with the content identity frozen in the persisted transfer plan.
-    const home = await tempDirectory('transfer-attachment-mutated');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([1, 2, 3, 4]));
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([1, 2, 3, 4]));
     const input = planned(minted);
     const replacement = new Uint8Array([9, 8, 7, 6]);
-    const manifestFile = join(minted.directory, 'manifest.json');
-    const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as Record<string, unknown>;
-    await Bun.write(join(minted.directory, 'original'), replacement);
-    await Bun.write(
-      manifestFile,
-      JSON.stringify({ ...manifest, size: replacement.byteLength, sha256: sha(replacement) }),
-    );
-
-    // Act + Assert
-    const error = await reject(copier(home).copyOriginal(input));
+    store.put(SOURCE, minted.id, 'original', replacement);
+    reMint(store, minted, { size: replacement.byteLength, sha256: sha(replacement), id: `att_${sha(replacement)}` });
+    // The owner's parser reads the manifest under the planned id; the rewritten one names another, so it is invalid.
+    const error = await reject(subject.copyOriginal(input));
     should((error as SessionAttachmentCopyError).failure).equal('corrupt');
-    should((error as Error).message).containEql('manifest');
+    should(store.writesOf(TARGET)).deepEqual([]);
   });
 
   it('refuses every planned manifest field drifting over unchanged bytes, including locked state', async () => {
@@ -328,181 +257,110 @@ describe('FileSessionAttachmentCopier', () => {
     ];
 
     for (const [index, mutation] of mutations.entries()) {
-      const home = await tempDirectory(`transfer-attachment-manifest-${index}`);
-      const minted = await mintAttachment(home, SOURCE, new Uint8Array([1, 2, 3, index]));
-      const manifestFile = join(minted.directory, 'manifest.json');
-      const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as Record<string, unknown>;
-      await Bun.write(manifestFile, JSON.stringify({ ...manifest, ...mutation }));
+      const { store, subject } = setup();
+      const minted = mintAttachment(store, SOURCE, new Uint8Array([1, 2, 3, index]));
+      reMint(store, minted, mutation);
 
-      const error = await reject(copier(home).copyOriginal(planned(minted)));
+      const error = await reject(subject.copyOriginal(planned(minted)));
       should((error as SessionAttachmentCopyError).failure).equal('corrupt');
       should((error as Error).message).containEql('does not match the transfer plan');
+      should(store.writesOf(TARGET)).deepEqual([]);
     }
   });
 
   it('refuses an unplanned source manifest field instead of copying its raw bytes into the target', async () => {
-    const home = await tempDirectory('transfer-attachment-source-extra-field');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([4, 4, 4]));
-    const manifestFile = join(minted.directory, 'manifest.json');
-    const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as Record<string, unknown>;
-    await Bun.write(manifestFile, JSON.stringify({ ...manifest, sourceOnlySecret: 'must-not-cross' }));
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([4, 4, 4]));
+    reMint(store, minted, { sourceOnlySecret: 'must-not-cross' });
 
-    const error = await reject(copier(home).copyOriginal(planned(minted)));
+    const error = await reject(subject.copyOriginal(planned(minted)));
 
     should((error as SessionAttachmentCopyError).failure).equal('corrupt');
     should((error as Error).message).containEql('manifest is invalid');
+    should(store.writesOf(TARGET)).deepEqual([]);
   });
 
   it('repairs target manifest metadata drift only from a source that still matches the plan', async () => {
-    const home = await tempDirectory('transfer-attachment-target-manifest');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([7, 7, 7]));
-    const subject = copier(home);
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([7, 7, 7]));
     await subject.copyOriginal(planned(minted));
-    const sourceManifest = join(minted.directory, 'manifest.json');
-    const targetManifest = join(home, 'attachments', DAEMON, TARGET, minted.id, 'manifest.json');
-    const target = JSON.parse(await readFile(targetManifest, 'utf8')) as Record<string, unknown>;
-    await Bun.write(targetManifest, JSON.stringify({ ...target, filename: 'drifted.txt' }));
+    const target = JSON.parse(store.text(TARGET, minted.id, 'manifest') ?? 'null') as Record<string, unknown>;
+    store.put(TARGET, minted.id, 'manifest', JSON.stringify({ ...target, filename: 'drifted.txt' }));
 
     await subject.copyOriginal(planned(minted));
 
-    should(await readFile(targetManifest)).deepEqual(await readFile(sourceManifest));
+    should(store.bytes(TARGET, minted.id, 'manifest')).deepEqual(store.bytes(SOURCE, minted.id, 'manifest'));
   });
 
   it('removes an unplanned target manifest field only after re-proving the source against the plan', async () => {
-    const home = await tempDirectory('transfer-attachment-target-extra-field');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([6, 6, 6]));
-    const subject = copier(home);
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([6, 6, 6]));
     await subject.copyOriginal(planned(minted));
-    const sourceManifest = join(minted.directory, 'manifest.json');
-    const targetManifest = join(home, 'attachments', DAEMON, TARGET, minted.id, 'manifest.json');
-    const target = JSON.parse(await readFile(targetManifest, 'utf8')) as Record<string, unknown>;
-    await Bun.write(targetManifest, JSON.stringify({ ...target, targetOnlySecret: 'must-not-survive' }));
+    const target = JSON.parse(store.text(TARGET, minted.id, 'manifest') ?? 'null') as Record<string, unknown>;
+    store.put(TARGET, minted.id, 'manifest', JSON.stringify({ ...target, targetOnlySecret: 'must-not-survive' }));
 
     await subject.copyOriginal(planned(minted));
 
-    should(await readFile(targetManifest)).deepEqual(await readFile(sourceManifest));
+    should(store.bytes(TARGET, minted.id, 'manifest')).deepEqual(store.bytes(SOURCE, minted.id, 'manifest'));
   });
 
-  it('publishes both artifacts in write, file fsync, close, rename, artifact-directory fsync order', async () => {
-    // The fork stamps `imported` as soon as import returns, so ORDER is the guarantee for both
-    // artifacts: each temporary holds every byte before it is flushed, neither final name exists
-    // until its temporary is durable, and the directory that names them is flushed after each rename.
+  it('publishes the original first and the verbatim manifest last, then confirms both names', async () => {
+    // The fork stamps `imported` as soon as import returns, so ORDER is the guarantee: a loss between the two
+    // writes leaves a target the manifest-first replay reads as unmatched and rebuilds, never a manifest
+    // vouching for bytes that are not beside it. The names are confirmed after the whole set is published.
     // Arrange
-    const home = await tempDirectory('transfer-attachment-order');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([3, 1, 4, 1, 5]));
-    const target = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    const sourceManifest = await readFile(join(minted.directory, 'manifest.json'));
-    const observed: string[] = [];
-    const recorder = ledger(home, {
-      atOpenFileSync: async () => {
-        observed.push(`flushing ${(await readdir(target)).sort().join(' + ')}`);
-      },
-      atDirectorySync: async path => {
-        if (path !== target) return;
-        observed.push(`published ${(await readdir(target)).sort().join(' + ')}`);
-      },
-    });
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([3, 1, 4, 1, 5]));
+    store.calls.length = 0;
 
     // Act
-    await copier(home, recorder.io).copyOriginal(planned(minted));
+    await subject.copyOriginal(planned(minted));
 
-    // Assert — parents first, then original, then the verbatim manifest, each flushed after its rename.
-    const artifact = `dir:${join('attachments', DAEMON, TARGET, minted.id)}`;
-    should(recorder.events).deepEqual([...chain(), 'temp:fsync', artifact, 'temp:fsync', artifact]);
-    // Each temporary is complete and unpublished at its flush; each rename is complete and the
-    // temporary gone by the time the directory entry is persisted.
-    should(observed).deepEqual([
-      'flushing original.t1.tmp',
-      'published original',
-      'flushing manifest.json.t2.tmp + original',
-      'published manifest.json + original',
+    // Assert — the target-first proof reads manifest then (finding none) stops; the source is read; the original is
+    // written before the manifest; every target name is read back last, in publication order.
+    const target = (file: string): string => `${TARGET}/${minted.id}/${file}`;
+    should(store.calls.filter(call => call.startsWith('write '))).deepEqual([
+      `write ${target('original')}`,
+      `write ${target('manifest')}`,
     ]);
-    should(new Uint8Array(await readFile(join(target, 'original')))).deepEqual(minted.bytes);
-    should(await readFile(join(target, 'manifest.json'))).deepEqual(sourceManifest);
+    should(store.calls.slice(-2)).deepEqual([`read ${target('original')}`, `read ${target('manifest')}`]);
+    should(store.calls[0]).equal(`read ${target('manifest')}`);
   });
 
-  it('persists created directory entries parent-first, and again for a copy that created none', async () => {
-    // Arrange — `mkdir(recursive)` reports only what THIS call created, so a copy standing in front of
-    // a target tree another attempt made would otherwise skip the parent flushes its own return
-    // depends on; that other attempt may have crashed before flushing any of them.
-    const home = await tempDirectory('transfer-attachment-parents');
-    const first = await mintAttachment(home, SOURCE, new Uint8Array([1, 1, 2, 3]));
-    const second = await mintAttachment(home, SOURCE, new Uint8Array([5, 8, 13, 21]));
-    const firstLedger = ledger(home);
-    const secondLedger = ledger(home);
-
-    // Act — the first copy creates the target tree; the second finds every level already there.
-    await copier(home, firstLedger.io).copyOriginal(planned(first));
-    await copier(home, secondLedger.io).copyOriginal(planned(second));
-
-    // Assert — the same parent-first chain both times, from the state root down.
-    should(firstLedger.events.slice(0, chain().length)).deepEqual([...chain()]);
-    should(secondLedger.events.slice(0, chain().length)).deepEqual([...chain()]);
-    should(secondLedger.events).deepEqual([
-      ...chain(),
-      'temp:fsync',
-      `dir:${join('attachments', DAEMON, TARGET, second.id)}`,
-      'temp:fsync',
-      `dir:${join('attachments', DAEMON, TARGET, second.id)}`,
-    ]);
-  });
-
-  it('never overwrites or removes a colliding writer temporary', async () => {
-    // Arrange — a foreign attempt holds the exact temporary name this copy will mint.
-    const home = await tempDirectory('transfer-attachment-temp-collision');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([2, 2, 2, 2]));
-    const target = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    await mkdir(target, { recursive: true });
-    const foreign = join(target, 'original.t1.tmp');
-    await Bun.write(foreign, 'another writer is mid-flight');
+  it('re-proves and republishes both artifacts on a matching replay without changing their bytes', async () => {
+    // Arrange — a target-first replay that reads the planned bytes back has proved they are VISIBLE, which is
+    // what a page cache offers a moment before power is cut. The receipt commits `imported` behind this return,
+    // so it must establish the same durability the first copy did: the proved bytes go through the store again.
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([9, 9, 9, 9]));
+    await subject.copyOriginal(planned(minted));
+    const original = new Uint8Array(store.bytes(TARGET, minted.id, 'original') ?? []);
+    const manifest = store.text(TARGET, minted.id, 'manifest');
+    store.calls.length = 0;
 
     // Act
-    const error = await reject(copier(home).copyOriginal(planned(minted)));
+    await subject.copyOriginal(planned(minted));
 
-    // Assert — exclusive creation refused, foreign bytes intact, nothing published or cleaned up over it.
-    should((error as { code?: string }).code).equal('EEXIST');
-    should(await readFile(foreign, 'utf8')).equal('another writer is mid-flight');
-    should(await readdir(target)).deepEqual(['original.t1.tmp']);
-  });
-
-  it('re-proves and re-flushes both artifacts on a matching replay without replacing their inodes', async () => {
-    // Arrange — a target-first replay that reads the planned bytes back has proved they are VISIBLE,
-    // which is what a page cache offers a moment before power is cut. The receipt commits `imported`
-    // behind this return, so it must establish the same durability the first copy did.
-    const home = await tempDirectory('transfer-attachment-replay-durability');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([9, 9, 9, 9]));
-    await copier(home).copyOriginal(planned(minted));
-    const target = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    const before = [await stat(join(target, 'original')), await stat(join(target, 'manifest.json'))];
-    const recorder = ledger(home);
-
-    // Act
-    await copier(home, recorder.io).copyOriginal(planned(minted));
-
-    // Assert — same inodes and mtimes, no temporary, and both artifacts plus the chain flushed.
-    const after = [await stat(join(target, 'original')), await stat(join(target, 'manifest.json'))];
-    should(after.map(entry => entry.ino)).deepEqual(before.map(entry => entry.ino));
-    should(after.map(entry => entry.mtimeMs)).deepEqual(before.map(entry => entry.mtimeMs));
-    should(recorder.events).deepEqual([
-      // Manifest first, then the original — the same order and the same facts the read-only
-      // verification proves — each flushed on the handle its bytes were proved from, then the names.
-      `file:${join('attachments', DAEMON, TARGET, minted.id, 'manifest.json')}`,
-      `file:${join('attachments', DAEMON, TARGET, minted.id, 'original')}`,
-      ...chain(),
-      `dir:${join('attachments', DAEMON, TARGET, minted.id)}`,
+    // Assert — manifest first, then the original (the order the read-only verification proves them in), both
+    // written back, and nothing read from the source.
+    const target = (file: string): string => `${TARGET}/${minted.id}/${file}`;
+    should(store.calls.filter(call => call.startsWith('write '))).deepEqual([
+      `write ${target('manifest')}`,
+      `write ${target('original')}`,
     ]);
-    should((await readdir(target)).sort()).deepEqual(['manifest.json', 'original']);
+    should(store.calls.some(call => call.includes(`${SOURCE}/`))).be.false();
+    should(store.bytes(TARGET, minted.id, 'original')).deepEqual(original);
+    should(store.text(TARGET, minted.id, 'manifest')).equal(manifest);
   });
 
-  it('verifies an already-imported target read-only, flushing and repairing nothing', async () => {
+  it('verifies an already-imported target read-only, writing and repairing nothing', async () => {
     // The fork's pre-launch check may only REFUSE a drifted target, so it must leave the medium exactly
-    // as it found it — no flush, no repair — even though it proves the very same facts a replay does.
+    // as it found it — no write, no repair — even though it proves the very same facts a replay does.
     // Arrange
-    const home = await tempDirectory('transfer-attachment-verify-readonly');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([4, 2]));
-    await copier(home).copyOriginal(planned(minted));
-    const recorder = ledger(home);
-    const subject = copier(home, recorder.io);
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([4, 2]));
+    await subject.copyOriginal(planned(minted));
+    store.calls.length = 0;
 
     // Act
     await subject.verifyTarget({ newSessionId: TARGET, expectedManifest: minted.expectedManifest });
@@ -515,112 +373,132 @@ describe('FileSessionAttachmentCopier', () => {
 
     // Assert
     should((drifted as SessionAttachmentCopyError).failure).equal('corrupt');
-    should(recorder.events).deepEqual([]);
+    should(store.calls.filter(call => call.startsWith('write '))).deepEqual([]);
   });
 
   it('reconstructs the exact attachment from the frozen plan after a loss before durability', async () => {
-    // Arrange — power is cut in the manifest's publication window: the rename was visible to that
-    // process but nothing had been flushed, so the manifest is gone after the reboot. The target-first
-    // replay reads that target as unmatched and rebuilds both artifacts from the plan-verified source.
-    const home = await tempDirectory('transfer-attachment-lost');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([7, 7, 0, 7]), { encrypted: true });
-    const target = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    const manifest = join(target, 'manifest.json');
+    // Arrange — power is cut in the manifest's publication window: the write was visible to that process but
+    // nothing was flushed, so the manifest is gone after the reboot. The target-first replay reads that target as
+    // unmatched and rebuilds both artifacts from the plan-verified source.
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([7, 7, 0, 7]), { encrypted: true });
     let publications = 0;
-    const lost = ledger(home, {
-      atDirectorySync: async path => {
-        if (path !== target) return;
-        publications += 1;
-        if (publications < 2) return;
-        await rm(manifest);
-        throw new Error('power was lost before the artifact directory was persisted');
-      },
-    });
+    store.afterWrite = written => {
+      publications += 1;
+      if (publications < 2) return;
+      store.files.delete(written.key);
+      throw new Error('power was lost before the manifest was persisted');
+    };
 
     // Act — the interrupted copy, then a fresh copier after the reboot.
-    const error = await reject(copier(home, lost.io).copyOriginal(planned(minted)));
-    await copier(home).copyOriginal(planned(minted));
+    const error = await reject(subject.copyOriginal(planned(minted)));
+    store.afterWrite = () => undefined;
+    await new FileSessionAttachmentCopier(store).copyOriginal(planned(minted));
 
-    // Assert — the interrupted attempt did not return successfully, and the replay rebuilt the exact
-    // frozen artifact: same original bytes, byte-identical verbatim manifest, locked state carried.
+    // Assert — the interrupted attempt did not return successfully, and the replay rebuilt the exact frozen
+    // artifact: same original bytes, byte-identical verbatim manifest, locked state carried.
     should((error as Error).message).containEql('power was lost');
-    should(new Uint8Array(await readFile(join(target, 'original')))).deepEqual(minted.bytes);
-    should(await readFile(manifest)).deepEqual(await readFile(join(minted.directory, 'manifest.json')));
-    should((await readdir(target)).sort()).deepEqual(['manifest.json', 'original']);
+    should(store.bytes(TARGET, minted.id, 'original')).deepEqual(minted.bytes);
+    should(store.bytes(TARGET, minted.id, 'manifest')).deepEqual(store.bytes(SOURCE, minted.id, 'manifest'));
   });
 
-  it('refuses to verify a target session id that is not usable, before touching the disk', async () => {
+  it('recovers from another writer replacing the original mid-publication, and fails closed on a second time', async () => {
+    // Arrange — after the original lands another writer puts different bytes under its name.
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([5, 4, 3, 2]));
+    let substitutions = 1;
+    store.afterWrite = written => {
+      if (written.file === 'original' && substitutions-- > 0) store.put(TARGET, minted.id, 'original', new Uint8Array([0]));
+    };
+
+    // Act + Assert — one substitution is re-read and the whole set republished.
+    await subject.copyOriginal(planned(minted));
+    should(store.bytes(TARGET, minted.id, 'original')).deepEqual(minted.bytes);
+
+    // A writer that substitutes every time is not chased forever: the call fails, so no receipt advances.
+    const hostile = setup();
+    const other = mintAttachment(hostile.store, SOURCE, new Uint8Array([6, 5, 4, 3]));
+    hostile.store.afterWrite = written => {
+      if (written.file === 'original') hostile.store.put(TARGET, other.id, 'original', new Uint8Array([0]));
+    };
+    const error = await reject(hostile.subject.copyOriginal(planned(other)));
+    should((error as Error).message).containEql('replaced by another writer');
+  });
+
+  it('refuses to verify a target session id that is not usable, before asking the store anything', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-verify-id');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([7, 7]));
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([7, 7]));
+    store.calls.length = 0;
 
     // Act
     const error = await reject(
-      copier(home).verifyTarget({ newSessionId: '../escape', expectedManifest: minted.expectedManifest }),
+      subject.verifyTarget({ newSessionId: '../escape', expectedManifest: minted.expectedManifest }),
     );
 
     // Assert
     should(error).be.instanceOf(SessionAttachmentCopyError);
     should((error as SessionAttachmentCopyError).failure).equal('invalid');
     should((error as SessionAttachmentCopyError).message).match(/target session id is not usable/u);
+    should(store.calls).deepEqual([]);
   });
 
   it('refuses a source manifest that is not JSON as corrupt, and leaves no target behind', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-manifest-json');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([8, 8]));
-    await Bun.write(join(minted.directory, 'manifest.json'), '{not json');
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([8, 8]));
+    store.put(SOURCE, minted.id, 'manifest', '{not json');
 
     // Act
-    const error = await reject(copier(home).copyOriginal(planned(minted)));
+    const error = await reject(subject.copyOriginal(planned(minted)));
 
     // Assert
     should((error as SessionAttachmentCopyError).failure).equal('corrupt');
     should((error as SessionAttachmentCopyError).message).match(/manifest is not valid JSON/u);
-    should(await stat(join(home, 'attachments', DAEMON, TARGET, minted.id)).catch(() => undefined)).equal(undefined);
+    should(store.writesOf(TARGET)).deepEqual([]);
   });
 
   it('reports a source artifact that cannot be read as itself, not as a missing attachment', async () => {
-    // Arrange — the original is a directory: it exists, so this is not "not found", and it cannot be read.
-    const home = await tempDirectory('transfer-attachment-unreadable');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([6, 6]));
-    await rm(join(minted.directory, 'original'));
-    await mkdir(join(minted.directory, 'original'));
+    // Arrange — the original exists and cannot be read.
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([6, 6]));
+    store.unreadable.add(`${SOURCE}/${minted.id}/original`);
 
     // Act
-    const error = await reject(copier(home).copyOriginal(planned(minted)));
+    const error = await reject(subject.copyOriginal(planned(minted)));
 
     // Assert
     should(error).not.be.instanceOf(SessionAttachmentCopyError);
     should((error as NodeJS.ErrnoException).code).equal('EISDIR');
   });
 
-  it('repairs a target whose manifest is torn, treating it as unproved rather than as a failure', async () => {
+  it('verifies a target whose manifest is torn as drift, read-only, never as a parser error', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-torn-proof');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([5, 5]));
-    await copier(home).copyOriginal(planned(minted));
-    const target = join(home, 'attachments', DAEMON, TARGET, minted.id);
-    await Bun.write(join(target, 'manifest.json'), '{"torn');
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([5, 5]));
+    await subject.copyOriginal(planned(minted));
+    store.put(TARGET, minted.id, 'manifest', '{"torn');
+    store.calls.length = 0;
 
     // Act
     const verification = await reject(
-      copier(home).verifyTarget({ newSessionId: TARGET, expectedManifest: minted.expectedManifest }),
+      subject.verifyTarget({ newSessionId: TARGET, expectedManifest: minted.expectedManifest }),
     );
 
     // Assert: verification refuses the drift read-only; it never throws a parser's error.
     should((verification as SessionAttachmentCopyError).failure).equal('corrupt');
-    should(await readFile(join(target, 'manifest.json'), 'utf8')).equal('{"torn');
+    should(store.text(TARGET, minted.id, 'manifest')).equal('{"torn');
+    should(store.calls.filter(call => call.startsWith('write '))).deepEqual([]);
   });
 
   it('refuses an unusable identity or a target that aliases the source with an invalid failure', async () => {
     // Arrange
-    const home = await tempDirectory('transfer-attachment-invalid');
-    const minted = await mintAttachment(home, SOURCE, new Uint8Array([4, 5, 6]));
+    const { store, subject } = setup();
+    const minted = mintAttachment(store, SOURCE, new Uint8Array([4, 5, 6]));
 
     // Act + Assert — bad id.
     const badId = await reject(
-      copier(home).copyOriginal({
+      subject.copyOriginal({
         ...planned(minted),
         expectedManifest: { ...minted.expectedManifest, id: 'not-an-attachment-id' },
       }),
@@ -628,7 +506,7 @@ describe('FileSessionAttachmentCopier', () => {
     should((badId as SessionAttachmentCopyError).failure).equal('invalid');
 
     const mismatchedPlan = await reject(
-      copier(home).copyOriginal({
+      subject.copyOriginal({
         ...planned(minted),
         expectedManifest: { ...minted.expectedManifest, sha256: 'f'.repeat(64) },
       }),
@@ -636,7 +514,8 @@ describe('FileSessionAttachmentCopier', () => {
     should((mismatchedPlan as SessionAttachmentCopyError).failure).equal('invalid');
 
     // The explicit target cannot alias the source: that is the I4 guarantee in miniature.
-    const sameSession = await reject(copier(home).copyOriginal(planned(minted, SOURCE)));
+    const sameSession = await reject(subject.copyOriginal(planned(minted, SOURCE)));
     should((sameSession as SessionAttachmentCopyError).failure).equal('invalid');
+    should(store.writesOf(TARGET)).deepEqual([]);
   });
 });

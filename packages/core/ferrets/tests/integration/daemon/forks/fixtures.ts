@@ -1,61 +1,64 @@
 /**
- * Real state homes, real session documents, and one complete frozen plan for the fork adapters.
+ * In-memory state, session documents, and one complete frozen plan for the fork adapters.
  *
- * These tests are in the integration tier because the adapters under test are the daemon's writers:
- * what they must be proved to do is put exact bytes into exact files under exact keys, and a fake
- * storage would prove only that they called the methods a fake was written to expect.
+ * These tests are in the integration tier because the adapters under test are the daemon's writers: what they must be
+ * proved to do is put exact documents under exact keys, and a fake storage would prove only that they called the
+ * methods a fake was written to expect. The state is the kernel test host's `MemoryStateFolder` — a real
+ * `StatePort` with the declared files' format and schema checks — so what is written is what the kernel would hold.
+ * The one real directory is the target's WORKING directory, which the lifecycle canonicalises and refuses unless an
+ * agent could really start in it.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../src/adapters/index.ts';
+import { ForkFiles } from '../../../../contract/index.ts';
 import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
-import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
-import { SessionPlanner } from '../../../src/lib/core/session-planner.ts';
-import { defaultStartWaitPolicy } from '../../../src/lib/core/display-model.ts';
+import type { ForkHarnessFacts } from '../../../../daemon/lib/forks/ports.ts';
+import type { RuntimeControlRequest } from '../../../../daemon/lib/protocol/session.ts';
+import type { SessionEffectKey, SessionEffectLedger } from '../../../../daemon/lib/session/effects/index.ts';
+import type { CoreAccount, SessionPlanner as SessionPlannerPort } from '../../../../daemon/lib/session/peers/core.ts';
+import type { HarnessKind } from '../../../../daemon/lib/session/peers/fleet.ts';
+import type {
+  AttachmentFile,
+  TransferAttachmentStore,
+  TransferStoredManifest,
+} from '../../../../daemon/lib/transfer/ports.ts';
+import { defaultStartWaitPolicy, SessionPlanner } from '../../../unit/daemon/session/launch/planner-fixture.ts';
+import { memoryStorage, SESSION_STORE_FILES } from '../../../support/daemon/storage.ts';
 
 export const AT = '2026-08-06T09:00:00.000Z';
 export const SOURCE_ID = '20260806-source';
 export const TARGET_ID = '20260806-target';
 
+/** Every declared file a fork touches: the session store's, the receipts, and the target's plan and brief. */
+export const FORK_STATE_FILES = [...SESSION_STORE_FILES, ForkFiles, TransferPlanFiles, TransferBriefFiles] as const;
+
 const directories = new Set<string>();
 
-/** Removes every temporary home these fixtures opened. */
+/** Removes every temporary working directory these fixtures made. */
 export async function cleanup(): Promise<void> {
   for (const directory of directories) await rm(directory, { recursive: true, force: true });
   directories.clear();
 }
 
-/** A real, locked state home with a real SQLite index behind it. */
-export async function openStorage(
-  label: string,
-): Promise<{ storage: DaemonStorage; home: string; sessionDirectory: (id: string) => string }> {
-  const home = await realTemporaryDirectory(`fy-fork-${label}-`);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(AT)),
-    () => new KeyedSerialExecutor(),
-  );
-  const opened = await factory.open();
+/** A session store over a memory state folder, and the state port a fork's own files are read and written through. */
+export async function openStorage(_label: string): Promise<{
+  storage: DaemonStorage;
+  folder: MemoryStateFolder;
+  state: ReturnType<MemoryStateFolder['port']>;
+  sessionDirectory: (id: string) => string;
+}> {
+  const opened = await memoryStorage({ clock: { now: () => AT } });
   return {
     storage: opened.storage,
-    home,
-    sessionDirectory: (id: string) => join(opened.paths.sessions, id),
+    folder: opened.folder,
+    state: opened.folder.port(FORK_STATE_FILES),
+    // A name, never a place on disk: the fork reads it only as the string a rollout is later correlated by.
+    sessionDirectory: (id: string) => `/state/ferrets/${id}`,
   };
 }
 
@@ -67,6 +70,47 @@ export async function realTemporaryDirectory(prefix: string): Promise<string> {
   // aliases (`/tmp` against `/private/tmp`) the working-directory resolver would otherwise change.
   return resolve(made);
 }
+
+/**
+ * The attachment owner's store, in memory: files by session, attachment and kind.
+ *
+ * It is the owner's PORT (`TransferAttachmentStore`), so a fork copies through the one writer a later download reads —
+ * there is no second layout for a copier to disagree with. `parseManifest` accepts exactly a manifest of the durable keys.
+ */
+export class MemoryAttachmentStore implements TransferAttachmentStore {
+  readonly files = new Map<string, Uint8Array>();
+
+  private key(sessionId: string, attachmentId: string, file: AttachmentFile): string {
+    return `${sessionId}/${attachmentId}/${file}`;
+  }
+
+  async read(sessionId: string, attachmentId: string, file: AttachmentFile): Promise<Uint8Array | undefined> {
+    const held = this.files.get(this.key(sessionId, attachmentId, file));
+    return held === undefined ? undefined : new Uint8Array(held);
+  }
+
+  async write(sessionId: string, attachmentId: string, file: AttachmentFile, bytes: Uint8Array): Promise<void> {
+    this.files.set(this.key(sessionId, attachmentId, file), new Uint8Array(bytes));
+  }
+
+  parseManifest(document: unknown, attachmentId: string): TransferStoredManifest {
+    const manifest = document as Partial<TransferStoredManifest> | null;
+    if (manifest === null || typeof manifest !== 'object' || manifest.id !== attachmentId)
+      throw new Error(`manifest does not describe attachment ${attachmentId}`);
+    return manifest as TransferStoredManifest;
+  }
+}
+
+/** The harness plugins' facts, as the quirk table and the launch argv declare them. */
+export const harnessFacts: ForkHarnessFacts = {
+  quirks: (harness: HarnessKind) =>
+    harness === 'claude'
+      ? { effortIsRuntimeCommand: true, mintsOwnSessionIds: false }
+      : { effortIsRuntimeCommand: false, mintsOwnSessionIds: true },
+  startupModelArguments: (model: string) => ['--model', model],
+  claudeTranscriptFile: (home: string, cwd: string, harnessSessionId: string) =>
+    join(home, 'projects', cwd.replaceAll(/[^a-zA-Z0-9]/gu, '-'), `${harnessSessionId}.jsonl`),
+};
 
 /** One published account, in the exact shape the fleet manifest declares. */
 export function account(overrides: Partial<CoreAccount> = {}): CoreAccount {
@@ -87,8 +131,8 @@ export function account(overrides: Partial<CoreAccount> = {}): CoreAccount {
   };
 }
 
-/** The planner the composition root publishes, under a policy pinned for these tests. */
-export function planner(): SessionPlanner {
+/** The planner the host publishes, under a policy pinned for these tests. */
+export function planner(): SessionPlannerPort {
   return new SessionPlanner({
     startWait: defaultStartWaitPolicy,
     contextWindowOverrides: { 'claude-opus-5': 1_000_000 },
@@ -174,4 +218,43 @@ export function plan(cwd: string, overrides: Partial<SessionTransferPlan> = {}):
     ],
     ...overrides,
   };
+}
+
+/** A fixture-local durable-effect stand-in: every lifecycle rebuilt by one harness shares it. */
+export function memoryEffectLedger(): SessionEffectLedger {
+  const held = new Map<string, { readonly fingerprint: string; readonly settled: boolean }>();
+  const identity = (key: SessionEffectKey): string => JSON.stringify([key.sessionId, key.effectId]);
+
+  return {
+    inspect: async (key, fingerprint) => {
+      const effect = held.get(identity(key));
+      if (effect === undefined) return 'unclaimed';
+      if (effect.fingerprint !== fingerprint) return 'conflict';
+      return effect.settled ? 'settled' : 'unsettled';
+    },
+    begin: async (key, fingerprint) => {
+      const effect = held.get(identity(key));
+      if (effect !== undefined) {
+        if (effect.fingerprint !== fingerprint) return 'conflict';
+        return effect.settled ? 'settled' : 'unsettled';
+      }
+      held.set(identity(key), { fingerprint, settled: false });
+      return 'perform';
+    },
+    settle: async (key, fingerprint) => {
+      const effect = held.get(identity(key));
+      if (effect === undefined || effect.fingerprint !== fingerprint)
+        throw new Error(`cannot settle unclaimed or conflicting effect ${key.effectId}`);
+      held.set(identity(key), { fingerprint, settled: true });
+    },
+  };
+}
+
+/** The runtime subsystem's opaque comparison, repeated only by this stateful port stand-in. */
+export function runtimeEffectFingerprint(request: RuntimeControlRequest): string {
+  return JSON.stringify([
+    request.action,
+    request.action === 'model' || request.action === 'effort' ? (request.effort ?? null) : null,
+    request.action === 'model' ? (request.model ?? null) : null,
+  ]);
 }

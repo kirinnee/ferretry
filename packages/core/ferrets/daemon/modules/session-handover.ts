@@ -1,45 +1,40 @@
-import { asActivity, KeyedSerialExecutor, type SystemClock } from '../../src/adapters/index.ts';
+import type { StatePort } from '@ferretry/kernel/contract';
 import { FileHandoverReceiptStore } from '../adapters/moves/handover/file-handover-receipt-store.ts';
+import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import {
-  type AccountInventoryPort,
-  type ActivityLedger,
   DEFAULT_HANDOVER_SETTINGS,
-  type ExecutableResolverPort,
-  type FoundationPaths,
   HandoverError,
   type HandoverJournalAppend,
   type HandoverReceiptStore,
   HandoverReconcileLoop,
   RememberedHandoverReceipts,
-  type SerialExecutor,
-  type SessionDirectorySubsystem,
   SessionHandoverService,
-  type SessionPlanner,
-  tryParseSessionId,
-} from '../../src/lib/index.ts';
-import { resolveStartAccount } from '../lib/fleet/start-resolution.ts';
-import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { sessionHandoverContribution } from '../lib/runtime/mounts/session-handover.ts';
+} from '../lib/moves/handover/index.ts';
+import { type HandoverRoute, sessionHandoverContribution } from '../lib/runtime/mounts/session-handover.ts';
+import type { ClockPort, SerialExecutor } from '../lib/ports.ts';
+import type { SessionDirectorySubsystem } from '../lib/session/directory/subsystem.ts';
+import type { CoreAccount, SessionPlanner } from '../lib/session/peers/core.ts';
+import { tryParseSessionId } from '../lib/session-id.ts';
 
 /**
  * The cross-harness handover: the three routes under `/v1/ferrets/:ferretId/handover`, the durable receipt store, the
  * state machine behind them and the reconcile loop that finishes a handover nobody is watching.
  *
- * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
- * `DaemonWorld` carries: the receipt store, the serial executor and the loop's scheduler are fixed production adapters;
- * the session directory, the account inventory, the executable resolver, the planner, the storage and the clock are needs),
- * no releases of its own and no protocol features. Building starts nothing: the service and the loop capture their inputs,
+ * See `./learning.ts` for what a module file owns. This module has no `Seams` (the receipt store and the serial
+ * executor are fixed production adapters; the state port, the session directory, the start-account resolution, the
+ * planner, the storage, the clock and the repeating timer are needs), and no protocol features. Its one release is the
+ * reconcile loop's disarm, registered when the loop is armed so a stopping daemon leaves no timer behind. Building starts nothing: the service and the loop capture their inputs,
  * and the loop's interval is created by `jobs.arm()`, never by the build.
  *
  * ONE JOB, armed by `start()`: the reconcile loop, whose `arm()` returns its disarm synchronously (and runs one pass
  * immediately — a daemon that has just restarted is when a handover is most likely to be mid-ladder). It is armed
- * beside the warden sweep and after the bind, on the line `start()` always had.
+ * beside the warden sweep and after the bind, on the line `start()` always had. The disarm is also handed to the
+ * lifecycle as a release, so the daemon stopping cancels the timers the kernel clock holds for it.
  *
- * Session lifecycle, launch, resume and move stay in `fyd.ts`: the module reaches the session directory, the
- * planner and the account resolution only as typed {@link SessionHandoverNeeds}, the very locals the old call passed.
- * What it provides is the service itself, read by nothing but its own route, and the loop, which `MountedSubsystems`
- * still carries as `handoverReconcile` (the boot trace names that field).
+ * Session lifecycle, launch, resume and move stay with their own owners: the module reaches the session directory, the
+ * planner and the account resolution only as typed {@link SessionHandoverNeeds}.
+ * What it provides is the service itself, read by nothing but its own route, and the loop.
  */
 
 /**
@@ -112,17 +107,23 @@ export async function appendHandoverEventOnce(
   });
 }
 
+/**
+ * The account a start of this agent name would launch on, or a rejection saying why it cannot.
+ *
+ * ONE RESOLUTION, THE START'S OWN. A handover and a start must agree about which agents exist and which of them this
+ * host can run, and the only way to be sure is to call the very same resolution, so it is injected as a function (as the
+ * fork's is) rather than re-derived from the inventory, the executable resolver and the client name here. The host binds
+ * it to `resolveStartAccount(...)` and answers its `account`.
+ */
+export type HandoverStartAccount = (agent: string) => Promise<CoreAccount>;
+
 /** The collaborators a cross-harness handover needs from the rest of the root. */
 interface SessionHandoverWiring {
-  readonly paths: FoundationPaths;
   readonly storage: DaemonStorage;
   readonly sessions: SessionDirectorySubsystem;
-  readonly accounts: AccountInventoryPort;
-  readonly executables: ExecutableResolverPort;
+  readonly startAccount: HandoverStartAccount;
   readonly planner: SessionPlanner;
-  readonly clock: SystemClock;
-  /** The binary name a person drives, which an account resolution is typed with (`CLIENT_NAME` in `fyd.ts`). */
-  readonly clientName: string;
+  readonly clock: ClockPort;
   /** Serializes the journal's read-then-write per session, which is what makes `appendOnce` hold
    *  against CONCURRENT callers as well as against a restart. Owned by the composition root, because a
    *  lock created per call would serialize nothing. */
@@ -223,7 +224,7 @@ export function createSessionHandoverSubsystem(
       },
       accounts: {
         resolve: async (agent, model) => {
-          const { account } = await resolveStartAccount(wiring.accounts, agent, wiring.executables, wiring.clientName);
+          const account = await wiring.startAccount(agent);
           // The SAME planner the start and the move use, so the model a handover records and the
           // window it is measured against come from one decision rather than two that can disagree.
           const planned = wiring.planner.plan({
@@ -270,20 +271,16 @@ export function createSessionHandoverSubsystem(
 
 /** What the session-handover module is built from. */
 export interface SessionHandoverNeeds {
-  /** The state home's directories: the receipts live beside each session, under `sessions`. */
-  readonly paths: FoundationPaths;
+  /** Ferrets' state: the receipts live beside each session (`<id>/handover.json`, the contract's `HandoverFiles`). */
+  readonly state: StatePort;
   readonly storage: DaemonStorage;
   /** The session directory the handover reads a source and its replacement through. */
   readonly sessions: SessionDirectorySubsystem;
-  readonly accounts: AccountInventoryPort;
-  readonly executables: ExecutableResolverPort;
+  /** The start's account resolution; see {@link HandoverStartAccount}. */
+  readonly startAccount: HandoverStartAccount;
   /** The process's one planner: the model a handover records comes from the same decision a start makes. */
   readonly planner: SessionPlanner;
-  readonly clock: SystemClock;
-  /** The binary name a person drives, which an account resolution is typed with. */
-  readonly clientName: string;
-  /** The housekeeping ledger the reconcile loop's passes run inside, or none. */
-  readonly activities: ActivityLedger | undefined;
+  readonly clock: ClockPort;
   /**
    * The repeating timer the reconcile loop runs on: the kernel clock's `every` (5.0 has no `setInterval` in a
    * subsystem). Called only when the loop is armed; returns its disarm.
@@ -304,21 +301,36 @@ export interface SessionHandoverJobs {
   readonly arm: () => () => void;
 }
 
-export const sessionHandoverModule: DaemonModule<
-  void,
-  SessionHandoverNeeds,
-  SessionHandoverProvides,
-  SessionHandoverJobs
-> = {
+/** The part of the host's module lifecycle this module uses: a release that runs when the daemon stops. */
+export interface SessionHandoverLifecycle {
+  readonly onRelease: (label: string, release: () => void | Promise<void>) => unknown;
+}
+
+/** What building the module yields: the service and loop, the job to arm, and the three routes' handlers. */
+export interface BuiltSessionHandover {
+  readonly id: 'sessionHandover';
+  readonly provides: SessionHandoverProvides;
+  readonly jobs: SessionHandoverJobs;
+  readonly contributes: { readonly routes: readonly HandoverRoute[] };
+}
+
+export const sessionHandoverModule: {
+  readonly id: 'sessionHandover';
+  readonly build: (
+    needs: SessionHandoverNeeds,
+    seams?: undefined,
+    lifecycle?: SessionHandoverLifecycle,
+  ) => BuiltSessionHandover;
+} = {
   id: 'sessionHandover',
-  build: (needs, _seams, _lifecycle) => {
-    const { paths, storage, sessions, accounts, executables, planner, clock, clientName, activities, every } = needs;
+  build: (needs, _seams, lifecycle) => {
+    const { state, storage, sessions, startAccount, planner, clock, every } = needs;
     // ONE receipt store for both readers of it: the service that writes a receipt and the loop that
     // rosters the ones which are not yet terminal. Two handles over one directory would be two
     // answers to "what is still in flight".
     // Remembering which receipts are open, so the reconciler reads them all only at boot and on its
     // backstop, rather than every session directory every fifteen seconds.
-    const handoverReceipts = new RememberedHandoverReceipts(new FileHandoverReceiptStore(paths.sessions));
+    const handoverReceipts = new RememberedHandoverReceipts(new FileHandoverReceiptStore(state));
     // Hoisted for the reason the move is: the reconcile loop drives THIS service rather
     // than a second one of its own. Two would each hold their own per-session serialization chain
     // over one receipt document, and the whole point of that chain is that a begin and a reconciler
@@ -326,32 +338,37 @@ export const sessionHandoverModule: DaemonModule<
     const handover = createSessionHandoverSubsystem(
       // Its own queue, constructed here so it lives as long as the daemon does: a serializer created
       // per call would serialize nothing, which is the whole failure this guards against.
-      {
-        paths,
-        storage,
-        sessions,
-        accounts,
-        executables,
-        planner,
-        clock,
-        clientName,
-        journalSerial: new KeyedSerialExecutor(),
-      },
+      { storage, sessions, startAccount, planner, clock, journalSerial: new KeyedSerialExecutor() },
       handoverReceipts,
     );
     // The loop drives the SAME service the route serves, so a receipt advanced by a tick and one
     // begun by a request are the same document under the same lock. Its cadence is the domain's
-    // own default; the scheduler is the composition root's, because a timer is not a `src/lib`
+    // own default; the scheduler is the kernel clock's (injected), because a timer is not a lib
     // fact. Errors inside a pass are swallowed by the loop itself and surface as a receipt that
     // has not advanced, which is the honest reading of a supervision failure.
     const reconcile = new HandoverReconcileLoop(handover, handoverReceipts, {
-      every: (intervalMs, tick) => every(intervalMs, asActivity(activities, 'handover reconcile', tick)),
+      every: (intervalMs, tick) => every(intervalMs, tick),
     });
     return {
       id: 'sessionHandover',
       provides: { handover, reconcile },
       // A lambda, not `reconcile.arm.bind(...)`: the loop is looked up at the moment `start()` arms it.
-      jobs: { arm: () => reconcile.arm() },
+      jobs: {
+        arm: () => {
+          const disarm = reconcile.arm();
+          // DISARM ON STOP. The loop's timers belong to the kernel clock, which would otherwise keep ticking a
+          // pass against a store that is closing. The disarm is idempotent so an explicit disarm and the stop
+          // release cannot cancel the same timers twice.
+          let disarmed = false;
+          const once = (): void => {
+            if (disarmed) return;
+            disarmed = true;
+            disarm();
+          };
+          lifecycle?.onRelease('handover reconcile', once);
+          return once;
+        },
+      },
       contributes: sessionHandoverContribution(handover),
     };
   },

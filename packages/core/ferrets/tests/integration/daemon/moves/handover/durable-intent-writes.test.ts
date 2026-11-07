@@ -1,8 +1,7 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'bun:test';
+import { beforeEach, describe, it } from 'bun:test';
+import type { StatePort } from '@ferretry/kernel/contract';
 import should from 'should';
+import { memoryHandoverState } from '../../../../support/daemon/handover-state.ts';
 import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { SessionHandoverService } from '../../../../../daemon/lib/moves/handover/service.ts';
 import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
@@ -36,17 +35,10 @@ import {
 /** The replacement id the identity fake mints first. */
 const REPLACEMENT = 'replacement-1';
 
-let home = '';
-let sessions = '';
+let sessions: StatePort;
 
-beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'fy-handover-intents-'));
-  sessions = join(home, 'state', 'sessions');
-  await mkdir(join(sessions, SOURCE_ID), { recursive: true });
-});
-
-afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+beforeEach(() => {
+  sessions = memoryHandoverState().state;
 });
 
 /**

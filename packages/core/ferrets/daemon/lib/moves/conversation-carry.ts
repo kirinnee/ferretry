@@ -1,7 +1,7 @@
 import { isAbsolute, join, relative } from 'node:path';
 import type { Harness } from '../protocol/session-base.ts';
 import type { TranscriptProvenance } from '../protocol/session.ts';
-import { claudeTranscriptFile } from '../session/transcript/claude-path.ts';
+import type { TranscriptToolkit } from './ports.ts';
 
 /**
  * What a Restart or a same-harness move does with the conversation the session is bound to.
@@ -72,7 +72,10 @@ const unresumable = (reason: string): ConversationUnresumable => ({
  * start names it by, so the resumed harness finds it where it looks. Codex's is kept at the same path
  * relative to its home, because `resume <thread>` searches the date-partitioned `sessions/` tree.
  */
-export function planConversationCarry(request: ConversationCarryRequest): ConversationCarry {
+export function planConversationCarry(
+  request: ConversationCarryRequest,
+  paths: Pick<TranscriptToolkit, 'claudeTranscriptFile'>,
+): ConversationCarry {
   const { source, targetHome } = request;
   if (source === undefined)
     return unresumable('This session has no recorded conversation, so there is nothing Ferretry can resume.');
@@ -86,7 +89,9 @@ export function planConversationCarry(request: ConversationCarryRequest): Conver
     );
   const id = source.harnessSessionId;
   const target =
-    request.harness === 'claude' ? claudeTranscriptFile(targetHome, request.cwd, id) : codexTarget(source, targetHome);
+    request.harness === 'claude'
+      ? paths.claudeTranscriptFile(targetHome, request.cwd, id)
+      : codexTarget(source, targetHome);
   if (target === undefined)
     return unresumable(
       `The conversation file ${source.file} isn't inside its login's home, so it can't be moved to ${request.targetAgent}.`,

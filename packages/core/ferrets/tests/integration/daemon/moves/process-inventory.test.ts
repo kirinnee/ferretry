@@ -1,22 +1,22 @@
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import should from 'should';
+import type { Clock, SpawnPort, SpawnResult } from '@ferretry/kernel/contract';
 import {
-  BunProcessProbe,
+  KernelProcessProbe,
   listeningInodes,
   PaneProcessInventory,
+  type ProcessHostFacts,
   ProjectMcpServers,
   TmuxPaneSnapshot,
-} from '../../../../daemon/adapters/moves/bun-process-inventory.ts';
+} from '../../../../daemon/adapters/moves/process-inventory.ts';
 import type { ConfiguredServer } from '../../../../daemon/lib/moves/harness-provenance.ts';
 import type { ProcessProbePort, ProcessTableRead } from '../../../../daemon/lib/moves/process-inventory-port.ts';
-import { descendantsOf, type ProcRow, parseProcessTable } from '../../../../daemon/lib/moves/process-table.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
-import { PANE_PROOF_FORMAT } from '../../../src/lib/tmux/pane-proof.ts';
-import { waitFor } from '../support/wait-for.ts';
+import {
+  PANE_PROOF_FORMAT,
+  type TmuxCommandPort,
+  type TmuxCommandResult,
+} from '../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 
 /**
  * A tmux that answers per COMMAND, because absence is now two questions rather than one.
@@ -66,7 +66,12 @@ class FakeProbe implements ProcessProbePort {
 
 const table = (stdout: string): ProcessTableRead => ({ kind: 'read', stdout });
 
-const provenance = { binaryName: 'fy', servers: { read: async (): Promise<readonly ConfiguredServer[]> => [] } };
+const provenance = {
+  binaryName: 'fy',
+  toolsServerArguments: ['mcp', 'serve'],
+  statuslineSubcommand: 'statusline',
+  servers: { read: async (): Promise<readonly ConfiguredServer[]> => [] },
+};
 
 describe('PaneProcessInventory', () => {
   it('should inspect only pane descendants through the socket-scoped tmux port', async () => {
@@ -209,199 +214,225 @@ describe('PaneProcessInventory', () => {
   });
 });
 
-describe('BunProcessProbe', () => {
-  it('should read the real process table through an absolute ps executable', async () => {
-    // Arrange
-    const executable = Bun.which('ps');
-    if (!executable) throw new Error('ps executable is required for this isolated integration test');
+/** A clock the test drives: only the reads the probe makes. */
+class DrivenClock implements Pick<Clock, 'nowMs'> {
+  constructor(public ms: number) {}
+  nowMs(): number {
+    return this.ms;
+  }
+}
 
-    // Act
-    const actual = await new BunProcessProbe(executable).processTable();
+/** A `SpawnPort` that answers `ps` from a script and counts how often it was asked. */
+class FakePs implements Pick<SpawnPort, 'run'> {
+  readonly calls: Array<{ readonly program: string; readonly args: readonly string[] }> = [];
 
-    // Assert — the reader's own pid must appear in the table it just read.
-    if (actual.kind !== 'read') throw new Error(`expected a read, got: ${actual.reason}`);
-    should(actual.stdout).match(new RegExp(`^\\s*${globalThis.process.pid}\\s`, 'm'));
-  });
+  constructor(private readonly answer: () => Promise<SpawnResult> | SpawnResult) {}
 
-  it('should refuse to resolve ps from the executable search path', async () => {
-    // Act
-    const unresolved = await new BunProcessProbe(undefined).processTable();
-    const relative = await new BunProcessProbe('ps').processTable();
+  async run(program: string, args: readonly string[]): Promise<SpawnResult> {
+    this.calls.push({ program, args });
+    return await this.answer();
+  }
+}
 
-    // Assert
-    const reason = 'no absolute ps executable is available to read the process table';
-    should(unresolved).deepEqual({ kind: 'failed', reason });
-    should(relative).deepEqual({ kind: 'failed', reason });
-  });
-
-  it('should report a non-zero ps exit as a failed read', async () => {
-    // Arrange — `false` accepts and ignores the ps arguments, then exits non-zero.
-    const executable = Bun.which('false');
-    if (!executable) throw new Error('false executable is required for this isolated integration test');
-
-    // Act
-    const actual = await new BunProcessProbe(executable).processTable();
-
-    // Assert
-    should(actual).deepEqual({ kind: 'failed', reason: 'ps exited 1: no output' });
-  });
-
-  it('should report an unspawnable ps as a failed read', async () => {
-    // Act
-    const actual = await new BunProcessProbe('/nonexistent/ferretry-test-ps').processTable();
-
-    // Assert
-    if (actual.kind !== 'failed') throw new Error('expected an unspawnable ps to fail the read');
-    should(actual.reason).startWith('ps could not be run: ');
-  });
-
-  it('should read its own working directory and tolerate a pid it cannot see', async () => {
-    // Act
-    const own = await new BunProcessProbe(undefined).workingDirectory(globalThis.process.pid);
-    const absent = await new BunProcessProbe(undefined).workingDirectory(0);
-
-    // Assert
-    should(own).equal(globalThis.process.cwd());
-    should(absent).be.undefined();
-  });
-});
+const printed = (stdout: string): SpawnResult => ({ exitCode: 0, signal: null, stdout, stderr: '' });
 
 /** `/proc/<pid>/stat` with the fields a subtree read uses: comm, parent, start time in ticks. */
 const stat = (pid: number, comm: string, ppid: number | string, ticks: number): string =>
   `${String(pid)} (${comm}) S ${String(ppid)} ${'0 '.repeat(17)}${String(ticks)} 0 0\n`;
 
-/** A procfs written by hand: every shape a live one can take between two reads. */
-async function fakeProc(root: string): Promise<void> {
-  const write = async (path: string, text: string): Promise<void> => {
-    await mkdir(join(root, path, '..'), { recursive: true });
-    await writeFile(join(root, path), text);
-  };
-  await write('uptime', '1000.50 999.00\n');
-  // Two threads of the root, listing one child twice and pid 1 once.
-  await write('100/task/100/children', '201 200 1 ');
-  await write('100/task/101/children', '300 200');
-  await write('200/stat', stat(200, 'node', 100, 50_000));
-  await write('200/cmdline', 'node\0x.js\0');
-  await write('200/task/200/children', '400 ');
-  // 400 exited between being listed and being read: no stat at all.
-  await write('201/stat', stat(201, 'kw)x', 100, 99_000));
-  await write('201/cmdline', '');
-  // 201 has no task directory: it went before its children could be listed.
-  await write('300/stat', stat(300, 'sh', 100, 100_000));
-  await write('300/cmdline', 'echo\0a\nb\0');
-  await write('300/task/300/children', '500');
-  await write('500/stat', stat(500, 'odd', 'not-a-pid', 1));
-  await write('500/cmdline', 'odd');
+/** The boot time that makes the clock below read the same uptime (1000.5 s) the old procfs fixture wrote. */
+const BOOT_SECONDS = 1_000_000;
+const NOW_MS = (BOOT_SECONDS + 1000.5) * 1000;
+
+/** A procfs written by hand, behind the kernel's host facts: every shape a live one can take between two reads. */
+class FakeProc implements ProcessHostFacts {
+  readonly platform: string;
+  readonly files = new Map<string, string>();
+  readonly directories = new Map<number, string>();
+  readonly links = new Map<string, string>();
+
+  constructor(platform = 'linux') {
+    this.platform = platform;
+  }
+
+  set(path: string, text: string): this {
+    this.files.set(path, text);
+    return this;
+  }
+
+  private read(path: string): string {
+    const text = this.files.get(path);
+    if (text === undefined) throw new Error(`ENOENT ${path}`);
+    return text;
+  }
+
+  async procFile(pid: number | 'self', file: string): Promise<string> {
+    return this.read(`${String(pid)}/${file}`);
+  }
+
+  async procSystemFile(file: string): Promise<string> {
+    return this.read(file);
+  }
+
+  async procTasks(pid: number): Promise<readonly string[]> {
+    const tasks = [...this.files.keys()]
+      .map(key => new RegExp(`^${String(pid)}/task/(\\d+)/children$`, 'u').exec(key)?.[1])
+      .filter((task): task is string => task !== undefined);
+    if (tasks.length === 0) throw new Error(`ENOENT ${String(pid)}/task`);
+    return tasks;
+  }
+
+  async procTaskChildren(pid: number, task: number): Promise<string> {
+    return this.read(`${String(pid)}/task/${String(task)}/children`);
+  }
+
+  async procFds(pid: number): Promise<readonly string[]> {
+    const fds = [...this.links.keys()]
+      .filter(key => key.startsWith(`${String(pid)}/`))
+      .map(key => key.split('/')[1] ?? '');
+    if (fds.length === 0) throw new Error(`ENOENT ${String(pid)}/fd`);
+    return fds;
+  }
+
+  async procFdLink(pid: number, fd: string): Promise<string> {
+    const link = this.links.get(`${String(pid)}/${fd}`);
+    if (link === undefined) throw new Error('ENOENT');
+    return link;
+  }
+
+  async procWorkingDirectory(pid: number): Promise<string> {
+    const directory = this.directories.get(pid);
+    if (directory === undefined) throw new Error('ENOENT');
+    return directory;
+  }
 }
 
-describe('BunProcessProbe, reading one subtree from procfs', () => {
-  it('should walk only the subtree, in table order, as `ps` would print each row', async () => {
+/** The shapes of procfs the subtree walk meets, as the old fixture wrote them to disk. */
+function fakeProc(): FakeProc {
+  return (
+    new FakeProc()
+      .set('stat', `cpu 1 2 3\nbtime ${String(BOOT_SECONDS)}\n`)
+      // Two threads of the root, listing one child twice and pid 1 once.
+      .set('100/task/100/children', '201 200 1 ')
+      .set('100/task/101/children', '300 200')
+      .set('200/stat', stat(200, 'node', 100, 50_000))
+      .set('200/cmdline', 'node\0x.js\0')
+      .set('200/task/200/children', '400 ')
+      // 400 exited between being listed and being read: no stat at all.
+      .set('201/stat', stat(201, 'kw)x', 100, 99_000))
+      .set('201/cmdline', '')
+      // 201 has no task directory: it went before its children could be listed.
+      .set('300/stat', stat(300, 'sh', 100, 100_000))
+      .set('300/cmdline', 'echo\0a\nb\0')
+      .set('300/task/300/children', '500')
+      .set('500/stat', stat(500, 'odd', 'not-a-pid', 1))
+      .set('500/cmdline', 'odd')
+  );
+}
+
+const probeOver = (host: ProcessHostFacts, ps: Pick<SpawnPort, 'run'> = new FakePs(() => printed('')), options = {}) =>
+  new KernelProcessProbe(ps, host, new DrivenClock(NOW_MS), options);
+
+describe('KernelProcessProbe', () => {
+  it('should read the process table through ps, which the kernel resolves by name', async () => {
     // Arrange
-    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
-    await fakeProc(root);
-    const subject = new BunProcessProbe(undefined, { procRoot: root });
+    const ps = new FakePs(() => printed('  2 1 00:01 init\n'));
 
-    try {
-      // Act
-      const actual = await subject.descendants(100);
+    // Act
+    const actual = await probeOver(new FakeProc(), ps).processTable();
 
-      // Assert
-      should(actual).deepEqual([
-        { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' },
-        { pid: 201, ppid: 100, startedSecondsAgo: 10, argv: '[kw)x]' },
-        { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b' },
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    // Assert
+    should(actual).deepEqual({ kind: 'read', stdout: '  2 1 00:01 init\n' });
+    should(ps.calls).deepEqual([{ program: 'ps', args: ['-Ao', 'pid=,ppid=,etime=,args='] }]);
+  });
+
+  it('should report a non-zero ps exit as a failed read', async () => {
+    // Arrange
+    const ps = new FakePs(() => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }));
+
+    // Act
+    const actual = await probeOver(new FakeProc(), ps).processTable();
+
+    // Assert
+    should(actual).deepEqual({ kind: 'failed', reason: 'ps exited 1: no output' });
+  });
+
+  it('should report a ps the kernel will not run as a failed read', async () => {
+    // Arrange — a program the manifest did not declare is refused by the spawn port before anything runs.
+    const ps = new FakePs(() => {
+      throw new Error('ps is not a declared program');
+    });
+
+    // Act
+    const actual = await probeOver(new FakeProc(), ps).processTable();
+
+    // Assert
+    should(actual).deepEqual({ kind: 'failed', reason: 'ps could not be run: ps is not a declared program' });
+  });
+
+  it('should read a process working directory and tolerate a pid it cannot see', async () => {
+    // Arrange
+    const host = new FakeProc();
+    host.directories.set(200, '/work/repository');
+
+    // Act
+    const own = await probeOver(host).workingDirectory(200);
+    const absent = await probeOver(host).workingDirectory(0);
+
+    // Assert
+    should(own).equal('/work/repository');
+    should(absent).be.undefined();
+  });
+});
+
+describe('KernelProcessProbe, reading one subtree from procfs', () => {
+  it('should walk only the subtree, in table order, as `ps` would print each row', async () => {
+    // Act
+    const actual = await probeOver(fakeProc()).descendants(100);
+
+    // Assert
+    should(actual).deepEqual([
+      { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' },
+      { pid: 201, ppid: 100, startedSecondsAgo: 10, argv: '[kw)x]' },
+      { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b' },
+    ]);
   });
 
   it('should hand the question back to the full table whenever procfs cannot answer it', async () => {
     // Arrange
-    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
-    await fakeProc(root);
-    const noUptime = await mkdtemp(join(tmpdir(), 'fy-proc-'));
-    const badUptime = await mkdtemp(join(tmpdir(), 'fy-proc-'));
-    await writeFile(join(badUptime, 'uptime'), 'soon\n');
+    const noBootTime = new FakeProc().set('100/task/100/children', '');
+    const badBootTime = fakeProc().set('stat', 'btime soon\n');
 
-    try {
-      // Act + Assert — no procfs, an unreadable root, no uptime, an uptime that is not a number.
-      should(await new BunProcessProbe(undefined, { procRoot: undefined }).descendants(100)).be.undefined();
-      should(await new BunProcessProbe(undefined, { procRoot: root }).descendants(999)).be.undefined();
-      should(await new BunProcessProbe(undefined, { procRoot: noUptime }).descendants(100)).be.undefined();
-      should(await new BunProcessProbe(undefined, { procRoot: badUptime }).descendants(100)).be.undefined();
-    } finally {
-      for (const directory of [root, noUptime, badUptime]) await rm(directory, { recursive: true, force: true });
-    }
+    // Act + Assert — no procfs, an unreadable root, no boot time, a boot time that is not a number.
+    should(await probeOver(fakeProc(), undefined, { procfs: false }).descendants(100)).be.undefined();
+    should(await probeOver(new FakeProc('darwin')).descendants(100)).be.undefined();
+    should(await probeOver(fakeProc()).descendants(999)).be.undefined();
+    should(await probeOver(noBootTime).descendants(100)).be.undefined();
+    should(await probeOver(badBootTime).descendants(100)).be.undefined();
   });
-
-  it.skipIf(globalThis.process.platform !== 'linux')(
-    'should agree with the real ps about a real process tree',
-    async () => {
-      // Arrange — a shell with two children, and one grandchild under a second shell.
-      const ps = Bun.which('ps');
-      if (ps === null) throw new Error('ps executable is required for this integration test');
-      const tree = Bun.spawn(['/bin/sh', '-c', 'sleep 30 & sleep 31 & /bin/sh -c "sleep 32; :" & wait'], {
-        stdout: 'ignore',
-        stderr: 'ignore',
-      });
-      const subject = new BunProcessProbe(ps);
-
-      try {
-        await waitFor(
-          async () => (await subject.descendants(tree.pid))?.length === 4,
-          'the shell to have started its process tree',
-        );
-
-        // Act
-        const actual = await subject.descendants(tree.pid);
-        const table = await subject.processTable();
-
-        // Assert
-        if (table.kind !== 'read') throw new Error(table.reason);
-        const expected = descendantsOf(tree.pid, parseProcessTable(table.stdout));
-        const shape = (rows: readonly ProcRow[] | undefined) =>
-          rows?.map(({ pid, ppid, argv }) => ({ pid, ppid, argv }));
-        should(shape(actual)).deepEqual(shape(expected));
-        should(actual?.length).equal(4);
-        for (const [index, row] of (actual ?? []).entries())
-          should(Math.abs(row.startedSecondsAgo - (expected[index]?.startedSecondsAgo ?? -9))).be.belowOrEqual(1);
-      } finally {
-        tree.kill();
-      }
-    },
-  );
 
   it('should let one table answer every ask inside its time-to-live, and never hold a failed read', async () => {
     // Arrange
-    const root = await mkdtemp(join(tmpdir(), 'fy-ps-ttl-'));
-    const count = join(root, 'count');
-    const executable = join(root, 'ps.sh');
-    const failing = join(root, 'failing.sh');
-    await writeFile(executable, `#!/bin/sh\nprintf x >> '${count}'\nprintf '  2 1 00:01 init\\n'\n`);
-    await writeFile(failing, `#!/bin/sh\nprintf y >> '${count}'\nexit 1\n`);
-    await chmod(executable, 0o700);
-    await chmod(failing, 0o700);
-    let now = 0;
-    const cached = new BunProcessProbe(executable, { tableTtlMs: 1_000, nowMs: () => now, procRoot: undefined });
-    const uncached = new BunProcessProbe(failing, { tableTtlMs: 1_000, nowMs: () => now });
+    const clock = new DrivenClock(0);
+    const working = new FakePs(() => printed('  2 1 00:01 init\n'));
+    const failing = new FakePs(() => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }));
+    const options = { tableTtlMs: 1_000, procfs: false };
+    const cached = new KernelProcessProbe(working, new FakeProc(), clock, options);
+    const uncached = new KernelProcessProbe(failing, new FakeProc(), clock, options);
 
-    try {
-      // Act
-      const first = await cached.processTable();
-      now = 999;
-      const held = await cached.processTable();
-      now = 1_000;
-      await cached.processTable();
-      await uncached.processTable();
-      await uncached.processTable();
+    // Act
+    const first = await cached.processTable();
+    clock.ms = 999;
+    const held = await cached.processTable();
+    clock.ms = 1_000;
+    await cached.processTable();
+    await uncached.processTable();
+    await uncached.processTable();
 
-      // Assert
-      should(held).equal(first);
-      should(await readFile(count, 'utf8')).equal('xxyy');
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    // Assert
+    should(held).equal(first);
+    should(working.calls).have.length(2);
+    should(failing.calls).have.length(2);
   });
 });
 
@@ -494,7 +525,7 @@ describe('TmuxPaneSnapshot', () => {
 
 const fixtureTable = (name: string): ProcessTableRead => ({
   kind: 'read',
-  stdout: readFileSync(`${import.meta.dir}/../../fixtures/ps/${name}`, 'utf8'),
+  stdout: readFileSync(`${import.meta.dir}/../../../fixtures/ps/${name}`, 'utf8'),
 });
 
 describe('PaneProcessInventory, over real process tables', () => {
@@ -536,7 +567,7 @@ describe('PaneProcessInventory, over real process tables', () => {
 
     // Act
     const actual = await new PaneProcessInventory(tmux, new FakeProbe(fixtureTable('macos-claude-pane.txt')), {
-      binaryName: 'fy',
+      ...provenance,
       servers,
     }).collect('fy-session');
 
@@ -568,7 +599,7 @@ describe('PaneProcessInventory, over real process tables', () => {
     const actual = await new PaneProcessInventory(
       tmux,
       { processTable: async () => fixtureTable('macos-claude-pane.txt'), workingDirectory: async () => undefined },
-      { binaryName: 'fy', servers },
+      { ...provenance, servers },
     ).collect('fy-session');
 
     // Assert
@@ -581,66 +612,64 @@ describe('PaneProcessInventory, over real process tables', () => {
 describe('ProjectMcpServers', () => {
   it('should read the servers of the .mcp.json in a directory, and none from anywhere else', async () => {
     // Arrange
-    const directory = await mkdtemp(join(tmpdir(), 'fy-mcp-servers-'));
-    try {
-      await writeFile(
-        join(directory, '.mcp.json'),
+    const files = new Map([
+      [
+        '/work/repository/.mcp.json',
         JSON.stringify({ mcpServers: { search: { command: 'npx', args: ['search-mcp'] } } }),
-      );
-      const empty = await mkdtemp(join(tmpdir(), 'fy-mcp-none-'));
+      ],
+      ['/work/broken/.mcp.json', '{ not json'],
+    ]);
+    const reader = { readText: async (path: string): Promise<string | undefined> => files.get(path) };
+    const subject = new ProjectMcpServers(reader);
 
-      // Act
-      const found = await new ProjectMcpServers().read(directory);
-      const none = await new ProjectMcpServers().read(empty);
-      const missing = await new ProjectMcpServers().read(join(empty, 'absent'));
+    // Act
+    const found = await subject.read('/work/repository');
+    const broken = await subject.read('/work/broken');
+    const missing = await subject.read('/work/absent');
 
-      // Assert
-      should(found).deepEqual([{ name: 'search', command: 'npx', args: ['search-mcp'] }]);
-      should(none).deepEqual([]);
-      should(missing).deepEqual([]);
-      await rm(empty, { recursive: true, force: true });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    // Assert
+    should(found).deepEqual([{ name: 'search', command: 'npx', args: ['search-mcp'] }]);
+    should(broken).deepEqual([]);
+    should(missing).deepEqual([]);
+  });
+
+  it('should explain nothing when the file cannot be read at all', async () => {
+    // Arrange
+    const subject = new ProjectMcpServers({
+      readText: async () => {
+        throw new Error('outside the work folder');
+      },
+    });
+
+    // Act + Assert
+    should(await subject.read('/elsewhere')).deepEqual([]);
   });
 });
 
-describe('BunProcessProbe — which processes are servers', () => {
+describe('KernelProcessProbe — which processes are servers', () => {
   const TCP_HEADER = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
   const tcpRow = (state: string, inode: string): string =>
     `   0: 0100007F:1F90 00000000:0000 ${state} 00000000:00000000 00:00000000 00000000  1000        0 ${inode} 1 0000000000000000 100 0 0 10 0`;
 
   it('should name only the processes holding a LISTEN socket, from procfs', async () => {
     // Arrange — 201 listens on inode 5001; 202 holds an ESTABLISHED socket; 203 holds only a file.
-    const root = await mkdtemp(join(tmpdir(), 'fy-proc-listen-'));
-    try {
-      await mkdir(join(root, 'net'), { recursive: true });
-      await writeFile(join(root, 'net', 'tcp'), [TCP_HEADER, tcpRow('0A', '5001'), tcpRow('01', '5002')].join('\n'));
-      await writeFile(join(root, 'net', 'tcp6'), TCP_HEADER);
+    const host = new FakeProc()
+      .set('net/tcp', [TCP_HEADER, tcpRow('0A', '5001'), tcpRow('01', '5002')].join('\n'))
+      .set('net/tcp6', TCP_HEADER);
+    host.links.set('201/3', 'socket:[5001]');
+    host.links.set('202/3', 'socket:[5002]');
+    host.links.set('203/3', '/dev/null');
 
-      for (const [pid, target] of [
-        [201, 'socket:[5001]'],
-        [202, 'socket:[5002]'],
-        [203, '/dev/null'],
-      ] as const) {
-        await mkdir(join(root, String(pid), 'fd'), { recursive: true });
-        await symlink(target, join(root, String(pid), 'fd', '3'));
-      }
-      const subject = new BunProcessProbe(undefined, { procRoot: root });
+    // Act
+    const listening = await probeOver(host).listening([201, 202, 203, 204]);
 
-      // Act
-      const listening = await subject.listening([201, 202, 203, 204]);
-
-      // Assert
-      should([...(listening ?? [])]).deepEqual([201]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    // Assert
+    should([...(listening ?? [])]).deepEqual([201]);
   });
 
   it('should say it cannot tell where there is no procfs', async () => {
     // Act / Assert
-    should(await new BunProcessProbe(undefined, { procRoot: undefined }).listening([1])).be.undefined();
+    should(await probeOver(new FakeProc(), undefined, { procfs: false }).listening([1])).be.undefined();
   });
 
   it('should read the LISTEN inodes of a /proc/net/tcp table', () => {
@@ -651,56 +680,36 @@ describe('BunProcessProbe — which processes are servers', () => {
   });
 });
 
-describe('BunProcessProbe, looking up pids wherever they are', () => {
+describe('KernelProcessProbe, looking up pids wherever they are', () => {
   it('should read each pid from procfs, whoever its parent is, and leave out the ones not running', async () => {
-    // Arrange
-    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
-    await fakeProc(root);
-    const subject = new BunProcessProbe(undefined, { procRoot: root });
-
-    try {
-      // Act
-      const actual = await subject.lookup([200, 400, 999]);
-
-      // Assert
-      should([...actual.entries()]).deepEqual([
-        [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' }],
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it('should throw rather than answer "gone" when procfs gives no usable uptime', async () => {
-    // Arrange
-    const badUptime = await mkdtemp(join(tmpdir(), 'fy-proc-'));
-    await writeFile(join(badUptime, 'uptime'), 'soon\n');
-
-    try {
-      // Act
-      const read = new BunProcessProbe(undefined, { procRoot: badUptime }).lookup([1]);
-
-      // Assert
-      await should(read).be.rejectedWith(/uptime/);
-    } finally {
-      await rm(badUptime, { recursive: true, force: true });
-    }
-  });
-
-  it('should read the real table where there is no procfs, and throw when it cannot read one', async () => {
-    // Arrange
-    const executable = Bun.which('ps');
-    if (!executable) throw new Error('ps executable is required for this isolated integration test');
-
     // Act
-    const own = await new BunProcessProbe(executable, { procRoot: undefined }).lookup([
-      globalThis.process.pid,
-      4_194_305,
-    ]);
-    const unreadable = new BunProcessProbe(undefined, { procRoot: undefined }).lookup([1]);
+    const actual = await probeOver(fakeProc()).lookup([200, 400, 999]);
 
     // Assert
-    should([...own.keys()]).deepEqual([globalThis.process.pid]);
-    await should(unreadable).be.rejectedWith(/ps executable/);
+    should([...actual.entries()]).deepEqual([
+      [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' }],
+    ]);
+  });
+
+  it('should throw rather than answer "gone" when procfs gives no usable boot time', async () => {
+    // Act
+    const read = probeOver(fakeProc().set('stat', 'btime soon\n')).lookup([1]);
+
+    // Assert
+    await should(read).be.rejectedWith(/boot time/);
+  });
+
+  it('should read the table where there is no procfs, and throw when it cannot read one', async () => {
+    // Arrange
+    const ps = new FakePs(() => printed('  200 100 00:05 sleep 30\n  300   1 00:05 other\n'));
+    const broken = new FakePs(() => ({ exitCode: 1, signal: null, stdout: '', stderr: 'cannot allocate memory' }));
+
+    // Act
+    const found = await probeOver(new FakeProc('darwin'), ps).lookup([200, 999]);
+    const unreadable = probeOver(new FakeProc('darwin'), broken).lookup([1]);
+
+    // Assert
+    should([...found.keys()]).deepEqual([200]);
+    await should(unreadable).be.rejectedWith('ps exited 1: cannot allocate memory');
   });
 });
