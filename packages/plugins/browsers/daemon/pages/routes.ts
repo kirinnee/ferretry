@@ -27,9 +27,8 @@ import { type BrowserActionResult, BrowserActionSchema } from './wire/browser.ts
  * The per-session browser: every action is an act on its page through `kernel.act` (§4.7). A write-only action
  * answers the status read afterwards, masked (S16); a read answers its masked text; a screenshot its picture.
  */
-export interface BrowserMountedSubsystem extends BrowserSubsystem {
-  stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;
-}
+/** Opens one viewer stream on a socket. */
+export type BrowserStreamOpener = (sessionId: string, downstream: SocketDownstream) => Promise<SocketHandler>;
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */
 function refusal(error: BrowserControlError): ApiError {
@@ -133,10 +132,10 @@ export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, b
 }
 
 /** `GET /v1/sessions/:sessionId/browser/stream`: proves the session, then hands the socket to the viewer stream. */
-export function streamSocket(browser: BrowserMountedSubsystem): SocketAccept {
+export function streamSocket(browser: Pick<BrowserSubsystem, 'status'>, stream: BrowserStreamOpener): SocketAccept {
   return async call => {
     const id = sessionIdOf(call);
     await browser.status(id).catch(browserFailure);
-    return async downstream => await browser.stream(id, downstream);
+    return async downstream => await stream(id, downstream);
   };
 }

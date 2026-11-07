@@ -65,10 +65,11 @@ export class BrowserProfileStore implements BrowserProfilePort {
   private readonly now: () => Date;
   private readonly sleep: (milliseconds: number) => Promise<void>;
 
-  constructor(daemonDirectory: string, options: BrowserProfileStoreOptions = {}) {
-    this.browserDirectory = path.join(daemonDirectory, 'browser');
+  constructor(stateDirectory: string, options: BrowserProfileStoreOptions = {}) {
+    // `state/browsers/` (§9.2): Chrome's own profile under `data/agent`, the display cookies under `x11/`.
+    this.browserDirectory = stateDirectory;
     this.displayDirectory = path.join(this.browserDirectory, 'x11');
-    this.profile = path.join(this.browserDirectory, 'profile');
+    this.profile = path.join(this.browserDirectory, 'data', 'agent');
     this.leaseFile = path.join(this.browserDirectory, leaseName);
     this.daemonPid = options.daemonPid ?? process.pid;
     this.hostname = options.hostname ?? os.hostname();

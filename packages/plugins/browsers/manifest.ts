@@ -1,5 +1,6 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
+import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { InputTargets } from '@ferretry/core-vault/contract';
 import {
   AUDIT,
@@ -42,6 +43,8 @@ export default definePlugin({
   kinds: ['tool', 'command', 'view'],
   words: BROWSERS_WORDS,
 
+  /** Optional (§7.6): the ferret a page belongs to and the name it is grouped under; off, no ferret has pages. */
+  uses: { ferrets: FerretsPort },
   provides: { browsers: BrowsersPort },
 
   actions: {
@@ -300,5 +303,23 @@ export default definePlugin({
 
   doctor: ['chrome', 'loopback-firewall'],
 
-  permissions: { spawn: ['chrome', 'chromium', 'google-chrome', 'Xvfb'] },
+  permissions: {
+    /** Chrome under each name a host installs it as, the private display, the sign-in window's VNC and its bound. */
+    spawn: [
+      'chrome',
+      'chromium',
+      'chromium-browser',
+      'google-chrome',
+      'google-chrome-stable',
+      'Google Chrome',
+      'Chromium',
+      'Xvfb',
+      'x11vnc',
+      'timeout',
+    ],
+    /** Uploads come from the ferret's own folder; downloads and PDFs are saved to its downloads root (S51). */
+    roots: ['work', 'downloads'],
+    /** Chrome's own DevTools endpoint on loopback, which the launcher waits for. */
+    network: ['127.0.0.1'],
+  },
 });
