@@ -24,7 +24,7 @@ import {
   type AgendaQuestion,
   type AgendaShape,
   plainLabel,
-} from '../../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import type { ReactNode } from 'react';
 
 type Prose = (text: string) => ReactNode;

@@ -8,7 +8,7 @@
  */
 
 import { daemonHomeHref } from '../shell.ts';
-import { sessionNotificationPath } from '../wire/index.ts';
+import { sessionNotificationPath } from '@ferretry/core-asks/contract';
 import type { SessionConfig, SessionStatus } from '../shell.ts';
 import { parseTaskName } from '../shell.ts';
 import { displayCallsign } from '../shell.ts';

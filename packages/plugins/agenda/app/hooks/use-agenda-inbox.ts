@@ -12,7 +12,12 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import { type AgendaListRecord, type AgendaItem, MACHINE_AGENDA_ID, isMachineAgendaId } from '../wire/index.ts';
+import {
+  type AgendaItem,
+  type AgendaListRecord,
+  isMachineAgendaId,
+  MACHINE_AGENDA_ID,
+} from '@ferretry/core-asks/contract';
 import type { SessionView } from '../shell.ts';
 import {
   createContext,

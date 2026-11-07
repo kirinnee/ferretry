@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import { withComposerNote } from '../../../../app/lib/agenda-reply.ts';

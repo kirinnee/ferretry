@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { callFromFetch, type TestFetch } from '../../../support/app/call-from-fetch.ts';
-import { agendaListSnapshot } from '../../../../app/wire/index.ts';
+import { agendaListSnapshot } from '@ferretry/core-asks/contract';
 import { projectionRecord, projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { agendaConversationPath, type InboxCard } from '../../../../app/lib/agenda-inbox.ts';

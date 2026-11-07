@@ -16,14 +16,13 @@
 
 import {
   type AgendaItem,
+  type AgendaListRecord,
   type AgendaStage,
   agendaStage,
   agendaState,
   hasOpenCardAsk,
-  needsYouQueue,
-  type AgendaListRecord,
-  restingQueue,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
+import { needsYouQueue, restingQueue } from './agenda-queue.ts';
 import { shortAgo } from './agenda-revisions.ts';
 import { agendaAuthor, parkedUntilWords } from './agenda-status.ts';
 

@@ -4,7 +4,7 @@ import {
   type AgendaItem,
   type AgendaResponse,
   type ResolvedAgendaItem,
-} from '../../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import {
   BadgeCheck,
   Bot,

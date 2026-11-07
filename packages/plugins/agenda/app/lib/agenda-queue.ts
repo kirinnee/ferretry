@@ -2,10 +2,16 @@
  * THE NEEDS-YOU QUEUE AND THE RESTING LIST (docs/agenda.md § The Needs-you queue): one selector each, so the Inbox,
  * the badge, push and every count read the same list in the same order. Pure and total.
  */
-import { type AgendaCardAsk, type AgendaParked, agendaWakeAt } from './agenda.ts';
-import { hasOpenCardAsk } from './agenda-card-asks.ts';
-import { agendaNeedsYouSince } from './agenda-stage.ts';
-import { type AgendaRestSubState, type AgendaStateSource, agendaState } from './agenda-state.ts';
+import {
+  type AgendaCardAsk,
+  agendaNeedsYouSince,
+  type AgendaParked,
+  type AgendaRestSubState,
+  agendaState,
+  type AgendaStateSource,
+  agendaWakeAt,
+  hasOpenCardAsk,
+} from '@ferretry/core-asks/contract';
 
 /** What the queue reads of an item. */
 export interface AgendaQueueSource extends AgendaStateSource {

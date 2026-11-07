@@ -32,7 +32,7 @@
  */
 
 import { gateOf } from '../../lib/gate-items.ts';
-import type { AgendaCardAnswer, AgendaItem } from '../../wire/index.ts';
+import type { AgendaCardAnswer, AgendaItem } from '@ferretry/core-asks/contract';
 import { GitCompareArrows, Merge } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DoneCloseSource } from '../../lib/agenda-done-close.ts';

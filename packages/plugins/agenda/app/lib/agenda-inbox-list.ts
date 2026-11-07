@@ -17,7 +17,13 @@
  */
 
 import { matchesMode, sessionsBarNames, type ModeFilter } from './ferret-names.ts';
-import { type AgendaItem, agendaTitle, agendaWakeAt, formatTaskRef, isMachineAgendaId } from '../wire/index.ts';
+import {
+  type AgendaItem,
+  agendaTitle,
+  agendaWakeAt,
+  formatTaskRef,
+  isMachineAgendaId,
+} from '@ferretry/core-asks/contract';
 import type { SessionView } from '../shell.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';

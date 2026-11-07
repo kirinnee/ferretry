@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test';
-import { AskBoardSnapshotSchema, AskItemSchema, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
 import {
   AgendaItemSchema,
-  AgendaSnapshotSchema,
-  AgendaListSnapshotSchema,
-  ResolvedAgendaItemSchema,
   AgendaListRecordSchema,
-} from '../../../app/wire/index.ts';
+  AgendaListSnapshotSchema,
+  AgendaSnapshotSchema,
+  AskBoardSnapshotSchema,
+  AskItemSchema,
+  AskListSnapshotSchema,
+  ResolvedAgendaItemSchema,
+} from '@ferretry/core-asks/contract';
 import * as shell from '../../../app/shell.ts';
 import { fetchAgendaSnapshot } from '../../../app/lib/agenda-client.ts';
 import { callFromFetch } from '../../support/app/call-from-fetch.ts';

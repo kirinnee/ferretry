@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { AgendaFormField } from '../../../app/wire/index.ts';
+import type { AgendaFormField } from '@ferretry/core-asks/contract';
 import {
   AgendaFormStore,
   agendaForms,

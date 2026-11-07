@@ -44,7 +44,13 @@ import {
   notificationPayload,
   showNotification,
 } from '../lib/notify.ts';
-import type { PushDeliveryPort, PushDeliveryReport, PushDeliveryStatus, PushDeviceView } from '../lib/push-delivery.ts';
+import {
+  PUSH_REVOKE_FAILED_MESSAGE,
+  type PushDeliveryPort,
+  type PushDeliveryReport,
+  type PushDeliveryStatus,
+  type PushDeviceView,
+} from '../lib/push-delivery.ts';
 
 /** One daemon's live preference slice; another pairing's changes never re-render it. */
 export const useNotificationPreferences = (
@@ -256,10 +262,22 @@ export const useNotificationControls = (
     (deviceId: string) => {
       markChecking();
       const started = context;
-      // Revoking THIS browser's own device turns its switch off: it no longer receives anything from that machine.
-      if (deviceId === lastReport.current.currentDeviceId)
-        host.preferences.set(started.connection.daemonId, { enabled: false });
-      void started.delivery.revoke(started.connection, deviceId).then(publish(started));
+      const own = deviceId === lastReport.current.currentDeviceId;
+      const settled = (next: PushDeliveryReport): void => {
+        // Revoking THIS browser's own device turns its switch off — once the machine has revoked it. A revoke that
+        // failed leaves the device enrolled and buzzing, so its readout still names it and the switch stays on.
+        if (own && next.currentDeviceId !== deviceId)
+          host.preferences.set(started.connection.daemonId, { enabled: false });
+        publish(started)(next);
+      };
+      void started.delivery.revoke(started.connection, deviceId).then(settled, () =>
+        publish(started)({
+          status: 'unavailable',
+          message: PUSH_REVOKE_FAILED_MESSAGE,
+          devices: [],
+          currentDeviceId: lastReport.current.currentDeviceId,
+        }),
+      );
     },
     [context, host.preferences, markChecking, publish],
   );

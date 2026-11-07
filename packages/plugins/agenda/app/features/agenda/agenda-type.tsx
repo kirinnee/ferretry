@@ -5,7 +5,7 @@
  * what it asks.
  */
 
-import { AGENDA_KIND_LABELS, type AgendaItem, type AgendaKind, agendaCardKind } from '../../wire/index.ts';
+import { AGENDA_KIND_LABELS, agendaCardKind, type AgendaItem, type AgendaKind } from '@ferretry/core-asks/contract';
 import { gateVerb, gateOf } from '../../lib/gate-items.ts';
 
 type AgendaTypeTone = 'decision' | 'approval' | 'todo' | 'review' | 'note' | 'reply';

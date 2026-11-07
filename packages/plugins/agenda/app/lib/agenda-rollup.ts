@@ -11,7 +11,7 @@ import { AgendaOpenPageSchema, type AgendaOpenPage } from '../../contract/index.
  * than it read.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { AGENDA_READ_HEADERS, type AgendaCall, agendaCall, DaemonResponseError } from './agenda-call.ts';
 import { AGENDA_OPEN } from './agenda-wire.ts';
 import type { DaemonConnection, DaemonId } from './machine.ts';

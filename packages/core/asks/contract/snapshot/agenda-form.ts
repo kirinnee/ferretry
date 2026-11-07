@@ -9,11 +9,11 @@
 import type { AgendaFormAnswer, AgendaFormField } from './agenda.ts';
 
 /** The words a yes-or-no field is answered with. */
-export const FORM_YES = 'Yes';
-export const FORM_NO = 'No';
+const FORM_YES = 'Yes';
+const FORM_NO = 'No';
 
 /** What a line says for a field the owner skipped: every field may be left empty (&F922). */
-export const FORM_UNANSWERED = '(skipped)';
+const FORM_UNANSWERED = '(skipped)';
 
 /** The short word a field's line uses: its own `name`, else its question without the closing mark. */
 export const formFieldName = (field: Pick<AgendaFormField, 'name' | 'label'>): string =>

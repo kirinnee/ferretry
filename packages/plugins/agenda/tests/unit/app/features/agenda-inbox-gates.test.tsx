@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { type AgendaGate, type AgendaItem, gateAskOptions, gateReference } from '../../../../app/wire/index.ts';
+import { type AgendaGate, type AgendaItem, gateAskOptions, gateReference } from '@ferretry/core-asks/contract';
 import { useState } from 'react';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
@@ -370,6 +370,44 @@ describe('a gate item in the Inbox', () => {
       expect(attach(mounted)).toBeNull();
       await mounted.unmount();
     });
+  });
+
+  it('opens the why box as a dialog with the cursor in its field', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
+    await press(buttonNamed(mounted, 'Not good'));
+    const why = sendBackBox(mounted.container);
+    expect(why.getAttribute('role')).toBe('dialog');
+    expect(why.getAttribute('aria-modal')).toBe('true');
+    expect(why.getAttribute('aria-labelledby')).not.toBeNull();
+    expect(document.activeElement).toBe(why.querySelector('textarea'));
+    await mounted.unmount();
+  });
+
+  it('Esc in the why box, in the field or on Cancel, closes only the box', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
+    await press(buttonNamed(mounted, 'Not good'));
+    const field = must(sendBackBox(mounted.container).querySelector('textarea'), 'the field');
+    await interact(() => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(mounted.container.querySelector('[data-inbox-gate-why]')).toBeNull();
+    expect(mounted.container.querySelector('[data-inbox-gate]')).not.toBeNull();
+    expect(pending(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('refuses a reason that is too long in the box, with today’s sentence, and sends nothing', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
+    await press(buttonNamed(mounted, 'Not good'));
+    const why = sendBackBox(mounted.container);
+    await writeSendBack(why, 'x'.repeat(2 * 1024 + 1));
+    await press(sendBackSubmit(why));
+    expect(pending(fake)).toEqual([]);
+    expect(why.querySelector('[role="alert"]')?.textContent).toBe('That is too long: keep it under 2048 characters.');
+    await writeSendBack(why, 'short');
+    expect(why.querySelector('[role="alert"]')).toBeNull();
+    await mounted.unmount();
   });
 
   it('Cancel on the why composer sends nothing and keeps the card', async () => {

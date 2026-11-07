@@ -7,7 +7,7 @@ import {
   agendaReMessage,
   type AgendaSnapshot,
   parseAgendaMessage,
-} from '../../../app/wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   AGENDA_KIND_LABEL,

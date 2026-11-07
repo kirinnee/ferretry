@@ -1,5 +1,6 @@
+import { type SessionAgendaSummary } from '../../../contract/wire.ts';
 import { describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, ResolvedAgendaItem, SessionAgendaSummary } from '../../../app/wire/index.ts';
+import type { AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/core-asks/contract';
 import {
   actionSentence,
   agendaConversationPath,

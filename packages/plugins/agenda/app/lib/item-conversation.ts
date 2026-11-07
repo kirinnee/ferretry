@@ -11,7 +11,7 @@
  * in its reply. `itemHistory` then applies the one relevance rule to them, exactly as it does to the live chat.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { withFreshMessageCursor } from '../shell.ts';
 import type { TranscriptEntry } from './transcript.ts';
 

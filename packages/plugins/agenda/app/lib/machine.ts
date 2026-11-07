@@ -5,7 +5,7 @@
  * no address and no credential: nothing in this half reaches a daemon but through its client.
  */
 
-import type { AgendaId } from '../wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 
 export type DaemonId = string & { readonly daemonId: unique symbol };
 

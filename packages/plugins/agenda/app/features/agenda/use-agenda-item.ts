@@ -1,4 +1,9 @@
-import { type AgendaItem, type AgendaListRecord, type AgendaReadItem, isAgendaHeader } from '../../wire/index.ts';
+import {
+  type AgendaItem,
+  type AgendaListRecord,
+  type AgendaReadItem,
+  isAgendaHeader,
+} from '@ferretry/core-asks/contract';
 import { useEffect, useState } from 'react';
 import { fetchAgendaItem } from '../../lib/agenda-item-client.ts';
 import type { DaemonConnection } from '../../shell.ts';

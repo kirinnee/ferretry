@@ -17,11 +17,11 @@
 
 import {
   type AgendaItem,
+  agendaStage,
   type AgendaVersionList,
   type AgendaVersionSummary,
-  agendaStage,
   formatTaskRef,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { STAGE_WORDS } from './agenda-item-sections.ts';
 import { revisionStamp } from './agenda-revisions.ts';
 

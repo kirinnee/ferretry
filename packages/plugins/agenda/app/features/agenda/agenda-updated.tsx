@@ -5,7 +5,7 @@
  * Nothing here edits anything.
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { ChevronDown, History } from 'lucide-react';
 import { type KeyboardEvent, useId, useRef, useState } from 'react';
 import { decidedSummary, revisionAuthor, revisionList, revisionStamp, updatedAgo } from '../../lib/agenda-revisions.ts';

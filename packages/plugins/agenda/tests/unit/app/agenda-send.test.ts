@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaResponse } from '../../../app/wire/index.ts';
+import type { AgendaResponse } from '@ferretry/core-asks/contract';
 import type { InboxAction } from '../../../app/lib/agenda-answers.ts';
 import { type AgendaSender, sendAgendaAction } from '../../../app/lib/agenda-send.ts';
 import { daemonConnection } from '../../../app/shell.ts';

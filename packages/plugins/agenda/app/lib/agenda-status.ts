@@ -4,7 +4,7 @@
  * no status. Nothing here draws anything.
  */
 
-import { type AgendaItem, type AgendaTurn, agendaTurn, agendaWakeAt } from '../wire/index.ts';
+import { type AgendaItem, type AgendaTurn, agendaTurn, agendaWakeAt } from '@ferretry/core-asks/contract';
 
 type AgendaTone = 'blocking' | 'needs-you' | 'will-block' | 'needed-by' | 'ferret' | 'parked' | 'done';
 

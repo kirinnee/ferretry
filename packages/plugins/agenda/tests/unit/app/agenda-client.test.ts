@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type AgendaResponse, MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
+import {
+  type AgendaActionRequest,
+  type AgendaId,
+  type AgendaResponse,
+  MACHINE_AGENDA_ID,
+} from '@ferretry/core-asks/contract';
 import should from 'should';
 import {
   AGENDA_READS_PER_DAEMON,
@@ -19,7 +24,6 @@ import type { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { type DaemonConnection, daemonConnection, type DaemonSessionScope } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
 import { DaemonResponseError } from '../../../app/shell.ts';
-import type { AgendaActionRequest, AgendaId } from '../../../app/wire/index.ts';
 import { callFromFetch, type TestFetch } from '../../support/app/call-from-fetch.ts';
 
 // Each read below goes through the half's one client by route key; a scripted fetcher answers it (`callFromFetch`).
@@ -130,9 +134,9 @@ describe('attention transport', () => {
       await should(operation()).be.rejectedWith(/unavailable on \/v1\/machine\/agenda/u);
     should(calls).equal(0);
   });
-  it('sends Send now with its request identity and no agenda channel header (GAP agenda-channel-header)', async () => {
+  it('sends Send now with its request identity and the agenda channel header', async () => {
     await sendAgendaReplies(daemonA, scopeA, async (_input, init) => {
-      should(new Headers(init?.headers).has('x-fy-agenda-channel')).be.false();
+      should(new Headers(init?.headers).get('x-fy-agenda-channel')).equal('2');
       should(new Headers(init?.headers).get('x-fy-request-id')).not.be.empty();
       return response(snapshot(scopeA.sessionId));
     });
@@ -161,7 +165,7 @@ describe('attention transport', () => {
     should(new Headers(calls[2]?.init.headers).get('content-type')).equal('application/json');
     should(new Headers(calls[2]?.init.headers).get('x-fy-request-id')).not.be.empty();
     should(calls[2]?.init.method).equal('POST');
-    for (const call of calls) should(new Headers(call.init.headers).has('x-fy-agenda-channel')).be.false();
+    for (const call of calls) should(new Headers(call.init.headers).get('x-fy-agenda-channel')).equal('2');
     should(JSON.parse(String(calls[2]?.init.body))).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 

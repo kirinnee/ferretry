@@ -4,6 +4,7 @@
  * an OPEN item opens here as the deck's card, like a tap on the Open list does.
  */
 
+import { agendaTitle } from '@ferretry/core-asks/contract';
 import { sessionsBarNames } from '../../lib/ferret-names.ts';
 import { Fragment } from 'react';
 import { agendaConversationPath } from '../../lib/agenda-inbox.ts';
@@ -34,7 +35,7 @@ const lineOf = (row: FindRow): Line => {
   {
     const names = sessionsBarNames(row.row.view);
     return {
-      title: row.row.record.title ?? row.row.record.subject,
+      title: agendaTitle(row.row.record),
       more: [names.ferret ?? names.title, row.row.machineName, agendaReference(row.row.record.id)],
       to: agendaConversationPath(row.row.daemonId, row.row.view.config.id, row.row.record.id),
       open: null,

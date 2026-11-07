@@ -3,6 +3,9 @@ import {
   AgendaModeSwitch,
   useAgendaSessionActions,
 } from '../../../../../app/features/agenda/agenda-session-actions.tsx';
+import { createAgendaModePanel } from '../../../../../app/views/agenda-mode-panel.tsx';
+import type { AgendaRuntime } from '../../../../../app/lib/agenda-runtime.ts';
+import type { PanelProps } from '@ferretry/kernel/manifest';
 import { patchSessionAgenda } from '../../../../../app/lib/agenda-api.ts';
 import type { AgendaCall } from '../../../../../app/lib/agenda-call.ts';
 import { type Mounted, mount, must } from '@ferretry/app/testing';
@@ -115,6 +118,19 @@ describe('Agenda mode in a ferret’s toolbar', () => {
     mounted = await mount(<Page client={daemon.client} canControl={false} />);
     expect(row(mounted.container)).toBeNull();
     expect(daemon.calls).toEqual([]);
+  });
+
+  it('the toolbar panel itself draws the daemon’s note and a refusal (it has no failure line)', async () => {
+    const daemon = fakeDaemon();
+    const Panel = createAgendaModePanel({ client: daemon.client } as unknown as AgendaRuntime);
+    mounted = await mount(<Panel {...({ subject: FERRET } as unknown as PanelProps)} />);
+    const root = mounted.container;
+    await waitFor(() => toggleOf(root).getAttribute('aria-checked') === 'false', 'off');
+    await click(toggleOf(root));
+    await waitForText(root, 'takes effect when the ferret restarts');
+    daemon.refusals.push({ status: 403, body: { error: 'operator access is closed', code: 'forbidden' } });
+    await click(toggleOf(root));
+    await waitForText(root, 'Agenda mode could not be switched: operator access is closed');
   });
 
   it('says HTTP when a refusal carries no words', async () => {

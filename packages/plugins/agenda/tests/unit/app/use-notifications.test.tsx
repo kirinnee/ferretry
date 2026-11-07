@@ -554,6 +554,51 @@ describe('useNotificationControls', () => {
     await probe.unmount();
   });
 
+  it('keeps the switch on when revoking this browser’s own device fails, and says so', async () => {
+    const push = fakeDelivery({ remembered: { [daemonA.daemonId]: DEVICE.id } });
+    const refused = {
+      ...push.port,
+      revoke: async () => ({
+        status: 'unavailable' as const,
+        message: 'Could not revoke that device with this daemon.',
+        devices: [],
+        currentDeviceId: DEVICE.id,
+      }),
+    };
+    const host = controlsHost({ delivery: refused });
+    host.preferences.set(daemonA.daemonId, { enabled: true });
+    const probe = await mount(host);
+
+    await runAsync(async () => {
+      probe.controls().revokeDevice(DEVICE.id);
+    });
+    await settle();
+
+    expect(probe.controls().enabled).toBe(true);
+    expect(probe.controls().currentDeviceId).toBe(DEVICE.id);
+    expect(probe.controls().deliveryMessage).toBe('Could not revoke that device with this daemon.');
+
+    await probe.unmount();
+  });
+
+  it('keeps the switch on and says today’s sentence when the revoke itself throws', async () => {
+    const push = fakeDelivery({ remembered: { [daemonA.daemonId]: DEVICE.id } });
+    const throwing = { ...push.port, revoke: () => Promise.reject(new Error('offline')) };
+    const host = controlsHost({ delivery: throwing });
+    host.preferences.set(daemonA.daemonId, { enabled: true });
+    const probe = await mount(host);
+
+    await runAsync(async () => {
+      probe.controls().revokeDevice(DEVICE.id);
+    });
+    await settle();
+
+    expect(probe.controls().enabled).toBe(true);
+    expect(probe.controls().deliveryMessage).toBe('Could not revoke that device with this daemon.');
+
+    await probe.unmount();
+  });
+
   it('re-reads on request', async () => {
     const push = fakeDelivery();
     const probe = await mount(controlsHost({ delivery: push.port }));

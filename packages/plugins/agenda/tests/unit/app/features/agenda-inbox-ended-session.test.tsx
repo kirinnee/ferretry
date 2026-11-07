@@ -1,5 +1,6 @@
+import { type SessionAgendaSummary } from '../../../../contract/wire.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary } from '../../../../app/wire/index.ts';
+import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../../app/shell.ts';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import {

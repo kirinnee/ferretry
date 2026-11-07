@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { ReactNode } from 'react';
-import { agendaListSnapshot, type AgendaItem, type AgendaListRecord } from '../../../../app/wire/index.ts';
+import { type AgendaItem, type AgendaListRecord, agendaListSnapshot } from '@ferretry/core-asks/contract';
 import { projectionRecord, projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import { useAgendaItem } from '../../../../app/features/agenda/use-agenda-item.ts';
 import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';

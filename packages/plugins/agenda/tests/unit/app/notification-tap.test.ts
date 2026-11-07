@@ -6,7 +6,7 @@
  * page (`/d/<daemon>/agenda/<ferret>/<ask>`), where today it opened the Inbox at that card.
  */
 import { describe, expect, it } from 'bun:test';
-import { agendaNotificationPath, type AgendaId, MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
+import { type AgendaId, agendaNotificationPath, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON, showGroupedNotification } from '../../../app/lib/notify.ts';

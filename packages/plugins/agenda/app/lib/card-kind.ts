@@ -4,8 +4,7 @@
  * the chip every surface draws, so the Inbox, Answer quickly and the side panel never disagree. Pure.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
-import { agendaKindLabel, TEST_KIND_LABEL } from '../wire/agenda-card.ts';
+import { type AgendaItem, agendaKindLabel, TEST_KIND_LABEL } from '@ferretry/core-asks/contract';
 import { gateVerb, isGateItem } from './gate-items.ts';
 
 type CardKindFamily = 'task' | 'agenda';

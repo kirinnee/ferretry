@@ -4,8 +4,7 @@
  * option's own one-line `description`. Pure.
  */
 
-import type { AgendaAskOption, AgendaItem } from '../wire/index.ts';
-import { singleAgendaQuestion, yesNoOrder } from '../wire/index.ts';
+import { type AgendaAskOption, type AgendaItem, singleAgendaQuestion, yesNoOrder } from '@ferretry/core-asks/contract';
 
 export interface LetteredOption {
   readonly letter: string;

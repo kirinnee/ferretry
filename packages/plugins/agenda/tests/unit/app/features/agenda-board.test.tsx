@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 
 import {
   agendaAge,

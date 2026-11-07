@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AgendaCardRow } from '../../../../app/wire/index.ts';
+import type { AgendaCardRow } from '@ferretry/core-asks/contract';
 import {
   type AgendaCardOutcome,
   AgendaCardsList,

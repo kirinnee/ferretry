@@ -8,7 +8,7 @@
  * This draws only the shell and its rows: what is in it is the item view's (`agenda-item-view.tsx`).
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { Ellipsis } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';

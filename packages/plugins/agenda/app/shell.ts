@@ -83,7 +83,7 @@ export {
 
 // ─── small pure helpers, this half's own ─────────────────────────────────────────────────────────────────────────
 
-import { AgendaIdSchema, type AgendaId } from './wire/index.ts';
+import { type AgendaId, AgendaIdSchema } from '@ferretry/core-asks/contract';
 import type { DaemonId } from './lib/machine.ts';
 import { DaemonResponseError } from './lib/agenda-call.ts';
 

@@ -7,7 +7,7 @@
  * until Board contributes the board (GAP(cards-board)).
  */
 
-import type { AgendaCardRow } from '../../wire/index.ts';
+import type { AgendaCardRow } from '@ferretry/core-asks/contract';
 import { createContext, type ReactNode, useContext, useMemo, useRef } from 'react';
 import { type AgendaCardsBoard, agendaCardsActions, boardErr } from '../../lib/agenda-cards-actions.ts';
 import { useAgendaLinks } from '../../lib/agenda-links.ts';

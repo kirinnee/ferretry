@@ -15,7 +15,7 @@ import {
   type AgendaItem,
   type AgendaVersionList,
   isMachineAgendaId,
-} from '../../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type DaemonAgendaClient,

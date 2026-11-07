@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaRevision } from '../../../../app/wire/index.ts';
+import type { AgendaRevision } from '@ferretry/core-asks/contract';
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { AgendaDetail } from '../../../../app/features/agenda/agenda-detail.tsx';
 import { AgendaUpdated } from '../../../../app/features/agenda/agenda-updated.tsx';

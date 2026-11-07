@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 /** A board task id (`F12`). */
 const BOARD_TASK_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
-const BoardTaskIdSchema = z.string().regex(BOARD_TASK_ID_PATTERN);
+export const BoardTaskIdSchema = z.string().regex(BOARD_TASK_ID_PATTERN);
 
 const MAX_MACHINE_ID_LENGTH = 128;
 /** The daemon a card lives on. Opaque to the board; the app's merged view keys on it. */

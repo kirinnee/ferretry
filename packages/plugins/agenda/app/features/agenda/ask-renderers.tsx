@@ -15,9 +15,11 @@
  */
 
 import type { ReactNode } from 'react';
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AskOnScreen } from '../../../contract/wire.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import type { InboxCard } from '../../lib/agenda-inbox.ts';
+import { inboxWho } from '../../lib/agenda-inbox-list.ts';
 import { RendererView } from '../../shell.ts';
 import { AgendaCardsHost } from './agenda-cards-host.tsx';
 
@@ -26,56 +28,64 @@ export const SIGN_IN_APPROVAL_RENDERER = 'ask:sign-in-approval';
 /** The input-request owner's renderer for a value typed into a prompt. */
 export const INPUT_RENDERER = 'ask:input';
 
-/** The value an owner's renderer reads: the ref (its own kind and ids) and the ask's own words. */
-export interface AskOnScreen {
-  readonly ref: { readonly kind: string } & Readonly<Record<string, unknown>>;
-  readonly subject: string;
-  readonly why?: string;
-  readonly context?: string;
+/** Who an ask is from, for the renderer that draws part of it: the ferret's id and spoken name, and its project. */
+export interface AskFrom {
+  readonly ferret: string;
+  readonly ferretName: string;
+  readonly projectId?: string | undefined;
 }
 
-const onScreen = (item: AgendaItem, ref: AskOnScreen['ref']): AskOnScreen => ({
+const onScreen = (item: AgendaItem, ref: AskOnScreen['ref'], from: AskFrom): AskOnScreen => ({
   ref,
   subject: item.subject,
   ...(item.why === undefined || item.why === null ? {} : { why: item.why }),
   ...(item.context === undefined || item.context === null ? {} : { context: item.context }),
+  ferret: from.ferret,
+  ferretName: from.ferretName,
+  ...(from.projectId === undefined ? {} : { projectId: from.projectId }),
 });
 
 /** Which owner draws this item's own part, and with what; `undefined` for an item the Agenda answers alone. */
 export const askRendererFor = (
   item: AgendaItem,
+  from: AskFrom,
 ): { readonly key: string; readonly value: AskOnScreen; readonly slot: 'plan' | 'input' } | undefined => {
-  if (item.twoFactorSeed !== undefined)
-    return {
-      key: SIGN_IN_APPROVAL_RENDERER,
-      slot: 'plan',
-      value: onScreen(item, { kind: 'two-factor-seed', stage: item.twoFactorSeed.stage }),
-    };
-  if (item.phoneApproval !== undefined)
-    return {
-      key: SIGN_IN_APPROVAL_RENDERER,
-      slot: 'plan',
-      value: onScreen(item, { kind: 'phone-approval', id: item.phoneApproval.id }),
-    };
   if (item.taskPlan !== undefined)
     return {
       key: SIGN_IN_APPROVAL_RENDERER,
       slot: 'plan',
-      value: onScreen(item, { kind: 'task-plan', planId: item.taskPlan.planId }),
+      value: onScreen(item, { kind: 'task-plan', planId: item.taskPlan.planId }, from),
     };
   if (item.signInRuleSuggestion !== undefined)
     return {
       key: SIGN_IN_APPROVAL_RENDERER,
       slot: 'plan',
-      value: onScreen(item, { kind: 'sign-in-rule-suggestion', suggestion: item.signInRuleSuggestion.suggestion }),
+      value: onScreen(
+        item,
+        { kind: 'sign-in-rule-suggestion', suggestion: item.signInRuleSuggestion.suggestion },
+        from,
+      ),
     };
   if (item.copyPlan !== undefined)
     return {
       key: SIGN_IN_APPROVAL_RENDERER,
       slot: 'plan',
-      value: onScreen(item, { kind: 'copy-plan', planId: item.copyPlan.planId }),
+      value: onScreen(item, { kind: 'copy-plan', planId: item.copyPlan.planId }, from),
     };
-  if (item.kind === 'input') return { key: INPUT_RENDERER, slot: 'input', value: onScreen(item, { kind: 'input' }) };
+  if (item.phoneApproval !== undefined)
+    return {
+      key: SIGN_IN_APPROVAL_RENDERER,
+      slot: 'plan',
+      value: onScreen(item, { kind: 'phone-approval', id: item.phoneApproval.id }, from),
+    };
+  if (item.twoFactorSeed !== undefined)
+    return {
+      key: SIGN_IN_APPROVAL_RENDERER,
+      slot: 'plan',
+      value: onScreen(item, { kind: 'two-factor-seed', stage: item.twoFactorSeed.stage }, from),
+    };
+  if (item.kind === 'input')
+    return { key: INPUT_RENDERER, slot: 'input', value: onScreen(item, { kind: 'input' }, from) };
   return undefined;
 };
 
@@ -92,7 +102,12 @@ export const askFormFor = (
   if (connection === undefined) return {};
   if (card.item.cards !== undefined)
     return { cardsForm: <AgendaCardsHost cards={card.item.cards} connection={connection} onNavigate={onNavigate} /> };
-  const owned = askRendererFor(card.item);
+  const who = inboxWho(card);
+  const owned = askRendererFor(card.item, {
+    ferret: card.view.config.id,
+    ferretName: who.ferret,
+    projectId: card.view.config.projectId,
+  });
   if (owned === undefined) return {};
   const drawn = <RendererView daemon={connection.daemonId} rendererKey={owned.key} value={owned.value} />;
   return owned.slot === 'input' ? { inputForm: drawn } : { planForm: drawn };

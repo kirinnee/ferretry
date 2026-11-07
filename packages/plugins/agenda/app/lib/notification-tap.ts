@@ -11,7 +11,7 @@
  * a tap on one that names an ask opens that ask's own page (`inboxTargetPath`).
  */
 
-import { isMachineAgendaId } from '../wire/index.ts';
+import { isMachineAgendaId } from '@ferretry/core-asks/contract';
 import { agendaPagePath } from './agenda-links.ts';
 import { agendaTargetFromSearch, inboxTargetPath } from './agenda-inbox.ts';
 import type { DaemonId } from './machine.ts';

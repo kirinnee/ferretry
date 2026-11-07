@@ -1,4 +1,9 @@
-import { type AgendaId, type AgendaReadItem, AgendaReadItemSchema, isMachineAgendaId } from '../wire/index.ts';
+import {
+  type AgendaId,
+  type AgendaReadItem,
+  AgendaReadItemSchema,
+  isMachineAgendaId,
+} from '@ferretry/core-asks/contract';
 import { AGENDA_READ_HEADERS, type AgendaCall, agendaCall, DaemonResponseError } from './agenda-call.ts';
 import { MACHINE_AGENDA_ITEM, SESSION_AGENDA_ITEM } from './agenda-wire.ts';
 import type { DaemonConnection, DaemonSessionScope } from './machine.ts';

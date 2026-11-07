@@ -8,7 +8,7 @@
  * contributes one (or the lead gives Agenda a need on Board's card routes).
  */
 
-import type { AgendaItem, TaskRef } from '../wire/index.ts';
+import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
 import { createContext, createElement, type ReactNode, useContext, useMemo, useSyncExternalStore } from 'react';
 import {
   type CardForClose,

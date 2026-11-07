@@ -33,7 +33,7 @@ import {
   type AgendaItem,
   plainLabel,
   singleAgendaQuestion,
-} from '../../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { inputContextLines } from '../../lib/input-context.ts';
 import { Check } from 'lucide-react';
 import { type ReactNode, useRef, useState } from 'react';

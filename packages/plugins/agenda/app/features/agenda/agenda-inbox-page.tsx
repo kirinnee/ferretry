@@ -38,8 +38,9 @@
 
 import type { TranscriptEntry } from '../../lib/transcript.ts';
 import { itemCardKind } from '../../lib/card-kind.ts';
+import { GATE_REASON_LENGTH_LIMIT, gateReasonTooLong } from '../../lib/gate-reason.ts';
 import { type ModeFilter, sessionsBarNames } from '../../lib/ferret-names.ts';
-import { type AgendaId, type AgendaItem, agendaAnswerText, isMachineAgendaId } from '../../wire/index.ts';
+import { agendaAnswerText, type AgendaId, type AgendaItem, isMachineAgendaId } from '@ferretry/core-asks/contract';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -593,8 +594,15 @@ function GateWhy({
 }) {
   const [words, setWords] = useState('');
   const [attached, setAttached] = useState<readonly string[]>([]);
+  const [tooLong, setTooLong] = useState<string | null>(null);
   const fieldId = useId();
+  const headingId = useId();
   const picker = useRef<HTMLInputElement | null>(null);
+  const field = useRef<HTMLTextAreaElement | null>(null);
+  // The box opens with the cursor in it: the words are what it waits for.
+  useEffect(() => {
+    field.current?.focus();
+  }, []);
   // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
   const takes = useAnswerFiles(optional ? undefined : ports, daemon);
   const upload = ports?.uploadAttachment;
@@ -614,30 +622,50 @@ function GateWhy({
     : `Not good: what went wrong with ${subject}?`;
   const ready = optional || words.trim() !== '';
   return (
-    <div className="fy-inbox-gate-why" data-inbox-gate-why={card.key}>
+    <div
+      aria-labelledby={headingId}
+      aria-modal="true"
+      className="fy-inbox-gate-why"
+      data-inbox-gate-why={card.key}
+      onKeyDown={event => {
+        // Esc anywhere in the box, the field and the buttons alike, goes back to the answer row, not out of the deck.
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        event.stopPropagation();
+        onCancel();
+      }}
+      role="dialog"
+    >
       <form
         className="fy-send-back"
         onSubmit={event => {
           event.preventDefault();
           if (!ready) return;
+          if (words.trim().length > GATE_REASON_LENGTH_LIMIT) {
+            setTooLong(gateReasonTooLong());
+            return;
+          }
           onSend({ reason: words.trim(), attachmentIds: files ? attached : [] }, files ? sessionId : null);
         }}
       >
-        <label className="fy-send-back__heading" htmlFor={fieldId}>
+        <label className="fy-send-back__heading" htmlFor={fieldId} id={headingId}>
           {heading}
         </label>
+        {(tooLong ?? error) ? (
+          <p className="fy-send-back__error" role="alert">
+            {tooLong ?? error}
+          </p>
+        ) : null}
         <textarea
           className="kt-input fy-send-back__words"
           id={fieldId}
-          onChange={event => setWords(event.target.value)}
+          onChange={event => {
+            setWords(event.target.value);
+            setTooLong(null);
+          }}
           placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
+          ref={field}
           value={words}
         />
-        {error === null ? null : (
-          <p className="fy-send-back__error" role="alert">
-            {error}
-          </p>
-        )}
         <div className="fy-send-back__actions">
           {files ? (
             <>

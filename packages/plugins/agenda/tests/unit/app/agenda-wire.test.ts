@@ -1,3 +1,4 @@
+import { type SessionAgendaSummary } from '../../../contract/wire.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   MACHINE_AGENDA_READ,
@@ -6,7 +7,6 @@ import {
   sessionAgendaSummary,
 } from '../../../app/lib/agenda-wire.ts';
 import { requestOf } from '../../support/app/call-from-fetch.ts';
-import type { SessionAgendaSummary } from '../../../app/wire/index.ts';
 
 describe('the agenda route keys', () => {
   it('name every route as the daemon serves it', () => {

@@ -6,17 +6,17 @@ import {
   AgendaConversationPageSchema,
   type AgendaCountResponse,
   type AgendaId,
-  type AgendaResponse,
-  AgendaSeenResponseSchema,
   type AgendaListSnapshot as AgendaSnapshot,
   AgendaListSnapshotSchema as AgendaSnapshotSchema,
+  type AgendaResponse,
+  AgendaSeenResponseSchema,
   type AgendaVersion,
   type AgendaVersionList,
   AgendaVersionListSchema,
   AgendaVersionSchema,
   type BoardReopenAttachments,
   isMachineAgendaId,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { ConcurrencyLimit, ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from '../shell.ts';
 import {
   AGENDA_READ_HEADERS,

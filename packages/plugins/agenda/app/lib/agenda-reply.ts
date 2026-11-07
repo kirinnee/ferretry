@@ -5,7 +5,7 @@
  * the card do the drawing.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { InboxAction } from './agenda-answers.ts';
 
 /**

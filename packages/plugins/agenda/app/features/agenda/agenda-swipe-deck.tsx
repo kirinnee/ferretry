@@ -29,7 +29,7 @@
  *   spring: the card is simply gone, or simply back.
  */
 
-import { agendaTitle } from '../../wire/index.ts';
+import { agendaTitle } from '@ferretry/core-asks/contract';
 import {
   type CSSProperties,
   type KeyboardEvent,

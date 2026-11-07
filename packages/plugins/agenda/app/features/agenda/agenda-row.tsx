@@ -7,7 +7,7 @@
  * A ferret's-turn row is dimmed.
  */
 
-import { type AgendaItem, hasOwnTitle } from '../../wire/index.ts';
+import { type AgendaItem, hasOwnTitle } from '@ferretry/core-asks/contract';
 import { bulletPoints } from '../../lib/agenda-revisions.ts';
 import { type AgendaStatus, agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { agendaHeading } from './agenda-delivery.tsx';

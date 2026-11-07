@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaVersionList } from '../../../../app/wire/index.ts';
+import type { AgendaItem, AgendaVersionList } from '@ferretry/core-asks/contract';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
 import type { AgendaMergeView, AgendaVersionsView } from '../../../../app/features/agenda/use-item-lifecycle.ts';

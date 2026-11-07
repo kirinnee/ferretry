@@ -27,7 +27,7 @@ import {
   agendaStage,
   agendaState,
   gateReference,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { revisionStamp } from './agenda-revisions.ts';
 import { agendaAuthor, parkedUntilWords } from './agenda-status.ts';
 import { attachedGateView, type GateItem, isPlanGate, gateOf } from './gate-items.ts';

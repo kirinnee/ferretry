@@ -7,7 +7,7 @@
  * credential.
  */
 
-import { AgendaClearAgentsResultSchema } from '../wire/index.ts';
+import { AgendaClearAgentsResultSchema } from '../../contract/wire.ts';
 import { type AgendaCall, agendaCall, requestIdHeaders } from './agenda-call.ts';
 import { AGENDA_CLEAR_AGENTS } from './agenda-wire.ts';
 import type { DaemonConnection, DaemonId } from './machine.ts';

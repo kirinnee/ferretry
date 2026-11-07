@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { ReactElement } from 'react';
-import { agendaListSnapshot, MACHINE_AGENDA_ID } from '../../../../app/wire/index.ts';
+import { agendaListSnapshot, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { projectionRecord, projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import { ResolvedItemView } from '../../../../app/features/agenda/resolved-item-view.tsx';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ResolvedAgendaItem } from '../../../../app/wire/index.ts';
+import type { ResolvedAgendaItem } from '@ferretry/core-asks/contract';
 import { LANE_PROPOSAL_ANSWERS } from '../../../../app/lib/lane-edit.ts';
 
 /** A lane-proposal card's `sourceRef`, in Board's spelling (`lanes:<project>:<version>`). */

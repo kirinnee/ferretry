@@ -4,7 +4,7 @@
  * an undo brings it back, and nothing is "sent" until the test turns the clock past the window.
  */
 
-import { type AgendaAsk, type AgendaItem, agendaTurn } from '../../../app/wire/index.ts';
+import { type AgendaAsk, type AgendaItem, agendaTurn } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../app/shell.ts';
 import { type ReactElement, useEffect, useSyncExternalStore } from 'react';
 import { ScreenHrefProvider, type ScreenHrefOf } from '@ferretry/app';

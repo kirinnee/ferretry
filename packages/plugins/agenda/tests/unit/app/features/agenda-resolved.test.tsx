@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { ResolvedAgendaItem } from '../../../../app/wire/index.ts';
+import type { ResolvedAgendaItem } from '@ferretry/core-asks/contract';
 import { ResolvedRow, resolvedWhen } from '../../../../app/features/agenda/agenda-resolved.tsx';
 import { ensureDom } from '@ferretry/app/testing';
 ensureDom();

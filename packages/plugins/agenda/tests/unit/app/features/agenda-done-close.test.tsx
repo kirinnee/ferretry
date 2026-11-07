@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem, TaskRef } from '../../../../app/wire/index.ts';
+import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { AgendaQuickReplies } from '../../../../app/features/agenda/agenda-quick-replies.tsx';
 import { useDoneCloseFlow } from '../../../../app/features/agenda/use-done-close-flow.ts';

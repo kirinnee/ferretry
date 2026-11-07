@@ -8,7 +8,7 @@
  * stops the run and leaves the item open, with the reason, so the owner never believes work is closed that is not.
  */
 
-import { type AgendaItem, formatTaskRef, type TaskRef } from '../wire/index.ts';
+import { type AgendaItem, formatTaskRef, type TaskRef } from '@ferretry/core-asks/contract';
 
 export type DoneCloseResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
@@ -78,7 +78,9 @@ export const closePlan = (
   const laneSet = card.laneSet;
   const category = laneSet?.lanes.find(lane => lane.id === card.laneId)?.category;
   if (laneSet === null || card.dropped || category === undefined) return refused;
-  if (category === 'closed') return { kind: 'closed' };
+  // A closed card counts as done only where it could be sent back: a set with a lane to reopen it into.
+  if (category === 'closed')
+    return laneSet.lanes.some(lane => lane.category !== 'closed') ? { kind: 'closed' } : refused;
   const done =
     laneSet.lanes.find(lane => lane.id === laneSet.doneLane && lane.category === 'closed')?.id ??
     laneSet.lanes.find(lane => lane.category === 'closed')?.id;

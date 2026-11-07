@@ -26,7 +26,7 @@
  * host that hands the Inbox a composer of its own.
  */
 
-import type { AgendaId } from '../../wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../shell.ts';
 import { type ComponentType, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';

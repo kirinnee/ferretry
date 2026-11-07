@@ -46,6 +46,9 @@ export interface PushDeliveryPort {
 export const PUSH_UNSUPPORTED_MESSAGE =
   'Web Push is unavailable in this browser; notifications still appear while the app is open.';
 
+/** Shown when a device could not be revoked with its machine. */
+export const PUSH_REVOKE_FAILED_MESSAGE = 'Could not revoke that device with this daemon.';
+
 const unbound = async (): Promise<PushDeliveryReport> => ({
   status: 'unavailable',
   message: PUSH_UNSUPPORTED_MESSAGE,

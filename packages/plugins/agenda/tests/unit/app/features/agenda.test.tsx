@@ -2,10 +2,10 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import {
   type AgendaId,
   type AgendaItem,
-  type AgendaSnapshot,
   type AgendaListSnapshot,
   agendaListSnapshot,
-} from '../../../../app/wire/index.ts';
+  type AgendaSnapshot,
+} from '@ferretry/core-asks/contract';
 import { LANE_PROPOSAL_ANSWERS } from '../../../../app/lib/lane-edit.ts';
 import { projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import type { ReactElement } from 'react';

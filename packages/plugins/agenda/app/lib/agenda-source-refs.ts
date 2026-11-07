@@ -4,7 +4,7 @@
  * confirms lanes, a gate item's answer moves a card. So a reference in one of these grammars is the daemon's alone:
  * nothing a ferret controls — a harness question's tool id above all — may ever carry one.
  */
-import { MAX_AGENDA_SOURCE_REF_LENGTH } from './agenda.ts';
+import { MAX_AGENDA_SOURCE_REF_LENGTH } from '@ferretry/core-asks/contract';
 
 /** The harness's own question items: `question:<the provider's tool id>`, so no other producer's id can collide. */
 export const HARNESS_QUESTION_REF_PREFIX = 'question:';

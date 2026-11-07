@@ -14,18 +14,18 @@
  * key is `(daemonId, sessionId, itemId)`: two machines' `A3` in two same-named sessions are unrelated.
  */
 
+import { type SessionAgendaSummary } from '../../contract/wire.ts';
 import { agendaAskPath } from '../../contract/wire.ts';
 import {
-  ASK_LINK_PARAMETER,
   type AgendaBrief,
   type AgendaId,
   AgendaIdSchema,
   type AgendaItem,
+  type AgendaListRecord,
   type AgendaListSnapshot,
   agendaTurn,
-  type AgendaListRecord,
-  type SessionAgendaSummary,
-} from '../wire/index.ts';
+  ASK_LINK_PARAMETER,
+} from '@ferretry/core-asks/contract';
 import { agendaDeepLinkFromFragment, type SessionView } from '../shell.ts';
 import {
   answerActions,

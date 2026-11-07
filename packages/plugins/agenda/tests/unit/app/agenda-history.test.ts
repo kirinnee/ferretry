@@ -1,11 +1,11 @@
 import { type TranscriptEntry } from '../../../app/lib/transcript.ts';
 import { describe, expect, test } from 'bun:test';
 import {
-  type AgendaItem,
   agendaAnswerMessage,
   agendaDismissedMessage,
+  type AgendaItem,
   agendaReMessage,
-} from '../../../app/wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { type HistoryEvent, itemHistory } from '../../../app/lib/agenda-history.ts';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
 

@@ -6,8 +6,8 @@
  * reads these against the Asks and Agenda manifests.
  */
 
+import { type SessionAgendaSummary } from '../../contract/wire.ts';
 import type { FerretState } from './ferret-view.ts';
-import type { SessionAgendaSummary } from '../wire/index.ts';
 
 /** `GET`/`POST` the ferret's board. */
 export const SESSION_AGENDA_READ = 'GET /v1/ferrets/:ferretId/agenda';

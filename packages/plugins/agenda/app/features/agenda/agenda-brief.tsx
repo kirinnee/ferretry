@@ -18,14 +18,17 @@
  * option buttons (docs/agenda.md, "What I need from you").
  */
 
-import type {
-  AgendaItem,
-  AgendaLink,
-  AgendaQuestion,
-  AgendaRecommendation,
-  AgendaRevisableField as RevisionField,
-} from '../../wire/index.ts';
-import { agendaCardKind, agendaTabs, plainLabel, recommendedAgendaOption } from '../../wire/index.ts';
+import {
+  agendaCardKind,
+  type AgendaItem,
+  type AgendaLink,
+  type AgendaQuestion,
+  type AgendaRecommendation,
+  type AgendaRevisableField as RevisionField,
+  agendaTabs,
+  plainLabel,
+  recommendedAgendaOption,
+} from '@ferretry/core-asks/contract';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';

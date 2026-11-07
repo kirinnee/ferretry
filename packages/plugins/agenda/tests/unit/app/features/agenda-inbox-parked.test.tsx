@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaId } from '../../../../app/wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { agendaConversationPath, type InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import type { DaemonId } from '../../../../app/shell.ts';

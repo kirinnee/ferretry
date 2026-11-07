@@ -6,9 +6,9 @@
  * built with the daemon's own rule (`agendaSummaryOf`, copied from today's `sessionAgendaSummary`).
  */
 
-import type { AgendaItem, SessionAgendaSummary } from '../wire/index.ts';
-import { needsYouQueue } from '../wire/agenda-queue.ts';
-import type { TaskRef } from '../wire/index.ts';
+import { type SessionAgendaSummary } from '../../contract/wire.ts';
+import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
+import { needsYouQueue } from './agenda-queue.ts';
 
 /** Where a ferret stands (Ferrets' four states), and `running` for the machine's own stand-in conversation. */
 export type FerretStatus = 'starting' | 'working' | 'idle' | 'stopped' | 'running';

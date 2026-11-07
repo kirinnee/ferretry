@@ -5,8 +5,9 @@
  * its navigation entry (`AgendaNavEntry`) and the Inbox page's heading. The top bar and the phone's tab bar are the
  * app shell's, which 5.0 has not given an Inbox count; they are not drawn here.
  */
+import { type SessionAgendaSummary } from '../../../../contract/wire.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary } from '../../../../app/wire/index.ts';
+import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../../app/shell.ts';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { type AgendaInboxMachine, useAgendaInboxModel } from '../../../../app/hooks/use-agenda-inbox.ts';

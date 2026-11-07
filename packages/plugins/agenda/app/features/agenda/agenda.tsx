@@ -33,7 +33,7 @@ import type {
   AgendaListRecord,
   AgendaListSnapshot,
   ResolvedAgendaItem,
-} from '../../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
@@ -596,7 +596,10 @@ export const useAgenda = ({
             act(formItem, action, '');
           });
   // What another plugin draws inside the card: its owner's renderer, by key (§5.2), never that owner's component.
-  const owned = cardItem === undefined ? undefined : askRendererFor(cardItem);
+  const owned =
+    cardItem === undefined
+      ? undefined
+      : askRendererFor(cardItem, { ferret: scope.sessionId, ferretName: ferret, projectId });
   const ownerForms =
     cardItem === undefined || owned === undefined
       ? {}
@@ -612,18 +615,7 @@ export const useAgenda = ({
             ),
           }
         : {
-            planForm: (
-              <RendererView
-                daemon={connection.daemonId}
-                rendererKey={owned.key}
-                value={
-                  // A standing rule can be limited to the board project this ferret works in.
-                  projectId === undefined || cardItem.signInRuleSuggestion === undefined
-                    ? owned.value
-                    : { ...owned.value, projectId }
-                }
-              />
-            ),
+            planForm: <RendererView daemon={connection.daemonId} rendererKey={owned.key} value={owned.value} />,
           };
   const view =
     cardItem === undefined ? (

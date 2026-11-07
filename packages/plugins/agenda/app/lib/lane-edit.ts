@@ -5,7 +5,8 @@
  * Board's page, which the caller spells (`laneEditor`), so this half hard-codes no Board path. Pure.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
+import { z } from 'zod';
 import type { InboxAction } from './agenda-inbox.ts';
 
 /** The choice labels of a lane-proposal card (Board's `LANE_PROPOSAL_ANSWERS`). */
@@ -13,13 +14,18 @@ export const LANE_PROPOSAL_ANSWERS = { accept: 'Accept', edit: 'Edit' } as const
 
 const LANE_PROPOSAL_REFERENCE_PREFIX = 'lanes:';
 
+/** A board project's id as a lane proposal names it (Board's `BoardProjectIdSchema`; this half imports nothing of Board's). */
+const BOARD_PROJECT_ID = z.union([z.uuid(), z.literal('unfiled')]);
+
 /** The project a lane-proposal `sourceRef` names, or `undefined` for any other reference. */
 export const laneProposalProject = (sourceRef: string | null): string | undefined => {
   if (sourceRef === null || !sourceRef.startsWith(LANE_PROPOSAL_REFERENCE_PREFIX)) return undefined;
   const separator = sourceRef.lastIndexOf(':');
   const version = Number(sourceRef.slice(separator + 1));
   const projectId = sourceRef.slice(LANE_PROPOSAL_REFERENCE_PREFIX.length, separator);
-  return !Number.isSafeInteger(version) || version < 1 || projectId === '' ? undefined : projectId;
+  if (!Number.isSafeInteger(version) || version < 1 || projectId === '') return undefined;
+  // Board's project id: a UUID, or the one unfiled project.
+  return BOARD_PROJECT_ID.safeParse(projectId).success ? projectId : undefined;
 };
 
 /** The lane editor `action` opens, or `undefined` when it is not the Edit answer of a lane-proposal card. */

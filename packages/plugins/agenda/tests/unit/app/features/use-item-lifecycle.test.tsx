@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { AgendaConversationEntry, AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaConversationEntry, AgendaItem } from '@ferretry/core-asks/contract';
 import { useState } from 'react';
 import {
   type ItemLifecycle,
