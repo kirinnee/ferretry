@@ -74,6 +74,7 @@ import {
 import { JobRunner } from './jobs.ts';
 import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
+import { carrierListenerPort } from './carrier-listener.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { livePort } from './live-port.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
@@ -645,6 +646,13 @@ async function bootLocked(
       items,
       resolversOf(manifest.id),
     ),
+    carrierListener: carrierListenerPort({
+      manifest,
+      dispatcher: () => dispatcher,
+      daemonId: identityPort.daemonId,
+      onStop: lifecycle.onStop.bind(lifecycle),
+      stopping: () => lifecycle.stopping(),
+    }),
     identity: identityPort,
     paths: ownerPaths,
     updateHost: updateHostOf(manifest, adapters, options.version),
@@ -947,7 +955,8 @@ async function bootLocked(
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
       const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        ToolHandler | undefined;
+        | ToolHandler
+        | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

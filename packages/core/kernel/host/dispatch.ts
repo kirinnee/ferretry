@@ -369,6 +369,18 @@ export class Dispatcher {
     return response;
   }
 
+  /**
+   * Which declared socket would take this request: its owner and its template, as declared. Asks nothing of admission
+   * and runs nothing, so a listener that serves one plugin's route can check the table claims it for that plugin.
+   */
+  socketClaim(
+    request: Pick<ApiRequest, 'method' | 'path'>,
+  ): { readonly plugin: PluginId; readonly method: string; readonly path: string } | undefined {
+    const found = this.sockets.lookup(request.method, request.path);
+    if (found.kind !== 'matched') return undefined;
+    return { plugin: found.route.owner.plugin, method: found.route.method, path: found.route.path };
+  }
+
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
     const found = this.sockets.lookup(request.method, request.path);
