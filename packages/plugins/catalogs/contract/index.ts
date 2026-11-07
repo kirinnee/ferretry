@@ -4,3 +4,4 @@ export * from './port.ts';
 export * from './wire.ts';
 export * from './words.ts';
 export * from './items/index.ts';
+export * from './config.ts';
