@@ -30,7 +30,7 @@ import {
   switchLoginSignInToLink,
 } from '../lib/harness-login-api.ts';
 import { finishSignInLabel, HARNESS_NAMES, loginName, signedInSentence, signInCoverage } from '../lib/logins-view.ts';
-import { Button } from '../ui.ts';
+import { Button, ChangeApplyPanel, useChangeAuthority } from '../ui.ts';
 import { ClaudeLoginPanel } from './claude-login-panel.tsx';
 import { CodexLoginPanel } from './codex-login-panel.tsx';
 
@@ -70,6 +70,8 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
   /** The next start follows a sign-in that ended badly, so it starts over rather than picking one up. */
   const [restartNext, setRestartNext] = useState(false);
   const reported = useRef<string | null>(null);
+  /** What this caller may change here: a remote caller that needs a passkey is told so, one that is refused is not offered the button. */
+  const authority = useChangeAuthority(client);
 
   const finished = useCallback(
     (next: LoginSignInFlow): void => {
@@ -198,16 +200,15 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
           <p className="m-0 text-row font-semibold text-fg">Sign in to {name}</p>
           <p className="mb-0 mt-1 text-cell leading-base text-muted">{signInCoverage(login, machineName)}</p>
         </div>
-        {refusal === null ? null : (
-          <p role="alert" className="m-0 text-cell leading-base text-warn">
-            {refusal}
-          </p>
-        )}
-        <div>
-          <Button type="button" variant="primary" disabled={busy} onClick={() => void start(restartNext)}>
-            {busy ? 'Starting sign-in…' : linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
-          </Button>
-        </div>
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={authority}
+          busy={busy}
+          busyLabel="Starting sign-in…"
+          refusal={refusal}
+          submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
+          onSubmit={() => void start(restartNext)}
+        />
         {login.harness === 'codex' ? (
           <div data-login-sign-in-method={method}>
             <p className="m-0 text-meta leading-base text-muted">

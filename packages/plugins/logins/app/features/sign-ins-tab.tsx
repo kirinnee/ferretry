@@ -4,8 +4,8 @@
  * environment login) tested.
  *
  * One page is one login. This screen reads and acts through Logins' own routes only (`GET /v1/logins`, check, test,
- * sign-in, local models). GAP(runtimes): adding, signing out, disabling, labelling and removing a login are reviewed
- * changes whose routes are Runtimes', which a Logins view cannot call; the screen says so rather than hiding it.
+ * sign-in, local models, and the login change routes: add, label, switch off or on, sign out, remove). Every act that
+ * changes the machine ends in a `ChangeApplyPanel`, so a caller that may not change it is told why before it clicks.
  */
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -33,7 +33,10 @@ import {
   usageBars,
   usageBarText,
 } from '../lib/logins-view.ts';
-import { Badge, Button, cn } from '../ui.ts';
+import { Badge, Button, ChangeApplyPanel, cn } from '../ui.ts';
+import { AddLoginPanel } from './add-login-panel.tsx';
+import { DisableControl, LabelEditor, RemoveZone, SignOutZone } from './login-changes-panels.tsx';
+import { useLoginChanges } from '../lib/login-changes.ts';
 import { LocalModelsPanel } from './local-models-panel.tsx';
 import { environmentChip, LoginEnvironmentSection } from './login-environment.tsx';
 import { LoginSignIn } from './login-sign-in.tsx';
@@ -42,10 +45,6 @@ import { useLocalModels } from './use-local-models.ts';
 /** The columns every meter on a login shares, so the bars start and end in the same place. */
 const METER_LABEL = 'w-12 shrink-0 whitespace-nowrap text-muted';
 const METER_WORDS = 'w-48 shrink-0 text-right text-muted';
-
-/** Said under the list: what this screen does not do yet. */
-export const CHANGES_NOTE =
-  'Adding, signing out, switching off, labelling and removing a login are not available from this screen yet.';
 
 function UsageBars({ login, now }: { readonly login: LoginView; readonly now: number }) {
   const bars = usageBars(login, now);
@@ -117,10 +116,12 @@ interface LoginPageProps {
   readonly reload: () => Promise<void>;
   readonly onBack: () => void;
   readonly now: number;
+  readonly clock: () => number;
   readonly pollMs?: number;
 }
 
-function LoginPage({ login, machineName, client, reload, onBack, now, pollMs }: LoginPageProps) {
+function LoginPage({ login, machineName, client, reload, onBack, now, clock, pollMs }: LoginPageProps) {
+  const changes = useLoginChanges(client);
   const [notice, setNotice] = useState<string | null>(null);
   const [signedInFor, setSignedInFor] = useState<readonly string[] | null>(null);
   const [checking, setChecking] = useState(false);
@@ -212,22 +213,24 @@ function LoginPage({ login, machineName, client, reload, onBack, now, pollMs }: 
       ) : (
         <div className="flex flex-col gap-3 border-t border-border pt-3" data-login-actions="">
           {login.checkNow.available ? (
-            <div>
-              <Button
-                type="button"
-                variant="primary"
-                disabled={checking}
-                data-login-check=""
-                onClick={() => void check()}
-              >
-                {checking ? 'Checking…' : 'Check now'}
-              </Button>
-            </div>
+            <ChangeApplyPanel
+              machineName={machineName}
+              authority={changes.authority}
+              busy={checking}
+              busyLabel="Checking…"
+              refusal={null}
+              submitLabel="Check now"
+              variant="primary"
+              onSubmit={() => void check()}
+            />
           ) : (
             <p className="m-0 text-cell text-muted">{login.checkNow.reason}</p>
           )}
         </div>
       )}
+
+      <LabelEditor login={login} machineName={machineName} changes={changes} reload={reload} />
+      <DisableControl login={login} machineName={machineName} changes={changes} reload={reload} now={clock} />
 
       <div>
         <h4 className="m-0 text-meta font-semibold uppercase text-muted">Used by</h4>
@@ -245,9 +248,16 @@ function LoginPage({ login, machineName, client, reload, onBack, now, pollMs }: 
         )}
       </div>
 
-      <p className="m-0 text-meta leading-base text-muted" data-login-changes-note="">
-        {CHANGES_NOTE}
-      </p>
+      {needsSignIn ? null : <SignOutZone login={login} machineName={machineName} changes={changes} reload={reload} />}
+      <RemoveZone
+        login={login}
+        machineName={machineName}
+        changes={changes}
+        onRemoved={() => {
+          onBack();
+          void reload();
+        }}
+      />
     </section>
   );
 }
@@ -300,6 +310,7 @@ type ReadState =
 export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }: SignInsTabProps) {
   const [state, setState] = useState<ReadState>({ kind: 'loading' });
   const [detail, setDetail] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -338,8 +349,33 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }
         reload={reload}
         onBack={() => setDetail(null)}
         now={now()}
+        clock={now}
         {...(pollMs === undefined ? {} : { pollMs })}
       />
+    );
+
+  if (adding)
+    return (
+      <section className="flex min-w-0 flex-col gap-3" data-logins-adding="">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="kt-btn--flush-start"
+          onClick={() => setAdding(false)}
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+          Logins
+        </Button>
+        <AddLoginPanel
+          client={client}
+          onAdded={id => {
+            setAdding(false);
+            setDetail(id);
+            void reload();
+          }}
+        />
+      </section>
     );
 
   return (
@@ -355,12 +391,20 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }
           <p className="m-0 text-cell leading-base text-muted">
             A login is one sign-in or key to Claude Code or Codex. It belongs to this machine.
           </p>
+          <Button type="button" variant="primary" data-add-login="" onClick={() => setAdding(true)}>
+            Add a login
+          </Button>
         </div>
       ) : (
         <>
-          <p className="m-0 text-cell text-muted">
-            {plural(list.logins.length, 'login')} on {list.machine}
-          </p>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+            <p className="m-0 text-cell text-muted">
+              {plural(list.logins.length, 'login')} on {list.machine}
+            </p>
+            <Button type="button" variant="primary" data-add-login="" onClick={() => setAdding(true)}>
+              Add a login
+            </Button>
+          </div>
           {loginGroups(list).map(group => (
             <div key={group.scope} data-logins-group={group.scope}>
               <h4 className="m-0 text-meta font-semibold uppercase text-muted">{group.title}</h4>
@@ -380,9 +424,6 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }
           ) : null}
         </>
       )}
-      <p className="m-0 text-meta leading-base text-muted" data-login-changes-note="">
-        {CHANGES_NOTE}
-      </p>
     </section>
   );
 }

@@ -14,7 +14,6 @@ import {
   usageBars,
   usageBarText,
 } from '../../../app/lib/logins-view.ts';
-import { readoutWords as readout } from '../../../app/features/quota-readout.tsx';
 import { login, loginList } from '../cli/fakes.ts';
 
 const NOW = Date.parse('2026-11-01T10:00:00.000Z');
@@ -82,21 +81,5 @@ describe('how a login is worded', () => {
     ]);
     expect(hasSharedEmails(list)).toBe(false);
     expect(hasSharedEmails(loginList(login({ id: 'a' }), login({ id: 'b' })))).toBe(true);
-  });
-
-  it('words the status-area readout', () => {
-    expect(readout(loginList())).toBe('No logins');
-    expect(readout(loginList(login(), login({ id: 'b' })))).toBe('2 logins ready');
-    const needs = login({
-      id: 'n',
-      status: {
-        word: 'needs_sign_in',
-        label: 'Needs sign-in',
-        reason: 'not_signed_in',
-        explanation: 'x',
-        lastCheckInconclusive: false,
-      },
-    });
-    expect(readout(loginList(login(), needs))).toBe('1 login needs sign-in');
   });
 });

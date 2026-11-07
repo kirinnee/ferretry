@@ -168,3 +168,24 @@ export const testResultLine = (result: {
   result.ok
     ? `Test passed${result.spent === 'one-token' ? ' — one token spent' : ' — nothing spent'}.`
     : result.message;
+
+const LOGIN_ID_LIMIT = 64;
+
+const slug = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+
+/** The id a new login gets: `<harness>-<label>`, or `<harness>-login`, with `-2`, `-3`… added until it is free. */
+export function suggestLoginId(harness: HarnessKind, label: string | undefined, taken: ReadonlySet<string>): string {
+  const base = `${harness === 'claude-code' ? 'claude' : 'codex'}-${slug(label ?? '') || 'login'}`.slice(
+    0,
+    LOGIN_ID_LIMIT - 3,
+  );
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${String(n)}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}

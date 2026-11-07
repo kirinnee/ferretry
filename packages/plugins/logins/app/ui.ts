@@ -1,6 +1,8 @@
 /** Shared browser primitives come from the app shell. */
 export {
   Badge,
+  ChangeApplyPanel,
+  type ChangeAuthority,
   BottomSheet,
   Button,
   ContextMenu,
@@ -10,6 +12,7 @@ export {
   cn,
   Textarea,
   type MenuAnchor,
+  useChangeAuthority,
   useDialogFocus,
   useNow,
 } from '@ferretry/app/ui';

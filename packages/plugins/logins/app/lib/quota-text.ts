@@ -24,3 +24,18 @@ export function quotaResetsIn(at: number | undefined, now: number): string | nul
   if (hours < 24) return hours < 10 && minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
   return `${Math.round(hours / 24)}d`;
 }
+
+/**
+ * The money line for a credit-billed login with no window: "$12.34 left", else "$3.20 this month". `null` when neither
+ * is known — and then the caller says "unknown", never "$0".
+ */
+export function quotaMoneyText(
+  quota:
+    | { readonly balance?: { readonly amount: number; readonly currency: string }; readonly spendUsd?: number }
+    | null
+    | undefined,
+): string | null {
+  if (quota?.balance !== undefined) return `${formatQuotaMoney(quota.balance.amount, quota.balance.currency)} left`;
+  if (quota?.spendUsd !== undefined) return `${formatQuotaMoney(quota.spendUsd, 'USD')} this month`;
+  return null;
+}
