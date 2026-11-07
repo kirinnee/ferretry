@@ -980,7 +980,7 @@ describe('2FA keys as the owner reads them', () => {
     expect(automaticKeysInOfferOrder([twin(8), twin(9)]).map(each => each.id)).toEqual([TF(8), TF(9)]);
   });
 
-  it('should bind an add-2fa-key proof to one account and one staged seed', () => {
+  it('S90 should bind an add-2fa-key proof to one account and one staged seed, by the digest Access stamps', () => {
     // Arrange
     const stage = `st_${'a'.repeat(24)}`;
     const expected = createHash('sha256')
@@ -989,6 +989,8 @@ describe('2FA keys as the owner reads them', () => {
 
     // Act / Assert
     expect(addTwoFactorKeySubject(KEY(1), stage)).toBe(expected);
+    // Pinned: Access stamps the add-2fa-key challenge with exactly this digest (step-up.stages:add-2fa-key).
+    expect(expected).toBe('e7ac28b9cca4f3394fcec490c7037780ea809736a16b5575ea814d7344ff9230');
     expect(addTwoFactorKeySubject(KEY(2), stage)).not.toBe(expected);
     expect(addTwoFactorKeySubject(KEY(1), `st_${'b'.repeat(24)}`)).not.toBe(expected);
     expect(TwoFactorStageIdSchema.safeParse(stage).success).toBe(true);
