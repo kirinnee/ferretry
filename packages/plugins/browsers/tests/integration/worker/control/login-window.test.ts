@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import { BrowserLoginStatusSchema } from '../../../../contract/index.ts';
 import should from 'should';
 import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
-import { type BrowserLoginStatus } from '../../../../contract/index.ts';
-import { type BrowserProfileLease, type BrowserProfilePort } from '../../../../daemon/worker/control/profile.ts';
+import type { BrowserLoginStatus } from '../../../../contract/index.ts';
+import type { BrowserProfileLease, BrowserProfilePort } from '../../../../daemon/worker/control/profile.ts';
 import {
   BrowserLoginWindowService,
   type BrowserLoginChild,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { SpeedupsView } from '../../../app/shell.ts';
-import { type WardenConfig, type WardenConfigPatch, type WardenConfigView } from '../../../app/wire.ts';
+import type { WardenConfig, WardenConfigPatch, WardenConfigView } from '../../../app/wire.ts';
 import { type ComponentProps, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 

@@ -3,7 +3,7 @@
  * contract. Where the contract renamed a thing to the words (§1: ferret, message, draft), the old name is still
  * exported here as an alias so the copied bodies read as they did; nothing here is a second definition.
  */
-import { z } from 'zod';
+import type { z } from 'zod';
 import {
   AnswerRequestSchema,
   type CompactAtPatchResult,
@@ -39,8 +39,8 @@ import {
   InterruptRequestSchema,
   type MessageLabel,
   MessageLabelSchema,
-  SendCancelEffectSchema,
-  SendDispositionSchema,
+  type SendCancelEffectSchema,
+  type SendDispositionSchema,
   SendRequestSchema,
   REQUEST_ID_HEADER,
   type SenderKind,

@@ -16,8 +16,8 @@ import {
   NO_SCRIPTED_ORIGINS,
   type SignInGrant,
 } from '../../../../daemon/lib/sign-in-grants/matcher.ts';
-import { type InputRequestField } from '../../../../daemon/lib/vault-inputs.ts';
-import { type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputRequestField } from '../../../../daemon/lib/vault-inputs.ts';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE SHARED MATCHER, one row per check (docs/input-requests.md, "Task plan fills", "Standing rule fills"): each row's

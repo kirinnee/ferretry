@@ -345,7 +345,7 @@ describe('the ferrets cli half', () => {
       },
     };
     const half = cli.build?.({ manifest, client, io: { out: t => out.push(t), err: () => undefined, isTty: false } });
-    const ps = (half?.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>).ps;
+    const ps = ((half?.verbs ?? {}) as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>).ps;
     if (ps === undefined) throw new Error('ps is implemented');
     expect(await ps({ args: [], options: {} })).toBe(0);
     expect(await ps({ args: [], options: {} })).toBe(0);

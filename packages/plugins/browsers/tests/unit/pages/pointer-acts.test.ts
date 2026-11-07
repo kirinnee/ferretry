@@ -23,16 +23,15 @@ class FakePage implements PointerPage {
   failMove = false;
 
   private place(selector: string): PointerLocator {
-    const page = this;
     const log = (line: string): void => {
-      page.calls.push(`${line} @${selector}`);
+      this.calls.push(`${line} @${selector}`);
     };
     const locator: PointerLocator = {
       first: () => locator,
       count: async () => {
         const ref = /^aria-ref=(.+)$/u.exec(selector)?.[1];
-        if (ref === undefined) return selector === 'text:missing' && !page.textOnPage ? 0 : 1;
-        return page.refs.has(ref) ? 1 : 0;
+        if (ref === undefined) return selector === 'text:missing' && !this.textOnPage ? 0 : 1;
+        return this.refs.has(ref) ? 1 : 0;
       },
       click: async () => log('click'),
       fill: async value => log(`fill ${JSON.stringify(value)}`),
@@ -40,7 +39,7 @@ class FakePage implements PointerPage {
       press: async key => log(`press ${key}`),
       getAttribute: async name => {
         if (name === 'data-selector') return selector;
-        return name === 'type' ? (page.types.get(selector) ?? null) : (page.attributes.get(selector)?.[name] ?? null);
+        return name === 'type' ? (this.types.get(selector) ?? null) : (this.attributes.get(selector)?.[name] ?? null);
       },
       innerText: async () => '',
       ariaSnapshot: async () => '',
@@ -64,10 +63,10 @@ class FakePage implements PointerPage {
       setInputFiles: async () => log('setInputFiles'),
       // An identifier check asks the field's document host: answered only for a page given one.
       evaluate: async (pageFunction, arg) =>
-        page.host === undefined
+        this.host === undefined
           ? false
           : (pageFunction as (element: unknown, arg: string) => unknown)(
-              { tagName: 'INPUT', ownerDocument: { location: { host: page.host } } },
+              { tagName: 'INPUT', ownerDocument: { location: { host: this.host } } },
               arg,
             ),
       boundingBox: async () => null,

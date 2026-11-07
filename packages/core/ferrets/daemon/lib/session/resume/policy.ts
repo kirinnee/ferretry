@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { type QueueAuthor } from '../../protocol/session.ts';
+import type { QueueAuthor } from '../../protocol/session.ts';
 import { turnFileInstruction } from '../../protocol/turn-handoff.ts';
 import {
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,

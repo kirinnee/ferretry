@@ -63,7 +63,6 @@ export type McpConversion =
     }
   | { readonly ok: false; readonly reason: string };
 
-// biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to read
 const HOW_TO_FIX =
   'Put the key in the secret store, declare the server as a fleet MCP component with the value ${secret:NAME}, and add that component instead.';
 

@@ -46,6 +46,7 @@ export const useSpendToday = (
       }
     };
     void read();
+    // biome-ignore lint/suspicious/useIterableCallbackReturn: `browserClock.every` is a repeating timer, not `Array.prototype.every`
     const stop = browserClock.every(() => void read(), SPEND_REFRESH_MS);
     return () => {
       cancelled = true;

@@ -1,6 +1,6 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
-import { type BoardFileSchema, type BoardProjectId, type BoardSwitch } from '../../../contract/index.ts';
+import type { BoardFileSchema, BoardProjectId, BoardSwitch } from '../../../contract/index.ts';
 import { BoardSwitchUnavailableError, LaneSetUnavailableError } from '../../lib/lanes/errors.ts';
 import { type LaneSet, LaneSetSchema } from '../../lib/lanes/model.ts';
 import type { BoardSwitchStore, LaneSetMutation, LaneSetStore } from '../../lib/lanes/ports.ts';

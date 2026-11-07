@@ -366,7 +366,6 @@ export function AgendaSwipeDeck({
   const room = useDeckRoom(deck, topKey);
   // A new card on top starts with no drag — the old one's must never carry over — and
   // takes the focus the card it replaced had.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the card on top changing is the only trigger
   useEffect(() => {
     gesture.current = null;
     setDrag(null);

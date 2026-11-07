@@ -195,6 +195,7 @@ export class DaemonUsageStore {
       existing.count += 1;
       existing.daemon = daemon;
     } else {
+      // biome-ignore lint/suspicious/useIterableCallbackReturn: `browserClock.every` is a repeating timer, not `Array.prototype.every`
       const stop = browserClock.every(() => {
         if (this.#isHidden()) return;
         const current = this.#watches.get(id);

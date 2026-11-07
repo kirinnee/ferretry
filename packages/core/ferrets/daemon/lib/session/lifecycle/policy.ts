@@ -1,5 +1,5 @@
 import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '../peers/fleet.ts';
-import { type BoardProjectId } from '../../protocol/board-refs.ts';
+import type { BoardProjectId } from '../../protocol/board-refs.ts';
 import { INTERACTIVE_PLACEHOLDER_NAME, type SessionLaunchInstructions } from '../../protocol/session.ts';
 import {
   assignedTaskDocument as protocolAssignedTaskDocument,

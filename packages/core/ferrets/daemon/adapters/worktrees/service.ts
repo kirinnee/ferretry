@@ -27,8 +27,8 @@ import type {
   WorktreeRemovalBlocker,
   WorktreeRemovalEvidence,
 } from '../../lib/worktrees/types.ts';
-import { GitWorktreeGateway } from './git-gateway.ts';
-import { WorktreeOperationQueue } from './queue.ts';
+import type { GitWorktreeGateway } from './git-gateway.ts';
+import type { WorktreeOperationQueue } from './queue.ts';
 
 const OWNERSHIP_MARKER = 'worktree-owner';
 

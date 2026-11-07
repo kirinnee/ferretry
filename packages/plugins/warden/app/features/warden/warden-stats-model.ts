@@ -15,13 +15,7 @@
  *      Jev's decisions and its actions.
  */
 
-import {
-  type WardenActor,
-  type WardenActorCounts,
-  type WardenDayStats,
-  type WardenOutcome,
-  type WardenStatusView,
-} from '../../wire.ts';
+import type { WardenActor, WardenActorCounts, WardenDayStats, WardenOutcome, WardenStatusView } from '../../wire.ts';
 
 import type { MetricChartPoint, MetricChartSeries } from '../../shell.ts';
 import { jevCost } from './warden-jev-line.ts';
