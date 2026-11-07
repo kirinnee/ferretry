@@ -32,6 +32,7 @@ async function pairingInput(daemonId: string, address = DIRECT): Promise<PairDir
       deviceName: 'phone',
       publicKey: toBase64Url(minted.publicKeySpki),
       key: shellCrypto.deviceKeyHandle(minted.privateKey),
+      save: () => Promise.resolve(),
     },
   };
 }

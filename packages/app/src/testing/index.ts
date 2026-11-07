@@ -5,6 +5,10 @@ export {
   type FakeCarrier,
   type FakeDeviceClaims,
   type FakeDeviceClaimsOptions,
+  connector,
+  pairOnLeg,
+  pairOverCarriers,
+  WebCryptoRelayCrypto,
 } from '../connect/testing.ts';
 export { interact, type Mounted, mount, must, pressKey } from './dom.ts';
 export { render, run, runAsync, runUntil } from './react.ts';
