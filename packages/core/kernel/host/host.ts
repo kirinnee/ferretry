@@ -17,6 +17,7 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
+import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
 import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
   Clock,
@@ -137,6 +138,8 @@ export type ConfigJudge = (input: {
 }) => boolean;
 
 export interface HostAdapters {
+  /** Production claims the home before state is read, holds it through serving, releases it on stop. */
+  readonly lockHome?: () => Promise<HomeLockLease>;
   readonly clock: Clock;
   readonly logSink: LogSink;
   readonly fs: HostFs;
@@ -287,14 +290,46 @@ function deadlineFrom(clock: Clock): Deadline {
 export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { adapters, home } = options;
   const trace: string[] = [];
-  const log = scopedLog(adapters.logSink, 'kernel');
   const clock = adapters.clock;
-  const deadline = deadlineFrom(clock);
 
   // 2. Home and fence, identity (before anything is read from the home).
   trace.push('home');
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
   if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  let lease: HomeLockLease | undefined;
+  try {
+    lease = await adapters.lockHome?.();
+  } catch (error) {
+    if (error instanceof StateHomeLockedError) return { kind: 'refused', sentence: error.message, trace };
+    throw error;
+  }
+  try {
+    const outcome = await bootClaimedHome(options, trace);
+    if (outcome.kind === 'refused') await lease?.release();
+    else {
+      const stop = outcome.host.stop;
+      let stopped: Promise<void> | undefined;
+      outcome.host.stop = () =>
+        (stopped ??= (async () => {
+          try {
+            await stop();
+          } finally {
+            await lease?.release();
+          }
+        })());
+    }
+    return outcome;
+  } catch (error) {
+    await lease?.release();
+    throw error;
+  }
+}
+
+async function bootClaimedHome(options: HostOptions, trace: string[]): Promise<BootOutcome> {
+  const { adapters, home } = options;
+  const clock = adapters.clock;
+  const log = scopedLog(adapters.logSink, 'kernel');
+  const deadline = deadlineFrom(clock);
   trace.push('identity');
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };

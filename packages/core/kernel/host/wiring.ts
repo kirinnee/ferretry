@@ -14,6 +14,7 @@ import { type LogSink, scopedLog } from './log.ts';
 import {
   createNodeHostFs,
   createStatePort,
+  acquireHomeLock,
   type HostFs as StateFs,
   moveStateAside,
   openPluginState,
@@ -114,6 +115,7 @@ export function realAdapters(
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
     config: configService(home, stateFs, clock, log.child('config'), options.binary),
+    lockHome: () => acquireHomeLock({ home, binary: options.binary }),
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
