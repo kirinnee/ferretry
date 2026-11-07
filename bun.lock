@@ -130,6 +130,8 @@
       "name": "@ferretry/plugin-agenda",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -139,7 +141,10 @@
       "name": "@ferretry/plugin-board",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
@@ -202,6 +207,8 @@
       "name": "@ferretry/plugin-conversation",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -364,7 +371,10 @@
       "name": "@ferretry/plugin-warden",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
