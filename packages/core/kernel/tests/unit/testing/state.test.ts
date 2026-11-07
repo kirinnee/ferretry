@@ -77,3 +77,29 @@ describe('the test host state port: records() and tail() as the real one', () =>
     expect(tail.records.length).toBeLessThan(3);
   });
 });
+
+describe('the test host state port: lines() skips, update() declines, version()', () => {
+  const Log = defineState({
+    name: 'log',
+    path: 'log.jsonl',
+    store: 'jsonl',
+    format: 1,
+    schema: z.strictObject({ n: z.number() }),
+  });
+  test('lines skips a bad line; update with the same value writes nothing; version moves with the bytes', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log, Doc]);
+    folder.plant(Log, '{"format":1,"n":1}\n{ bad\n{"format":1,"n":2}\n');
+    const seen: unknown[] = [];
+    for await (const record of port.lines(Log)) seen.push(record);
+    expect(seen).toEqual([{ n: 1 }, { n: 2 }]);
+    await port.write(Doc, { n: 1 });
+    const raw = folder.raw(Doc);
+    const v1 = await port.version(Doc);
+    expect(await port.update(Doc, async current => current as { n: number })).toEqual({ ok: true, value: { n: 1 } });
+    expect(folder.raw(Doc)).toBe(raw);
+    expect(await port.version(Doc)).toEqual(v1);
+    await port.update(Doc, current => ({ n: (current?.n ?? 0) + 1 }));
+    expect((await port.version(Doc))?.etag).not.toBe(v1?.etag);
+  });
+});

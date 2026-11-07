@@ -94,6 +94,12 @@ export interface SqliteHandle {
   close(): void;
 }
 
+/** {@link StatePort.version}: `etag` is opaque; equal etags mean the same file, unchanged. */
+export interface StateVersion {
+  readonly size: number;
+  readonly etag: string;
+}
+
 /** A JSONL file read line by line: every record that checked, and how many lines did not (never their text). */
 export interface JsonlRecords<Shape> {
   readonly records: readonly Shape[];
@@ -111,14 +117,27 @@ export const MAX_STATE_TAIL_BYTES = 64 * 1024 * 1024;
 export interface StatePort {
   read<Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>>;
   write<Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void>;
-  /** Read-modify-write on one serialization chain per file. */
+  /**
+   * Read-modify-write on one serialization chain per file. `fn` may be async (it runs inside the chain). Returning
+   * `current` itself (the same reference) DECLINES: nothing is written and `current` is answered (today's session
+   * storage: a CAS loser or an already-applied transform has no write).
+   */
   update<Shape>(
     file: StateFileDef<string, Shape>,
-    fn: (current: Shape | undefined) => Shape,
+    fn: (current: Shape | undefined) => Shape | Promise<Shape>,
     name?: string,
   ): Promise<Result<Shape, StateDamage>>;
   append<Shape>(file: StateFileDef<string, Shape>, entry: Shape, name?: string): Promise<void>;
+  /**
+   * Each record in order. A line that does not parse or check is SKIPPED and reading goes on (today's journal read);
+   * `records()` says how many were skipped. Only an io fault or a missing `required` file is damage.
+   */
   lines<Shape>(file: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape>;
+  /**
+   * A cheap identity of one file from a single `lstat` (no read): its size and an etag that moves on any rewrite or
+   * append, so a reader can tell "unchanged since I last looked" without re-reading a journal. `undefined` when absent.
+   */
+  version(file: StateFileDef, name?: string): Promise<StateVersion | undefined>;
   /**
    * Every line checked on its own (a log, a journal): a bad line is skipped and counted rather than damaging the file,
    * so one torn or hand-edited line never hides the rest. A missing file is no records.

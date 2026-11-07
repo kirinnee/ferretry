@@ -244,22 +244,56 @@ describe('StatePort: jsonl files', () => {
     expect(again).toEqual([{ count: 1 }, { count: 2 }]);
   });
 
-  test('a bad line in the middle, a lower format line or a schema failure damages the whole file', async () => {
+  test('AA a bad line in the middle, a lower format line or a schema failure is skipped and reading goes on (today)', async () => {
     const cases = [
       '{"format":1,"count":1}\nnot json\n{"format":1,"count":2}\n',
-      '{"format":1,"count":1}\n{"format":0,"count":2}\n',
-      '{"format":1,"count":1}\n{"format":1,"count":"x"}\n',
+      '{"format":1,"count":1}\n{"format":0,"count":2}\n{"format":1,"count":2}\n',
+      '{"format":1,"count":1}\n{"format":1,"count":"x"}\n{"format":1,"count":2}\n',
     ];
     for (const text of cases) {
       const { port, fs, path } = memoryStore();
       fs.seed(path('log.jsonl'), text);
-      await expect(
-        (async () => {
-          for await (const _ of port.lines(logFile)) void _;
-        })(),
-      ).rejects.toBeInstanceOf(StoreDamagedError);
-      expect(port.damaged()).toHaveLength(1);
+      const seen: unknown[] = [];
+      for await (const record of port.lines(logFile)) seen.push(record);
+      expect(seen).toEqual([{ count: 1 }, { count: 2 }]);
+      expect((await port.records(logFile)).unreadable).toBe(1);
+      expect(port.damaged()).toEqual([]);
     }
+  });
+
+  test('AA version: one lstat, an etag that moves on append and stays put otherwise', async () => {
+    const { port } = memoryStore();
+    expect(await port.version(logFile)).toBeUndefined();
+    await port.append(logFile, { count: 1 });
+    const first = await port.version(logFile);
+    expect(first?.size).toBeGreaterThan(0);
+    expect(await port.version(logFile)).toEqual(first);
+    await port.append(logFile, { count: 2 });
+    const second = await port.version(logFile);
+    expect(second?.etag).not.toBe(first?.etag);
+    expect(second?.size).toBeGreaterThan(first?.size ?? 0);
+  });
+
+  test('AA update takes an async transform, and answering the current value itself writes nothing', async () => {
+    const { port, fs, path } = memoryStore();
+    await port.write(counterFile, { count: 1 });
+    const before = fs.snapshot().get(path('counter.json'));
+    fs.seed(path('counter.json'), `${before}`);
+    let writes = 0;
+    const original = fs.writeAtomic.bind(fs);
+    fs.writeAtomic = async (...args: Parameters<typeof fs.writeAtomic>) => {
+      writes += 1;
+      await original(...args);
+    };
+    const declined = await port.update(counterFile, async current => {
+      await Promise.resolve();
+      return current as { count: number };
+    });
+    expect(declined).toEqual({ ok: true, value: { count: 1 } });
+    expect(writes).toBe(0);
+    const bumped = await port.update(counterFile, async current => ({ count: (current?.count ?? 0) + 1 }));
+    expect(bumped).toEqual({ ok: true, value: { count: 2 } });
+    expect(writes).toBe(1);
   });
 
   test('an oversized record is refused at append, so a read never meets one', async () => {

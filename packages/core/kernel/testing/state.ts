@@ -186,7 +186,9 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       return await serial(pathOf(file, name), async () => {
         const current = await read(file, name);
         if (!current.ok) return current;
-        const next = fn(current.value);
+        const next = await fn(current.value);
+        // declined, as the real port: the very value given back means no write
+        if (current.value !== undefined && next === current.value) return ok(next) as Result<typeof next, StateDamage>;
         await write(file, next, name);
         return ok(next) as Result<typeof next, StateDamage>;
       });
@@ -200,13 +202,18 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     },
     async *lines(file, name) {
       guard(file);
-      const text = folder.files.get(pathOf(file, name)) ?? '';
-      for (const line of text.split('\n')) {
-        if (line === '') continue;
-        const parsed = parseDocument(file, line);
-        if (!parsed.ok) throw new Error(parsed.error.sentence);
-        if (parsed.value !== undefined) yield parsed.value;
-      }
+      if (file.store !== 'jsonl') throw new TypeError(`state ${file.name}: only a jsonl file is read with lines()`);
+      // as the real port: a bad line is skipped, the rest still read
+      for (const record of lenientLines(file, folder.files.get(pathOf(file, name)) ?? '').records) yield record;
+    },
+    async version(file, name) {
+      guard(file);
+      const path = pathOf(file, name);
+      const stored = isBytes(file) ? folder.bytes.get(path) : folder.files.get(path);
+      if (stored === undefined) return undefined;
+      const size = typeof stored === 'string' ? new TextEncoder().encode(stored).byteLength : stored.byteLength;
+      // content-addressed: equal etags mean the same bytes (the real port's moves on any rewrite or append)
+      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}` };
     },
     async records(file, name) {
       guard(file);

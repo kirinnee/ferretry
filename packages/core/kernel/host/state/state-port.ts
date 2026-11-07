@@ -8,6 +8,7 @@ import {
   type StateFileDef,
   type StatePort,
   type StateRead,
+  type StateVersion,
 } from '../../contract/index.ts';
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
@@ -197,7 +198,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
 
     async update<Shape>(
       def: StateFileDef<string, Shape>,
-      fn: (current: Shape | undefined) => Shape,
+      fn: (current: Shape | undefined) => Shape | Promise<Shape>,
       name?: string,
     ): Promise<Result<Shape, StateDamage>> {
       const at = locate(def, name);
@@ -210,7 +211,9 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
           return err(current.error);
         }
         healthy(at.label);
-        const next = fn(current.value);
+        const next = await fn(current.value);
+        // Declined: the transform answered the very value it was given, so nothing is written.
+        if (current.value !== undefined && next === current.value) return ok(next);
         await fs.writeAtomic(at.path, `${encodeDocument(def, next, true)}\n`, fileMode(def));
         return ok(next);
       });
@@ -228,17 +231,15 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     },
 
     async *lines<Shape>(def: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape> {
+      // Today's journal read: a bad line is skipped and the rest still read (records() counts what was skipped).
+      for (const record of (await lenient(def, name, undefined)).records) yield record;
+    },
+
+    async version(def: StateFileDef, name?: string): Promise<StateVersion | undefined> {
       const at = locate(def, name);
-      if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read with lines()`);
-      const records = await readJsonlRecords(fs, def, at.path, at.label);
-      if (!records.ok) {
-        note(def, records.error);
-        // The whole file is checked before the first line is handed out: half a history is not a history.
-        if (def.onDamaged === 'subsystem') throw new StoreDamagedError(records.error);
-        return;
-      }
-      healthy(at.label);
-      for (const record of records.value) yield record;
+      const info = await fs.info(at.path);
+      if (info === undefined) return undefined;
+      return { size: info.size, etag: `${info.inode}:${info.size}:${info.modifiedAtMs}` };
     },
 
     async records<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>> {
