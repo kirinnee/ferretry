@@ -9,11 +9,11 @@ import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { agendaConversationPath } from '../lib/agenda-inbox.ts';
 import { useAgendaInbox } from '../hooks/use-agenda-inbox.ts';
-import { useAgendaItemOpened, useAppStore, useLayoutMode, useRouter } from '../shell.ts';
+import { daemonAgendaPath, useAgendaItemOpened, useAppStore, useLayoutMode, useRouter } from '../shell.ts';
 
 export function createAgendaAskScreen(client: PluginClient) {
   return function AgendaAskScreen({ params }: ScreenProps) {
-    const { navigate } = useRouter();
+    const { navigate, route } = useRouter();
     const store = useAppStore();
     const inbox = useAgendaInbox();
     const phone = useLayoutMode() === 'drawer';
@@ -35,7 +35,9 @@ export function createAgendaAskScreen(client: PluginClient) {
           }
           onOpenSettled={(opened: boolean) =>
             navigate(
-              opened || connection === undefined ? '/agenda' : agendaConversationPath(connection.daemonId, ferret, ask),
+              opened || connection === undefined
+                ? daemonAgendaPath(route.daemon)
+                : agendaConversationPath(connection.daemonId, ferret, ask),
               { replace: true },
             )
           }

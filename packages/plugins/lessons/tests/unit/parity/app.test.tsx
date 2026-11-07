@@ -9,7 +9,7 @@ import app from '../../../app/index.ts';
 import { LessonsPage } from '../../../app/src/lessons-page.tsx';
 import { LessonsSettingsSurface } from '../../../app/src/lessons-settings.tsx';
 import { LESSON_TABS } from '../../../app/src/model.ts';
-import { LESSONS_PATH } from '../../../app/src/surfaces.tsx';
+import { LESSONS_PATH, lessonsHref } from '../../../app/src/surfaces.tsx';
 import { LESSONS_MINER_GAP, LESSONS_MINER_GAP_CODE } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import { byText, click, textOf, waitForText } from '../../support/app/dom-helpers.ts';
@@ -33,10 +33,11 @@ describe('the Lessons app half', () => {
     expect(Object.keys(half.settings)).toEqual(['lessons']);
   });
 
-  it('S-0396 S-0372 S-0131 screen learning at /d/:daemonId/learning is the lessons screen at /lessons', async () => {
+  it('S-0396 S-0372 S-0131 screen learning at /d/:daemonId/learning is the lessons screen at lessons, per daemon', async () => {
     const [screen] = manifest.ui.screens;
-    expect(screen).toMatchObject({ id: 'lessons', path: '/lessons' });
-    expect(LESSONS_PATH).toBe('/lessons');
+    expect(screen).toMatchObject({ id: 'lessons', path: 'lessons' });
+    expect(LESSONS_PATH).toBe('lessons');
+    expect(lessonsHref({ daemon: 'studio' })).toBe('/d/studio/lessons');
     const daemon = fakeLessonsDaemon([lesson({ ruleText: 'Run the gate before pushing.' })]);
     const Screen = must(halfOver(daemon).screens.lessons, 'screen');
     const view = await mount(<Screen />);
