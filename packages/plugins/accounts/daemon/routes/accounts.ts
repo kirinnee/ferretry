@@ -62,12 +62,10 @@ import {
   type TwoFactorStageId,
   TwoFactorStageIdSchema,
 } from '../../contract/routes/index.ts';
-import { idAt, paramOf, factorAudit, type FactorAudit } from './factor-audit.ts';
 import { AccountDefaultsNotWritten } from '../adapters/kernel-defaults-writer.ts';
 import { AccountDefaultNotUsable, type AccountDefaults, AccountDefaultsFileBroken } from '../lib/account-defaults.ts';
 import { type AccountDirectory, type AccountListing, type AccountVault, LoginEntryError } from '../lib/accounts.ts';
 import { parseBody } from '../lib/body.ts';
-import type { AuditSink } from '../lib/local-ports.ts';
 import { SecretStoreError } from '../lib/seal.ts';
 import type { SignInChoicePort } from '../lib/sign-in-context.ts';
 import {
@@ -105,8 +103,6 @@ export interface AccountRoutesDeps {
   readonly choice?: SignInChoicePort;
   /** Staged 2FA seeds, waiting for the passkey bound to each. It never answers a seed. */
   readonly seeds?: TwoFactorSeedStages;
-  /** Where the 2FA key routes keep their `secrets.changed` records (S102); Gate stamps them. */
-  readonly audit?: AuditSink;
 }
 
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: CAPABILITIES.secrets, axis: 'configure' };
@@ -346,16 +342,14 @@ const seedProofDemand = (): ApiResponse =>
 
 /** An owner-only handler: a ferret is refused before the body is read, and a domain refusal is its HTTP answer. */
 const owned =
-  (act: string, run: (call: Call) => Promise<unknown>, status = 200, audit?: FactorAudit): Handler =>
+  (act: string, run: (call: Call) => Promise<unknown>, status = 200): Handler =>
   async call => {
     try {
       ownerOnly(call, act);
       const answer = await run(call);
-      await audit?.answered(call, answer);
       return jsonResponse(answer, status);
     } catch (error) {
       const mapped = ownedFailure(error);
-      await audit?.refused(call, mapped);
       throw mapped;
     }
   };
@@ -487,7 +481,7 @@ export function accountRoutes(deps: AccountRoutesDeps) {
       const { from } = await parseBody(call.request, AccountPairRequestSchema);
       return await accounts.apart(id, from);
     }),
-    ...factorRoutes(accounts, seeds, deps.audit),
+    ...factorRoutes(accounts, seeds),
   } satisfies Readonly<Record<string, Handler>>;
 }
 
@@ -497,25 +491,8 @@ export function accountRoutes(deps: AccountRoutesDeps) {
  * asked of every caller, the machine included: the commit never reads `governance`, an unlock or `stepUpOnActions`
  * (S88, S90, S91).
  */
-function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | undefined, sink: AuditSink | undefined) {
+function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | undefined) {
   const noSeeds = unavailable('cannot save 2FA seeds yet');
-  const stageId = (call: Call, answer: unknown) => ({ stage: idAt(answer, 'stage') ?? paramOf(call, 'stage') });
-  const audit = {
-    staged: factorAudit(sink, { action: 'factor-seed-staged', ids: stageId }),
-    saved: factorAudit(sink, {
-      action: 'factor-added',
-      proof: 'passkey',
-      ids: (_call, answer) => ({ factor: idAt(answer, 'factor', 'id') }),
-    }),
-    confirming: factorAudit(sink, { action: 'factor-seed-confirm-in-app', ids: stageId }),
-    dropped: factorAudit(sink, { action: 'factor-seed-dropped', ids: stageId }),
-    added: factorAudit(sink, { action: 'factor-added', ids: (_call, answer) => ({ factor: idAt(answer, 'id') }) }),
-    relabelled: factorAudit(sink, {
-      action: 'factor-relabelled',
-      ids: (_call, answer) => ({ factor: idAt(answer, 'id') }),
-    }),
-    removed: factorAudit(sink, { action: 'factor-removed', ids: call => ({ factor: paramOf(call, 'factor') }) }),
-  };
   return {
     'POST /v1/accounts/:id/factors/seed':
       seeds === undefined
@@ -531,7 +508,6 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
                 ),
               ),
             201,
-            audit.staged,
           ),
     // The card names no account: the app reads its stage, and the account it is for, by the stage id alone (S101).
     'GET /v1/accounts/seed-stages/:stage':
@@ -566,15 +542,12 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
                 seedSaver(call),
               );
               const answer = TwoFactorSeedSavedSchema.parse(saved);
-              await audit.saved.answered(call, answer);
               return jsonResponse(answer);
             } catch (error) {
               if (error instanceof TwoFactorSeedProofMissing) {
-                await audit.saved.refused(call, new ApiError(403, 'a passkey is needed', STEP_UP_REQUIRED_CODE));
                 return seedProofDemand();
               }
               const mapped = ownedFailure(error);
-              await audit.saved.refused(call, mapped);
               throw mapped;
             }
           }) satisfies Handler),
@@ -597,7 +570,6 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
               return TwoFactorSeedConfirmingSchema.parse({ stage, session: sessionId, agendaItemId });
             },
             201,
-            audit.confirming,
           ),
     'DELETE /v1/accounts/:id/factors/seed/:stage':
       seeds === undefined
@@ -610,14 +582,12 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
               return { stage, dropped: true };
             },
             200,
-            audit.dropped,
           ),
     'POST /v1/accounts/:id/factors': owned(
       'add a 2FA key',
       async call =>
         await accounts.addFactor(pathAccountId(call), await parseBody(call.request, AddTwoFactorKeyRequestSchema)),
       201,
-      audit.added,
     ),
     'PATCH /v1/accounts/:id/factors/:factor': owned(
       'change a 2FA key',
@@ -627,7 +597,6 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
         return await accounts.patchFactor(id, factor, await parseBody(call.request, PatchTwoFactorKeyRequestSchema));
       },
       200,
-      audit.relabelled,
     ),
     // NEVER a passkey: removing a key only narrows what this machine can do. Its seed is swept with it (S99).
     'DELETE /v1/accounts/:id/factors/:factor': owned(
@@ -640,7 +609,6 @@ function factorRoutes(accounts: AccountDirectory, seeds: TwoFactorSeedStages | u
         return RemovedTwoFactorKeySchema.parse({ account: id, factor, removed: true });
       },
       200,
-      audit.removed,
     ),
   } satisfies Readonly<Record<string, Handler>>;
 }
