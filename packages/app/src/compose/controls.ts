@@ -1,0 +1,606 @@
+/**
+ * SOLE OWNER of the `fy:app:controls` browser-storage key (§9.4): this device's shell controls.
+ *
+ * Carved out of kteam `ui/src/lib/store.tsx:80-233,785-805`, where the persisted
+ * UI controls lived inside the fleet store. They have no transport, no socket
+ * and no timers, so they belong in their own module: the fleet store can then be
+ * ported without carrying browser persistence along with it.
+ *
+ * Kept from kteam, deliberately:
+ *   - FIELD-BY-FIELD tolerant parsing. A hand-edited or older payload degrades
+ *     to the default for that field alone; one bad field must never discard the
+ *     reader's other controls.
+ *   - `density` and `dashboardView` absent means `null`, not a written default,
+ *     so the first-load pointer policy stays free to choose compact on a phone
+ *     and full on a desktop.
+ *   - `chatWidth` absent means `'readable'` (Compact, 720px), the session redesign's
+ *     default; a stored choice is kept. Every later field follows the same rule:
+ *     absent reads as the shipped default, so none of them needs a version bump.
+ *   - An empty `projectScope` is NO scope, not a folder named nothing.
+ *   - A patch that changes nothing writes nothing and notifies nobody.
+ *
+ * WHAT CHANGED — survey row #48. kteam wrote all nine controls into one
+ * un-namespaced device record, including `projectScope`, which holds a
+ * DAEMON-DERIVED filesystem path (a normalised project path, or a raw cwd for a
+ * fallback group). Two paired daemons have disjoint path sets, so a scope
+ * persisted against daemon A silently filters daemon B's fleet to nothing on the
+ * next reload. The split here is by field LIFETIME rather than daemon-keying all
+ * nine: the eight device preferences are properties of the reader's screen and
+ * are right to share, while `projectScope` is stored, read and cleared per
+ * `DaemonId` and has no daemon-free lookup. `query` stays device-global on
+ * purpose — it is a transient search term, not daemon identity.
+ *
+ * Remembered scopes are bounded so an unpaired daemon cannot accumulate forever.
+ * Recency is a stored counter rather than a wall clock, so eviction order is
+ * reproducible without injecting a clock; it advances when a daemon's scope
+ * CHANGES, and re-selecting the identical scope is a no-op by design.
+ *
+ * The stored record carries `format: 1` (§9.4, clean slate): a payload of any other format, or none, is a clean
+ * reset, so no older shape is ever read.
+ *
+ * The ephemeral Settings-sheet state that sat beside these controls in kteam
+ * (`settingsOpen`, `settingsTarget`) is NOT here and must never be persisted:
+ * opening Settings is current navigation, not a preference.
+ */
+
+import { RECORD_FORMAT } from '../storage/records.ts';
+import { localKey } from '../storage/names.ts';
+import type { ComposerEnterKeyPreference } from './composer-keybinding.ts';
+
+/** A paired daemon's durable id. */
+type DaemonId = string;
+/** How a ferret runs: on its own, or with the owner at it. */
+type InteractionMode = 'auto' | 'interactive';
+
+/**
+ * WHICH KEYS OPEN A REFERENCE MENU — Settings › Behaviour › "Open suggestions with".
+ *
+ *   ladder   @ files, @@ agents, @@@ agenda, @@@@ tasks. Typing `:`, `!` or `&` in prose never pops a menu.
+ *   symbols  @ files, then the direct sigils `:` agents, `!` agenda and `&` tasks. No `@@` tiers.
+ *   both     either way works.
+ *
+ * `/` and `%` open in every mode. The default is the ladder because a single repeated key
+ * teaches itself from the legend, while the symbols are ordinary punctuation in prose.
+ */
+export type SuggestionKeys = 'ladder' | 'symbols' | 'both';
+
+export const SUGGESTION_KEYS: readonly SuggestionKeys[] = ['ladder', 'symbols', 'both'];
+
+export const DEFAULT_SUGGESTION_KEYS: SuggestionKeys = 'ladder';
+
+/** Settings › Appearance › Motion. `system` follows prefers-reduced-motion; `reduced` always reduces. */
+export type MotionPreference = 'system' | 'reduced';
+
+/**
+ * WHERE AN ORDINARY LINK OPENS — Settings › Appearance › "Open links in".
+ *
+ *   browser  outside Ferretry: a new tab, or the real Safari app from the installed app on iOS (the default);
+ *   panel    Ferretry's in-app preview, beside the conversation or as a sheet on a phone;
+ *   computer this computer's own default browser (so a router such as Finicky picks the browser and profile),
+ *            handed over by the daemon on this computer. Offered only while one is connected directly on
+ *            loopback; with none, a link opens as `browser` does.
+ *
+ * A modified click (Cmd/Ctrl/Shift, a middle click) and a long press keep the browser's own new-tab
+ * behaviour whichever is chosen (`features/browser/link-behaviour-model.ts`).
+ */
+export type OpenLinksIn = 'browser' | 'panel' | 'computer';
+
+export const OPEN_LINKS_IN: readonly OpenLinksIn[] = ['browser', 'panel', 'computer'];
+
+/** The sole browser-storage key for persisted UI controls. */
+export const CONTROLS_KEY = localKey('app', 'controls');
+/** The stored record's format (§9.4). */
+export const CONTROLS_FORMAT = RECORD_FORMAT;
+/** Remembered per-daemon scopes. Far above the daemons one reader pairs. */
+export const MAX_DAEMON_SCOPES = 20;
+/** Retained on a quota-denied rewrite, before giving up entirely. */
+export const RETRY_DAEMON_SCOPES = 5;
+
+export type ModeFilter = 'all' | InteractionMode;
+export type DashboardView = 'cards' | 'table';
+export type Density = 'full' | 'compact' | 'minimal';
+/** The persisted form of the shell's conversation-width choice. */
+/**
+ * WHICH SESSIONS THE LIST SHOWS — Settings › Behaviour › "Sessions list".
+ *
+ *   all      every paired machine's sessions, with one Needs you group across them (the default);
+ *   current  only the machine on screen, as the list always was.
+ *
+ * A property of this device's screen, like the rest: another browser keeps its own answer.
+ */
+export type SessionsListScope = 'all' | 'current';
+
+export const SESSIONS_LIST_SCOPES: readonly SessionsListScope[] = ['all', 'current'];
+
+export type ChatWidthPreference = 'full' | 'balanced' | 'readable';
+
+/**
+ * Controls that belong to the reader's device and are shared by every paired
+ * daemon. Switching daemon must not change any of them.
+ */
+export interface DeviceControls {
+  /** Instant client-side filter over the session list. */
+  readonly query: string;
+  readonly mode: ModeFilter;
+  /** Remote-control sessions only — a real filter, not a search term. */
+  readonly rcOnly: boolean;
+  readonly includeFinished: boolean;
+  /** null = follow the viewport (cards when narrow). */
+  readonly dashboardView: DashboardView | null;
+  /** null = use the first-load device default without persisting it. */
+  readonly density: Density | null;
+  /** Gather the sessions with open Attention into a "Needs you" group at the top. Default on. */
+  readonly groupNeedsYou: boolean;
+  /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
+  readonly chatWidth: ChatWidthPreference;
+  /** Bare Enter on a keyboard (desktop). null = the default, Enter sends. */
+  readonly composerEnterKey: ComposerEnterKeyPreference | null;
+  /** Return on a phone or other touch-first device. null = the default, return starts a new line. */
+  readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
+  /** Reduced motion: follow the operating system, or always reduce it on this device. */
+  readonly motion: MotionPreference;
+  readonly sidebarCollapsed: boolean;
+  /** Every paired machine's sessions in the list, or only the machine on screen's. */
+  readonly sessionsList: SessionsListScope;
+  /** The Sessions bar's kind filter. null = never chosen on this device, so the bar opens on Interactive. */
+  readonly sessionsMode: ModeFilter | null;
+  /**
+   * The daemon ids in the order the reader dragged their machines into on THIS device. A preference
+   * over the pairing order, reconciled against who is paired now (`lib/machine-order.ts`), so it may
+   * name an unpaired machine and omit a new one. Empty = the pairing order.
+   */
+  readonly machineOrder: readonly string[];
+  /**
+   * The one daemon the Warden page is narrowed to on THIS device. null = All paired daemons (the default).
+   * A preference, reconciled against who is paired now, so it may name a daemon that has been unpaired.
+   */
+  readonly wardenDaemon: string | null;
+  /**
+   * Which keys open the composer's reference menu: the `@` ladder, the direct
+   * symbols, or both (`SuggestionKeys`).
+   *
+   * Every suggestion field governs a MENU and nothing else. An authored
+   * reference is still parsed, still proved and still linked with the menu off,
+   * and inserting one from elsewhere (the transcript's Add to chat) is not a
+   * suggestion and never consults these. That asymmetry is the whole contract:
+   * turning a family off removes an offer, never a capability.
+   */
+  readonly suggestionKeys: SuggestionKeys;
+  /** Whether `$` opens the skill menu. `/` is a command surface and is never governed. */
+  readonly skillSuggestions: boolean;
+  /**
+   * Optional Vim-style modal editing in the composer. Off by default, and the
+   * native textarea remains the input owner either way: this changes which keys
+   * mean what, never which element holds the draft, the selection or dictation.
+   */
+  readonly composerVimMode: boolean;
+  /** Where an ordinary tap on an external link opens (`OpenLinksIn`). */
+  readonly openLinksIn: OpenLinksIn;
+  /**
+   * Keep the interactive chats and the most recently opened ones fresh in the background, so switching
+   * to one is instant (`lib/background-fresh.ts`). On by default; per device.
+   */
+  readonly keepChatsFresh: boolean;
+  /** …but not while the browser says the link is cellular. Where it cannot say, this changes nothing. */
+  readonly keepChatsFreshNotOnCellular: boolean;
+}
+
+/** What a screen renders: device preferences plus THIS daemon's project scope. */
+export interface UiControls extends DeviceControls {
+  /**
+   * The focused project group KEY for one daemon — a normalised project path, or
+   * a raw cwd for a fallback group, never a display name. null = whole fleet.
+   */
+  readonly projectScope: string | null;
+}
+
+export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
+  query: '',
+  mode: 'all',
+  rcOnly: false,
+  includeFinished: false,
+  dashboardView: null,
+  density: null,
+  groupNeedsYou: true,
+  chatWidth: 'readable',
+  composerEnterKey: null,
+  composerPhoneEnterKey: null,
+  motion: 'system',
+  sidebarCollapsed: false,
+  sessionsList: 'all',
+  sessionsMode: null,
+  machineOrder: Object.freeze([]),
+  wardenDaemon: null,
+  suggestionKeys: DEFAULT_SUGGESTION_KEYS,
+  skillSuggestions: true,
+  composerVimMode: false,
+  openLinksIn: 'browser',
+  keepChatsFresh: true,
+  keepChatsFreshNotOnCellular: false,
+});
+
+/**
+ * DERIVED from the defaults rather than listed a second time.
+ *
+ * A hand-written literal with `as const satisfies readonly (keyof DeviceControls)[]`
+ * proves soundness — no wrong key — and NOT completeness. A field added to
+ * `DeviceControls` and forgotten here would make `withDeviceControls` drop that
+ * field's patch in silence: the switch flips on screen, nothing persists, and no
+ * type and no gate says so. `DEFAULT_DEVICE_CONTROLS` is a total `DeviceControls`,
+ * so the compiler already refuses a missing member there, and reading its keys
+ * moves the omission from a runtime surprise to an impossibility.
+ */
+const DEVICE_KEYS = Object.keys(DEFAULT_DEVICE_CONTROLS) as readonly (keyof DeviceControls)[];
+
+/** One daemon's remembered scope. `seq` is its recency for LRU eviction. */
+export interface DaemonScopeEntry {
+  readonly projectScope: string;
+  readonly seq: number;
+}
+
+export interface ControlsRecord {
+  readonly format: typeof CONTROLS_FORMAT;
+  readonly device: DeviceControls;
+  /** Keyed by `DaemonId`; a daemon with no scope simply has no entry. */
+  readonly scopes: Readonly<Record<string, DaemonScopeEntry>>;
+}
+
+/**
+ * Scope maps have a NULL PROTOTYPE, and membership is always an own-key test.
+ * A `DaemonId` is any non-blank string, so it can be `__proto__`, `toString` or
+ * `constructor`: on an ordinary object `scopes.__proto__ = entry` would hit the
+ * prototype setter instead of storing anything, and `'toString' in scopes` would
+ * be true for a daemon that has no scope — breaking persistence and the no-op
+ * identity contract. A null-prototype map has no inherited keys to collide with.
+ */
+const emptyScopes = (): Record<string, DaemonScopeEntry> => Object.create(null) as Record<string, DaemonScopeEntry>;
+
+const cloneScopes = (scopes: Readonly<Record<string, DaemonScopeEntry>>): Record<string, DaemonScopeEntry> => {
+  const next = emptyScopes();
+  for (const [key, entry] of Object.entries(scopes)) next[key] = entry;
+  return next;
+};
+
+/** One daemon's own scope, never a value inherited from a prototype. */
+const scopeOf = (record: ControlsRecord, daemonId: DaemonId): string | null =>
+  Object.hasOwn(record.scopes, daemonId) ? (record.scopes[daemonId]?.projectScope ?? null) : null;
+
+export const emptyControlsRecord = (): ControlsRecord => ({
+  format: CONTROLS_FORMAT,
+  device: { ...DEFAULT_DEVICE_CONTROLS },
+  scopes: emptyScopes(),
+});
+
+/**
+ * An absent, blank, whitespace-only or non-string scope is no scope at all.
+ * Blank-is-empty follows `daemonId` and `upsertDraft`; the surviving value is
+ * stored unmodified, because a group key is compared against daemon-supplied
+ * paths and must not be silently rewritten.
+ */
+const readProjectScope = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() !== '' ? value : null;
+
+/** A persisted flag, or that field's own default — never another field's. */
+const readFlag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
+
+/** A stored machine order: its non-blank, distinct string ids; anything else is the empty default. */
+const readMachineOrder = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim() !== ''))]
+    : DEFAULT_DEVICE_CONTROLS.machineOrder;
+
+const readDeviceControls = (value: unknown): DeviceControls => {
+  const fields = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  return {
+    query: typeof fields.query === 'string' ? fields.query : DEFAULT_DEVICE_CONTROLS.query,
+    mode:
+      fields.mode === 'all' || fields.mode === 'auto' || fields.mode === 'interactive'
+        ? fields.mode
+        : DEFAULT_DEVICE_CONTROLS.mode,
+    rcOnly: readFlag(fields.rcOnly, DEFAULT_DEVICE_CONTROLS.rcOnly),
+    includeFinished: readFlag(fields.includeFinished, DEFAULT_DEVICE_CONTROLS.includeFinished),
+    dashboardView: fields.dashboardView === 'cards' || fields.dashboardView === 'table' ? fields.dashboardView : null,
+    density:
+      fields.density === 'full' || fields.density === 'compact' || fields.density === 'minimal' ? fields.density : null,
+    groupNeedsYou: readFlag(fields.groupNeedsYou, DEFAULT_DEVICE_CONTROLS.groupNeedsYou),
+    chatWidth:
+      fields.chatWidth === 'full' || fields.chatWidth === 'balanced' || fields.chatWidth === 'readable'
+        ? fields.chatWidth
+        : DEFAULT_DEVICE_CONTROLS.chatWidth,
+    composerEnterKey:
+      fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
+    sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
+    sessionsList: fields.sessionsList === 'current' ? 'current' : DEFAULT_DEVICE_CONTROLS.sessionsList,
+    sessionsMode:
+      fields.sessionsMode === 'all' || fields.sessionsMode === 'auto' || fields.sessionsMode === 'interactive'
+        ? fields.sessionsMode
+        : null,
+    machineOrder: readMachineOrder(fields.machineOrder),
+    wardenDaemon:
+      typeof fields.wardenDaemon === 'string' && fields.wardenDaemon.trim() !== '' ? fields.wardenDaemon : null,
+    suggestionKeys: (SUGGESTION_KEYS as readonly unknown[]).includes(fields.suggestionKeys)
+      ? (fields.suggestionKeys as SuggestionKeys)
+      : DEFAULT_DEVICE_CONTROLS.suggestionKeys,
+    skillSuggestions: readFlag(fields.skillSuggestions, DEFAULT_DEVICE_CONTROLS.skillSuggestions),
+    composerVimMode: readFlag(fields.composerVimMode, DEFAULT_DEVICE_CONTROLS.composerVimMode),
+    composerPhoneEnterKey:
+      fields.composerPhoneEnterKey === 'send' || fields.composerPhoneEnterKey === 'newline'
+        ? fields.composerPhoneEnterKey
+        : null,
+    motion: fields.motion === 'reduced' ? 'reduced' : 'system',
+    openLinksIn:
+      fields.openLinksIn === 'panel' || fields.openLinksIn === 'computer'
+        ? fields.openLinksIn
+        : DEFAULT_DEVICE_CONTROLS.openLinksIn,
+    keepChatsFresh: readFlag(fields.keepChatsFresh, DEFAULT_DEVICE_CONTROLS.keepChatsFresh),
+    keepChatsFreshNotOnCellular: readFlag(
+      fields.keepChatsFreshNotOnCellular,
+      DEFAULT_DEVICE_CONTROLS.keepChatsFreshNotOnCellular,
+    ),
+  };
+};
+
+const readScopes = (value: unknown): Record<string, DaemonScopeEntry> => {
+  const scopes = emptyScopes();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return scopes;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (key.trim() === '' || !entry || typeof entry !== 'object') continue;
+    const candidate = entry as Record<string, unknown>;
+    const projectScope = readProjectScope(candidate.projectScope);
+    if (projectScope === null) continue;
+    if (typeof candidate.seq !== 'number' || !Number.isSafeInteger(candidate.seq) || candidate.seq < 0) continue;
+    scopes[key] = { projectScope, seq: candidate.seq };
+  }
+  return scopes;
+};
+
+/** Drops the least recently changed scopes; returns the input when within bound. */
+export const evictDaemonScopes = (record: ControlsRecord, max = MAX_DAEMON_SCOPES): ControlsRecord => {
+  const keys = Object.keys(record.scopes);
+  if (keys.length <= max) return record;
+  const scopes = emptyScopes();
+  const newest = keys
+    .sort((left, right) => (record.scopes[right]?.seq ?? 0) - (record.scopes[left]?.seq ?? 0))
+    .slice(0, max);
+  for (const key of newest) {
+    const entry = record.scopes[key];
+    if (entry) scopes[key] = entry;
+  }
+  return { ...record, scopes };
+};
+
+/**
+ * Defensive parse: another format, a non-object or unreadable JSON is a
+ * clean reset. Individual fields and individual daemon entries fall back on
+ * their own, and a hand-edited overlong scope list is bounded on the way in.
+ */
+export const parseControlsRecord = (raw: string | null | undefined): ControlsRecord => {
+  if (!raw) return emptyControlsRecord();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return emptyControlsRecord();
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyControlsRecord();
+  const fields = parsed as Record<string, unknown>;
+  if (fields.format !== CONTROLS_FORMAT) return emptyControlsRecord();
+  return evictDaemonScopes({
+    format: CONTROLS_FORMAT,
+    device: readDeviceControls(fields.device),
+    scopes: readScopes(fields.scopes),
+  });
+};
+
+/** The merged view for one daemon. There is no daemon-free overload. */
+export const controlsFor = (record: ControlsRecord, daemonId: DaemonId): UiControls => ({
+  ...record.device,
+  projectScope: scopeOf(record, daemonId),
+});
+
+/** Field-wise equality, used to reuse a merged object that did not change. */
+const sameControls = (left: UiControls, right: UiControls): boolean =>
+  left.projectScope === right.projectScope && DEVICE_KEYS.every(key => left[key] === right[key]);
+
+const scopesForNextSeq = (
+  record: ControlsRecord,
+): { readonly scopes: Record<string, DaemonScopeEntry>; readonly seq: number } => {
+  const scopes = cloneScopes(record.scopes);
+  let highest = -1;
+  for (const entry of Object.values(record.scopes)) highest = Math.max(highest, entry.seq);
+  if (highest < Number.MAX_SAFE_INTEGER) return { scopes, seq: highest + 1 };
+
+  // A valid but exhausted persisted counter must not make the new entry tie
+  // with its predecessor. Rebase the bounded map while preserving its order.
+  const oldestToNewest = Object.keys(scopes).sort(
+    (left, right) => (scopes[left]?.seq ?? 0) - (scopes[right]?.seq ?? 0),
+  );
+  for (const [seq, key] of oldestToNewest.entries()) scopes[key] = { ...scopes[key]!, seq };
+  return { scopes, seq: oldestToNewest.length };
+};
+
+/**
+ * Applies device fields only. An explicitly `undefined` value leaves that field
+ * alone, and unknown keys are ignored; an unchanged patch returns the SAME
+ * record so a caller can detect a no-op by identity.
+ */
+export const withDeviceControls = (record: ControlsRecord, patch: Partial<DeviceControls>): ControlsRecord => {
+  const device = { ...record.device } as Record<string, unknown>;
+  for (const key of DEVICE_KEYS) {
+    const value = patch[key];
+    if (value !== undefined) device[key] = value;
+  }
+  const next = device as unknown as DeviceControls;
+  if (DEVICE_KEYS.every(key => next[key] === record.device[key])) return record;
+  return { ...record, device: next };
+};
+
+/** Forgets one daemon's scope; returns the SAME record when it had none. */
+export const withoutDaemonScope = (record: ControlsRecord, daemonId: DaemonId): ControlsRecord => {
+  if (!Object.hasOwn(record.scopes, daemonId)) return record;
+  const scopes = cloneScopes(record.scopes);
+  delete scopes[daemonId];
+  return { ...record, scopes };
+};
+
+/**
+ * Records one daemon's scope, normalising blank to none. Returns the SAME record
+ * when the scope is already what was asked for.
+ */
+export const withDaemonScope = (
+  record: ControlsRecord,
+  daemonId: DaemonId,
+  projectScope: string | null,
+): ControlsRecord => {
+  const normalized = readProjectScope(projectScope);
+  if (normalized === scopeOf(record, daemonId)) return record;
+  if (normalized === null) return withoutDaemonScope(record, daemonId);
+  const { scopes, seq } = scopesForNextSeq(record);
+  scopes[daemonId] = { projectScope: normalized, seq };
+  return evictDaemonScopes({ ...record, scopes });
+};
+
+export interface ControlsStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** Where `localStorage` is looked up. Injected so a test never has to mutate a global. */
+export interface ControlsStorageSource {
+  readonly localStorage?: unknown;
+}
+
+/**
+ * Resolves the browser store, treating denial as an ordinary condition: reading
+ * `localStorage` itself throws in some privacy modes, and an object that only
+ * looks like a store is not trusted.
+ */
+export const browserControlsStorage = (
+  source: ControlsStorageSource = globalThis as ControlsStorageSource,
+): ControlsStorage | undefined => {
+  try {
+    const candidate = source.localStorage as ControlsStorage | undefined;
+    return candidate && typeof candidate.getItem === 'function' && typeof candidate.setItem === 'function'
+      ? candidate
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The persisted UI controls, shaped for `useSyncExternalStore`: `snapshot()` and
+ * `controls(daemonId)` are identity-stable across a commit that did not change
+ * what they return, so a screen reading one daemon's controls does not re-render
+ * because another daemon's scope changed. See `#commit` for how that holds while
+ * there is only one listener set.
+ */
+export class DaemonControlsStore {
+  readonly #storage: ControlsStorage | undefined;
+  readonly #listeners = new Set<() => void>();
+  readonly #merged = new Map<string, UiControls>();
+  #record: ControlsRecord | null = null;
+
+  constructor(storage: ControlsStorage | undefined = browserControlsStorage()) {
+    this.#storage = storage;
+  }
+
+  /** Identity-stable record; the first read hydrates from storage. */
+  snapshot(): ControlsRecord {
+    this.#record ??= this.#load();
+    return this.#record;
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  /** One daemon's merged controls. A daemon must always be named. */
+  controls(daemonId: DaemonId): UiControls {
+    const cached = this.#merged.get(daemonId);
+    if (cached) return cached;
+    const merged = controlsFor(this.snapshot(), daemonId);
+    this.#merged.set(daemonId, merged);
+    return merged;
+  }
+
+  /**
+   * Applies device fields and this daemon's scope. Omitted or explicitly
+   * `undefined` fields are unchanged; `null` or blank explicitly clears a
+   * scope. A patch that changes nothing writes nothing and notifies nobody.
+   */
+  setControls(daemonId: DaemonId, patch: Partial<UiControls>): UiControls {
+    let next = withDeviceControls(this.snapshot(), patch);
+    if (patch.projectScope !== undefined) next = withDaemonScope(next, daemonId, patch.projectScope);
+    this.#commit(next);
+    return this.controls(daemonId);
+  }
+
+  /**
+   * Applies device preferences with no daemon in context — a settings screen
+   * changing text density has no daemon to name, and must not have to invent one.
+   */
+  setDeviceControls(patch: Partial<DeviceControls>): DeviceControls {
+    this.#commit(withDeviceControls(this.snapshot(), patch));
+    return this.snapshot().device;
+  }
+
+  /** Forgets one unpaired daemon's scope and leaves every other daemon's. */
+  clearDaemon(daemonId: DaemonId): boolean {
+    const changed = this.#commit(withoutDaemonScope(this.snapshot(), daemonId));
+    this.#merged.delete(daemonId);
+    return changed;
+  }
+
+  /**
+   * Every subscriber is notified, because one listener set is simpler than
+   * per-daemon channels and `useSyncExternalStore` already bails out on an
+   * unchanged snapshot. What makes that bail-out possible is identity: a merged
+   * view whose fields did not change is REUSED, so a scope change on one daemon
+   * cannot re-render a screen reading another. A device change legitimately
+   * changes every daemon's view, and every reader does re-render.
+   */
+  #commit(next: ControlsRecord): boolean {
+    if (next === this.snapshot()) return false;
+    this.#record = next;
+    for (const [id, previous] of this.#merged) {
+      const merged = controlsFor(next, id as DaemonId);
+      this.#merged.set(id, sameControls(previous, merged) ? previous : merged);
+    }
+    this.#save(next);
+    for (const listener of this.#listeners) listener();
+    return true;
+  }
+
+  #load(): ControlsRecord {
+    if (!this.#storage) return emptyControlsRecord();
+    try {
+      return parseControlsRecord(this.#storage.getItem(CONTROLS_KEY));
+    } catch {
+      return emptyControlsRecord();
+    }
+  }
+
+  /**
+   * Persistence is best effort: a denied write never blocks a filter from
+   * applying for the rest of the tab. A quota failure retries with only the
+   * most recent scopes, since those are the ones a reader will come back to.
+   */
+  #save(record: ControlsRecord): boolean {
+    if (!this.#storage) return false;
+    try {
+      this.#storage.setItem(CONTROLS_KEY, JSON.stringify(record));
+      return true;
+    } catch {
+      try {
+        this.#storage.setItem(CONTROLS_KEY, JSON.stringify(evictDaemonScopes(record, RETRY_DAEMON_SCOPES)));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+}

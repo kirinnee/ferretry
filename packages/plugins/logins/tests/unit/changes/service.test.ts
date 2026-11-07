@@ -164,6 +164,50 @@ describe('LoginChangeService', () => {
   });
 });
 
+describe('LoginChangeService: login.env', () => {
+  const envFiles = () =>
+    new Map<string, LoginFile>([
+      ['gate', { harness: 'claude-code', store: 'environment', env: { ANTHROPIC_BASE_URL: 'http://localhost:4000' } }],
+    ]);
+
+  it('should stage the variable change, write only the changed keys on apply, and announce an edit', async () => {
+    const { service, writes, events, setFiles } = world();
+    setFiles(envFiles());
+
+    const view = await service.stage({
+      kind: 'login.env',
+      id: 'gate',
+      env: { ANTHROPIC_BASE_URL: 'http://localhost:4001', TZ: 'UTC' },
+    });
+    const outcome = await service.apply(view.id);
+
+    should(view).containDeep({ summary: 'Change the variables of login gate', state: 'pending' });
+    should(outcome).deepEqual({ outcome: 'applied' });
+    should(writes).deepEqual([
+      {
+        id: 'gate',
+        patch: { env: { ANTHROPIC_BASE_URL: 'http://localhost:4001', TZ: 'UTC' }, cloudCredential: undefined },
+      },
+    ]);
+    should(events).deepEqual([{ id: 'gate', change: 'edited' }]);
+  });
+
+  it('should refuse a raw secret at staging, hold nothing, and never put the value in the sentence', async () => {
+    const { service, writes, setFiles } = world();
+    setFiles(envFiles());
+    const rawKey = 'sk-ant-api03-abcdefghijklmnopq';
+
+    const error = (await service
+      .stage({ kind: 'login.env', id: 'gate', env: { ANTHROPIC_BASE_URL: 'http://x', EXTRA: rawKey } })
+      .catch(caught => caught)) as LoginChangeError;
+
+    should(error.code).equal('login_change_refused');
+    should(error.message).match(/looks like a secret/u);
+    should(error.message).not.containEql(rawKey);
+    should(writes).deepEqual([]);
+  });
+});
+
 describe('changeRoutes', () => {
   it('should stage and apply over the routes, a refusal as a 409 with its code and an unknown change as a 404', async () => {
     const { service } = world();

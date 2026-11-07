@@ -217,6 +217,9 @@ export function buildLoginsDaemon() {
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
         models: modelsView,
+        // The routes and this port share ONE service below, so a change staged either way has the same refusals, the
+        // same held review and the same events. `changes` is built after `api` (it reads `api.get`); these call it lazily.
+        changes: { stage: change => changes.stage(change), apply: id => changes.apply(id) },
       };
 
       /**

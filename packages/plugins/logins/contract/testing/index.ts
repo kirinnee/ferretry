@@ -3,8 +3,12 @@
  * the fake pass the same suite.
  */
 import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
-import { err, ok, type Result } from '@ferretry/std';
+import { err, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import {
+  type LoginChange,
+  LoginChangeError,
+  type LoginChangeOutcome,
+  type LoginChangeView,
   type LoginId,
   type LoginList,
   LoginListSchema,
@@ -47,14 +51,60 @@ export interface FakeLogins extends LoginsApi {
   readonly spends: { readonly loginId: string; readonly variable: string; readonly hosts: readonly string[] }[];
   /** What `authorizeFetch` answers next (default `refused`). */
   answerSpend(outcome: AuthorizedOutcome): void;
+  /** Every change staged through `changes.stage`, in order. */
+  readonly staged: readonly LoginChange[];
+  /** Every id applied through `changes.apply`, in order. */
+  readonly applied: readonly string[];
+  /** What the next `apply` answers (default: applied). */
+  setOutcome(outcome: LoginChangeOutcome): void;
+  /** Refuse the next `stage` (or every one, until cleared with `undefined`) the way the real service does. */
+  refuseStage(error: LoginChangeError | undefined): void;
+  refuseApply(error: LoginChangeError | undefined): void;
 }
+
+const FAKE_EXPIRY = instantFromEpochMs(4_070_908_800_000);
 
 export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   let logins = [...initial];
   let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
   const spends: FakeLogins['spends'] = [];
   const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
+  const staged: LoginChange[] = [];
+  const applied: string[] = [];
+  let outcome: LoginChangeOutcome = { outcome: 'applied' };
+  let stageRefusal: LoginChangeError | undefined;
+  let applyRefusal: LoginChangeError | undefined;
   return {
+    staged,
+    applied,
+    setOutcome: next => {
+      outcome = next;
+    },
+    refuseStage: error => {
+      stageRefusal = error;
+    },
+    refuseApply: error => {
+      applyRefusal = error;
+    },
+    changes: {
+      stage: async change => {
+        if (stageRefusal !== undefined) throw stageRefusal;
+        staged.push(change);
+        return {
+          id: `change-${String(staged.length)}`,
+          change,
+          summary: `fake ${change.kind} ${change.id}`,
+          consequences: [],
+          expiresAt: FAKE_EXPIRY,
+          state: 'pending',
+        } satisfies LoginChangeView;
+      },
+      apply: async id => {
+        if (applyRefusal !== undefined) throw applyRefusal;
+        applied.push(id);
+        return outcome;
+      },
+    },
     list: async () => list(),
     get: async id => logins.find(login => login.id === id),
     quota: async id => logins.find(login => login.id === id)?.usage,
