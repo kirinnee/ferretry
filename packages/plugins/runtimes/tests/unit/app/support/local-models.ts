@@ -1,5 +1,5 @@
 /**
- * `LocalModels` as the daemon answers `POST /v1/logins/models/local/refresh`, parsed through the real schema so
+ * `LocalModels` as the daemon answers `POST /v1/models/local/refresh`, parsed through the real schema so
  * a wire change fails here first. `localModelsFixture('found')` is a machine with two models pulled.
  */
 
