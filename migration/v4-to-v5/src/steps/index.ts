@@ -13,6 +13,7 @@ import { accessStep } from './access.ts';
 import { accountsStep } from './accounts.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
+import { catalogsStep } from './catalogs.ts';
 import { conversationStep } from './conversation.ts';
 import { daemonSettingsStep } from './daemon-settings.ts';
 import { ferretsStep } from './ferrets.ts';
@@ -74,19 +75,7 @@ export const STEPS: readonly Step[] = [
   lessonsStep,
   usageStep,
   wardenStep,
-  pending(
-    {
-      id: 'catalogs',
-      title: 'Catalogs and shares (published catalogs, links, members, installs)',
-      owner: ['plugin-catalogs', 'plugin-skills'],
-      reads: ['state/catalogs/**', 'state/catalog-installs.json', 'state/local-skill-installs.json'],
-      sealed: ['state/catalogs/link-keys.json'],
-      notCarried: [
-        { what: 'catalogs.v1.json, catalogs.v2.json, members.before-unique-names.json', why: 'v4 upgrade backups' },
-      ],
-    },
-    'the Catalogs and Skills state schemas',
-  ),
+  catalogsStep,
   settingsStep,
   daemonSettingsStep,
   // After Settings and Daemon settings: config/pack.yaml, models-guide.yaml and routing.json are this step's alone.
