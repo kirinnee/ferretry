@@ -169,16 +169,16 @@ describe('the composed Vault input half', () => {
     const { host, asks, gate, api, id, request, target, deliver } = await setup();
     const askId = AskIdSchema.parse(request.agendaItemId);
     // An open-card notification cannot withdraw it.
-    host.emit(AsksChanged, { askId, state: 'open' });
+    host.emit(AsksChanged, { ferret: request.sessionId, askId, state: 'open' });
     await host.settle();
     expect(await api.inputState(id)).toBe('pending');
-    await asks.close(askId, 'dismissed');
-    host.emit(AsksChanged, { askId, state: 'closed' });
+    await asks.close({ ferret: request.sessionId, id: askId }, 'dismissed');
+    host.emit(AsksChanged, { ferret: request.sessionId, askId, state: 'closed' });
     await host.settle();
     expect(await api.inputState(id)).toBe('cancelled');
     expect((await deliver()).status).toBe(410);
     expect(target.live.writes()).toBe(0);
-    host.emit(AsksChanged, { askId, state: 'closed' });
+    host.emit(AsksChanged, { ferret: request.sessionId, askId, state: 'closed' });
     await host.settle();
     expect(gate.audits.filter(event => event.event === 'input.cancelled')).toHaveLength(1);
   });
