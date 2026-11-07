@@ -224,6 +224,13 @@ async function send(
   const request = await parseBody(context.request, SendRequestSchema);
   const sender = senderSessionId(context);
   const requestId = sendId(context);
+  // The key lives in the header; a body that names a different one is two requests in one, so neither is honoured.
+  if (request.sendId !== undefined && request.sendId !== requestId)
+    throw new ApiError(
+      400,
+      `the body's sendId and ${FY_REQUEST_ID_HEADER} name two different sends; send one`,
+      'invalid_request',
+    );
   const result = await subsystem
     .send(id, {
       message: request.message,

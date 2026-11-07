@@ -9,17 +9,18 @@ const BYTES = z.instanceof(Uint8Array);
 
 /**
  * The files under `state/conversation/` (§9.2). `*` is the ferret's folder. Every JSON document starts at format 1;
- * a JSONL line carries its own `v: 1`. A damaged file fails the whole plugin closed, except the two caches, which
+ * a queue line carries its own `v: 1`; the other JSONL files (sends, answers, inbox,
+ * outbox) are written without one, and the schema of each line is in `lines.ts`. A damaged file fails the whole plugin closed, except the two caches, which
  * are dropped and rebuilt (a cache rule).
  */
-/** Lines are the queue's own events (enqueued, edited, moved, waiting); the fold is the schema, parsed at the boundary. */
+/** Lines are the queue's own events (`QueueEventSchema`), parsed at the boundary; the fold is `QueuedMessageSchema`. */
 export const QUEUE_STATE = defineState({ name: 'queue', path: '*/queue.jsonl', store: 'jsonl', format: 1 });
-/** Lines are the ledger's own records, last write wins; `SendRecordSchema` is the wire view of one. */
+/** Lines are the ledger's own records (`SendLineSchema`), last write per send id wins; `SendRecordSchema` is the wire view of one. */
 export const SENDS_STATE = defineState({ name: 'sends', path: '*/sends.jsonl', store: 'jsonl', format: 1 });
-/** What reached a ferret, and what it sent. */
+/** What reached a ferret (`InboxLineSchema`), and what it sent (`OutboxLineSchema`). */
 export const INBOX_STATE = defineState({ name: 'inbox', path: '*/inbox.jsonl', store: 'jsonl', format: 1 });
 export const OUTBOX_STATE = defineState({ name: 'outbox', path: '*/outbox.jsonl', store: 'jsonl', format: 1 });
-/** Lines are the answer ledger's receipts, last write per request wins. */
+/** Lines are the answer ledger's receipts (`AnswerLineSchema`), last write per request wins. */
 export const ANSWERS_STATE = defineState({ name: 'answers', path: '*/answers.jsonl', store: 'jsonl', format: 1 });
 export const TURNS_STATE = defineState({ name: 'turns', path: '*/turns', store: 'opaque', format: 1 });
 export const QUESTION_STATE = defineState({

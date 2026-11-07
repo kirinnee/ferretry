@@ -155,6 +155,9 @@ export default implementDaemon(manifest, {
         'ask.sources:card': { schema: CardAskRefSchema, title: '{card}', form: false, apply: world.applyAnswer },
         'start.decide': () => ALLOW,
         'sitrep.lines': () => [{ id: 'board', order: 50, item: { lines: async ferret => await world.lines(ferret) } }],
+        // Board's cards are work Conversation's search finds (`fy search`, `search_work`).
+        // read-scoped: none — Board hands over its cards raw; Conversation scrubs every text through the read-scoped redaction before it indexes or shows it
+        'search.sources': () => [{ id: 'board', item: world.workSource }],
         // A turn ended (Conversation): the turn-end and gate checks of today (fyd.ts:10727-10783).
         'turn.ended': async payload => {
           await world.turnEnded(payload.ferret);

@@ -3,10 +3,9 @@ import { statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { HealthSchema, HomeJsonSchema } from '@ferretry/kernel/contract';
+import { HomeJsonSchema } from '@ferretry/kernel/contract';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
 import { DAEMON_RELEASE_KEYS } from '@ferretry/plugin-updates/contract';
-import { z } from 'zod';
 import { resolveDaemonBinaryPath } from '../../lib/daemon/binary.ts';
 import { resolveDaemonLayout } from '../../lib/daemon/layout.ts';
 import type { IStateHomeClaimPort } from '../../lib/daemon/ports.ts';
@@ -19,6 +18,7 @@ import type { IDaemonUpdateViewPort } from '../../lib/update/ports.ts';
 import { NixProfileSwitch } from '../../lib/update/profile-switch.ts';
 import { PlainProgress } from '../../lib/update/progress.ts';
 import type { DaemonUpdaterDeps } from '../../lib/update/updater.ts';
+import { ServingSchema } from '../daemon/health.ts';
 import { readDaemonRunDocument } from '../daemon/run-file.ts';
 import { FileDaemonLifecycleLock } from '../daemon/lifecycle-lock.ts';
 import { NixStoreGcRoot } from '../daemon/nix-gc-root.ts';
@@ -148,9 +148,7 @@ export function buildUpdateMachine(
         const url = resolveDaemonUrl('', parseDaemonRun(await readDaemonRunDocument(daemonRunPath(inputs.home))));
         const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(3_000) });
         if (!response.ok) return undefined;
-        return HealthSchema.extend({ pid: z.number().int().min(2) })
-          .strip()
-          .parse(await response.json());
+        return ServingSchema.parse(await response.json());
       } catch {
         return undefined;
       }
