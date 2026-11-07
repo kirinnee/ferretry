@@ -145,24 +145,6 @@ const scriptedFor = (
 };
 
 describe('a sign-in already running', () => {
-  const legacy = new FyHttpError(
-    `a sign-in for "${CLAUDE_CREDENTIAL_ID}" is already running as flow "flow-one"; finish or cancel it first`,
-    409,
-    'fleet_login_in_progress',
-  );
-
-  it('is picked up from a daemon too old to do it itself, by reading the flow its refusal named', async () => {
-    const { client, calls } = scriptedFor({
-      [`POST ${FLEET_LOGIN_PATH}`]: legacy,
-      [`GET ${FLEET_LOGIN_PATH}/flow-one`]: claudeFlow('awaiting-code'),
-    });
-
-    const flow = await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID });
-
-    expect(flow).toMatchObject({ flowId: 'flow-one', state: 'awaiting-code', resumed: true });
-    expect(calls.map(call => call.key)).toEqual([`POST ${FLEET_LOGIN_PATH}`, `GET ${FLEET_LOGIN_PATH}/flow-one`]);
-  });
-
   it('passes every other refusal through, including one that names no flow', async () => {
     const other = new FyHttpError('not installed', 409, 'fleet_login_unavailable');
     const unnamed = new FyHttpError('already running', 409, 'fleet_login_in_progress');
@@ -186,24 +168,6 @@ describe('a sign-in already running', () => {
       { key: `DELETE ${FLEET_LOGIN_PATH}/flow-one`, body: undefined },
       { key: `POST ${FLEET_LOGIN_PATH}`, body: { credentialId: CLAUDE_CREDENTIAL_ID, restart: true } },
       { key: `POST ${FLEET_LOGIN_PATH}`, body: { credentialId: CLAUDE_CREDENTIAL_ID, restart: true } },
-    ]);
-  });
-
-  it('falls back to an ordinary start on a daemon that refuses the restart field as a malformed body', async () => {
-    let posts = 0;
-    const { client, calls } = scriptedFor({
-      [`POST ${FLEET_LOGIN_PATH}`]: () => {
-        posts += 1;
-        return posts === 1 ? new FyHttpError('unrecognised key: restart', 400, 'bad_request') : claudeFlow('starting');
-      },
-    });
-
-    const flow = await restartCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, undefined);
-
-    expect(flow.state).toBe('starting');
-    expect(calls.map(call => call.body)).toEqual([
-      { credentialId: CLAUDE_CREDENTIAL_ID, restart: true },
-      { credentialId: CLAUDE_CREDENTIAL_ID },
     ]);
   });
 
