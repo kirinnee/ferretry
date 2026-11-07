@@ -1,9 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  type AuditDraft,
-  DEFAULT_SECURITY_SETTINGS,
-  type SecuritySettings,
-} from '../../../../contract/index.ts';
+import { type AuditDraft, DEFAULT_SECURITY_SETTINGS, type SecuritySettings } from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
 import {
   DAMAGED_SECURITY_SETTINGS,
@@ -69,7 +65,10 @@ describe('security settings', () => {
 
   test('G113 a patch is judged field by field and refused whole if any field widens', async () => {
     const { svc, writes } = service();
-    const outcome = await svc.patch({ unlockValidityHours: 4, stepUpOnActions: false, deviceKeyRotationDays: 60 }, phone);
+    const outcome = await svc.patch(
+      { unlockValidityHours: 4, stepUpOnActions: false, deviceKeyRotationDays: 60 },
+      phone,
+    );
     expect(outcome.ok).toBe(false);
     expect(writes).toEqual([]);
   });
@@ -86,6 +85,19 @@ describe('security settings', () => {
     expect(writes.at(-1)?.unlockValidityHours).toBe(24);
     expect(Object.values(audits.at(-1)?.detail ?? {})).toContain(PASSKEY_WIDEN_JOURNAL_LINE);
     expect(Object.values(audits.at(-1)?.detail ?? {})).toContain('security.unlockValidityHours=8->24');
+  });
+
+  test('G115 without the proof a raise is refused naming the act; with it, it applies, spends the proof and is journaled', async () => {
+    const { svc, writes, audits } = service();
+    const refused = await svc.patch({ unlockValidityHours: 12 }, phone);
+    expect(refused).toEqual({ ok: false, refusal: 'passkey-required', fields: ['unlockValidityHours'] });
+    expect(writes).toEqual([]);
+    const applied = await svc.patch({ unlockValidityHours: 12 }, { ...phone, freshPasskey: true });
+    expect(applied.ok && applied.spentPasskey).toBe(true);
+    expect(writes.at(-1)?.unlockValidityHours).toBe(12);
+    const detail = Object.values(audits.at(-1)?.detail ?? {});
+    expect(detail).toContain(PASSKEY_WIDEN_JOURNAL_LINE);
+    expect(detail).toContain('security.unlockValidityHours=8->12');
   });
 
   test('G116 a raise combined with any other loosening is refused whole without asking a passkey; the host is not asked', async () => {
