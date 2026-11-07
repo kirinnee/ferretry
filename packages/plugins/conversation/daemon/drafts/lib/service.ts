@@ -72,9 +72,9 @@ export const SHARED_DRAFT_WRITE_DELAY_MS = 1_000;
 /** The longest a write that keeps failing waits between attempts: each failure doubles the wait up to this. */
 export const SHARED_DRAFT_WRITE_RETRY_MAX_MS = 60_000;
 /** Edits one draft takes in a second from each device (each author), counted on its own. */
-export const SHARED_DRAFT_EDITS_PER_SECOND = 60;
+const SHARED_DRAFT_EDITS_PER_SECOND = 60;
 /** Drafts held in memory at once; the least recently used is written down and let go. */
-export const SHARED_DRAFT_MEMORY_LIMIT = 50;
+const SHARED_DRAFT_MEMORY_LIMIT = 50;
 /**
  * Characters the remembered history may insert in total. A count alone would let 200 whole-draft
  * pastes sit in memory per session; past this the oldest edits are forgotten, and a base that old is

@@ -50,9 +50,7 @@ import { withoutResolvedTranscriptBaseline } from './baseline.ts';
 /** The chain and its framing live in `raw-prefix.ts`, so a fold can load them alone; they are still this vocabulary. */
 export {
   extendSessionTranscriptRawPrefix,
-  frameSessionTranscriptValue,
   sessionTranscriptRawPrefixStart,
-  sessionTranscriptUnsigned64,
 } from './raw-prefix.ts';
 
 /** The envelope every token tag is taken under, so no other Ferretry MAC can be read as one. */
@@ -78,7 +76,7 @@ export const SESSION_TRANSCRIPT_MESSAGE_TOKEN_TAG_BYTES = 32;
  * miswired. Framing it anyway would mint a second, silently different token vocabulary under the
  * same domain — tags that verify against each other and against nothing the real chain produces.
  */
-export const SESSION_TRANSCRIPT_RAW_PREFIX_BYTES = 32;
+const SESSION_TRANSCRIPT_RAW_PREFIX_BYTES = 32;
 
 /** A 32-byte tag as unpadded base64url is exactly 43 characters, and nothing else is accepted. */
 const TAG_TEXT = /^[A-Za-z0-9_-]{43}$/u;

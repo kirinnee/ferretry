@@ -201,14 +201,14 @@ export function decodeInitialAttachments(
 }
 
 /** Text lifted out of an attachment, and where it will be written. */
-export interface AttachmentExtractionDelivery {
+interface AttachmentExtractionDelivery {
   readonly file: string;
   readonly characters: number;
   readonly truncated: boolean;
 }
 
 /** Why an attachment the daemon tried to read yielded no text. */
-export interface AttachmentExtractionRefusal {
+interface AttachmentExtractionRefusal {
   readonly code: string;
   readonly message: string;
 }
@@ -240,7 +240,7 @@ function attachmentLines(attachment: StoredInitialAttachment): readonly string[]
 }
 
 /** One file the start must put on disk before it hands the agent a document that names it. */
-export interface PlannedAttachmentFile {
+interface PlannedAttachmentFile {
   readonly file: string;
   readonly contents: Uint8Array | string;
 }

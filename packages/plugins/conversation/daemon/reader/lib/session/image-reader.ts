@@ -99,11 +99,11 @@ interface Proof {
 }
 
 /** How many handles' proofs are remembered; the least recently asked-for goes first. */
-export const TRANSCRIPT_IMAGE_PROOF_CAPACITY = 128;
+const TRANSCRIPT_IMAGE_PROOF_CAPACITY = 128;
 /** An inline image longer than this is proved again rather than held: it is not worth the memory. */
-export const TRANSCRIPT_IMAGE_INLINE_KEEP_CHARS = 256 * 1024;
+const TRANSCRIPT_IMAGE_INLINE_KEEP_CHARS = 256 * 1024;
 /** How many records are read and parsed at once, daemon-wide. */
-export const TRANSCRIPT_IMAGE_CONCURRENCY = 2;
+const TRANSCRIPT_IMAGE_CONCURRENCY = 2;
 
 const LINE_FEED = 0x0a;
 

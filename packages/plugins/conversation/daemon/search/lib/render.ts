@@ -12,23 +12,23 @@ const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 const clip = (text: string, width: number): string => (text.length <= width ? text : `${text.slice(0, width - 1)}…`);
 
 /** How a hit is cited: `&F303` for a card, `!A3` for an ask. */
-export const hitReference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : '!'}${hit.id}`;
+const hitReference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : '!'}${hit.id}`;
 
 /** The matching line of a hit, when it says something the title does not. */
-export function matchLine(hit: WorkHit): string {
+function matchLine(hit: WorkHit): string {
   if (hit.match.field === 'id' || hit.match.field === 'title') return '';
   const line = flat(hit.match.line);
   return line === '' || line === flat(hit.title) ? '' : clip(line, MATCH_WIDTH);
 }
 
-export function renderOlderHidden(olderHidden: number | undefined, retry: string): string[] {
+function renderOlderHidden(olderHidden: number | undefined, retry: string): string[] {
   if (olderHidden === undefined || olderHidden < 1) return [];
   const noun = olderHidden === 1 ? 'older closed item' : 'older closed items';
   return [`${String(olderHidden)} ${noun} hidden — ${retry}`];
 }
 
 /** What an empty answer says, naming the kind the person asked about. */
-export function renderNoMatch(query: string, kind: WorkKind | undefined): string {
+function renderNoMatch(query: string, kind: WorkKind | undefined): string {
   const subject = kind === 'card' ? 'cards' : kind === 'ask' ? 'asks' : 'cards or asks';
   return `No ${subject} match “${query}”.`;
 }

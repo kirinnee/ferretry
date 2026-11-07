@@ -47,7 +47,7 @@ export const doneCloseShortLabel = (refs: readonly TaskRef[]): string =>
   refs.length === 1 && refs[0] !== undefined ? `Close ${formatTaskRef(refs[0])}` : `Close ${refs.length} cards`;
 
 /** One lane of a card's board, as far as a Done reads it (Board's lane set, opaque to this half). */
-export interface LaneForClose {
+interface LaneForClose {
   readonly id: string;
   readonly category: string;
 }

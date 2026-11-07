@@ -19,7 +19,7 @@ import type { TranscriptEntry } from './transcript.ts';
  * One row of a ferret's conversation, as far as this read looks at it. The conversation is Conversation's; a host that
  * reads it hands this read a {@link ItemConversationClient}, and its rows fit this shape structurally.
  */
-export interface SessionTranscriptMessage {
+interface SessionTranscriptMessage {
   readonly point: { readonly byteOffset: number; readonly blockIndex?: number | undefined };
   readonly role: string;
   readonly text: string;
@@ -27,7 +27,7 @@ export interface SessionTranscriptMessage {
 }
 
 /** One backward page of a conversation: its rows, oldest first, and the cursor to the page before it. */
-export interface SessionTranscriptTail {
+interface SessionTranscriptTail {
   readonly messages: readonly SessionTranscriptMessage[];
   readonly previousCursor?: string | null | undefined;
 }

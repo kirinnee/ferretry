@@ -1,18 +1,8 @@
 /** DOM helpers the Learning suites share: find by visible text, click, type, choose. */
 
-import { interact, must, settleUntil } from '@ferretry/app/testing';
+import { interact, settleUntil } from '@ferretry/app/testing';
 
 export const textOf = (root: ParentNode): string => (root as HTMLElement).textContent ?? '';
-
-/** The first element of `selector` whose text includes `text`. */
-export const byText = <T extends HTMLElement = HTMLElement>(root: ParentNode, selector: string, text: string): T =>
-  must(
-    [...root.querySelectorAll<T>(selector)].find(element => (element.textContent ?? '').includes(text)),
-    `${selector} with text "${text}"`,
-  );
-
-export const maybeByText = (root: ParentNode, selector: string, text: string): HTMLElement | undefined =>
-  [...root.querySelectorAll<HTMLElement>(selector)].find(element => (element.textContent ?? '').includes(text));
 
 export const click = async (element: Element): Promise<void> => {
   await interact(() => {
@@ -25,13 +15,6 @@ export const typeInto = async (field: HTMLInputElement | HTMLTextAreaElement, va
   await interact(() => {
     Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value);
     field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
-export const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
   });
 };
 

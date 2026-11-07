@@ -8,7 +8,7 @@ import {
 } from '../lib/pdf-decrypt-protocol.ts';
 
 /** The worker that runs qpdf; a module of this package, started through the kernel's workers port. */
-export const PDF_WORKER_URL = new URL('../worker/pdf-decrypt.worker.ts', import.meta.url);
+const PDF_WORKER_URL = new URL('../worker/pdf-decrypt.worker.ts', import.meta.url);
 
 /** A decryption's answer: never a probe's, which only {@link probePdfDecryptWorker} asks for. */
 type DecryptAnswer = Exclude<PdfDecryptWorkerResponse, { readonly probe: true }>;

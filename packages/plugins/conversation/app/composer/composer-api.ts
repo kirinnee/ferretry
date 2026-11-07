@@ -25,7 +25,7 @@ const FAILED_SEND_MEMORY_MS = 10 * 60_000;
 const FAILED_SEND_MEMORY_LIMIT = 32;
 
 /** The composer's body for one send: the request minus the id, which {@link ComposerApi.send} owns. */
-export type ComposerSendInput = Omit<SendRequest, 'sendId'>;
+type ComposerSendInput = Omit<SendRequest, 'sendId'>;
 
 /** The five calls a composer makes; a host may hand in its own (a reply that names Agenda items, a test). */
 export interface ComposerApi {

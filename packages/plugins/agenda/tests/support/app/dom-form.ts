@@ -20,12 +20,6 @@ export const click = async (element: Element | null): Promise<void> => {
   await interact(() => target.click());
 };
 
-export const byText = (root: ParentNode, selector: string, text: string): HTMLElement =>
-  must(
-    [...root.querySelectorAll<HTMLElement>(selector)].find(node => node.textContent?.includes(text)),
-    `${selector} containing "${text}"`,
-  );
-
 /** Lets a settled promise chain (a fake client's answer, then state updates) run inside `act`. */
 export const settle = async (): Promise<void> => {
   await interact(async () => {

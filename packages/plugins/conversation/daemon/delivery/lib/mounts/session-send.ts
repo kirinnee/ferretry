@@ -121,7 +121,7 @@ export interface SessionSendSubsystem {
 }
 
 /** A send as the route hands it over: the client's body, plus the two facts only the route knows. */
-export interface SendInput {
+interface SendInput {
   readonly message: string;
   readonly attachmentIds?: readonly string[] | undefined;
   readonly now?: boolean | undefined;

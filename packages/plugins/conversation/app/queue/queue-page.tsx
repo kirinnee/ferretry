@@ -403,7 +403,7 @@ export function QueuePanel({ subject }: { readonly subject?: string }) {
 }
 
 /** Reads the queue of one ferret and keeps it current. */
-export function QueuePage({
+function QueuePage({
   client,
   daemon,
   ferretId,

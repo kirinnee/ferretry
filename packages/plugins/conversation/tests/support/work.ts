@@ -6,8 +6,8 @@ import type { WorkRedaction, WorkSource } from '../../daemon/search/lib/service.
 
 export const NOW_MS = Date.parse('2026-10-30T10:00:00.000Z');
 export const DAY_MS = 86_400_000;
-export const at = (ms: number): Instant => new Date(ms).toISOString() as Instant;
-export const same = (text: string): string => text;
+const at = (ms: number): Instant => new Date(ms).toISOString() as Instant;
+const same = (text: string): string => text;
 
 export const query = (q: string, rest: Partial<WorkSearchQuery> = {}): WorkSearchQuery =>
   WorkSearchQuerySchema.parse({ q, ...rest });

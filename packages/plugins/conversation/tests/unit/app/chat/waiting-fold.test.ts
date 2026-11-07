@@ -1,11 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  hideWaiting,
-  isWaitingSend,
-  type WaitingFoldSend as LedgerSendRecord,
-  type WaitingFoldQueue as QueueView,
-  type WaitingFoldEntry as TranscriptEntry,
-} from '../../../app/lib/waiting-fold.ts';
+import { hideWaiting, isWaitingSend } from '../../../../app/chat/waiting-fold.ts';
+import type { LedgerSendRecord } from '../../../../app/chat/send-ledger.ts';
+import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
+
+type QueueView = NonNullable<LedgerSendRecord['queue']>;
 
 const queue = (state: QueueView['state'], extra: Partial<QueueView> = {}): QueueView => ({
   state,

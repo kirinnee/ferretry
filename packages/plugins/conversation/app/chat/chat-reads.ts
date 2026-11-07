@@ -26,10 +26,7 @@ import {
   LogPageSchema,
   type Question,
   type SendRecord,
-  SendListResponseSchema,
   SendRecordSchema,
-  type TranscriptImageDownload,
-  TranscriptImageDownloadSchema,
 } from '../../contract/index.ts';
 import { readFerretQueue } from '../queue/send-queue.ts';
 import type { ChatReadApi } from './chat-refresh.ts';
@@ -128,11 +125,8 @@ export const readLogPage = async (
 };
 
 /** The ferret's view; the refresh checks it is the ferret it asked for. */
-export const readFerretView = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<FerretView> =>
+const readFerretView = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<FerretView> =>
   FerretViewSchema.parse(await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId } }));
-
-export const readSends = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<SendRecord[]> =>
-  SendListResponseSchema.parse(await client.call('GET /v1/ferrets/:ferretId/sends', { params: { ferretId } })).sends;
 
 /** The question the ferret is waiting on, as Conversation proved it against the transcript, or null. */
 export const readQuestion = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<Question | null> =>
@@ -148,15 +142,6 @@ export const readHandoff = async (
     await client.call('GET /v1/ferrets/:ferretId/handoffs/:name', {
       params: { ferretId, name: HandoffNameSchema.parse(name) },
     }),
-  );
-
-export const readTranscriptImage = async (
-  client: Pick<PluginClient, 'call'>,
-  ferretId: string,
-  handle: string,
-): Promise<TranscriptImageDownload> =>
-  TranscriptImageDownloadSchema.parse(
-    await client.call('GET /v1/ferrets/:ferretId/transcript-images/:handle', { params: { ferretId, handle } }),
   );
 
 export const retrySend = async (

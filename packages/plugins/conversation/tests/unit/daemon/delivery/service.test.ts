@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import { queuedMessageInstruction, turnFileInstruction } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../daemon/seams/index.ts';
+import { type ClockPort, type SerialExecutor } from '../../../../daemon/seams/ports.ts';
+import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import {
   type ComposerClearOutcome,
   type ComposerSubmitOutcome,
