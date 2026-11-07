@@ -9,7 +9,13 @@ import manifest from '../../manifest.ts';
 import { ABSENT_VIEW } from '../../contract/testing/index.ts';
 import type { HarnessCliView } from '../../contract/index.ts';
 
-GlobalRegistrator.register();
+// ONE registration per process: the unit tier runs every package's files in one bun process, and happy-dom refuses a
+// second global registration. Every suite that needs a DOM shares this flag (see the app's `tests/support/dom.ts`).
+const domFlag = globalThis as typeof globalThis & { __ferretryDomRegistered?: boolean };
+if (!domFlag.__ferretryDomRegistered) {
+  GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
+  domFlag.__ferretryDomRegistered = true;
+}
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const mounted: Root[] = [];
 afterEach(async () => {

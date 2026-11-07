@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { InstantSchema } from '@ferretry/std';
 import type { ReactNode } from 'react';
 import type { PackRow } from '../../../contract/index.ts';
 import type { PackCall, PackStartCall, PackStartOutcome } from '../../../app/lib/pack-calls.ts';
 import type { TranscriptEntry } from '../../../app/lib/shell-ports.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { mockUi } from '../support/ui-doubles.tsx';
 
 // The shell's primitives (`app/ui.ts`, PENDING.md) stand in for what the app shell will offer: a Markdown that
 // reads bold, a proved name that links to its ferret, a footer, and a tool group that shows the command.
-mock.module('../../../app/ui.ts', () => ({
+mockUi({
   Markdown: ({ text, className }: { text: string; className?: string }): ReactNode => (
     <div className={className}>
       {text
@@ -25,7 +26,7 @@ mock.module('../../../app/ui.ts', () => ({
   ToolGroup: ({ entry }: { entry: TranscriptEntry }): ReactNode => <pre>{entry.tools?.[0]?.use.name}</pre>,
   useReferenceSurface: () => ({}),
   cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
-}));
+});
 // PENDING PORT (ports-pending.json pendingAppPorts: packs pack-call): the card draws with the chat's reference-proved
 // Markdown, PeerName, MessageFooter and ToolGroup, which `@ferretry/app/ui` does not offer yet, and Conversation's
 // transcript row is what hosts it. The card is loaded only inside the skipped cases; each keeps every assertion.
