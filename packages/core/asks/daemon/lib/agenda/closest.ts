@@ -1,5 +1,4 @@
 import { type AgendaId, type AgendaItem, type AgendaLink, MAX_AGENDA_LINK_LABEL_LENGTH } from '../protocol/agenda.ts';
-import { type WorkRelatedResponse } from '@ferretry/protocol';
 
 /**
  * THE CLOSEST AGENDA of something the daemon raises for a ferret (docs/agenda.md § One channel per topic): an agenda is
@@ -9,6 +8,17 @@ import { type WorkRelatedResponse } from '@ferretry/protocol';
  *
  * Pure: the caller hands it the daemon's related matches and the session's open items.
  */
+/**
+ * The part of the daemon's related-work answer (`WorkRelatedResponse`, owned by the work search) this reads: each
+ * match's strength and, for an agenda hit, its session and id. Structural, so Asks names no other subsystem's type.
+ */
+export interface RelatedMatches {
+  readonly matches: readonly {
+    readonly strength: 'strong' | 'weak';
+    readonly hit: { readonly kind: string; readonly id: string; readonly sessionId?: string };
+  }[];
+}
+
 export interface ClosestAgenda {
   readonly id: AgendaId;
   readonly title: string;
@@ -27,14 +37,14 @@ const isTopic = (item: AgendaItem): boolean =>
  * enough to tie a card to a topic the owner would not recognise it under. The daemon's order picks among several.
  */
 export function closestAgenda(
-  related: WorkRelatedResponse,
+  related: RelatedMatches,
   sessionId: string,
   open: readonly AgendaItem[],
 ): ClosestAgenda | undefined {
   const topics = new Map(open.filter(isTopic).map(item => [item.id, item]));
   for (const match of related.matches) {
     if (match.strength !== 'strong' || match.hit.kind !== 'agenda' || match.hit.sessionId !== sessionId) continue;
-    const item = topics.get(match.hit.id);
+    const item = topics.get(match.hit.id as AgendaId);
     if (item !== undefined) return { id: item.id, title: item.title ?? item.subject };
   }
   return undefined;

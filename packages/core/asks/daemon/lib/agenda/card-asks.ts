@@ -19,8 +19,7 @@
  *   it Done.
  * - **Not yet.** The ask stays open, marked, and the agenda rests the same way.
  *
- * `gateAttached` mirrors the first ask in the order they are asked (`askedCardAsks`: a Not yet goes behind the asks
- * still waiting) on every write, for an app that predates card asks. Pure and total.
+ * Pure and total.
  */
 import { createHash } from 'node:crypto';
 import {
@@ -40,13 +39,13 @@ import {
   hasOpenCardAsk,
   itemAsksOwnQuestion,
   isOpenCardAsk,
-  mirroredCardAsk,
   ownAskDigest,
   openCardAsks,
   parseCardAgendaReference,
   repliedToOwnAsk,
 } from '../protocol/agenda-card-asks.ts';
-import { canonicalJson, formatTaskRef } from '@ferretry/protocol';
+import { canonicalJson } from '@ferretry/std';
+import { formatTaskRef } from '../protocol/board-refs.ts';
 
 /** What the gate engine does to one agenda's card asks. */
 export type CardAskOperation =
@@ -83,38 +82,11 @@ const bounded = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] => {
   return asks.filter(ask => isOpenCardAsk(ask) || kept.has(ask));
 };
 
-/**
- * How long after an ask is answered, or the mirror changes, a repeat from an app that predates card asks (it names no
- * ask) is still read as the screen's old view: a lost response retried, or a screen that still draws the ask before.
- */
-export const LEGACY_REPLAY_MS = 2 * 60_000;
-
-/**
- * The item carrying exactly these asks, `gateAttached` mirroring the first one asked (`mirroredCardAsk`); both absent
- * when none is left.
- * Given the time of the write (`at`), a mirror that comes to show a DIFFERENT ask than it did, or to show nothing, is
- * stamped (`gateAttachedChangedAt`): a screen of an older app may still draw the ask that went. One that shows the same
- * ask keeps its stamp, and so does one that comes from nothing — until the stamp is older than {@link LEGACY_REPLAY_MS}.
- * An agenda that was never mirrored has none.
- */
-export const withCardAsks = (item: AgendaItem, asks: readonly AgendaCardAsk[], at?: string): AgendaItem => {
-  const { cardAsks: _asks, gateAttached: before, gateAttachedChangedAt: stamped, ...rest } = item;
+/** The item carrying exactly these asks (at most {@link MAX_AGENDA_CARD_ASKS}); absent when none is left. */
+export const withCardAsks = (item: AgendaItem, asks: readonly AgendaCardAsk[]): AgendaItem => {
+  const { cardAsks: _asks, ...rest } = item;
   const kept = bounded(asks);
-  const mirror = mirroredCardAsk({ cardAsks: kept });
-  const replaced =
-    before !== undefined && mirror !== undefined && cardAskReference({ gate: before }) !== cardAskReference(mirror);
-  const gone = before !== undefined && mirror === undefined;
-  const fresh =
-    stamped !== undefined && (at === undefined || Date.parse(at) - Date.parse(stamped) < LEGACY_REPLAY_MS)
-      ? stamped
-      : undefined;
-  const changedAt = replaced || gone ? at : before === undefined ? fresh : stamped;
-  return {
-    ...rest,
-    ...(kept.length === 0 ? {} : { cardAsks: kept }),
-    ...(mirror === undefined ? {} : { gateAttached: mirror.gate }),
-    ...(changedAt === undefined ? {} : { gateAttachedChangedAt: changedAt }),
-  };
+  return { ...rest, ...(kept.length === 0 ? {} : { cardAsks: kept }) };
 };
 
 /** What an attached ask says it is about, as the activity line records it: "&F12 is at Released: Done or Not good". */
@@ -159,8 +131,6 @@ const fingerprint = (item: AgendaItem): string | undefined => {
   const {
     cardAsks: _asks,
     cardAsksSeal: _seal,
-    gateAttached: _shown,
-    gateAttachedChangedAt: _stamp,
     resting,
     conversation,
     conversationCount,
@@ -189,7 +159,7 @@ export const sealCardAsks = (item: AgendaItem): AgendaItem => {
 const untouched = (item: AgendaItem): boolean =>
   item.cardAsksSeal !== undefined && item.cardAsksSeal === fingerprint(item);
 
-/** The digest of the item's own ask: one spelling for both ends (`@ferretry/protocol`). */
+/** The digest of the item's own ask: one spelling for both ends (`agenda-card-asks`). */
 export { ownAskDigest };
 
 /** Whether an owner's answer to a card ask was recorded on the item after `at`. */
@@ -315,7 +285,6 @@ const operate = (
       const next = withCardAsks(
         item,
         asks.map(ask => (ask === existing ? restated : ask)),
-        at,
       );
       return sameJson(next, item) ? { kind: 'unchanged' } : { kind: 'changed', item: next, change: 'refreshed' };
     }
@@ -341,7 +310,7 @@ const operate = (
       'updated',
       askedLine(added),
     );
-    return { kind: 'changed', item: withCardAsks(woken, [...asks, added], at), change: 'woke' };
+    return { kind: 'changed', item: withCardAsks(woken, [...asks, added]), change: 'woke' };
   }
   if (operation.kind === 'line') {
     const last = item.history?.at(-1);
@@ -355,7 +324,6 @@ const operate = (
     const left = withCardAsks(
       item,
       asks.filter(ask => ask !== target),
-      at,
     );
     // Only a thread nobody has written on since the daemon left it is moved.
     const asLeft = untouched(item);
@@ -425,7 +393,6 @@ const operate = (
   const answered = withCardAsks(
     effects.history(item, 'gate-answered', operation.reference),
     asks.map(ask => (ask === target ? changed : ask)),
-    at,
   );
   return { kind: 'changed', item: restedOnAnswer(answered, at), change: 'answered' };
 };
@@ -457,9 +424,9 @@ export type CardAsksMove =
   | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
   | { readonly kind: 'moved'; readonly into: AgendaItem };
 
-/** The item stripped of every card ask and its mirror: what is left of one whose asks went to another item. */
+/** The item stripped of every card ask: what is left of one whose asks went to another item. */
 export const withoutCardAsks = (item: AgendaItem): AgendaItem => {
-  const { cardAsks: _asks, gateAttached: _shown, gateAttachedChangedAt: _stamp, cardAsksSeal: _seal, ...rest } = item;
+  const { cardAsks: _asks, cardAsksSeal: _seal, ...rest } = item;
   return rest;
 };
 
@@ -478,7 +445,6 @@ export const withoutCardAsks = (item: AgendaItem): AgendaItem => {
 export const joinCardAsks = (
   item: AgendaItem,
   incoming: readonly AgendaCardAsk[],
-  at: string,
   stage: CardAskEffects['stage'],
 ): CardAsksMove => {
   if (incoming.length === 0) return { kind: 'moved', into: item };
@@ -506,7 +472,7 @@ export const joinCardAsks = (
   const waitingOn = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] =>
     asks.filter(ask => isOpenCardAsk(ask) && ask.notYet === undefined);
   const arriving = new Set(waitingOn(kept).filter(ask => !own.includes(ask)));
-  if (arriving.size === 0) return { kind: 'moved', into: withCardAsks(item, kept, at) };
+  if (arriving.size === 0) return { kind: 'moved', into: withCardAsks(item, kept) };
   const first = waitingOn(own)[0];
   const woke = isCardAgenda(item) ? undefined : first === undefined ? turnOf(item) : first.woke;
   const retold = kept.map(ask => {
@@ -514,11 +480,11 @@ export const joinCardAsks = (
     const { woke: _theirs, ...rest } = ask;
     return woke === undefined ? rest : { ...rest, woke };
   });
-  if (first !== undefined) return { kind: 'moved', into: withCardAsks(item, retold, at) };
+  if (first !== undefined) return { kind: 'moved', into: withCardAsks(item, retold) };
   const newest = new Date(Math.max(...[...arriving].map(ask => Date.parse(ask.at)))).toISOString();
   const woken = agendaState(item).state === 'needs-you' ? item : awake(item, newest);
   const staged = stage(woken, cardAskStage(([...arriving][0] as AgendaCardAsk).gate));
-  return { kind: 'moved', into: withCardAsks(staged, retold, at) };
+  return { kind: 'moved', into: withCardAsks(staged, retold) };
 };
 
 /**
@@ -538,7 +504,6 @@ export const leaveCardAsks = (
   const left = withCardAsks(
     item,
     (item.cardAsks ?? []).filter(ask => !moves(ask)),
-    at,
   );
   const stillWaiting = openCardAsks(left).some(ask => ask.notYet === undefined);
   // An item that asks something of its own (a question a ferret added or reworded beside the ask) stays on the owner's

@@ -8,8 +8,8 @@ import { gateReference, parseGateFollowupReference } from './agenda-gate.ts';
 import { gateAskLine } from './agenda-gate-wording.ts';
 import type { AgendaStage } from './agenda-state.ts';
 import type { TaskRef } from './board-refs.ts';
-import { canonicalJson } from './canonical-json.ts';
-import { sha256Hex } from './mcp-oauth.ts';
+import { canonicalJson } from '@ferretry/std';
+import { sha256Hex } from './sha256.ts';
 
 /** The prefix of the `sourceRef` of the agenda the daemon opens for a card: `card-agenda:<card>`. */
 const CARD_AGENDA_REFERENCE_PREFIX = 'card-agenda:';
@@ -207,14 +207,6 @@ export const askedCardAsks = <Ask extends Pick<AgendaCardAsk, 'answer' | 'notYet
     ...open.filter(ask => ask.notYet !== undefined).sort((left, right) => deferredAt(left) - deferredAt(right)),
   ];
 };
-
-/**
- * The card ask an app that predates card asks is shown (`gateAttached`), and the one an answer that names no ask
- * reaches: the first of {@link askedCardAsks}, so a Not yet moves an old app on to the next ask instead of trapping it.
- */
-export const mirroredCardAsk = (item: {
-  readonly cardAsks?: readonly AgendaCardAsk[] | undefined;
-}): AgendaCardAsk | undefined => askedCardAsks(item)[0];
 
 /** The card ask on this agenda with this reference, open or answered. */
 export const cardAskOf = (

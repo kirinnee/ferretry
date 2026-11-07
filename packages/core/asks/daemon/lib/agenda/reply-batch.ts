@@ -6,7 +6,7 @@ import {
   MAX_AGENDA_RESOLUTIONS,
 } from '../protocol/agenda.ts';
 import { agendaBatchMessage } from '../protocol/agenda-message.ts';
-import { InstantSchema } from '@ferretry/protocol';
+import { InstantSchema } from '../protocol/common.ts';
 import { z } from 'zod';
 import type { SerialExecutor } from '../ports.ts';
 

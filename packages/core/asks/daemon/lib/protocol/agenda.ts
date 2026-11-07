@@ -1406,19 +1406,6 @@ const AgendaItemBaseShape = {
    * answered before reads, and its receipt still answers a replay.
    */
   gate: AgendaGateSchema.optional(),
-  /**
-   * The gate of the FIRST card ask in the order they are asked (`cardAsks` read by `askedCardAsks`: an ask the owner
-   * said Not yet to goes behind the ones still waiting), mirrored for an app that predates card asks: it draws Done / Not
-   * good on the agenda and answers them with `gate: true`. Only the daemon sets or clears it, always with `cardAsks`.
-   */
-  gateAttached: AgendaGateSchema.optional(),
-  /**
-   * When `gateAttached` last CHANGED FROM one ask to another or to none (the shown one answered or withdrawn, the next
-   * taking its place or arriving later): an old app still showing the first would answer the second without the owner
-   * seeing it, so the daemon refuses an answer from an app that names no ask for a short while after. Absent when the
-   * mirror never replaced or lost an ask.
-   */
-  gateAttachedChangedAt: InstantSchema.optional(),
   /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
   cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
   /**
@@ -1999,7 +1986,6 @@ export const AgendaActionRequestSchema = z
       gate: z.literal(true).optional(),
       /**
        * WHICH card ask the response answers (`agenda.card-asks.1`): its gate reference (`gate:<card>:<lane>:<entry>`).
-       * Absent with `gate: true`, the answer is to the ask an older app was shown (`gateAttached`).
        */
       cardAsk: z.string().min(1).max(MAX_AGENDA_SOURCE_REF_LENGTH).optional(),
       /**

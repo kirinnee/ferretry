@@ -15,7 +15,6 @@ import {
   type AgendaCardAsk,
   type AgendaGate,
   type AgendaHistoryEntry,
-  AgendaHistoryEntrySchema,
   type AgendaId,
   AgendaIdSchema,
   type AgendaInputRef,
@@ -52,18 +51,8 @@ import {
   MAX_AGENDA_REVISIONS,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
-  StoredAgendaItemSchema,
-  StoredResolvedAgendaItemSchema,
 } from '../protocol/agenda.ts';
-import {
-  canCarryCardAsk,
-  cardAgendaReference,
-  cardAskReference,
-  cardAskStage,
-  hasOpenCardAsk,
-  openCardAsks,
-  parseCardAgendaReference,
-} from '../protocol/agenda-card-asks.ts';
+import { hasOpenCardAsk, openCardAsks, parseCardAgendaReference } from '../protocol/agenda-card-asks.ts';
 import { agendaItemRevision } from '../protocol/agenda-patch.ts';
 import {
   type AgendaResting,
@@ -77,8 +66,8 @@ import { applyAgendaTabEdits } from '../protocol/agenda-tabs.ts';
 import { agendaEditShapeProblems, agendaShapeProblems } from '../protocol/agenda-shape.ts';
 import { agendaStage, agendaStageOfKind } from '../protocol/agenda-stage.ts';
 import { formAnswerProblems } from '../protocol/agenda-form.ts';
-import { gateReference, parseGateFollowupReference, parseGateReference } from '../protocol/agenda-gate.ts';
-import { formatTaskRef, type TaskRef } from '@ferretry/protocol';
+import { parseGateFollowupReference, parseGateReference } from '../protocol/agenda-gate.ts';
+import { formatTaskRef, type TaskRef } from '../protocol/board-refs.ts';
 import { z } from 'zod';
 import {
   type AgendaArchiveCursor,
@@ -86,19 +75,7 @@ import {
   type AgendaArchiveRecord,
   AgendaArchiveRecordSchema,
 } from './archive.ts';
-import {
-  interleaved,
-  loggedFromChat,
-  mergedThreads,
-  type RecordedItem,
-  relinked,
-  responseWords,
-  resumedConversation,
-  said,
-  seedConversation,
-  speakerOf,
-  wordsOf,
-} from './item-words.ts';
+import { loggedFromChat, mergedThreads, responseWords, said, speakerOf, wordsOf } from './item-words.ts';
 import {
   applyCardAsk,
   type CardAskOperation,
@@ -159,8 +136,6 @@ export type AgendaEntry =
   | { readonly lifecycle: 'active'; readonly origin: AgendaActor; readonly item: AgendaItem }
   | { readonly lifecycle: 'addressed'; readonly origin: AgendaActor; readonly item: ResolvedAgendaItem };
 
-const ArchivedOwnerHistorySchema = z.array(z.strictObject({ id: AgendaIdSchema, entry: AgendaHistoryEntrySchema }));
-
 /** Internal durable state. Active state and count are both derived from the entry lifecycle. */
 export interface AgendaLedger {
   /** Bounded position in the private append-only sidecar. */
@@ -172,7 +147,7 @@ export interface AgendaLedger {
   readonly entries: readonly AgendaEntry[];
   /** Full threads, outside the bounded current item, committed atomically with the ledger. Never sent in snapshots. */
   readonly conversations?: Readonly<Record<string, readonly AgendaConversationEntry[]>>;
-  /** Original legacy entries whose bounded history/revisions had to move to make room for new metadata. */
+  /** Entries whose bounded history/revisions had to move to make room for new metadata, kept for their versions. */
   readonly carriedEntries?: Readonly<Record<string, AgendaEntry>>;
   readonly updatedAt: string;
   /**
@@ -180,21 +155,16 @@ export interface AgendaLedger {
    * them, counted as the snapshot's `parseErrors`, and never handed to a transition. Absent when there are none.
    */
   readonly unreadable?: readonly unknown[];
-  /**
-   * The shape the file was written in: {@link AGENDA_LEDGER_VERSION} once this daemon read it; absent on a file an
-   * older one wrote, which reads as 1 and is brought to the current shape as it is read ({@link toChannel}).
-   */
+  /** The ledger's format, {@link AGENDA_LEDGER_VERSION}; a file in any other is refused, never converted. */
   readonly version?: number;
 }
 
 /**
- * The ledger shape this daemon writes. 2 (docs/agenda.md § States): an item an owner's reply parked RESTS, saying
- * how (`resting`), and every item names its stage. 3 (§ The conversation): an item stores what is said on it
- * (`conversation`), seeded from its history as it is read. Version 4 moves full threads into the ledger-level
- * conversations map, leaving bounded recent tails in current items and wire snapshots. Card asks (docs/agenda.md
- * § Card asks) need no new shape marker: {@link liftGateItems} reads every ledger, of any version, into them.
+ * The ledger format this daemon writes and reads (5.0 clean slate: format 1). An item an owner's reply parked RESTS,
+ * saying how (`resting`); every item names its stage; full threads live in the ledger-level conversations map, with
+ * bounded recent tails on current items and wire snapshots; a card's asks ride its agenda (`cardAsks`).
  */
-export const AGENDA_LEDGER_VERSION = 4;
+export const AGENDA_LEDGER_VERSION = 1;
 
 /** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
 export interface AgendaCardFields {
@@ -245,7 +215,7 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly gate?: AgendaGate;
   /**
    * The card asks the new agenda carries (docs/agenda.md § Card asks): only the daemon raises one with any, when it
-   * opens the agenda of a card that nobody's agenda carries yet. `gateAttached` mirrors the first one asked (`mirroredCardAsk`).
+   * opens the agenda of a card that nobody's agenda carries yet.
    */
   readonly cardAsks?: readonly AgendaCardAsk[];
   /**
@@ -256,66 +226,6 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   /** What the item needs from the owner now (`--stage`); its kind says when absent (`agendaStageOfKind`). */
   readonly stage?: AgendaStage;
 }
-
-/**
- * What a gate item moved to its card's new ferret keeps of the one it replaces (docs/board.md § Gates ask the
- * owner): when it began waiting, the owner's snooze, whose turn it is, and the conversation and edits so far.
- */
-export type AgendaCarried = Pick<
-  AgendaItem,
-  | 'waitingSince'
-  | 'parked'
-  | 'waitingOn'
-  | 'askedAt'
-  | 'waitingFor'
-  | 'infoRequests'
-  | 'history'
-  | 'revisions'
-  | 'conversation'
-  | 'urgentAt'
-  | 'resting'
-  | 'stage'
-  | 'stages'
-  | 'cardAsks'
-  | 'gateAttached'
-  | 'gateAttachedChangedAt'
-  | 'generatedSubject'
-  | 'askVersion'
-  | 'ownAskRepliedTo'
->;
-
-const CARRIED_FIELDS = [
-  'waitingSince',
-  'parked',
-  'waitingOn',
-  'askedAt',
-  'waitingFor',
-  'infoRequests',
-  'history',
-  'revisions',
-  'conversation',
-  'urgentAt',
-  'resting',
-  'stage',
-  'stages',
-  // An agenda carried to another ferret takes its card asks with it: they are the card's, not the ferret's.
-  'cardAsks',
-  'gateAttached',
-  'gateAttachedChangedAt',
-  // What the daemon wrote on a card agenda goes with it, so the subject a ferret rewrote stays the ferret's there too.
-  'generatedSubject',
-  // The owner's reply to the item's own question goes with it, and so does the ask version that digest was taken at
-  // (`ownAskDigest` reads it): carried content digests the same, so a question already answered stays answered, while
-  // one the arriving request words differently no longer matches and is asked afresh.
-  'askVersion',
-  'ownAskRepliedTo',
-] as const satisfies readonly (keyof AgendaCarried)[];
-
-/** The carried fields an item has, and only those: an absent one stays absent. */
-const agendaCarriedOf = (item: AgendaCarried): AgendaCarried =>
-  Object.fromEntries(
-    CARRIED_FIELDS.flatMap(field => (item[field] === undefined ? [] : [[field, item[field]]])),
-  ) as AgendaCarried;
 
 /** One RESTING item a nudge is about: which rest (`since`) and how many nudges it had had when the Warden looked. */
 export interface AgendaNudgeTarget {
@@ -741,12 +651,7 @@ export function applyAgendaCommandToSession(
  * machine. Keeping this validation in the pure layer prevents corrupt storage
  * from being silently replaced by a fresh board.
  */
-export function parseAgendaLedger(
-  value: unknown,
-  sessionId: string,
-  archived: readonly AgendaArchiveRecord[] = [],
-  recorded?: Readonly<Record<string, RecordedItem>>,
-): AgendaLedger | null {
+export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedger | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   if (
@@ -755,7 +660,8 @@ export function parseAgendaLedger(
     (raw.nextId as number) < 1 ||
     typeof raw.updatedAt !== 'string' ||
     !Number.isFinite(Date.parse(raw.updatedAt)) ||
-    !Array.isArray(raw.entries)
+    !Array.isArray(raw.entries) ||
+    raw.version !== AGENDA_LEDGER_VERSION
   ) {
     return null;
   }
@@ -766,22 +672,16 @@ export function parseAgendaLedger(
     if (raw.carriedEntries === null || typeof raw.carriedEntries !== 'object' || Array.isArray(raw.carriedEntries))
       return null;
     for (const [id, value] of Object.entries(raw.carriedEntries)) {
-      const entry = parseAgendaEntry(value, false, []);
+      const entry = parseAgendaEntry(value);
       if (entry === null || entry.item.id !== id) return null;
       carriedEntries[id] = entry;
     }
   }
   const entries: AgendaEntry[] = [];
-  const archive = ArchivedOwnerHistorySchema.safeParse(raw.ownerHistory ?? []);
-  if (!archive.success) return null;
   const pending = z.array(AgendaArchiveRecordSchema).safeParse(raw.archivePending ?? []);
   const cursor = AgendaArchiveCursorSchema.optional().safeParse(raw.archive);
   if (!pending.success || !cursor.success) return null;
-  const archivePending: AgendaArchiveRecord[] = [
-    ...pending.data,
-    ...archive.data.map(record => ({ kind: 'owner-history' as const, ...record })),
-  ];
-  const legacy = raw.version === undefined || raw.version === 1;
+  const archivePending: AgendaArchiveRecord[] = [...pending.data];
   const unreadable: unknown[] = [];
   const ids = new Set<string>();
   let maxId = 0;
@@ -793,7 +693,7 @@ export function parseAgendaLedger(
   // "Couldn't read" for all of them. It still counts as what it was (`setAsideOf`): its id is never reused and
   // it holds its place under the caps, so the board stays one that reads whole should the entry read again.
   for (const rawEntry of raw.entries) {
-    const entry = parseAgendaEntry(rawEntry, legacy, archivePending);
+    const entry = parseAgendaEntry(rawEntry);
     if (entry === null) {
       unreadable.push(rawEntry);
       continue;
@@ -819,7 +719,7 @@ export function parseAgendaLedger(
   ) {
     return null;
   }
-  const parked = parkOwnerReplies({
+  return {
     sessionId,
     nextId: raw.nextId as number,
     entries,
@@ -829,96 +729,8 @@ export function parseAgendaLedger(
     ...(cursor.data === undefined ? {} : { archive: cursor.data }),
     ...(archivePending.length === 0 ? {} : { archivePending }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
-  });
-  return liftedOnRead(toChannel(parked, legacy, archived, recorded));
-}
-
-/**
- * THE MIGRATION TO THE AGENDA AS A CHANNEL (docs/agenda.md § States), read-time, so no file is rewritten until a
- * transition writes it: every item still reads, and nothing on it is dropped.
- *
- * - An open item PARKED as `replied` with no `resting` rests as `waiting-on-ferret`, its reply time its nudge clock.
- *   One from a file an older daemon wrote (`legacy`) is marked `migrated`: the Warden nudges it once after the
- *   upgrade, never again, so a board of old replies is not a burst of nudges. One without it here is an item a
- *   path parked without saying how; it rests the same way, unmarked.
- * - An item that names no stage gets the one its kind says (`done` once it is closed), as the first of its stages.
- * - The ledger is marked {@link AGENDA_LEDGER_VERSION}.
- * - An item with no stored conversation gets one, seeded from the words its history, answers and closing note kept
- *   ({@link seedConversation}); nothing is dropped, and an item that has one is left as it is. An item with a
- *   `recorded` version (a board an older daemon wrote after this one kept it) starts from that version's whole thread
- *   and its merge and split links, and adds only the words said since ({@link resumedConversation}).
- * - What the fit to the transport bound shed from an item's history of the owner's words goes to `archivePending`.
- *
- * Pure, total and idempotent: a ledger already in this shape comes back as it came, the same object.
- */
-export function toChannel(
-  ledger: AgendaLedger,
-  legacy: boolean,
-  archived: readonly AgendaArchiveRecord[] = [],
-  recorded?: Readonly<Record<string, RecordedItem>>,
-): AgendaLedger {
-  let moved = ledger.version !== AGENDA_LEDGER_VERSION;
-  const conversations = { ...(ledger.conversations ?? {}) };
-  const carriedEntries = { ...(ledger.carriedEntries ?? {}) };
-  const shed: AgendaArchiveRecord[] = [];
-  const entries = ledger.entries.map(entry => {
-    const history = [
-      ...[...archived, ...(ledger.archivePending ?? [])]
-        .filter(
-          (record): record is Extract<AgendaArchiveRecord, { kind: 'owner-history' }> =>
-            record.kind === 'owner-history' && record.id === entry.item.id,
-        )
-        .map(record => record.entry),
-      ...(entry.item.history ?? []),
-    ];
-    const stored = conversations[entry.item.id] ?? entry.item.conversation;
-    const version = recorded?.[entry.item.id];
-    const seed = (): AgendaConversationEntry[] => {
-      const seeded = seedConversation({ ...entry.item, history });
-      return version === undefined ? seeded : resumedConversation(version, seeded);
-    };
-    const previous = stored ?? seed();
-    const full = interleaved(previous, undefined);
-    if (full.some((word, index) => word !== previous[index])) moved = true;
-    conversations[entry.item.id] = full;
-    const normalized = channelItem(version === undefined ? entry.item : relinked(entry.item, version), legacy);
-    const item = fitAgendaItem(boundedConversation(normalized, full));
-    (entry.lifecycle === 'active' ? AgendaItemSchema : ResolvedAgendaItemSchema).parse(item);
-    shed.push(...shedOwnerHistory(entry.item, item));
-    if (
-      item.history !== normalized.history ||
-      item.revisions !== normalized.revisions ||
-      (entry.item.stages !== undefined && normalized.stages !== entry.item.stages)
-    ) {
-      carriedEntries[entry.item.id] ??= entry;
-    }
-    if (item === entry.item) return entry;
-    moved = true;
-    return { ...entry, item } as AgendaEntry;
-  });
-  return moved
-    ? {
-        ...ledger,
-        entries,
-        ...(Object.keys(conversations).length === 0 ? {} : { conversations }),
-        ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
-        ...(shed.length === 0 ? {} : { archivePending: [...(ledger.archivePending ?? []), ...shed] }),
-        version: AGENDA_LEDGER_VERSION,
-      }
-    : ledger;
-}
-
-/** The owner's words in history entries that `fitted` shed from `before` (they are kept in the sidecar, as the fit does). */
-function shedOwnerHistory(before: AgendaItem | ResolvedAgendaItem, after: AgendaItem | ResolvedAgendaItem) {
-  const kept = (after.history ?? []).map(record => JSON.stringify(record));
-  const shed: AgendaArchiveRecord[] = [];
-  for (const record of before.history ?? []) {
-    const index = kept.indexOf(JSON.stringify(record));
-    if (index >= 0) kept.splice(index, 1);
-    else if (['replied', 'needs-info', 'discuss'].includes(record.kind))
-      shed.push({ kind: 'owner-history', id: before.id, entry: record });
-  }
-  return shed;
+    version: AGENDA_LEDGER_VERSION,
+  };
 }
 
 /** A bounded recent tail; complete entries only. The durable thread is held separately. */
@@ -952,197 +764,6 @@ function parseTransitionItem(item: AgendaItem) {
         data: { ...parsed.data, ...(item.conversation === undefined ? {} : { conversation: item.conversation }) },
       }
     : parsed;
-}
-
-/** One item in the channel's shape: resting as its park says, and naming its stage; the same item when it already is. */
-function channelItem<Item extends AgendaItem | ResolvedAgendaItem>(item: Item, legacy: boolean): Item {
-  const closed = 'resolvedAt' in item && typeof item.resolvedAt === 'string';
-  const rests = !closed && item.parked?.reason === 'replied' && item.resting === undefined;
-  const staged = item.stage === undefined;
-  if (!rests && !staged) return item;
-  const stage = agendaStage(item);
-  const since = closed ? (item as ResolvedAgendaItem).resolvedAt : item.waitingSince;
-  return {
-    ...item,
-    ...(rests && item.parked !== undefined
-      ? {
-          resting: {
-            sub: 'waiting-on-ferret',
-            at: item.parked.at,
-            ...(legacy ? { migrated: true as const } : {}),
-          } satisfies AgendaResting,
-        }
-      : {}),
-    ...(staged ? { stage, stages: [...(item.stages ?? []), { stage, at: since }].slice(-MAX_AGENDA_STAGES) } : {}),
-  };
-}
-
-/** What a card's agenda asks of its own, beside its card asks: a reply, if the owner wants to talk it over. */
-export const CARD_AGENDA_HOW_TO_RESOLVE =
-  "Answer the card's ask here (its buttons move the card); reply to talk it over. The ferret marks this done.";
-
-const MIGRATION_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
-
-/** A gate item's gate as the card ask it becomes: open, put on the agenda when the gate item was raised. */
-const liftedAsk = (item: AgendaItem, gate: AgendaGate): AgendaCardAsk => {
-  const notYet = (item.history ?? []).findLast(
-    entry => entry.kind === 'gate-answered' && entry.note === gateReference(gate),
-  );
-  return {
-    gate,
-    at: item.waitingSince,
-    ...(item.gate !== undefined && item.body !== undefined && item.body.trim() !== '' ? { howToTest: item.body } : {}),
-    ...(notYet === undefined ? {} : { notYet: { at: notYet.at } }),
-  };
-};
-
-/** The item as it reads, or `undefined` when the lifted shape would not read back (it is then left as it was). */
-const readable = (item: AgendaItem): AgendaItem | undefined => {
-  const parsed = AgendaItemSchema.safeParse(item);
-  return parsed.success ? parsed.data : undefined;
-};
-
-/**
- * An open gate item as its card's agenda (docs/agenda.md § Card asks): the same id, history, snooze and turn, raised
- * on its ferret's behalf (`card-agenda:<card>`), its gate now its card ask, asking nothing of its own but a reply.
- */
-const cardAgendaOf = (item: AgendaItem & { readonly gate: AgendaGate }, at: string): AgendaItem => {
-  const { gate, ask: _ask, answers: _answers, kind: _kind, ...rest } = item;
-  const stage = cardAskStage(gate);
-  const base: AgendaItem = {
-    ...rest,
-    sourceRef: cardAgendaReference(gate.cardId),
-    kind: 'reply',
-    ask: { kind: 'open-question' },
-    howToResolve: CARD_AGENDA_HOW_TO_RESOLVE,
-    ...staged({ ...rest, kind: 'reply', ask: { kind: 'open-question' } }, stage, at),
-  };
-  return withCardAsks(base, [liftedAsk(item, gate)]);
-};
-
-/** Whether an open item is a thread about this card: an agent's own item on it, never a notice or a gate item. */
-const isCardThread = (item: AgendaItem, cardId: string): boolean =>
-  item.raisedBy === 'agent' && canCarryCardAsk(item) && item.task?.id === cardId;
-
-/** The thread that takes a card's ask: one already carrying it, else one on the owner's turn, else the newest. */
-const threadFor = (entries: readonly AgendaEntry[], cardId: string): AgendaItem | undefined => {
-  const threads = entries
-    .filter(isActiveAgenda)
-    .flatMap(entry => (isCardThread(entry.item, cardId) ? [entry.item] : []));
-  const newest = (pool: readonly AgendaItem[]): AgendaItem | undefined =>
-    pool.reduce<AgendaItem | undefined>(
-      (kept, each) =>
-        kept === undefined || Date.parse(each.waitingSince) > Date.parse(kept.waitingSince) ? each : kept,
-      undefined,
-    );
-  return (
-    newest(threads.filter(each => (each.cardAsks ?? []).some(ask => ask.gate.cardId === cardId))) ??
-    newest(threads.filter(each => each.waitingOn === undefined && each.parked === undefined)) ??
-    newest(threads)
-  );
-};
-
-/**
- * The thread with a gate item's ask added: when the gate item was in the owner's queue and the thread was not, the
- * thread takes its place there (`waitingSince`), so moving the ask never takes it out of the owner's sight.
- */
-const threadWithAsk = (thread: AgendaItem, gateItem: AgendaItem & { readonly gate: AgendaGate }): AgendaItem => {
-  const ask = liftedAsk(gateItem, gateItem.gate);
-  const asks = thread.cardAsks ?? [];
-  const carried = asks.some(each => cardAskReference(each) === cardAskReference(ask)) ? asks : [...asks, ask];
-  const shown = agendaState(gateItem).state === 'needs-you' && agendaState(thread).state !== 'needs-you';
-  if (!shown) return withCardAsks(thread, carried);
-  const {
-    parked: _parked,
-    resting: _resting,
-    waitingOn: _waitingOn,
-    askedAt: _askedAt,
-    waitingFor: _waitingFor,
-    ...awake
-  } = thread;
-  return withCardAsks({ ...awake, waitingSince: gateItem.waitingSince }, carried);
-};
-
-const withItem = (ledger: AgendaLedger, item: AgendaItem): AgendaLedger => ({
-  ...ledger,
-  entries: ledger.entries.map(entry =>
-    entry.lifecycle === 'active' && entry.item.id === item.id ? { ...entry, item } : entry,
-  ),
-});
-
-/**
- * THE MIGRATION TO CARD ASKS (docs/agenda.md § Card asks), read-time like {@link toChannel}: a card never asks the
- * owner itself any more, so no open standalone gate item is left on a board, and nothing on one is lost.
- *
- * - A thread with a bare `gateAttached` (no `cardAsks`) carries that gate as its open card ask; a `gate-answered`
- *   entry for it in its history (the owner's Not yet) is kept as the ask's `notYet`.
- * - An open gate item whose card has an open thread on this board (an agent's own item about the card) puts its ask
- *   on that thread and closes, saying where its ask went, so the card has ONE agenda here. The thread takes the gate
- *   item's place in the owner's queue when only the gate item was in it. The closed item keeps its history.
- * - Any other open gate item BECOMES its card's agenda in place: the same id, history, snooze and turn, its gate now
- *   its card ask, asking nothing of its own but a reply, at stage `test` or `plan`, raised on its ferret's behalf.
- *   A second open gate item of the same card adds its ask to that agenda and closes the same way.
- * - Closed items are left exactly as they are: an answered gate keeps its receipt, so a replay still finds it.
- * - An item whose lifted shape would not read back is left as it was.
- *
- * Pure, total and idempotent: a board with no open gate item and no bare `gateAttached` comes back as it came.
- */
-export function liftGateItems(ledger: AgendaLedger): AgendaLedger {
-  const at = ledger.updatedAt;
-  let current = ledger;
-  for (const entry of ledger.entries.filter(isActiveAgenda)) {
-    const gate = entry.item.gateAttached;
-    if (gate === undefined || entry.item.cardAsks !== undefined || isGateItem(entry.item)) continue;
-    const lifted = readable(
-      withCardAsks(entry.item, [{ ...liftedAsk(entry.item, gate), at: entry.item.waitingSince }]),
-    );
-    if (lifted !== undefined) current = withItem(current, lifted);
-  }
-  const gateItems = current.entries
-    .filter(isActiveAgenda)
-    .flatMap(entry =>
-      isGateItem(entry.item) && entry.item.gate !== undefined
-        ? [entry.item as AgendaItem & { readonly gate: AgendaGate }]
-        : [],
-    )
-    .sort((left, right) => Date.parse(right.waitingSince) - Date.parse(left.waitingSince));
-  for (const cardId of new Set(gateItems.map(item => item.gate.cardId))) {
-    const ofCard = gateItems.filter(item => item.gate.cardId === cardId);
-    let carrier = threadFor(current.entries, cardId);
-    let closing = ofCard;
-    if (carrier === undefined) {
-      const [newest, ...older] = ofCard;
-      const converted = newest === undefined ? undefined : readable(cardAgendaOf(newest, at));
-      if (converted === undefined) continue;
-      current = withItem(current, converted);
-      carrier = converted;
-      closing = older;
-    }
-    for (const gateItem of closing) {
-      const carrying = current.entries.find(
-        (entry): entry is Extract<AgendaEntry, { lifecycle: 'active' }> =>
-          entry.lifecycle === 'active' && entry.item.id === carrier?.id,
-      );
-      const target = current.entries.find(
-        (entry): entry is Extract<AgendaEntry, { lifecycle: 'active' }> =>
-          entry.lifecycle === 'active' && entry.item.id === gateItem.id,
-      );
-      if (carrying === undefined || target === undefined) continue;
-      const taken = readable(threadWithAsk(carrying.item, gateItem));
-      if (taken === undefined) continue;
-      const closed = addressed(
-        withItem(current, taken),
-        target,
-        MIGRATION_ACTOR,
-        `its card's ask is now on !${taken.id}`,
-        at,
-        'done',
-        'resolved',
-      );
-      if (closed.ok) current = { ...closed.ledger, updatedAt: ledger.updatedAt };
-    }
-  }
-  return current;
 }
 
 const isWardenActor = (actor: AgendaActor): boolean => actor.kind === 'daemon' && actor.cause === 'warden-escalation';
@@ -1197,89 +818,6 @@ export function agendaLedgerDocument(ledger: AgendaLedger): string {
   return `${JSON.stringify(whole, null, 2)}\n`;
 }
 
-/** Whether an open item sits on the ferret's turn only because the owner wrote about it (not asked for more or to discuss). */
-function waitsOnOwnerReply(item: AgendaItem): boolean {
-  return (
-    item.waitingOn === 'ferret' &&
-    item.waitingFor === 'discussion' &&
-    item.notice !== true &&
-    item.askedAt !== undefined &&
-    Date.parse(item.askedAt) > Date.parse(item.waitingSince) &&
-    !(item.history ?? []).some(entry => entry.kind === 'discuss' && entry.at === item.askedAt)
-  );
-}
-
-/**
- * THE MIGRATION (docs/agenda.md § Parked items): a reply PARKS an item, so a board an earlier daemon wrote is
- * brought to that shape the moment it is read —
- *
- * - an item left on the ferret's turn after an owner reply (before replies closed items) is parked as
- *   `replied` at the reply;
- * - an item CLOSED as `replied` (while replies closed items) is open again, parked as `replied` at its close —
- *   newest first, and only while the board has room (`MAX_AGENDA_PER_SESSION`, and the agent cap for a
- *   ferret's item). The rest stay closed; the ferret's `surface` or `edit` still brings one back.
- *
- * Pure and idempotent: the next write persists it, and a board with nothing to move is returned as it came.
- */
-export function parkOwnerReplies(ledger: AgendaLedger): AgendaLedger {
-  const closed = ledger.entries
-    .filter(
-      (entry): entry is Extract<AgendaEntry, { lifecycle: 'addressed' }> =>
-        entry.lifecycle === 'addressed' && entry.item.disposition === 'replied',
-    )
-    .sort((left, right) => compareAddressed(left.item as ResolvedAgendaItem, right.item as ResolvedAgendaItem));
-  const waiting = ledger.entries.some(entry => entry.lifecycle === 'active' && waitsOnOwnerReply(entry.item));
-  if (!waiting && closed.length === 0) return ledger;
-  const active: AgendaEntry[] = ledger.entries
-    .filter(isActiveAgenda)
-    .map(entry =>
-      entry.item.askedAt !== undefined && waitsOnOwnerReply(entry.item)
-        ? { ...entry, item: parkedReply(entry.item, entry.item.askedAt) }
-        : entry,
-    );
-  const aside = setAsideOf(ledger.unreadable);
-  let agents = active.filter(entry => entry.origin.kind === 'agent').length + aside.agentActive;
-  const reopened: AgendaEntry[] = [];
-  for (const entry of closed) {
-    const room =
-      active.length + aside.active + reopened.length < MAX_AGENDA_PER_SESSION &&
-      (entry.origin.kind !== 'agent' || agents < MAX_AGENT_AGENDA_PER_SESSION);
-    const item = room ? reopenedReply(entry.item as ResolvedAgendaItem) : null;
-    if (item === null) continue;
-    reopened.push({ lifecycle: 'active', origin: entry.origin, item });
-    if (entry.origin.kind === 'agent') agents += 1;
-  }
-  const back = new Set(reopened.map(entry => entry.item.id));
-  const addressedLeft = ledger.entries.filter(entry => entry.lifecycle === 'addressed' && !back.has(entry.item.id));
-  return { ...ledger, entries: [...active, ...reopened, ...addressedLeft] };
-}
-
-/** An open item the owner replied to, parked as `replied` at `at`: out of any wait, with the reply in its history. */
-function parkedReply(item: AgendaItem, at: string): AgendaItem {
-  const { waitingOn: _w, askedAt: _a, waitingFor: _f, undelivered: _u, ...open } = item;
-  return {
-    ...open,
-    parked: { reason: 'replied', at },
-    history: withHistory(open.history, { at, kind: 'replied' }),
-  };
-}
-
-/** A closed `replied` item open again and parked as `replied` at its close; `null` when it no longer reads as an item. */
-function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
-  const {
-    resolvedAt,
-    resolutionNote: _resolutionNote,
-    response: _response,
-    disposition: _disposition,
-    resolvedBy: _resolvedBy,
-    resolvedBySession: _resolvedBySession,
-    resolvedByName: _resolvedByName,
-    ...rest
-  } = closed;
-  const parsed = AgendaItemSchema.safeParse({ ...rest, parked: { reason: 'replied', at: resolvedAt } });
-  return parsed.success ? parsed.data : null;
-}
-
 /**
  * WHAT IS WRITTEN READS BACK. A transition builds its items from what its caller handed it, and the daemon's own
  * callers are typed but not parsed — a Warden notice once carried a 471-character subject. The reader refuses
@@ -1316,25 +854,6 @@ function withWholeThreads(ledger: AgendaLedger): AgendaLedger {
         : ({ ...entry, item: { ...entry.item, conversation: [...conversation] } } as AgendaEntry);
     }),
   };
-}
-
-/**
- * {@link liftGateItems} as a read runs it: on the whole threads, as a transition, and what it changed stored as every
- * write is ({@link fitted}: the thread in the conversations map, a bounded tail on the item), so the words it says
- * when it closes a gate item read back. The same ledger when there is nothing to lift.
- */
-function liftedOnRead(channel: AgendaLedger): AgendaLedger {
-  const expanded = withWholeThreads(channel);
-  const lifted = liftGateItems(expanded);
-  if (lifted === expanded) return channel;
-  // An entry the lift left alone is the stored one again, so only what it changed is fitted.
-  const stored = new Map(expanded.entries.map((entry, index) => [entry, channel.entries[index] ?? entry]));
-  const mutation = success(
-    { ...lifted, entries: lifted.entries.map(entry => stored.get(entry) ?? entry) },
-    true,
-    'refreshed',
-  );
-  return mutation.ok ? fitted(channel, mutation).ledger : channel;
 }
 
 /**
@@ -1507,14 +1026,10 @@ type RaiseCommand = Extract<AgendaCommand, { action: 'raise' }>;
 
 /**
  * The subject the daemon writes on the card agenda it opens or restates, kept as its own (`generatedSubject`): while the
- * subject still equals it, the item asks nothing but its card asks (`isGeneratedCardAgendaAsk`). One carried over from
- * another ferret's agenda keeps what that one held (`AgendaCarried`), never the subject it arrives with.
+ * subject still equals it, the item asks nothing but its card asks (`isGeneratedCardAgendaAsk`).
  */
 const generatedSubjectOf = ({ actor, request }: RaiseCommand): { readonly generatedSubject?: string } =>
-  actor.kind === 'daemon' &&
-  request.carried === undefined &&
-  request.source === 'task' &&
-  parseCardAgendaReference(request.sourceRef) !== undefined
+  actor.kind === 'daemon' && request.source === 'task' && parseCardAgendaReference(request.sourceRef) !== undefined
     ? { generatedSubject: request.subject }
     : {};
 type AddressCommand = Extract<AgendaCommand, { action: 'answer' | 'resolve' | 'dismiss' }>;
@@ -1667,7 +1182,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     },
     actor,
   );
-  // A card agenda opens with its card asks, the first one asked mirrored for an app that predates them.
+  // A card agenda opens with its card asks.
   // One that carries its talk over from another ferret's is not sealed: it reads its activity lines, as one from before the seal does.
   const asked = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
   const item = request.cardAsks === undefined ? asked : sealCardAsks(asked);
@@ -1986,39 +1501,20 @@ function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): Age
     : addressed(ledger, target, command.actor, command.note ?? null, command.at, 'done', 'resolved');
 }
 
-export function parseAgendaEntry(value: unknown, legacy: boolean, pending: AgendaArchiveRecord[]): AgendaEntry | null {
+export function parseAgendaEntry(value: unknown): AgendaEntry | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const origin = parseAgendaActor(raw.origin);
   if (origin === null) return null;
   if (raw.lifecycle === 'active') {
-    const decoded = parseEntryItem(legacy ? StoredAgendaItemSchema : AgendaItemSchema, raw.item, origin);
-    const item = decoded === null ? null : migrateStoredItem(decoded, legacy, pending);
+    const item = parseEntryItem(AgendaItemSchema, raw.item, origin);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'active', origin, item } : null;
   }
   if (raw.lifecycle === 'addressed') {
-    const decoded = parseEntryItem(
-      legacy ? StoredResolvedAgendaItemSchema : ResolvedAgendaItemSchema,
-      raw.item,
-      origin,
-    );
-    const item = decoded === null ? null : migrateStoredItem(decoded, legacy, pending);
+    const item = parseEntryItem(ResolvedAgendaItemSchema, raw.item, origin);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'addressed', origin, item } : null;
   }
   return null;
-}
-
-/** Old writers had no aggregate wire limit. Decode their versions first and preserve them before fitting the view. */
-function migrateStoredItem<Item extends AgendaItem | ResolvedAgendaItem>(
-  item: Item,
-  legacy: boolean,
-  pending: AgendaArchiveRecord[],
-): Item {
-  if (!legacy) return item;
-  const migrated = channelItem(item, true);
-  const fitted = fitAgendaItem(migrated);
-  if (fitted !== migrated) pending.push({ kind: 'version', id: item.id, item });
-  return fitted;
 }
 
 /**
@@ -2912,13 +2408,12 @@ function distinctBy<Item>(items: readonly Item[], key: (item: Item) => string): 
 
 /**
  * A thread the owner and a ferret talk through: not a gate item, a notice, or a card the daemon acts on. One carrying
- * card asks is one (docs/agenda.md § Card asks): `gateAttached` is then only their mirror for an older app.
+ * card asks is one (docs/agenda.md § Card asks).
  */
 function plainThread(item: AgendaItem): boolean {
   return (
     !isGateItem(item) &&
     item.notice !== true &&
-    (item.gateAttached === undefined || item.cardAsks !== undefined) &&
     item.confirms === undefined &&
     item.kind !== 'input' &&
     item.input === undefined &&
@@ -2979,7 +2474,7 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
     );
   }
   // Every card ask of both rides the one item, once per card and entry; the absorbed item keeps none.
-  const asked = joinCardAsks(survivor, absorbed.cardAsks ?? [], command.at, (item, stage) => ({
+  const asked = joinCardAsks(survivor, absorbed.cardAsks ?? [], (item, stage) => ({
     ...item,
     ...staged(item, stage, command.at),
   }));
@@ -3063,7 +2558,7 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
   const moves = (ref: TaskRef): boolean => moving.some(card => sameCard(card, ref));
   // A moved card's asks go with it (docs/agenda.md § Merge and split): the new item carries them, the original keeps the rest.
   const { left, moved } = leaveCardAsks(original, ask => moves({ id: ask.gate.cardId }), command.at);
-  const carried = joinCardAsks(made.item, moved, command.at, (item, stage) => ({
+  const carried = joinCardAsks(made.item, moved, (item, stage) => ({
     ...item,
     ...staged(item, stage, command.at),
   }));
