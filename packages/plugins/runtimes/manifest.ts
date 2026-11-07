@@ -153,7 +153,7 @@ export default definePlugin({
         guard: { none: 'counts only' },
       }),
       // ── the recommender (recommend.ts): no capability today; it names every login, so `operator` ───────────────────
-      route('POST /v1/runtimes/recommend', {
+      route('POST /v1/recommend', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,

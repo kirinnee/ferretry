@@ -44,7 +44,7 @@ describe('runtimes contract', () => {
     expect(axis('GET /v1/runtimes/setup/scan')).toBe('configure');
     expect(axis('GET /v1/runtimes/export')).toBe('configure');
     expect(
-      manifest.actions.routes.find(route => route.key === 'POST /v1/runtimes/recommend')?.capability,
+      manifest.actions.routes.find(route => route.key === 'POST /v1/recommend')?.capability,
     ).toBeUndefined();
   });
 
