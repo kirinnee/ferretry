@@ -59,7 +59,7 @@ import { CatalogItems, type CatalogMcpProvider, type McpSourceServer } from '../
 import catalogsDaemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
 
-import type { CatalogSigningIdentity } from '../../daemon/adapters/signatures.ts';
+import type { CatalogSigningIdentity } from '../../daemon/lib/relay-wire/signatures.ts';
 import {
   catalogLinkSignedBytes,
   catalogManifestSignedBytes,

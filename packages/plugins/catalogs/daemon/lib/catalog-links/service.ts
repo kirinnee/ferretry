@@ -56,7 +56,7 @@ import {
   sealLinkEnvelope,
   signCatalogLink,
   toBase64Url,
-} from '../../adapters/relay.ts';
+} from '../relay-wire/index.ts';
 import { itemForCatalog, readItem } from '../shared-catalogs/freeze.ts';
 import { CatalogRefusal } from '../shared-catalogs/refusal.ts';
 import {

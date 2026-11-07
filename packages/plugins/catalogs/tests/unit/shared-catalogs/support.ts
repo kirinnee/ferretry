@@ -5,7 +5,7 @@ import {
 } from '../../../contract/wire/index.ts';
 import { toBase64Url } from '../../../worker/kernel-wire/index.ts';
 import { WebCryptoSessionCrypto } from '../../../worker/kernel-wire/index.ts';
-import type { CatalogSigningIdentity } from '../../../daemon/adapters/relay.ts';
+import type { CatalogSigningIdentity } from '../../../daemon/lib/relay-wire/index.ts';
 import { type CatalogsDocument, EMPTY_CATALOGS_DOCUMENT } from '../../../daemon/lib/shared-catalogs/document.ts';
 import type { McpSourceServer } from '../../../daemon/lib/shared-catalogs/mcp-source.ts';
 import type {

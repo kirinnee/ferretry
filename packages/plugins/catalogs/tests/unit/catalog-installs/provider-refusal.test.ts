@@ -5,7 +5,7 @@
  */
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
-import type { DaemonIdentity } from '../../../daemon/adapters/relay.ts';
+import type { DaemonIdentity } from '../../../daemon/lib/relay-wire/index.ts';
 import { CatalogItemRefusal } from '../../../contract/items/index.ts';
 import { catalogInstallRoutes } from '../../../daemon/lib/routes/catalog-installs.ts';
 import { newIdentity, skillItem } from '../../support/catalog-fixtures.ts';
