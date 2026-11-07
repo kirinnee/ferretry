@@ -1,5 +1,5 @@
 import { AsksPort } from '@ferretry/core-asks/contract';
-import { AUDIT_KINDS, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
+import { AUDIT_KINDS, audit, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
@@ -16,6 +16,10 @@ import {
   FerretsPort,
   FerretTokensFile,
   ForkFiles,
+  HandoverFiles,
+  MoveInflightFiles,
+  TransferBriefFiles,
+  TransferPlanFiles,
   Harnesses,
   LaunchParts,
   LimitsAppliedFile,
@@ -68,6 +72,74 @@ export default definePlugin({
     // Today's descriptors (packages/daemon/src/lib/runtime/mounts/{sessions,session-control,session-resume,
     // session-rename,session-credential,names,session-filesystem}.ts), paths renamed by the parity table.
     routes: [
+      // ── moves and forks (ferrets-c): today's descriptors from mounts/session-{fork,handover,migrate}.ts, field for
+      // field; paths /v1/sessions/:sessionId/… → /v1/ferrets/:ferretId/…, migrate → move (§1.4).
+      // R-0344
+      route('POST /v1/ferrets/:ferretId/fork', {
+        minimum: 'operator',
+        caller: 'person',
+        noStore: true,
+        audit: audit('session.opened'),
+        guard: { none: 'the fresh ferret summary and the public plan projection; no transcript text' },
+      }),
+      // R-0345
+      route('POST /v1/ferrets/:ferretId/handover', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'drives an existing session; its journal records it' },
+        guard: { none: 'the handover receipt: ids, phases and accounts, no transcript text' },
+      }),
+      // R-0154
+      route('GET /v1/ferrets/:ferretId/handover', {
+        minimum: 'authenticated',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a read of the handover receipt records nothing' },
+        guard: { none: 'the handover receipt: ids, phases and accounts, no transcript text' },
+      }),
+      // R-0346
+      route('POST /v1/ferrets/:ferretId/handover/cancel', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'drives an existing session; its journal records it' },
+        guard: { none: 'the handover receipt: ids, phases and accounts, no transcript text' },
+      }),
+      // R-0169
+      route('GET /v1/ferrets/:ferretId/relaunch-settings', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a read records nothing' },
+        guard: { none: 'whether the launch settings drifted, and which kind; no setting values' },
+      }),
+      // R-0341
+      route('POST /v1/ferrets/:ferretId/conversion-preview', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: {
+          skip: 'a read with a body: previews a cross-harness conversion and writes nothing; the move it precedes is audited',
+        },
+        guard: { none: 'conversion counts and versions; no transcript text' },
+      }),
+      // R-0355
+      route('POST /v1/ferrets/:ferretId/move', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'drives an existing session; its journal records it' },
+        guard: { none: 'the moved ferret view, or the in-flight inventory as titles and trimmed commands' },
+      }),
+      // R-0356
+      route('POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: audit('agent.prompted'),
+        guard: { none: 'the queued message id and the jobs as pid and trimmed command' },
+      }),
       // R-0134: conditional (R501, R503); registered before the pattern below.
       route('GET /v1/ferrets', {
         minimum: 'operator',
@@ -302,6 +374,10 @@ export default definePlugin({
     ],
     // Today's `fy` verbs (packages/cli/src/lib/{session,stop,restart,worktrees}), V-rows of the parity inventory.
     cli: [
+      // V-0329: `fy migrate <id>` → `fy ferret move <id>` (§1.4).
+      verb('ferret move <id>', {
+        summary: 'continue a ferret on another runtime (another harness only with --convert)',
+      }),
       verb('ps', { summary: 'list ferrets' }),
       verb('status [id]', { summary: 'show one ferret in detail, or with --subtree a table of its helpers' }),
       verb('start [prompt...]', { summary: 'start a ferret on one of your agent runtimes' }),
@@ -361,6 +437,10 @@ export default definePlugin({
       FerretPinFiles,
       FerretDetailsFiles,
       FerretSummaryFiles,
+      HandoverFiles,
+      TransferPlanFiles,
+      TransferBriefFiles,
+      MoveInflightFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],
@@ -380,5 +460,11 @@ export default definePlugin({
     ],
     takes: [{ hook: Bearers, key: 'ferret' }],
   },
-  permissions: { roots: ['agent-homes', 'worktrees', 'work'] },
+  // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
+  // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
+  permissions: {
+    roots: ['agent-homes', 'worktrees', 'work', 'harness-history'],
+    spawn: ['ps'],
+    hostFacts: true,
+  },
 });

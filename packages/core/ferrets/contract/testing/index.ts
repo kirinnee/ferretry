@@ -24,7 +24,7 @@ import type {
   StartRefusal,
   Started,
 } from '../kinds.ts';
-import type { FerretsApi, Sitrep, StartFailure, StartRequest } from '../port.ts';
+import type { FerretsApi, ManagedWorktreeSummary, Sitrep, StartFailure, StartRequest } from '../port.ts';
 import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
 
 /** 2026-11-07T12:00:00Z. */
@@ -426,6 +426,14 @@ export class FakeFerrets implements FerretsApi {
   }
   async summary(ferret: FerretId): Promise<string | undefined> {
     return this.#ferrets.get(ferret)?.state === 'stopped' ? this.#summaries.get(ferret) : undefined;
+  }
+  #worktrees: readonly ManagedWorktreeSummary[] = [];
+  /** TEST ONLY: the managed worktree registry `managedWorktrees()` answers. */
+  setManagedWorktrees(rows: readonly ManagedWorktreeSummary[]): void {
+    this.#worktrees = rows;
+  }
+  async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
+    return this.#worktrees;
   }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */

@@ -17,6 +17,7 @@ import { NpmCodexLatest } from './adapters/npm-latest.ts';
 import { packageRunner } from './adapters/package-run.ts';
 import { HostCodexProbe } from './adapters/probe.ts';
 import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import { codexProjectApprovals } from './lib/project-approvals.ts';
 
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -94,7 +95,9 @@ export default implementDaemon(manifest, {
 
     return {
       routes,
-      provides: { codex: { view, discovery } },
+      // `approvedProjectServers` is always `not-taken` (Codex takes no `.mcp.json` server's sign-in, as today); MCP
+      // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
+      provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
         'harnesses:codex': codexHarness({
           kernel,

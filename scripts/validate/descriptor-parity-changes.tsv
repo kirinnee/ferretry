@@ -142,6 +142,22 @@ route	POST /v1/ferrets/:ferretId/task-plans/:planId/revoke	added	session routes 
 route	GET /v1/task-plans	removed	Accounts owns task plans: moved under its own prefix as /v1/accounts/plans (the replaced word `task`); lead decision 2026-11-07 (DECISIONS-1 item 16); descriptor fields unchanged
 route	GET /v1/accounts/plans	added	Accounts owns task plans: moved under its own prefix as /v1/accounts/plans (the replaced word `task`); lead decision 2026-11-07 (DECISIONS-1 item 16); descriptor fields unchanged
 route	POST /v1/push/seen	removed	DECISIONS-1 #4: Agenda owns the seen route; Access keeps push subscriptions.
+route	POST /v1/sessions/:sessionId/fork	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/fork	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/handover	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/handover	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/handover	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/handover	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/handover/cancel	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/handover/cancel	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/relaunch-settings	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/relaunch-settings	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/conversion-preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/conversion-preview	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/migrate	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/move	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/agenda	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/agenda	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/agenda	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged

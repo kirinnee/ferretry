@@ -106,6 +106,28 @@ export type StartFailure =
   | { readonly code: 'harness_unavailable' | 'runner_unavailable' | 'login_unavailable'; readonly reason: string }
   | { readonly code: 'failed'; readonly reason: string };
 
+/**
+ * One checkout in the managed worktree registry (`<home>-worktrees`, `state/ferrets/worktrees.json`): the durable
+ * facts of today's `ManagedWorktreeView` (`protocol/src/lib/worktrees.ts`), copied. Live Git state, the removal
+ * verdict and who stands in it are left out — reading them runs Git. `projectId` is not here: Ferrets is core and
+ * cannot read Projects (§2.1), so a reader joins `commonDirectory` to a project's own (today's `projectForWorktree`).
+ */
+export interface ManagedWorktreeSummary {
+  readonly path: string;
+  readonly branch: string;
+  readonly repositoryRoot: string;
+  /** The repository's common directory: what joins a checkout to its project. */
+  readonly commonDirectory: string;
+  /** Where inside the source checkout the fork was taken from; the empty string is its root. */
+  readonly relativeCwd: string;
+  readonly createdAt: string;
+  readonly initialHead: string;
+  readonly branchPreexisted: boolean;
+  readonly removedAt?: string;
+  /** Why this row is not a finished checkout: a creation declared and never finished (today's `unresolved`). */
+  readonly unresolved?: string;
+}
+
 /** A ferret's whole status: its state, its turn, what plugins add, and its blockers from the Asks port. */
 export interface Sitrep {
   readonly ferret: FerretSummary;
@@ -165,6 +187,14 @@ export interface FerretsApi {
    * masks it inside one `Redaction.read`. Read only.
    */
   summary(ferret: FerretId): Promise<string | undefined>;
+  /**
+   * The managed worktree registry as it is now (today's `ManagedWorktreeService.list()` rows, durable facts only):
+   * every recorded checkout, removed ones included with `removedAt`, then every interrupted creation with
+   * `unresolved`. MCP reads it to map a managed worktree to its project, as today's `mcpInventoryFolders`. Read only;
+   * no Git inspection (only the registry's own settling, as `list()`). Optional, so it is additive: absent reads as no
+   * managed worktree.
+   */
+  managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
   /**
    * What this ferret may control right now (today's "What agents may control"): `limits.yaml`'s `agentControl` over
    * today's defaults, read fresh on every call so a change applies to the ferret's very next action. A ferret this
