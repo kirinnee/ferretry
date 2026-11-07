@@ -250,78 +250,7 @@ const CanonicalAnalyticsPricingRateSchema = z.strictObject({
 
 type CanonicalAnalyticsPricingRate = z.infer<typeof CanonicalAnalyticsPricingRateSchema>;
 
-/**
- * The instant domain the previous schema accepted, canonicalized on the way in.
- *
- * It took anything `Date.parse` understood, so `"2026-07-01"` is in operators' files today. Reading
- * it with the strict instant would have been the same refusal in a different place, so this converts
- * rather than rejects and everything downstream still sees one spelling.
- */
-const LegacyInstantSchema = z
-  .string()
-  .trim()
-  .refine(value => Number.isFinite(Date.parse(value)), 'must be a valid instant')
-  .transform(value => new Date(value).toISOString());
-
-/**
- * The spelling operators already have on disk, read into the canonical one.
- *
- * A CONFIGURATION THAT BOOTED YESTERDAY BOOTS TODAY. The rate table used to be a per-million-token
- * object under `ratesUsdMicrosPerMillion`, and a schema that simply stopped accepting it would refuse
- * the whole document — taking the daemon down over prices, which are not what a daemon is for. This
- * is a second INPUT DOMAIN, not a second validator: it produces the canonical shape and nothing
- * downstream ever sees the old one, so there is still exactly one answer to "what is a valid rate".
- *
- * What it fills in is what the old shape could not say: the currency it always meant, `manual`
- * provenance because nothing synced these, and `null` for the slots it had no way to express. None of
- * those is a guess about a price.
- */
-const LegacyAnalyticsPricingRateSchema = z
-  .strictObject({
-    pricingKey: NonEmptyStringSchema.max(128),
-    modelId: NonEmptyStringSchema.max(128),
-    aliases: z.array(NonEmptyStringSchema.max(128)).max(32).readonly().default([]),
-    provider: AnalyticsPricingProviderSchema,
-    ratesUsdMicrosPerMillion: z.strictObject({
-      input: UsdMicrosSchema,
-      cachedRead: UsdMicrosSchema,
-      cacheWrite: UsdMicrosSchema.optional(),
-      cacheWrite5m: UsdMicrosSchema.optional(),
-      cacheWrite1h: UsdMicrosSchema.optional(),
-      output: UsdMicrosSchema,
-    }),
-    verifiedAt: LegacyInstantSchema,
-    validFrom: LegacyInstantSchema,
-    validThrough: LegacyInstantSchema.optional(),
-  })
-  .transform(
-    (rate): CanonicalAnalyticsPricingRate => ({
-      pricingKey: rate.pricingKey,
-      modelId: rate.modelId,
-      aliases: rate.aliases,
-      provider: rate.provider,
-      currency: 'USD',
-      rates: {
-        input: rate.ratesUsdMicrosPerMillion.input,
-        output: rate.ratesUsdMicrosPerMillion.output,
-        cachedInput: rate.ratesUsdMicrosPerMillion.cachedRead,
-        cacheWrite: rate.ratesUsdMicrosPerMillion.cacheWrite ?? null,
-        cacheWrite5m: rate.ratesUsdMicrosPerMillion.cacheWrite5m ?? null,
-        cacheWrite1h: rate.ratesUsdMicrosPerMillion.cacheWrite1h ?? null,
-        reasoning: null,
-        image: null,
-        tool: null,
-      },
-      source: { kind: 'manual' },
-      validFrom: rate.validFrom,
-      validThrough: rate.validThrough ?? null,
-      verifiedAt: rate.verifiedAt,
-      lastSyncedAt: null,
-    }),
-  );
-
-export const AnalyticsPricingRateSchema = z
-  .union([CanonicalAnalyticsPricingRateSchema, LegacyAnalyticsPricingRateSchema])
+export const AnalyticsPricingRateSchema = CanonicalAnalyticsPricingRateSchema
   .superRefine((rate, context) => {
     if (rate.validThrough !== null && Date.parse(rate.validThrough) < Date.parse(rate.validFrom)) {
       context.addIssue({ code: 'custom', path: ['validThrough'], message: 'must not precede validFrom' });

@@ -95,7 +95,6 @@ const rawSession = {
   contextEndPercent: 74.5,
   stalled: false,
   failed: false,
-  migrated: false,
   completed: true,
 } satisfies AnalyticsRawSession;
 

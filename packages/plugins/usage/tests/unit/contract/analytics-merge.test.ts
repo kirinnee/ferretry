@@ -192,7 +192,6 @@ function raw(id: string, overrides: Partial<AnalyticsRawSession> = {}): Analytic
     contextEndPercent: null,
     stalled: false,
     failed: false,
-    migrated: false,
     completed: true,
     ...overrides,
   };

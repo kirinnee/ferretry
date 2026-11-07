@@ -46,9 +46,8 @@ export const AnalyticsPricingViewSchema = z.strictObject({
    * operator's `catalog` does not price — an operator row WINS for its whole model, so a row here is
    * exactly what analytics charges a session at when nobody configured a price. Read-only: no patch
    * or apply addresses them, and they are outside `catalogFingerprint`, which guards operator edits.
-   * Absent from a daemon older than the field, which priced nothing from a catalog.
    */
-  modelCatalogRates: z.array(ModelCatalogAnalyticsPricingRateSchema).max(512).readonly().optional(),
+  modelCatalogRates: z.array(ModelCatalogAnalyticsPricingRateSchema).max(512).readonly(),
   catalogFingerprint: AnalyticsPricingFingerprintSchema,
   sources: ConfiguredAnalyticsPricingSourcesSchema,
   sourcesFingerprint: AnalyticsPricingFingerprintSchema,

@@ -255,7 +255,6 @@ export const AnalyticsRawSessionSchema = z.object({
   contextEndPercent: z.number().finite().min(0).max(100).nullable(),
   stalled: z.boolean(),
   failed: z.boolean(),
-  migrated: z.boolean(),
   completed: z.boolean(),
 });
 export type AnalyticsRawSession = z.infer<typeof AnalyticsRawSessionSchema>;
