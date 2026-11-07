@@ -2,6 +2,7 @@ import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferret
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
+import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import {
   AUDIT,
   GUARD_ACK,
@@ -51,6 +52,8 @@ export default definePlugin({
   provides: { terminals: TerminalsPort },
   /** Who holds terminals and where a ferret works (Ferrets); input cards a ferret raises (Vault). */
   needs: { ferrets: FerretsPort, vault: VaultPort },
+  /** Conversation (optional; lead ruling 2026-11-07): Off, nothing asks Terminals for the composer's `%terminal` menu. */
+  uses: { conversation: ConversationPort },
 
   actions: {
     routes: [
@@ -308,6 +311,8 @@ export default definePlugin({
     takes: [
       { hook: InputTargets, key: 'terminal' },
       { hook: Runners, key: 'tmux' },
+      /** The composer's `%terminal` menu is this plugin's: the terminals the ferret holds (reference.catalog). */
+      { hook: ReferenceCatalog, key: '%terminal' },
     ],
   },
 

@@ -39,10 +39,11 @@ describe('terminals manifest', () => {
       else expect(entry.guard).toBe('secrets');
     }
   });
-  test('takes the terminal input target and the tmux runner', () => {
+  test('takes the terminal input target, the tmux runner and the %terminal reference menu', () => {
     expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
       'input.targets:terminal',
       'runners:tmux',
+      'reference.catalog:%terminal',
     ]);
   });
   test('uses neither Browsers nor the Warden, so their optional uses of Terminals make no cycle', () => {
