@@ -217,7 +217,7 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   G161: {
     owner: 'ferrets',
     reason:
-      "enforced by Ferrets' `GET /v1/events` socket descriptor (`operator` minimum) under Gate's admission; a `live` frame is the same journal envelope the snapshot read serves",
+      "enforced by Ferrets' `GET /v1/events` socket descriptor (`operator` minimum) under Gate's admission; a `live` frame is the frame schema's live-activity readout, the same fields the pane and transcript reads serve",
   },
   I14: {
     owner: 'asks',

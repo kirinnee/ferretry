@@ -5,7 +5,10 @@ import { DaemonClient, fillPath } from '../../../src/client/daemon-client.ts';
 import { DaemonCallError, type TransportRequest } from '../../../src/client/transport.ts';
 import { CORE, FakeTransport, inventoryOf, json, surface } from './fixtures.ts';
 
-const board = surface('board', { routes: ['GET /v1/board', 'GET /v1/board/:id'], sockets: ['GET /v1/board/stream'] });
+const board = surface('board', {
+  routes: ['GET /v1/board', 'GET /v1/board/:id'],
+  sockets: ['GET /v1/board/stream', 'GET /v1/board/:id/stream'],
+});
 const agenda = surface('agenda', { routes: ['GET /v1/agenda'] });
 const compiled = [...CORE, board, agenda];
 const BoardChanged = defineEvent('board.changed', z.strictObject({ id: z.string() }));
@@ -29,6 +32,12 @@ describe('fillPath', () => {
   test('substitutes and encodes parameters', () => {
     expect(fillPath('/v1/board/:id', { id: 'F 1' })).toBe('/v1/board/F%201');
     expect(() => fillPath('/v1/board/:id')).toThrow('needs the parameter "id"');
+  });
+
+  test('refuses a parameter that is a dot segment or holds a slash, so it cannot reach another route', () => {
+    for (const id of ['.', '..', 'a/b', '../stream'])
+      expect(() => fillPath('/v1/board/:id/stream', { id })).toThrow(/cannot be "\." or "\.\." or hold a "\/"/u);
+    expect(fillPath('/v1/board/:id/stream', { id: '..a' })).toBe('/v1/board/..a/stream');
   });
 });
 
@@ -137,6 +146,47 @@ describe('the guard', () => {
       '/v1/board/stream?after=3&sessionId=a+b%26c%3Dd',
       '/v1/board/stream',
     ]);
+  });
+
+  test('a socket route fills its :param, and a query with ?, #, &, = and non-ASCII in keys and values cannot leave the query', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+
+    client
+      .forPackage('board')
+      .socket(
+        'GET /v1/board/:id/stream',
+        { id: 'F 1' },
+        { onFrame: () => {}, onClose: () => {} },
+        { 'k&x=y?z#w': 'a?b#c/d&e=f', kéy: 'välue ✓' },
+      );
+
+    const opened = transport.sockets.map(open => open.path);
+    expect(opened).toHaveLength(1);
+    const url = new URL(opened[0] ?? '', 'http://daemon.test');
+    expect(url.pathname).toBe('/v1/board/F%201/stream');
+    expect(url.hash).toBe('');
+    expect([...url.searchParams.entries()]).toEqual([
+      ['k&x=y?z#w', 'a?b#c/d&e=f'],
+      ['kéy', 'välue ✓'],
+    ]);
+    for (const encoded of ['%3F', '%23', '%26', '%3D', '%2F', '%C3%A9', '%E2%9C%93'])
+      expect(opened[0]).toContain(encoded);
+    expect((opened[0] ?? '').match(/\?/gu)).toHaveLength(1);
+  });
+
+  test('a socket parameter that is a dot segment is refused at once, nothing is opened', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    const listeners = { onFrame: () => {}, onClose: () => {} };
+
+    expect(() => client.forPackage('board').socket('GET /v1/board/:id/stream', { id: '..' }, listeners)).toThrow(
+      /cannot be/u,
+    );
+    expect(() => client.forPackage('board').socket('GET /v1/board/:id/stream', { id: '.' }, listeners)).toThrow(
+      /cannot be/u,
+    );
+    expect(transport.sockets).toHaveLength(0);
   });
 
   test('a socket hears when the daemon accepts the stream, and the close code the stream ended with', async () => {

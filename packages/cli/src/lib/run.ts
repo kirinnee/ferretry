@@ -42,6 +42,7 @@ import { updateVerb } from './commands/update.ts';
 import { EXIT, errorText, ShellError } from './errors.ts';
 import { pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
+import { buildRequest } from './request.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
 import { buildVerbTable, expandAlias, renderHelp, resolveVerb, type VerbEntry } from './verbs.ts';
 import type { CliWorld } from './world.ts';
@@ -279,6 +280,8 @@ function lazyClient(deps: () => Promise<ClientDeps>, id: string, surfaces: Surfa
     socket: (key, params, listeners, query) => {
       // Declared and person-only checks come first and throw here, before the connection exists (S59).
       socketFactsBeforeContact(surfaces, paned, key);
+      // A missing, unused or unsafe parameter fails the caller here, before the daemon is contacted, not through onClose.
+      buildRequest(key, { params, ...(query === undefined ? {} : { query }) });
       let socket: PluginSocket | undefined;
       let closed = false;
       // The connection opens now, like a call; a refusal to connect ends the stream with its words.

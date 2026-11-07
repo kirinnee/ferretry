@@ -82,7 +82,8 @@
       "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
       "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
       "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
-      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile",
+      "GAP(live): production wires no LiveActivitySource into GET /v1/events (packages/core/ferrets/daemon/index.ts passes no extras), so ?live=1 is accepted and sends no live frames today; G161 holds because nothing is sent, and a test with a fake source pins what a wired one may send"
     ],
     "conversation": [
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",

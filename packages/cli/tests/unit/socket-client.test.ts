@@ -69,6 +69,45 @@ describe('the guarded client opens a socket route', () => {
     should(transport.opened.map(open => open.path)).deepEqual(['/v1/tracks/a%20b/stream?after=3&sessionId=x%26y%3Dz']);
   });
 
+  it('keeps ?, #, &, = and non-ASCII in keys and values inside the query', async () => {
+    const transport = new StreamingTransport();
+    const { deps } = depsOf(registry, healthy, { transport });
+
+    pluginClient(deps, 'tracks').socket(
+      'GET /v1/tracks/:id/stream',
+      { id: 'a' },
+      { onFrame: () => {}, onClose: () => {} },
+      { 'k&x=y?z#w': 'a?b#c/d&e=f', kéy: 'välue ✓' },
+    );
+    await settle();
+
+    const [path] = transport.opened.map(open => open.path);
+    const url = new URL(path ?? '', 'http://daemon.test');
+    should(url.pathname).equal('/v1/tracks/a/stream');
+    should(url.hash).equal('');
+    should([...url.searchParams.entries()]).deepEqual([
+      ['k&x=y?z#w', 'a?b#c/d&e=f'],
+      ['kéy', 'välue ✓'],
+    ]);
+    for (const encoded of ['%3F', '%23', '%26', '%3D', '%2F', '%C3%A9', '%E2%9C%93']) should(path).containEql(encoded);
+    should((path ?? '').match(/\?/gu)).have.length(1);
+  });
+
+  it('refuses a dot-segment parameter before anything is contacted', async () => {
+    const transport = new StreamingTransport();
+    const { deps, reads } = depsOf(registry, healthy, { transport });
+    const listeners = { onFrame: () => {}, onClose: () => {} };
+
+    for (const id of ['.', '..'])
+      should(() => pluginClient(deps, 'tracks').socket('GET /v1/tracks/:id/stream', { id }, listeners)).throw(
+        /cannot be "\." or "\.\."/u,
+      );
+    await settle();
+
+    should(transport.opened).deepEqual([]);
+    should(reads.count).equal(0);
+  });
+
   it('opens the bare path when no query is given', async () => {
     const transport = new StreamingTransport();
     const { deps } = depsOf(registry, healthy, { transport });

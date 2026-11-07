@@ -90,11 +90,13 @@ interface OpenSocket {
   readonly listeners: SocketListeners;
 }
 
-/** `/v1/board/:id` + `{ id: 'F 1' }` → `/v1/board/F%201`. A missing parameter is a programming error. */
+/** `/v1/board/:id` + `{ id: 'F 1' }` → `/v1/board/F%201`. A missing parameter, `.`, `..` or one holding a `/` is refused. */
 export function fillPath(template: string, params: Readonly<Record<string, string>> = {}): string {
   return template.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, (_, name: string) => {
     const value = params[name];
     if (value === undefined) throw new TypeError(`route ${template} needs the parameter "${name}"`);
+    if (value === '.' || value === '..' || value.includes('/'))
+      throw new TypeError(`route ${template}: the parameter "${name}" cannot be "." or ".." or hold a "/"`);
     return encodeURIComponent(value);
   });
 }

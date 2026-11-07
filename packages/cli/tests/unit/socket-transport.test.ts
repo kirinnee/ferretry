@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
 import { type FeedSocket, HttpTransport } from '../../src/adapters/daemon/http-transport.ts';
+import { SessionCredentialGateway } from '../../src/adapters/agent-tools/session-credential-gateway.ts';
 import { isLocalDaemonUrl } from '../../src/lib/address.ts';
 
 // Synthetic fixtures only: a placeholder credential and a WebSocket server on a loopback port the test owns.
@@ -180,6 +181,20 @@ describe('DaemonTransport.socket', () => {
     should(closed).deepEqual(['refusing to send the daemon admin token to https://daemon.example']);
     should(reads.count).equal(0);
     should(opens).equal(0);
+  });
+
+  it('the ferret gateway’s own guard refuses an address that is not this machine, and opens no socket', async () => {
+    const closed: string[] = [];
+
+    new SessionCredentialGateway({ baseUrl: async () => 'http://192.0.2.1:1', bearer: 'fys_unit-test-only' }).socket(
+      '/v1/events',
+      { onFrame: () => {}, onClose: reason => closed.push(reason) },
+    );
+    await until(() => closed.length > 0);
+
+    should(closed).deepEqual([
+      'a ferret’s fy talks only to the daemon on this machine, and http://192.0.2.1:1 is not on it',
+    ]);
   });
 
   it('refuses a path that names another host, before the credential is read', async () => {

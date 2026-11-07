@@ -12,6 +12,7 @@ import {
 } from '../../../../daemon/modules/fleet-events.ts';
 import { FyEventStreamFrameSchema } from '../../../../daemon/lib/protocol/session.ts';
 import { journalEventToFyEvent } from '../../../../daemon/lib/session/peers/reads.ts';
+import { FerretLiveActivitySchema } from '../../../../contract/index.ts';
 import ferretsManifest from '../../../../manifest.ts';
 import { createSessionEvent, encodeSessionEvent } from '../../../../daemon/lib/storage/journal.ts';
 import type { SessionId } from '../../../../daemon/lib/session-id.ts';
@@ -284,13 +285,8 @@ describe('G161 R520 the socket: replay, then the idle proof, then live appends',
   });
 });
 
-describe('G161 live frames widen nothing', () => {
-  test('G161 the socket descriptor’s minimum is operator: Gate admits a live frame to no wider a caller than the snapshot and log reads', () => {
-    const declared = ferretsManifest.actions?.sockets?.find(entry => entry.key === 'GET /v1/events');
-    expect(declared?.minimum).toBe('operator');
-  });
-
-  test('G161 a live frame carries only the envelope fields a replayed (snapshot) event carries, nothing the journal line did not', async () => {
+describe('journal events on the stream', () => {
+  test('a live-tailed event carries only the envelope fields a replayed event carries, nothing the journal line did not', async () => {
     const { append, source } = world();
     await append('wren', 1);
     const accept = fleetEventsAccept(source, { after: () => ({ cancel: () => undefined }) }, id => id === 'wren');
@@ -322,5 +318,87 @@ describe('G161 live frames widen nothing', () => {
       Object.keys(journalEventToFyEvent({ sequence: 0, sessionId: 'x', time: NOW, type: 't', data: null })).sort(),
     );
     expect(JSON.stringify(feed.frames).includes('must-not-travel')).toBe(false);
+  });
+});
+
+describe('G161 live frames widen nothing', () => {
+  /** The socket the way a `?live=1` reader opens it, with `sample` as the live readout behind it. */
+  async function openLive(sample: () => unknown) {
+    const { source } = world();
+    const timers: (() => void)[] = [];
+    const accept = fleetEventsAccept(
+      source,
+      { after: (_ms, action) => (timers.push(action), { cancel: () => undefined }) },
+      id => id === 'wren',
+      { live: { sample: async () => sample() as never } },
+    );
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['live', '1'],
+      ]),
+    );
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    // Run every timer armed so far (the live sampler is armed at once after the replay), then let its sample settle.
+    for (const run of timers.splice(0)) run();
+    await Bun.sleep(5);
+    const live = () =>
+      feed.frames
+        .map(frame => FyEventStreamFrameSchema.parse(frame))
+        .flatMap(frame => (frame.kind === 'live' ? [frame.live] : []));
+    return { live, feed };
+  }
+
+  const FULL_READING = {
+    sessionId: 'wren',
+    at: NOW,
+    turnStartedAt: NOW,
+    verb: 'Pontificating…',
+    outputTokens: 12,
+    inputTokens: 34,
+    outputSource: 'transcript',
+    compaction: { phase: 'done', endedAt: NOW },
+  };
+
+  test('G161 the socket descriptor’s minimum is operator, the same as the ferret read Gate admits at', () => {
+    const declared = ferretsManifest.actions?.sockets?.find(entry => entry.key === 'GET /v1/events');
+    const read = ferretsManifest.actions?.routes?.find(entry => entry.key === 'GET /v1/ferrets/:ferretId');
+    expect(declared?.minimum).toBe('operator');
+    expect(declared?.minimum).toBe(read?.minimum);
+  });
+
+  test('G161 a ?live=1 stream sends live frames whose fields are exactly the live-activity fields the readout serves', async () => {
+    const { live } = await openLive(() => FULL_READING);
+    const frames = live();
+    expect(frames).toHaveLength(1);
+    const allowed = Object.keys(FerretLiveActivitySchema.shape).sort();
+    expect(Object.keys(frames[0] ?? {}).sort()).toEqual(allowed);
+    expect(frames[0]).toEqual(FULL_READING as never);
+  });
+
+  test('G161 a reading that carries a field beyond those is refused by the frame schema, so it never travels', async () => {
+    const { live, feed } = await openLive(() => ({ ...FULL_READING, secret: 'must-not-travel' }));
+    expect(live()).toEqual([]);
+    expect(JSON.stringify(feed.frames).includes('must-not-travel')).toBe(false);
+  });
+
+  test('G161 a stream that did not ask for ?live=1 sends no live frame even when a readout is wired', async () => {
+    const { source } = world();
+    const timers: (() => void)[] = [];
+    const accept = fleetEventsAccept(
+      source,
+      { after: (_ms, action) => (timers.push(action), { cancel: () => undefined }) },
+      id => id === 'wren',
+      { live: { sample: async () => FULL_READING as never } },
+    );
+    const attach = await accept(call([['sessionId', 'wren']]));
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    for (const run of timers.splice(0)) run();
+    await Bun.sleep(5);
+    expect(feed.frames.map(frame => FyEventStreamFrameSchema.parse(frame).kind)).not.toContain('live');
   });
 });
