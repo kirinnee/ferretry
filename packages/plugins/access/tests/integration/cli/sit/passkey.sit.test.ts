@@ -174,11 +174,15 @@ describe(`passkey window (SIT, ${process.env.CLI_BIN ? 'compiled binary' : 'bun 
 
   it('should be mounted and name itself in --help', async () => {
     // Act
-    const actual = await driver.run(['passkey', '--help'], sitEnvironment({ FY_TOKEN: '', FY_URL: '' }));
+    const group = await driver.run(['passkey', '--help'], sitEnvironment({ FY_TOKEN: '', FY_URL: '' }));
+    const window = await driver.run(['passkey', 'window', '--help'], sitEnvironment({ FY_TOKEN: '', FY_URL: '' }));
 
-    // Assert — the 5.0 shell renders the manifest's summaries; the long help (`passkeyHelp`) has no seat yet.
-    should(actual.code).equal(0);
-    should(actual.out)
+    // Assert — the 5.0 shell prints the one verb's own manifest summary and does not list the verbs under it, so
+    // each verb is asked for itself; the long help (`passkeyHelp`) has no seat yet.
+    should(group.code).equal(0);
+    should(group.out).containEql('passkey').and.containEql("this machine's passkeys");
+    should(window.code).equal(0);
+    should(window.out)
       .containEql('passkey window')
       .and.containEql('open a short window in which a device may add a passkey');
   });
