@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { err, ok } from '@ferretry/std';
 import { SHELL_CODES, ShellItemSchema, ShellLockSchema } from '../../contract/index.ts';
 import { buildKey, cacheName } from '../../daemon/lib/source.ts';
@@ -88,7 +89,7 @@ describe('adding a shell', () => {
     expect(h.state.files.has('locks/web.json')).toBe(false);
   });
 
-  test('a name already taken is a conflict; no nix is a conflict that says what to do; no door is 503', async () => {
+  test('a name already taken is a conflict; no nix is a conflict that says what to do', async () => {
     const taken = withWeb({ initial: { 'shells/web': { flake: lockedRef } } });
     expect((await taken.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) })).ok).toBe(false);
     const result = await taken.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
@@ -99,10 +100,6 @@ describe('adding a shell', () => {
     const refused = await noNix.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
     expect(!refused.ok && refused.refusal).toMatchObject({ status: 409, code: SHELL_CODES.noNix });
     expect(!refused.ok && refused.refusal.sentence).toContain('install nix');
-
-    const noDoor = withWeb({ noDoor: true });
-    const unavailable = await noDoor.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
-    expect(!unavailable.ok && unavailable.refusal).toMatchObject({ status: 503, code: SHELL_CODES.noConfigDoor });
   });
 
   test('a source nix cannot read is refused with nix’s own words and nothing is written', async () => {
@@ -339,17 +336,76 @@ test('a direct relock keeps the active lock through owner hold and activates onl
   expect(h.tree.calls).toHaveLength(2);
 });
 
-test('a new resolution cannot become active while held, or without the config approval door', async () => {
-  for (const options of [{ hold: ['approve the resolved hash'] }, { noDoor: true }]) {
-    const h = shellsHarness({
-      ...options,
-      initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true } },
+test('a new resolution cannot become active while its approval is held for the owner', async () => {
+  const hold = ['approve the resolved hash'];
+  const h = shellsHarness({
+    hold,
+    initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true } },
+  });
+  h.nix.metadata.set('github:me/shells', flakeFacts());
+  const result = await h.service.relock('web', { expectedHash: HASH_A });
+  expect(result.ok && result.value.held).toEqual(hold);
+  expect(h.state.files.has('locks/web.json')).toBe(false);
+  expect((await h.service.build('web')).ok).toBe(false);
+});
+
+describe('every outcome the kernel’s config writer can give', () => {
+  const refused: ConfigWriteOutcome = {
+    kind: 'refused',
+    reason: 'schema',
+    issues: [{ path: 'shells', message: 'the shell does not check' }],
+  };
+  const moved: ConfigWriteOutcome = { kind: 'conflict' };
+  const unpinned = { 'shells/web': { flake: 'github:me/shells#web', floating: true } };
+
+  test('add: a refusal is a 422 in the kernel’s words, a moved file a 409, and no lock is kept for either', async () => {
+    const one = withWeb({ forced: refused });
+    const result = await one.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
+    expect(!result.ok && result.refusal).toEqual({
+      status: 422,
+      code: SHELL_CODES.invalid,
+      sentence: 'the shell does not check',
     });
-    h.nix.metadata.set('github:me/shells', flakeFacts());
-    const result = await h.service.relock('web', { expectedHash: HASH_A });
-    if ('noDoor' in options) expect(!result.ok && result.refusal.code).toBe(SHELL_CODES.noConfigDoor);
-    else expect(result.ok && result.value.held).toEqual(options.hold);
-    expect(h.state.files.has('locks/web.json')).toBe(false);
-    expect((await h.service.build('web')).ok).toBe(false);
-  }
+    expect(one.state.files.has('locks/web.json')).toBe(false);
+    expect(one.published).toEqual([]);
+
+    const other = withWeb({ forced: moved });
+    const conflict = await other.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
+    expect(!conflict.ok && conflict.refusal).toMatchObject({ status: 409, code: SHELL_CODES.hashChanged });
+    expect(other.state.files.has('locks/web.json')).toBe(false);
+    expect(other.published).toEqual([]);
+  });
+
+  test('relock: a refusal is a 422, a moved file a 409, and the active lock is kept for either', async () => {
+    for (const [forced, status, code] of [
+      [refused, 422, SHELL_CODES.invalid],
+      [moved, 409, SHELL_CODES.hashChanged],
+    ] as const) {
+      const h = shellsHarness({ initial: unpinned, forced });
+      h.nix.metadata.set('github:me/shells', flakeFacts());
+      const result = await h.service.relock('web', { expectedHash: HASH_A });
+      expect(!result.ok && result.refusal).toMatchObject({ status, code });
+      expect(h.state.files.has('locks/web.json')).toBe(false);
+    }
+  });
+
+  test('remove: a refusal, a moved file or a hold leaves the shell and its lock where they were', async () => {
+    const seed = withWeb();
+    const added = await seed.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
+    const lock = added.ok ? added.value.lock : undefined;
+    const item = Bun.YAML.parse(seed.tree.calls[0]?.text as string);
+    const held: ConfigWriteOutcome = { kind: 'held', etag: 'e1', id: 'h1', sentences: ['it waits'] };
+    for (const [forced, status, code] of [
+      [refused, 422, SHELL_CODES.invalid],
+      [moved, 409, SHELL_CODES.hashChanged],
+      [held, 409, SHELL_CODES.hashChanged],
+    ] as const) {
+      const h = shellsHarness({ initial: { 'shells/web': item }, forced });
+      h.state.files.set('locks/web.json', lock);
+      const result = await h.service.remove('web');
+      expect(!result.ok && result.refusal).toMatchObject({ status, code });
+      expect(h.state.files.has('locks/web.json')).toBe(true);
+      expect(h.published).toEqual([]);
+    }
+  });
 });

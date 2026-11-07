@@ -100,7 +100,13 @@ export type SlotName = FrameSlot | `${string}.${string}`;
 
 export interface ScreenDecl<Id extends string = string> {
   readonly id: Id;
+  /**
+   * Where the screen is served. RELATIVE (`board/:card`) is per daemon, at `/d/<daemon>/board/<card>`; ABSOLUTE
+   * (`/join`) is daemon-less and must also say `daemonless: true` (the `screen-paths` check refuses it otherwise).
+   */
   readonly path: string;
+  /** On purpose, the screen belongs to no daemon (a share link's landing page, first-run setup). Absolute paths only. */
+  readonly daemonless?: true;
   readonly nav?: { readonly label: string; readonly icon?: string; readonly order: number };
 }
 

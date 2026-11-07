@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createLayoutsService } from '../../daemon/lib/service.ts';
 import { COMPACT_LAYOUT, DEFAULT_LAYOUT, LayoutSchema } from '../../contract/index.ts';
-import { configTree } from './support.ts';
+import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
+import { configTree, refusing } from './support.ts';
 
-const make = (initial: Record<string, Record<string, unknown>> = {}, refuse?: string) => {
-  const tree = configTree(initial, refuse);
-  return { tree, service: createLayoutsService(tree.port, tree.door) };
+const make = (initial: Record<string, Record<string, unknown>> = {}, forced?: ConfigWriteOutcome) => {
+  const tree = configTree(initial, forced);
+  return { tree, service: createLayoutsService(tree.port) };
 };
 
 describe('layouts service', () => {
@@ -119,24 +120,60 @@ describe('layouts service', () => {
     expect(service.layout('default')?.density).toBe('comfortable');
   });
 
-  test('without a config door every write is unavailable and every read still works', async () => {
-    const tree = configTree();
-    const service = createLayoutsService(tree.port, undefined);
-    for (const result of [
-      await service.set([{ path: 'density', value: 'compact' }]),
-      await service.use('compact'),
-      await service.useTheme('default'),
-      await service.reset(),
-      await service.save('mine'),
-    ])
-      expect(!result.ok && result.refusal.kind).toBe('unavailable');
-    expect(service.current().layout.id).toBe('default');
+  /** Every way a layout is changed, so each kernel outcome is checked on all of them. */
+  const everyChange = (service: ReturnType<typeof make>['service']) => [
+    () => service.set([{ path: 'density', value: 'compact' }]),
+    () => service.use('compact'),
+    () => service.useTheme('default'),
+    () => service.reset(),
+    () => service.save('other'),
+    () => service.remove('mine'),
+  ];
+  const saved = { 'layouts/mine': { ...DEFAULT_LAYOUT, id: 'mine' } };
+
+  test('an edit the kernel holds for the owner is a 409 config_held on every change, naming what waits', async () => {
+    const held: ConfigWriteOutcome = { kind: 'held', etag: 'e1', id: 'h1', sentences: ['it would widen a thing'] };
+    const { service } = make(saved, held);
+    for (const change of everyChange(service)) {
+      const result = await change();
+      expect(!result.ok && result.refusal).toEqual({
+        kind: 'conflict',
+        code: 'config_held',
+        sentence: 'held for the owner: it would widen a thing',
+      });
+    }
   });
 
-  test('a write the config door refuses is reported as an invalid layout', async () => {
-    const { service } = make({}, 'overrides: not a mapping');
-    const result = await service.set([{ path: 'density', value: 'compact' }]);
-    expect(!result.ok && result.refusal.kind).toBe('invalid');
+  test('a file that moved since it was read is a 409 config_conflict on every change, not a crash', async () => {
+    const { service } = make(saved, { kind: 'conflict' });
+    for (const change of everyChange(service)) {
+      const result = await change();
+      expect(!result.ok && result.refusal).toMatchObject({ kind: 'conflict', code: 'config_conflict' });
+    }
+  });
+
+  test('a write the kernel refuses is an invalid layout carrying the kernel’s own issues, on every change', async () => {
+    const { service } = make(saved, refusing('not a mapping'));
+    for (const change of everyChange(service)) {
+      const result = await change();
+      expect(!result.ok && result.refusal).toEqual({
+        kind: 'invalid',
+        code: 'layout_invalid',
+        issues: [{ path: 'density', message: 'not a mapping' }],
+      });
+    }
+  });
+
+  test('a refusal that names no line or path is still an invalid layout, never a crash', async () => {
+    const { service } = make(
+      {},
+      { kind: 'refused', reason: 'raw_secret', issues: [{ path: '', message: 'a secret' }] },
+    );
+    const result = await service.use('compact');
+    expect(!result.ok && result.refusal).toMatchObject({
+      kind: 'invalid',
+      issues: [{ path: '', message: 'a secret' }],
+    });
   });
 });
 
@@ -148,7 +185,7 @@ test('selecting a saved theme the app cannot read is refused before changing the
       ...tree.port,
       collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', base: 'neo', light, dark: {} }]]) as never,
     };
-    const service = createLayoutsService(port, tree.door);
+    const service = createLayoutsService(port);
     const result = await service.useTheme('dusk');
     expect(!result.ok && result.refusal.kind).toBe('invalid');
     expect(tree.calls).toEqual([]);
