@@ -1,8 +1,17 @@
 import { describe, it } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import { homeText, launchCommand, settingsDocument } from '../../../daemon/lib/harness/launch.ts';
 import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harness/transcript.ts';
+import {
+  CLAUDE_QUESTION_HOOK_COMMAND,
+  CLAUDE_QUESTION_HOOKS,
+  CLAUDE_PROMPTS_SEEN,
+} from '../../../daemon/lib/harness/fixed-layer.ts';
+import pending from '../../../../../../ports-pending.json';
 
 const settings = new Map([
   ['b-theme', { settings: { theme: 'dark', model: 'one' } }],
@@ -11,6 +20,30 @@ const settings = new Map([
 const hooks = new Map([['audit', { hooks: { Stop: [{ id: 2 }], PreToolUse: [{ id: 3 }] } }]]);
 
 describe('settingsDocument', () => {
+  it('deep-merges disjoint nested permission settings without losing deny rules', () => {
+    const settings = new Map([
+      ['a-deny', { settings: { permissions: { deny: ['Bash(rm *)'], allow: ['Old'] } } }],
+      ['b-allow', { settings: { permissions: { allow: ['Read'] } } }],
+    ]);
+    should(settingsDocument({ settings, hooks: new Map() })).eql({
+      permissions: { deny: ['Bash(rm *)'], allow: ['Read'] },
+    });
+    should(settings.get('a-deny')?.settings.permissions.allow).eql(['Old']);
+  });
+
+  it('replaces scalars, null and arrays while empty object overlays preserve nested settings', () => {
+    const settings = new Map([
+      ['a', { settings: { a: { nested: true }, b: [1], c: { nested: true }, d: null } }],
+      ['b', { settings: { a: {}, b: [2], c: null, d: { nested: true } } }],
+    ]);
+    should(settingsDocument({ settings, hooks: new Map() })).eql({
+      a: { nested: true },
+      b: [2],
+      c: null,
+      d: { nested: true },
+    });
+  });
+
   it('applies settings items in name order, so a later name wins a key', () => {
     should(settingsDocument({ settings, hooks: new Map(), effort: undefined })).containEql({
       theme: 'dark',
@@ -33,6 +66,81 @@ describe('settingsDocument', () => {
 });
 
 describe('homeText', () => {
+  it('question hook writes the complete tool input quietly and drains input when unset or unwritable', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'claude-question-hook-'));
+    const body = JSON.stringify({ tool_use_id: 'question-1', tool_input: { questions: [{ question: 'Which?' }] } });
+    const file = join(folder, 'question.json');
+    try {
+      for (const target of [file, undefined, join(folder, 'missing/question.json')]) {
+        const child = Bun.spawn(['sh', '-c', CLAUDE_QUESTION_HOOK_COMMAND], {
+          env: { PATH: '/usr/bin:/bin', ...(target === undefined ? {} : { FY_QUESTION_FILE: target }) },
+          stdin: new Blob([body]),
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        should(await child.exited).equal(0);
+        should(await new Response(child.stdout).text()).equal('');
+        should(await new Response(child.stderr).text()).equal('');
+      }
+      should(await readFile(file, 'utf8')).equal(body);
+      should(await Bun.file(`${file}.tmp`).exists()).equal(false);
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('applies fixed launch precedence, onboarding and trust, and keeps the question hook in its own overlay', () => {
+    for (const permissionMode of ['auto', 'skip'] as const) {
+      const userHook = { matcher: 'Read', hooks: [{ type: 'command', command: 'true' }] };
+      const text = homeText({
+        folder: '/work/repo',
+        permissionMode,
+        instructions: [],
+        parts: [],
+        effort: 'high',
+        settings: new Map([
+          [
+            'user',
+            {
+              settings: {
+                remoteControlAtStartup: true,
+                permissions: { defaultMode: 'plan', deny: ['Bash(rm *)'] },
+                skipAutoPermissionPrompt: false,
+                skipDangerousModePermissionPrompt: false,
+                hooks: { PreToolUse: [userHook] },
+              },
+            },
+          ],
+        ]),
+        hooks: new Map(),
+      });
+      const mode = permissionMode === 'skip' ? 'bypassPermissions' : 'auto';
+      const settings = JSON.parse(text.settings);
+      should(settings.permissions).eql({ defaultMode: mode, deny: ['Bash(rm *)'] });
+      should(settings.remoteControlAtStartup).equal(false);
+      should(settings.effortLevel).equal('high');
+      should(settings.hooks.PreToolUse).eql([userHook]);
+      const overlay = JSON.parse(text.overlay);
+      should(overlay).eql({
+        permissions: { defaultMode: mode },
+        remoteControlAtStartup: false,
+        ...(permissionMode === 'skip'
+          ? { skipDangerousModePermissionPrompt: true }
+          : { skipAutoPermissionPrompt: true }),
+        hooks: CLAUDE_QUESTION_HOOKS,
+      });
+      should(JSON.parse(text.claudeJson)).eql({
+        hasCompletedOnboarding: true,
+        ...CLAUDE_PROMPTS_SEEN,
+        projects: { '/work/repo': { hasTrustDialogAccepted: true } },
+      });
+    }
+  });
+
+  it('keeps claude-code pending while item verbs and answer panels are stubs', () => {
+    should(pending.pending).containEql('claude-code');
+  });
+
   const parts: LaunchPart[] = [
     { kind: 'mcp', name: 'docs', config: { command: 'docs-mcp' } },
     { kind: 'instruction', id: 'x', text: 'From a plugin.' },
@@ -41,6 +149,8 @@ describe('homeText', () => {
 
   it('writes instructions then instruction parts into the memory file', () => {
     const text = homeText({
+      folder: '/work',
+      permissionMode: 'auto',
       instructions: [{ id: 'i', text: 'Be brief.\n' }],
       parts,
       settings: new Map(),
@@ -50,15 +160,36 @@ describe('homeText', () => {
   });
 
   it('writes the MCP servers it was given, and no MCP file when it was given none', () => {
-    const withMcp = homeText({ instructions: [], parts, settings: new Map(), hooks: new Map() });
+    const withMcp = homeText({
+      folder: '/work',
+      permissionMode: 'auto',
+      instructions: [],
+      parts,
+      settings: new Map(),
+      hooks: new Map(),
+    });
     should(JSON.parse(withMcp.mcp as string)).eql({ mcpServers: { docs: { command: 'docs-mcp' } } });
-    const without = homeText({ instructions: [], parts: [], settings: new Map(), hooks: new Map() });
+    const without = homeText({
+      folder: '/work',
+      permissionMode: 'auto',
+      instructions: [],
+      parts: [],
+      settings: new Map(),
+      hooks: new Map(),
+    });
     should(without.mcp).be.undefined();
     should(without.memory).equal('');
   });
 
   it('never writes an env part: the environment is the Vault’s, not a file’s', () => {
-    const text = homeText({ instructions: [], parts, settings: new Map(), hooks: new Map() });
+    const text = homeText({
+      folder: '/work',
+      permissionMode: 'auto',
+      instructions: [],
+      parts,
+      settings: new Map(),
+      hooks: new Map(),
+    });
     should(JSON.stringify(text)).not.containEql('secret:');
   });
 });
@@ -78,7 +209,7 @@ describe('launchCommand', () => {
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
       '/opt/bin/claude',
       '--settings',
-      '/state/claude-code/agent-homes/f1/settings.json',
+      '/state/claude-code/agent-homes/f1/launch-settings.json',
       '--permission-mode',
       'auto',
       '--session-id',

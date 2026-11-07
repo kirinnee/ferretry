@@ -88,6 +88,10 @@ export default implementDaemon(manifest, {
       permission,
       dialog,
       newConversationId: () => crypto.randomUUID(),
+      historyHome: async () => {
+        const directory = await host.home();
+        return directory.startsWith('/') ? `${directory.replace(/\/+$/u, '')}/.claude` : '';
+      },
     });
 
     return {

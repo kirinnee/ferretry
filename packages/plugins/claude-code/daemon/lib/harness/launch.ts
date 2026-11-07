@@ -1,18 +1,29 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import type { HarnessConfig, HooksItem, SettingsItem } from '../../../contract/index.ts';
+import { fixedLayer } from './fixed-layer.ts';
+import { deepMergeSettings } from './settings.ts';
 import { startupModelArguments } from './startup.ts';
 
 /**
  * WHAT A CLAUDE CODE HOME HOLDS AND HOW CLAUDE IS STARTED IN IT.
  *
  * A ferret's home is its `CLAUDE_CONFIG_DIR`: Claude Code reads `CLAUDE.md` there as its user-level memory (how
- * it takes instructions), the file `--settings` names as an overlay (the settings and hooks items, as data) and
+ * it takes instructions), `settings.json` for the settings and hooks items, the fixed `--settings` overlay and
  * the file `--mcp-config` names (MCP). Pure: the adapter writes the text through the ferret's `agent-homes` root.
  */
 
-export const HOME_FILES = { memory: 'CLAUDE.md', settings: 'settings.json', mcp: 'mcp.json' } as const;
+export const HOME_FILES = {
+  memory: 'CLAUDE.md',
+  settings: 'settings.json',
+  overlay: 'launch-settings.json',
+  claudeJson: '.claude.json',
+  conversation: 'conversation.json',
+  mcp: 'mcp.json',
+} as const;
 
 export interface HomeInputs {
+  readonly folder: string;
+  readonly permissionMode: HarnessConfig['permissionMode'];
   /** Instructions already filtered by `when` and ordered by Ferrets. */
   readonly instructions: readonly { readonly id: string; readonly text: string }[];
   readonly parts: readonly LaunchPart[];
@@ -25,6 +36,8 @@ export interface HomeInputs {
 export interface HomeText {
   readonly memory: string;
   readonly settings: string;
+  readonly overlay: string;
+  readonly claudeJson: string;
   /** Absent when no MCP server was added to this launch. */
   readonly mcp?: string;
 }
@@ -34,8 +47,8 @@ const byName = <T>(items: ReadonlyMap<string, T>): readonly T[] =>
 
 /** The settings document: each item's settings in name order, each hooks item's hooks appended per event. */
 export function settingsDocument(inputs: Pick<HomeInputs, 'settings' | 'hooks' | 'effort'>): Record<string, unknown> {
-  const document: Record<string, unknown> = {};
-  for (const item of byName(inputs.settings)) Object.assign(document, item.settings);
+  let document: Record<string, unknown> = {};
+  for (const item of byName(inputs.settings)) document = deepMergeSettings(document, item.settings);
   const hooks: Record<string, unknown[]> = {};
   const declared = document.hooks;
   if (typeof declared === 'object' && declared !== null && !Array.isArray(declared))
@@ -50,16 +63,21 @@ export function settingsDocument(inputs: Pick<HomeInputs, 'settings' | 'hooks' |
 
 /** The text of every file a launch writes into the home. */
 export function homeText(inputs: HomeInputs): HomeText {
+  const fixed = fixedLayer(inputs.permissionMode, inputs.folder);
   const memory = [
     ...inputs.instructions.map(entry => entry.text.trim()),
     ...inputs.parts.flatMap(part => (part.kind === 'instruction' ? [part.text.trim()] : [])),
   ]
     .filter(text => text !== '')
     .join('\n\n');
-  const servers = Object.fromEntries(inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])));
+  const servers = Object.fromEntries(
+    inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])),
+  );
   return {
     memory: memory === '' ? '' : `${memory}\n`,
-    settings: `${JSON.stringify(settingsDocument(inputs), null, 2)}\n`,
+    settings: `${JSON.stringify(deepMergeSettings(settingsDocument(inputs), fixed.settings), null, 2)}\n`,
+    overlay: `${JSON.stringify(fixed.overlay, null, 2)}\n`,
+    claudeJson: `${JSON.stringify(fixed.claudeJson, null, 2)}\n`,
     ...(Object.keys(servers).length === 0 ? {} : { mcp: `${JSON.stringify({ mcpServers: servers }, null, 2)}\n` }),
   };
 }
@@ -86,7 +104,7 @@ export function launchCommand(inputs: CommandInputs): readonly string[] {
     `CLAUDE_CONFIG_DIR=${inputs.home}`,
     inputs.binary,
     '--settings',
-    `${inputs.home}/${HOME_FILES.settings}`,
+    `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
     inputs.permissionMode === 'skip' ? 'bypassPermissions' : 'auto',
     ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),

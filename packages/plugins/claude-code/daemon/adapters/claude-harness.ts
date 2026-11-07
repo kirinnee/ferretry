@@ -32,9 +32,15 @@ import type {
   RootsPort,
   SpawnPort,
 } from '@ferretry/kernel/contract';
-import { err, type Instant, milliseconds, ok, type Result } from '@ferretry/std';
-import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_HOOKS, CLAUDE_CODE_SETTINGS, type HarnessConfig } from '../../contract/index.ts';
+import { err, milliseconds, ok, type Result } from '@ferretry/std';
+import {
+  CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_HOOKS,
+  CLAUDE_CODE_SETTINGS,
+  type HarnessConfig,
+} from '../../contract/index.ts';
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
+import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
 import { parseEntries, parseUsage } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
@@ -58,6 +64,8 @@ export interface ClaudeHarnessDeps {
   readonly dialog: DialogAnswerService;
   /** A fresh conversation id: Claude takes `--session-id`, so the daemon assigns it. */
   readonly newConversationId: () => string;
+  /** The user's documented Claude history home; only its projects subtree is read. */
+  readonly historyHome: () => Promise<string>;
 }
 
 const TMUX_TIMEOUT_MS = 5_000;
@@ -112,7 +120,11 @@ export class ClaudeHarness implements Harness {
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
     const home = this.home(spec.ferret);
+    if (this.fenced(home.resolve('')) !== spec.home)
+      throw new Error('the launch home does not match the ferret agent-homes subfolder');
     const text = homeText({
+      folder: spec.folder,
+      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
       instructions: spec.instructions,
       parts: spec.parts,
       settings: this.deps.config.collection(settingsCollection) as never,
@@ -127,6 +139,8 @@ export class ClaudeHarness implements Harness {
     };
     await write(HOME_FILES.memory, text.memory);
     await write(HOME_FILES.settings, text.settings);
+    await write(HOME_FILES.overlay, text.overlay);
+    await write(HOME_FILES.claudeJson, text.claudeJson);
     if (text.mcp !== undefined) await write(HOME_FILES.mcp, text.mcp);
     return { files, args: [] };
   }
@@ -236,7 +250,9 @@ export class ClaudeHarness implements Harness {
   /** Claude's own conversations on this machine, read from its documented history folder only. */
   readonly conversations: ConversationFinder = {
     list: async folder => {
-      const history = this.deps.roots.root('harness-history');
+      const historyHome = await this.deps.historyHome();
+      if (!historyHome.startsWith('/')) return [];
+      const history = this.deps.roots.root('harness-history', { subfolder: historyHome });
       const projects = history.resolve('projects');
       if (!projects.ok) return [];
       const found: FoundConversation[] = [];
@@ -244,7 +260,7 @@ export class ClaudeHarness implements Harness {
         const dir = history.resolve(`projects/${directory}`);
         if (!dir.ok) continue;
         for (const name of await history.list(dir.value).catch(() => [])) {
-          if (!name.endsWith('.jsonl')) continue;
+          if (!name.endsWith('.jsonl') || !isConversationId(name.slice(0, -'.jsonl'.length))) continue;
           const file = history.resolve(`projects/${directory}/${name}`);
           if (!file.ok) continue;
           const stat = await history.stat(file.value);
@@ -267,6 +283,7 @@ export class ClaudeHarness implements Harness {
     env: ChildEnvironment,
     conversation: { readonly kind: 'new' | 'resume'; readonly id: string },
   ): Promise<Result<Started, StartRefusal>> {
+    if (!isConversationId(conversation.id)) throw new Error('the conversation id must be one plain name (S45)');
     const found = await this.discover();
     if (!found.found) return err('unavailable');
     await this.prepareHome(spec);
@@ -280,6 +297,12 @@ export class ClaudeHarness implements Harness {
       conversation,
     });
     const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
+    // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.
+    const home = this.home(spec.ferret);
+    await home.writeText(
+      this.fenced(home.resolve(HOME_FILES.conversation)),
+      `${JSON.stringify({ format: 1, id: conversation.id, cwd: spec.folder })}\n`,
+    );
     const started = await runner.start(spec2);
     if (!started.ok) return started;
     this.deps.panes.remember(spec.ferret, started.value.handle);
@@ -287,7 +310,8 @@ export class ClaudeHarness implements Harness {
   }
 
   private home(ferret: FerretId): RootHandle {
-    return this.deps.roots.root('agent-homes', { ferret });
+    if (!isConversationId(ferret)) throw new Error('the ferret id must be one plain name');
+    return this.deps.roots.root('agent-homes', { ferret, subfolder: ferret });
   }
 
   private fenced(resolved: ReturnType<RootHandle['resolve']>): FencedPath {
@@ -298,9 +322,7 @@ export class ClaudeHarness implements Harness {
   private async tmux(args: readonly string[]): Promise<Result<true, string>> {
     try {
       const result = await this.deps.spawn.run('tmux', args, { timeout: milliseconds(TMUX_TIMEOUT_MS) });
-      return result.exitCode === 0
-        ? ok(true)
-        : err(result.stderr.trim() || `tmux exited ${String(result.exitCode)}`);
+      return result.exitCode === 0 ? ok(true) : err(result.stderr.trim() || `tmux exited ${String(result.exitCode)}`);
     } catch (error) {
       return err(error instanceof Error ? error.message : String(error));
     }
@@ -318,25 +340,23 @@ export class ClaudeHarness implements Harness {
     }
   }
 
-  /** The newest conversation file in the ferret's home: a home belongs to one ferret. */
+  /** Read only the assigned id in its encoded cwd, including after a daemon restart. */
   private async transcriptText(ferret: FerretId): Promise<string | undefined> {
     const home = this.home(ferret);
-    const projects = home.resolve('projects');
-    if (!projects.ok) return undefined;
-    let newest: { readonly path: FencedPath; readonly modified: Instant } | undefined;
-    for (const directory of await home.list(projects.value).catch(() => [])) {
-      const dir = home.resolve(`projects/${directory}`);
-      if (!dir.ok) continue;
-      for (const name of await home.list(dir.value).catch(() => [])) {
-        if (!name.endsWith('.jsonl')) continue;
-        const file = home.resolve(`projects/${directory}/${name}`);
-        if (!file.ok) continue;
-        const stat = await home.stat(file.value);
-        if (stat !== undefined && (newest === undefined || stat.modified > newest.modified))
-          newest = { path: file.value, modified: stat.modified };
-      }
+    const binding = home.resolve(HOME_FILES.conversation);
+    if (!binding.ok) return undefined;
+    let identity: unknown;
+    try {
+      identity = JSON.parse(await home.readText(binding.value, FIRST_RECORDS_BYTES));
+    } catch {
+      return undefined;
     }
-    return newest === undefined ? undefined : await home.readText(newest.path, MAX_TRANSCRIPT_BYTES);
+    if (typeof identity !== 'object' || identity === null) return undefined;
+    const { format, id, cwd } = identity as { format?: unknown; id?: unknown; cwd?: unknown };
+    if (format !== 1 || !isConversationId(id) || typeof cwd !== 'string' || !cwd.startsWith('/')) return undefined;
+    const file = home.resolve(claudeTranscriptPath(cwd, id));
+    if (!file.ok || (await home.stat(file.value))?.kind !== 'file') return undefined;
+    return await home.readText(file.value, MAX_TRANSCRIPT_BYTES);
   }
 
   /** Entries, already masked when they leave the reader. */

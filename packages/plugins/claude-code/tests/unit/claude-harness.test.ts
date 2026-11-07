@@ -1,45 +1,53 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
-import type { FencedPath, FerretId, RootHandle, SpawnResult } from '@ferretry/kernel/contract';
+import type { FerretId, SpawnResult } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
+import { mkdir, mkdtemp, readFile, rm, symlink, utimes } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
+import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 
 const FERRET = 'f1' as FerretId;
-const HOME = '/state/claude-code/agent-homes/f1';
+let fixture: string;
+let HOME: string;
+let HISTORY: string;
+beforeEach(async () => {
+  fixture = await mkdtemp(join(tmpdir(), 'claude-harness-unit-'));
+  HOME = join(fixture, 'fy-home/state/claude-code/agent-homes/f1');
+  HISTORY = join(fixture, 'owner/.claude');
+  await mkdir(HOME, { recursive: true });
+  await mkdir(join(fixture, 'fy-home/state/claude-code/agent-homes/f2'), { recursive: true });
+  await mkdir(HISTORY, { recursive: true });
+});
+afterEach(async () => {
+  await rm(fixture, { recursive: true, force: true });
+});
 const T = '2026-11-01T10:00:00.000Z' as Instant;
 
-/** A home on a map: it resolves only names inside itself, which is what the real root does. */
-function fakeRoot(files: Map<string, string>): RootHandle {
-  return {
-    resolve: (relative: string) =>
-      relative.includes('..') ? { ok: false, error: 'outside' } : ok(`${HOME}/${relative}` as FencedPath),
-    readText: async (path: string) => {
-      const text = files.get(path);
-      if (text === undefined) throw new Error('no such file');
-      return text;
-    },
-    writeText: async (path: string, text: string) => {
-      files.set(path, text);
-    },
-    list: async (path: string) => {
-      const prefix = `${path}/`;
-      return [
-        ...new Set(
-          [...files.keys()].filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length).split('/')[0]),
-        ),
-      ];
-    },
-    stat: async (path: string) => (files.has(path) ? { kind: 'file', size: 1, modified: T } : undefined),
-  } as unknown as RootHandle;
-}
-
 function build(options: { located?: boolean; tmux?: (args: readonly string[]) => number } = {}) {
-  const files = new Map<string, string>();
+  const roots = rootsPortFor(
+    nodeFs(() => crypto.randomUUID()),
+    {
+      home: join(fixture, 'fy-home'),
+      plugin: 'claude-code',
+      worktrees: join(fixture, 'worktrees'),
+    },
+    ['agent-homes', 'harness-history'],
+    () => undefined,
+  );
+  const writeHome = async (relative: string, text: string) => {
+    const home = roots.root('agent-homes', { subfolder: FERRET });
+    const path = home.resolve(relative);
+    if (!path.ok) throw new Error('invalid test fixture path');
+    await home.writeText(path.value, text);
+  };
   const tmux: string[][] = [];
   const panes = new PaneDirectory();
   const harness = new ClaudeHarness({
-    roots: { root: () => fakeRoot(files) } as never,
+    roots,
     config: { file: () => ({ searchPaths: [], permissionMode: 'auto' }), collection: () => new Map() } as never,
     spawn: {
       run: async (_program: string, args: readonly string[]): Promise<SpawnResult> => {
@@ -50,7 +58,11 @@ function build(options: { located?: boolean; tmux?: (args: readonly string[]) =>
     clock: { sleep: async () => {} } as never,
     redaction: {
       read: async (fn: (scope: unknown) => unknown) =>
-        await fn({ text: (s: string) => s.replaceAll('SECRET', '******'), lines: (l: unknown) => l, cells: (g: unknown) => g }),
+        await fn({
+          text: (s: string) => s.replaceAll('SECRET', '******'),
+          lines: (l: unknown) => l,
+          cells: (g: unknown) => g,
+        }),
     } as never,
     location: {
       locate: async () =>
@@ -64,8 +76,9 @@ function build(options: { located?: boolean; tmux?: (args: readonly string[]) =>
     permission: {} as never,
     dialog: {} as never,
     newConversationId: () => 'conv-1',
+    historyHome: async () => HISTORY,
   });
-  return { harness, files, tmux, panes };
+  return { harness, roots, writeHome, tmux, panes };
 }
 
 const spec = (more: Record<string, unknown> = {}): LaunchSpec =>
@@ -93,19 +106,95 @@ const runner = (started: { command?: readonly string[]; cwd?: string }): Runner 
   }) as unknown as Runner;
 
 describe('ClaudeHarness', () => {
+  test('S40 prepares isolated per-ferret homes using the real kernel roots and validates spec.home', async () => {
+    const { harness } = build();
+    await harness.prepareHome(spec());
+    const secondHome = join(fixture, 'fy-home/state/claude-code/agent-homes/f2');
+    await harness.prepareHome(spec({ ferret: 'f2', home: secondHome, instructions: [], parts: [] }));
+    expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toBe('Be brief.\n');
+    expect(await readFile(join(secondHome, 'CLAUDE.md'), 'utf8')).toBe('');
+    await expect(harness.prepareHome(spec({ home: secondHome }))).rejects.toThrow('does not match');
+    await expect(harness.prepareHome(spec({ ferret: '../f2' }))).rejects.toThrow('plain name');
+  });
+
+  test('S41 real roots refuse a home settings symlink that escapes its ferret subfolder', async () => {
+    const { harness } = build();
+    await Bun.write(join(fixture, 'outside.json'), '{}');
+    await symlink(join(fixture, 'outside.json'), join(HOME, 'settings.json'));
+    await expect(harness.prepareHome(spec())).rejects.toThrow('link_escape');
+  });
+
+  test('discovers conversations from an absolute read-only history scope with real roots', async () => {
+    const { harness, roots } = build();
+    await mkdir(join(HISTORY, 'projects/p'), { recursive: true });
+    await Bun.write(join(HISTORY, 'projects/p/c-1.jsonl'), `${JSON.stringify({ cwd: '/work' })}\n`);
+    await Bun.write(join(HISTORY, 'projects/p/c-2.jsonl'), `${JSON.stringify({ cwd: '/elsewhere' })}\n`);
+    expect((await harness.conversations.list(spec().folder)).map(item => [item.id, item.folder])).toEqual([
+      ['c-1', '/work'],
+    ]);
+    const history = roots.root('harness-history', { subfolder: HISTORY });
+    const file = history.resolve('projects/p/c-1.jsonl');
+    if (!file.ok) throw new Error('invalid fixture');
+    await expect(history.writeText(file.value, 'changed')).rejects.toThrow('read_only');
+    expect(roots.root('harness-history').resolve('projects').ok).toBe(false);
+  });
+
+  test('S41 conversation discovery refuses a history symlink that leaves its root', async () => {
+    const { harness } = build();
+    await mkdir(join(fixture, 'outside'), { recursive: true });
+    await Bun.write(join(fixture, 'outside/other.jsonl'), JSON.stringify({ cwd: '/work' }));
+    await mkdir(join(HISTORY, 'projects'), { recursive: true });
+    await symlink(join(fixture, 'outside'), join(HISTORY, 'projects/escape'));
+    expect(await harness.conversations.list()).toEqual([]);
+  });
+
+  test('binds transcript and usage to the resumed id and encoded cwd, even after a daemon restart', async () => {
+    const { harness, writeHome } = build();
+    const record = (id: string) =>
+      JSON.stringify({
+        type: 'assistant',
+        uuid: id,
+        timestamp: T,
+        message: { content: [{ type: 'text', text: id }], usage: { input_tokens: 7, output_tokens: 2 } },
+      });
+    await writeHome('projects/-work-repo-a/older.jsonl', record('ours'));
+    await utimes(join(HOME, 'projects/-work-repo-a/older.jsonl'), 1, 1);
+    await writeHome('projects/-work-repo-a/newer.jsonl', record('other-id'));
+    await writeHome('projects/wrong-cwd/older.jsonl', record('wrong-cwd'));
+    await harness.resume(spec({ folder: '/work/repo.a' }), runner({}), {} as never, 'older');
+    expect((await harness.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['ours']);
+    const restarted = build().harness;
+    expect((await restarted.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['ours']);
+    expect((await restarted.usage.turns(FERRET)).map(turn => turn.inputTokens)).toEqual([7]);
+    await restarted.start(spec({ folder: '/work/repo.a' }), runner({}), {} as never);
+    expect(await restarted.transcript.read(FERRET)).toEqual([]);
+    expect(await restarted.usage.turns(FERRET)).toEqual([]);
+  });
+
+  test('S45 refuses invalid conversation ids at resume and when recovering a persisted association', async () => {
+    const { harness, writeHome } = build();
+    for (const id of ['../other', '/other', '_first', 'a'.repeat(129), '']) {
+      await expect(harness.resume(spec(), runner({}), {} as never, id)).rejects.toThrow('S45');
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id, cwd: '/work' }));
+      expect(await harness.transcript.read(FERRET)).toEqual([]);
+    }
+    await writeHome('conversation.json', '{broken');
+    expect(await harness.transcript.read(FERRET)).toEqual([]);
+  });
+
   test('discover finds claude and its version without reading any sign-in file', async () => {
     expect(await build().harness.discover()).toEqual({ found: true, binary: '/opt/bin/claude', version: '2.1.220' });
     expect((await build({ located: false }).harness.discover()).found).toBe(false);
   });
 
   test('prepareHome writes instructions, settings and MCP inside the ferret home and nowhere else', async () => {
-    const { harness, files } = build();
+    const { harness } = build();
 
     const plan = await harness.prepareHome(spec({ effort: 'high' }));
 
-    expect([...files.keys()].every(path => path.startsWith(`${HOME}/`))).toBe(true);
-    expect(plan.files.length).toBe(files.size);
-    expect([...files.values()].some(text => text.includes('Be brief.'))).toBe(true);
+    expect(plan.files.every(path => path.startsWith(`${HOME}/`))).toBe(true);
+    expect(plan.files.length).toBe(5);
+    expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toContain('Be brief.');
   });
 
   test('start runs claude in the home with a session id the daemon assigned, and remembers the pane', async () => {
@@ -168,16 +257,19 @@ describe('ClaudeHarness', () => {
     expect(await build().harness.transcript.read(FERRET)).toEqual([]);
   });
 
-  test('the transcript is read from the newest conversation in the home, masked as it leaves', async () => {
-    const { harness, files } = build();
-    files.set(
-      `${HOME}/projects/p/c.jsonl`,
-      `${JSON.stringify({ type: 'user', uuid: 'u1', timestamp: T, message: { content: 'my SECRET here' } })}\n${JSON.stringify({
-        type: 'assistant',
-        uuid: 'a1',
-        timestamp: T,
-        message: { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 1 } },
-      })}`,
+  test('the transcript is read from its assigned conversation in the home, masked as it leaves', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    await writeHome(
+      'projects/-work/conv-1.jsonl',
+      `${JSON.stringify({ type: 'user', uuid: 'u1', timestamp: T, message: { content: 'my SECRET here' } })}\n${JSON.stringify(
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          timestamp: T,
+          message: { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 1 } },
+        },
+      )}`,
     );
 
     const entries = await harness.transcript.read(FERRET);
