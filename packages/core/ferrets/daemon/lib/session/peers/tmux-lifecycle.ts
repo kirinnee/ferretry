@@ -136,11 +136,11 @@ export interface PaneSighting {
   readonly sessionCreated?: number;
 }
 
-/** What a registration pins a pane by. `sessionCreated` is absent from one written before it was recorded. */
+/** What a registration pins a pane by. */
 export interface PaneStamp {
   readonly paneId: string;
   readonly pid: number;
-  readonly sessionCreated?: number;
+  readonly sessionCreated: number;
 }
 
 const PANE_ID = /^%(?:0|[1-9][0-9]*)$/u;
@@ -173,31 +173,15 @@ export function parsePaneSighting(output: string): PaneSighting | undefined {
 /**
  * Whether `sighting` is the pane `stamp` registered:
  *
- * - `proven`: the same id, the same session creation second when the stamp has one, and the same pid
- *   whenever tmux printed one. A pane with no pid is proven only when it is dead AND the creation
- *   second matches.
- * - `pane-id-only`: a DEAD pane with no pid against a stamp written before the creation second was
- *   recorded — the same id in the session the registration names, and nothing more to check it by.
- *   The caller must say that this is all it rests on, never pass it off as `proven`.
+ * - `proven`: the same id, the same session creation second, and the same pid whenever tmux printed one.
+ *   A pane with no pid is proven only when it is dead AND the creation second matches.
  * - `refuted`: anything else, which says nothing about the registered pane.
  */
-export function provePane(sighting: PaneSighting, stamp: PaneStamp): 'proven' | 'pane-id-only' | 'refuted' {
+export function provePane(sighting: PaneSighting, stamp: PaneStamp): 'proven' | 'refuted' {
   if (sighting.paneId !== stamp.paneId) return 'refuted';
-  if (stamp.sessionCreated !== undefined && sighting.sessionCreated !== stamp.sessionCreated) return 'refuted';
+  if (sighting.sessionCreated !== stamp.sessionCreated) return 'refuted';
   if (sighting.pid !== undefined) return sighting.pid === stamp.pid ? 'proven' : 'refuted';
-  if (!sighting.dead) return 'refuted';
-  return stamp.sessionCreated === undefined ? 'pane-id-only' : 'proven';
-}
-
-/**
- * The creation second to add to a stamp written before it was recorded, or `undefined` when there is
- * nothing to add or nothing to prove it by. Only a LIVE pane whose id and pid both match the stamp
- * earns it.
- */
-export function stampToRecord(sighting: PaneSighting, stamp: PaneStamp): number | undefined {
-  if (stamp.sessionCreated !== undefined || sighting.dead) return undefined;
-  if (sighting.paneId !== stamp.paneId || sighting.pid !== stamp.pid) return undefined;
-  return sighting.sessionCreated;
+  return sighting.dead ? 'proven' : 'refuted';
 }
 
 // --- lib/tmux/pane.ts -------------------------------------------------------------------------------------------

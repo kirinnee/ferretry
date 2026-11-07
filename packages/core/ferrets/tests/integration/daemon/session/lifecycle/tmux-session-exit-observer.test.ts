@@ -1,147 +1,94 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { describe, it } from 'bun:test';
 import should from 'should';
-import { BunSqliteIndexFactory, BunTmuxProcess, DaemonStorageFactory, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
 import { DurableTerminalPaneRegistrar, DurableTerminalPaneStore } from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
 import { InMemoryLaunchGate } from '../../../../../daemon/adapters/session/resume/in-memory-launch-gate.ts';
-import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { TmuxSessionExitObserver } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-exit-observer.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
 import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
-import { PANE_PROOF_FORMAT, type TmuxCommandPort, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import { PANE_PROOF_FORMAT, type TmuxCommandPort } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import { SelfRestartCoordinator } from '../../../../../daemon/lib/session/health/self-restart.ts';
 import type { SessionExitObservation } from '../../../../../daemon/lib/session/health/exit.ts';
 import { SessionHealthService } from '../../../../../daemon/lib/session/health/service.ts';
 import { UNNAMED_SELF_CHECK_STAGES } from '../../../../../daemon/lib/session/health/types.ts';
-import { waitFor } from '../../support/wait-for.ts';
+import { FakeIncarnation, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
+import { MEMORY_PATHS, MemoryFileSystem } from '../../../../support/daemon/memory-file-system.ts';
+import { memoryStorage, sessionState } from '../../../../support/daemon/storage.ts';
 
 /**
  * A session whose agent exits must stop reading `running` on the self-check's own tick.
  *
- * Real tmux and the repository's fake harness, because the facts that matter are tmux's: that a
- * launch's `remain-on-exit` keeps the dead pane, that `pane_dead_status` carries the harness's exit
- * status, and that the dead pane is still the registered one by the shared pane proof. It
- * spends nothing — the harness is `scripts/test/fake-harness.ts` reading a scripted scenario.
+ * The facts that matter are tmux's: that a launch's `remain-on-exit` keeps the dead pane, that
+ * `pane_dead_status` carries the harness's exit status, and that the dead pane is still the registered
+ * one by the shared pane proof. Ferrets is core and cannot import a plugin's code (§2.1), so tmux here is
+ * the test's own (`FakeTmux`), answering the raw vocabulary the observer speaks, over the session store
+ * on the kernel's memory state folder.
  */
 
-const REPOSITORY = resolve(import.meta.dir, '../../../../../..');
 const DAEMON = 'exit-test-daemon';
 const NOW = '2026-09-26T10:00:00.000Z';
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
-const cleanups = new Set<() => Promise<void>>();
-
-afterEach(async () => {
-  await Promise.all([...cleanups].map(cleanup => cleanup()));
-  cleanups.clear();
-});
 
 interface ExitFixture {
-  readonly home: string;
   readonly id: SessionId;
   readonly tmuxSession: string;
-  readonly storage: Awaited<ReturnType<DaemonStorageFactory['open']>>['storage'];
-  readonly files: StateFileSystem;
+  readonly exitCode: number;
+  readonly storage: DaemonStorage;
+  readonly files: MemoryFileSystem;
   readonly store: DurableTerminalPaneStore;
-  readonly commands: BunTmuxProcess;
-  readonly controller: TmuxController;
+  readonly tmux: FakeTmux;
   readonly gate: InMemoryLaunchGate;
-  readonly tmuxExecutable: string;
   readonly events: { readonly type: string; readonly data: unknown }[];
 }
 
 async function fixture(exitCode: number): Promise<ExitFixture> {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-session-exit-'));
-  const tmuxExecutable = Bun.which('tmux');
-  if (tmuxExecutable === null) throw new Error('tmux is required for session-exit integration coverage');
-  const opened = await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  ).open();
+  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
   const record = createSessionRecord(
-    { agent: AGENT, cwd: process.cwd(), mode: 'interactive', prompt: 'Exit when told', command: [AGENT] },
-    { id: parseSessionId('exit-session'), cwd: process.cwd(), at: NOW, settings: defaultSessionLifecycleSettings },
+    { agent: AGENT, cwd: '/workspace/project', mode: 'interactive', prompt: 'Exit when told', command: [AGENT] },
+    { id: parseSessionId('exit-session'), cwd: '/workspace/project', at: NOW, settings: defaultSessionLifecycleSettings },
   ).record;
   const id = record.config.id;
-  await opened.storage.writeState(id, { id, status: 'created' });
-  const scenario = join(home, 'scenario.json');
-  await writeFile(
-    scenario,
-    JSON.stringify({
-      version: 1,
-      steps: [
-        { type: 'say', text: 'harness ready' },
-        { type: 'ask', text: '>', expect: 'go' },
-        { type: 'exit', code: exitCode },
-      ],
-    }),
-  );
-  const commands = new BunTmuxProcess(tmuxExecutable, join(home, 'tmux.sock'));
-  const controller = new TmuxController(commands);
-  await controller.launch({
-    session: record.config.tmuxSession,
-    cwd: process.cwd(),
-    command: [process.execPath, join(REPOSITORY, 'scripts/test/fake-harness.ts')],
-    env: { FY_E2E_HARNESS_SCRIPT: scenario, FY_E2E_HARNESS_INVOCATIONS: join(home, 'invocations.jsonl') },
-  });
-  const files = new StateFileSystem(opened.paths);
-  await new DurableTerminalPaneRegistrar(DAEMON, controller, files, opened.paths).register(record);
-  await opened.storage.writeState(id, { id, status: 'running', health: 'healthy' });
+  await storage.writeState(id, sessionState(id, { status: 'created' }));
+  const tmux = new FakeTmux();
+  await tmux.launch({ session: record.config.tmuxSession, cwd: '/workspace/project', command: [AGENT] });
+  const files = new MemoryFileSystem();
+  await new DurableTerminalPaneRegistrar(DAEMON, tmux, files, MEMORY_PATHS, new FakeIncarnation()).register(record);
+  await storage.writeState(id, sessionState(id, { status: 'running', health: 'healthy' }));
   const events: { readonly type: string; readonly data: unknown }[] = [];
-  const unsubscribe = opened.storage.subscribeEvents(event => events.push({ type: event.type, data: event.data }));
-  cleanups.add(async () => {
-    unsubscribe();
-    await Bun.spawn([tmuxExecutable, '-S', join(home, 'tmux.sock'), 'kill-server'], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    }).exited;
-    await opened.storage.close();
-    await rm(home, { recursive: true, force: true });
-  });
+  storage.subscribeEvents(event => events.push({ type: event.type, data: event.data }));
   return {
-    home,
     id,
     tmuxSession: record.config.tmuxSession,
-    storage: opened.storage,
+    exitCode,
+    storage,
     files,
-    store: new DurableTerminalPaneStore(opened.storage, files, opened.paths),
-    commands,
-    controller,
-    gate: new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds)),
-    tmuxExecutable,
+    store: new DurableTerminalPaneStore(storage, files, MEMORY_PATHS),
+    tmux,
+    gate: new InMemoryLaunchGate(async () => undefined),
     events,
   };
 }
 
-function observer(subject: ExitFixture, commands: TmuxCommandPort = subject.commands): TmuxSessionExitObserver {
+function observer(subject: ExitFixture, commands: TmuxCommandPort = subject.tmux): TmuxSessionExitObserver {
   return new TmuxSessionExitObserver(DAEMON, subject.storage, subject.store, commands, subject.gate, {
     now: () => NOW,
   });
 }
 
-/** The real server for everything but the pane-exit read, which gets the given answer. */
+/** The fake server for everything but the pane-exit read, which gets the given answer. */
 function metadataAnswers(subject: ExitFixture, answer: () => { code: number; stdout: string }): TmuxCommandPort {
   return {
     execute: async (arguments_, stdin) =>
       arguments_[0] === 'display-message' && arguments_.at(-1)?.startsWith('#{pane_dead}') === true
         ? { stderr: '', ...answer() }
-        : await subject.commands.execute(arguments_, stdin),
+        : await subject.tmux.execute(arguments_, stdin),
   };
 }
 
-/**
- * tmux 3.8 on any tmux: the pane proof read with a dead pane's pid blanked, as 3.8 prints it once the
- * pane's process is gone, so every runner proves the 3.8 path whatever tmux it has.
- */
+/** tmux 3.8: the pane proof read with a dead pane's pid blanked, as 3.8 prints it once the pane's process is gone. */
 function asTmux38(commands: TmuxCommandPort): TmuxCommandPort {
   return {
     execute: async (arguments_, stdin) => {
@@ -191,48 +138,14 @@ function selfCheck(subject: ExitFixture): SessionHealthService {
   );
 }
 
-/** Waits on the condition itself, never on a fixed sleep; the deadline is a safety net, not a budget. */
-async function until(check: () => Promise<boolean>, what: string): Promise<void> {
-  await waitFor(check, what);
-}
-
+/** The harness answers its prompt and exits with the fixture's code; `remain-on-exit` keeps the pane, dead. */
 async function exitHarness(subject: ExitFixture): Promise<void> {
-  await until(async () => (await subject.controller.capture(subject.tmuxSession, false)).includes('>'), 'the prompt');
-  await subject.controller.sendLiteral(subject.tmuxSession, 'go');
-  await subject.controller.sendKey(subject.tmuxSession, 'Enter');
-  await until(async () => (await subject.controller.state(subject.tmuxSession)).dead, 'the pane to die');
+  subject.tmux.exit(subject.tmuxSession, { exitStatus: subject.exitCode });
 }
 
-/** Whether a pid no longer names any process, zombie included — so tmux has reaped it. */
-function reaped(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Ticks the self-check until it settles something, the way the daemon's timer would.
- *
- * Deliberately NOT one tick after the pane died: tmux marks a pane dead when its terminal closes and
- * records how it ended only after it reaps the child, and a tick can land between — or tmux can have
- * lost the child's SIGCHLD, which leaves it a zombie until something makes the server reap. The first
- * tick that finds no status asks tmux to reap, so the test then waits for exactly that and ticks
- * again, and the exit it asserts on is one tmux has certainly recorded.
- */
-async function tickUntilSettled(subject: ExitFixture, service: SessionHealthService) {
-  const registration = await subject.store.registration(DAEMON, subject.id);
-  if (registration === undefined) throw new Error('the pane registration is missing');
-  let outcome = await service.selfCheck();
-  if (outcome.exited.length > 0) return outcome;
-  await until(async () => reaped(registration.pid), 'tmux to reap the harness after the nudge');
-  await until(async () => {
-    outcome = await service.selfCheck();
-    return outcome.exited.length > 0;
-  }, 'a self-check to settle the exited session');
-  return outcome;
+/** One tick of the self-check, the way the daemon's timer would run it. */
+async function tickUntilSettled(_subject: ExitFixture, service: SessionHealthService) {
+  return await service.selfCheck();
 }
 
 async function state(subject: ExitFixture): Promise<Record<string, unknown>> {
@@ -274,7 +187,7 @@ describe('tmux session exit observer', () => {
       },
     ]);
     // The dead pane is left for snapshot and resume: nothing in this pass kills.
-    should(await subject.controller.alive(subject.tmuxSession)).be.true();
+    should(await subject.tmux.alive(subject.tmuxSession)).be.true();
   }, 20_000);
 
   it('should read a harness that exited 0 as completed', async () => {
@@ -293,13 +206,7 @@ describe('tmux session exit observer', () => {
   it('should settle a session whose whole tmux server is gone without inventing an exit status', async () => {
     // Arrange
     const subject = await fixture(0);
-    const serverPid = Number((await subject.commands.execute(['display-message', '-p', '#{pid}'])).stdout.trim());
-    if (!Number.isInteger(serverPid) || serverPid <= 0) throw new Error('the tmux server pid could not be read');
-    await Bun.spawn([subject.tmuxExecutable, '-S', join(subject.home, 'tmux.sock'), 'kill-server']).exited;
-    // `kill-server` returns once the server was told, not once it is gone. A query in between still
-    // connects and is answered "server exited unexpectedly", which the observer rightly treats as
-    // proving nothing, so the tick waits for the server process itself to have exited.
-    await until(async () => reaped(serverPid), 'the tmux server to exit');
+    await subject.tmux.execute(['kill-server']);
 
     // Act
     const actual = await selfCheck(subject).selfCheck();
@@ -315,13 +222,12 @@ describe('tmux session exit observer', () => {
   it('should observe nothing while the harness is alive, launching, or no longer claimed running', async () => {
     // Arrange
     const subject = await fixture(0);
-    await until(async () => (await subject.controller.capture(subject.tmuxSession, false)).includes('>'), 'the prompt');
     const alive = await observer(subject).observe();
     await exitHarness(subject);
     const launch = subject.gate.register(subject.id);
     const launching = await observer(subject).observe();
     launch.release();
-    await subject.storage.writeState(subject.id, { id: subject.id, status: 'stopped' });
+    await subject.storage.writeState(subject.id, sessionState(subject.id, { status: 'stopped' }));
 
     // Act
     const stopped = await observer(subject).observe();
@@ -359,7 +265,7 @@ describe('tmux session exit observer', () => {
     ).observe();
     if (observed === undefined) throw new Error('the dead pane was not observed');
     const transition = { status: 'failed', health: 'crashed', reason: 'exited', exitCode: 1 } as const;
-    const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
+    const path = createSessionPaths(MEMORY_PATHS, subject.id).terminalPane;
     const original = await subject.files.readText(path);
     if (original === undefined) throw new Error('no registration was written');
 
@@ -374,7 +280,7 @@ describe('tmux session exit observer', () => {
     const launch = subject.gate.register(subject.id);
     const launching = await observer(subject).settle(observed, transition);
     launch.release();
-    await rm(path);
+    await subject.files.removeFile(path);
     const unregistered = await observer(subject).settle(observed, transition);
 
     // Assert
@@ -387,13 +293,13 @@ describe('tmux session exit observer', () => {
     // Arrange
     const subject = await fixture(0);
     await exitHarness(subject);
-    const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
+    const path = createSessionPaths(MEMORY_PATHS, subject.id).terminalPane;
     const registration = JSON.parse((await subject.files.readText(path)) ?? '{}') as Record<string, unknown>;
     const failing = (answer: (arguments_: readonly string[]) => { code: number; stderr: string }): TmuxCommandPort => ({
       execute: async (arguments_, stdin) =>
         arguments_[0] === 'has-session' || arguments_[0] === 'display-message'
           ? { stdout: '', ...answer(arguments_) }
-          : await subject.commands.execute(arguments_, stdin),
+          : await subject.tmux.execute(arguments_, stdin),
     });
     const refusedHasSession = failing(() => ({ code: 1, stderr: 'server exited unexpectedly' }));
     const refusedDisplay = failing(arguments_ =>
@@ -412,7 +318,7 @@ describe('tmux session exit observer', () => {
     results.push(await observer(subject, throwing).observe());
     await subject.files.writeTextAtomic(path, `${JSON.stringify({ ...registration, paneId: '%9' })}\n`);
     results.push(await observer(subject).observe());
-    const unnamed = new TmuxSessionExitObserver('', subject.storage, subject.store, subject.commands, subject.gate, {
+    const unnamed = new TmuxSessionExitObserver('', subject.storage, subject.store, subject.tmux, subject.gate, {
       now: () => NOW,
     });
     results.push(await unnamed.observe());
@@ -554,7 +460,7 @@ describe('tmux session exit observer', () => {
     await exitHarness(subject);
     const registration = await subject.store.registration(DAEMON, subject.id);
     const as38 = observer(subject, asTmux38(metadataAnswers(subject, () => ({ code: 0, stdout: '1|3|' }))));
-    const proof = await asTmux38(subject.commands).execute([
+    const proof = await asTmux38(subject.tmux).execute([
       'display-message',
       '-p',
       '-t',
@@ -562,45 +468,13 @@ describe('tmux session exit observer', () => {
       PANE_PROOF_FORMAT,
     ]);
 
-    // Act — once with the registration as written, once as one written before the second was recorded.
+    // Act
     const recorded = await as38.observe();
-    const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
-    const { sessionCreated: _created, ...unstamped } = registration ?? {};
-    await subject.files.writeTextAtomic(path, `${JSON.stringify(unstamped)}\n`);
-    const unrecorded = await as38.observe();
 
-    // Assert — tmux printed no pid and the stamp proved the pane; a stampless registration is settled on
-    // its pane id alone, and the observation says so rather than leaving the session running.
+    // Assert — tmux printed no pid and the stamp proved the pane.
     should(proof.stdout).match(/^%[0-9]+\|\|1\|[0-9]+\n$/u);
     should(registration?.sessionCreated).be.a.Number();
     should(recorded.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 3, signal: undefined }]);
-    should(unrecorded.map(item => item.exit)).deepEqual([
-      { kind: 'exited', exitStatus: 3, signal: undefined, byPaneIdOnly: true },
-    ]);
-  }, 20_000);
-
-  it('should stamp a registration written before the creation second was recorded, while its pane lives', async () => {
-    // Arrange — a live agent whose registration predates the stamp, as one launched before the upgrade.
-    const subject = await fixture(0);
-    const registration = await subject.store.registration(DAEMON, subject.id);
-    if (registration === undefined) throw new Error('the pane registration is missing');
-    const { sessionCreated, ...unstamped } = registration;
-    const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
-    await subject.files.writeTextAtomic(path, `${JSON.stringify(unstamped)}\n`);
-
-    // Act — one look while it runs; then it dies on a tmux that prints no pid for it.
-    const whileAlive = await observer(subject).observe();
-    const stamped = await subject.store.registration(DAEMON, subject.id);
-    await exitHarness(subject);
-    const afterDeath = await observer(
-      subject,
-      asTmux38(metadataAnswers(subject, () => ({ code: 0, stdout: '1|0|' }))),
-    ).observe();
-
-    // Assert — stamped with tmux's own second once, and so proven outright after the pid was gone.
-    should(whileAlive).deepEqual([]);
-    should(stamped?.sessionCreated).be.a.Number().and.equal(sessionCreated);
-    should(afterDeath.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 0, signal: undefined }]);
   }, 20_000);
 
   it('should settle a pane a signal ended at once, naming the signal', async () => {

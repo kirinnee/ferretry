@@ -21,9 +21,6 @@ import type {
 import type { SessionId } from '../../session-id.ts';
 import { sessionPaneEnvironment } from '../lifecycle/policy.ts';
 
-/** A launch record made before the rename called the notify section `attention`. */
-const canonical = (id: LaunchInstructionSectionId): LaunchInstructionSectionId => (id === 'attention' ? 'notify' : id);
-
 const same = (told: LaunchInstructionSection, now: LaunchInstructionSection): boolean =>
   told.digest === undefined || now.digest === undefined ? told.chars === now.chars : told.digest === now.digest;
 
@@ -33,8 +30,8 @@ export function outdatedSections(
   now: SessionLaunchInstructions,
 ): readonly LaunchInstructionSectionId[] {
   if (recorded === undefined) return [];
-  const told = new Map(recorded.sections.map(section => [canonical(section.id), section]));
-  const current = new Map(now.sections.map(section => [canonical(section.id), section]));
+  const told = new Map(recorded.sections.map(section => [section.id, section]));
+  const current = new Map(now.sections.map(section => [section.id, section]));
   const ids = [...new Set([...current.keys(), ...told.keys()])];
   const order = ['tools', 'settings', 'notify', 'board', 'hypermedia', 'pack', 'agenda', 'learning'];
   return ids

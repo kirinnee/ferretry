@@ -4,31 +4,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type RuntimeControlRequest, SessionViewSchema } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  FileSessionEffectLedger,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  StorageSessionLifecycleRepository,
-  SystemClock,
-} from '../../../src/adapters/index.ts';
-import type { CodexPickerCleanup } from '../../../src/lib/session/harness/cleanup.ts';
-import { HarnessQuirkService } from '../../../src/lib/session/harness/service.ts';
-import {
-  CodexRuntimeCatalogCache,
-  createSessionPaths,
-  createSessionRecord,
-  defaultSessionLifecycleSettings,
-  parseSessionId,
-  type SerialExecutor,
-  type SessionLifecycleLauncher,
-  SessionLifecycleService,
-  transitionSessionRecord,
-} from '../../../src/lib/index.ts';
+import { FileSessionEffectLedger } from '../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
+import { StorageSessionLifecycleRepository } from '../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { KeyedSerialExecutor } from '../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import type { SerialExecutor } from '../../../../daemon/lib/ports.ts';
+import { createSessionRecord, transitionSessionRecord } from '../../../../daemon/lib/session/lifecycle/policy.ts';
+import { SessionLifecycleService } from '../../../../daemon/lib/session/lifecycle/service.ts';
+import { defaultSessionLifecycleSettings } from '../../../../daemon/lib/session/lifecycle/settings.ts';
+import type { SessionLifecycleLauncher } from '../../../../daemon/lib/session/lifecycle/types.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
+import { sessionView } from '../../../support/daemon/session-view.ts';
+import { harnessCatalogs } from '../../../unit/daemon/session/runtime-control/harness-fixture/catalogs.ts';
+import type { CodexPickerCleanup } from '../../../unit/daemon/session/runtime-control/harness-fixture/cleanup.ts';
+import { CodexRuntimeCatalogCache } from '../../../unit/daemon/session/runtime-control/harness-fixture/codex-catalog-cache.ts';
+import { HarnessQuirkService } from '../../../unit/daemon/session/runtime-control/harness-fixture/service.ts';
 import { runtimeRequestFingerprint } from '../../../../daemon/lib/session/runtime-control/ledger.ts';
 import {
   runtimeQuarantineState,
@@ -36,14 +26,15 @@ import {
   type SessionRuntimeControlPorts,
 } from '../../../../daemon/lib/session/runtime-control/service.ts';
 import { SessionRuntimeError } from '../../../../daemon/lib/session/runtime-control/types.ts';
-import { sessionView } from '../../unit/runtime/mounts/support.ts';
 
 /**
  * The production composition invariant in one deterministic fixture.
  *
  * Lifecycle stop and mounted runtime control share one observed production `KeyedSerialExecutor`.
- * The session record and effect admission are real files. Only tmux and the harness transport are
- * test boundaries, and every possible pane input is recorded in one ordered log.
+ * The session record lives in the session store (over the kernel's memory state folder) and effect
+ * admission is real files. Only tmux and the harness transport are test boundaries, and every possible
+ * pane input is recorded in one ordered log. The harness quirks and catalogs are the runtime-control
+ * fixtures: Ferrets is core and cannot import a plugin's code (§2.1).
  */
 
 const NOW = '2026-08-07T16:45:00.000Z';
@@ -120,23 +111,11 @@ interface FixtureOptions {
   readonly beforePickerFailure?: () => Promise<void>;
 }
 
-async function openStorage(home: string) {
-  return await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  ).open();
-}
-
 async function buildFixture(options: FixtureOptions = {}) {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-runtime-stop-fence-'));
   homes.add(home);
-  const opened = await openStorage(home);
-  const storage = opened.storage;
+  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
+  const sessionDirectory = (id: string) => join(home, 'sessions', id);
   const serial = new ObservedSerial();
   const actions: string[] = [];
   const harness = options.harness ?? 'claude';
@@ -166,7 +145,7 @@ async function buildFixture(options: FixtureOptions = {}) {
     exitCode: 137,
   }));
 
-  const effects = new FileSessionEffectLedger(id => createSessionPaths(opened.paths, id).directory);
+  const effects = new FileSessionEffectLedger(sessionDirectory);
   const lifecycleRepository = new StorageSessionLifecycleRepository(storage);
   const launcher: SessionLifecycleLauncher = {
     alive: async () => true,
@@ -204,7 +183,7 @@ async function buildFixture(options: FixtureOptions = {}) {
   const view = async () => {
     const [config, state] = await Promise.all([storage.readConfig(SESSION), storage.readState(SESSION)]);
     if (config === undefined || state === undefined) return undefined;
-    return SessionViewSchema.parse({ config, state, directory: createSessionPaths(opened.paths, SESSION).directory });
+    return SessionViewSchema.parse({ config, state, directory: sessionDirectory(SESSION) });
   };
   const cleanup = {
     async dismiss() {
@@ -260,6 +239,7 @@ async function buildFixture(options: FixtureOptions = {}) {
       },
     }),
     harness: new HarnessQuirkService(cleanup, 'fy'),
+    catalogs: harnessCatalogs,
     accounts: { accounts: async () => [] },
     catalog: new CodexRuntimeCatalogCache(async () => [
       {

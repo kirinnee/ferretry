@@ -19,6 +19,7 @@ function registration(overrides: Partial<RegisteredTerminalPane> = {}): Register
     paneId: '%41',
     pid: 812,
     processStartTicks: 1_002_003,
+    sessionCreated: 1_790_000_000,
     ...overrides,
   };
 }

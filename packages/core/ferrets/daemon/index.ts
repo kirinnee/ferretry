@@ -16,6 +16,7 @@ import {
   type FerretId,
   FerretChanged,
   FerretFiles,
+  FerretHistoryFiles,
   type FerretRecord,
   FerretsChanged,
   FerretTokensFile,
@@ -29,7 +30,9 @@ import {
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService } from './lib/ferrets/service.ts';
-import { parseStartBody, parseRenameBody } from './lib/ferrets/wire.ts';
+import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
+import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
+import type { SessionId } from './lib/session-id.ts';
 import { DEFAULT_CALLSIGN_POOL, suggestCallsigns } from './lib/names/index.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
@@ -50,7 +53,7 @@ import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
 import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { AgentPinsFile, FerretPinFiles } from './lib/state.ts';
+import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles } from './lib/state.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -89,6 +92,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const read = await kernel.state.read(FerretFiles, name);
       if (read.ok && read.value !== undefined) registry.put(read.value);
       else if (!read.ok) log.warn('a ferret record could not be read', { file: read.error.file });
+      if (!read.ok || read.value === undefined) continue;
+      // Its start options and title, kept beside the record so a list or a read stays memory-only.
+      const details = await kernel.state.read(FerretDetailsFiles, name);
+      if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);
+      else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
     }
     const held = await kernel.state.read(FerretTokensFile);
     if (held.ok && held.value !== undefined)
@@ -97,6 +105,38 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const ready = async (): Promise<void> => {
     await loaded;
   };
+
+  // The owner's sidebar pins (agent-pins.json): the service marks `pinnedAt` on each summary from them.
+  const pinClock = { now: () => kernel.clock.now() };
+  const agentPins = new AgentPinService(
+    new StateAgentPinRepository(kernel.state, AgentPinsFile),
+    pinClock,
+    new KeyedSerialExecutor(),
+  );
+
+  /**
+   * Today's journal append (`storage/session-storage.ts` `append`) without its index: the next sequence after the
+   * last readable event. One chain per ferret; a journal that cannot be read to its end is not appended to.
+   */
+  const historyQueue = new KeyedSerialExecutor();
+  const appendHistory = async (ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>) =>
+    await historyQueue
+      .run(ferret, async () => {
+        let last = 0;
+        for await (const line of kernel.state.lines(FerretHistoryFiles, ferret)) {
+          const event = parseSessionEvent(line, ferret as unknown as SessionId);
+          if (event !== undefined) last = Math.max(last, event.sequence);
+        }
+        const event = createSessionEvent(ferret as unknown as SessionId, last, kernel.clock.now(), type, data);
+        await kernel.state.append(FerretHistoryFiles, encodeSessionEvent(event), ferret);
+      })
+      .catch((error: unknown) =>
+        log.warn('a ferret history event could not be recorded', {
+          ferret,
+          type,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
 
   const service = new FerretsService(registry, tokens, {
     ready,
@@ -136,6 +176,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       hooks.observe(FerretChanged, payload);
       kernel.events.publish(FerretsChanged, { ferret: payload.ferret, generation });
     },
+    saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
+    history: appendHistory,
+    pinnedAt: async () => await agentPins.pinnedAt(),
+    // Binds to the `work` root's `RootHandle.realPath` when kernel item N reaches the base; until then no work folder
+    // is answered (fails closed: Accounts gets no folder default).
+    realPath: async () => undefined,
     vault: needs.vault,
     asks: needs.asks,
   });
@@ -246,12 +292,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
 
   // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
-  const pinClock = { now: () => kernel.clock.now() };
-  const agentPins = new AgentPinService(
-    new StateAgentPinRepository(kernel.state, AgentPinsFile),
-    pinClock,
-    new KeyedSerialExecutor(),
-  );
   const pinnedReader = withPinned(
     {
       list: async () => {
@@ -325,11 +365,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       'POST /v1/ferrets/:ferretId/pins': noteBoard.apply,
       'GET /v1/ferrets': async call => {
         await ready();
-        return fleetList.answer(registry.list(), headerValue(call.request, 'if-none-match'));
+        return fleetList.answer(await service.list(), headerValue(call.request, 'if-none-match'));
       },
       'GET /v1/ferrets/:ferretId': async call => {
         const id = await pathFerret(call);
-        return jsonResponse(registry.summary(id));
+        return jsonResponse(await service.get(id));
       },
       'POST /v1/ferrets': async call => {
         await ready();
@@ -386,7 +426,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const seen = lookupStartRequest(held.ok ? held.value : undefined, id, digest);
         if (seen.kind === 'conflict')
           throw new ApiError(409, `request id ${JSON.stringify(id)} started a different ferret`, 'request_id_reused');
-        const summary = seen.kind === 'same' ? registry.summary(seen.ferret) : undefined;
+        const summary = seen.kind === 'same' ? await service.get(seen.ferret) : undefined;
         if (summary === undefined)
           throw new ApiError(404, `no start by this daemon carries request id ${JSON.stringify(id)}`, 'not-found');
         return jsonResponse(summary);
@@ -395,20 +435,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const id = await pathFerret(call);
         mayAct(call, id);
         const how = queryValue(call.request, 'how') === 'now' ? 'now' : 'polite';
-        await service.stop(id, how);
+        const { reason } = parseStopBody(await body(call));
+        await service.stop(id, how, reason);
         return jsonResponse({ id, state: registry.get(id)?.state });
       },
       'POST /v1/ferrets/:ferretId/resume': async call => {
         const id = await pathFerret(call);
         mayAct(call, id);
-        const resumed = await service.resume(id);
+        const { message } = parseResumeBody(await body(call));
+        const resumed = await service.resume(id, message);
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });
       },
       'POST /v1/ferrets/:ferretId/rename': async call => {
         const id = await pathFerret(call);
         mayAct(call, id);
-        const renamed = await service.rename(id, parseRenameBody(await body(call)).name);
+        const renamed = await service.rename(id, parseRenameBody(await body(call)));
         if (!renamed.ok) throw new ApiError(409, renamed.error, 'name_taken');
         return jsonResponse(renamed.value);
       },

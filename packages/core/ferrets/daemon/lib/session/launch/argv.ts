@@ -5,8 +5,7 @@
  * dead pane — runs the fleet wrapper with arguments the daemon owns. Those arguments used to be
  * assembled in three places that drifted apart: the start added `--model`, the move forgot it,
  * and the revive did not assemble anything at all — it re-ran the argv recorded at start, so a session
- * started before the handoff `Read(...)` rules existed never got them, and a session switched to
- * another model came back on the one it started with.
+ * switched to another model came back on the one it started with.
  *
  * WHAT THE DAEMON OWNS ON THE ARGV, in launch order:
  *
@@ -184,35 +183,30 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
 /**
  * The transcript arguments a RELAUNCH of an existing session must carry.
  *
- * The recorded provenance is the evidence: Claude's minted id is what the start put on the argv. A
- * session whose document predates provenance still carries the flag in its recorded argv, so that
- * id is kept rather than a new conversation being created. Codex names its own session, so a fresh
+ * The recorded provenance is the evidence: Claude's minted id is what the start put on the argv. Codex
+ * names its own session, so a fresh
  * one takes nothing; once its thread is KNOWN — proven by correlation, or adopted and started with
  * `resume <id>` — every relaunch resumes it. Only adopted threads used to: a correlated session came
  * back from a revive or a Restart in a brand-new rollout, its conversation left behind on disk.
  *
  * A Codex session with a correlation token is relaunched DECLARING it again, as its start did. A
- * session whose rollout was never proven — including one started before starts declared it — would
- * otherwise come back in a fresh rollout nothing can prove either, so Restart could never repair it.
+ * session whose rollout was never proven would otherwise come back in a fresh rollout nothing can prove
+ * either, so Restart could never repair it.
  */
 export function transcriptLaunchArguments(
   harness: HarnessKind,
   provenance: TranscriptProvenance | undefined,
-  recorded: readonly string[],
 ): readonly string[] {
   if (harness !== 'claude') {
     // The schema makes an id present exactly when the identity is established.
-    const id = provenance?.harnessSessionId ?? (recorded[1] === CODEX_RESUME ? recorded[2] : undefined);
+    const id = provenance?.harnessSessionId;
     const token = provenance?.correlationToken;
     return [
       ...(id === undefined ? [] : [CODEX_RESUME, id]),
       ...(token === undefined ? [] : codexCorrelationArguments(token)),
     ];
   }
-  if (provenance?.harnessSessionId !== undefined) return claudeSessionArguments(provenance.harnessSessionId);
-  const at = recorded.findIndex(token => token === HARNESS_SESSION_FLAG || token === HARNESS_RESUME_FLAG);
-  const id = at < 1 ? undefined : recorded[at + 1];
-  return id === undefined ? [] : claudeSessionArguments(id);
+  return provenance?.harnessSessionId === undefined ? [] : claudeSessionArguments(provenance.harnessSessionId);
 }
 
 /** Codex's subcommand for continuing a conversation it already has. */
@@ -293,8 +287,8 @@ export function launchedCompactAt(command: readonly string[]): CompactAt {
  * What is left is the part a relaunch would change if a setting changed — the wrapper, the
  * remote-control surface, the `Read(...)` rules, the owner's flags — which is what a stale-settings
  * check must compare. A model the owner switched to with `/model` is not a stale setting, and a
- * revive turning `--session-id` into `--resume` is not one either. Nor is the correlation root: every
- * session started before launches declared it would otherwise be told its settings are stale.
+ * revive turning `--session-id` into `--resume` is not one either. Nor is the correlation root, which
+ * names the run's rollout.
  */
 export function settingsArguments(argv: readonly string[]): readonly string[] {
   const kept: string[] = [];

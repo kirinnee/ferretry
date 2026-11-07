@@ -41,7 +41,7 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** A session with no stored environment launches with none, which is the pre-credential behaviour. */
+/** A launcher wired without an environment store launches every pane with none. */
 const NO_ENVIRONMENT: SessionEnvironmentStore = {
   write: async () => undefined,
   read: async () => ({}),

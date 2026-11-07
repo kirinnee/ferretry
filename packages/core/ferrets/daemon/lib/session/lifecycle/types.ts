@@ -89,8 +89,8 @@ export const SessionLifecycleConfigSchema = z.object({
    *
    * The agent-tool identity resolver authenticates a presented credential against this hash, so it
    * must be durable and readable by the daemon without the plaintext — which lives only in the
-   * session environment store. Optional because sessions started before the credential existed have
-   * none, and nothing can authenticate as them.
+   * session environment store. Optional because a stopped or revoked session has none (both erase it),
+   * and nothing can authenticate as it.
    *
    * IT IS THE ONE FIELD OF THIS CONFIGURATION THAT A LAUNCH REWRITES. Every pane launch re-issues the
    * credential ({@link SessionCredentialRotator}), so the hash names one pane rather than the whole

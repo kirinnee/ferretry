@@ -1,6 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
 import { AccountAutoResumeAvailability } from '../../../../../daemon/adapters/session/auto-resume/account-auto-resume-availability.ts';
@@ -8,42 +6,35 @@ import { BootExitRecorder } from '../../../../../daemon/adapters/session/auto-re
 import { FileAutoResumeLedger } from '../../../../../daemon/adapters/session/auto-resume/file-auto-resume-ledger.ts';
 import { FileAutoResumeSummaryStore } from '../../../../../daemon/adapters/session/auto-resume/file-auto-resume-summary-store.ts';
 import { RepositoryAutoResumeRoster } from '../../../../../daemon/adapters/session/auto-resume/storage-auto-resume-roster.ts';
-import { StateFileSystem } from 'UNRESOLVED';
 import { StorageAutoResumeJournal } from '../../../../../daemon/adapters/session/auto-resume/storage-auto-resume-journal.ts';
 import type { AutoResumeCandidate } from '../../../../../daemon/lib/session/auto-resume/types.ts';
 import { AutoResumeService } from '../../../../../daemon/lib/session/auto-resume/service.ts';
-import { createFoundationPaths } from '../../../../../daemon/lib/paths.ts';
 import type { ExitedSessionTransition, SessionExitObservation } from '../../../../../daemon/lib/session/health/exit.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { ResumeTarget } from '../../../../../daemon/lib/session/resume/types.ts';
-import { resolveStateHome } from 'UNRESOLVED';
 import type { SessionExitPort } from '../../../../../daemon/lib/session/health/service.ts';
+import { MEMORY_PATHS, MemoryFileSystem } from '../../../../support/daemon/memory-file-system.ts';
 
 const NOW = '2026-10-21T12:00:00.000Z';
 const ID = '2c8f5f2e-5b53-4a53-9a38-8f2b3d2f6a11';
-const homes = new Set<string>();
 
-afterEach(async () => {
-  for (const home of homes) await rm(home, { recursive: true, force: true });
-  homes.clear();
-});
-
-async function temporaryHome(): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-auto-resume-test-'));
-  homes.add(home);
-  return home;
-}
-
-function fileSystem(home: string): StateFileSystem {
-  return new StateFileSystem(createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: '/unused' })));
+/**
+ * The state home's files, in memory. A path outside the home is refused the way the daemon's own filesystem
+ * refuses one: the read throws, which the adapters must read as nothing.
+ */
+function fileSystem(): MemoryFileSystem {
+  const system = new MemoryFileSystem();
+  system.refusedOutside = MEMORY_PATHS.home;
+  return system;
 }
 
 describe('auto-resume ledger', () => {
   it('should round-trip candidates and remove the file when none are owed', async () => {
     // Arrange
-    const home = await temporaryHome();
+    const home = MEMORY_PATHS.home;
+    const system = fileSystem();
     const file = join(home, 'auto-resume.json');
-    const ledger = new FileAutoResumeLedger(fileSystem(home), file);
+    const ledger = new FileAutoResumeLedger(system, file);
     const candidates: AutoResumeCandidate[] = [{ id: 'a', status: 'running', at: NOW }];
 
     // Act
@@ -54,26 +45,26 @@ describe('auto-resume ledger', () => {
     // Assert
     should(stored).deepEqual(candidates);
     should(await ledger.read()).deepEqual([]);
-    await should(readFile(file, 'utf8')).be.rejected();
+    should(system.text(file)).be.undefined();
   });
 
   it('should read an absent, torn or foreign file as nothing owed', async () => {
     // Arrange
-    const home = await temporaryHome();
+    const home = MEMORY_PATHS.home;
+    const system = fileSystem();
     const file = join(home, 'auto-resume.json');
-    const ledger = new FileAutoResumeLedger(fileSystem(home), file);
+    const ledger = new FileAutoResumeLedger(system, file);
 
     // Act / Assert
     should(await ledger.read()).deepEqual([]);
-    await writeFile(file, '{ torn', 'utf8');
+    system.plant(file, '{ torn');
     should(await ledger.read()).deepEqual([]);
-    await writeFile(file, JSON.stringify({ version: 2, candidates: [] }), 'utf8');
+    system.plant(file, JSON.stringify({ version: 2, candidates: [] }));
     should(await ledger.read()).deepEqual([]);
   });
 
   it('should read an unreadable path as nothing owed', async () => {
-    const home = await temporaryHome();
-    const ledger = new FileAutoResumeLedger(fileSystem(home), '/outside/the/state/home.json');
+    const ledger = new FileAutoResumeLedger(fileSystem(), '/outside/the/state/home.json');
     should(await ledger.read()).deepEqual([]);
   });
 });
@@ -81,24 +72,24 @@ describe('auto-resume ledger', () => {
 describe('auto-resume summary store', () => {
   it('should round-trip the last pass and read nothing otherwise', async () => {
     // Arrange
-    const home = await temporaryHome();
+    const home = MEMORY_PATHS.home;
+    const system = fileSystem();
     const file = join(home, 'auto-resume-summary.json');
-    const store = new FileAutoResumeSummaryStore(fileSystem(home), file);
+    const store = new FileAutoResumeSummaryStore(system, file);
     const summary = { at: NOW, resumed: 2, skipped: [{ sessionId: 'a', reason: 'login expired' }] };
 
     // Act / Assert
     should(await store.read()).equal(null);
     await store.write(summary);
     should(await store.read()).deepEqual(summary);
-    await writeFile(file, '{ torn', 'utf8');
+    system.plant(file, '{ torn');
     should(await store.read()).equal(null);
-    await writeFile(file, JSON.stringify({ at: 'x' }), 'utf8');
+    system.plant(file, JSON.stringify({ at: 'x' }));
     should(await store.read()).equal(null);
   });
 
   it('should read an unreadable path as nothing', async () => {
-    const home = await temporaryHome();
-    should(await new FileAutoResumeSummaryStore(fileSystem(home), '/outside/the/home.json').read()).equal(null);
+    should(await new FileAutoResumeSummaryStore(fileSystem(), '/outside/the/home.json').read()).equal(null);
   });
 });
 
@@ -166,7 +157,7 @@ function observation(id: string, status: string, kind: 'gone' | 'exited'): Sessi
   return {
     id,
     status,
-    registration: { daemonId: 'd', sessionId: id, tmuxSession: `fy-${id}`, paneId: '%0', pid: 1, processStartTicks: 1 },
+    registration: { daemonId: 'd', sessionId: id, tmuxSession: `fy-${id}`, paneId: '%0', pid: 1, processStartTicks: 1, sessionCreated: 1 },
     exit: kind === 'gone' ? { kind: 'gone' } : { kind: 'exited', exitStatus: 1 },
   };
 }
@@ -262,8 +253,8 @@ describe('a host restart, end to end', () => {
 
   it('should bring back what was running, leave stopped work stopped, and say what it could not do', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const system = fileSystem(home);
+    const home = MEMORY_PATHS.home;
+    const system = fileSystem();
     const machine = new Machine();
     machine.add('mid-turn', 'tool_running');
     machine.add('idle-auto', 'awaiting_user', 'auto');

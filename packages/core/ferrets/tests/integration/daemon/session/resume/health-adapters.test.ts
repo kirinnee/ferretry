@@ -1,73 +1,46 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
-import { BunSqliteIndexFactory, DaemonStorageFactory, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
+import { FerretHistoryFiles } from '../../../../../contract/index.ts';
 import { FileSelfRestartStampStore } from '../../../../../daemon/adapters/session/resume/file-self-restart-stamp-store.ts';
 import { FileSessionHealthEventSink } from '../../../../../daemon/adapters/session/resume/file-health-event-sink.ts';
-import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { StorageConsistencyPass } from '../../../../../daemon/adapters/session/resume/storage-consistency-pass.ts';
 import { StorageSessionHealthInventory, type SupervisionCapabilities } from '../../../../../daemon/adapters/session/resume/storage-health-inventory.ts';
 import { SystemMonotonicClock } from '../../../../../daemon/adapters/session/resume/system-monotonic-clock.ts';
 import { UnmountedSupervisionRepair } from '../../../../../daemon/adapters/session/resume/unmounted-repair.ts';
-import { CURRENT_SESSION_VERSION, resolveStateHome } from 'UNRESOLVED';
-import { createFoundationPaths, createSessionPaths } from '../../../../../daemon/lib/paths.ts';
-import { createSessionEvent, encodeSessionEvent } from '../../../../../daemon/lib/storage/journal.ts';
+import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
 import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
-import type { FileSystemFactory, FileSystemPort } from '../../../../../daemon/lib/ports.ts';
-import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
+import { MEMORY_PATHS, MemoryFileSystem } from '../../../../support/daemon/memory-file-system.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
 import { waitForValue } from '../../support/wait-for.ts';
 
-const homes = new Set<string>();
+/**
+ * The health adapters: the self-restart stamp and the health event file (a `FileSystemPort`, here in memory), the
+ * inventory and the consistency pass over the session store (the kernel's memory state folder).
+ *
+ * The consistency pass still reads a journal's last write through the filesystem, at the session directory's
+ * `events.jsonl`, so a test that needs a journal to have outlived its session lays that file down in the memory
+ * filesystem at the instant it wants.
+ */
+
 const NOW = '2026-07-31T10:00:00.000Z';
 const SETTINGS = defaultSessionHealthSettings;
+const HOME = MEMORY_PATHS.home;
 
-/** Counts journal byte reads, which is what separates a shallow tick from a full reconcile. */
-class CountingStateFileSystem extends StateFileSystem {
-  journalReads = 0;
-
-  override async *readChunks(path: string, chunkSize: number, offset = 0): AsyncIterable<Uint8Array> {
-    if (path.endsWith('/events.jsonl')) this.journalReads += 1;
-    yield* super.readChunks(path, chunkSize, offset);
-  }
+/** A filesystem whose writes are stamped from NOW on, so a journal written now is newer than anything before. */
+function memoryFiles(): MemoryFileSystem {
+  return new MemoryFileSystem(Date.parse(NOW));
 }
 
-/**
- * Hands storage the very same counting filesystem the consistency pass holds. Counting only the
- * pass's own filesystem proves nothing: the survey and the reconcile both run through storage's.
- */
-class CountingStateFileSystemFactory implements FileSystemFactory {
-  constructor(private readonly fileSystem: CountingStateFileSystem) {}
-
-  create(): FileSystemPort {
-    return this.fileSystem;
-  }
+async function openStorage() {
+  return await memoryStorage({ clock: { now: () => NOW } });
 }
 
-async function temporaryHome() {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-health-test-'));
-  homes.add(home);
-  return home;
-}
-
-async function openStorage(home: string, fileSystems: FileSystemFactory = new StateFileSystemFactory()) {
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    fileSystems,
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return await factory.open();
-}
-
-function paths(home: string) {
-  // FY_HOME only, and a home directory that would fail loudly if it were ever consulted: a test
-  // that resolves the operator's real state home is a broken test.
-  return createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: '/home-must-not-be-used' }));
+/** A write to the session's journal file, as the consistency pass reads its last modification. */
+async function journalWrite(files: MemoryFileSystem, id: SessionId): Promise<void> {
+  await files.appendLineDurable(createSessionPaths(MEMORY_PATHS, id).events, '{"type":"session.late_write"}');
 }
 
 function capabilities(overrides: Partial<SupervisionCapabilities> = {}): SupervisionCapabilities {
@@ -84,16 +57,12 @@ function capabilities(overrides: Partial<SupervisionCapabilities> = {}): Supervi
   };
 }
 
-afterEach(async () => {
-  for (const home of homes) await rm(home, { recursive: true, force: true });
-  homes.clear();
-});
+const TEN_MINUTES_BEFORE = new Date(Date.parse(NOW) - 10 * 60_000).toISOString();
 
 describe('self-restart stamp store', () => {
   it('should report no stamp at all before anything has restarted', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const store = new FileSelfRestartStampStore(new StateFileSystem(paths(home)), join(home, 'self-restart.json'));
+    const store = new FileSelfRestartStampStore(memoryFiles(), join(HOME, 'self-restart.json'));
 
     // Act
     const actual = await store.read();
@@ -102,11 +71,11 @@ describe('self-restart stamp store', () => {
     should(actual).be.undefined();
   });
 
-  it('should round-trip a stamp through the real filesystem', async () => {
+  it('should round-trip a stamp through the filesystem', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const file = join(home, 'self-restart.json');
-    const store = new FileSelfRestartStampStore(new StateFileSystem(paths(home)), file);
+    const files = memoryFiles();
+    const file = join(HOME, 'self-restart.json');
+    const store = new FileSelfRestartStampStore(files, file);
 
     // Act
     await store.write({ at: NOW, sessions: ['a', 'b'] });
@@ -114,15 +83,15 @@ describe('self-restart stamp store', () => {
 
     // Assert
     should(actual).deepEqual({ at: NOW, sessions: ['a', 'b'] });
-    should(JSON.parse(await readFile(file, 'utf8'))).have.property('at', NOW);
+    should(JSON.parse(files.text(file) ?? 'null')).have.property('at', NOW);
   });
 
   it('should throw on a corrupt stamp rather than reporting an absent one', async () => {
     // Arrange — reading a torn stamp as "nothing restarted" is what disables the restart-loop brake.
-    const home = await temporaryHome();
-    const file = join(home, 'self-restart.json');
-    await writeFile(file, '{ this is not json', 'utf8');
-    const store = new FileSelfRestartStampStore(new StateFileSystem(paths(home)), file);
+    const files = memoryFiles();
+    const file = join(HOME, 'self-restart.json');
+    files.plant(file, '{ this is not json');
+    const store = new FileSelfRestartStampStore(files, file);
 
     // Act / Assert
     await should(store.read()).be.rejected();
@@ -130,10 +99,10 @@ describe('self-restart stamp store', () => {
 
   it('should throw on a stamp whose shape does not match the schema', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const file = join(home, 'self-restart.json');
-    await writeFile(file, JSON.stringify({ at: 'the other day' }), 'utf8');
-    const store = new FileSelfRestartStampStore(new StateFileSystem(paths(home)), file);
+    const files = memoryFiles();
+    const file = join(HOME, 'self-restart.json');
+    files.plant(file, JSON.stringify({ at: 'the other day' }));
+    const store = new FileSelfRestartStampStore(files, file);
 
     // Act / Assert
     await should(store.read()).be.rejected();
@@ -141,9 +110,7 @@ describe('self-restart stamp store', () => {
 
   it('should clear a stamp, and stay silent when there was none to clear', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const file = join(home, 'self-restart.json');
-    const store = new FileSelfRestartStampStore(new StateFileSystem(paths(home)), file);
+    const store = new FileSelfRestartStampStore(memoryFiles(), join(HOME, 'self-restart.json'));
     await store.write({ at: NOW, sessions: [] });
 
     // Act
@@ -158,20 +125,16 @@ describe('self-restart stamp store', () => {
 describe('health event sink', () => {
   it('should append one durable stamped line per event', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const file = join(home, 'health-events.jsonl');
-    const sink = new FileSessionHealthEventSink(
-      new StateFileSystem(paths(home)),
-      file,
-      new SystemClock(() => new Date(NOW)),
-    );
+    const files = memoryFiles();
+    const file = join(HOME, 'health-events.jsonl');
+    const sink = new FileSessionHealthEventSink(files, file, { now: () => NOW });
 
     // Act
     await sink.emit({ type: 'fleet.daemon_wedge', data: { gapSeconds: 200 } });
     await sink.emit({ type: 'fleet.index_incoherent', data: { consecutive: 1 } });
 
     // Assert
-    const lines = (await readFile(file, 'utf8'))
+    const lines = (files.text(file) ?? '')
       .trim()
       .split('\n')
       .map(line => JSON.parse(line));
@@ -184,8 +147,7 @@ describe('health event sink', () => {
 describe('storage health inventory', () => {
   it('should report an empty fleet with no supervision claimed', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
 
     // Act
     const actual = await new StorageSessionHealthInventory(opened.storage, capabilities()).observe();
@@ -199,12 +161,11 @@ describe('storage health inventory', () => {
   });
 
   it('should classify indexed sessions by status and never guess a missing one is finished', async () => {
-    // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    await opened.storage.writeState(parseSessionId('running-one'), { id: 'running-one', status: 'running' });
-    await opened.storage.writeState(parseSessionId('stopped-one'), { id: 'stopped-one', status: 'stopped' });
-    await opened.storage.writeState(parseSessionId('blank-one'), { id: 'blank-one' });
+    // Arrange — `blank-one` has a configuration and no state, so the index knows no status for it.
+    const opened = await openStorage();
+    await opened.storage.writeState(parseSessionId('running-one'), sessionState('running-one', { status: 'running' }));
+    await opened.storage.writeState(parseSessionId('stopped-one'), sessionState('stopped-one', { status: 'stopped' }));
+    await opened.storage.writeConfig(parseSessionId('blank-one'), sessionConfig('blank-one'));
 
     // Act
     const actual = await new StorageSessionHealthInventory(opened.storage, capabilities()).observe();
@@ -219,9 +180,8 @@ describe('storage health inventory', () => {
 
   it('should consult the monitor registry only once monitors are actually mounted', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    await opened.storage.writeState(parseSessionId('watched'), { id: 'watched', status: 'running' });
+    const opened = await openStorage();
+    await opened.storage.writeState(parseSessionId('watched'), sessionState('watched', { status: 'running' }));
     const armedAtMs = Date.parse(NOW) - 45_000;
     const sweptAt = new Date(Date.parse(NOW) - 30_000).toISOString();
 
@@ -250,10 +210,9 @@ describe('storage health inventory', () => {
 describe('storage consistency pass', () => {
   it('should reconcile nothing and touch no index when the fleet is already coherent', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    await opened.storage.writeState(parseSessionId('known'), { id: 'known', status: 'running' });
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    const opened = await openStorage();
+    await opened.storage.writeState(parseSessionId('known'), sessionState('known', { status: 'running' }));
+    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(false);
@@ -271,18 +230,12 @@ describe('storage consistency pass', () => {
   });
 
   it('should find a session on disk that the index lost, and repair it', async () => {
-    // Arrange — the 2026-07-23 shape: a session directory whose row vanished from the index.
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    // A session directory laid down beside the index, exactly as one the index lost looks: the
-    // directory is authoritative, and nothing in the index knows about it.
-    const session = createSessionPaths(paths(home), parseSessionId('orphan'));
-    await mkdir(session.directory, { recursive: true, mode: 0o700 });
-    // A current-version directory always carries its journal, so the fixture carries one too.
-    await writeFile(session.events, '', { mode: 0o600 });
-    await writeFile(session.marker, `${CURRENT_SESSION_VERSION}\n`, { mode: 0o600 });
-    await writeFile(session.state, JSON.stringify({ id: 'orphan', status: 'running' }), { mode: 0o600 });
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    // Arrange — the 2026-07-23 shape: a session whose row vanished from the index while its documents stayed.
+    const opened = await openStorage();
+    const orphan = parseSessionId('orphan');
+    await opened.storage.writeState(orphan, sessionState('orphan', { status: 'running' }));
+    opened.storage.forgetFromIndex(orphan);
+    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(false);
@@ -296,14 +249,14 @@ describe('storage consistency pass', () => {
 
   it('should report a terminal session whose journal outlived it as a zombie on a deep pass', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
+    const files = memoryFiles();
     const id = parseSessionId('zombie');
-    const finishedAt = new Date(Date.now() - 10 * 60_000).toISOString();
-    await opened.storage.writeState(id, { id: 'zombie', status: 'stopped', finishedAt });
+    await opened.storage.writeState(id, sessionState('zombie', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
     // The journal keeps growing long after the session was declared finished.
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    await journalWrite(files, id);
+    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -315,11 +268,10 @@ describe('storage consistency pass', () => {
 
   it('should name the zombie scan, the reindex and its verification as stages of a deep pass', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    await opened.storage.writeState(parseSessionId('known'), { id: 'known', status: 'running' });
+    const opened = await openStorage();
+    await opened.storage.writeState(parseSessionId('known'), sessionState('known', { status: 'running' }));
     const stages: string[] = [];
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS, {
+    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS, {
       run: async (name, work) => {
         stages.push(name);
         return await work();
@@ -339,11 +291,10 @@ describe('storage consistency pass', () => {
   });
 
   it('should compare the index against the walk it is handed rather than taking its own', async () => {
-    // Arrange — the session is on disk and indexed; only the handed walk says otherwise.
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    await opened.storage.writeState(parseSessionId('known'), { id: 'known', status: 'running' });
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    // Arrange — the session is stored and indexed; only the handed walk says otherwise.
+    const opened = await openStorage();
+    await opened.storage.writeState(parseSessionId('known'), sessionState('known', { status: 'running' }));
+    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
 
     // Act
     const handed = await pass.run(false, []);
@@ -357,16 +308,13 @@ describe('storage consistency pass', () => {
 
   it('should not look for zombies on a shallow pass', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
+    const files = memoryFiles();
     const id = parseSessionId('zombie');
-    await opened.storage.writeState(id, {
-      id: 'zombie',
-      status: 'stopped',
-      finishedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
-    });
+    await opened.storage.writeState(id, sessionState('zombie', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    await journalWrite(files, id);
+    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(false);
@@ -378,12 +326,11 @@ describe('storage consistency pass', () => {
 
   it('should report a vanished indexed journal as unhealable instead of healthy', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
     const id = parseSessionId('lost-journal');
     await opened.storage.append(id, 'session.started', { durable: true });
-    await rm(createSessionPaths(paths(home), id).events);
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    opened.folder.files.delete(FerretHistoryFiles.path.replace('*', id));
+    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -399,25 +346,20 @@ describe('storage consistency pass', () => {
 
   it('should keep reporting a lost journal on every shallow tick without reconciling again', async () => {
     // Arrange — a healthy deep pass first, so the finding can only come from the deletion.
-    const home = await temporaryHome();
-    const fileSystem = new CountingStateFileSystem(paths(home));
-    const opened = await openStorage(home, new CountingStateFileSystemFactory(fileSystem));
+    const opened = await openStorage();
     const lost = parseSessionId('lost-journal');
     const healthy = parseSessionId('healthy-session');
     await opened.storage.append(lost, 'session.started', { durable: true });
     await opened.storage.append(healthy, 'session.started', { durable: true });
-    const pass = new StorageConsistencyPass(opened.storage, fileSystem, paths(home), SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
     const healthyPass = await pass.run(true);
-    await rm(createSessionPaths(paths(home), lost).events);
-    // The healthy journal grows behind the index's back. A reconcile has to read those bytes to
-    // catch its row up, so a tick that finishes at zero reads provably never reconciled — without
-    // this divergence the counter would read zero even for a full pass, and prove nothing.
-    await writeFile(
-      createSessionPaths(paths(home), healthy).events,
-      `${encodeSessionEvent(createSessionEvent(healthy, 1, NOW, 'session.behind_the_index', {}))}\n`,
-      { flag: 'a', mode: 0o600 },
-    );
-    fileSystem.journalReads = 0;
+    opened.folder.files.delete(FerretHistoryFiles.path.replace('*', lost));
+    const reconcile = opened.storage.reconcile.bind(opened.storage);
+    let reconciles = 0;
+    opened.storage.reconcile = async () => {
+      reconciles += 1;
+      return await reconcile();
+    };
 
     // Act
     const shallow = [await pass.run(false), await pass.run(false), await pass.run(false)];
@@ -427,40 +369,20 @@ describe('storage consistency pass', () => {
     should(healthyPass.unhealable).deepEqual([]);
     should(shallow.map(tick => tick.unhealable)).deepEqual([[lost], [lost], [lost]]);
     should(shallow.map(tick => tick.missingFromIndex)).deepEqual([[], [], []]);
-    should(fileSystem.journalReads).equal(0);
+    should(reconciles).equal(0);
     should(opened.storage.findSession(healthy)?.lastSequence).equal(1);
-    await opened.storage.close();
-  });
-
-  it('should report an old session whose only witness is the index as unhealable too', async () => {
-    // Arrange — a version-1 directory the boot sweep deliberately refused to move, because
-    // fabricating its journal would have destroyed the index fingerprint that proves the loss.
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('old-witnessed');
-    await opened.storage.append(id, 'session.started', { durable: true });
-    const session = createSessionPaths(paths(home), id);
-    await writeFile(session.marker, '1\n', { mode: 0o600 });
-    await rm(session.events);
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
-
-    // Act
-    const actual = await pass.run(false);
-
-    // Assert
-    should(await opened.storage.surveySessionDirectories()).deepEqual([{ id, journalLost: true }]);
-    should(actual.unhealable).deepEqual([id]);
     await opened.storage.close();
   });
 
   it('should ignore a terminal session with no finish stamp rather than call it a zombie', async () => {
     // Arrange
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
+    const files = memoryFiles();
     const id = parseSessionId('undated');
-    await opened.storage.writeState(id, { id: 'undated', status: 'failed' });
+    await opened.storage.writeState(id, sessionState('undated', { status: 'failed' }));
     await opened.storage.append(id, 'session.late_write', { note: 'no finish stamp' });
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    await journalWrite(files, id);
+    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -472,13 +394,14 @@ describe('storage consistency pass', () => {
 
   it('should not call a terminal session a zombie when its state record can no longer be read', async () => {
     // Arrange — without the finish stamp there is nothing to compare the journal's last write against.
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
+    const files = memoryFiles();
     const id = parseSessionId('torn-state');
-    await opened.storage.writeState(id, { id: 'torn-state', status: 'stopped', finishedAt: NOW });
+    await opened.storage.writeState(id, sessionState('torn-state', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    await writeFile(createSessionPaths(paths(home), id).state, '{"id": "torn-state"', 'utf8');
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    await journalWrite(files, id);
+    opened.folder.plant(SessionStateFiles, '{"id": "torn-state"', id);
+    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -491,12 +414,13 @@ describe('storage consistency pass', () => {
   it('should not call a finished session with an untouched empty journal a zombie', async () => {
     // Arrange — a session that recorded no events still has a real, zero-length journal, and its
     // creation timestamp must not read as activity outliving the session.
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
+    const files = memoryFiles();
     const id = parseSessionId('quiet');
-    await opened.storage.writeState(id, { id: 'quiet', status: 'stopped', finishedAt: new Date().toISOString() });
-    const journal = await new StateFileSystem(paths(home)).information(createSessionPaths(paths(home), id).events);
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+    await opened.storage.writeState(id, sessionState('quiet', { status: 'stopped', finishedAt: NOW }));
+    files.plant(createSessionPaths(MEMORY_PATHS, id).events, '');
+    const journal = await files.information(createSessionPaths(MEMORY_PATHS, id).events);
+    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
 
     // Act
     const actual = await pass.run(true);

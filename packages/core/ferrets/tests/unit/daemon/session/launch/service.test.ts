@@ -20,8 +20,8 @@ const planner = new SessionPlanner({
   remoteControlPrefix: 'fyd',
 });
 
-/** A session started BEFORE the Read rules existed: its recorded argv has none. */
-const earlierSubject = (overrides: Partial<LaunchSubject> = {}): LaunchSubject => ({
+/** A session whose recorded argv lacks the hand-off Read rules a relaunch would add. */
+const unruledSubject = (overrides: Partial<LaunchSubject> = {}): LaunchSubject => ({
   config: launchConfig({
     transcript: {
       v: 1,
@@ -37,7 +37,7 @@ const earlierSubject = (overrides: Partial<LaunchSubject> = {}): LaunchSubject =
 });
 
 class Ports implements SessionLaunchPorts {
-  subjectValue: LaunchSubject | undefined = earlierSubject();
+  subjectValue: LaunchSubject | undefined = unruledSubject();
   accountValue: ReturnType<typeof launchAccount> | undefined = launchAccount();
   digest: string | undefined = 'settings-now';
   /** The login's fixed `--settings` text: empty is a login with none, undefined is unreadable. */
@@ -63,7 +63,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should rebuild a revive on current settings, record it, and resume the conversation', async () => {
     // Arrange: an old session that has since been switched to Sonnet with /model.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       state: launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER, observedReasoningEffort: 'high' }),
     });
 
@@ -113,7 +113,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should carry the remote-control surface and the owner flags a session asked for', async () => {
     // Arrange: no transcript record, so whether it started is never asked.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ remoteControl: true, harnessFlags: ['--verbose'] }),
       command: [WRAPPER],
     });
@@ -132,7 +132,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should never start the Remote Control surface for a session that did not ask for it', async () => {
     // Arrange
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({ config: launchConfig({ remoteControl: false }), command: [WRAPPER] });
+    ports.subjectValue = unruledSubject({ config: launchConfig({ remoteControl: false }), command: [WRAPPER] });
 
     // Act
     const argv = await new SessionLaunchService(ports).relaunch(ID);
@@ -145,7 +145,7 @@ describe('SessionLaunchService.relaunch', () => {
   it('should fall back to the account default when the model it was on is no longer served', async () => {
     // Arrange
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ model: 'claude-gone-4', teammate: 'Ada', parent: 'p1' }),
     });
 
@@ -178,7 +178,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
   it('should keep fast mode on a Claude session across a restart, carrying the fixed overlay with it', async () => {
     // Arrange: launched fast; nothing reported since.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
+    ports.subjectValue = unruledSubject({ config: launchConfig({ launchFast: true }) });
 
     // Act
     const argv = await new SessionLaunchService(ports).relaunch(ID);
@@ -193,7 +193,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
   it('should restart on what the harness last reported when that is newer than the launch', async () => {
     // Arrange: launched fast, then turned off with /fast off.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ launchFast: true }),
       state: launchState({ observedFast: false, observedModelAt: LATER }),
     });
@@ -236,7 +236,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     // Arrange
     const ports = new Ports();
     ports.accountValue = launchAccount({ kind: 'codex' });
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ harness: 'codex', launchFast: true }),
       command: [WRAPPER],
     });
@@ -253,10 +253,10 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     // Arrange
     const unreadable = new Ports();
     unreadable.fixed = undefined;
-    unreadable.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
+    unreadable.subjectValue = unruledSubject({ config: launchConfig({ launchFast: true }) });
     const corrupt = new Ports();
     corrupt.fixed = '{not json';
-    corrupt.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
+    corrupt.subjectValue = unruledSubject({ config: launchConfig({ launchFast: true }) });
 
     // Act / Assert
     should(await new SessionLaunchService(unreadable).relaunch(ID)).be.undefined();
@@ -269,7 +269,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     // Arrange: only an overlay that cannot be read leaves a session to its record; a port that breaks
     // is a real fault, and swallowing it would restart the pane on a stale argv without saying so.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({ config: launchConfig({ launchFast: true }) });
+    ports.subjectValue = unruledSubject({ config: launchConfig({ launchFast: true }) });
     ports.readableFolders = () => {
       throw new Error('the state directory is gone');
     };
@@ -289,7 +289,7 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
   it('should treat the fast-mode argument as part of the run, so a live /fast is not a stale setting', async () => {
     // Arrange: the process runs with the fast overlay it launched with; the owner then typed /fast off.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ launchFast: true }),
       state: launchState({ observedFast: false, observedModelAt: LATER }),
       command: [
@@ -324,7 +324,7 @@ describe('SessionLaunchService.drift', () => {
   it('should call a session current when only its model, effort or resume flag differ', async () => {
     // Arrange: launched with the rules, then switched model; neither is a stale setting.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ launchSettings: 'settings-now' }),
       state: launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER }),
       command: [WRAPPER, '--resume', HARNESS_SESSION, ...READ_RULES, '--model', 'claude-opus-5', '--effort', 'low'],
@@ -340,7 +340,7 @@ describe('SessionLaunchService.drift', () => {
   it('should call a session stale when the fleet settings it launched under have changed', async () => {
     // Arrange: e.g. the permission mode or the profile changed since, which regenerated the wrapper.
     const ports = new Ports();
-    ports.subjectValue = earlierSubject({
+    ports.subjectValue = unruledSubject({
       config: launchConfig({ launchSettings: 'settings-then' }),
       command: [WRAPPER, ...READ_RULES, '--model', 'claude-opus-5'],
     });
@@ -355,10 +355,10 @@ describe('SessionLaunchService.drift', () => {
   it('should claim nothing it cannot show', async () => {
     // Arrange: no recorded digest, an unreadable wrapper now, an unreadable session, a gone account.
     const unrecorded = new Ports();
-    unrecorded.subjectValue = earlierSubject({ command: [WRAPPER, ...READ_RULES] });
+    unrecorded.subjectValue = unruledSubject({ command: [WRAPPER, ...READ_RULES] });
     const unreadableNow = new Ports();
     unreadableNow.digest = undefined;
-    unreadableNow.subjectValue = earlierSubject({
+    unreadableNow.subjectValue = unruledSubject({
       config: launchConfig({ launchSettings: 'settings-then' }),
       command: [WRAPPER, ...READ_RULES],
     });

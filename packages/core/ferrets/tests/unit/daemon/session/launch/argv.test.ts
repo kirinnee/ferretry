@@ -197,27 +197,16 @@ describe('transcriptLaunchArguments', () => {
     };
 
     // Act
-    const argv = transcriptLaunchArguments('claude', provenance, [WRAPPER]);
+    const argv = transcriptLaunchArguments('claude', provenance);
 
     // Assert
     should(argv).eql(['--session-id', HARNESS_SESSION]);
   });
 
-  it('should keep the id a session recorded before provenance existed, in either spelling', () => {
-    // Arrange: creating a new conversation here would lose the one being revived.
-    const created = [WRAPPER, '--session-id', HARNESS_SESSION];
-    const resumed = [WRAPPER, '--resume', HARNESS_SESSION];
-
+  it('should carry nothing for a session that never named one', () => {
     // Act / Assert
-    should(transcriptLaunchArguments('claude', undefined, created)).eql(['--session-id', HARNESS_SESSION]);
-    should(transcriptLaunchArguments('claude', undefined, resumed)).eql(['--session-id', HARNESS_SESSION]);
-  });
-
-  it('should carry nothing for a session that never named one, a dangling flag, or Codex', () => {
-    // Act / Assert
-    should(transcriptLaunchArguments('claude', undefined, [WRAPPER, '--model', 'x'])).eql([]);
-    should(transcriptLaunchArguments('claude', undefined, [WRAPPER, '--session-id'])).eql([]);
-    should(transcriptLaunchArguments('codex', undefined, [WRAPPER, '--session-id', HARNESS_SESSION])).eql([]);
+    should(transcriptLaunchArguments('claude', undefined)).eql([]);
+    should(transcriptLaunchArguments('codex', undefined)).eql([]);
   });
 });
 
@@ -231,12 +220,9 @@ describe('transcriptLaunchArguments, for a Codex conversation Ferretry adopted',
       identity: 'adopted' as const,
       file: `/fleet/homes/codex/sessions/rollout-${HARNESS_SESSION}.jsonl`,
     };
-    const recorded = ['/fleet/bin/codex-auto', 'resume', HARNESS_SESSION];
 
-    // Act / Assert: from the record of adoption, or from the argv a document without one kept.
-    should(transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto'])).eql(['resume', HARNESS_SESSION]);
-    should(transcriptLaunchArguments('codex', undefined, recorded)).eql(['resume', HARNESS_SESSION]);
-    should(transcriptLaunchArguments('codex', undefined, ['/fleet/bin/codex-auto', 'resume'])).eql([]);
+    // Act / Assert: from the record of adoption.
+    should(transcriptLaunchArguments('codex', provenance)).eql(['resume', HARNESS_SESSION]);
   });
 });
 
@@ -254,7 +240,7 @@ describe('transcriptLaunchArguments, for a Codex session proven by correlation',
     };
 
     // Act
-    const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
+    const argv = transcriptLaunchArguments('codex', provenance);
 
     // Assert
     should(argv).eql(['--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
@@ -272,7 +258,7 @@ describe('transcriptLaunchArguments, for a Codex session proven by correlation',
     };
 
     // Act
-    const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
+    const argv = transcriptLaunchArguments('codex', provenance);
 
     // Assert
     should(argv).eql(['resume', HARNESS_SESSION, '--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
@@ -289,7 +275,7 @@ describe('transcriptLaunchArguments, for a Codex session proven by correlation',
     };
 
     // Act
-    const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
+    const argv = transcriptLaunchArguments('codex', provenance);
 
     // Assert
     should(argv).eql(['resume', HARNESS_SESSION, '--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
@@ -353,15 +339,12 @@ describe('settingsArguments', () => {
     ]);
   });
 
-  it('should drop the Codex correlation root, in both spellings, and keep an owner’s own --add-dir', () => {
-    // Arrange: a session started before launches declared the root, or before it moved one level down,
-    // must not read as stale.
+  it('should drop the Codex correlation root and keep an owner’s own --add-dir', () => {
+    // Arrange: the launch-declared correlation root must not read as stale.
     const argv = [
       WRAPPER,
       '--add-dir',
       '/state/sessions/s1/codex-correlation/unreachable',
-      '--add-dir',
-      '/state/sessions/s0/codex-correlation',
       '--add-dir',
       '/work/shared',
       '--add-dir',

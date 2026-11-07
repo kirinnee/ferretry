@@ -1,123 +1,67 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  type FileHandle,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { type FileHandle, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { BunSqliteIndexFactory, DaemonStorageFactory, type PaneDeliveryOptions, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystem, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
 import { FileSessionEffectLedger } from '../../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { FileSessionTaskStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
-import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { NodeSessionCredentialIssuer } from '../../../../../daemon/adapters/session/lifecycle/node-session-credential-issuer.ts';
 import { NodeWorkingDirectoryResolver } from '../../../../../daemon/adapters/session/lifecycle/node-working-directory-resolver.ts';
-import { StorageSessionLifecycleRepository, UnusableSessionRecordError } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import {
+  StorageSessionLifecycleRepository,
+  UnusableSessionRecordError,
+} from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { TimeSessionIdFactory } from '../../../../../daemon/adapters/session/lifecycle/time-session-id-factory.ts';
-import { TmuxPaneDelivery } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { TmuxSessionLifecycleLauncher } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-lifecycle-launcher.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 // Imported from their own modules rather than the barrel: each lifecycle module keeps its OWN copy
-// of this helper — no shared filesystem abstraction was introduced — so these are three distinct
+// of this helper — no shared filesystem abstraction was introduced — so these are distinct
 // functions, each of which has to be proven on its own. They are named apart rather than sharing one
-// name because `lifecycle/index.ts` star-exports all three modules, and a shared name would collide
+// name because `lifecycle/index.ts` star-exports both modules, and a shared name would collide
 // there and again in `adapters/index.ts`.
 import { fsyncEnvironmentDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { fsyncTaskDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
-import { fsyncReservedDirectory } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
-import { createSessionPaths, type FoundationPaths } from '../../../../../daemon/lib/paths.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
+import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
+import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import { createSessionRecord, transitionSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
-import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
-import type { FrozenJsonValue, JsonValue } from '@ferretry/std';
-import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { SessionEnvironmentStore, SessionLifecycleRecord } from '../../../../../daemon/lib/session/lifecycle/types.ts';
 import { SessionLifecycleService } from '../../../../../daemon/lib/session/lifecycle/service.ts';
-import { type TmuxCommandPort, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
-import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
+import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
+import type { SessionEnvironmentStore, SessionLifecycleRecord } from '../../../../../daemon/lib/session/lifecycle/types.ts';
+import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
+import type { TmuxLaunch } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { FakePaneDelivery, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
+
+/**
+ * The lifecycle's storage-backed repository, its tmux launcher and its file stores, composed.
+ *
+ * The session documents and journal live in the kernel's state port (`memoryStorage`); the tmux the launcher drives is
+ * the injected `TmuxController`/`TmuxPaneDelivery` pair (`FakeTmux`/`FakePaneDelivery`), because the real controller
+ * and delivery belong to the terminals plugin and are tested there. The turn, environment and effect files are still
+ * this package's own `node:fs` adapters, so those run against real temporary directories.
+ */
 
 const homes = new Set<string>();
 const NOW = '2026-07-31T10:00:00.000Z';
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 
-async function openTemporaryStorage(existingHome?: string) {
-  const home = existingHome ?? (await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-test-')));
+async function temporaryHome(prefix: string): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), prefix));
   homes.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return await factory.open();
+  return home;
 }
 
-/**
- * The real state filesystem, which runs `interleave` the first time anyone looks at `target` after it
- * is armed — so another writer can be made to land at exactly the moment a reader has its copy.
- */
-class InterleavingStateFileSystem extends StateFileSystem {
-  target: string | undefined;
-  interleave: () => void = () => undefined;
-
-  private observe(path: string): void {
-    if (path !== this.target) return;
-    this.target = undefined;
-    this.interleave();
-  }
-
-  override async identity(path: string): Promise<string | undefined> {
-    this.observe(path);
-    return await super.identity(path);
-  }
-
-  override async readTextIdentified(path: string) {
-    this.observe(path);
-    return await super.readTextIdentified(path);
-  }
+async function openStorage(): Promise<DaemonStorage> {
+  return (await memoryStorage({ clock: { now: () => NOW } })).storage;
 }
 
-async function openInterleavingStorage() {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-test-'));
-  homes.add(home);
-  let fileSystem: InterleavingStateFileSystem | undefined;
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    {
-      create: (paths: FoundationPaths) => {
-        fileSystem = new InterleavingStateFileSystem(paths);
-        return fileSystem;
-      },
-    },
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  const opened = await factory.open();
-  if (fileSystem === undefined) throw new Error('the storage built no filesystem');
-  return { ...opened, fileSystem };
-}
-
-/** A JSON document's fields, for merging a change over it the way every real writer does. */
-function documentFields(document: FrozenJsonValue): Record<string, FrozenJsonValue> {
-  return typeof document === 'object' && document !== null && !Array.isArray(document)
-    ? { ...(document as Readonly<Record<string, FrozenJsonValue>>) }
-    : {};
+/** The event types a session's journal holds, in order. */
+async function journal(storage: DaemonStorage, id: SessionId): Promise<readonly string[]> {
+  return (await storage.replay(id)).events.map(event => event.type);
 }
 
 function record(id = 'stored-session', overrides: Record<string, unknown> = {}): SessionLifecycleRecord {
@@ -127,57 +71,17 @@ function record(id = 'stored-session', overrides: Record<string, unknown> = {}):
   ).record;
 }
 
-/**
- * A tmux server the test owns: it answers the real command vocabulary the controller emits, so the
- * launcher is exercised through actual argument construction rather than a stubbed controller.
- */
-class RecordingTmuxPort implements TmuxCommandPort {
-  readonly calls: Array<readonly string[]> = [];
-  alive = false;
-  dead = false;
-  /** How many `state` polls report a busy pane before the prompt appears. */
-  pollsBeforeReady = 0;
-  readonly failures = new Map<string, string>();
-  private captures = 0;
-
-  async execute(arguments_: readonly string[]) {
-    this.calls.push(arguments_);
-    const command = arguments_[0] ?? '';
-    const failure = this.failures.get(command);
-    if (failure !== undefined) return { code: 1, stdout: '', stderr: failure };
-    if (command === 'has-session') return { code: this.alive ? 0 : 1, stdout: '', stderr: '' };
-    if (command === 'new-session') this.alive = true;
-    if (command === 'kill-session') this.alive = false;
-    if (command === 'display-message') return { code: 0, stdout: `${this.dead ? '1' : '0'}|||0|0|24|80`, stderr: '' };
-    if (command === 'capture-pane') {
-      // Two captures per `state` call, so readiness is counted in pairs.
-      this.captures += 1;
-      const ready = Math.ceil(this.captures / 2) > this.pollsBeforeReady;
-      return { code: 0, stdout: ready ? '> ' : 'Loading model…', stderr: '' };
-    }
-    return { code: 0, stdout: '', stderr: '' };
-  }
-
-  commands(): readonly string[] {
-    return this.calls.map(call => call[0] ?? '');
-  }
+/** A launcher over a fresh fake tmux, with the delivery that reads it. */
+function launcher(environment?: SessionEnvironmentStore) {
+  const tmux = new FakeTmux();
+  const delivery = new FakePaneDelivery(tmux);
+  const instance = new TmuxSessionLifecycleLauncher(tmux, delivery, environment);
+  return { instance, tmux, delivery };
 }
 
-function launcher(port: TmuxCommandPort, options: PaneDeliveryOptions = {}, environment?: SessionEnvironmentStore) {
-  const slept: number[] = [];
-  const controller = new TmuxController(port);
-  const instance = new TmuxSessionLifecycleLauncher(
-    controller,
-    new TmuxPaneDelivery(
-      controller,
-      async milliseconds => {
-        slept.push(milliseconds);
-      },
-      options,
-    ),
-    environment,
-  );
-  return { instance, slept };
+/** The environment the first launch handed its pane. */
+function firstLaunchEnv(tmux: FakeTmux): Readonly<Record<string, string>> {
+  return tmux.launches[0]?.env ?? {};
 }
 
 afterEach(async () => {
@@ -188,8 +92,8 @@ afterEach(async () => {
 describe('StorageSessionLifecycleRepository', () => {
   it('should persist and read the lifecycle record through the authoritative daemon store', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const created = createSessionRecord(
       { agent: AGENT, cwd: '/workspace/project', mode: 'auto', prompt: 'Persist me' },
       {
@@ -203,7 +107,6 @@ describe('StorageSessionLifecycleRepository', () => {
     // Act
     await subject.write(created.record, created.event);
     const actual = await subject.read(created.record.config.id);
-    const paths = createSessionPaths(opened.paths, created.record.config.id);
 
     // Assert
     should(actual).deepEqual(created.record);
@@ -211,36 +114,33 @@ describe('StorageSessionLifecycleRepository', () => {
     // protocol's, whose `agent` is the name every account is published under. The absolute executable
     // the lifecycle authorizes against is `command[0]`, which is where the read above recovered it
     // from — so the record round-trips while the document stays the one every mounted surface parses.
-    should(await opened.storage.readConfig(created.record.config.id)).deepEqual({
+    should(await storage.readConfig(created.record.config.id)).deepEqual({
       ...created.record.config,
       agent: 'claude-auto-loge',
     });
-    should(await opened.storage.readState(created.record.config.id)).deepEqual(created.record.state);
-    should((await readFile(paths.events, 'utf8')).trim()).containEql('"type":"session.created"');
-    should(paths.directory).endWith('/state/sessions/stored-session');
-    await opened.storage.close();
+    should(await storage.readState(created.record.config.id)).deepEqual(created.record.state);
+    should(await journal(storage, created.record.config.id)).containEql('session.created');
+    await storage.close();
   });
 
   it('should report an unknown session as missing rather than inventing one', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
 
     // Act
     const actual = await subject.read(parseSessionId('never-created'));
 
     // Assert
     should(actual).be.undefined();
-    await opened.storage.close();
+    await storage.close();
   });
 
-  it('should reserve a durable session layout without publishing a record or duplicate create event', async () => {
+  it('should reserve a session without publishing a record or duplicate create event', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const id = parseSessionId('reserved-session');
-    const paths = createSessionPaths(opened.paths, id);
-    const environment = new FileSessionEnvironmentStore(held => createSessionPaths(opened.paths, held).directory);
     const capability = 'reserved-capability';
     const capabilityHash = createHash('sha256').update(capability, 'utf8').digest('hex');
     const created = createSessionRecord(
@@ -254,146 +154,44 @@ describe('StorageSessionLifecycleRepository', () => {
       { id, cwd: '/workspace/project', at: NOW, settings: defaultSessionLifecycleSettings },
     );
 
-    // Act — a repeated reservation and a durable plaintext are still not a lifecycle record.
+    // Act — a repeated reservation is still not a lifecycle record.
     await subject.reserve(id);
-    await environment.write(id, { FY_SESSION_BOARD_CAPABILITY: capability });
     await subject.reserve(id);
 
     // Assert
     should(await subject.read(id)).be.undefined();
-    should(await opened.storage.readConfig(id)).be.undefined();
-    should(await opened.storage.readState(id)).be.undefined();
-    should(await readFile(paths.marker, 'utf8')).equal('2\n');
-    should((await stat(paths.events)).size).equal(0);
+    should(await storage.readConfig(id)).be.undefined();
+    should(await storage.readState(id)).be.undefined();
+    should(storage.listSessions().map(session => session.id)).deepEqual([]);
 
-    await opened.storage.close();
-
-    // A fresh storage process still sees plaintext but no published/indexed session. Retrying the
-    // publication keeps the exact hash agreement and appends one create event, never two.
-    const reopened = await openTemporaryStorage(opened.paths.home);
-    const recovered = new StorageSessionLifecycleRepository(reopened.storage);
-    const recoveredEnvironment = new FileSessionEnvironmentStore(
-      held => createSessionPaths(reopened.paths, held).directory,
-    );
-    should(await recovered.read(id)).be.undefined();
-    should(await recoveredEnvironment.read(id)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: capability });
-    should((await reopened.storage.rebuildIndex()).sessionCount).equal(0);
-    await reopened.storage.reconcile();
-    should(reopened.storage.listSessions().map(session => session.id)).deepEqual([]);
-    should(await reopened.storage.sessionIdsOnDisk()).deepEqual([]);
-    should(await reopened.storage.fleetSessionIds()).deepEqual([]);
-
-    await recovered.write(created.record, created.event);
-    should((await recovered.read(id))?.config.sessionCapabilityHash).equal(capabilityHash);
-    should(await recoveredEnvironment.read(id)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: capability });
-    should(reopened.storage.listSessions().map(session => session.id)).deepEqual([id]);
-    should((await readFile(paths.events, 'utf8')).trim().split('\n')).have.length(1);
-    await reopened.storage.close();
+    // Publishing keeps the exact hash agreement and appends one create event, never two.
+    await subject.write(created.record, created.event);
+    should((await subject.read(id))?.config.sessionCapabilityHash).equal(capabilityHash);
+    should(storage.listSessions().map(session => session.id)).deepEqual([id]);
+    should(await journal(storage, id)).deepEqual(['session.created']);
+    await storage.close();
   });
 
-  it('should persist the sessions entry after the reservation itself is durable', async () => {
-    // Arrange: the reservation makes the journal and marker durable, and each of those syncs the
-    // SESSION directory — which says nothing about the entry NAMING that session in `sessions/`.
-    const opened = await openTemporaryStorage();
-    const synced: string[] = [];
-    const subject = new StorageSessionLifecycleRepository(opened.storage, undefined, async path => {
-      synced.push(path);
-    });
-    const id = parseSessionId('reserved-ordering');
-    const paths = createSessionPaths(opened.paths, id);
-
-    // Act
-    await subject.reserve(id);
-
-    // Assert: the layout is complete first, then the SESSION directory — which is where the journal
-    // and marker entries live — then the entry naming that session. Innermost first, because an entry
-    // lives in its immediate parent and neither sync substitutes for the other.
-    should(await readFile(paths.marker, 'utf8')).equal('2\n');
-    should(synced).eql([paths.directory, opened.paths.sessions]);
-  });
-
-  it('should make a repeated reservation persist the sessions entry again', async () => {
-    // Arrange: a retried start reserves twice, and the second attempt creates nothing.
-    const opened = await openTemporaryStorage();
-    const synced: string[] = [];
-    const subject = new StorageSessionLifecycleRepository(opened.storage, undefined, async path => {
-      synced.push(path);
-    });
-    const id = parseSessionId('reserved-repeat');
-
-    // Act — the second call creates nothing at all.
-    await subject.reserve(id);
-    await subject.reserve(id);
-
-    // Assert: unconditional, and BOTH directories each time. The retry is precisely the call that
-    // must sync: storage publishes the marker with an atomic rename and syncs the session directory
-    // after it, so an attempt that dies in between leaves a marker a later `ensureSessionDirectory`
-    // merely OBSERVES — returning without syncing anything. A created-only rule would skip exactly
-    // the call that owes the barrier.
-    const directory = createSessionPaths(opened.paths, id).directory;
-    should(synced).eql([directory, opened.paths.sessions, directory, opened.paths.sessions]);
-  });
-
-  it('should make every concurrent reservation persist the sessions entry on its own behalf', async () => {
-    // Arrange: two ids, so they do not share the per-session queue and can genuinely interleave.
-    const opened = await openTemporaryStorage();
-    const synced: string[] = [];
-    const subject = new StorageSessionLifecycleRepository(opened.storage, undefined, async path => {
-      synced.push(path);
-    });
-
-    // Act
-    await Promise.all([subject.reserve(parseSessionId('reserved-a')), subject.reserve(parseSessionId('reserved-b'))]);
-
-    // Assert: each reservation syncs its own session directory and then the shared parent, in that
-    // order. Neither relies on the other eventually persisting anything.
-    should(synced.filter(path => path === opened.paths.sessions)).have.length(2);
-    for (const id of ['reserved-a', 'reserved-b']) {
-      const directory = createSessionPaths(opened.paths, parseSessionId(id)).directory;
-      should(synced.filter(path => path === directory)).have.length(1);
-      should(synced.indexOf(directory)).be.below(synced.lastIndexOf(opened.paths.sessions));
-    }
-  });
-
-  it('should still publish no session document from a reservation that persists its parent', async () => {
+  it('should still publish no session document from a reservation', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const id = parseSessionId('reserved-invisible');
 
     // Act
     await subject.reserve(id);
 
-    // Assert: durability of the NAME is not publication of the session.
+    // Assert: a reservation is not publication of the session.
     should(await subject.read(id)).equal(undefined);
-    should(opened.storage.findSession(id)).equal(undefined);
-  });
-
-  it('should recover a reservation torn after its empty journal but before its marker', async () => {
-    // Arrange — marker-last reservation can leave exactly this prefix and no session document.
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
-    const id = parseSessionId('torn-reservation');
-    const paths = createSessionPaths(opened.paths, id);
-    await mkdir(paths.directory, { recursive: true });
-    await writeFile(paths.events, '');
-
-    // Act + Assert — the lifecycle's collision read sees no record, and retrying reservation repairs
-    // the layout without fabricating config, state, or an event.
-    should(await subject.read(id)).be.undefined();
-    await subject.reserve(id);
-    should(await subject.read(id)).be.undefined();
-    should(await readFile(paths.marker, 'utf8')).equal('2\n');
-    should((await stat(paths.events)).size).equal(0);
-    await opened.storage.close();
+    should(storage.findSession(id)).equal(undefined);
   });
 
   it('should recover a create that tore between its configuration and state writes', async () => {
-    // Arrange — exactly what a crash between the two writes leaves on disk.
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    // Arrange — exactly what a crash between the two writes leaves behind.
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const torn = record('torn-session');
-    await opened.storage.writeConfig(torn.config.id, torn.config);
+    await storage.writeConfig(torn.config.id, torn.config);
 
     // Act
     const actual = await subject.read(torn.config.id);
@@ -403,33 +201,33 @@ describe('StorageSessionLifecycleRepository', () => {
     const stopped = transitionSessionRecord(torn, 'stopped', '2026-07-31T10:05:00.000Z', 'cleaned up');
     await subject.write(stopped.record, stopped.event);
     should((await subject.read(torn.config.id))?.state.status).equal('stopped');
-    await opened.storage.close();
+    await storage.close();
   });
 
   it('should name the damage when a record cannot be trusted at all', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const orphan = parseSessionId('state-only-session');
     const invalid = record('invalid-session');
-    await opened.storage.writeState(orphan, { id: orphan, status: 'running' });
-    await opened.storage.writeConfig(invalid.config.id, { ...invalid.config, command: [] });
-    await opened.storage.writeState(invalid.config.id, invalid.state);
+    await storage.writeState(orphan, { id: orphan, status: 'running' });
+    await storage.writeConfig(invalid.config.id, { ...invalid.config, command: [] });
+    await storage.writeState(invalid.config.id, invalid.state);
 
     // Act + Assert
     await should(subject.read(orphan)).be.rejectedWith(UnusableSessionRecordError);
     await should(subject.read(orphan)).be.rejectedWith(/configuration document is missing/u);
     await should(subject.read(invalid.config.id)).be.rejectedWith(/config\.command/u);
-    await opened.storage.close();
+    await storage.close();
   });
 
   it('should read, and let a stop write, a session whose turn was interrupted by a client', async () => {
     // Arrange — the exact state a person's Stop met: the send path wrote a turn-level status.
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const interrupted = record('interrupted-session');
-    await opened.storage.writeConfig(interrupted.config.id, interrupted.config);
-    await opened.storage.writeState(interrupted.config.id, {
+    await storage.writeConfig(interrupted.config.id, interrupted.config);
+    await storage.writeState(interrupted.config.id, {
       id: interrupted.config.id,
       status: 'interrupted',
       turn: 2,
@@ -450,107 +248,55 @@ describe('StorageSessionLifecycleRepository', () => {
 
     // Assert — usable, and the stop merged over the turn fields it does not own.
     should(read.state.status).equal('interrupted');
-    const state = await opened.storage.readState(interrupted.config.id);
+    const state = await storage.readState(interrupted.config.id);
     should(state).containDeep({ status: 'stopped', reason: 'stopped by client', turn: 2, turnState: 'working' });
-    await opened.storage.close();
+    await storage.close();
   });
 
   it('should read a session carrying any status the protocol defines', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const held = record('every-status');
-    await opened.storage.writeConfig(held.config.id, held.config);
+    await storage.writeConfig(held.config.id, held.config);
 
     for (const status of SessionStatusSchema.options) {
-      await opened.storage.writeState(held.config.id, { id: held.config.id, status });
+      await storage.writeState(held.config.id, { id: held.config.id, status });
 
       // Act + Assert
       should((await subject.read(held.config.id))?.state.status).equal(status);
     }
     await should(
       (async () => {
-        await opened.storage.writeState(held.config.id, { id: held.config.id, status: 'not-a-status' });
+        await storage.writeState(held.config.id, { id: held.config.id, status: 'not-a-status' });
         return await subject.read(held.config.id);
       })(),
     ).be.rejectedWith(/state\.status/u);
-    await opened.storage.close();
+    await storage.close();
   });
 
   it('should keep the journal behind the state it describes', async () => {
     // Arrange
-    const opened = await openTemporaryStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const storage = await openStorage();
+    const subject = new StorageSessionLifecycleRepository(storage);
     const created = record('journal-session');
     const started = transitionSessionRecord(created, 'starting', '2026-07-31T10:01:00.000Z');
 
     // Act
     await subject.write(created, { type: 'session.created', data: {} });
     await subject.write(started.record, started.event);
-    const journal = await readFile(createSessionPaths(opened.paths, created.config.id).events, 'utf8');
 
     // Assert
-    should(
-      journal
-        .trim()
-        .split('\n')
-        .map(line => JSON.parse(line).type),
-    ).deepEqual(['session.created', 'session.starting']);
+    should(await journal(storage, created.config.id)).deepEqual(['session.created', 'session.starting']);
     should((await subject.read(created.config.id))?.state.status).equal('starting');
-    await opened.storage.close();
-  });
-
-  it('should never revert a turn or configuration change that lands while a transition is being written', async () => {
-    // Arrange: a running session on turn 1. The turn watcher and the send repository change the state
-    // document through `updateState`, and the protocol half of the configuration changes through
-    // `updateConfig` — each a locked read-modify-write of its own.
-    const opened = await openInterleavingStorage();
-    const subject = new StorageSessionLifecycleRepository(opened.storage);
-    const created = record('raced-session');
-    const id = created.config.id;
-    await subject.write(created, { type: 'session.created', data: {} });
-    await opened.storage.updateState(id, current => ({ ...documentFields(current), turn: 1 }));
-    const starting = transitionSessionRecord(created, 'starting', '2026-07-31T10:01:00.000Z');
-    // Both concurrent writers fire the instant the transition first looks at the configuration: the
-    // moment its copy of the session is the newest one anybody has.
-    const concurrent: Promise<JsonValue>[] = [];
-    opened.fileSystem.target = createSessionPaths(opened.paths, id).config;
-    opened.fileSystem.interleave = () => {
-      concurrent.push(
-        opened.storage.updateState(id, current => ({
-          ...documentFields(current),
-          turn: 2,
-          turnState: 'working',
-          turnStateAt: '2026-07-31T10:01:30.000Z',
-        })),
-        opened.storage.updateConfig(id, current => ({ ...documentFields(current), label: 'renamed' })),
-      );
-    };
-
-    // Act
-    await subject.write(starting.record, starting.event);
-    await Promise.all(concurrent);
-
-    // Assert: the transition AND both concurrent changes are on disk. A transition that merged over a
-    // copy read outside the lock would put turn 1 back and drop the label — a silent revert.
-    should(concurrent).have.length(2);
-    should(await opened.storage.readState(id)).containDeep({
-      status: 'starting',
-      turn: 2,
-      turnState: 'working',
-      turnStateAt: '2026-07-31T10:01:30.000Z',
-    });
-    should(await opened.storage.readConfig(id)).containDeep({ name: created.config.name, label: 'renamed' });
-    should((await subject.read(id))?.state.status).equal('starting');
-    await opened.storage.close();
+    await storage.close();
   });
 });
 
 describe('TmuxSessionLifecycleLauncher', () => {
   it('should launch and stop only through the injected isolated tmux controller', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const subject = launcher(port).instance;
+    const { instance: subject, tmux } = launcher();
     const input = record('tmux-session', { command: [AGENT, '--mode', 'auto'] });
 
     // Act
@@ -561,40 +307,28 @@ describe('TmuxSessionLifecycleLauncher', () => {
 
     // Assert
     should([before, during]).deepEqual([false, true]);
-    should(port.calls).deepEqual([
-      ['has-session', '-t', 'fy-tmux-session'],
-      ['has-session', '-t', 'fy-tmux-session'],
-      // A session with no stored environment still launches carrying its OWN id: the identity is
-      // derived from the record, so it does not depend on a file the session may never have had.
-      [
-        'new-session',
-        '-d',
-        '-s',
-        'fy-tmux-session',
-        '-c',
-        '/workspace/project',
-        '-e',
-        'FY_HYPERMEDIA=0',
-        '-e',
-        'FY_SESSION_ID=tmux-session',
-        AGENT,
-        '--mode',
-        'auto',
-      ],
-      ['set-option', '-t', 'fy-tmux-session', 'remain-on-exit', 'on'],
-      ['has-session', '-t', 'fy-tmux-session'],
-      ['has-session', '-t', 'fy-tmux-session'],
-      // Its control clients are listed first, so a subscribed one is released in the kill's own
-      // command list: tmux 3.6a crashes the whole server when one outlives its session.
-      ['list-clients', '-t', 'fy-tmux-session', '-F', '#{client_control_mode} #{client_name}'],
-      ['kill-session', '-t', 'fy-tmux-session'],
+    should(tmux.calls).deepEqual([
+      ['alive', 'fy-tmux-session'],
+      ['launch', 'fy-tmux-session'],
+      ['alive', 'fy-tmux-session'],
+      ['stop', 'fy-tmux-session'],
+    ]);
+    // A session with no stored environment still launches carrying its OWN id: the identity is
+    // derived from the record, so it does not depend on a file the session may never have had.
+    should(tmux.launches).deepEqual([
+      {
+        session: 'fy-tmux-session',
+        cwd: '/workspace/project',
+        command: [AGENT, '--mode', 'auto'],
+        env: { FY_HYPERMEDIA: '0', FY_SESSION_ID: 'tmux-session' },
+      } satisfies TmuxLaunch,
     ]);
   });
 
   it('should register a launched pane and wait publicly for its startup prompt', async () => {
-    // Arrange — use the real launcher, controller and delivery adapter over an inspectable tmux port.
-    const port = new RecordingTmuxPort();
-    const slept: number[] = [];
+    // Arrange — the real launcher over the injected controller and delivery.
+    const tmux = new FakeTmux();
+    const delivery = new FakePaneDelivery(tmux);
     const registered: SessionLifecycleRecord[] = [];
     let announceRegistrarEntry = (): void => undefined;
     const entered = new Promise<void>(resolve => {
@@ -604,21 +338,13 @@ describe('TmuxSessionLifecycleLauncher', () => {
     const registrationRelease = new Promise<void>(resolve => {
       releaseRegistration = resolve;
     });
-    const controller = new TmuxController(port);
-    const subject = new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async milliseconds => {
-        slept.push(milliseconds);
-      }),
-      undefined,
-      {
-        register: async actual => {
-          registered.push(actual);
-          announceRegistrarEntry();
-          await registrationRelease;
-        },
+    const subject = new TmuxSessionLifecycleLauncher(tmux, delivery, undefined, {
+      register: async actual => {
+        registered.push(actual);
+        announceRegistrarEntry();
+        await registrationRelease;
       },
-    );
+    });
     const input = record('registered-session');
 
     // Act — a fire-and-forget registrar would let this launch settle while registration remains held.
@@ -639,62 +365,46 @@ describe('TmuxSessionLifecycleLauncher', () => {
     // Assert — the complete record entered the registrar, but launch cannot finish until it releases.
     should(registered).deepEqual([input]);
     should(launchSettled).be.false();
+    should(delivery.calls).deepEqual([]);
 
     // Act — registration is now complete; readiness remains a separate public startup step.
     releaseRegistration();
     await launch;
-    port.calls.length = 0;
-    port.pollsBeforeReady = 1;
     await subject.ready(input);
 
-    // Assert — ready only polls after the awaited registration completes.
-    should(slept).deepEqual([100]);
-    should(port.commands().filter(command => command === 'display-message')).have.length(2);
-    // The plain captures; the composer's own row, read with attributes, is a separate look beside the last.
-    should(port.calls.filter(call => call[0] === 'capture-pane' && !call.includes('-e'))).have.length(4);
-    should(port.commands()).not.containEql('send-keys');
+    // Assert — ready is the delivery's startup wait, asked only after the awaited registration, and nothing is typed.
+    should(delivery.calls).deepEqual([['waitReady', 'fy-registered-session', undefined]]);
+    should(delivery.delivered).deepEqual([]);
   });
 
   it('should kill the pane it launched when that pane cannot be registered', async () => {
     // Arrange — the pane exists by the time registration runs. Left alive, it is an agent no record
     // names: the lifecycle sees a live pane and records the failure without retrying, the reap reads
     // only registrations, and it outlives `fy daemon stop`.
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
-    const subject = new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async () => undefined),
-      undefined,
-      {
-        register: async () => {
-          throw new Error('tmux did not prove the launched pane identity');
-        },
+    const tmux = new FakeTmux();
+    const subject = new TmuxSessionLifecycleLauncher(tmux, new FakePaneDelivery(tmux), undefined, {
+      register: async () => {
+        throw new Error('tmux did not prove the launched pane identity');
       },
-    );
+    });
 
     // Act + Assert
     await should(subject.launch(record('unregistered-session'))).be.rejectedWith(
       'tmux did not prove the launched pane identity',
     );
-    should(port.commands()).containEql('kill-session');
-    should(port.alive).be.false();
+    should(tmux.methods()).containEql('stop');
+    should(tmux.panes.has('fy-unregistered-session')).be.false();
   });
 
   it('should say so when the pane it could not register cannot be killed either', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    port.failures.set('kill-session', 'server exited unexpectedly');
-    const controller = new TmuxController(port);
-    const subject = new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async () => undefined),
-      undefined,
-      {
-        register: async () => {
-          throw new Error('tmux did not prove the launched pane identity');
-        },
+    const tmux = new FakeTmux();
+    tmux.failures.set('stop', 'server exited unexpectedly');
+    const subject = new TmuxSessionLifecycleLauncher(tmux, new FakePaneDelivery(tmux), undefined, {
+      register: async () => {
+        throw new Error('tmux did not prove the launched pane identity');
       },
-    );
+    });
 
     // Act + Assert — both failures are named, so nobody believes the pane is gone.
     await should(subject.launch(record('stuck-session'))).be.rejectedWith(
@@ -702,87 +412,50 @@ describe('TmuxSessionLifecycleLauncher', () => {
     );
   });
 
-  it('should wait for a ready prompt before typing the first turn into the pane', async () => {
-    // Arrange — the harness is still drawing itself for the first two `state` polls.
-    const server = new FakeTmuxServer();
-    server.alive = false;
-    server.bootCaptures = 4;
-    const { instance: subject } = launcher(server);
+  it('should hand the first turn to the delivery for the pane it launched', async () => {
+    // Arrange
+    const { instance: subject, delivery } = launcher();
     const input = record('deliver-session');
     await subject.launch(input);
-    server.calls.length = 0;
+    const order: string[] = [];
 
     // Act
-    await subject.deliver(input, 'Read the file /turns/turn-001.md now');
+    await subject.deliver(input, 'Read the file /turns/turn-001.md now', async () => {
+      order.push('before-write');
+    });
 
-    // Assert — nothing is typed while the pane is booting, and the pane received the whole turn.
-    const firstKey = server.commands().indexOf('send-keys');
-    should(server.commands().slice(0, firstKey)).not.containEql('send-keys');
-    should(firstKey).be.greaterThan(6, 'the boot frames are polled before anything is typed');
-    should(server.submitted).deepEqual(['Read the file /turns/turn-001.md now']);
-  });
-
-  it('should refuse to deliver into a pane that is gone or already dead', async () => {
-    // Arrange
-    const missing = new FakeTmuxServer();
-    missing.alive = false;
-    const died = new FakeTmuxServer();
-    died.dead = true;
-    const input = record('gone-session');
-
-    // Act + Assert
-    await should(launcher(missing).instance.deliver(input, 'anything')).be.rejectedWith(
-      /the interactive harness exited; tmux reported no exit code/u,
-    );
-    await should(launcher(died).instance.deliver(input, 'anything')).be.rejectedWith(/harness exited/u);
-    should(died.calls.some(call => call[0] === 'send-keys')).be.false();
-  });
-
-  it('should give up on a pane that never becomes ready instead of typing into a booting terminal', async () => {
-    // Arrange
-    const server = new FakeTmuxServer();
-    server.alive = false;
-    server.bootCaptures = Number.MAX_SAFE_INTEGER;
-    const { instance: subject, slept } = launcher(server, { readinessAttempts: 2 });
-    const input = record('wedged-session');
-    await subject.launch(input);
-
-    // Act + Assert
-    await should(subject.deliver(input, 'anything')).be.rejectedWith(
-      'tmux session fy-wedged-session did not become ready to accept a turn',
-    );
-    should(slept).deepEqual([100, 200]);
-    should(server.commands().filter(command => command === 'send-keys')).deepEqual([]);
+    // Assert — the delivery owns the wait and the write; the launcher names the pane and passes the hook through.
+    should(order).deepEqual(['before-write']);
+    should(delivery.delivered).deepEqual([{ session: 'fy-deliver-session', text: 'Read the file /turns/turn-001.md now' }]);
   });
 
   it('should surface a tmux failure rather than reporting a launch or stop that did not happen', async () => {
     // Arrange
-    const launchPort = new RecordingTmuxPort();
-    launchPort.failures.set('new-session', 'no server running on /tmp/fy.sock');
-    const stopPort = new RecordingTmuxPort();
-    stopPort.alive = true;
-    stopPort.failures.set('kill-session', 'session not found');
-    const sendPort = new RecordingTmuxPort();
-    sendPort.alive = true;
-    sendPort.failures.set('send-keys', 'pane is unwritable');
+    const launchFails = launcher();
+    launchFails.tmux.failures.set('launch', 'no server running on /tmp/fy.sock');
+    const stopFails = launcher();
+    stopFails.tmux.open('fy-failing-session');
+    stopFails.tmux.failures.set('stop', 'session not found');
+    const sendFails = launcher();
+    sendFails.tmux.open('fy-failing-session');
+    sendFails.delivery.failures.set('deliver', 'pane is unwritable');
     const input = record('failing-session');
 
     // Act + Assert
-    await should(launcher(launchPort).instance.launch(input)).be.rejectedWith('no server running on /tmp/fy.sock');
-    await should(launcher(stopPort).instance.stop(input)).be.rejectedWith('session not found');
-    await should(launcher(sendPort).instance.deliver(input, 'anything')).be.rejectedWith('pane is unwritable');
+    await should(launchFails.instance.launch(input)).be.rejectedWith('no server running on /tmp/fy.sock');
+    await should(stopFails.instance.stop(input)).be.rejectedWith('session not found');
+    await should(sendFails.instance.deliver(input, 'anything')).be.rejectedWith('pane is unwritable');
   });
 
   it('should reject an invalid record before issuing a tmux launch command', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const subject = launcher(port).instance;
+    const { instance: subject, tmux } = launcher();
     const input = record('empty-command', { mode: 'interactive', prompt: undefined });
     const malformed = { ...input, config: { ...input.config, command: [] } };
 
     // Act + Assert
     await should(subject.launch(malformed)).be.rejectedWith('session command is empty');
-    should(port.calls).deepEqual([]);
+    should(tmux.calls).deepEqual([]);
   });
 });
 
@@ -970,13 +643,13 @@ describe('FileSessionTaskStore', () => {
 
   it('should stop owning the environment temporary once the credential file is published', async () => {
     // Arrange: the same window, in the one file that holds a session's plaintext credential.
-    const opened = await openTemporaryStorage();
+    const home = await temporaryHome('ferretry-environment-store-');
     const id = parseSessionId('published-environment');
-    const directory = createSessionPaths(opened.paths, id).directory;
+    const directory = join(home, id);
     const reused = join(directory, 'environment.json.fixed-id.tmp');
     let plantedDuringSync = false;
     const subject = new FileSessionEnvironmentStore(
-      held => createSessionPaths(opened.paths, held).directory,
+      held => join(home, held),
       () => 'fixed-id',
       async () => {
         plantedDuringSync = true;
@@ -1078,24 +751,23 @@ describe('NodeWorkingDirectoryResolver', () => {
 
 describe('the composed session lifecycle', () => {
   it('should give a started auto session its task through real storage and a real turn file', async () => {
-    // Arrange — every adapter is the production one; only the tmux process boundary is a double.
-    const opened = await openTemporaryStorage();
-    const server = new FakeTmuxServer();
-    server.alive = false;
-    const cwd = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-cwd-'));
-    homes.add(cwd);
+    // Arrange — every adapter is the production one; only the tmux ports are doubles.
+    const storage = await openStorage();
+    const files = await temporaryHome('ferretry-lifecycle-files-');
+    const { instance, tmux, delivery } = launcher();
+    const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
     const subject = new SessionLifecycleService(
       {
-        repository: new StorageSessionLifecycleRepository(opened.storage),
-        launcher: launcher(server).instance,
-        tasks: new FileSessionTaskStore(id => createSessionPaths(opened.paths, id).directory),
-        effects: new FileSessionEffectLedger(id => createSessionPaths(opened.paths, id).directory),
+        repository: new StorageSessionLifecycleRepository(storage),
+        launcher: instance,
+        tasks: new FileSessionTaskStore(id => join(files, id)),
+        effects: new FileSessionEffectLedger(id => join(files, id)),
         directories: new NodeWorkingDirectoryResolver(),
         ids: new TimeSessionIdFactory(
           () => Date.parse(NOW),
           () => 'ABCDEF12-3456-7890-ABCD-EF1234567890',
         ),
-        clock: new SystemClock(() => new Date(NOW)),
+        clock: { now: () => NOW },
         serial: new KeyedSerialExecutor(),
       },
       defaultSessionLifecycleSettings,
@@ -1109,50 +781,49 @@ describe('the composed session lifecycle', () => {
       mode: 'auto',
       prompt: 'Finish the lifecycle unit',
     });
-    const taskFile = join(createSessionPaths(opened.paths, running.config.id).directory, 'turns', 'turn-001.md');
-    const typed = server.calls.find(call => call[0] === 'send-keys' && call[3] === '-l');
+    const taskFile = join(files, running.config.id, 'turns', 'turn-001.md');
+    const typed = delivery.delivered[0];
     const stopped = await subject.stop(running.config.id, 'work complete');
 
     // Assert — the agent was told to read the file that exists and holds its assignment.
     should(running.config.id).equal('ms8ru4g0-abcdef12');
     should(running.state.status).equal('running');
     should(await readFile(taskFile, 'utf8')).equal('# Assigned task\n\nFinish the lifecycle unit\n');
-    should(typed?.at(-1)).equal(
+    should(typed?.text).equal(
       `Read the file ${taskFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`,
     );
-    should(server.commands()).containDeep(['new-session', 'set-option']);
+    should(tmux.methods()).containEql('launch');
     should(stopped.state).containDeep({ status: 'stopped', reason: 'work complete' });
-    should(server.commands().at(-1)).equal('kill-session');
-    should(
-      (await readFile(createSessionPaths(opened.paths, running.config.id).events, 'utf8'))
-        .trim()
-        .split('\n')
-        .map(line => JSON.parse(line).type),
-    ).deepEqual(['session.created', 'session.starting', 'session.running', 'session.stopped']);
-    await opened.storage.close();
+    should(tmux.methods().at(-1)).equal('stop');
+    should(await journal(storage, running.config.id)).deepEqual([
+      'session.created',
+      'session.starting',
+      'session.running',
+      'session.stopped',
+    ]);
+    await storage.close();
   });
 
-  it('should hand the launched pane its own credential through tmux, keeping the plaintext off the session document', async () => {
+  it('should hand the launched pane its own credential, keeping the plaintext off the session document', async () => {
     // Arrange — the real credential issuer, the real environment file, and the real launcher, so the
-    // only fake in the chain is the tmux server itself.
-    const opened = await openTemporaryStorage();
-    const cwd = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-cwd-'));
-    homes.add(cwd);
-    const server = new FakeTmuxServer();
-    server.alive = false;
-    const environment = new FileSessionEnvironmentStore(id => createSessionPaths(opened.paths, id).directory);
+    // only doubles in the chain are the tmux ports.
+    const storage = await openStorage();
+    const files = await temporaryHome('ferretry-lifecycle-files-');
+    const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
+    const environment = new FileSessionEnvironmentStore(id => join(files, id));
+    const { instance, tmux } = launcher(environment);
     const subject = new SessionLifecycleService(
       {
-        repository: new StorageSessionLifecycleRepository(opened.storage),
-        launcher: launcher(server, {}, environment).instance,
-        tasks: new FileSessionTaskStore(id => createSessionPaths(opened.paths, id).directory),
-        effects: new FileSessionEffectLedger(id => createSessionPaths(opened.paths, id).directory),
+        repository: new StorageSessionLifecycleRepository(storage),
+        launcher: instance,
+        tasks: new FileSessionTaskStore(id => join(files, id)),
+        effects: new FileSessionEffectLedger(id => join(files, id)),
         directories: new NodeWorkingDirectoryResolver(),
         ids: new TimeSessionIdFactory(
           () => Date.parse(NOW),
           () => 'ABCDEF12-3456-7890-ABCD-EF1234567890',
         ),
-        clock: new SystemClock(() => new Date(NOW)),
+        clock: { now: () => NOW },
         serial: new KeyedSerialExecutor(),
         credentials: new NodeSessionCredentialIssuer(),
         environment,
@@ -1170,20 +841,17 @@ describe('the composed session lifecycle', () => {
     });
     const id = running.config.id;
     const capability = (await environment.read(id)).FY_SESSION_BOARD_CAPABILITY;
-    const newSession = server.calls.find(call => call[0] === 'new-session');
+    const env = firstLaunchEnv(tmux);
 
     // Assert — the pane really was launched carrying the secret, under the name the CLI reads.
     should(capability).be.a.String().and.not.be.empty();
-    should(newSession).containDeep(['-e', `FY_SESSION_BOARD_CAPABILITY=${capability}`]);
+    should(env.FY_SESSION_BOARD_CAPABILITY).equal(capability);
     // The stored secret and the DERIVED identity compose rather than displacing one another: the
     // pane gets both, in the same launch, under the two names the CLI reads.
-    should(newSession).containDeep(['-e', `FY_SESSION_ID=${id}`]);
+    should(env.FY_SESSION_ID).equal(id);
     // The id is never written into the environment document. It is on the record already, so storing
     // it would only create a second copy that a merge could contradict.
     should(await environment.read(id)).not.have.property('FY_SESSION_ID');
-    // `-e` is an option of new-session, so it has to precede the agent word to be an environment
-    // entry at all rather than an argument handed to the agent.
-    should(newSession?.indexOf('-e')).be.below(newSession?.indexOf(AGENT) ?? -1);
     // The hash is durable on the record — it is what the task-board domain keys grants on — and the
     // capability itself appears nowhere any reader of the session document can reach.
     should(running.config.sessionCapabilityHash).equal(
@@ -1191,12 +859,12 @@ describe('the composed session lifecycle', () => {
         .update(capability ?? '', 'utf8')
         .digest('hex'),
     );
-    const document = await readFile(createSessionPaths(opened.paths, id).config, 'utf8');
+    const document = JSON.stringify(await storage.readConfig(id));
     should(document).not.containEql(capability);
     should(document).containEql(running.config.sessionCapabilityHash);
     // Only the owning daemon may read the one copy of the plaintext.
     should((await stat(environment.file(id))).mode & 0o777).equal(0o600);
-    await opened.storage.close();
+    await storage.close();
   });
 });
 
@@ -1204,11 +872,11 @@ describe('TimeSessionIdFactory', () => {
   it('should never delete a colliding environment temporary it did not create', async () => {
     // Arrange: this file is the only place a session's plaintext credential lives, so destroying
     // another writer's in-flight document on the way out of a failure is the worst possible cleanup.
-    const opened = await openTemporaryStorage();
+    const home = await temporaryHome('ferretry-environment-store-');
     const id = parseSessionId('collided-environment');
-    const directory = createSessionPaths(opened.paths, id).directory;
+    const directory = join(home, id);
     const subject = new FileSessionEnvironmentStore(
-      held => createSessionPaths(opened.paths, held).directory,
+      held => join(home, held),
       () => 'fixed-id',
     );
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -1281,14 +949,13 @@ function handleRefusingToSync(code: string, closes: string[]): FileHandle {
  * them says nothing about the others.
  */
 describe('lifecycle directory durability', () => {
-  // Typed to ONE signature rather than inferred `as const`: the three exports are distinct
+  // Typed to ONE signature rather than inferred `as const`: the two exports are distinct
   // functions, and an inferred union of them would be a union of call signatures rather than the
   // single contract every one of them is required to keep.
   const helpers: ReadonlyArray<{
     readonly owner: string;
     readonly fsyncDirectory: (path: string, openDirectory?: (target: string) => Promise<FileHandle>) => Promise<void>;
   }> = [
-    { owner: 'StorageSessionLifecycleRepository', fsyncDirectory: fsyncReservedDirectory },
     { owner: 'FileSessionTaskStore', fsyncDirectory: fsyncTaskDirectory },
     { owner: 'FileSessionEnvironmentStore', fsyncDirectory: fsyncEnvironmentDirectory },
   ];
@@ -1354,6 +1021,7 @@ describe('lifecycle directory durability', () => {
   }
 });
 
+
 /**
  * The launch path and an account a profile authenticates.
  *
@@ -1363,27 +1031,25 @@ describe('lifecycle directory durability', () => {
  */
 describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () => {
   const profiled = (
-    port: TmuxCommandPort,
+    tmux: FakeTmux,
     accountEnvironment: AccountLaunchEnvironment,
     environment?: SessionEnvironmentStore,
-  ) => {
-    const controller = new TmuxController(port);
-    return new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async () => {}),
+  ) =>
+    new TmuxSessionLifecycleLauncher(
+      tmux,
+      new FakePaneDelivery(tmux),
       environment,
       undefined,
       undefined,
       undefined,
       accountEnvironment,
     );
-  };
 
   it('should ask about the executable this session runs, and hand the pane what it answers', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
+    const tmux = new FakeTmux();
     const asked: string[] = [];
-    const subject = profiled(port, {
+    const subject = profiled(tmux, {
       forWrapper: async wrapper => {
         asked.push(wrapper);
         return { ANTHROPIC_API_KEY: 'fixture-value' };
@@ -1395,33 +1061,29 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
 
     // Assert
     should(asked).deepEqual([AGENT]);
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', 'ANTHROPIC_API_KEY=fixture-value']);
-    should(launch).containDeep(['-e', 'FY_SESSION_ID=profiled-session']);
+    should(firstLaunchEnv(tmux)).containDeep({ ANTHROPIC_API_KEY: 'fixture-value', FY_SESSION_ID: 'profiled-session' });
   });
 
   it('should let the session keep its own variable when a profile names the same one', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
+    const tmux = new FakeTmux();
     const stored: SessionEnvironmentStore = {
       write: async () => undefined,
       read: async () => ({ FY_SESSION_BOARD_CAPABILITY: 'this-session-only' }),
     };
-    const subject = profiled(port, { forWrapper: async () => ({ FY_SESSION_BOARD_CAPABILITY: 'shared' }) }, stored);
+    const subject = profiled(tmux, { forWrapper: async () => ({ FY_SESSION_BOARD_CAPABILITY: 'shared' }) }, stored);
 
     // Act
     await subject.launch(record('contested-session'));
 
     // Assert
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=this-session-only']);
-    should(launch).not.containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=shared']);
+    should(firstLaunchEnv(tmux).FY_SESSION_BOARD_CAPABILITY).equal('this-session-only');
   });
 
   it('should refuse the launch when the profile cannot be resolved, rather than start without it', async () => {
     // Arrange — an empty credential is a 401 from a remote service with nothing to point at.
-    const port = new RecordingTmuxPort();
-    const subject = profiled(port, {
+    const tmux = new FakeTmux();
+    const subject = profiled(tmux, {
       forWrapper: async () => {
         throw new Error('this daemon holds no secret named WORK_KEY');
       },
@@ -1429,33 +1091,27 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
 
     // Act & Assert
     await should(subject.launch(record('missing-secret-session'))).be.rejectedWith(/no secret named WORK_KEY/u);
-    should(port.calls.filter(call => call[0] === 'new-session')).be.empty();
+    should(tmux.launches).be.empty();
   });
 
   it('should launch exactly as it always did when no resolver is wired at all', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
-    const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+    const { instance: subject, tmux } = launcher();
 
     // Act
     await subject.launch(record('plain-session'));
 
-    // Assert
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', 'FY_SESSION_ID=plain-session']);
-    // Its own id, and the hypermedia default every pane carries (docs/hypermedia.md).
-    should(launch?.filter(word => word === '-e')).have.length(2);
+    // Assert — its own id, and the hypermedia default every pane carries (docs/hypermedia.md).
+    should(firstLaunchEnv(tmux)).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'plain-session' });
   });
 
   it('should hand the pane its media folder and question file when they are wired', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const asked: string[] = [];
     const subject = new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -1477,19 +1133,18 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     // Assert — created per launch and handed over as FY_MEDIA_DIR (docs/hypermedia.md), with the file
     // Claude's question hook records an open question in (FY_QUESTION_FILE).
     should(asked).deepEqual(['media-session']);
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', 'FY_MEDIA_DIR=/state/sessions/media-session/media']);
-    should(launch).containDeep(['-e', 'FY_QUESTION_FILE=/state/sessions/media-session/question-asked.json']);
+    should(firstLaunchEnv(tmux)).containDeep({
+      FY_MEDIA_DIR: '/state/sessions/media-session/media',
+      FY_QUESTION_FILE: '/state/sessions/media-session/question-asked.json',
+    });
   });
 
   it('should launch an interactive ferret with hypermedia on and an auto one with it off', async () => {
     // Arrange
     const hypermediaOf = async (mode: 'auto' | 'interactive') => {
-      const port = new RecordingTmuxPort();
-      const controller = new TmuxController(port);
-      const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+      const { instance: subject, tmux } = launcher();
       await subject.launch(record(`mode-${mode}`, { mode, ...(mode === 'interactive' ? { prompt: undefined } : {}) }));
-      return port.calls.filter(call => call[0] === 'new-session')[0];
+      return firstLaunchEnv(tmux).FY_HYPERMEDIA;
     };
 
     // Act
@@ -1497,8 +1152,8 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     const auto = await hypermediaOf('auto');
 
     // Assert
-    should(interactive).containDeep(['-e', 'FY_HYPERMEDIA=1']);
-    should(auto).containDeep(['-e', 'FY_HYPERMEDIA=0']);
+    should(interactive).equal('1');
+    should(auto).equal('0');
   });
 });
 
@@ -1510,11 +1165,10 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
  * matter — the renewal must happen BEFORE the pane, and it must never be able to stop the pane.
  */
 describe('TmuxSessionLifecycleLauncher and a credential that can renew itself', () => {
-  const renewing = (port: TmuxCommandPort, accountRenewal: AccountLaunchRenewal) => {
-    const controller = new TmuxController(port);
-    return new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async () => {}),
+  const renewing = (tmux: FakeTmux, accountRenewal: AccountLaunchRenewal) =>
+    new TmuxSessionLifecycleLauncher(
+      tmux,
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -1522,21 +1176,19 @@ describe('TmuxSessionLifecycleLauncher and a credential that can renew itself', 
       undefined,
       accountRenewal,
     );
-  };
 
   it('should give the account its turn before the pane exists, not after', async () => {
     // Ordering is the feature. A renewal that ran after the launch would be racing the harness this
     // launch just started, which is the one thing the whole attended rule exists to avoid.
     // Arrange
-    const port = new RecordingTmuxPort();
     const order: string[] = [];
-    const observed: TmuxCommandPort = {
-      execute: async arguments_ => {
-        if (arguments_[0] === 'new-session') order.push('launch');
-        return await port.execute(arguments_);
-      },
-    };
-    const subject = renewing(observed, {
+    class OrderedTmux extends FakeTmux {
+      override async launch(launch: TmuxLaunch): Promise<void> {
+        order.push('launch');
+        await super.launch(launch);
+      }
+    }
+    const subject = renewing(new OrderedTmux(), {
       beforeLaunch: async wrapper => {
         order.push(`renew ${wrapper}`);
       },
@@ -1553,41 +1205,42 @@ describe('TmuxSessionLifecycleLauncher and a credential that can renew itself', 
     // The port answers nothing a launch could branch on, and this pins that there is no branch: a
     // renewal that could not happen is not a reason not to start a session.
     // Arrange
-    const port = new RecordingTmuxPort();
-    const subject = renewing(port, { beforeLaunch: async () => await Promise.resolve() });
+    const tmux = new FakeTmux();
+    const subject = renewing(tmux, { beforeLaunch: async () => await Promise.resolve() });
 
     // Act
     await subject.launch(record('undecided-session'));
 
     // Assert
-    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+    should(tmux.launches).have.length(1);
   });
 
   it('should launch exactly as it always did when no renewal is wired at all', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
-    const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+    const { instance: subject, tmux } = launcher();
 
     // Act
     await subject.launch(record('unrenewed-session'));
 
     // Assert
-    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+    should(tmux.launches).have.length(1);
   });
 });
 
 /**
  * What a launch says its pane was told: read off the environment the pane was actually given — the
- * stored switches, the mode-derived hypermedia default — and never the text itself.
+ * stored switches, the mode-derived hypermedia default — and never the text itself. Which sections that
+ * environment turns into is the runtimes plugin's `launchInstructions`, injected here as `describe`.
  */
 describe('TmuxSessionLifecycleLauncher launch instructions', () => {
-  const named = (port: TmuxCommandPort, stored: Readonly<Record<string, string>>) => {
-    const controller = new TmuxController(port);
+  const TOLD: SessionLaunchInstructions = { sections: [{ id: 'tools', chars: 12 }], mode: 'interactive', questions: true };
+
+  const named = (tmux: FakeTmux, stored: Readonly<Record<string, string>>) => {
+    const asked: { readonly fy: string; readonly env: Readonly<Record<string, string>> }[] = [];
     const environment: SessionEnvironmentStore = { write: async () => undefined, read: async () => stored };
-    return new TmuxSessionLifecycleLauncher(
-      controller,
-      new TmuxPaneDelivery(controller, async () => {}),
+    const subject = new TmuxSessionLifecycleLauncher(
+      tmux,
+      new FakePaneDelivery(tmux),
       environment,
       undefined,
       undefined,
@@ -1596,61 +1249,66 @@ describe('TmuxSessionLifecycleLauncher launch instructions', () => {
       undefined,
       undefined,
       'zz',
+      (fy, env) => {
+        asked.push({ fy, env });
+        return TOLD;
+      },
     );
+    return { subject, asked };
   };
 
-  it('should answer the sections and question rule of the environment it launched the pane with', async () => {
+  it('should answer what the environment it launched the pane with describes', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const subject = named(port, { FY_SESSION_MODE: 'interactive', FY_PACK: '1', FY_LEARNING_PASSIVE: '0' });
+    const tmux = new FakeTmux();
+    const { subject, asked } = named(tmux, { FY_SESSION_MODE: 'interactive', FY_PACK: '1', FY_LEARNING_PASSIVE: '0' });
 
     // Act
     const launched = await subject.launch(record('told-session', { mode: 'interactive' }));
 
-    // Assert
-    should(launched?.sections.map(section => section.id)).deepEqual([
-      'tools',
-      'settings',
-      'notify',
-      'board',
-      'hypermedia',
-      'pack',
-    ]);
-    should(launched?.sections.every(section => section.chars > 0)).be.true();
-    should(launched?.mode).equal('interactive');
-    should(launched?.questions).be.true();
-    should(JSON.stringify(launched)).not.containEql('Pack mode:');
+    // Assert — described from the very environment the pane received, under the binary name it was told.
+    should(launched).deepEqual(TOLD);
+    should(asked).deepEqual([{ fy: 'zz', env: firstLaunchEnv(tmux) }]);
+    should(asked[0]?.env).containDeep({ FY_SESSION_MODE: 'interactive', FY_PACK: '1', FY_HYPERMEDIA: '1' });
   });
 
-  it('should let a stored switch win over the mode default, and withhold questions from an unattended pane', async () => {
+  it('should describe a stored switch that wins over the mode default', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const subject = named(port, { FY_SESSION_MODE: 'auto', FY_HYPERMEDIA: '1' });
+    const tmux = new FakeTmux();
+    const { subject, asked } = named(tmux, { FY_SESSION_MODE: 'auto', FY_HYPERMEDIA: '1' });
 
     // Act
-    const launched = await subject.launch(record('worker-session'));
+    await subject.launch(record('worker-session'));
 
     // Assert
-    should(launched?.sections.map(section => section.id)).deepEqual([
-      'tools',
-      'settings',
-      'notify',
-      'board',
-      'hypermedia',
-    ]);
-    should(launched?.questions).be.false();
+    should(asked[0]?.env).containDeep({ FY_SESSION_MODE: 'auto', FY_HYPERMEDIA: '1' });
   });
 
   it('should answer nothing when it was not told the binary name', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
-    const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+    const tmux = new FakeTmux();
+    const asked: string[] = [];
+    const subject = new TmuxSessionLifecycleLauncher(
+      tmux,
+      new FakePaneDelivery(tmux),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      fy => {
+        asked.push(fy);
+        return TOLD;
+      },
+    );
 
     // Act
     const launched = await subject.launch(record('unnamed-session'));
 
     // Assert
     should(launched).be.undefined();
+    should(asked).deepEqual([]);
   });
 });

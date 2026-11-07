@@ -5,7 +5,7 @@ import {
   type SessionView,
 } from '../../protocol/session.ts';
 import { tryParseSessionId, type SessionId } from '../../session-id.ts';
-import { SessionReadError, type SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
+import { SessionReadError, type SessionDirectorySubsystem } from './subsystem.ts';
 import type { IndexedSession } from '../../storage-types.ts';
 
 /**

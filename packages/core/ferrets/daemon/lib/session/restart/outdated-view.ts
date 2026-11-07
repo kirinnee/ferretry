@@ -1,6 +1,6 @@
 import { DORMANT_AGENT_STATUSES } from '../../protocol/agent-address.ts';
 import { type LaunchInstructionSectionId, type SessionView } from '../../protocol/session.ts';
-import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
+import type { SessionDirectorySubsystem } from '../directory/subsystem.ts';
 import { createViewMemo } from '../directory/view-memo.ts';
 
 /**

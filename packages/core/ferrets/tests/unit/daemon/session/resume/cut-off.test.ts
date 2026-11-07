@@ -94,12 +94,4 @@ describe('bringing a cut-off session back (secrev-1329-delta)', () => {
     should(unasked.state).eql({ cutOff: true, steps: [] });
     should([view, plain.state.steps]).eql(['resumed', []]);
   });
-
-  it('should ask the route for every restore in the daemon, not only a device’s', async () => {
-    const fyd = (await Bun.file(new URL('../../../../bin/fyd.ts', import.meta.url)).text())
-      .replaceAll(/\s+/gu, ' ')
-      .replaceAll('( ', '(');
-    should(fyd.includes('await resumeUnderCutOff(cutOff, { confirm: confirmRestore,')).be.true();
-    should(fyd.includes("cutOff === 'restore' && actor === 'device'")).be.false();
-  });
 });

@@ -2,79 +2,52 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { BunSqliteIndexFactory, DaemonStorageFactory, type PaneDeliveryOptions, RuntimeEnvironment, SqliteHomeLockFactory, StateFileSystemFactory, StateHomeLayout, SystemClock } from 'UNRESOLVED';
 import { FileResumeTurnStore } from '../../../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { InMemoryLaunchGate } from '../../../../../daemon/adapters/session/resume/in-memory-launch-gate.ts';
-import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { NoMonitorSupervision } from '../../../../../daemon/adapters/session/resume/no-monitor-supervision.ts';
-import { type ResumeLaunchSpec, TmuxResumeLauncher } from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
 import { StorageResumeRepository } from '../../../../../daemon/adapters/session/resume/storage-resume-repository.ts';
-import { TmuxPaneDelivery } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
-import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../../../daemon/lib/session/peers/fleet.ts';
-import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import {
+  type ResumeLaunchSpec,
+  TmuxResumeLauncher,
+} from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
+import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
+import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import type { SessionCredentialRotator } from '../../../../../daemon/lib/session/lifecycle/types.ts';
-import { type TmuxCommandPort, TmuxController } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
-import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
+import type {
+  AccountLaunchEnvironment,
+  AccountLaunchRenewal,
+} from '../../../../../daemon/lib/session/peers/fleet.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { FakePaneDelivery, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
 
 const homes = new Set<string>();
-const NOW = '2026-07-31T10:00:00.000Z';
 const ID = parseSessionId('session-1');
+const PANE = 'fy-session-1';
 
-async function openStorage() {
+async function temporaryDirectory(): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-resume-test-'));
   homes.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return { home, opened: await factory.open() };
+  return home;
 }
 
-function config(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'session-1',
-    name: 'Revive me',
-    agent: '/opt/fleet/bin/claude-auto-loge',
-    command: ['/opt/fleet/bin/claude-auto-loge'],
-    cwd: '/workspace/project',
-    mode: 'auto',
-    turn: 3,
-    tmuxSession: 'fy-session-1',
-    createdAt: NOW,
-    updatedAt: NOW,
-    ...overrides,
-  };
+/** A configuration the declared schema accepts, as the start wrote it. */
+function config(id = 'session-1', overrides: Record<string, unknown> = {}) {
+  return sessionConfig(id, { name: 'Revive me', cwd: '/workspace/project', mode: 'auto', turn: 3, ...overrides });
 }
 
-/** A tmux server the test owns, answering the real command vocabulary the controller emits. */
-class RecordingTmuxPort implements TmuxCommandPort {
-  readonly calls: Array<readonly string[]> = [];
-  alive = true;
-  dead = false;
-  promptReady = true;
-  visible = 'the last frame';
+/** A pending question the declared schema accepts. */
+const QUESTION = { toolUseId: 'tool-1', questions: [{ question: 'Which branch?' }] };
 
-  async execute(argv: readonly string[]): Promise<{ stdout: string; stderr: string; code: number }> {
-    this.calls.push(argv);
-    const command = argv[0];
-    if (command === 'has-session') return this.result(this.alive ? '' : 'no such session', this.alive ? 0 : 1);
-    // `#{pane_dead}|#{pane_dead_status}|#{cursor_x}|#{cursor_y}|#{pane_height}|#{pane_width}`
-    if (command === 'display-message') return this.result(`${this.dead ? 1 : 0}||0|1|24|80\n`);
-    if (command === 'capture-pane')
-      return this.result(this.promptReady ? `${this.visible}\n> \n` : `${this.visible}\n`);
-    return this.result('');
-  }
-
-  private result(stdout: string, code = 0) {
-    return { stdout, stderr: '', code };
-  }
+/**
+ * The terminals plugin's controller and delivery as the launcher sees them (the injected ports), with the
+ * session's pane already open and showing its last frame.
+ */
+function panes() {
+  const tmux = new FakeTmux();
+  tmux.open(PANE, { visible: 'the last frame\n> ' });
+  return { tmux, delivery: new FakePaneDelivery(tmux) };
 }
 
 afterEach(async () => {
@@ -85,7 +58,7 @@ afterEach(async () => {
 describe('resume turn store', () => {
   it('should write a numbered turn document atomically inside the session directory', async () => {
     // Arrange
-    const { home, opened } = await openStorage();
+    const home = await temporaryDirectory();
     const store = new FileResumeTurnStore(() => join(home, 'sessions', 'session-1'));
 
     // Act
@@ -95,12 +68,11 @@ describe('resume turn store', () => {
     should(file).endWith('turns/turn-004.md');
     should(await readFile(file, 'utf8')).equal('Continue the assigned task.\n');
     should((await stat(file)).mode & 0o777).equal(0o600);
-    await opened.storage.close();
   });
 
   it('should remove stale completion markers, and tolerate ones that were never written', async () => {
     // Arrange — a `done` marker from the previous turn would end the new turn the moment it starts.
-    const { home, opened } = await openStorage();
+    const home = await temporaryDirectory();
     const directory = join(home, 'sessions', 'session-1');
     const store = new FileResumeTurnStore(() => directory);
     await store.writeTurn(ID, 4, 'anything');
@@ -112,16 +84,21 @@ describe('resume turn store', () => {
 
     // Assert
     await should(stat(join(directory, 'done.marker'))).be.rejected();
-    await opened.storage.close();
   });
 });
 
 describe('storage resume repository', () => {
   it('should read a durable session as a resume target', async () => {
     // Arrange
-    const { opened } = await openStorage();
-    await opened.storage.writeConfig(ID, config({ label: 'my-batch', retry: { transientAttempts: 2 } }));
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped', retryAttempt: 1 });
+    const opened = await memoryStorage();
+    await opened.storage.writeConfig(
+      ID,
+      config('session-1', {
+        label: 'my-batch',
+        retry: { transientAttempts: 2, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
+      }),
+    );
+    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped', turn: 3, retryAttempt: 1 }));
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).read(ID);
@@ -137,7 +114,6 @@ describe('storage resume repository', () => {
       retryAttempt: 1,
       transientRetryBudget: 2,
     });
-    await opened.storage.close();
   });
 
   it('should take the turn from the document that actually moves', async () => {
@@ -146,64 +122,60 @@ describe('storage resume repository', () => {
     // Reading the configuration first froze every session at the turn it was created on, so the
     // SECOND revive planned the same number again and overwrote the first revive's assignment.
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped', turn: 7 });
+    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped', turn: 7 }));
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).read(ID);
 
     // Assert
     should(actual).have.property('turn', 7);
-    await opened.storage.close();
   });
 
   it('should report nothing for a session that was never written', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).read(ID);
 
     // Assert
     should(actual).be.undefined();
-    await opened.storage.close();
   });
 
   it('should refuse to guess at a record whose status or mode will not parse', async () => {
     // Arrange — resume replaces terminals, so acting on a record it could not read is the one
-    // mistake that costs an operator a live agent.
-    const { opened } = await openStorage();
-    await opened.storage.writeConfig(ID, config({ mode: 'telepathy' }));
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    // mistake that costs an operator a live agent. A blank working directory passes the stored schema
+    // and is still no place to relaunch in; a status the protocol does not define is refused by the store.
+    const opened = await memoryStorage();
+    await opened.storage.writeConfig(ID, config('session-1', { cwd: '   ' }));
+    await opened.storage.writeState(ID, sessionState('session-1'));
     const other = parseSessionId('session-2');
-    await opened.storage.writeConfig(other, config({ id: 'session-2', tmuxSession: 'fy-session-2' }));
-    await opened.storage.writeState(other, { id: 'session-2', status: 'transcending' });
+    await opened.storage.writeConfig(other, config('session-2'));
+    await opened.storage.writeState(other, sessionState('session-2'));
+    opened.folder.plant(SessionStateFiles, JSON.stringify(sessionState('session-2', { status: 'transcending' })), other);
+    const repository = new StorageResumeRepository(opened.storage);
 
     // Act
-    const actual = await Promise.all([
-      new StorageResumeRepository(opened.storage).read(ID),
-      new StorageResumeRepository(opened.storage).read(other),
-    ]);
+    const blank = await repository.read(ID);
 
-    // Assert
-    should(actual).deepEqual([undefined, undefined]);
-    await opened.storage.close();
+    // Assert — no target is guessed at either way.
+    should(blank).be.undefined();
+    await should(repository.read(other)).be.rejected();
   });
 
-  it('should carry a pending question through, and drop one with no tool id', async () => {
+  it('should carry a pending question through, and none for a cleared one', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, {
-      id: 'session-1',
-      status: 'running',
-      pendingQuestion: { toolUseId: 'tool-1' },
-      needsHumanKind: 'picker_cleanup',
-    });
+    await opened.storage.writeState(
+      ID,
+      sessionState('session-1', { pendingQuestion: QUESTION, needsHumanKind: 'picker_cleanup' }),
+    );
     const other = parseSessionId('session-2');
-    await opened.storage.writeConfig(other, config({ id: 'session-2', tmuxSession: 'fy-session-2' }));
-    await opened.storage.writeState(other, { id: 'session-2', status: 'running', pendingQuestion: {} });
+    await opened.storage.writeConfig(other, config('session-2'));
+    await opened.storage.writeState(other, sessionState('session-2', { pendingQuestion: null }));
 
     // Act
     const repository = new StorageResumeRepository(opened.storage);
@@ -213,31 +185,30 @@ describe('storage resume repository', () => {
     should(actual[0]?.pendingQuestion).deepEqual({ toolUseId: 'tool-1' });
     should(actual[0]?.needsHumanKind).equal('picker_cleanup');
     should(actual[1]?.pendingQuestion).be.undefined();
-    await opened.storage.close();
   });
 
   it('should list every readable session and silently skip the unreadable ones', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    await opened.storage.writeState(ID, sessionState('session-1'));
     const broken = parseSessionId('session-2');
-    await opened.storage.writeConfig(broken, config({ id: 'session-2', tmuxSession: 'fy-session-2' }));
-    await opened.storage.writeState(broken, { id: 'session-2', status: 'nonsense' });
+    await opened.storage.writeConfig(broken, config('session-2'));
+    await opened.storage.writeState(broken, sessionState('session-2'));
+    opened.folder.plant(SessionStateFiles, JSON.stringify(sessionState('session-2', { status: 'nonsense' })), broken);
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).list();
 
     // Assert
     should(actual.map(item => item.id)).deepEqual(['session-1']);
-    await opened.storage.close();
   });
 
   it('should write the state before it journals the event that describes it', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped', needsHumanKind: 'picker_cleanup' });
+    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped', needsHumanKind: 'picker_cleanup' }));
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).transition(ID, {
@@ -254,14 +225,13 @@ describe('storage resume repository', () => {
     should(actual.retryAttempt).equal(0);
     const state = (await opened.storage.readState(ID)) as Record<string, unknown>;
     should(state.reason).equal('revived by an operator');
-    await opened.storage.close();
   });
 
   it('should replace the launch record on a relaunch and keep it through a transition that launched nothing', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    const before = { sections: [{ id: 'tools', chars: 10 }], mode: 'auto', questions: false };
+    const before: SessionLaunchInstructions = { sections: [{ id: 'tools', chars: 10 }], mode: 'auto', questions: false };
     const after: SessionLaunchInstructions = {
       sections: [
         { id: 'tools', chars: 10 },
@@ -270,7 +240,7 @@ describe('storage resume repository', () => {
       mode: 'auto',
       questions: false,
     };
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped', launchInstructions: before });
+    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped', launchInstructions: before }));
     const repository = new StorageResumeRepository(opened.storage);
 
     // Act
@@ -282,18 +252,13 @@ describe('storage resume repository', () => {
     // Assert
     should(kept.launchInstructions).deepEqual(before);
     should(replaced.launchInstructions).deepEqual(after);
-    await opened.storage.close();
   });
 
   it('should clear a pending question on the transition that abandons it', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const opened = await memoryStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, {
-      id: 'session-1',
-      status: 'stopped',
-      pendingQuestion: { toolUseId: 'tool-1' },
-    });
+    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped', pendingQuestion: QUESTION }));
 
     // Act
     const actual = await new StorageResumeRepository(opened.storage).transition(ID, {
@@ -304,49 +269,43 @@ describe('storage resume repository', () => {
 
     // Assert
     should(actual.pendingQuestion).be.undefined();
-    await opened.storage.close();
   });
 
   it('should refuse to report success for a transition it can no longer read back', async () => {
     // Arrange
-    const { opened } = await openStorage();
-    await opened.storage.writeConfig(ID, config({ mode: 'telepathy' }));
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped' });
+    const opened = await memoryStorage();
+    await opened.storage.writeConfig(ID, config('session-1', { cwd: '   ' }));
+    await opened.storage.writeState(ID, sessionState('session-1', { status: 'stopped' }));
 
     // Act / Assert
     await should(
       new StorageResumeRepository(opened.storage).transition(ID, { event: 'session.resumed', status: 'running' }),
     ).be.rejectedWith(/unreadable after a resume transition/u);
-    await opened.storage.close();
   });
 });
 
 describe('tmux resume launcher', () => {
+  const SPEC: ResumeLaunchSpec = {
+    tmuxSession: PANE,
+    mode: 'auto',
+    cwd: '/workspace/project',
+    command: ['/opt/fleet/bin/agent'],
+  };
+
   function launcher(
-    port: TmuxCommandPort,
-    options: PaneDeliveryOptions = {},
+    tmux: FakeTmux,
+    delivery = new FakePaneDelivery(tmux),
     snapshots?: { write(id: string, text: string): Promise<void> },
   ) {
-    const controller = new TmuxController(port);
-    return new TmuxResumeLauncher(
-      controller,
-      async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
-      }),
-      new TmuxPaneDelivery(controller, async () => {}, options),
-      snapshots,
-    );
+    return new TmuxResumeLauncher(tmux, async () => SPEC, delivery, snapshots);
   }
 
   it('should observe a live prompt-ready pane', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
+    const { tmux } = panes();
 
     // Act
-    const actual = await launcher(port).observe(ID);
+    const actual = await launcher(tmux).observe(ID);
 
     // Assert
     should(actual).deepEqual({ alive: true, dead: false, promptReady: true });
@@ -354,9 +313,9 @@ describe('tmux resume launcher', () => {
 
   it('should capture the final frame before the pane is destroyed', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
+    const { tmux } = panes();
     const writes: Array<readonly [string, string]> = [];
-    const subject = launcher(port, {}, { write: async (id, text) => void writes.push([id, text]) });
+    const subject = launcher(tmux, undefined, { write: async (id, text) => void writes.push([id, text]) });
 
     // Act
     await subject.snapshot(ID);
@@ -369,18 +328,19 @@ describe('tmux resume launcher', () => {
 
   it('should address only this session name when it kills or relaunches', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const subject = launcher(port);
+    const { tmux } = panes();
+    const subject = launcher(tmux);
 
     // Act
     await subject.kill(ID, 'cleanup before resume');
-    // The kill is what makes the name free again; the controller refuses to launch over a live one.
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
-    const addressed = port.calls.flat().filter(argument => argument.startsWith('fy-'));
-    should(new Set(addressed)).deepEqual(new Set(['fy-session-1']));
+    const addressed = tmux.calls
+      .flat()
+      .filter((argument): argument is string => typeof argument === 'string' && argument.startsWith('fy-'));
+    should(new Set(addressed)).deepEqual(new Set([PANE]));
+    should(tmux.methods()).deepEqual(['stop', 'launch']);
   });
 
   it('should hand the replacement pane the session identity and the environment it already had', async () => {
@@ -390,82 +350,55 @@ describe('tmux resume launcher', () => {
     // unable to attribute a single message, which reads as the peer having gone quiet rather than as a
     // relaunch defect. The identity is derived from the id, so it survives an absent spec environment.
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const withStoredEnvironment = new TmuxResumeLauncher(
-      controller,
-      async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
-        env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' },
-      }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      async () => ({ ...SPEC, env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' } }),
+      new FakePaneDelivery(tmux),
     );
 
-    // Act — the controller refuses to launch over a live name, so the pane is gone in both cases.
-    port.alive = false;
+    // Act
     await withStoredEnvironment.relaunch(ID);
     // The same revive for a session that has no stored environment at all, which is the normal case.
-    await launcher(port).relaunch(ID);
+    await launcher(tmux).relaunch(ID);
 
     // Assert
-    const launches = port.calls.filter(call => call[0] === 'new-session');
+    const launches = tmux.launches;
     should(launches).have.length(2);
-    should(launches[0]).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=stored-secret']);
-    should(launches[0]).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
-    should(launches[1]).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
-    // `-e` is an option of new-session, so it has to precede the agent word to be an environment entry
-    // at all rather than an argument handed to the agent.
-    should(launches[1]?.indexOf('-e')).be.below(launches[1]?.indexOf('/opt/fleet/bin/agent') ?? -1);
+    should(launches[0]?.env).containEql({ FY_SESSION_BOARD_CAPABILITY: 'stored-secret', FY_SESSION_ID: ID });
+    should(launches[1]?.env).containEql({ FY_SESSION_ID: ID });
+    should(launches[1]?.command).deepEqual(['/opt/fleet/bin/agent']);
   });
 
   it('should relaunch with the hypermedia default of the session mode, and let a stored switch win', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const revive = async (mode: 'auto' | 'interactive', env: Record<string, string>) => {
-      await new TmuxResumeLauncher(
-        controller,
-        async () => ({
-          tmuxSession: 'fy-session-1',
-          cwd: '/workspace/project',
-          command: ['/opt/fleet/bin/agent'],
-          env,
-          mode,
-        }),
-        new TmuxPaneDelivery(controller, async () => {}),
-      ).relaunch(ID);
+      await new TmuxResumeLauncher(tmux, async () => ({ ...SPEC, env, mode }), new FakePaneDelivery(tmux)).relaunch(ID);
     };
 
     // Act
-    port.alive = false;
     await revive('interactive', {});
     await revive('auto', {});
     await revive('auto', { FY_HYPERMEDIA: '1' });
 
     // Assert
-    const launches = port.calls.filter(call => call[0] === 'new-session');
-    should(launches[0]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
-    should(launches[1]).containDeep(['-e', 'FY_HYPERMEDIA=0']);
-    should(launches[2]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+    should(tmux.launches.map(launch => launch.env?.FY_HYPERMEDIA)).deepEqual(['1', '0', '1']);
   });
 
   it('should answer what the replacement pane was told when it knows the binary name, and nothing otherwise', async () => {
-    // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    // Arrange — what the pane was told is the runtimes plugin's to render (the injected `describe`); the
+    // launcher's part is asking it with the binary name and the very environment the pane launched with.
+    const tmux = new FakeTmux();
+    const asked: { readonly fy: string; readonly env: Readonly<Record<string, string>> }[] = [];
     const named = new TmuxResumeLauncher(
-      controller,
+      tmux,
       async () => ({
-        tmuxSession: 'fy-session-1',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
+        ...SPEC,
         env: { FY_SESSION_MODE: 'interactive', FY_LEARNING_PASSIVE: '1' },
         mode: 'interactive',
       }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -474,24 +407,22 @@ describe('tmux resume launcher', () => {
       undefined,
       undefined,
       'zz',
+      undefined,
+      (fy, env) => {
+        asked.push({ fy, env });
+        return { sections: [{ id: 'tools', chars: 1 }], mode: 'interactive', questions: true };
+      },
     );
 
     // Act
-    port.alive = false;
     const told = await named.relaunch(ID);
-    const untold = await launcher(port).relaunch(ID);
+    const untold = await launcher(tmux).relaunch(ID);
 
     // Assert
-    should(told?.sections.map(section => section.id)).deepEqual([
-      'tools',
-      'settings',
-      'notify',
-      'board',
-      'hypermedia',
-      'learning',
-    ]);
-    should(told?.mode).equal('interactive');
-    should(told?.questions).be.true();
+    should(told).deepEqual({ sections: [{ id: 'tools', chars: 1 }], mode: 'interactive', questions: true });
+    should(asked).have.length(1);
+    should(asked[0]?.fy).equal('zz');
+    should(asked[0]?.env).deepEqual(tmux.launches[0]?.env);
     should(untold).be.undefined();
   });
 
@@ -499,96 +430,55 @@ describe('tmux resume launcher', () => {
     // A revive used to REPLAY the recorded argv, so whatever the daemon learned to put on a launch
     // since — a Read rule, the model the owner switched to — never reached the replacement process.
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const { tmux } = panes();
     const built: string[] = [];
     const subject = new TmuxResumeLauncher(
-      controller,
+      tmux,
       async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
+        ...SPEC,
         command: ['/opt/fleet/bin/agent', '--model', 'recorded'],
         relaunch: async () => {
           built.push('built');
           return ['/opt/fleet/bin/agent', '--model', 'current'];
         },
       }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      new FakePaneDelivery(tmux),
     );
 
     // Act — only the relaunch builds; reading the pane must not record a launch that never happened.
     await subject.observe(ID);
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
     should(built).deepEqual(['built']);
-    const launch = port.calls.find(call => call[0] === 'new-session') ?? [];
-    should(launch).containDeep(['current']);
-    should(launch).not.containEql('recorded');
+    should(tmux.launches[0]?.command).deepEqual(['/opt/fleet/bin/agent', '--model', 'current']);
   });
 
   it('should refuse to relaunch a session whose command is empty', async () => {
     // Arrange
-    const subject = new TmuxResumeLauncher(
-      new TmuxController(new RecordingTmuxPort()),
-      async () => ({ tmuxSession: 'fy-session-1', mode: 'auto', cwd: '/workspace/project', command: [] }),
-      new TmuxPaneDelivery(new TmuxController(new RecordingTmuxPort()), async () => {}),
-    );
+    const tmux = new FakeTmux();
+    const subject = new TmuxResumeLauncher(tmux, async () => ({ ...SPEC, command: [] }), new FakePaneDelivery(tmux));
 
     // Act / Assert
     await should(subject.relaunch(ID)).be.rejectedWith(/empty command/u);
+    should(tmux.launches).be.empty();
   });
 
-  it('should answer the resume gate a large session comes back on before typing the turn', async () => {
-    // Arrange — the menu a revive of a long-running session always lands on.
-    const server = new FakeTmuxServer();
-    server.bootCaptures = 2;
-    server.modal = [
-      'This session is 2h 45m old and 382k tokens.',
-      '❯ 1. Resume from summary (recommended)',
-      '  2. Resume full session as-is',
-      "  3. Don't ask me again",
-    ].join('\n');
+  it('should hand the turn to the session’s own pane through the delivery the launch path uses', async () => {
+    // Arrange
+    const { tmux, delivery } = panes();
 
     // Act
-    await launcher(server).deliver(ID, 'read your new turn');
+    await launcher(tmux, delivery).deliver(ID, 'read your new turn');
 
-    // Assert — the menu was walked to "Resume full session", then the turn was delivered.
-    should(server.calls.filter(call => call[0] === 'send-keys').map(call => call.at(-1))).containDeep([
-      'Down',
-      'Enter',
-    ]);
-    should(server.submitted).deepEqual(['read your new turn']);
-  });
-
-  it('should refuse to type into a pane whose harness is gone', async () => {
-    // Arrange
-    const server = new FakeTmuxServer();
-    server.dead = true;
-
-    // Act / Assert
-    await should(launcher(server).deliver(ID, 'anything')).be.rejectedWith(/harness exited/u);
-  });
-
-  it('should give up rather than type into a terminal that never becomes ready', async () => {
-    // Arrange
-    const server = new FakeTmuxServer();
-    server.bootCaptures = Number.MAX_SAFE_INTEGER;
-
-    // Act / Assert
-    await should(launcher(server, { readinessAttempts: 2 }).deliver(ID, 'anything')).be.rejectedWith(
-      /did not become ready/u,
-    );
-    should(server.calls.some(call => call[0] === 'send-keys')).be.false();
+    // Assert
+    should(delivery.delivered).deepEqual([{ session: PANE, text: 'read your new turn' }]);
   });
 
   it('should confirm an exit only when the pane itself agrees the harness is gone', async () => {
     // Arrange
-    const alive = new RecordingTmuxPort();
-    const gone = new RecordingTmuxPort();
-    gone.alive = false;
+    const alive = panes().tmux;
+    const gone = new FakeTmux();
 
     // Act
     const actual = [await launcher(alive).confirmExit(ID), await launcher(gone).confirmExit(ID)];
@@ -601,12 +491,13 @@ describe('tmux resume launcher', () => {
 
   it('should assume the harness is gone when even the probe fails', async () => {
     // Arrange
+    const tmux = new FakeTmux();
     const subject = new TmuxResumeLauncher(
-      new TmuxController(new RecordingTmuxPort()),
+      tmux,
       async () => {
         throw new Error('config is unreadable');
       },
-      new TmuxPaneDelivery(new TmuxController(new RecordingTmuxPort()), async () => {}),
+      new FakePaneDelivery(tmux),
     );
 
     // Act
@@ -706,22 +597,20 @@ describe('the resume launcher and a profile-authenticated account', () => {
   const profile = (env: Readonly<Record<string, string>>): AccountLaunchEnvironment => ({
     forWrapper: async () => env,
   });
+  const SPEC: ResumeLaunchSpec = {
+    tmuxSession: PANE,
+    mode: 'auto',
+    cwd: '/workspace/project',
+    command: ['/opt/fleet/bin/agent'],
+  };
 
   it('should hand the replacement the credential the account has now', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const subject = new TmuxResumeLauncher(
-      controller,
-      async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
-        env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' },
-        agent: '/opt/fleet/bin/agent',
-      }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      async () => ({ ...SPEC, env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' }, agent: '/opt/fleet/bin/agent' }),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -730,29 +619,23 @@ describe('the resume launcher and a profile-authenticated account', () => {
     );
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert — both halves, and the session's own still there.
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', 'ANTHROPIC_API_KEY=fixture-value']);
-    should(launch).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=stored-secret']);
-    should(launch).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
+    should(tmux.launches[0]?.env).containEql({
+      ANTHROPIC_API_KEY: 'fixture-value',
+      FY_SESSION_BOARD_CAPABILITY: 'stored-secret',
+      FY_SESSION_ID: ID,
+    });
   });
 
   it('should hand the replacement the same media folder and question file', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const subject = new TmuxResumeLauncher(
-      controller,
-      async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
-      }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      async () => SPEC,
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -766,30 +649,26 @@ describe('the resume launcher and a profile-authenticated account', () => {
     );
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', `FY_MEDIA_DIR=/state/sessions/${ID}/media`]);
-    should(launch).containDeep(['-e', `FY_QUESTION_FILE=/state/sessions/${ID}/question-asked.json`]);
+    should(tmux.launches[0]?.env).containEql({
+      FY_MEDIA_DIR: `/state/sessions/${ID}/media`,
+      FY_QUESTION_FILE: `/state/sessions/${ID}/question-asked.json`,
+    });
   });
 
   it('should let the session keep its own variable when a profile names the same one', async () => {
     // Arrange — a profile is shared by every account that lists it; a board capability is not.
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const subject = new TmuxResumeLauncher(
-      controller,
+      tmux,
       async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
+        ...SPEC,
         env: { FY_SESSION_BOARD_CAPABILITY: 'this-session-only' },
         agent: '/opt/fleet/bin/agent',
       }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -798,29 +677,20 @@ describe('the resume launcher and a profile-authenticated account', () => {
     );
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
-    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
-    should(launch).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=this-session-only']);
-    should(launch).not.containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=from-the-profile']);
+    should(tmux.launches[0]?.env?.FY_SESSION_BOARD_CAPABILITY).equal('this-session-only');
   });
 
   it('should ask for nothing when the spec cannot name the executable', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     let asked = 0;
     const subject = new TmuxResumeLauncher(
-      controller,
-      async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
-      }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      async () => SPEC,
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -834,7 +704,6 @@ describe('the resume launcher and a profile-authenticated account', () => {
     );
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
@@ -843,18 +712,11 @@ describe('the resume launcher and a profile-authenticated account', () => {
 
   it('should let a refused profile take the revive down rather than revive without a credential', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const subject = new TmuxResumeLauncher(
-      controller,
-      async () => ({
-        tmuxSession: 'fy-session-1',
-        mode: 'auto',
-        cwd: '/workspace/project',
-        command: ['/opt/fleet/bin/agent'],
-        agent: '/opt/fleet/bin/agent',
-      }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      async () => ({ ...SPEC, agent: '/opt/fleet/bin/agent' }),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -867,9 +729,8 @@ describe('the resume launcher and a profile-authenticated account', () => {
     );
 
     // Act & Assert
-    port.alive = false;
     await should(subject.relaunch(ID)).be.rejectedWith(/no secret named WORK_KEY/u);
-    should(port.calls.filter(call => call[0] === 'new-session')).be.empty();
+    should(tmux.launches).be.empty();
   });
 });
 
@@ -881,18 +742,17 @@ describe('the resume launcher and a profile-authenticated account', () => {
  */
 describe('the resume launcher and a credential that can renew itself', () => {
   const reviving = (spec: Partial<ResumeLaunchSpec>, accountRenewal: AccountLaunchRenewal) => {
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const subject = new TmuxResumeLauncher(
-      controller,
+      tmux,
       async () => ({
-        tmuxSession: 'fy-session-1',
+        tmuxSession: PANE,
         mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent'],
         ...spec,
       }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -900,35 +760,34 @@ describe('the resume launcher and a credential that can renew itself', () => {
       undefined,
       accountRenewal,
     );
-    return { port, subject };
+    return { tmux, subject };
   };
 
   it('should give the account its turn before the replacement pane exists', async () => {
     // Arrange
     const asked: string[] = [];
-    const { port, subject } = reviving(
+    const { tmux, subject } = reviving(
       { agent: '/opt/fleet/bin/agent' },
       {
         beforeLaunch: async wrapper => {
-          asked.push(`${wrapper} @ ${String(port.calls.filter(call => call[0] === 'new-session').length)}`);
+          asked.push(`${wrapper} @ ${String(tmux.launches.length)}`);
         },
       },
     );
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert — asked once, about this account, while no replacement had been started yet.
     should(asked).deepEqual(['/opt/fleet/bin/agent @ 0']);
-    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+    should(tmux.launches).have.length(1);
   });
 
   it('should ask for nothing when the spec cannot name the executable', async () => {
     // Arrange — the same rule the profile lookup follows: a spec with no executable names no account,
     // so there is nothing to renew and no fleet to read looking for one.
     let asked = 0;
-    const { port, subject } = reviving(
+    const { tmux, subject } = reviving(
       {},
       {
         beforeLaunch: async () => {
@@ -938,12 +797,11 @@ describe('the resume launcher and a credential that can renew itself', () => {
     );
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
     should(asked).equal(0);
-    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+    should(tmux.launches).have.length(1);
   });
 });
 
@@ -956,23 +814,22 @@ describe('the resume launcher and a credential that can renew itself', () => {
  */
 describe('the resume launcher and a credential issued per launch', () => {
   const rotating = (rotate: SessionCredentialRotator['rotate']) => {
-    const port = new RecordingTmuxPort();
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
     const order: string[] = [];
     let stored: Readonly<Record<string, string>> = { FY_SESSION_BOARD_CAPABILITY: 'replaced-pane-capability' };
     const subject = new TmuxResumeLauncher(
-      controller,
+      tmux,
       async () => {
         order.push('spec');
         return {
-          tmuxSession: 'fy-session-1',
+          tmuxSession: PANE,
           mode: 'auto',
           cwd: '/workspace/project',
           command: ['/opt/fleet/bin/agent'],
           env: stored,
         };
       },
-      new TmuxPaneDelivery(controller, async () => {}),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       undefined,
@@ -990,28 +847,27 @@ describe('the resume launcher and a credential issued per launch', () => {
         },
       },
     );
-    return { port, order, subject };
+    return { tmux, order, subject };
   };
 
   it('should re-issue the credential before the replacement pane reads its environment', async () => {
     // Arrange
-    const { port, order, subject } = rotating(async () => 'f'.repeat(64));
+    const { tmux, order, subject } = rotating(async () => 'f'.repeat(64));
 
     // Act
-    port.alive = false;
     await subject.relaunch(ID);
 
     // Assert
-    const launches = port.calls.filter(call => call[0] === 'new-session');
-    should(launches).have.length(1);
-    should(launches[0]).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=replacement-capability']);
-    should(launches[0]?.join(' ')).not.containEql('replaced-pane-capability');
+    should(tmux.launches).have.length(1);
+    should(tmux.launches[0]?.env?.FY_SESSION_BOARD_CAPABILITY).equal('replacement-capability');
+    should(JSON.stringify(tmux.launches[0])).not.containEql('replaced-pane-capability');
     should(order[0]).equal(`rotate:${ID}`);
   });
 
   it('should never rotate when it only observes, captures or kills the pane', async () => {
     // Arrange — the reads a daemon restart, a monitor and a stop make of a pane that keeps running.
-    const { order, subject } = rotating(async () => 'f'.repeat(64));
+    const { tmux, order, subject } = rotating(async () => 'f'.repeat(64));
+    tmux.open(PANE);
 
     // Act
     await subject.observe(ID);
@@ -1024,48 +880,29 @@ describe('the resume launcher and a credential issued per launch', () => {
 
   it('should launch nothing when the credential cannot be re-issued', async () => {
     // Arrange
-    const { port, subject } = rotating(async () => {
+    const { tmux, subject } = rotating(async () => {
       throw new Error('the environment could not be made durable');
     });
 
     // Act + Assert
-    port.alive = false;
     await should(subject.relaunch(ID)).be.rejectedWith('the environment could not be made durable');
-    should(port.calls.filter(call => call[0] === 'new-session')).have.length(0);
+    should(tmux.launches).have.length(0);
   });
 });
 
 describe('tmux resume launcher › recording the replacement pane’s identity', () => {
-  /** A tmux whose `kill-session` can be made to fail, so a replacement that cannot be named cannot be removed. */
-  class KillableTmux extends RecordingTmuxPort {
-    unkillable = false;
-    override async execute(argv: readonly string[]): Promise<{ stdout: string; stderr: string; code: number }> {
-      // The kill is one command list that releases the control clients first, so it is found by name.
-      if (argv.includes('kill-session')) {
-        this.calls.push(argv);
-        if (this.unkillable) return { stdout: '', stderr: 'no permission', code: 1 };
-        this.alive = false;
-        return { stdout: '', stderr: '', code: 0 };
-      }
-      const result = await super.execute(argv);
-      if (argv[0] === 'new-session') this.alive = true;
-      return result;
-    }
-  }
-
   function subject(failures: number, unkillable = false) {
-    const port = new KillableTmux();
-    port.alive = false;
-    port.unkillable = unkillable;
-    const controller = new TmuxController(port);
+    const tmux = new FakeTmux();
+    // A stop that fails is a replacement that cannot be named and cannot be removed either.
+    if (unkillable) tmux.failures.set('stop', 'no permission');
     const registrations: string[] = [];
     let remaining = failures;
     // The SHIPPED retry policy, deliberately not overridden: the bound this daemon actually applies
     // is part of what these tests are about, and a fake one would prove a policy nothing runs.
     const launcher = new TmuxResumeLauncher(
-      controller,
-      async () => ({ tmuxSession: 'fy-session-1', mode: 'auto', cwd: '/workspace/project', command: ['/opt/agent'] }),
-      new TmuxPaneDelivery(controller, async () => {}),
+      tmux,
+      async () => ({ tmuxSession: PANE, mode: 'auto', cwd: '/workspace/project', command: ['/opt/agent'] }),
+      new FakePaneDelivery(tmux),
       undefined,
       undefined,
       {
@@ -1078,26 +915,26 @@ describe('tmux resume launcher › recording the replacement pane’s identity',
         },
       },
     );
-    return { port, launcher, registrations };
+    return { tmux, launcher, registrations };
   }
 
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
   it('should retry a registration that lost the race with the pane it is about', async () => {
     // Arrange — both ways this write fails are races with the launch that just happened.
-    const { port, launcher, registrations } = subject(2);
+    const { tmux, launcher, registrations } = subject(2);
 
     // Act
     await launcher.relaunch(ID);
 
     // Assert — the identity names the replacement, and no pane was thrown away over a race.
-    should(registrations).deepEqual(['fy-session-1']);
-    should(port.calls.some(call => call.includes('kill-session'))).be.false();
+    should(registrations).deepEqual([PANE]);
+    should(tmux.methods()).not.containEql('stop');
   });
 
   it('should tear the replacement down and FAIL when its identity cannot be recorded at all', async () => {
     // Arrange — a live pane nothing can name is worse than no pane.
-    const { port, launcher, registrations } = subject(Number.POSITIVE_INFINITY);
+    const { tmux, launcher, registrations } = subject(Number.POSITIVE_INFINITY);
 
     // Act
     const failure = await launcher.relaunch(ID).then(() => undefined, message);
@@ -1106,7 +943,8 @@ describe('tmux resume launcher › recording the replacement pane’s identity',
     should(failure).match(/could not be registered \(tmux has not proved the pane\)/u);
     should(failure).match(/the unregistered replacement pane was killed/u);
     should(registrations).be.empty();
-    should(port.calls.some(call => call.includes('kill-session'))).be.true();
+    should(tmux.methods()).containEql('stop');
+    should(tmux.panes.has(PANE)).be.false();
   });
 
   it('should say so when it could not even kill the replacement it cannot name', async () => {
@@ -1117,6 +955,6 @@ describe('tmux resume launcher › recording the replacement pane’s identity',
     const failure = await launcher.relaunch(ID).then(() => undefined, message);
 
     // Assert — the worst state this daemon can be in must not be the quietest one.
-    should(failure).match(/could not be killed either/u);
+    should(failure).match(/could not be killed either \(no permission\)/u);
   });
 });

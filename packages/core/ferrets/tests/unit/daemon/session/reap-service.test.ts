@@ -22,6 +22,7 @@ const PANE: RegisteredTerminalPane = {
   paneId: '%41',
   pid: 812,
   processStartTicks: 1_002_003,
+  sessionCreated: 1_790_000_000,
 };
 const SESSION: DurableTerminalSession = {
   daemonId: DAEMON,

@@ -8,7 +8,6 @@ import { TmuxResumeLauncher } from '../../../../../daemon/adapters/session/resum
 import { TmuxSessionLifecycleLauncher } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-lifecycle-launcher.ts';
 import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
-import { LaunchEnvironmentStore } from '../../../../../daemon/lib/session/lifecycle/launch-environment.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import type {
   TmuxController,
@@ -21,8 +20,8 @@ import type {
  * the first launch — which a start, a fork, a Pack sub-ferret and an imported or continued conversation
  * all reach through the lifecycle — and the relaunch, which a Restart, a same-harness move, a
  * revive and a resume all reach through the resume service. Both read the session's mode from its
- * record and its environment through one `LaunchEnvironmentStore`, so these cases pin both halves for
- * an interactive and an unattended ferret, including one started before Pack mode existed.
+ * record and its environment from the one stored environment, so these cases pin both halves for
+ * an interactive and an unattended ferret.
  */
 
 const homes = new Set<string>();
@@ -96,8 +95,7 @@ async function fixture(mode: 'auto' | 'interactive', stored: Readonly<Record<str
   const id = parseSessionId(`session-${mode}`);
   const files = new FileSessionEnvironmentStore(session => join(home, session));
   await files.write(id, stored);
-  // What Pack mode's hooks derive from this record: a top-level ferret, machine switch on.
-  const environments = new LaunchEnvironmentStore(files, async () => ({ FY_PACK: '1' }));
+  const environments = files;
   const record = createSessionRecord(
     { agent: AGENT, cwd: '/workspace/project', mode, ...(mode === 'auto' ? { prompt: 'work' } : {}) },
     { id, cwd: '/workspace/project', at: NOW, settings: defaultSessionLifecycleSettings },
@@ -125,9 +123,9 @@ describe('the switches every launch path hands a ferret', () => {
   it.each([
     ['interactive', { FY_HYPERMEDIA: '1', FY_PACK: '1' }],
     ['auto', { FY_HYPERMEDIA: '0', FY_PACK: '1' }],
-  ] as const)('should launch and relaunch an %s ferret started before Pack mode with %j', async (mode, expected) => {
-    // Arrange — nothing stored but the mode: the state every ferret older than these switches is in.
-    const subject = await fixture(mode, { FY_SESSION_MODE: mode });
+  ] as const)('should launch and relaunch an %s ferret its start put in Pack mode with %j', async (mode, expected) => {
+    // Arrange — the mode and the Pack switch the start stored; hypermedia follows the mode.
+    const subject = await fixture(mode, { FY_SESSION_MODE: mode, FY_PACK: '1' });
 
     // Act — the first launch, then the pane dies and the session is relaunched into it.
     await subject.first.launch(subject.record);
@@ -145,7 +143,7 @@ describe('the switches every launch path hands a ferret', () => {
   it("should keep the owner's stored switches on every launch, in either direction", async () => {
     // Arrange — an interactive ferret the owner switched off, and an auto one switched on.
     const off = await fixture('interactive', { FY_HYPERMEDIA: '0', FY_PACK: '0' });
-    const on = await fixture('auto', { FY_HYPERMEDIA: '1' });
+    const on = await fixture('auto', { FY_HYPERMEDIA: '1', FY_PACK: '1' });
 
     // Act
     await off.first.launch(off.record);

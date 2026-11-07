@@ -19,10 +19,9 @@ export interface RegisteredTerminalPane {
   readonly processStartTicks: number;
   /**
    * The UNIX second the pane's tmux session was created: what proves the pane once it is dead and tmux
-   * 3.8 no longer prints its pid (`lib/tmux/pane-proof.ts`). Absent from a registration written before
-   * it was recorded.
+   * 3.8 no longer prints its pid (`lib/tmux/pane-proof.ts`).
    */
-  readonly sessionCreated?: number;
+  readonly sessionCreated: number;
 }
 
 export interface DurableTerminalSession {

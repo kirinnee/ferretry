@@ -170,7 +170,7 @@ export class SessionLaunchService {
           harness: account.kind,
           executable,
           remoteControl: config.remoteControl ? outcome.plan.extraArgs : [],
-          transcript: transcriptLaunchArguments(account.kind, config.transcript, subject.command),
+          transcript: transcriptLaunchArguments(account.kind, config.transcript),
           readableFolders: this.ports.readableFolders(id),
           model: outcome.plan.model,
           ...(effort === undefined ? {} : { effort }),

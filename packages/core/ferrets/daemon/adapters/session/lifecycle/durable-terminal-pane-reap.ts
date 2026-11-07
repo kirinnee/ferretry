@@ -43,7 +43,8 @@ function durableRegistration(text: string, daemonId: string, sessionId: string):
     typeof value.tmuxSession !== 'string' ||
     typeof value.paneId !== 'string' ||
     typeof value.pid !== 'number' ||
-    typeof value.processStartTicks !== 'number'
+    typeof value.processStartTicks !== 'number' ||
+    typeof value.sessionCreated !== 'number'
   )
     throw new Error(`session ${sessionId} has an incomplete terminal pane registration`);
   const registration: RegisteredTerminalPane = {
@@ -53,12 +54,9 @@ function durableRegistration(text: string, daemonId: string, sessionId: string):
     paneId: value.paneId,
     pid: value.pid,
     processStartTicks: value.processStartTicks,
-    ...(value.sessionCreated === undefined ? {} : { sessionCreated: value.sessionCreated as number }),
+    sessionCreated: value.sessionCreated,
   };
-  if (
-    value.sessionCreated !== undefined &&
-    !(Number.isSafeInteger(value.sessionCreated) && (value.sessionCreated as number) > 0)
-  )
+  if (!(Number.isSafeInteger(value.sessionCreated) && value.sessionCreated > 0))
     throw new Error(`session ${sessionId} has an invalid terminal pane registration`);
   if (!hasSafeTerminalPaneIdentity(registration))
     throw new Error(`session ${sessionId} has an invalid terminal pane registration`);
@@ -83,8 +81,11 @@ export class DurableTerminalPaneRegistrar {
   async registerSession(sessionId: SessionId, tmuxSession: string): Promise<void> {
     const sighting = await this.tmux.paneSighting(tmuxSession);
     // A dead pane is no identity to register — on tmux 3.8 it has no pid at all — so its exit is the answer.
-    const identity = sighting?.dead === false && sighting.pid !== undefined ? sighting : undefined;
-    if (identity?.pid === undefined)
+    const identity =
+      sighting?.dead === false && sighting.pid !== undefined && sighting.sessionCreated !== undefined
+        ? sighting
+        : undefined;
+    if (identity?.pid === undefined || identity.sessionCreated === undefined)
       throw await this.refusal(tmuxSession, 'tmux did not prove the launched pane identity');
     const ticks = await this.incarnation.startOf(identity.pid);
     if (ticks === undefined)
@@ -96,7 +97,7 @@ export class DurableTerminalPaneRegistrar {
       paneId: identity.paneId,
       pid: identity.pid,
       processStartTicks: ticks,
-      ...(identity.sessionCreated === undefined ? {} : { sessionCreated: identity.sessionCreated }),
+      sessionCreated: identity.sessionCreated,
     };
     await this.files.writeTextAtomic(
       createSessionPaths(this.paths, sessionId).terminalPane,
@@ -228,27 +229,6 @@ export class DurableTerminalPaneStore {
   async registration(daemonId: string, sessionId: SessionId): Promise<RegisteredTerminalPane | undefined> {
     const text = await this.files.readText(createSessionPaths(this.paths, sessionId).terminalPane);
     return text === undefined ? undefined : durableRegistration(text, daemonId, sessionId);
-  }
-
-  /**
-   * Adds the second the pane's session was created to a registration written before it was recorded —
-   * once, and only while the file on disk is still exactly `registration`. A registration replaced
-   * meanwhile (a resume re-registered) or already stamped is left alone. Answers whether it wrote.
-   */
-  async recordSessionCreated(
-    daemonId: string,
-    registration: RegisteredTerminalPane,
-    sessionCreated: number,
-  ): Promise<boolean> {
-    const id = parseSessionId(registration.sessionId);
-    const current = await this.registration(daemonId, id);
-    if (current === undefined || JSON.stringify(current) !== JSON.stringify(registration)) return false;
-    if (current.sessionCreated !== undefined) return false;
-    await this.files.writeTextAtomic(
-      createSessionPaths(this.paths, id).terminalPane,
-      `${JSON.stringify({ ...current, sessionCreated })}\n`,
-    );
-    return true;
   }
 
   /** The reap's view: a ledger with any damage in it is not a ledger a sweep may act on. */
