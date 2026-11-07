@@ -32,10 +32,35 @@ export interface CarrierSocketEvents {
   readonly onBinary: (bytes: Uint8Array) => void;
   readonly onText: (text: string) => void;
   readonly onClose: (code: number, reason: string) => void;
+  /** This socket carries one live stream (an event or terminal stream), not request sessions. */
+  readonly stream?: boolean;
+}
+
+/**
+ * What a carrier that WALKS may add to the socket it hands one session. Both members are optional, so any plain
+ * socket (the shell's own direct dial) is one, and a session over it behaves exactly as it always did.
+ *
+ * Today's rule (PWA `relay-carrier.ts`, `RelayUnsentError`): a session the daemon never accepted carried no request,
+ * so even a write may try the next carrier, on a FRESH session — the old one's handshake belongs to the old carrier.
+ * Only the session knows when the daemon accepted it, so it says so; only the carrier knows what is left to try.
+ */
+export interface CarrierWalkSocket extends RelayClientSocket {
+  /** The daemon accepted the session on this socket (`ready()` resolved): this carrier carries. */
+  accepted?(): void;
+  /**
+   * The session on this socket ended before the daemon accepted it. The dial for a fresh session on the walk's next
+   * carrier, or `undefined` when there is none left (or the walk was retired).
+   */
+  onward?(): CarrierDial | undefined;
+  /**
+   * A request on the accepted session failed because the session ended under it (today's request path forgets the
+   * remembered carrier then). A session that ended idle says nothing: the carrier is redialled first next time.
+   */
+  requestLost?(): void;
 }
 
 /** Opens one carrier socket for one session. */
-export type CarrierDial = (events: CarrierSocketEvents) => RelayClientSocket;
+export type CarrierDial = (events: CarrierSocketEvents) => CarrierWalkSocket;
 
 export interface SessionTransportOptions {
   readonly crypto: RelayCrypto;
@@ -62,16 +87,23 @@ function decodeBody(text: string): unknown {
   }
 }
 
+interface OpenedSession {
+  readonly session: RelayClientSession;
+  readonly socket: CarrierWalkSocket;
+}
+
 function openSession(
   options: SessionTransportOptions,
+  dial: CarrierDial,
   mode: RelayClientSessionDependencies['mode'],
   onData?: (frame: RelayStreamFrame) => void,
-): RelayClientSession {
+): OpenedSession {
   let session: RelayClientSession | undefined;
-  const socket = options.dial({
+  const socket = dial({
     onBinary: bytes => void session?.receiveBinary(bytes),
     onText: text => session?.receiveText(text),
     onClose: (code, reason) => session?.carrierClosed(code, reason),
+    ...(mode.kind === 'stream' ? { stream: true } : {}),
   });
   session = new RelayClientSession({
     crypto: options.crypto,
@@ -80,16 +112,51 @@ function openSession(
     socket,
     ...(onData === undefined ? {} : { onData }),
   });
-  return session;
+  return { session, socket };
+}
+
+/**
+ * A request session the daemon ACCEPTED, walking on to a fresh session over the carrier's next leg each time one ends
+ * before acceptance (see {@link CarrierWalkSocket}). Nothing a request needs has left before acceptance, so the walk
+ * is safe for a write too; once the daemon accepted, a failure is the session's and is never re-dialled here.
+ */
+async function acceptedSession(
+  options: SessionTransportOptions,
+  mode: RelayClientSessionDependencies['mode'],
+): Promise<OpenedSession> {
+  let dial = options.dial;
+  for (;;) {
+    const opened = openSession(options, dial, mode);
+    try {
+      await opened.session.ready();
+    } catch (reason) {
+      const onward = opened.socket.onward?.();
+      if (onward === undefined) throw reason;
+      dial = onward;
+      continue;
+    }
+    opened.socket.accepted?.();
+    return opened;
+  }
 }
 
 const pairs = (query: Readonly<Record<string, string>> | undefined): readonly (readonly [string, string])[] =>
   Object.entries(query ?? {});
 
+/**
+ * A request failed: when its session ended under it, the carrier lost it (today's request path, which then forgets the
+ * remembered carrier). The caller's own abort, or a session still live (an answer), says nothing about the carrier.
+ */
+function lostUnder(opened: OpenedSession, reason: unknown, signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true && reason === signal.reason) return;
+  if (opened.session.live()) return;
+  opened.socket.requestLost?.();
+}
+
 export class SessionTransport implements DaemonTransport {
   readonly #options: SessionTransportOptions;
   readonly #reconnect = new Set<() => void>();
-  #session: Promise<RelayClientSession> | undefined;
+  #session: Promise<OpenedSession> | undefined;
   #opened = 0;
 
   constructor(options: SessionTransportOptions) {
@@ -97,17 +164,16 @@ export class SessionTransport implements DaemonTransport {
   }
 
   /** The live request session, or a new one when the last ended (a lease ran out, the carrier dropped). */
-  #requestSession(): Promise<RelayClientSession> {
+  #requestSession(): Promise<OpenedSession> {
     const current = this.#session;
     if (current !== undefined) {
-      return current.then(session => (session.live() ? session : this.#fresh()));
+      return current.then(opened => (opened.session.live() ? opened : this.#fresh()));
     }
     return this.#fresh();
   }
 
-  #fresh(): Promise<RelayClientSession> {
-    const session = openSession(this.#options, { kind: 'auth', device: this.#options.device });
-    const ready = session.ready();
+  #fresh(): Promise<OpenedSession> {
+    const ready = acceptedSession(this.#options, { kind: 'auth', device: this.#options.device });
     this.#session = ready;
     ready.catch(() => {
       if (this.#session === ready) this.#session = undefined;
@@ -138,7 +204,7 @@ export class SessionTransport implements DaemonTransport {
     };
     let answer: RelayTunnelAnswer;
     try {
-      answer = await session.request(record, request.signal);
+      answer = await session.session.request(record, request.signal);
     } catch (reason) {
       // R244, copied from today's relay-carrier: a lapsed lease silently reopens a read ONCE.
       // A write may already have happened, and a revocation is final on every method.
@@ -146,10 +212,17 @@ export class SessionTransport implements DaemonTransport {
         !(reason instanceof RelaySessionError) ||
         reason.code !== RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE ||
         !['GET', 'HEAD'].includes(request.method.toUpperCase())
-      )
+      ) {
+        lostUnder(session, reason, request.signal);
         throw reason;
+      }
       const fresh = await this.#requestSession();
-      answer = await fresh.request(record, request.signal);
+      try {
+        answer = await fresh.session.request(record, request.signal);
+      } catch (again) {
+        lostUnder(fresh, again, request.signal);
+        throw again;
+      }
     }
     return { status: answer.status, headers: answer.headers, body: decodeBody(answer.body) };
   }
@@ -178,30 +251,49 @@ export class SessionTransport implements DaemonTransport {
     const url = new URL(path, 'http://session.invalid');
     const query = [...url.searchParams.entries()];
     let closed = false;
-    const session = openSession(
-      this.#options,
-      {
-        kind: 'stream',
-        device: this.#options.device,
-        path: url.pathname,
-        ...(query.length === 0 ? {} : { query }),
-      },
-      frame => listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes),
-    );
     const end = (reason: string): void => {
       if (closed) return;
       closed = true;
       listeners.onClose(reason);
     };
-    session.onStreamClosed(closedWith => end(closedWith.reason));
-    session.ready().catch((error: unknown) => end(error instanceof Error ? error.message : String(error)));
+    const mode: RelayClientSessionDependencies['mode'] = {
+      kind: 'stream',
+      device: this.#options.device,
+      path: url.pathname,
+      ...(query.length === 0 ? {} : { query }),
+    };
+    const onData = (frame: RelayStreamFrame): void =>
+      listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes);
+    let session: RelayClientSession | undefined;
+    // A stream the daemon never opened carried nothing (a stream session sends no data before `stream-opened`), so it
+    // walks on to a fresh session over the carrier's next leg exactly as a request session does.
+    const open = (dial: CarrierDial): void => {
+      const opened = openSession(this.#options, dial, mode, onData);
+      session = opened.session;
+      opened.session.onStreamClosed(closedWith => end(closedWith.reason));
+      opened.session.ready().then(
+        () => opened.socket.accepted?.(),
+        (error: unknown) => {
+          if (closed) return;
+          const onward = opened.socket.onward?.();
+          if (onward !== undefined) {
+            open(onward);
+            return;
+          }
+          end(error instanceof Error ? error.message : String(error));
+        },
+      );
+    };
+    open(this.#options.dial);
     return {
       send: frame =>
-        session.sendStream(typeof frame === 'string' ? { kind: 'text', text: frame } : { kind: 'bytes', bytes: frame }),
+        session?.sendStream(
+          typeof frame === 'string' ? { kind: 'text', text: frame } : { kind: 'bytes', bytes: frame },
+        ),
       close: () => {
         if (closed) return;
         closed = true;
-        session.closeStream();
+        session?.closeStream();
       },
     };
   }
@@ -212,7 +304,7 @@ export class SessionTransport implements DaemonTransport {
   }
 
   close(): void {
-    void this.#session?.then(session => session.close()).catch(() => {});
+    void this.#session?.then(opened => opened.session.close()).catch(() => {});
     this.#session = undefined;
   }
 }

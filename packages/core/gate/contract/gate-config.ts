@@ -100,6 +100,42 @@ export const UnlockGrantedSchema = z.strictObject({
   keyRotated: z.literal(true).optional(),
 });
 
+// ─── shared-catalog members ───────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How long one member unlock opens `/v1/shared/*` (today's `catalogs.memberUnlockDays`, `protocol/src/lib/catalog-member.ts`):
+ * whole days, 1 to 90, 30 unless the owner changed it. Raising it loosens what a member may do, so it is held like any
+ * loosening.
+ */
+export const MEMBER_UNLOCK_DAYS_MIN = 1;
+export const MEMBER_UNLOCK_DAYS_MAX = 90;
+export const MEMBER_UNLOCK_DAYS_DEFAULT = 30;
+
+/**
+ * The `security` block of `gate.yaml`: the machine's security settings (served by `/v1/security`, field for field
+ * today's) and the member unlock, which `/v1/security` does not carry (today it was a config-file value only).
+ */
+export const GateSecuritySchema = SecuritySettingsSchema.extend({
+  memberUnlockDays: z
+    .number()
+    .int()
+    .min(MEMBER_UNLOCK_DAYS_MIN)
+    .max(MEMBER_UNLOCK_DAYS_MAX)
+    .default(MEMBER_UNLOCK_DAYS_DEFAULT),
+});
+export type GateSecurity = z.infer<typeof GateSecuritySchema>;
+
+export const DEFAULT_GATE_SECURITY: GateSecurity = Object.freeze({
+  ...DEFAULT_SECURITY_SETTINGS,
+  memberUnlockDays: MEMBER_UNLOCK_DAYS_DEFAULT,
+});
+
+/** The security settings `/v1/security` serves, without the member unlock. */
+export function securitySettingsOf(security: GateSecurity): SecuritySettings {
+  const { memberUnlockDays: _member, ...settings } = security;
+  return settings;
+}
+
 // ─── gate.yaml ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** What a remote warden may do: the daemon-wide half, never a step-up (a warden has no passkey). */
@@ -143,14 +179,14 @@ const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FIELDS).p
 export const GateConfigSchema = z.strictObject({
   /** The daemon-wide half: what any governed caller may do at most. An omitted capability is the product default. */
   grants: CapabilityGrantsDocumentSchema,
-  security: SecuritySettingsSchema.default(DEFAULT_SECURITY_SETTINGS),
+  security: GateSecuritySchema.default(DEFAULT_GATE_SECURITY),
   warden: RemoteWardenSchema.default({ remote: false }),
 });
 export type GateConfig = z.infer<typeof GateConfigSchema>;
 
 export const DEFAULT_GATE_CONFIG: GateConfig = Object.freeze({
   grants: DEFAULT_CAPABILITY_GRANTS,
-  security: DEFAULT_SECURITY_SETTINGS,
+  security: DEFAULT_GATE_SECURITY,
   warden: { remote: false },
 });
 
@@ -173,6 +209,10 @@ export function gateConfigLoosens(before: GateConfig | undefined, after: GateCon
       loosened.push(
         `security ${field} loosened from ${String(from.security[field])} to ${String(after.security[field])}`,
       );
+  if (after.security.memberUnlockDays > from.security.memberUnlockDays)
+    loosened.push(
+      `security memberUnlockDays loosened from ${String(from.security.memberUnlockDays)} to ${String(after.security.memberUnlockDays)}`,
+    );
   if (!from.warden.remote && after.warden.remote) loosened.push('a remote warden is now honoured');
   return loosened;
 }

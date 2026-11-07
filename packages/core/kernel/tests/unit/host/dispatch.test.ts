@@ -280,6 +280,19 @@ describe('the actor reaches kernel.act from admission (§4.7)', () => {
     await dispatcher([route]).dispatch(request('GET', '/v1/act'));
     expect(seen).toBe('owner-tools');
   });
+
+  test('a handler runs with the standing admission put on its call, for the config-write judge', async () => {
+    const { currentStanding } = await import('../../../host/call-scope.ts');
+    let seen: unknown;
+    const route = mounted('/v1/standing', {
+      handle: async () => {
+        seen = currentStanding();
+        return jsonResponse({});
+      },
+    });
+    await dispatcher([route]).dispatch(request('GET', '/v1/standing'));
+    expect(seen).toEqual({ actor: 'owner' });
+  });
 });
 
 describe('the dispatcher tells Gate about audited calls (Admission.recorded)', () => {

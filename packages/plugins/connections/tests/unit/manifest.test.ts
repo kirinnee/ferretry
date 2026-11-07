@@ -21,6 +21,12 @@ describe('connections manifest', () => {
     expect(put?.audit).toHaveProperty('record');
   });
   test('takes exactly the four carrier keys', () => {
-    expect(manifest.hooks.takes.map(take => take.key)).toEqual(['direct', 'relay', 'tunnel', 'webrtc']);
+    expect(manifest.hooks.takes.flatMap(take => ('key' in take ? [take.key] : []))).toEqual([
+      'direct',
+      'relay',
+      'tunnel',
+      'webrtc',
+    ]);
+    expect(manifest.hooks.takes.some(take => take.hook.name === 'doctor.checks')).toBe(true);
   });
 });

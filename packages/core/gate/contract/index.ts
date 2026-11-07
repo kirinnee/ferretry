@@ -15,6 +15,7 @@ export {
 export * from './audit.ts';
 export * from './credentials.ts';
 export * from './gate-config.ts';
+export * from './grants.ts';
 export * from './inventory.ts';
 export * from './policy.ts';
 export * from './port.ts';

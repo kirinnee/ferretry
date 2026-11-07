@@ -21,7 +21,15 @@
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
-    "node-datachannel": "0.33.4"
+    "react": "^19.0.0",
+    "lucide-react": "^0.468.0",
+    "node-datachannel": "0.33.4",
+    "@ferretry/app": "workspace:*"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
 }

@@ -34,8 +34,8 @@ export function describeGrantRefusal(
     return `this daemon cannot say what it is allowed to do with ${noun}, so it is doing nothing with it. Its grant document could not be read as a complete decision — run \`${clientName} config read gate.yaml\` on the host to see and repair it.`;
   if (refusal === 'not-granted')
     return demand.axis === 'use'
-      ? `the operator of this machine has not granted the UI the use of ${noun}. Grant it on the host in gate.yaml (grants.${name}.use).`
-      : `the operator of this machine has not granted the UI permission to change the settings for ${noun}. Grant it on the host in gate.yaml (grants.${name}.configure).`;
+      ? `the operator of this machine has not granted the UI the use of ${noun}. Grant it on the host with \`${clientName} daemon config set ${name} --use\`.`
+      : `the operator of this machine has not granted the UI permission to change the settings for ${noun}. Grant it on the host with \`${clientName} daemon config set ${name} --configure\`.`;
   if (refusal === 'device-not-granted')
     return `this device has not been given ${demand.axis === 'use' ? 'the use of' : 'permission to change the settings for'} ${noun}. Grant it at the machine with \`${clientName} device grant <device> ${name} --${demand.axis}\`, or from a device that holds it and may manage devices.`;
   return demand.axis === 'use'
