@@ -20,12 +20,17 @@ export interface V5FileDef<Shape> {
 export interface V5Writer {
   json<Shape>(def: V5FileDef<Shape>, value: Shape): Promise<void>;
   jsonl<Shape>(def: V5FileDef<Shape>, lines: readonly Shape[]): Promise<void>;
+  /**
+   * An `opaque` file whose owner reads its own exact bytes (Asks' per-ferret agenda files): written as given, 0600.
+   * The caller has already checked the bytes against what the v5 reader accepts.
+   */
+  opaque(relativePath: string, bytes: string | Uint8Array): Promise<void>;
   /** Where a byte-for-byte file lands (sealed blobs, a harness's own folder). */
   resolve(relativePath: string): string;
 }
 
 export function v5Writer(home: string, options: { readonly dryRun: boolean }): V5Writer {
-  const place = async (relativePath: string, text: string, mode: number): Promise<void> => {
+  const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
     if (options.dryRun) return;
     const target = join(home, relativePath);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
@@ -42,6 +47,9 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
     async jsonl(def, lines) {
       const text = lines.map(line => JSON.stringify(def.schema.parse(line))).join('\n');
       await place(def.path, lines.length === 0 ? '' : `${text}\n`, def.mode ?? 0o600);
+    },
+    async opaque(relativePath, bytes) {
+      await place(relativePath, bytes, 0o600);
     },
     resolve(relativePath) {
       return join(home, relativePath);
