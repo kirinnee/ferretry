@@ -222,6 +222,7 @@ export async function liveTerminalSubject(): Promise<InputTargetSubject> {
   };
   const live = (name: string): string =>
     ({
+      pane_id: '%1',
       pane_pid: String(world.pid),
       pane_current_command: world.command,
       cursor_y: String(world.cursor),
