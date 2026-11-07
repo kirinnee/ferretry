@@ -35,4 +35,5 @@ export default definePlugin({
     publishes: [AskAnswered, AsksChanged],
   },
   hooks: { offers: [{ hook: AskSources }] },
+  instructions: [{ id: 'asks', text: 'instructions/asks.md', when: { role: 'any' } }],
 });
