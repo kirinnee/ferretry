@@ -428,6 +428,17 @@ describe('source scans', () => {
     expect(found[0]?.where).toBe('packages/core/kernel/contract/home.ts:2');
   });
 
+  test('catalog retirement wording stays scoped and does not allow format converters', () => {
+    const source = file(
+      'catalog-word.ts',
+      "export const retiredAt = 'version_retired';\nexport const legacyRetired = 'migration';\n",
+    );
+    const own = compatIn(source, 'packages/plugins/catalogs/daemon/lib/document.ts');
+    expect(own.length).toBe(2);
+    expect(own.every(finding => finding.where.endsWith(':2'))).toBe(true);
+    expect(compatIn(source, 'packages/plugins/access/daemon/lib/document.ts').length).toBe(4);
+  });
+
   test('no-compat allows only the two exact native Codex notice literals in their declared constant', () => {
     const path = 'packages/plugins/codex/daemon/lib/fixed-layer.ts';
     const source = file(

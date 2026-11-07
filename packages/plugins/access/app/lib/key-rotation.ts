@@ -16,8 +16,9 @@
  * - no answer at all → the pending key STAYS, and the carrier tries it once if the old key is refused.
  */
 
-import { type DeviceKeyRotationSchema, UnlockGrantedSchema } from '@ferretry/core-gate/contract';
+import { UnlockGrantedSchema } from '@ferretry/core-gate/contract';
 import type { z } from 'zod';
+import type { DeviceKeyRotationSchema } from '../../contract/index.ts';
 import { StepUpGrantedSchema } from '../../contract/index.ts';
 import type { PrivateKeyHandle } from '../shell-pairing.ts';
 import { type DeviceKeyGenerator, type DeviceKeyStore, mintDeviceKey } from './device-keys.ts';

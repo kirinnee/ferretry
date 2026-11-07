@@ -82,7 +82,7 @@ import {
   StepUpService,
 } from './lib/step-up/index.ts';
 import type { ApiRoute } from './lib/wire.ts';
-import { type AccessStepUpProvider, stepUpProvider } from './step-up-provider.ts';
+import { stepUpProvider } from './step-up-provider.ts';
 
 /**
  * What Access needs from the host that no kernel or plugin port gives yet (sent to the lead): the daemon identity
@@ -132,6 +132,8 @@ export class AccessRuntime {
   #wired: Promise<Wired> | undefined;
   #current: Wired | undefined;
   #generation = 0;
+  /** Whoever asked to hear of a generation move (Gate re-asks every open stream of the kind, G149). */
+  readonly #watchers = new Set<() => void>();
   /** Every device revoked or expired by this run: `revoked` to Gate, never `unknown` (a device id is never reminted). */
   readonly #revoked = new Set<string>();
 
@@ -293,7 +295,7 @@ export class AccessRuntime {
       clientName: host.clientName,
       changed: () => {
         this.#connections.recheckAll();
-        this.#generation += 1;
+        this.#moved();
       },
     });
     const guard = gateGuard(gate, host.clientName);
@@ -313,7 +315,11 @@ export class AccessRuntime {
     const write = ledger.write.bind(ledger);
     ledger.write = async unlocks => {
       this.#generation += 1;
-      await write(unlocks);
+      try {
+        await write(unlocks);
+      } finally {
+        this.#notify();
+      }
     };
     return ledger;
   }
@@ -333,8 +339,25 @@ export class AccessRuntime {
     );
   }
 
-  #changed(device: string, change: 'paired' | 'revoked' | 'expired' | 'grants'): void {
+  /** The standing of some device moved: bump the generation, then tell the watchers (the new standing is readable). */
+  #moved(): void {
     this.#generation += 1;
+    this.#notify();
+  }
+
+  /** Each watcher hears once per move; one that throws never stops the others. */
+  #notify(): void {
+    for (const watcher of [...this.#watchers]) {
+      try {
+        watcher();
+      } catch {
+        // A listener's failure is its own; the others still hear of the move.
+      }
+    }
+  }
+
+  #changed(device: string, change: 'paired' | 'revoked' | 'expired' | 'grants'): void {
+    this.#moved();
     const parsed = PairedDeviceIdSchema.safeParse(device);
     if (parsed.success) this.#deps.kernel.events.publish(DevicesChanged, { device: parsed.data, change });
   }
@@ -422,12 +445,17 @@ export class AccessRuntime {
       };
     },
     generation: () => this.#generation,
+    /** Today's `recheckAll` on a grant change, pushed: each generation move tells the listener once, until cancelled. */
+    watch: listener => {
+      this.#watchers.add(listener);
+      return () => {
+        this.#watchers.delete(listener);
+      };
+    },
   };
 
-  /** `step-up:device`: Gate's witness questions, answered by Access's own step-up service (today's StepUpService). */
-  readonly witness: StepUpWitness & AccessStepUpProvider = {
-    ...stepUpProvider(() => this.#current?.stepUp),
-  };
+  /** `step-up:device`: Gate's `StepUpWitness`, answered by Access's own step-up service (fail closed while none is open). */
+  readonly witness: StepUpWitness = stepUpProvider(() => this.#current?.stepUp);
 
   /** What other plugins may ask of Access (Catalogs' verifier, Agenda's buzz). */
   readonly port: AccessApi = {

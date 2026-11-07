@@ -1,0 +1,35 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "ferretry-hosted-link-store",
+  "main": "adapters/link-store-worker.ts",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": false,
+  "vars": {
+    "LINK_STORE_MODE": "hosted"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LINK_BUNDLE",
+        "class_name": "LinkBundleDurableObject"
+      },
+      {
+        "name": "LINK_OWNER",
+        "class_name": "LinkOwnerDurableObject"
+      },
+      {
+        "name": "LINK_STORE_CONTROL",
+        "class_name": "LinkStoreControlDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LinkBundleDurableObject", "LinkOwnerDurableObject", "LinkStoreControlDurableObject"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

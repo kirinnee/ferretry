@@ -8,6 +8,7 @@ import {
 } from '../../protocol/session-restart.ts';
 import { type CallContext, headerValue, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
 import { parseBody } from '../../http/body.ts';
+import { ferretOf } from '@ferretry/core-gate/contract';
 
 /**
  * Restarting the ferrets whose instructions are out of date: `POST`, `GET` and `DELETE /v1/restarts`
@@ -35,7 +36,9 @@ export interface SessionRestartSubsystem {
  * `moverOf`, which ferrets-c's move mount also keeps; here read from Gate's standing instead of the actor string).
  */
 function requestedBy(call: CallContext): string {
-  return call.credential?.tokenClass === 'ferret' ? `session:${call.credential.ferret}` : 'owner';
+  // A ferret's own token, or the admin token naming a ferret (G12), is that ferret's request.
+  const ferret = ferretOf(call);
+  return ferret === undefined ? 'owner' : `session:${ferret}`;
 }
 
 /** `POST`, `GET` and `DELETE /v1/restarts` (R-0323, R-0128, R-0023; paths unchanged), keyed for the manifest. */

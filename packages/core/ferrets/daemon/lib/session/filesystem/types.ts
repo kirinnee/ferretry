@@ -1,5 +1,7 @@
 
 
+import { FsError, type FsErrorCode } from '@ferretry/kernel/contract';
+
 /**
  * The frozen vocabulary of the session working-tree viewer.
  *
@@ -80,36 +82,12 @@ export const MAX_INDEX_WALL_MS = 15_000;
  */
 export const MAX_DIFF_SIDE_BYTES = 1024 * 1024;
 
-export type FsErrorCode =
-  | 'invalid_path'
-  | 'not_found'
-  | 'not_a_directory'
-  | 'not_a_file'
-  | 'escapes_root'
-  | 'denied'
-  /** The gitignore gate, kept distinct from `denied` the same way the view flags are. */
-  | 'ignored'
-  /**
-   * This daemon cannot confine reads here AT ALL, so the whole surface is closed rather than a
-   * particular path refused.
-   *
-   * Kept distinct from `denied` because the two ask a client for opposite behaviour: a `denied` path is
-   * one refusal among many on a working surface, and retrying a different path is sensible. This is a
-   * property of the machine the daemon runs on, unchanged by any retry — a client that offers one is
-   * offering a control that cannot succeed.
-   */
-  | 'unsupported';
-
-/** Every refusal this subsystem raises. The code is the contract; the message is for a human. */
-export class FsError extends Error {
-  constructor(
-    readonly code: FsErrorCode,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'FsError';
-  }
-}
+/**
+ * Every refusal this subsystem raises. The class and its codes are the kernel's (`contract/pinned.ts`), because the
+ * kernel's pinned walk is what raises them: one class, so a refusal from the walk and one from this service are caught
+ * by the same `instanceof`. The code is the contract; the message is for a human.
+ */
+export { FsError, type FsErrorCode };
 
 /** What a human calls the system they are running, so a refusal reads as a fact about their computer. */
 const PLATFORM_NAMES: Readonly<Record<string, string>> = { darwin: 'macOS', win32: 'Windows' };

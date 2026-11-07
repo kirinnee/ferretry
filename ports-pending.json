@@ -36,8 +36,6 @@
       "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
     ],
     "warden": [
-      "liveness monitor (dead_monitor, sus_thinking, sus_subprocess, agent_frozen never fire): Terminals’ port (of, holders) has no look at a ferret’s own pane; needs a Terminals additive pane liveness sample (frame, token counter, transcript size, process tree) per D2 #19",
-      "leftover browsers are never closed: neither Terminals (of, holders) nor Browsers (state, pagesOf) reads a ferret pane’s processes or closes one; needs an additive close of the browsers left under a ferret’s pane (D2 #19)",
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
       "auto-revive is wired through FerretsApi.resume but inert: needs a death cause on FerretSummary (D2 #19)",
       "investigators refuse, so nothing is spent: needs Ferrets’ start taking a work folder and reports read back through summary(ferret) (D2 #19, #15)",
@@ -47,14 +45,14 @@
       "PATCH /v1/warden/config answers 503 plugin_unavailable: needs the kernel config write port (D2 #16)",
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
-      "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)"
+      "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)",
+      "the liveness reflex detects but never nudges (frozen, sus_* and dead_monitor still fire): reflex nudges need `FerretSummary` to carry `waiting` and the per-ferret `nudgeAfterSeconds`/`killAfterSeconds` (Ferrets additive)"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
-      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read",
-      "GAP(runtimes): the API-key tail of today's .claude.json seed (customApiKeyResponses.approved) is not seeded; it needs a child-side seed step, because the daemon half never holds the key"
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
     ],
     "codex": [
       "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",

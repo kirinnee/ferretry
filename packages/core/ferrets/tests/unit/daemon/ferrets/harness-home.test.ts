@@ -154,8 +154,8 @@ describe('S42 each harness supplies its own per-ferret home', () => {
 
   test('S42 two ferrets on one home are refused before launch, whether equal or one inside the other', async () => {
     for (const answer of [
-      (_ferret: FerretId) => `${CLAUDE_HOMES}/shared`,
-      (ferret: FerretId) => (ferret === 'f1' ? CLAUDE_HOMES : `${CLAUDE_HOMES}/${ferret}`),
+      (ferret: FerretId) => (ferret === 'home-probe' ? `${CLAUDE_HOMES}/home-probe` : `${CLAUDE_HOMES}/shared`),
+      (ferret: FerretId) => (ferret === 'f2' ? CLAUDE_HOMES : `${CLAUDE_HOMES}/${ferret}`),
     ]) {
       const shared = new FakeHarness('claude-code', CLAUDE_HOMES);
       shared.homeFor = async ferret => fenced(answer(ferret));
@@ -208,11 +208,13 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     ['a dot segment (names f1)', `${CLAUDE_HOMES}/./f1`],
     ['a dot-dot segment (names f1)', `${CLAUDE_HOMES}/f2/../f1`],
     ['the filesystem root itself (contains every home)', '/'],
+    ['a non-ASCII name, NFC (café can be spelled two ways)', `${CLAUDE_HOMES}/caf\u00e9`],
+    ['a non-ASCII name, NFD (café can be spelled two ways)', `${CLAUDE_HOMES}/cafe\u0301`],
   ] as const) {
     test(`S42 a non-canonical home is refused before token, prepare or runner: ${label}`, async () => {
       const log: string[] = [];
       const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
-      harness.homeFor = async ferret => fenced(ferret === 'f1' ? `${CLAUDE_HOMES}/f1` : second);
+      harness.homeFor = async ferret => fenced(ferret === 'f2' ? second : `${CLAUDE_HOMES}/${ferret}`);
       const f = fixture([harness], [], log);
       expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
       const started = await f.service.start({ folder: '/work', by: 'owner' });
@@ -228,6 +230,143 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       expect(f.registry.get(ferretId('f2'))?.state).toBe('stopped');
     });
   }
+
+  test('S42 two homes that differ only by case are one home on a case-insensitive filesystem: refused', async () => {
+    const log: string[] = [];
+    const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
+    harness.homeFor = async ferret => fenced(`${CLAUDE_HOMES}/${ferret === 'f2' ? 'F1' : ferret}`);
+    const f = fixture([harness], [], log);
+    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.error.code).toBe('refused');
+    expect(started.error.reason).toContain('ferret f1 also has');
+    expect(log).toEqual([`prepareHome f1 ${CLAUDE_HOMES}/f1`, 'vault.childEnvironment f1', 'runner.start f1']);
+    expect(f.tokens.holds(ferretId('f2'))).toBe(false);
+  });
+
+  test('S42 a non-ASCII home for the first ferret is refused before token, prepare or runner', async () => {
+    for (const name of ['caf\u00e9', 'cafe\u0301']) {
+      const log: string[] = [];
+      const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
+      harness.homeFor = async () => fenced(`${CLAUDE_HOMES}/${name}`);
+      const f = fixture([harness], [], log);
+      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      expect(started.ok).toBe(false);
+      if (started.ok) return;
+      expect(started.error.code).toBe('harness_unavailable');
+      expect(log).toEqual([]);
+      expect(f.tokens.holds(ferretId('f1'))).toBe(false);
+    }
+  });
+
+  // The first ferret on a harness has nobody to be compared with, so the harness is also asked for one fixed id that
+  // is never minted: a home that equals, holds or sits inside that answer is not a per-ferret home.
+  for (const [label, answer] of [
+    ['the agent-homes base itself', (_ferret: FerretId) => CLAUDE_HOMES],
+    ['the same home for every id', (_ferret: FerretId) => `${CLAUDE_HOMES}/everyone`],
+    [
+      'the base in another case',
+      (ferret: FerretId) => (ferret === 'f1' ? CLAUDE_HOMES.toUpperCase() : `${CLAUDE_HOMES}/${ferret}`),
+    ],
+  ] as const) {
+    test(`S42 the first ferret answered a home that is not its own is refused: ${label}`, async () => {
+      const log: string[] = [];
+      const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
+      const asked: string[] = [];
+      harness.homeFor = async ferret => {
+        asked.push(ferret);
+        return fenced(answer(ferret));
+      };
+      const f = fixture([harness], [], log);
+      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      expect(started.ok).toBe(false);
+      if (started.ok) return;
+      expect(started.error.code).toBe('refused');
+      expect(started.error.reason).toContain('holds the homes of other ferrets');
+      expect(asked).toEqual(['f1', 'home-probe']);
+      expect(log).toEqual([]);
+      expect(f.tokens.holds(ferretId('f1'))).toBe(false);
+      expect(f.registry.get(ferretId('f1'))?.state).toBe('stopped');
+    });
+  }
+
+  test('S42 the probe id is asked only for the first ferret on a harness, and a throwing probe is refused', async () => {
+    const harness = new FakeHarness('claude-code', CLAUDE_HOMES);
+    const asked: string[] = [];
+    const original = harness.homeFor.bind(harness);
+    harness.homeFor = async ferret => {
+      asked.push(ferret);
+      return await original(ferret);
+    };
+    const f = fixture([harness]);
+    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+    expect(asked.filter(ferret => ferret === 'home-probe')).toHaveLength(1);
+
+    const broken = new FakeHarness('claude-code', CLAUDE_HOMES);
+    const real = broken.homeFor.bind(broken);
+    broken.homeFor = async ferret => {
+      if (ferret === 'home-probe') throw new Error('/secret/path should never reach a caller');
+      return await real(ferret);
+    };
+    const g = fixture([broken]);
+    const started = await g.service.start({ folder: '/work', by: 'owner' });
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.error.code).toBe('refused');
+    expect(started.error.reason).not.toContain('/secret');
+    expect(g.runner.starts).toBe(0);
+    expect(broken.prepared).toHaveLength(0);
+  });
+
+  // An answer Ferrets cannot judge (it threw, or is not canonical) is not "no overlap": the start is refused.
+  for (const [label, bad] of [
+    ['throws', 'throw'],
+    ['is not canonical', `${CLAUDE_HOMES}//old1`],
+    ['is relative', 'old1'],
+  ] as const) {
+    test(`S42 another ferret’s harness whose answer ${label} refuses the start (fail closed)`, async () => {
+      const log: string[] = [];
+      const claude = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
+      const codex = new FakeHarness('codex', CODEX_HOMES);
+      codex.homeFor = async ferret => {
+        if (bad === 'throw' && ferret === 'old1') throw new Error('/secret/path should never reach a caller');
+        if (ferret === 'old1') return fenced(bad);
+        return fenced(`${CODEX_HOMES}/${ferret}`);
+      };
+      const f = fixture([claude, codex], [stopped('old1', 'codex')], log);
+      const started = await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
+      expect(started.ok).toBe(false);
+      if (started.ok) return;
+      expect(started.error.code).toBe('refused');
+      expect(started.error.reason).toContain('ferret old1');
+      expect(started.error.reason).not.toContain('/secret');
+      expect(log).toEqual([]);
+      expect(f.tokens.holds(ferretId('f1'))).toBe(false);
+    });
+  }
+
+  test('S42 the other harness’s answer for THIS ferret that throws or is not canonical refuses the start', async () => {
+    for (const answer of ['throw', `${CODEX_HOMES}//f1`] as const) {
+      const log: string[] = [];
+      const claude = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
+      const codex = new FakeHarness('codex', CODEX_HOMES);
+      codex.homeFor = async () => {
+        if (answer === 'throw') throw new Error('/secret/path should never reach a caller');
+        return fenced(answer);
+      };
+      const f = fixture([claude, codex], [], log);
+      const started = await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
+      expect(started.ok).toBe(false);
+      if (started.ok) return;
+      expect(started.error.code).toBe('refused');
+      expect(started.error.reason).toContain('codex harness');
+      expect(started.error.reason).not.toContain('/secret');
+      expect(log).toEqual([]);
+    }
+  });
 
   test('S42 a prepareHome that throws stops the start before the runner is asked, and revokes the token', async () => {
     const harness = new FakeHarness('claude-code', CLAUDE_HOMES);

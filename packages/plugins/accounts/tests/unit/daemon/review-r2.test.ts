@@ -1,7 +1,7 @@
 import { expect, it } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
-import { type AuditDraft, STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
+import type { AuditDraft } from '@ferretry/core-gate/contract';
 import { deviceStanding, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { StateFileDef } from '@ferretry/kernel/contract';
 import { device, ferret, fixedClock, testHost, type TestHost } from '@ferretry/kernel/testing';
@@ -14,6 +14,7 @@ import {
   type SignInSummary,
   type StoredStepUpProof,
 } from '../../../contract/routes/index.ts';
+import { AUDIT } from '../../../contract/policy.ts';
 import { approved, DEVICE, tappedFact, world, type FakeProofs } from './sign-in-rules/support.ts';
 
 const PASSWORD = 'synthetic-accounts-r2-password';
@@ -319,7 +320,7 @@ it('I184 a project default orders a sign-in by the project the Board names and P
 
 // ─── finding 5: the 2FA key routes keep their own records ───────────────────────────────────────────────────────
 
-it('S102 factor changes are kept secrets.changed records by account and key id, a seed save records proof passkey, none a value', async () => {
+it('S102 factor changes are recorded once by Gate as secrets.changed by account and key id, none a value, and Accounts writes none of its own', async () => {
   const audits: AuditDraft[] = [];
   let allowed: string | undefined;
   const gate = new StandInAdmission(() => ({
@@ -336,12 +337,13 @@ it('S102 factor changes are kept secrets.changed records by account and key id, 
     const staged = await h.request('POST', '/v1/accounts/REVIEW/factors/seed', { body });
     const stage = staged.json<{ stage: `st_${string}` }>().stage;
     const index = JSON.parse(h.state('accounts').raw(stateDef('accounts')) ?? '{}') as AccountIndexDocument;
-    // Without the passkey proof the commit is refused, and the refusal is a kept record too.
+    // Without the passkey proof the commit is refused (Gate keeps that refusal too).
     expect((await h.request('POST', `/v1/accounts/REVIEW/factors/seed/${stage}/commit`)).status).toBe(403);
     allowed = addTwoFactorKeySubject(index.accounts.REVIEW?.key as never, stage);
     const saved = await h.request('POST', `/v1/accounts/REVIEW/factors/seed/${stage}/commit`);
     expect(saved.status).toBe(200);
     const factor = saved.json<{ factor: { id: string } }>().factor.id;
+    expect(factor.length).toBeGreaterThan(0);
     const added = await h.request('POST', '/v1/accounts/REVIEW/factors', { body: { kind: 'push', label: 'Phone' } });
     expect(added.status).toBe(201);
     const pushId = added.json<{ id: string }>().id;
@@ -351,75 +353,26 @@ it('S102 factor changes are kept secrets.changed records by account and key id, 
     expect((await h.request('DELETE', `/v1/accounts/REVIEW/factors/${pushId}`)).status).toBe(200);
     expect((await h.request('DELETE', '/v1/accounts/REVIEW/factors/tf_000000000000')).status).toBe(404);
 
-    const kept = audits.map(entry => ({
-      event: entry.event,
-      subject: entry.subject,
-      actor: entry.actor,
-      outcome: entry.outcome,
-      detail: entry.detail,
-    }));
-    const host = { kind: 'host' };
-    expect(kept as unknown[]).toEqual([
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'succeeded',
-        detail: { action: 'factor-seed-staged', stage },
-      },
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'refused',
-        detail: { action: 'factor-added', code: STEP_UP_REQUIRED_CODE },
-      },
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'succeeded',
-        detail: { action: 'factor-added', proof: 'passkey', factor },
-      },
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'succeeded',
-        detail: { action: 'factor-added', factor: pushId },
-      },
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'succeeded',
-        detail: { action: 'factor-relabelled', factor: pushId },
-      },
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'succeeded',
-        detail: { action: 'factor-removed', factor: pushId },
-      },
-      {
-        event: 'secrets.changed',
-        subject: 'REVIEW',
-        actor: host,
-        outcome: 'refused',
-        detail: { action: 'factor-removed', code: 'unknown_2fa_key' },
-      },
-    ]);
+    // Accounts writes NO record of its own: each act is kept once, by Gate, from the descriptor below and Gate's
+    // table row (the composed test host has no recorder; Gate's audited-routes test pins descriptor <-> row).
+    expect(audits).toEqual([]);
     expect(JSON.stringify(audits)).not.toContain(SEED);
     expect(JSON.stringify(audits)).not.toContain(PASSWORD);
-    // The route keeps its own record, so Gate's generic route record is not a second one.
-    for (const key of [
+    // The answers carry only ids and fixed words, which are what Gate's row reads (the stage, the key's id): no value.
+    expect(JSON.stringify([staged.json(), saved.json(), added.json()])).not.toContain(SEED);
+    // All seven routes declare the record, so Gate's table (not Accounts) keeps it, once.
+    for (const route of [
       'POST /v1/accounts/:id/factors',
       'PATCH /v1/accounts/:id/factors/:factor',
       'DELETE /v1/accounts/:id/factors/:factor',
+      'POST /v1/accounts/:id/factors/seed',
       'POST /v1/accounts/:id/factors/seed/:stage/commit',
+      'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app',
+      'DELETE /v1/accounts/:id/factors/seed/:stage',
     ])
-      expect(accounts.manifest.actions.routes.find(route => route.key === key)?.audit).toHaveProperty('skip');
+      expect(accounts.manifest.actions.routes.find(each => each.key === route)?.audit).toEqual({
+        record: AUDIT.secretsChanged,
+      });
   } finally {
     await h.stop();
   }

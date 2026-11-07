@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import type { ChildHandle, RootName, RootsPort } from '@ferretry/kernel/contract';
 import type { LoginKind } from '@ferretry/core-ferrets/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
+import { fakeBrowsers } from '@ferretry/plugin-browsers/contract/testing';
 import { nodeFs, rootsPortFor } from '@ferretry/kernel/host';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, standInAdmission, testHost } from '@ferretry/kernel/testing';
@@ -454,8 +455,7 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
 });
 
 const browserFacts = (shared?: boolean): BrowsersApi => ({
-  state: async () => ({ state: 'stopped' }),
-  pagesOf: async () => [],
+  ...fakeBrowsers(),
   ...(shared === undefined ? {} : { browserPorts: async () => ({ shared }) }),
 });
 const sharingCases: readonly { name: string; browsers?: BrowsersApi; automatic?: true }[] = [

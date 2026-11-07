@@ -21,7 +21,6 @@ import {
   NARROW_CONFIGURE,
   SignInApprovalRefSchema,
   SignInsChanged,
-  SKIP_BY_ROUTE,
   SKIP_BY_SERVICE,
   SKIP_READ,
   SKIP_UNRECORDED,
@@ -99,7 +98,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('DELETE /v1/accounts/:id/factors/:factor', {
@@ -107,7 +106,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('PATCH /v1/accounts/:id/factors/:factor', {
@@ -115,7 +114,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('POST /v1/accounts/:id/factors/seed', {
@@ -123,7 +122,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('DELETE /v1/accounts/:id/factors/seed/:stage', {
@@ -131,7 +130,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('GET /v1/accounts/:id/factors/seed/:stage', {
@@ -147,7 +146,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app', {
@@ -155,7 +154,7 @@ export default definePlugin({
         caller: 'person',
         capability: CONFIGURE.secrets,
         noStore: true,
-        audit: SKIP_BY_ROUTE,
+        audit: { record: AUDIT.secretsChanged },
         guard: GUARD_NONE,
       }),
       route('POST /v1/accounts/:id/merge', {

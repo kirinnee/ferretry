@@ -163,6 +163,32 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
 }
 
 /**
+ * One file's bytes behind the same gates as a listing (today's file read). `scope=media` names the ferret's media
+ * folder, which this daemon keeps in its own state and does not serve through the working-tree walk: it answers
+ * 404, as today's daemon did when it kept no media folder. `rev=head` reads the committed bytes.
+ */
+async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
+  fileQuery(context);
+  if (queryValue(context.request, 'scope') === 'media')
+    throw new ApiError(404, 'this daemon keeps no session media folder', 'not_found');
+  const { cwd, fence } = await deps.reach(context);
+  const target = requiredPath(context);
+  const rev = queryValue(context.request, 'rev');
+  const format = queryValue(context.request, 'format');
+  try {
+    return jsonResponse(
+      await filesystem.readFile(cwd, target, {
+        ...(rev === 'head' ? { rev: 'head' as const } : {}),
+        ...(format === 'base64' ? { base64: true } : {}),
+        ...(fence === undefined ? {} : { fence }),
+      }),
+    );
+  } catch (error) {
+    return refuse(error);
+  }
+}
+
+/**
  * `admin` scope on all four: a warden supervises sessions and has no business reading the human's source
  * tree, and this surface is an arbitrary-file-read primitive wearing a viewer costume.
  *
@@ -173,10 +199,11 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
 /** What the file-browser routes need from Ferrets' build. */
 export interface FileBrowserDeps {
   /**
-   * The service, over the kernel's identity-returning root walk (today's session root pinners) and Git through the
-   * kernel's spawn. Absent until that kernel capability lands: then every route answers 503.
+   * The service, over the kernel's pinned root walk (today's session root pinners) and Git through the kernel's
+   * spawn: one for every ferret, or one made for the ferret a request names (its pinner is that ferret's `work`
+   * root). Absent: every route answers 503.
    */
-  readonly filesystem: SessionFilesystem | undefined;
+  readonly filesystem: SessionFilesystem | ((ferret: string) => SessionFilesystem) | undefined;
   /**
    * The ferret the path names, its working folder, and the fence an agent's read sits behind (S47: its own ferret and
    * its helpers only, never the state home); `fence` is `undefined` for a person. Refusals are today's.
@@ -213,18 +240,15 @@ export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in
   const bound =
     (handler: (filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext) => Promise<ApiResponse>) =>
     async (context: RouteContext): Promise<ApiResponse> => {
-      if (deps.filesystem !== undefined) return await handler(deps.filesystem, deps, context);
       // Who may ask is decided first (S47), so an agent is refused another ferret's folder even before it is built.
-      await deps.reach(context);
-      return notBuilt();
+      const reached = await deps.reach(context);
+      const filesystem = typeof deps.filesystem === 'function' ? deps.filesystem(reached.id) : deps.filesystem;
+      if (filesystem === undefined) return notBuilt();
+      // The handler is told what the check found, not asked to check again.
+      return await handler(filesystem, { ...deps, reach: async () => reached }, context);
     };
   return {
-    'GET /v1/ferrets/:ferretId/fs/file': async context => {
-      await deps.reach(context);
-      fileQuery(context);
-      // No confined readFile adapter is bound in this base. Never substitute an ordinary root read.
-      return notBuilt();
-    },
+    'GET /v1/ferrets/:ferretId/fs/file': bound(file),
     'GET /v1/ferrets/:ferretId/fs/index': bound(index),
     'GET /v1/ferrets/:ferretId/fs/changes': bound(changes),
     'GET /v1/ferrets/:ferretId/fs/diff': bound(diff),

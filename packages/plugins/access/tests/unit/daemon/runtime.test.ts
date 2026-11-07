@@ -15,6 +15,7 @@ import {
   LIMITED_DEVICE_GRANTS,
   STEP_UP_ACTS,
 } from '@ferretry/core-gate/contract';
+import { stepUpWitnessConformance } from '@ferretry/core-gate/contract/testing';
 import type {
   CarrierKey,
   EventDef,
@@ -22,6 +23,7 @@ import type {
   HolderWatch,
   KernelPorts,
   Log,
+  StatePort,
   ModeRedeemed,
   SessionId,
 } from '@ferretry/kernel/contract';
@@ -76,11 +78,23 @@ interface World {
   policy: GateConfig | undefined;
 }
 
+function failingUnlockWrites(port: StatePort, fails: () => boolean): StatePort {
+  return {
+    ...port,
+    write: async (file, value, name) => {
+      if (file.name === UnlocksFile.name && fails()) throw new Error('the disk refused the unlock ledger');
+      await port.write(file, value, name);
+    },
+  };
+}
+
 function world(
   options: {
     readonly identity?: AccessHost['identity'];
     readonly folder?: MemoryStateFolder;
     readonly stages?: AccessRuntimeDeps['stages'];
+    /** Makes the unlock ledger's writes reject while this answers true (a disk that refuses the write). */
+    readonly unlockWritesFail?: () => boolean;
   } = {},
 ): World {
   const folder = options.folder ?? new MemoryStateFolder();
@@ -97,7 +111,10 @@ function world(
   const kernel = {
     clock,
     log,
-    state: folder.port([DevicesFile, PasskeysFile, UnlocksFile, PushFile, PushKeysFile, GrantAuditFile]),
+    state: failingUnlockWrites(
+      folder.port([DevicesFile, PasskeysFile, UnlocksFile, PushFile, PushKeysFile, GrantAuditFile]),
+      options.unlockWritesFail ?? (() => false),
+    ),
     events: {
       publish: (event: EventDef<string, unknown>, payload: unknown) => published.push({ event, payload }),
     },
@@ -916,4 +933,225 @@ test('G141 a malformed grants field fails the device document closed, and every 
     expect([response.status, jsonBody(response).code]).toEqual([503, 'plugin_failed']);
     expect(damaged.runtime.credentials.standing(device.deviceId as HolderId, damaged.clock.now())).toBe('unknown');
   }
+});
+
+// ─── Gate's StepUpWitness, answered by Access's REAL witness (production path; no fake) ───────────────────────────
+
+/**
+ * Gate's `step-up` conformance suite against `AccessRuntime.witness`: every copy of the app that "proved a passkey"
+ * does so through the real ceremony (options, a software authenticator's assertion, the real WebAuthn verifier, the
+ * real registry), on a copy with a live session.
+ */
+stepUpWitnessConformance('AccessRuntime.witness', async () => {
+  const p = await prepared();
+  let signCount = 0;
+  let copies = 0;
+  return {
+    witness: p.w.runtime.witness,
+    proved: async act => {
+      copies += 1;
+      const watch = watcher(`conformance-copy-${copies}`);
+      p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, watch.watch);
+      const subject = { deviceId: p.device.deviceId, appSession: watch.watch.appSession };
+      const caller = { device: subject, hostLocal: false };
+      const options = await p.wired.stepUp.stepUpOptions(caller, p.origin, act);
+      if (!options.ok) throw new Error('options refused');
+      signCount += 1;
+      const done = await p.wired.stepUp.stepUp(caller, await signed(p, options.value, signCount));
+      if (!done.ok) throw new Error('the ceremony was refused');
+      return subject;
+    },
+  };
+});
+
+test('the witness hands a kept proof as its device, claims it once, and re-verifies it against the paired device', async () => {
+  const STAGE = `srs_${'d'.repeat(24)}`;
+  const CHALLENGE = new Uint8Array(32).fill(5);
+  const p = await prepared();
+  const watch = watcher('stored-proof-copy');
+  const release = p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, watch.watch);
+  const subject = { deviceId: p.device.deviceId, appSession: watch.watch.appSession };
+  const caller = { device: subject, hostLocal: false };
+  const options = await p.wired.stepUp.stepUpOptions(
+    caller,
+    p.origin,
+    STEP_UP_ACTS.approveSignInRule,
+    STAGE as never,
+    CHALLENGE,
+  );
+  if (!options.ok) throw new Error('options refused');
+  expect((await p.wired.stepUp.stepUp(caller, await signed(p, options.value))).ok).toBe(true);
+  const witness = p.w.runtime.witness;
+  // A different challenge, or a stage it was not proved for, takes nothing and spends nothing.
+  expect(
+    witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, STAGE as never, new Uint8Array(32).fill(6)),
+  ).toBeUndefined();
+  expect(
+    witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, `srs_${'e'.repeat(24)}` as never, CHALLENGE),
+  ).toBeUndefined();
+  const kept = witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, STAGE as never, CHALLENGE);
+  if (kept === undefined) throw new Error('expected the kept proof');
+  expect(kept.deviceId).toBe(p.device.deviceId);
+  expect(Object.keys(kept).sort()).toEqual(
+    ['authenticatorData', 'clientDataJSON', 'credentialId', 'deviceId', 'signature'].sort(),
+  );
+  expect(witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, STAGE as never, CHALLENGE)).toBeUndefined();
+  expect(await witness.verifyStoredProof(kept, CHALLENGE)).toBe(true);
+  expect(await witness.verifyStoredProof(kept, new Uint8Array(32).fill(6))).toBe(false);
+  // The holder must still be paired: the passkeys stay, only the pairing goes, and the same evidence verifies for nobody.
+  await p.wired.pairing.revokeDevice(p.device.deviceId, 'host');
+  await p.wired.passkeyStore.add({
+    credentialId: p.credentialId,
+    deviceId: p.device.deviceId,
+    algorithm: p.authenticator.algorithm,
+    publicKeySpki: toBase64Url(p.authenticator.spki),
+    signCount: 0,
+    origin: p.origin,
+    createdAt: p.w.clock.now(),
+  });
+  expect(await p.wired.passkeyStore.list(p.device.deviceId)).toHaveLength(1);
+  expect(p.wired.pairing.deviceGrants(p.device.deviceId)).toBeUndefined();
+  expect(await witness.verifyStoredProof(kept, CHALLENGE)).toBe(false);
+  release?.();
+});
+
+// ─── `credentials:device` watch (Gate's optional push of a generation move; today's `recheckAll`) ──────────────────
+
+test('a device grant change fires the credentials watch once, and a cancelled watch hears nothing', async () => {
+  const w = world();
+  const device = await paired(w);
+  await w.runtime.ready();
+  let heard = 0;
+  let readWhenHeard: ReturnType<typeof w.runtime.credentials.standing> | undefined;
+  const cancel = watchOf(w)(() => {
+    heard += 1;
+    readWhenHeard = w.runtime.credentials.standing(device.deviceId as HolderId, w.clock.now());
+  });
+  const generation = w.runtime.credentials.generation();
+  const narrow = async (use: boolean) =>
+    await w.runtime.handler('PATCH /v1/pair/devices/:deviceId/grants')(
+      call({
+        host: true,
+        method: 'PATCH',
+        path: `/v1/pair/devices/${device.deviceId}/grants`,
+        params: { deviceId: device.deviceId },
+        body: JSON.stringify({ terminal: { use } }),
+      }),
+    );
+  expect((await narrow(false)).status).toBe(200);
+  expect(heard).toBe(1);
+  expect(w.runtime.credentials.generation()).toBeGreaterThan(generation);
+  // The new standing was already readable INSIDE the listener, when it heard.
+  expect(typeof readWhenHeard === 'object' && readWhenHeard.grants.terminal.use).toBe(false);
+  cancel();
+  expect((await narrow(true)).status).toBeLessThan(500);
+  expect(heard).toBe(1);
+});
+
+test('a throwing credentials watcher never stops another from hearing', async () => {
+  const w = world();
+  const device = await paired(w);
+  let heard = 0;
+  watchOf(w)(() => {
+    throw new Error('a listener fails');
+  });
+  watchOf(w)(() => {
+    heard += 1;
+  });
+  const generation = w.runtime.credentials.generation();
+  expect(await revoke(w, device.deviceId)).toBe(200);
+  // A revoke is two moves (the grant going, and the device's unlock being forgotten): the healthy watcher hears each
+  // exactly once, however often the other throws.
+  expect(w.runtime.credentials.generation() - generation).toBe(2);
+  expect(heard).toBe(2);
+});
+
+/** The runtime's credentials watch, which Access provides (Gate's member is optional in its type). */
+function watchOf(w: World): (listener: () => void) => () => void {
+  const watch = w.runtime.credentials.watch;
+  if (watch === undefined) throw new Error('Access provides a credentials watch');
+  return listener => watch.call(w.runtime.credentials, listener);
+}
+
+/** A watch on the runtime's credentials that counts what it hears, plus the standing it could read at each notice. */
+function listen(w: World) {
+  const heard = { count: 0 };
+  const cancel = watchOf(w)(() => {
+    heard.count += 1;
+  });
+  return { heard, cancel };
+}
+
+async function unlockCeremony(p: Awaited<ReturnType<typeof prepared>>) {
+  const options = await asDevice(p.w, 'POST /v1/unlock/options', p.device.deviceId, { origin: ORIGIN });
+  expect(options.status).toBe(200);
+  return await asDevice(
+    p.w,
+    'POST /v1/unlock',
+    p.device.deviceId,
+    await signed(p, { challenge: String(jsonBody(options).challenge) }),
+  );
+}
+
+test('an unlock ceremony fires the credentials watch once', async () => {
+  const p = await prepared();
+  const { heard } = listen(p.w);
+  const generation = p.w.runtime.credentials.generation();
+  expect((await unlockCeremony(p)).status).toBe(200);
+  expect(heard.count).toBe(1);
+  expect(p.w.runtime.credentials.generation()).toBe(generation + 1);
+});
+
+test('an unlock whose ledger write fails still moves the generation and fires the credentials watch once', async () => {
+  let failing = false;
+  const p = await prepared({ unlockWritesFail: () => failing });
+  const { heard } = listen(p.w);
+  const generation = p.w.runtime.credentials.generation();
+  failing = true;
+  // The ceremony the person completed stands: the failed write only costs the next restart's prompt.
+  expect((await unlockCeremony(p)).status).toBe(200);
+  expect(heard.count).toBe(1);
+  expect(p.w.runtime.credentials.generation()).toBe(generation + 1);
+  const standing = p.w.runtime.credentials.standing(p.device.deviceId as HolderId, p.w.clock.now());
+  expect(typeof standing === 'object' && standing.unlockedUntil).toBeTruthy();
+});
+
+test('a device key rotation fires the credentials watch once', async () => {
+  const p = await prepared();
+  const { heard } = listen(p.w);
+  const transcriptHash = new Uint8Array(32).fill(9);
+  const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const deviceKey = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
+  const proof = toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        'Ed25519',
+        pair.privateKey,
+        new Uint8Array(deviceRotateMessage(transcriptHash, p.device.deviceId, deviceKey)),
+      ),
+    ),
+  );
+  const caller = { device: { deviceId: p.device.deviceId, appSession: 'page' }, hostLocal: false, transcriptHash };
+  // A step-up, not an unlock, so the only standing move is the rotation itself.
+  const options = await p.wired.stepUp.stepUpOptions(caller, p.origin);
+  if (!options.ok) throw new Error('options refused');
+  const done = await p.wired.stepUp.stepUp(caller, {
+    ...(await signed(p, options.value)),
+    rotation: { deviceKey, proof },
+  });
+  expect(done.ok && done.value.keyRotated).toBe(true);
+  expect(heard.count).toBe(1);
+});
+
+test('an idle device expiring fires the credentials watch once', async () => {
+  const p = await prepared();
+  const { heard } = listen(p.w);
+  const generation = p.w.runtime.credentials.generation();
+  await p.w.clock.advance(31 * DAY_MS);
+  expect(await p.wired.pairing.deviceKey(p.device.deviceId)).toBeUndefined();
+  expect(p.w.runtime.credentials.standing(p.device.deviceId as HolderId, p.w.clock.now())).toBe('revoked');
+  // Once per generation move: the expiry is the grant going and the device's unlock being forgotten, two moves.
+  const moves = p.w.runtime.credentials.generation() - generation;
+  expect(moves).toBe(2);
+  expect(heard.count).toBe(moves);
 });

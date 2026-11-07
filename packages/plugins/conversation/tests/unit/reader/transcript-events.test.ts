@@ -138,3 +138,15 @@ describe('the transcript tail carries the tool calls of a turn', () => {
     }
   });
 });
+
+describe('the log tail the Warden fingerprints (transcriptLog: today’s operatorReads.logs)', () => {
+  test('every event kind is rendered — reasoning included, which the event tail leaves out — and masked', async () => {
+    const log = await service(masking()).logs('s1', 20);
+    const tail = await service(masking()).transcriptEvents('s1', 20);
+    expect(log).toContain('thinking');
+    expect(JSON.stringify(tail)).not.toContain('thinking');
+    expect(log).toContain('open the PR');
+    expect(log).toContain('[redacted:GH_TOKEN]');
+    expect(log).not.toContain(SECRET);
+  });
+});

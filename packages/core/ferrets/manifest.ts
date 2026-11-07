@@ -40,6 +40,7 @@ import {
   FerretDetailsFiles,
   FerretPinFiles,
   FerretSummaryFiles,
+  FerretWaitFiles,
   SessionConfigFiles,
   SessionStateFiles,
 } from './daemon/lib/state.ts';
@@ -293,7 +294,7 @@ export default definePlugin({
         audit: { skip: 'a folder listing records nothing, as today' },
         guard: 'secrets',
       }),
-      // R-0371 (today's mounts/session-signal.ts, renamed). Answers 503 until the session services are bound.
+      // R-0371 (today's mounts/session-signal.ts, renamed).
       route('POST /v1/ferrets/:ferretId/signal', {
         minimum: 'operator',
         caller: 'any',
@@ -301,7 +302,7 @@ export default definePlugin({
         audit: { skip: 'a lifecycle signal is recorded in the ferret history, as today' },
         guard: { none: 'answers the ferret state' },
       }),
-      // Restarts (today's mounts/session-restart.ts, paths unchanged). 503 until the session services are bound.
+      // Restarts (today's mounts/session-restart.ts, paths unchanged).
       // R-0323
       route('POST /v1/restarts', {
         minimum: 'operator',
@@ -394,6 +395,11 @@ export default definePlugin({
         summary:
           'restart ferrets on the same runtime, keeping the conversation; a busy one waits for its next idle moment',
       }),
+      verb('wait <id>', {
+        summary:
+          'block until a ferret settles; exits 0 finished, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
+      }),
+      verb('instructions', { summary: 'which of its own instruction sections this ferret launched with' }),
       verb('signal <kind> [message...]', {
         summary: 'done | help | waiting | working — the teammate lifecycle signals',
       }),
@@ -441,6 +447,7 @@ export default definePlugin({
       TransferPlanFiles,
       TransferBriefFiles,
       MoveInflightFiles,
+      FerretWaitFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],
@@ -462,9 +469,10 @@ export default definePlugin({
   },
   // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
   // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
+  // `git`: the file browser's status, listing and diff, and the managed worktrees (today's Git runner).
   permissions: {
     roots: ['worktrees', 'work', 'harness-history'],
-    spawn: ['ps'],
+    spawn: ['git', 'ps'],
     hostFacts: true,
   },
 });

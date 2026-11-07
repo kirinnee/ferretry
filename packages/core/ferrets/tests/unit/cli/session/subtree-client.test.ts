@@ -39,3 +39,17 @@ test('G24 the actual CLI subtree controller consumes the safe daemon view in one
   await new SessionSubtreeController(new ClientSessionApi(client), json.presenter, {}).execute('lead', { json: true });
   expect(JSON.parse(json.io.out[0]!)).toEqual(view);
 });
+
+test('V-wait a read the daemon never answers is abandoned when the deadline signal aborts, and a late failure is not unhandled', async () => {
+  let fail: ((error: Error) => void) | undefined;
+  const client: PluginClient = {
+    call: async <T>(): Promise<T> => await new Promise<T>((_resolve, reject) => (fail = reject)),
+    subscribe: () => () => {},
+  };
+  const deadline = new AbortController();
+  const read = new ClientSessionApi(client).get('lead', deadline.signal);
+  deadline.abort();
+  await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+  fail?.(new Error('socket closed late'));
+  await expect(new ClientSessionApi(client).get('lead', deadline.signal)).rejects.toMatchObject({ name: 'AbortError' });
+});

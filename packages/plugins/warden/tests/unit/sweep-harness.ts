@@ -22,6 +22,7 @@ import {
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
   type WardenExchangeReader,
+  type WardenLeftoverClose,
   type WardenStuckInboxPort,
   type WardenStuckInputPort,
   type WardenFleetSession,
@@ -86,6 +87,7 @@ const settings = (overrides: Partial<WardenSweepSettings> = {}): WardenSweepSett
   wardenCwd: '/state',
   supervisesMonitors: true,
   nudgesOverdue: true,
+  reflexNudges: true,
   mayAct: false,
   ...overrides,
 });
@@ -210,8 +212,8 @@ export function harness(
     readonly redact?: (text: string) => string;
     /** Make one remedy throw. */
     readonly remedyFails?: string;
-    /** How many leftover browsers a close finds; one by default. */
-    readonly closeLeftoverBrowsers?: (sessionId: string) => Promise<number>;
+    /** What a leftover close does; one closed, none left alone, by default. */
+    readonly closeLeftoverBrowsers?: (sessionId: string) => Promise<WardenLeftoverClose>;
     readonly cost?: (wardenId: string) => Promise<number | undefined>;
     readonly feedBoards?: Readonly<Record<string, AgendaBoardInput | undefined>>;
     /** The clock, for the tests that let time pass. Fixed at noon otherwise. */
@@ -278,7 +280,7 @@ export function harness(
       failover: async (sessionId, agent) => remedy('failover', sessionId, agent),
       closeLeftoverBrowsers: async sessionId => {
         remedy('close_leftover', sessionId, '');
-        return await (options.closeLeftoverBrowsers?.(sessionId) ?? Promise.resolve(1));
+        return await (options.closeLeftoverBrowsers?.(sessionId) ?? Promise.resolve({ closed: 1, leftAlone: [] }));
       },
     },
     costs: { costUsd: async wardenId => await (options.cost?.(wardenId) ?? Promise.resolve(undefined)) },
