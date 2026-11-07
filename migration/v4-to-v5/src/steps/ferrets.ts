@@ -4,14 +4,16 @@ import type { StepReport } from '../report.ts';
 import { rewriteTranscript } from '../v5/harness-paths.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/ferrets.ts';
 import type { Step } from './index.ts';
+import { type DetailsSource, prepareDetails } from './ferret-details.ts';
 import { prepareLedgers } from './ferret-ledgers.ts';
 
 export const ferretsStep: Step = {
   id: 'ferrets',
-  title: 'Ferrets (identity, lineage, archive, tokens)',
+  title: 'Ferrets (identity, lineage, archive, tokens, session documents, pins)',
   owner: ['core-ferrets'],
   reads: [
-    'state/sessions/<sid>/{config,state,terminal-pane}.json, events.jsonl',
+    'state/sessions/<sid>/{config,state,terminal-pane,pins}.json, events.jsonl',
+    'state/agent-pins.json',
     'fleet/ids.json',
     'state/{callsigns,archived-sessions,worktrees}.json',
     'state/forks/*.json',
@@ -35,16 +37,28 @@ export const ferretsStep: Step = {
     },
     { what: 'auto-resume.json and restarts/queue.json', why: 'AutoResumeFile and RestartsFile declare no v5 schemas' },
     {
-      what: 'migration/migrations and conversion',
-      why: 'FerretRecordSchema has no login-move or cross-harness-conversion fields',
-    },
-    {
-      what: 'focusTask, focusAnchor and boardSkip',
-      why: 'FerretRecordSchema has projectId but no card or skip fields',
-    },
-    {
       what: 'transcript pointers outside fleet/homes or with no runtime UUID mapping',
-      why: 'cannot point at a copied agent home safely; resume id is still kept in harnessConversation',
+      why: 'cannot point at a copied agent home safely; resume id is still kept in harnessConversation, and config.json drops the pointer as ferret.json does',
+    },
+    {
+      what: 'conversion.fromFile outside the shared transcript pool',
+      why: 'kept verbatim in config.json (a display pointer to the original transcript); only a pooled path has a known place in the new home',
+    },
+    {
+      what: 'pins.json v, sessionId and updatedAt; agent-pins.json version',
+      why: "v5's pin documents are { format: 1, pins } only: the session is the folder, and v4 rewrote updatedAt on every read",
+    },
+    {
+      what: 'a damaged or foreign pins.json or agent-pins.json',
+      why: 'v4 read it as no pins (FilePinRepository, FileAgentPinRepository), so the owner saw none; counted, never quoted',
+    },
+    {
+      what: 'a pinned ferret whose session has no config.json',
+      why: 'it names no ferret in the new home',
+    },
+    {
+      what: 'a start option v5 refuses in details.json (e.g. a harness flag with a control character), and auto / teammateFallback',
+      why: 'details.json is checked against StartOptionsSchema; the value stays in config.json. v4 recorded neither auto nor teammateFallback',
     },
     {
       what: 'fork plan.durable.boardAccess',
@@ -53,18 +67,6 @@ export const ferretsStep: Step = {
     {
       what: 'path rebasing inside frozen fork plans',
       why: 'plans and fingerprints are preserved as frozen historical decisions; changing them would invalidate daemon fingerprint checks',
-    },
-    {
-      what: 'config.nameSource, label, teammate, incarnation, runtimeGeneration, command, prompt, modelHint, model, launchReasoningEffort, launchFast, launchSettings, harnessFlags, mode, remoteControl, hypermedia, pack, agenda, compactAt, intervalSeconds, timeoutSeconds, nudgeAfterSeconds, killAfterSeconds, directSendMaxChars, resumeMenuChoice, maxSnapshots, retry and turn',
-      why: 'FerretRecordSchema has no fields for these v4 config/state facts',
-    },
-    {
-      what: 'state.turn, pid, startedAt, finishedAt, lastActivityAt, lastSnapshotAt, lastDiffAt, exitCode, reason, health, promptReady, remoteControlUrl, openTools, pendingQuestion, lastAnsweredQuestionToolUseId, lastTranscriptAt, lastPaneAt, lastCounterAdvanceAt, lastTokenAdvanceAt, lastSubprocessAt, subprocessSince, nudgedAt, needsHuman, needsHumanKind, agenda, contextPercent, contextTokens, contextAt, contextWindow, usage5hPercent, usageWeeklyPercent, usage5hResetAt, usageWeeklyResetAt, usageAtLimit, usageAuthOk, launchedAt, harnessStartupMs, harnessNotReadyAfterMs, launchInstructions, observedModel, observedModelAt, observedReasoningEffort, observedFast, activity, lastToolStartedAt, quota, retryAttempt, turnCompleted, turnState, turnStateAt, turnPrompt, permissionRequest, harnessDialog, waiting and waitingCreditSeconds',
-      why: 'FerretRecordSchema has no observation fields; only one timestamp is selected for stateAt',
-    },
-    {
-      what: 'config.updatedAt and the exact v4 state.status',
-      why: 'represented by one stateAt timestamp and the four-state v5 lifecycle, not stored separately',
     },
     { what: 'terminal-pane.sessionCreated', why: 'FerretRecordSchema declares only the pane handle' },
   ],
@@ -75,6 +77,7 @@ export const ferretsStep: Step = {
       const ids = await runtimeIds(ctx.v4.fleet);
       const sourceRecords = await configs(ctx.v4.sessions);
       const ledgers = await prepareLedgers(ctx, sourceRecords);
+      const details: DetailsSource[] = [];
       const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true; cutOff?: true }[] = [];
       for (const config of sourceRecords) {
         const state = await json(join(ctx.v4.sessions, config.id, 'state.json'), State);
@@ -118,6 +121,7 @@ export const ferretsStep: Step = {
           stateAt: state?.finishedAt ?? state?.lastActivityAt ?? state?.startedAt ?? config.updatedAt,
         });
         records.push(record);
+        details.push({ config, runtime, transcript: record.transcript });
         // M4: v4 hashes the full fys_ bearer with SHA-256, exactly the v5 token contract.
         // v4 has no issuance timestamp; creation is the known lower bound, not conversion time.
         // A person's cut-off (v4 `credentialRevoked`) is v5's `cutOff`. v4 drops the hash when it cuts a ferret off,
@@ -136,6 +140,7 @@ export const ferretsStep: Step = {
           tokens.push({ ferret: config.id, digest: config.sessionCapabilityHash, issuedAt: config.createdAt });
       }
       const tokenDocument = FerretTokensSchema.parse({ format: 1, tokens });
+      const documents = await prepareDetails(ctx, details);
       for (const record of records)
         await ctx.v5.json(
           { ...FerretFiles, path: join('state/ferrets', record.id, 'ferret.json'), schema: FerretRecordSchema },
@@ -147,6 +152,7 @@ export const ferretsStep: Step = {
           tokenDocument,
         );
       await ledgers.write();
+      await documents.write();
       return {
         ...base,
         status: 'converted',
@@ -154,6 +160,7 @@ export const ferretsStep: Step = {
           { what: 'ferret records (including archived sessions)', count: records.length },
           { what: 'ferret credential hashes', count: tokens.length },
           ...ledgers.kept,
+          ...documents.kept,
         ],
       };
     } catch {

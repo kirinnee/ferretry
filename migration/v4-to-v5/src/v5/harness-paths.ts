@@ -11,7 +11,8 @@ export function agentHomesRoot(harness: 'claude' | 'codex') {
   return join('state', harness === 'claude' ? 'claude-code' : 'codex', declaration.path.replace(/\/\*$/u, ''));
 }
 
-function inside(parent: string, child: string) {
+/** `child` relative to `parent`, or `undefined` when it is not an absolute path inside it. */
+export function inside(parent: string, child: string) {
   if (!isAbsolute(child)) return undefined;
   const path = relative(resolve(parent), resolve(child));
   return path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path) ? undefined : path;
