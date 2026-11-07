@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes and asks/agenda have real conversions. The other steps remain `pending`, so the default conversion
+terminals, harness-homes, board and asks/agenda have real conversions. The other steps remain `pending`, so the default conversion
 still exits 3. Each step names what it waits for. Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -67,6 +67,13 @@ and a `replied` close (no longer a disposition) carried as `done` in the ledger,
 history cursor is recomputed; version archives are copied and set to `user_version` 1. An unfinished v4 commit
 (`agenda-versions.pending.json`, `agenda-history.jsonl.pending`, a non-empty `agenda-changes.pending.json`) fails the
 step by name. `notifications.jsonl` yields only what v5 can meet again: an ask's own buzz and the owner's opens (seen).
+
+Board cards keep their ids exactly (`&F1792` names the same card); counters continue after the highest id; parent,
+dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed cards
+are ordinary cards. History, clarifications, terms and links are carried whole in their v4 shape, since v5 declares them
+as loose records. Lane sets and the switch become one `boards/<project>.json` each. The ask's `source`, `legacyRef`,
+the session an owner or the daemon acted from, the sweep's nudge memory and the switch's `migratedAt` have no v5 field
+and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).
 
 Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
 runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
