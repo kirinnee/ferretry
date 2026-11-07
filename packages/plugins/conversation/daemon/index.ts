@@ -25,7 +25,12 @@ const unavailable =
  */
 export default implementDaemon(manifest, {
   build: ctx => {
-    const a = buildConversationA({ kernel: ctx.kernel, ferrets: ctx.needs.ferrets });
+    const a = buildConversationA({
+      kernel: ctx.kernel,
+      ferrets: ctx.needs.ferrets,
+      asks: ctx.needs.asks,
+      hooks: ctx.hooks,
+    });
     const b = buildReader();
     ctx.kernel.lifecycle.onStop(() => a.stop());
 
@@ -48,8 +53,10 @@ export default implementDaemon(manifest, {
         'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
       },
       subscribers: {
-        // An answer to a question lands: driving it into the pane waits on the terminal seam (see `host.ts`).
-        'asks.answered': () => undefined,
+        // An ask was answered: the draft of its item goes with it (a chat reply keeps the draft).
+        'asks.answered': async (payload: { readonly askId: string }) => {
+          await a.onAskAnswered(payload.askId);
+        },
       },
     } as unknown as Built;
   },

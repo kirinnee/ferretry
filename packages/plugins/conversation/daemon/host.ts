@@ -5,22 +5,27 @@ import {
   type RouteHandler,
   type SocketAccept,
 } from '@ferretry/kernel/contract';
-import { milliseconds } from '@ferretry/std';
+import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretsApi, SitrepLineSource } from '@ferretry/core-ferrets/contract';
-import { err, ok } from '@ferretry/std';
+import type { HookInvoker } from '@ferretry/kernel/manifest';
+import type { Instant } from '@ferretry/std';
+import { err, milliseconds, ok, seconds } from '@ferretry/std';
 import {
   type ConversationApi,
   type ConversationRefusal,
+  MessageBeforeSend,
   QueueChanged,
   type QueuedMessage,
   QUESTION_STATE,
   type SendRecord,
+  TurnEnded,
 } from '../contract/index.ts';
 import { ClockSendScheduler, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
 import { sendRecordFor, sendRecordView } from './delivery/lib/index.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
+import { TurnBoundaries } from './turns/lib/index.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
@@ -68,6 +73,8 @@ export interface ConversationAHalf {
     | 'editDraft'
   >;
   readonly sitrep: SitrepLineSource;
+  /** An ask was answered: the draft of its item goes with it. */
+  onAskAnswered(askId: string): Promise<void>;
   stop(): void;
 }
 
@@ -81,8 +88,10 @@ export interface ConversationAHalf {
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
+  readonly asks: Pick<AsksApi, 'get'>;
+  readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
 }): ConversationAHalf {
-  const { kernel, ferrets } = deps;
+  const { kernel, ferrets, asks, hooks } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
   const queueSerial = new KeyedSerialExecutor();
   const draftSerial = new KeyedSerialExecutor();
@@ -104,7 +113,7 @@ export function buildConversationA(deps: {
   const drafts = new SharedDraftService(
     {
       has: async id => (await ferrets.get(id as FerretId)) !== undefined,
-      hasOpenItem: async () => true,
+      hasOpenItem: async (_ferret, item) => (await asks.get(item as never))?.state === 'open',
     },
     new StateDraftRepository(kernel.state, draftSerial),
     clock,
@@ -112,6 +121,48 @@ export function buildConversationA(deps: {
     { next: () => String(kernel.ids.mint('draft')) },
   );
   const scheduler = new ClockSendScheduler(kernel.clock);
+
+  // The round that ends is announced to whoever takes `turn.ended`; Ferrets' own phase is what the daemon can see.
+  const boundaries = new TurnBoundaries(boundary => {
+    hooks.observe(TurnEnded, {
+      ferret: boundary.ferret as FerretId,
+      turn: boundary.turn,
+      outcome: boundary.outcome,
+      endedAt: boundary.endedAt as Instant,
+    });
+  });
+  const lookAtTurns = async (): Promise<void> => {
+    const all = await ferrets.list();
+    const now = kernel.clock.now();
+    for (const ferret of all) boundaries.look(ferret.id, ferret.state, now);
+    boundaries.keepOnly(new Set(all.map(ferret => ferret.id)));
+  };
+  let looking = false;
+  const stopWatching = kernel.clock.every(seconds(2), () => {
+    if (looking) return;
+    looking = true;
+    void lookAtTurns()
+      .catch(() => undefined)
+      .finally(() => {
+        looking = false;
+      });
+  });
+
+  /** The one place text enters a send: `message.before-send` may reword it, or refuse it. */
+  const prepared = async (ferret: string, message: string): Promise<string> => {
+    const out = await hooks.transform(MessageBeforeSend, { ferret: ferret as FerretId, text: message });
+    if (!out.ok) throw new ApiError(422, out.error, 'message_refused');
+    return out.value.text;
+  };
+  /** THE TERMINAL SEAM: typing into a ferret's terminal waits on the runner's deliver (Ferrets, Vault) and refuses until then. */
+  const terminal = {
+    deliver: async (_ferret: string, _message: string): Promise<never> => pending(),
+    interrupt: async (_ferret: string): Promise<never> => pending(),
+  };
+  const interruptFerret = async (ferret: string): Promise<void> => {
+    await terminal.interrupt(ferret);
+    boundaries.markInterrupted(ferret);
+  };
 
   const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => await queue.list(parseSessionId(id));
   const queueFailure = (error: unknown): never => {
@@ -125,8 +176,9 @@ export function buildConversationA(deps: {
   const mounts: MountRoute[] = [
     ...sessionSendRoutes(
       {
-        send: async () => pending(),
-        interrupt: async () => pending(),
+        send: async (id: string, request: { readonly message: string }) =>
+          await terminal.deliver(id, await prepared(id, request.message)),
+        interrupt: async (id: string) => await interruptFerret(id).then(pending),
         sends: records,
         sendStatus: async (id, sendId) => {
           const parsed: SessionId = parseSessionId(id);
@@ -158,9 +210,26 @@ export function buildConversationA(deps: {
   });
 
   const api: ConversationAHalf['api'] = {
-    currentTurn: async () => undefined,
-    send: async () => err(pendingRefusal()),
-    interrupt: async () => err(pendingRefusal()),
+    currentTurn: async ferret => boundaries.current(ferret),
+    send: async (ferret, _caller, request) => {
+      try {
+        await terminal.deliver(ferret, await prepared(ferret, request.message));
+      } catch (error) {
+        return err({
+          code: (error instanceof ApiError ? error.code : undefined) ?? 'send_refused',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return err(pendingRefusal());
+    },
+    interrupt: async ferret => {
+      try {
+        await interruptFerret(ferret);
+      } catch {
+        // refused below, with the sentence
+      }
+      return err(pendingRefusal());
+    },
     queue: async ferret => ({ messages: [...(await queue.list(ferret as unknown as SessionId))] }),
     editQueued: async (ferret, message, request) => {
       try {
@@ -230,7 +299,12 @@ export function buildConversationA(deps: {
     sockets: socketTable(sockets),
     api,
     sitrep,
+    onAskAnswered: async askId => {
+      const ask = await asks.get(askId as never);
+      if (ask?.ferret !== undefined) await drafts.discard(ask.ferret, askId as never).catch(() => undefined);
+    },
     stop: () => {
+      stopWatching();
       scheduler.cancelAll();
     },
   };
