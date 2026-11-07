@@ -196,10 +196,6 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
     why: 'v5 Catalogs declares no file for them; they only changed what a reader said, never acted, and an install stays at its pin either way (a skipped version is offered again)',
   },
   {
-    what: 'runtime-installed skill folders (fleet/assets/skills/<name>/)',
-    why: 'the Runtimes asset tree, not Catalogs: v5 does not declare where that tree lives yet, so the folders stay in the v4 home; the install records naming them are carried',
-  },
-  {
     what: 'the link store’s copy of each public link',
     why: 'remote (the Cloudflare link-store Worker), not in the home; the daemon identity is carried, so the store still knows its owner',
   },

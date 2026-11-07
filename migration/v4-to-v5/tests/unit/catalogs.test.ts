@@ -283,10 +283,11 @@ const without = <T extends { schemaVersion: number }>(v4: T) => {
   return { format: 1, ...body };
 };
 
-test('the step takes the catalogs slot, between Warden and Settings', () => {
+test('the step takes the catalogs slot after Warden, with the skill folders its install records name right after', () => {
   const ids = STEPS.map(step => step.id);
   expect(ids.indexOf('catalogs')).toBe(ids.indexOf('warden') + 1);
-  expect(ids.indexOf('catalogs')).toBe(ids.indexOf('settings') - 1);
+  expect(ids.indexOf('skill-folders')).toBe(ids.indexOf('catalogs') + 1);
+  expect(ids.indexOf('settings')).toBe(ids.indexOf('skill-folders') + 1);
   expect(STEPS.find(step => step.id === 'catalogs')).toBe(catalogsStep);
 });
 
