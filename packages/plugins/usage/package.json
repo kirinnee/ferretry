@@ -22,7 +22,8 @@
     "zod": "4.4.3",
     "@ferretry/plugin-logins": "workspace:*",
     "@ferretry/plugin-conversation": "workspace:*",
-    "@ferretry/core-ferrets": "workspace:*"
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/core-vault": "workspace:*"
   },
   "sideEffects": false
 }

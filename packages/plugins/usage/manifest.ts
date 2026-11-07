@@ -1,8 +1,10 @@
 import { FerretsPort, StartDecide } from '@ferretry/core-ferrets/contract';
+import { VaultPort } from '@ferretry/core-vault/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import {
+  BudgetReached,
   INSIGHTS_STATE,
   InsightsChanged,
   LoginPaused,
@@ -46,7 +48,7 @@ export default definePlugin({
   kinds: ['command', 'view'],
   words: USAGE_WORDS,
 
-  needs: { ferrets: FerretsPort, conversation: ConversationPort, logins: LoginsPort },
+  needs: { ferrets: FerretsPort, conversation: ConversationPort, logins: LoginsPort, vault: VaultPort },
   provides: { usage: UsagePort },
 
   actions: {
@@ -163,7 +165,7 @@ export default definePlugin({
     state: [PAUSES_STATE, PAUSE_TOLD_STATE, PRICING_STATE, QUOTAS_STATE, INSIGHTS_STATE],
     config: [USAGE_CONFIG],
     readModels: USAGE_READ_MODELS,
-    publishes: [LoginPaused, LoginResumed, InsightsChanged],
+    publishes: [LoginPaused, LoginResumed, InsightsChanged, BudgetReached],
   },
 
   hooks: { takes: [{ hook: StartDecide }, { hook: TurnEnded }] },
