@@ -69,7 +69,12 @@ export type SendEvidence = z.infer<typeof SendEvidenceSchema>;
 
 export const SendCancelEffectSchema = z.enum(['cleared', 'not_in_pane', 'left_in_queue', 'left_in_composer']);
 
-/** One entry of `sends.jsonl`: the ledger of a message from acceptance to its fate. */
+/**
+ * One send as the wire shows it (`GET .../sends`): the ledger of a message from acceptance to its fate. It is the VIEW,
+ * not a line of `sends.jsonl`: the store writes the daemon's own record (`SendLineSchema`: no `v`, a wider `fate` with
+ * `withdrawn`, the daemon's bookkeeping, and the instant and reason of each write), and this is what that record is
+ * shown as. Last write per `sendId` wins.
+ */
 export const SendRecordSchema = z.strictObject({
   v: z.literal(1),
   sendId: z.string().min(1),
@@ -118,6 +123,12 @@ export const SendEnterRequestSchema = z.strictObject({});
 /** `POST /v1/ferrets/:ferretId/send` body (today's `SendRequestSchema`; `sharedDraft` is `SharedDraftSentSchema`). */
 export const SendRequestSchema = z.strictObject({
   message: z.string().min(1),
+  /**
+   * The caller's idempotency key for this one send (today's `X-Fy-Request-Id`): the same key twice is ONE message, on the
+   * same ferret, across daemon runs. It is the message's own id in the queue and in the send ledger, so both stores keep
+   * it and a repeat finds the first request's message instead of making a second. Absent, the daemon mints one.
+   */
+  sendId: z.string().min(1).max(128).optional(),
   attachmentIds: z.array(z.string()).optional(),
   now: z.boolean().optional(),
   replyExpected: z.boolean().optional(),
@@ -157,7 +168,10 @@ export type QueuedMessageState = z.infer<typeof QueuedMessageStateSchema>;
 
 export const QueuedMessageIdSchema = z.string().min(1).max(128);
 
-/** One entry of `queue.jsonl`. */
+/**
+ * One queued message, as the FOLD of `queue.jsonl` describes it (the wire view). A line of that file is not this: it is
+ * one event that moves a message (`QueueEventSchema`), and the first of them (`enqueued`) carries this whole.
+ */
 export const QueuedMessageSchema = z.strictObject({
   v: z.literal(1),
   id: QueuedMessageIdSchema,

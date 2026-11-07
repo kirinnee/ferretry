@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { ferretId } from '@ferretry/core-ferrets/contract/testing';
+import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import manifest from '../../../manifest.ts';
+import { ConversationOwnerWords } from '../../../daemon/adapters/owner-words.ts';
 import { as, boot, makeCard } from '../../integration/daemon/harness.ts';
 
 const stateFile = (host: Awaited<ReturnType<typeof boot>>['host'], path: string): Record<string, unknown> => {
@@ -40,7 +43,11 @@ describe('storage parity', () => {
   test('F-0112 F-0113 F-0114 a board’s lane set and its switch are ONE file per project, boards/<project>.json', async () => {
     const { host } = await boot();
     await host.request('PUT', '/v1/board/projects/unfiled/switch', { body: { on: true }, headers: as('owner') });
-    const board = stateFile(host, 'boards/unfiled.json') as { format: number; project: string; switch: { on: boolean } };
+    const board = stateFile(host, 'boards/unfiled.json') as {
+      format: number;
+      project: string;
+      switch: { on: boolean };
+    };
     expect(board.format).toBe(1);
     expect(board.project).toBe('unfiled');
     expect(board.switch.on).toBe(true);
@@ -74,5 +81,17 @@ describe('storage parity', () => {
     expect(await copies.repositoryOf('/work/ferretry')).toBe('kirinnee/ferretry');
     expect(await copies.branchOf('/work/ferretry')).toBe('main');
     expect(asked.every(call => call[0] === 'git')).toBe(true);
+  });
+
+  test('F-0001 who wrote each turn (today’s .by.json) is read through Conversation: the owner’s words come from ownerWords, strictly for a private choice', async () => {
+    // Today Board read turn-NNN.by.json itself; the author of each turn is Conversation's, and Board asks for the words.
+    const conversation = fakeConversation();
+    await conversation.send(ferretId('f1'), { kind: 'owner' }, { message: 'build the board' });
+    await conversation.send(ferretId('f1'), { kind: 'ferret', ferret: ferretId('f2') }, { message: 'from a peer' });
+    const words = new ConversationOwnerWords(() => conversation);
+
+    expect(await words.said('f1', { strict: true })).toEqual(['build the board']);
+    await expect(new ConversationOwnerWords(() => undefined).said('f1', { strict: true })).rejects.toThrow();
+    expect(manifest.data.state.map(file => file.path).some(path => path.includes('.by.json'))).toBe(false);
   });
 });

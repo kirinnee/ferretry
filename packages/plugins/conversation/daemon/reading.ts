@@ -9,7 +9,7 @@ import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks } from './links/index.ts';
 import type { LinkHarness, LinkKeeper } from './links/lib/service.ts';
 import { registerReader } from './reader/index.ts';
-import type { TranscriptReadRedactor } from './reader/lib/reads.ts';
+import { TranscriptReadError, type TranscriptReadRedactor } from './reader/lib/reads.ts';
 import { messageTokenCodec } from './reader/adapters/message-token-key.ts';
 import { buildRenders } from './renders/index.ts';
 import { RenderError } from './renders/lib/types.ts';
@@ -51,6 +51,9 @@ const refusalOf = (error: unknown): ConversationRefusal => {
   if (error instanceof AttachmentError) return { code: error.failure, message: error.message };
   if (error instanceof RenderError) return { code: error.code, message: error.message };
   if (error instanceof ApiError) return { code: error.code ?? 'failed', message: error.message };
+  // No transcript this daemon can prove is the ferret's reads as "no such transcript"; the rest keep their own word.
+  if (error instanceof TranscriptReadError)
+    return { code: error.failure === 'no_transcript' ? 'not_found' : error.failure, message: error.message };
   return { code: 'failed', message: error instanceof Error ? error.message : String(error) };
 };
 const guarded = async <T>(work: () => Promise<T>): Promise<Result<T, ConversationRefusal>> => {
@@ -64,6 +67,7 @@ const guarded = async <T>(work: () => Promise<T>): Promise<Result<T, Conversatio
 type ReadingApi = Pick<
   ConversationApi,
   | 'transcript'
+  | 'transcriptEvents'
   | 'logPage'
   | 'logSearch'
   | 'addAttachment'
@@ -156,6 +160,12 @@ export function buildReading(deps: {
   const api: ReadingApi = {
     // THE HARNESS SEAM: the routes serve these through `registerReader`; the port answers the same sentence.
     transcript: pendingRefusal,
+    // The same reader the routes use, so it answers the harness sentence until a harness plugin supplies the transcript.
+    transcriptEvents: async (ferret, options) =>
+      await guarded(async () => {
+        if ((await ferrets.get(ferret)) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not_found');
+        return await reader.reads.transcriptEvents(ferret, options?.limit);
+      }),
     logPage: pendingRefusal,
     logSearch: pendingRefusal,
 
