@@ -1,242 +1,88 @@
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
-  FLEET_PRESETS_PATH,
-  type FleetAccountChange,
-  type FleetAccountChangeOutcome,
-  FleetAccountChangeOutcomeSchema,
-  FleetAccountChangeRequestSchema,
-  type FleetAccountChangeView,
-  FleetAccountChangeViewSchema,
-  type FleetCloneBundle,
-  FleetCloneBundleSchema,
-  FleetCloneForgetRequestSchema,
-  FleetCloneForgetResultSchema,
-  type FleetCloneReview,
-  type FleetCloneReviewRequest,
-  FleetCloneReviewRequestSchema,
-  FleetCloneReviewSchema,
-  type FleetComponentCatalog,
-  FleetComponentCatalogSchema,
-  FleetCredentialCheckRequestSchema,
-  type FleetCredentialList,
-  FleetCredentialListSchema,
-  FleetCredentialTestRequestSchema,
-  type FleetCredentialTestResult,
-  FleetCredentialTestResultSchema,
-  type FleetCredentialView,
-  FleetCredentialViewSchema,
-  type FleetLayeredProfileCatalog,
-  FleetLayeredProfileCatalogSchema,
-  type FleetMachineView,
-  FleetMachineViewSchema,
-  FleetProposalApplyRequestSchema,
-  type FleetProviderPresetCatalog,
-  FleetProviderPresetCatalogSchema,
-  type FleetRuntimeCatalog,
-  FleetRuntimeCatalogSchema,
-  type FleetSetupScan,
-  FleetSetupScanSchema,
-  FleetToolInstallRequestSchema,
-  type FleetToolInstallResult,
-  FleetToolInstallResultSchema,
-  type HarnessLoginCodexMethod,
-  type HarnessLoginFlow,
-  HarnessLoginFlowSchema,
-  HarnessLoginStartRequestSchema,
-  type HarnessLoginSubmission,
-  HarnessLoginSubmissionSchema,
-  HarnessLoginSubmitRequestSchema,
-} from '@ferretry/protocol';
-import { ProtocolSecretGateway } from '../secrets/gateway.ts';
-import type { ISecretGateway } from '../secrets/ports.ts';
-import type { AccountHarness, IAccountGateway } from './account-ports.ts';
-import type { FleetApiClient } from './ports.ts';
+  type AccountChange,
+  type AccountChangeOutcome,
+  AccountChangeOutcomeSchema,
+  AccountChangeRequestSchema,
+  type AccountChangeView,
+  AccountChangeViewSchema,
+  type ComponentCatalog,
+  ComponentCatalogSchema,
+  type LayeredProfileCatalog,
+  LayeredProfileCatalogSchema,
+  type MachineView,
+  MachineViewSchema,
+  ProposalApplyRequestSchema,
+  type Recommendation,
+  type RecommendationRequest,
+  RecommendationRequestSchema,
+  RecommendationSchema,
+  type RuntimeCatalog,
+  RuntimeCatalogSchema,
+  type SetupScan,
+  SetupScanSchema,
+} from '../../../contract/index.ts';
+import type { IRuntimesGateway } from './account-ports.ts';
 
-const FLEET_MACHINE_PATH = '/v1/fleet/machine';
-const FLEET_COMPONENTS_PATH = '/v1/fleet/components';
-const FLEET_PROFILES_PATH = '/v1/fleet/profiles';
-const FLEET_RUNTIMES_PATH = '/v1/fleet/runtimes';
-const FLEET_CREDENTIALS_PATH = '/v1/fleet/credentials';
-const FLEET_PROPOSALS_PATH = '/v1/fleet/proposals';
-const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
-const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
-const FLEET_EXPORT_PATH = '/v1/fleet/export';
-const FLEET_CLONE_REVIEW_PATH = '/v1/fleet/clone/review';
-const FLEET_CLONE_FORGET_PATH = '/v1/fleet/clone/forget';
-const FLEET_LOGIN_PATH = '/v1/fleet/login';
+/** The route keys the manifest declares (`/v1/runtimes/...`); a typo here is a missing route, not a 404 at run time. */
+export const ROUTES = {
+  machine: 'GET /v1/runtimes/machine',
+  components: 'GET /v1/runtimes/components',
+  profiles: 'GET /v1/runtimes/profiles',
+  runtimes: 'GET /v1/runtimes',
+  propose: 'POST /v1/runtimes/proposals',
+  apply: 'POST /v1/runtimes/proposals/:proposalId/apply',
+  scan: 'GET /v1/runtimes/setup/scan',
+  recommend: 'POST /v1/runtimes/recommend',
+} as const;
 
 /**
- * Installing a harness runs a package manager, and the route answers when it is done. A minute is
- * the client's ordinary patience for nothing; this gets ten.
- */
-export const TOOL_INSTALL_TIMEOUT_MS = 10 * 60_000;
-
-const segment = (value: string): string => encodeURIComponent(value);
-
-/**
- * Speaks the account-model routes through the protocol client, parsing every answer through the
- * shared schema, which has no field a credential could occupy.
+ * Speaks the runtimes routes through the plugin client, parsing every answer through the shared schema,
+ * which has no field a login could occupy.
  *
  * THIS CLASS HOLDS NO AUTHORITY. A write is not confirmed by anything the command line carries: the
  * daemon governs a caller by how it arrived, and a caller on this machine is ungoverned.
+ *
+ * GAP(kernel): `PluginClient.call` takes no timeout. Probing every login's quota for a recommendation is
+ * slow (several provider round trips) and was given 60 seconds; the client's own patience applies now.
  */
-export class ProtocolAccountGateway implements IAccountGateway {
-  /** The secret store, through the very same client: one daemon, one session, two surfaces over it. */
-  private readonly secrets: ISecretGateway;
+export class ClientRuntimesGateway implements IRuntimesGateway {
+  constructor(private readonly client: PluginClient) {}
 
-  constructor(private readonly client: FleetApiClient) {
-    this.secrets = new ProtocolSecretGateway(this.client);
+  async machine(): Promise<MachineView> {
+    return MachineViewSchema.parse(await this.client.call(ROUTES.machine));
   }
 
-  async machine(): Promise<FleetMachineView> {
-    return await this.client.request(FLEET_MACHINE_PATH, FleetMachineViewSchema);
+  async components(): Promise<ComponentCatalog> {
+    return ComponentCatalogSchema.parse(await this.client.call(ROUTES.components));
   }
 
-  async components(): Promise<FleetComponentCatalog> {
-    return await this.client.request(FLEET_COMPONENTS_PATH, FleetComponentCatalogSchema);
+  async profiles(): Promise<LayeredProfileCatalog> {
+    return LayeredProfileCatalogSchema.parse(await this.client.call(ROUTES.profiles));
   }
 
-  async profiles(): Promise<FleetLayeredProfileCatalog> {
-    return await this.client.request(FLEET_PROFILES_PATH, FleetLayeredProfileCatalogSchema);
+  async runtimes(): Promise<RuntimeCatalog> {
+    return RuntimeCatalogSchema.parse(await this.client.call(ROUTES.runtimes));
   }
 
-  async runtimes(): Promise<FleetRuntimeCatalog> {
-    return await this.client.request(FLEET_RUNTIMES_PATH, FleetRuntimeCatalogSchema);
+  async stage(change: AccountChange): Promise<AccountChangeView> {
+    const body = AccountChangeRequestSchema.parse({ change });
+    return AccountChangeViewSchema.parse(await this.client.call(ROUTES.propose, { body }));
   }
 
-  async credentials(): Promise<FleetCredentialList> {
-    return await this.client.request(FLEET_CREDENTIALS_PATH, FleetCredentialListSchema);
-  }
-
-  async check(credentialId: string): Promise<FleetCredentialView> {
-    return await this.client.request(
-      `${FLEET_CREDENTIALS_PATH}/${segment(credentialId)}/check`,
-      FleetCredentialViewSchema,
-      post(FleetCredentialCheckRequestSchema.parse({})),
+  async apply(changeId: string): Promise<AccountChangeOutcome> {
+    const body = ProposalApplyRequestSchema.parse({});
+    return AccountChangeOutcomeSchema.parse(
+      await this.client.call(ROUTES.apply, { params: { proposalId: changeId }, body }),
     );
   }
 
-  async test(credentialId: string, allowInference: boolean): Promise<FleetCredentialTestResult> {
-    return await this.client.request(
-      `${FLEET_CREDENTIALS_PATH}/${segment(credentialId)}/test`,
-      FleetCredentialTestResultSchema,
-      post(FleetCredentialTestRequestSchema.parse(allowInference ? { allowInference } : {})),
-    );
+  async scan(): Promise<SetupScan> {
+    return SetupScanSchema.parse(await this.client.call(ROUTES.scan));
   }
 
-  async presets(): Promise<FleetProviderPresetCatalog> {
-    return await this.client.request(FLEET_PRESETS_PATH, FleetProviderPresetCatalogSchema, GET);
-  }
-
-  async secretNames(): Promise<ReadonlySet<string>> {
-    const list = await this.secrets.list();
-    return new Set(list.health === 'damaged' ? [] : list.secrets.map(entry => entry.name));
-  }
-
-  async putSecret(name: string, value: string): Promise<void> {
-    await this.secrets.put(name, value);
-  }
-
-  async stage(change: FleetAccountChange): Promise<FleetAccountChangeView> {
-    return await this.client.request(
-      FLEET_PROPOSALS_PATH,
-      FleetAccountChangeViewSchema,
-      post(FleetAccountChangeRequestSchema.parse({ change })),
-    );
-  }
-
-  async apply(changeId: string): Promise<FleetAccountChangeOutcome> {
-    return await this.client.request(
-      `${FLEET_PROPOSALS_PATH}/${segment(changeId)}/apply`,
-      FleetAccountChangeOutcomeSchema,
-      post(FleetProposalApplyRequestSchema.parse({})),
-    );
-  }
-
-  async scan(): Promise<FleetSetupScan> {
-    return await this.client.request(FLEET_SETUP_SCAN_PATH, FleetSetupScanSchema, GET);
-  }
-
-  async installTools(harnesses: readonly AccountHarness[]): Promise<FleetToolInstallResult> {
-    return await this.client.request(
-      FLEET_TOOLS_INSTALL_PATH,
-      FleetToolInstallResultSchema,
-      post(FleetToolInstallRequestSchema.parse({ harnesses: [...harnesses] })),
-      TOOL_INSTALL_TIMEOUT_MS,
-    );
-  }
-
-  async exportBundle(): Promise<FleetCloneBundle> {
-    return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, GET);
-  }
-
-  async reviewClone(request: FleetCloneReviewRequest): Promise<FleetCloneReview> {
-    return await this.client.request(
-      FLEET_CLONE_REVIEW_PATH,
-      FleetCloneReviewSchema,
-      post(FleetCloneReviewRequestSchema.parse(request)),
-    );
-  }
-
-  async forgetCloneSource(source: string): Promise<boolean> {
-    const result = await this.client.request(
-      FLEET_CLONE_FORGET_PATH,
-      FleetCloneForgetResultSchema,
-      post(FleetCloneForgetRequestSchema.parse({ source })),
-    );
-    return result.forgotten;
-  }
-
-  async startSignIn(
-    credentialId: string,
-    method?: HarnessLoginCodexMethod,
-    restart?: boolean,
-  ): Promise<HarnessLoginFlow> {
-    const request = {
-      credentialId,
-      ...(method === undefined ? {} : { method }),
-      ...(restart === true ? { restart } : {}),
-    };
-    return await this.client.request(
-      FLEET_LOGIN_PATH,
-      HarnessLoginFlowSchema,
-      post(HarnessLoginStartRequestSchema.parse(request)),
-    );
-  }
-
-  async signInStatus(flowId: string): Promise<HarnessLoginFlow> {
-    return await this.client.request(`${FLEET_LOGIN_PATH}/${segment(flowId)}`, HarnessLoginFlowSchema, GET);
-  }
-
-  async submitSignInCode(flowId: string, code: string): Promise<HarnessLoginSubmission> {
-    return await this.client.request(
-      `${FLEET_LOGIN_PATH}/${segment(flowId)}`,
-      HarnessLoginSubmissionSchema,
-      post(HarnessLoginSubmitRequestSchema.parse({ code })),
-    );
-  }
-
-  async recheckSignIn(flowId: string): Promise<HarnessLoginSubmission> {
-    return await this.client.request(
-      `${FLEET_LOGIN_PATH}/${segment(flowId)}`,
-      HarnessLoginSubmissionSchema,
-      post(HarnessLoginSubmitRequestSchema.parse(RECHECK)),
-    );
-  }
-
-  async cancelSignIn(flowId: string): Promise<HarnessLoginFlow> {
-    return await this.client.request(`${FLEET_LOGIN_PATH}/${segment(flowId)}`, HarnessLoginFlowSchema, {
-      method: 'DELETE',
-    });
+  async recommend(request: RecommendationRequest): Promise<Recommendation> {
+    const body = RecommendationRequestSchema.parse(request);
+    return RecommendationSchema.parse(await this.client.call(ROUTES.recommend, { body }));
   }
 }
-
-const GET: RequestInit = { method: 'GET' };
-
-/** A second look at a sign-in's store — a submission BODY, whose `method` is the sign-in's, never HTTP's. */
-const RECHECK = { method: 'recheck' } as const;
-
-const post = (body: unknown): RequestInit => ({
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify(body),
-});

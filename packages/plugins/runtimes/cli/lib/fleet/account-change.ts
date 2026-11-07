@@ -1,11 +1,11 @@
-import type { FleetAccountChange, FleetAccountChangeOutcome } from '@ferretry/protocol';
+import type { AccountChange, AccountChangeOutcome } from '../../../contract/index.ts';
 import { requireMayApply } from './account-authority.ts';
 import type { AccountCommandDeps, AccountWriteOptions } from './account-ports.ts';
 import { renderChangeOutcome, renderChangeView } from './account-render.ts';
 
 /** One change as a command asks for it. */
 export interface ChangeRequest {
-  readonly change: FleetAccountChange;
+  readonly change: AccountChange;
   /**
    * Removes, replaces or signs out something. A destructive change asks before it applies (or needs
    * --yes); anything else applies straight after its preview, so nobody has to type "apply".
@@ -21,12 +21,12 @@ export interface ChangeRequest {
  * exit rather than hanging or assuming yes.
  */
 export async function confirmStep(
-  deps: Pick<AccountCommandDeps, 'prompt' | 'interactive' | 'out'>,
+  deps: Pick<AccountCommandDeps, 'prompt' | 'out'>,
   question: string,
   yes: boolean | undefined,
 ): Promise<boolean> {
   if (yes) return true;
-  if (!deps.interactive) {
+  if (deps.prompt === undefined) {
     deps.out.error('Nothing was changed: this needs a yes. Re-run with --yes to go ahead without being asked.');
     deps.out.setExitCode(1);
     return false;
@@ -50,7 +50,7 @@ export async function confirmStep(
 export async function runChange(
   deps: AccountCommandDeps,
   request: ChangeRequest,
-): Promise<FleetAccountChangeOutcome | undefined> {
+): Promise<AccountChangeOutcome | undefined> {
   await requireMayApply(deps);
   const view = await deps.gateway.stage(request.change);
   const json = request.options.json === true;

@@ -1,53 +1,57 @@
-import type { Command } from 'commander';
-import { AccountCommandError, type AccountHarness, type AccountWriteOptions } from './account-ports.ts';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { VerbInvocation } from '@ferretry/kernel/manifest';
+import { AccountCommandError, type AccountWriteOptions } from './account-ports.ts';
 
-/** The flags every account-model write carries. */
-export function writeOptions(command: Command): Command {
-  return command
-    .option('--dry-run', 'show what would change, and change nothing')
-    .option('-y, --yes', 'do not ask before a change that removes or replaces something (for scripts)')
-    .option('--json', 'print the change and its outcome as JSON');
+/** The flags as the shell parsed them (`--dry-run` is `dry-run`; `-y` is `y`), read without guessing a type. */
+type Options = VerbInvocation['options'];
+
+/** A switch that is on: `--name`, `--name=true`. `--no-name` and absence are off. */
+export function flagOn(options: Options, ...names: readonly string[]): boolean {
+  return names.some(name => options[name] === true || options[name] === 'true');
 }
 
-/** The read flag. */
-export function readOptions(command: Command): Command {
-  return command.option('--json', 'print the answer as JSON');
+/** A switch the person turned off with `--no-name`; `undefined` when they said nothing. */
+export function flagSet(options: Options, name: string): boolean | undefined {
+  const value = options[name];
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return undefined;
 }
 
-/**
- * A verb's flags together with its group's.
- *
- * commander hands a flag the group also declares to the GROUP, wherever it is typed — so
- * `machine clone x --json` sets the group's --json, not clone's. Reading both is what lets the flag
- * mean the same thing before and after the verb.
- */
-export const mergedOptions = (command: Command): Record<string, unknown> => ({
-  ...(command.parent?.opts() ?? {}),
-  ...command.opts(),
+/** The last value of a flag that takes one. */
+export function flagText(options: Options, name: string): string | undefined {
+  const value = options[name];
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value[value.length - 1] as string | undefined;
+  return undefined;
+}
+
+/** Every value of a repeatable flag, in the order given. */
+export function flagList(options: Options, name: string): string[] {
+  const value = options[name];
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return [...(value as readonly string[])];
+  return [];
+}
+
+/** The write flags as the shell parsed them. */
+export const writeFlags = (options: Options): AccountWriteOptions => ({
+  ...(flagOn(options, 'dry-run') ? { dryRun: true } : {}),
+  ...(flagOn(options, 'yes', 'y') ? { yes: true } : {}),
+  ...(flagOn(options, 'json') ? { json: true } : {}),
 });
 
-/** commander's collector for a repeatable option. */
-export const collect = (value: string, previous: readonly string[] = []): string[] => [...previous, value];
-
-/** The write flags as commander parsed them. */
-export const writeFlags = (options: Record<string, unknown>): AccountWriteOptions => ({
-  ...(options.dryRun === true ? { dryRun: true } : {}),
-  ...(options.yes === true ? { yes: true } : {}),
-  ...(options.json === true ? { json: true } : {}),
-});
-
-/** A harness as a person typed it. */
-export function parseHarness(value: string): AccountHarness {
+/** A tool as a person typed it. `claude` is Claude Code. */
+export function parseHarness(value: string): HarnessKey {
   const harness = value.trim().toLowerCase();
-  if (harness === 'claude' || harness === 'codex') return harness;
+  if (harness === 'claude' || harness === 'claude-code') return 'claude-code';
+  if (harness === 'codex') return 'codex';
   throw new AccountCommandError(`"${value}" is not a tool this machine knows: use claude or codex.`);
 }
 
-/** A local file a person named, refused in words when it cannot be read. */
-export async function readLocalFile(read: (path: string) => Promise<string>, path: string): Promise<string> {
-  try {
-    return await read(path);
-  } catch {
-    throw new AccountCommandError(`Could not read ${path}.`);
-  }
+/** A required positional, or a refusal naming what is missing. */
+export function positional(invocation: VerbInvocation, index: number, what: string): string {
+  const value = invocation.args[index];
+  if (value === undefined || value === '') throw new AccountCommandError(`Say which ${what}.`);
+  return value;
 }

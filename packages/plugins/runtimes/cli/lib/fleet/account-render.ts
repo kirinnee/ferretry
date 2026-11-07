@@ -1,19 +1,19 @@
-import { disabledPhrase } from '@ferretry/fleet';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type {
-  FleetAccountChangeOutcome,
-  FleetAccountChangeView,
-  FleetApplyOutcome,
-  FleetCatalogAct,
-  FleetDisabled,
-} from '@ferretry/protocol';
-import type { AccountHarness } from './account-ports.ts';
+  AccountChangeOutcome,
+  AccountChangeView,
+  ApplyOutcome,
+  CatalogAct,
+  Disabled,
+  HarnessScope,
+} from '../../../contract/index.ts';
 
 /**
  * Words shared by every account-model rendering. Plain language only: "home", "lane", "layer" as a
  * file concept and "manifest" never reach a person.
  */
 
-export const HARNESS_LABEL: Record<AccountHarness, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const HARNESS_LABEL: Record<HarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 
 /** Two spaces per level, so nested facts read as belonging to the line above. */
 export const indent = (lines: readonly string[], depth = 1): string[] =>
@@ -28,14 +28,21 @@ export const listOrNone = (items: readonly string[], none = 'none'): string =>
   items.length === 0 ? none : items.join(', ');
 
 /** An act's reason when it is not offered, or nothing. */
-export const unavailable = (act: FleetCatalogAct): string | undefined => (act.available ? undefined : act.reason);
+export const unavailable = (act: CatalogAct): string | undefined => (act.available ? undefined : act.reason);
 
 /** "disabled (spend limit reached) until 2026-11-01" for a switch that is off, or nothing when it is on. */
-export const disabledWords = (disabled: FleetDisabled | undefined): string | undefined =>
+export const disabledWords = (disabled: Disabled | undefined): string | undefined =>
   disabled === undefined ? undefined : disabledPhrase(disabled);
 
+/** The product's words for each scope: what a badge says. */
+export const HARNESS_SCOPE_WORDS: Readonly<Record<HarnessScope, string>> = {
+  generic: 'Generic',
+  'claude-code': 'Claude only',
+  codex: 'Codex only',
+};
+
 /** What one staged change would do, for the person deciding whether to apply it. */
-export function renderChangeView(view: FleetAccountChangeView): string {
+export function renderChangeView(view: AccountChangeView): string {
   const lines = [view.summary, ...indent(view.consequences.map(sentence => `• ${sentence}`))];
   const preview = view.preview;
   if (preview.kind === 'apply') {
@@ -80,7 +87,7 @@ export interface RenderedOutcome {
   readonly ok: boolean;
 }
 
-export function renderChangeOutcome(outcome: FleetAccountChangeOutcome): RenderedOutcome {
+export function renderChangeOutcome(outcome: AccountChangeOutcome): RenderedOutcome {
   if (outcome.outcome === 'applied') return renderApply(outcome.apply);
   if (outcome.outcome === 'signed-out') return { ok: true, text: `Signed out ${outcome.credential.id}.` };
   if (outcome.outcome === 'sign-out-failed') {
@@ -93,7 +100,7 @@ export function renderChangeOutcome(outcome: FleetAccountChangeOutcome): Rendere
 const leftAsItWas = (skipped: readonly { readonly path: string; readonly reason: string }[] | undefined): string[] =>
   (skipped ?? []).map(({ path, reason }) => `Left ${path} as it was: ${reason}`);
 
-function renderApply(apply: FleetApplyOutcome): RenderedOutcome {
+function renderApply(apply: ApplyOutcome): RenderedOutcome {
   switch (apply.outcome) {
     case 'committed': {
       const lines = ['Done.'];
@@ -129,4 +136,19 @@ function renderApply(apply: FleetApplyOutcome): RenderedOutcome {
         ].join('\n'),
       };
   }
+}
+
+/** `until` as a short calendar date for a sentence (UTC, `2026-11-01`). */
+const untilWords = (until: string): string => {
+  const ms = Date.parse(until);
+  if (Number.isNaN(ms)) return until;
+  const iso = new Date(ms).toISOString();
+  return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+};
+
+/** "disabled (spend limit reached) until 2026-11-01" — the clause every refusal and row builds on. */
+export function disabledPhrase(disabled: Disabled): string {
+  const why = disabled.reason === undefined ? '' : ` (${disabled.reason})`;
+  const until = disabled.until === undefined ? '' : ` until ${untilWords(disabled.until)}`;
+  return `disabled${why}${until}`;
 }

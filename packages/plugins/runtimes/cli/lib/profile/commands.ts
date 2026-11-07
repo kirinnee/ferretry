@@ -1,18 +1,17 @@
-import { HARNESS_SCOPE_WORDS } from '@ferretry/fleet';
-import type { FleetLayeredProfileCatalog, FleetLayeredProfileView, FleetProfileScope } from '@ferretry/protocol';
-import type { Command } from 'commander';
+import type { VerbInvocation } from '@ferretry/kernel/manifest';
+import type { LayeredProfileCatalog, LayeredProfileView, ProfileScope } from '../../../contract/index.ts';
 import { runChange } from '../fleet/account-change.ts';
-import { collect, readOptions, writeFlags, writeOptions } from '../fleet/account-commands.ts';
+import { flagList, flagOn, flagText, positional, writeFlags } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError } from '../fleet/account-ports.ts';
-import { HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
+import { HARNESS_LABEL, HARNESS_SCOPE_WORDS, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 import { renderStack } from '../runtime/render.ts';
 
 /** A profile's scope badge: "Generic", "Claude only", "Codex only", or "Mixed" for one written before P7. */
-const scopeBadge = (scope: FleetProfileScope): string =>
+const scopeBadge = (scope: ProfileScope): string =>
   scope.kind === 'mixed' ? 'Mixed' : HARNESS_SCOPE_WORDS[scope.scope];
 
 /** The Profiles tab in a terminal. */
-export function renderProfileList(catalog: FleetLayeredProfileCatalog, binaryName: string): string {
+export function renderProfileList(catalog: LayeredProfileCatalog, binaryName: string): string {
   if (catalog.profiles.length === 0) {
     return `No profiles yet. Build one with \`${binaryName} profile build <name> --layer instructions/<name>\`.`;
   }
@@ -31,7 +30,7 @@ export function renderProfileList(catalog: FleetLayeredProfileCatalog, binaryNam
 }
 
 /** One profile: its layers newest last, each harness's stack, and where it is used. */
-export function renderProfile(profile: FleetLayeredProfileView): string {
+export function renderProfile(profile: LayeredProfileView): string {
   const lines = [
     `${profile.name}  (${scopeBadge(profile.scope)})`,
     ...indent([
@@ -50,107 +49,67 @@ export function renderProfile(profile: FleetLayeredProfileView): string {
   return lines.join('\n');
 }
 
-interface ProfileFlags extends Record<string, unknown> {
-  readonly layer?: readonly string[];
-  readonly switchRuntimesTo?: string;
-}
-
-const layersOf = (options: ProfileFlags, bin: string): string[] => {
-  const layers = [...(options.layer ?? [])];
+const layersOf = (invocation: VerbInvocation, bin: string): string[] => {
+  const layers = flagList(invocation.options, 'layer');
   if (layers.length === 0) {
     throw new AccountCommandError(
-      `A profile needs at least one layer: --layer instructions/<name> (or profile/<name>). See them with \`${bin} components\`.`,
+      `A profile needs at least one layer: --layer instructions/<name> (or profile/<name>). Profiles you can build on are listed by \`${bin} profile ls\`.`,
     );
   }
   return layers;
 };
 
-/** Mounts `profiles` and `profile …` (docs/design/account-model.md §6.2). */
-export function registerProfileCommands(program: Command, deps: AccountCommandDeps): void {
-  const bin = deps.binaryName;
-  const list = async (options: { json?: boolean }): Promise<void> => {
-    const catalog = await deps.gateway.profiles();
-    deps.out.report(options.json ? JSON.stringify(catalog, null, 2) : renderProfileList(catalog, bin));
-  };
-  readOptions(
-    program
-      .command('profiles')
-      .description('the profiles on this machine: scope, layers, overrides and where each is used'),
-  ).action(list);
+/** `profile ls`: the profiles on this machine, each with its scope. */
+export async function profileLs(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
+  const catalog = await deps.gateway.profiles();
+  deps.out.report(
+    flagOn(invocation.options, 'json') ? JSON.stringify(catalog, null, 2) : renderProfileList(catalog, deps.binaryName),
+  );
+}
 
-  const profile = program.command('profile').description('list, build, show, edit or delete profiles');
-
-  readOptions(
-    profile
-      .command('ls')
-      .alias('list')
-      .description('the profiles on this machine, each with its scope: Generic, Claude only or Codex only'),
-  ).action(list);
-
-  readOptions(
-    profile
-      .command('show')
-      .description('one profile: its layers, overrides and where it is used')
-      .argument('<name>', 'the profile'),
-  ).action(async (name: string, options: { json?: boolean }) => {
-    const found = (await deps.gateway.profiles()).profiles.find(entry => entry.name === name);
-    if (found === undefined) {
-      throw new AccountCommandError(`There is no profile called "${name}". See them all with \`${bin} profiles\`.`);
-    }
-    deps.out.report(options.json ? JSON.stringify(found, null, 2) : renderProfile(found));
-  });
-
-  const layerOption = (command: Command): Command =>
-    command.option(
-      '--layer <kind/name>',
-      'a component (instructions/main) or another profile (profile/default); repeat it, oldest first',
-      collect,
-      [],
+/** `profile show <name>`: one profile, its layers, overrides and where it is used. */
+export async function profileShow(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
+  const name = positional(invocation, 0, 'profile to show');
+  const found = (await deps.gateway.profiles()).profiles.find(entry => entry.name === name);
+  if (found === undefined) {
+    throw new AccountCommandError(
+      `There is no profile called "${name}". See them all with \`${deps.binaryName} profile ls\`.`,
     );
+  }
+  deps.out.report(flagOn(invocation.options, 'json') ? JSON.stringify(found, null, 2) : renderProfile(found));
+}
 
-  writeOptions(
-    layerOption(
-      profile.command('build').description('build a new profile from layers').argument('<name>', 'the profile name'),
-    ),
-  ).action(async (name: string, options: ProfileFlags) => {
-    await runChange(deps, {
-      change: { kind: 'profile.put', name, layers: layersOf(options, bin), create: true },
-      destructive: false,
-      options: writeFlags(options),
-    });
+/** `profile build <name> --layer <kind/name>...`: a new profile, layers oldest first. */
+export async function profileBuild(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
+  const name = positional(invocation, 0, 'profile to build');
+  await runChange(deps, {
+    change: { kind: 'profile.put', name, layers: layersOf(invocation, deps.binaryName), create: true },
+    destructive: false,
+    options: writeFlags(invocation.options),
   });
+}
 
-  writeOptions(
-    layerOption(
-      profile
-        .command('edit')
-        .description("replace a profile's layers; every runtime on it changes")
-        .argument('<name>', 'the profile'),
-    ),
-  ).action(async (name: string, options: ProfileFlags) => {
-    await runChange(deps, {
-      change: { kind: 'profile.put', name, layers: layersOf(options, bin), create: false },
-      destructive: true,
-      options: writeFlags(options),
-    });
+/** `profile edit <name> --layer <kind/name>...`: replace the layers; every runtime on it changes. */
+export async function profileEdit(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
+  const name = positional(invocation, 0, 'profile to edit');
+  await runChange(deps, {
+    change: { kind: 'profile.put', name, layers: layersOf(invocation, deps.binaryName), create: false },
+    destructive: true,
+    options: writeFlags(invocation.options),
   });
+}
 
-  writeOptions(
-    profile
-      .command('rm')
-      .alias('remove')
-      .description('delete a profile')
-      .argument('<name>', 'the profile')
-      .option('--switch-runtimes-to <profile>', 'move every runtime on it to this profile first'),
-  ).action(async (name: string, options: ProfileFlags) => {
-    await runChange(deps, {
-      change: {
-        kind: 'profile.remove',
-        name,
-        ...(options.switchRuntimesTo === undefined ? {} : { switchRuntimesTo: options.switchRuntimesTo }),
-      },
-      destructive: true,
-      options: writeFlags(options),
-    });
+/** `profile rm <name> [--switch-runtimes-to <profile>]`. */
+export async function profileRm(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
+  const name = positional(invocation, 0, 'profile to delete');
+  const switchRuntimesTo = flagText(invocation.options, 'switch-runtimes-to');
+  await runChange(deps, {
+    change: {
+      kind: 'profile.remove',
+      name,
+      ...(switchRuntimesTo === undefined ? {} : { switchRuntimesTo }),
+    },
+    destructive: true,
+    options: writeFlags(invocation.options),
   });
 }

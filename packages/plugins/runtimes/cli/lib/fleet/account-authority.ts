@@ -1,7 +1,7 @@
-import type { FleetMachineView } from '@ferretry/protocol';
+import type { MachineView } from '../../../contract/index.ts';
 import { type AccountCommandDeps, AccountCommandError } from './account-ports.ts';
 
-type MachineAuthority = FleetMachineView['authority'];
+type MachineAuthority = MachineView['authority'];
 
 /** Why this caller may not change the machine at all, in words, per shared grant refusal. */
 const REFUSALS: Record<MachineAuthority['applyRefusal'], string> = {
