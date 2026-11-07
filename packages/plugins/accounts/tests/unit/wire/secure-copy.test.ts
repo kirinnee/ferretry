@@ -1,14 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as secureCopy from '../../src/lib/secure-copy.ts';
+import * as secureCopy from '../../../wire/secure-copy.ts';
 import { z } from 'zod';
-import {
-  AGENT_TOOL_NAMES,
-  AgentToolCallSchema,
-  AgentToolResultSchema,
-  isRepeatableAgentTool,
-} from '../../src/lib/agent-tools.ts';
-import { InputActorSchema, InputDeliverBodySchema, InputSourceSchema } from '../../src/lib/input-request.ts';
 import {
   COPY_COMMAND_MAX_ARGS,
   COPY_MAX_LIFETIME_SECONDS,
@@ -28,7 +21,7 @@ import {
   copyMask,
   PasteRuleCreateSchema,
   PasteRuleSchema,
-} from '../../src/lib/secure-copy.ts';
+} from '../../../wire/secure-copy.ts';
 
 const AT = '2026-10-31T09:00:00.000Z';
 
@@ -113,46 +106,6 @@ describe('where a copy is read from', () => {
   });
 });
 
-describe('the secure copy agent tools', () => {
-  it('should parse secure.copy, secure.list and secure.discard', () => {
-    should(
-      AgentToolCallSchema.parse({ tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh'] } }),
-    ).eql({ tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['gh'] } });
-    should(AgentToolCallSchema.parse({ tool: 'secure.list' })).eql({ tool: 'secure.list' });
-    should(AgentToolCallSchema.parse({ tool: 'secure.discard', handle: 'sealed:token' })).eql({
-      tool: 'secure.discard',
-      handle: 'token',
-    });
-    should(
-      AgentToolCallSchema.safeParse({
-        tool: 'secure.copy',
-        name: 'token',
-        source: { kind: 'command', argv: ['gh'] },
-        value: 'x',
-      }).success,
-    ).be.false();
-  });
-
-  it('should list them, and let only the listing repeat after a dropped request', () => {
-    should(AGENT_TOOL_NAMES).containEql('secure.copy');
-    should(AGENT_TOOL_NAMES).containEql('secure.list');
-    should(AGENT_TOOL_NAMES).containEql('secure.discard');
-    should(isRepeatableAgentTool('secure.list')).be.true();
-    should(isRepeatableAgentTool('secure.copy')).be.false();
-    should(isRepeatableAgentTool('secure.discard')).be.false();
-  });
-
-  it('should carry copies and a command report in a result', () => {
-    should(
-      AgentToolResultSchema.safeParse({
-        summary: 'Sealed.',
-        copies: [META],
-        command: { outcome: 'exited', exitCode: 0, stderr: 'warning: [sealed:token]' },
-      }).success,
-    ).be.true();
-  });
-});
-
 describe('the secure copy schemas never hold a value', () => {
   // `length` is the one count the brief makes visible (docs/secure-copy.md); everything else that could be a value fails.
   const VALUE_LIKE =
@@ -200,19 +153,6 @@ describe('the secure copy schemas never hold a value', () => {
 });
 
 describe('pasting, rules and plans', () => {
-  it('should take a deliver body with exactly one of padded, entry or sealed, and save only a typed value', () => {
-    const base = { deliveryId: '7b0a5f1c-3a49-4a7e-9d69-2f2a7f6c2e11', observedDigest: 'c'.repeat(64), submit: true };
-
-    should(InputDeliverBodySchema.safeParse({ ...base, sealed: true }).success).be.true();
-    should(InputDeliverBodySchema.safeParse({ ...base, sealed: true, padded: '00005:hello' }).success).be.false();
-    should(InputDeliverBodySchema.safeParse({ ...base, sealed: true, entry: 'SUDO_BOX' }).success).be.false();
-    should(InputDeliverBodySchema.safeParse({ ...base, sealed: false }).success).be.false();
-    should(
-      InputDeliverBodySchema.safeParse({ ...base, sealed: true, save: { entry: 'SUDO_BOX', label: 'x' } }).success,
-    ).be.false();
-    should(InputDeliverBodySchema.safeParse(base).success).be.false();
-  });
-
   it("should name a rule's ends by program, origin or exact secret name, and nothing looser", () => {
     should(CopyRouteFromSchema.safeParse({ kind: 'command', program: '/usr/bin/gh' }).success).be.false();
     should(
@@ -239,10 +179,6 @@ describe('pasting, rules and plans', () => {
 
     should(CopyPlanItemSchema.safeParse({ ...item, why: 'two\nlines' }).success).be.false();
     should(CopyPlanItemSchema.safeParse({ ...item, why: 'x'.repeat(141) }).success).be.false();
-    should(
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: Array.from({ length: 11 }, () => item) })
-        .success,
-    ).be.false();
     should(CopyPlanApproveSchema.safeParse({ items: [10] }).success).be.false();
   });
 
@@ -260,32 +196,15 @@ describe('pasting, rules and plans', () => {
       return found;
     };
 
-    for (const schema of [PasteRuleSchema, CopyPlanSchema, InputSourceSchema, PasteRuleCreateSchema])
+    for (const schema of [PasteRuleSchema, CopyPlanSchema, PasteRuleCreateSchema])
       should(names(schema).filter(name => VALUE_LIKE.test(name))).eql([]);
-    should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'a'.repeat(32) }).success).be.true();
-    should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'x' }).success).be.false();
-  });
-});
-
-describe('a plan the agent asks for', () => {
-  it('should last at most a day, however long the agent asks', () => {
-    const items = [
-      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
-    ];
-
-    should(
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_400 }).success,
-    ).be.true();
-    should(
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_401 }).success,
-    ).be.false();
   });
 });
 
 describe('the secure copy settings and the rule warnings', () => {
   it('should keep profile targets off by default, and leave the rules list exactly as an older app parses it', async () => {
     const { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleListSchema, PasteRuleSettingsSchema, PasteRuleSettingsViewSchema } =
-      await import('../../src/lib/secure-copy.ts');
+      await import('../../../wire/secure-copy.ts');
     should(DEFAULT_PASTE_RULE_SETTINGS).eql({ allowProfileTargets: false });
     should(PasteRuleSettingsSchema.safeParse({ allowProfileTargets: true, more: 1 }).success).be.false();
     should(PasteRuleListSchema.safeParse({ rules: [] }).success).be.true();
@@ -298,7 +217,7 @@ describe('the secure copy settings and the rule warnings', () => {
   });
 
   it('should call a shell or an interpreter a program that runs whatever it reads, and nothing else', async () => {
-    const { runsWhatItReads } = await import('../../src/lib/secure-copy.ts');
+    const { runsWhatItReads } = await import('../../../wire/secure-copy.ts');
     for (const program of [
       'bash',
       'sh',

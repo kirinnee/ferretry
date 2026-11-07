@@ -1,12 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import { addTwoFactorKeySubject } from '../../src/lib/accounts.ts';
-import { AgendaActionRequestSchema } from '../../src/lib/agenda.ts';
-import { AgentToolCallSchema, AgentToolResultSchema, taskPlanCallOf } from '../../src/lib/agent-tools.ts';
-import { sha256Hex } from '../../src/lib/mcp-oauth.ts';
-import { CopyPlanSchema } from '../../src/lib/secure-copy.ts';
-import * as plans from '../../src/lib/task-plan.ts';
+import { addTwoFactorKeySubject } from '../../../wire/accounts.ts';
+import { sha256Hex } from '../../../wire/sha256.ts';
+import { CopyPlanSchema } from '../../../wire/secure-copy.ts';
+import * as plans from '../../../wire/task-plan.ts';
 import {
   canonicalTaskPlanApproval,
   copyPlanOf,
@@ -29,11 +27,12 @@ import {
   taskPlanCoversTool,
   taskPlanSelection,
   taskPlanSelectionNeedsPasskey,
-} from '../../src/lib/task-plan.ts';
+  TaskPlanStageIdSchema,
+} from '../../../wire/task-plan.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const PLAN_ID = 'a'.repeat(32);
-const STAGE = `tps_${'1'.repeat(24)}`;
+const STAGE = TaskPlanStageIdSchema.parse(`tps_${'1'.repeat(24)}`);
 const AT = '2026-11-01T14:00:00.000Z';
 const LATER = '2026-11-01T16:00:00.000Z';
 const GITHUB_A = 'si_000000000000000a';
@@ -547,7 +546,7 @@ describe('what the ferret is told (invariant 24)', () => {
 
   it('should give the ferret one sentence for every miss', () => {
     should(TASK_PLAN_MISS_AGENT_NOTE).equal("Your task plan didn't cover this, so the owner was asked.");
-    should(AgentToolResultSchema.safeParse({ summary: 'x', taskPlan: taskPlanAgentView(plan()) }).success).be.true();
+    should(TaskPlanAgentViewSchema.safeParse(taskPlanAgentView(plan())).success).be.true();
   });
 });
 
@@ -811,32 +810,6 @@ describe('why a line did not apply', () => {
 });
 
 describe('the paste plan it widens (invariant 30)', () => {
-  const preapprove = {
-    tool: 'secure.preapprove',
-    items: [
-      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'the token' },
-      {
-        from: { kind: 'browser', origin: 'https://github.com' },
-        to: { kind: 'secret', name: 'GH_TOKEN' },
-        why: 'keep it',
-      },
-    ],
-    expiresInSeconds: 900,
-  };
-
-  it('should read secure.preapprove as a task plan of one-use paste lines', () => {
-    const parsed = AgentToolCallSchema.parse(preapprove);
-    if (parsed.tool !== 'secure.preapprove') throw new Error('not a preapprove');
-    const translated = taskPlanCallOf(parsed);
-
-    should(TaskPlanCallSchema.parse(translated)).deepEqual(translated);
-    should(translated).deepEqual({
-      tool: 'task.plan',
-      lines: preapprove.items.map(item => ({ kind: 'paste', ...item, uses: 1 })),
-      expiresInSeconds: 900,
-    });
-  });
-
   it('should answer secure.preapprove in the old plan shape, paste lines only', () => {
     const answered = approvedPlan(true, true);
     const pending = copyPlanOf(plan());
@@ -1028,15 +1001,5 @@ describe('the owner routes’ shapes (R3a-2)', () => {
       { name: 'a revoke with an empty list', schema: plans.TaskPlanRevokeSchema, value: { lines: [] } },
       { name: 'a revoke with a field of its own', schema: plans.TaskPlanRevokeSchema, value: { all: true } },
     ]);
-  });
-});
-
-describe('the agenda taskPlan ref is the daemon’s only (R3a-2)', () => {
-  it("should refuse a ferret's agenda add that carries a taskPlan ref, while the same add without one passes", () => {
-    const add = { action: 'add', subject: 'Allow these for this task?', why: 'a task', howToResolve: 'tick them' };
-
-    should(AgendaActionRequestSchema.safeParse(add).success).be.true();
-    should(AgendaActionRequestSchema.safeParse({ ...add, taskPlan: { planId: PLAN_ID } }).success).be.false();
-    should(AgendaActionRequestSchema.safeParse({ ...add, copyPlan: { planId: PLAN_ID } }).success).be.false();
   });
 });

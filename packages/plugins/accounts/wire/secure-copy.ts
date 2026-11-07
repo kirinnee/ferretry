@@ -1,9 +1,10 @@
 import { z } from 'zod';
-import { BrowserRefSchema } from './browser-target.ts';
-import { canonicalJson } from './canonical-json.ts';
-import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
-import { sha256Hex } from './mcp-oauth.ts';
-import { SurfaceKeySchema } from './surface-names.ts';
+import { BrowserRefSchema } from './foreign.ts';
+import { canonicalJson } from '@ferretry/std';
+import { NonNegativeIntegerSchema } from '@ferretry/std';
+import { InstantSchema } from './foreign.ts';
+import { sha256Hex } from './sha256.ts';
+import { SurfaceKeySchema } from '@ferretry/core-vault/contract';
 
 /**
  * SECURE COPY: a value the agent asked the daemon to capture and may only ever name (docs/secure-copy.md).

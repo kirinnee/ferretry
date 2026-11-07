@@ -7,9 +7,9 @@ import {
   TaskPlanStageIdSchema,
 } from './account-ids.ts';
 import { AccountRefSchema, type Place, PlaceKeySchema, PlaceSchema, placeKeys } from './accounts.ts';
-import { AgendaIdSchema } from './agenda.ts';
-import { canonicalJson } from './canonical-json.ts';
-import { InstantSchema } from './common.ts';
+import { AgendaIdSchema } from './foreign.ts';
+import { canonicalJson } from '@ferretry/std';
+import { InstantSchema } from './foreign.ts';
 import {
   LOGIN_MATCH_MAX,
   LOGIN_USERNAME_MAX_LENGTH,
@@ -19,8 +19,8 @@ import {
   oneLine,
 } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX, LoginObservedSecondFactorSchema } from './login-recipes.ts';
-import { sha256Hex } from './mcp-oauth.ts';
-import { type DaemonId, DaemonIdSchema } from './pairing.ts';
+import { sha256Hex } from './sha256.ts';
+import { type DaemonId, DaemonIdSchema } from '@ferretry/plugin-access/contract';
 import {
   COPY_PLAN_DEFAULT_LIFETIME_SECONDS,
   COPY_PLAN_MAX_ITEMS,
@@ -33,7 +33,7 @@ import {
   CopyRouteToSchema,
   RuleOwnerSchema,
 } from './secure-copy.ts';
-import { PASSKEY_CHALLENGE_TTL_SECONDS } from './step-up.ts';
+import { PASSKEY_CHALLENGE_TTL_SECONDS } from './foreign.ts';
 
 export type { TaskPlanStageId };
 export { TaskPlanStageIdSchema };

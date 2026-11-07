@@ -15,7 +15,7 @@ import {
   recipeDiffText,
   recipeReferences,
   recipeRenamed,
-} from '../../src/lib/index.ts';
+} from '../../../wire/index.ts';
 
 const AT = '2026-10-31T09:00:00.000Z';
 const entry = (id: string, extra: Record<string, unknown> = {}) =>

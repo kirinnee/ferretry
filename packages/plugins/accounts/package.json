@@ -20,7 +20,9 @@
     "@ferretry/core-asks": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-vault": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-access": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3"
   },

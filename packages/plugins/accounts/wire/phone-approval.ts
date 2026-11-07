@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { AccountRefSchema, PushAppSchema, TWO_FACTOR_LABEL_MAX_LENGTH } from './accounts.ts';
-import { AgendaPhoneApprovalRefSchema, MAX_AGENDA_SUBJECT_LENGTH } from './agenda.ts';
-import { InstantSchema } from './common.ts';
-import { InputFieldElementSchema } from './input-request.ts';
+import { MAX_ASK_SUBJECT_LENGTH as MAX_AGENDA_SUBJECT_LENGTH } from '@ferretry/core-asks/contract';
+import { PhoneApprovalIdSchema as ContractPhoneApprovalIdSchema } from '../contract/index.ts';
+import { InstantSchema } from './foreign.ts';
+import { InputFieldElementSchema } from './foreign.ts';
 import { LOGIN_USERNAME_MAX_LENGTH, LoginEntryIdSchema, oneLine } from './login-entries.ts';
-import { AgentNameSchema } from './session.ts';
-import { AppOriginSchema } from './step-up.ts';
-import { SurfaceKeySchema } from './surface-names.ts';
+import { AgentNameSchema } from './foreign.ts';
+import { AppOriginSchema } from '@ferretry/core-gate/contract';
+import { SurfaceKeySchema } from '@ferretry/core-vault/contract';
 
 /**
  * APPROVE ON YOUR PHONE (docs/input-requests.md, "Approve on your phone"): a sign-in that waits for a push the owner
@@ -23,8 +24,8 @@ import { SurfaceKeySchema } from './surface-names.ts';
  * sign-in moved on, never on anyone's say-so: there is no "I approved" button and no route that sets it.
  */
 
-/** A phone approval's id: `pa_` and 24 hex digits (the agenda ref owns the shape). */
-export const PhoneApprovalIdSchema = AgendaPhoneApprovalRefSchema.shape.id;
+/** A phone approval's id: `pa_` and 24 hex digits (the contract owns the shape). */
+export const PhoneApprovalIdSchema = ContractPhoneApprovalIdSchema;
 export type PhoneApprovalId = z.infer<typeof PhoneApprovalIdSchema>;
 
 /** How long a ferret may wait for a push to be approved, in seconds. */

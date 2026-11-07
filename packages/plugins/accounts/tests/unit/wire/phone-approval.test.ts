@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
+import { SignInApprovalRefSchema } from '../../../contract/index.ts';
 import {
-  AgendaActionRequestSchema,
-  AgendaItemSchema,
   PHONE_APPROVAL_WARNING,
   type PhoneApproval,
   PhoneApprovalAgentViewSchema,
@@ -10,7 +9,7 @@ import {
   PhoneApprovalRaiseSchema,
   PhoneApprovalSchema,
   phoneApprovalWords,
-} from '../../src/lib/index.ts';
+} from '../../../wire/index.ts';
 
 const AT = '2026-10-31T14:02:00.000Z';
 const ID = `pa_${'0'.repeat(23)}1`;
@@ -276,49 +275,14 @@ describe('the words of an approve-on-phone card', () => {
   });
 });
 
-describe('the agenda card that presents an approval', () => {
-  const item = {
-    id: 'A12',
-    source: 'question',
-    sourceRef: null,
-    subject: phoneApprovalWords(APPROVAL).subject,
-    why: 'A ferret is signing in and the site sent a push to your phone.',
-    waitingSince: AT,
-    howToResolve: 'Approve it on your phone, or tap Not me.',
-    kind: 'info',
-    raisedBy: 'daemon',
-    raisedBySession: null,
-    raisedByName: null,
-    phoneApproval: { id: ID },
-  };
-
-  it('should be an info card carrying the approval’s id', () => {
-    expect(AgendaItemSchema.parse(item).phoneApproval).toEqual({ id: ID });
-    for (const kind of ['input', 'yesno', 'permission'])
-      expect(AgendaItemSchema.safeParse({ ...item, kind }).success).toBe(false);
-    expect(AgendaItemSchema.safeParse({ ...item, phoneApproval: { id: 'pa_x' } }).success).toBe(false);
-  });
-
-  it('should read, in an app that does not know the ref, as a plain info card with no number (invariant 17)', () => {
-    // An older app's schema is this one without the key; its arms are not strict, so an unknown ref is dropped.
-    const { phoneApproval: _ref, ...older } = item;
-    const parsed = AgendaItemSchema.parse({ ...older, someRefFromTheFuture: { id: ID } });
-    expect(Object.keys(parsed)).not.toContain('someRefFromTheFuture');
-    expect(parsed.kind).toBe('info');
-    expect(parsed.subject).toBe('Approve on your phone: your account on company.okta.com');
-  });
-});
-
-describe('who may raise an approve card', () => {
-  it('should refuse the ref on a ferret’s own agenda item, so only the daemon’s card draws as one (secrev-r2-1, I5)', () => {
-    const add = {
-      action: 'add',
-      kind: 'info',
-      subject: 'Approve on your phone: ClickUp · a@gmail.com',
-      why: 'Tap 42 on your phone.',
-      howToResolve: 'Tap 42.',
-    };
-    expect(AgendaActionRequestSchema.safeParse(add).success).toBe(true);
-    expect(AgendaActionRequestSchema.safeParse({ ...add, phoneApproval: { id: ID } }).success).toBe(false);
+describe('the ask that presents an approval', () => {
+  it('I206 names the approval by id only, through the sign-in-approval source, never an account or a number', () => {
+    expect(SignInApprovalRefSchema.parse({ kind: 'phone-approval', id: ID })).toEqual({
+      kind: 'phone-approval',
+      id: ID,
+    });
+    expect(SignInApprovalRefSchema.safeParse({ kind: 'phone-approval', id: 'pa_x' }).success).toBe(false);
+    expect(SignInApprovalRefSchema.safeParse({ kind: 'phone-approval', id: ID, account: 'WORK' }).success).toBe(false);
+    expect(SignInApprovalRefSchema.safeParse({ kind: 'phone-approval', id: ID, number: '42' }).success).toBe(false);
   });
 });

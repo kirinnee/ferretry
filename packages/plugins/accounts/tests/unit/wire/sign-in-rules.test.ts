@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SignInRuleStageIdSchema } from '../../src/lib/account-ids.ts';
-import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../src/lib/accounts.ts';
-import { sha256Hex } from '../../src/lib/mcp-oauth.ts';
-import * as rules from '../../src/lib/sign-in-rules.ts';
+import { SignInRuleStageIdSchema, type TaskPlanStageId, type TwoFactorStageId } from '../../../wire/account-ids.ts';
+import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../../wire/accounts.ts';
+import { sha256Hex } from '../../../wire/sha256.ts';
+import * as rules from '../../../wire/sign-in-rules.ts';
 import {
   canonicalSignInRule,
   factorFingerprint,
@@ -33,13 +33,13 @@ import {
   signInRuleSubject,
   signInRuleSuspensionOf,
   signInRuleSuspensionWords,
-} from '../../src/lib/sign-in-rules.ts';
+} from '../../../wire/sign-in-rules.ts';
 import {
   GRANT_MISS_REASONS,
   GRANT_STOPPING_REASONS,
   ruleMissSuspends,
   taskPlanApprovalSubject,
-} from '../../src/lib/task-plan.ts';
+} from '../../../wire/task-plan.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const DEVICE = `fy_device_id_${'d'.repeat(22)}`;
@@ -724,8 +724,8 @@ describe('standing sign-in rules: the bytes the passkey is bound to', () => {
 
     // Act
     const rule = signInRuleSubject(STAGE, canonical);
-    const plan = taskPlanApprovalSubject(STAGE, canonical);
-    const seed = addTwoFactorKeySubject(KEY, STAGE);
+    const plan = taskPlanApprovalSubject(STAGE as unknown as TaskPlanStageId, canonical);
+    const seed = addTwoFactorKeySubject(KEY, STAGE as unknown as TwoFactorStageId);
 
     // Assert — one string, three domains: no proof made for one can ever be read as another's
     should(new Set([rule, plan, seed]).size).equal(3);

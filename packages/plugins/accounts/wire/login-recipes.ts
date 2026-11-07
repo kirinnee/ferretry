@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { InstantSchema } from './common.ts';
+import { InstantSchema } from './foreign.ts';
 
 /**
  * LOGIN RECIPES: how a saved login signs in, step by step, and what the daemon has SEEN about it
