@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { SpawnOptions, SpawnResult } from '@ferretry/kernel/contract';
 import { fixedClock } from '@ferretry/kernel/testing';
+import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
+import type { WorkSource } from '@ferretry/plugin-conversation/contract';
 import { fakeProjects } from '@ferretry/plugin-projects/contract/testing';
 import manifest from '../../../manifest.ts';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -145,5 +147,20 @@ describe('jobs parity', () => {
 
     const read = await host.request('GET', `/v1/board/cards/${card.id}`, { headers: as('owner') });
     expect(read.json<{ card: { assignee: string | null } }>().card.assignee).toBe(result.ferret);
+  });
+
+  test('J-0091 the work search no longer watches the board’s directory: Board hands Conversation its cards through search.sources, which re-indexes by identity', async () => {
+    const world = await boot({ uses: { conversation: fakeConversation() } });
+    const made = await makeCard(world.host);
+    const [contribution] = world.contribution('search.sources') as { id: string; item: WorkSource }[];
+    expect(contribution?.id).toBe('board');
+    const before = (await contribution?.item.list()) ?? [];
+    expect(before.map(work => work.key)).toEqual([`card:${made.id}`]);
+    expect((await contribution?.item.list())?.[0]).toBe(before[0]);
+    await world.host.request('POST', `/v1/board/cards/${made.id}`, {
+      body: { action: 'note', text: 'a change the search must see' },
+      headers: as('owner'),
+    });
+    expect((await contribution?.item.list())?.[0]).not.toBe(before[0]);
   });
 });
