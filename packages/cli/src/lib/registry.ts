@@ -25,6 +25,17 @@ export interface RegistryEntry {
   load(): Promise<AnyCliImplementation>;
 }
 
+/**
+ * The Kernel as this `fy` was built: its manifest (its routes, `GET /v1/glossary` among them) and its effective
+ * contract hash. It has no `cli/` half, so it is not a {@link RegistryEntry}; the guard still needs its hash, because a
+ * core package that differs blocks everything (§9.6).
+ */
+export interface KernelEntry {
+  readonly manifest: Manifest;
+  readonly contract: string;
+}
+
 export interface CommandRegistry {
+  readonly kernel: KernelEntry;
   readonly plugins: readonly RegistryEntry[];
 }

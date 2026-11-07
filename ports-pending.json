@@ -84,6 +84,16 @@
       "plugin": "runtimes",
       "path": "packages/plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-actions.test.tsx",
       "reason": "Runtimes reviewed apply-change screens and machine settings"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/unit/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/support/app",
+      "reason": "app-shell-fill React runtime and app test harness"
     }
   ]
 }

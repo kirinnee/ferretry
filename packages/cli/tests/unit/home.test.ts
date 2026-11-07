@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { adminTokenPath, daemonConfigPath, resolveHome } from '../../src/lib/home.ts';
+import { adminTokenPath, daemonRunPath, resolveHome } from '../../src/lib/home.ts';
 
 describe('resolveHome', () => {
   it('should default to the dot-product directory under the user home', () => {
@@ -19,8 +19,8 @@ describe('resolveHome', () => {
 });
 
 describe('the two daemon documents a client reads', () => {
-  it('should place the admin token and the daemon config under the home', () => {
+  it('should place the admin token and the kernel run record under the home', () => {
     should(adminTokenPath('/h')).equal('/h/state/gate/admin-token');
-    should(daemonConfigPath('/h')).equal('/h/config/daemon.json');
+    should(daemonRunPath('/h')).equal('/h/run/daemon.json');
   });
 });
