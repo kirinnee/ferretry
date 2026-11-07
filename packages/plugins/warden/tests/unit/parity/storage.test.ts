@@ -50,7 +50,7 @@ describe('storage parity', () => {
     expect(typeof WARDEN_CONFIG.loosens).toBe('function');
   });
 
-  test('F-0359 F-0081 the move ledger (today auto-migrate.json) lives under its own key of state.json and survives a sweep write', async () => {
+  test('pending F-0359 F-0081 (the running half builds no auto-move, a declared GAP): the move ledger (today auto-migrate.json) lives under its own key of state.json and survives a sweep write', async () => {
     const state = wardenState();
     const ledger = new StateAutoMoveLedger(state);
 

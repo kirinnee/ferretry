@@ -50,7 +50,7 @@ describe('job parity', () => {
     expect([first.status, second.status]).toEqual([200, 200]);
   });
 
-  test('J-0037 asking to investigate a ferret queues it, then looks again at once', async () => {
+  test('pending J-0037 (queue then look needs an investigator, a declared GAP): investigating a ferret nobody has is refused', async () => {
     const { host } = await wardenHost();
 
     const response = await host.request('POST', '/v1/warden/investigate', { body: { ferret: 'nobody' }, as: owner() });

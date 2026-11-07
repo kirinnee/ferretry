@@ -68,7 +68,7 @@ describe('route parity', () => {
     expect(Array.isArray(view.warnings)).toBe(true);
   });
 
-  test('R-0232 a settings change says in words when this host gives the warden no way to write warden.yaml', async () => {
+  test('pending R-0232 (the kernel config write port, D2 #16): a settings change answers 503 plugin_unavailable in words', async () => {
     const { host } = await wardenHost();
 
     const response = await host.request('PATCH', '/v1/warden/config', { body: { enabled: false }, as: owner() });
