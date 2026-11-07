@@ -13,6 +13,7 @@ export interface PluginHostInputs {
   readonly fs?: state.HostFs;
   readonly readFile?: (path: string) => Promise<string>;
   readonly readStdin?: () => Promise<string>;
+  readonly cwd?: () => string;
 }
 
 export function createPluginHost(inputs: PluginHostInputs): PluginHost {
@@ -20,7 +21,9 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const fs = inputs.fs ?? state.createNodeHostFs();
   const readFile = inputs.readFile ?? (path => Bun.file(path).text());
   const readStdin = inputs.readStdin ?? (() => Bun.stdin.text());
+  const cwd = inputs.cwd ?? (() => process.cwd());
   return {
+    cwd,
     clock: { now: () => clock.now(), nowMs: () => clock.nowMs() },
     sleep: (delay, signal) => clock.sleep(delay, signal),
     // As today's `readRecipe`: no size cap; a relative path is relative to the working directory.

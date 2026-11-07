@@ -102,7 +102,8 @@
       "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
       "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
       "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
-      "The fast switch needs Runtimes' account picker to fill the new optional `fast` on each ChosenFerretAccount model (from runtime-models.ts); until it does, no model is known to lack fast mode and the daemon is the one that refuses it"
+      "The fast switch needs Runtimes' account picker to fill the new optional `fast` on each ChosenFerretAccount model (from runtime-models.ts); until it does, no model is known to lack fast mode and the daemon is the one that refuses it",
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
     ]
   },
   "pendingHalves": {
