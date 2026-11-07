@@ -4,7 +4,7 @@
  * `agent-tools.ts`, and their audit rules. Gate owns the vocabulary; these are references into it.
  */
 import type { AuditDeclaration, CapabilityDemand, GuardDeclaration } from '@ferretry/kernel/contract';
-import { auditKind, CAPABILITIES } from './core.ts';
+import { auditKind, CAPABILITIES } from '@ferretry/core-gate/contract';
 
 export const CAPABILITY = {
   fleet: CAPABILITIES.fleet,

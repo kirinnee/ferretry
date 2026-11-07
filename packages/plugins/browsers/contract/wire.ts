@@ -7,7 +7,7 @@
  */
 import { InstantSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { SECRET_REFERENCE_SOURCE } from './core.ts';
+import { SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
 
 // ─── surfaces (Terminals keeps its own copy; there is no contract edge between the two) ──────────────────────────
 

@@ -1,6 +1,6 @@
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { FerretChanged, FerretsPort } from './contract/core.ts';
+import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import {
   AUDIT,
   CONFIGURE,

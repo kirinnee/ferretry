@@ -3,7 +3,7 @@
  * their audit rules: updating runs new code on the machine, so it is kept as a change to the machine's security.
  */
 import type { AuditDeclaration, CapabilityDemand, GuardDeclaration } from '@ferretry/kernel/contract';
-import { auditKind, CAPABILITIES } from './core.ts';
+import { auditKind, CAPABILITIES } from '@ferretry/core-gate/contract';
 
 export const CAPABILITY = {
   fleet: CAPABILITIES.fleet,
