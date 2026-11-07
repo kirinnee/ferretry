@@ -29,8 +29,6 @@ const perFerret = <const Name extends string>(name: Name, file: string) =>
 export const AgendaLedgerFiles = perFerret('ledgers', 'agenda.json');
 /** The owner's held answers on their way to the ferret (today's `agenda-replies.json`). */
 export const AgendaRepliesFiles = perFerret('replies', 'agenda-replies.json');
-/** Messages the daemon owes a ferret and has not yet typed, and the ones it has (`agenda-tells.json`). */
-export const AgendaTellFiles = perFerret('tells', 'agenda-tells.json');
 /** The append-only history the ledger's cursor commits (today's `agenda-history.jsonl`). */
 export const AgendaHistoryFiles = perFerret('history', 'agenda-history.jsonl');
 /** Where an uncommitted history append began (`agenda-history.jsonl.pending`). */
@@ -51,7 +49,6 @@ export const AgendaSetAsideFiles = defineState({ name: 'set-aside', path: 'set-a
 export const AGENDA_STATE_FILES = {
   'agenda.json': AgendaLedgerFiles,
   'agenda-replies.json': AgendaRepliesFiles,
-  'agenda-tells.json': AgendaTellFiles,
   'agenda-history.jsonl': AgendaHistoryFiles,
   'agenda-history.jsonl.pending': AgendaHistoryMarkFiles,
   'agenda-versions.pending.json': AgendaPendingVersionsFiles,
@@ -63,7 +60,6 @@ export const AGENDA_STATE_FILES = {
 export const ASKS_STATE = [
   AgendaLedgerFiles,
   AgendaRepliesFiles,
-  AgendaTellFiles,
   AgendaHistoryFiles,
   AgendaHistoryMarkFiles,
   AgendaPendingVersionsFiles,

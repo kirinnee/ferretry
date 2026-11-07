@@ -3,7 +3,6 @@ export {
   AGENDA_STATE_FILES,
   AgendaLedgerFiles,
   AgendaSetAsideFiles,
-  AgendaTellFiles,
   ASKS_STATE,
 } from '../../manifest.ts';
 

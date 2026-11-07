@@ -317,13 +317,17 @@ export interface AsksApi {
   /** Apply a machine-board owner verb with the owner as actor. Ferret-board answers still use Asks' own route. */
   ownerAction(action: AskOwnerAction): Promise<AgendaSnapshot>;
   /**
-   * Tells a ferret something in its own terminal, through `ask.delivery` (the same non-interrupting queue and composer
-   * check as an owner's answer). Idempotent by `sendId`: the same id is typed once, however often it is asked. `'sent'`:
-   * the send path accepted it. `'held'`: nothing was typed (a draft in the composer, a screen that cannot be read, or no
-   * delivery provider) and it is kept, durably, to be tried again. The text is the caller's, and never holds a secret.
-   * Optional so a build without it still satisfies the port.
+   * Tells a ferret something in its own terminal: the text joins the ferret's reply batch, the one an owner's answer
+   * joins, so it goes in ONE message with them (blank-line apart), after the same settle window, once the ferret's turn
+   * ends and its composer is empty, is given up on past the same composer wait, and is counted delivered on the same
+   * transcript proof. Idempotent by `sendId`: the same id is told once. `'queued'`: it joined the batch (what happens to
+   * the batch is the batch's, later, and a tell that never arrives is dropped, never made a card). `'known'`: that send
+   * id was already queued, sent or delivered. The text is the caller's, and never holds a secret.
+   *
+   * ONLY the Vault's view has this: every other plugin that holds Asks is handed a view without it (a call through a
+   * cast finds nothing to call), so no other plugin can type into a ferret's terminal through Asks.
    */
-  tell?(ferret: string, text: string, sendId: string): Promise<'sent' | 'held'>;
+  tell?(ferret: string, text: string, sendId: string): Promise<'queued' | 'known'>;
 }
 
 export const AsksPort = definePort<AsksApi>('asks');

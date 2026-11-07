@@ -1,11 +1,10 @@
 /** The two documents a ferret's session directory holds for its agenda. */
-export type AgendaFileKind = 'ledger' | 'outbox' | 'tells';
+export type AgendaFileKind = 'ledger' | 'outbox';
 
 /** What each is called. */
 export const AGENDA_FILES: Readonly<Record<AgendaFileKind, string>> = {
   ledger: 'agenda.json',
   outbox: 'agenda-replies.json',
-  tells: 'agenda-tells.json',
 };
 
 /** The one place a session's agenda files are touched, so a test can stand in for the disk. */

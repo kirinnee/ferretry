@@ -224,7 +224,7 @@ export function asksPort(
   agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation'>,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
-  tell?: (ferret: string, text: string, sendId: string) => Promise<'sent' | 'held'>,
+  tell?: NonNullable<AsksApi['tell']>,
 ): AsksApi {
   const raises = new SerialQueue();
   const checkSource = (draft: { readonly source: string; readonly ref: unknown }): void => {

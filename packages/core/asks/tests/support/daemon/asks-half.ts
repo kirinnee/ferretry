@@ -12,7 +12,7 @@ import {
   type JobSpec,
   type StatePort,
 } from '@ferretry/kernel/contract';
-import type { HookInvoker } from '@ferretry/kernel/manifest';
+import { type HookInvoker, type Needer, providedFor } from '@ferretry/kernel/manifest';
 import { testArrival, fixedClock, owner } from '@ferretry/kernel/testing';
 import asksDaemon from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
@@ -96,12 +96,18 @@ export async function asksHalf(
   if (build === undefined) throw new Error('the Asks daemon half has no build');
   const half = build({ manifest, needs: { gate: new FakeGate() }, uses: {}, kernel, hooks } as never) as unknown as {
     readonly routes: Readonly<Record<string, RouteHandler>>;
-    readonly provides: { readonly asks: import('../../../contract/index.ts').AsksApi };
+    readonly provides: { readonly asks: unknown };
   };
+  type Asks = import('../../../contract/index.ts').AsksApi;
+  /** The Asks view the kernel hands the plugin with this id: only the Vault's has `tell`. */
+  const asksFor = (id: string): Asks =>
+    providedFor(half.provides.asks, { id, permissions: {}, ownedSecretReferences: () => new Set() } as Needer) as Asks;
   return {
     home,
     clock,
-    asks: half.provides.asks,
+    /** The Vault's view (the one with `tell`); the other tests use no more than every view has. */
+    asks: asksFor('vault'),
+    asksFor,
     events,
     jobs,
     start: async () => {

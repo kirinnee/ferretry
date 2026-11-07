@@ -139,10 +139,10 @@ export class FakeAsks implements AsksApi {
   }
   /** Every distinct tell, as the real port types it once per send id. */
   readonly told: { readonly ferret: string; readonly text: string; readonly sendId: string }[] = [];
-  async tell(ferret: string, text: string, sendId: string): Promise<'sent' | 'held'> {
-    if (!this.told.some(each => each.ferret === ferret && each.sendId === sendId))
-      this.told.push({ ferret, text, sendId });
-    return 'sent';
+  async tell(ferret: string, text: string, sendId: string): Promise<'queued' | 'known'> {
+    if (this.told.some(each => each.ferret === ferret && each.sendId === sendId)) return 'known';
+    this.told.push({ ferret, text, sendId });
+    return 'queued';
   }
   async notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef> {
     return await this.raise({ ...notice, kind: 'notice' });
