@@ -18,8 +18,8 @@
 import type { FsChange, FsFile } from './files-api.ts';
 import { formatBytes, statusChip } from './files-model.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
-import type { LayoutMode } from '../hooks/use-layout-mode.ts';
-import type { CodeReference } from '../lib/references.ts';
+import type { LayoutMode } from '../../../../plugins/layouts/app/hooks/use-layout-mode.ts';
+import type { CodeReference } from '../../../../plugins/conversation/app/lib/references.ts';
 
 /**
  * Mirrors the shared highlighter's private cap only so the pane can explain its

@@ -13,10 +13,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { type MachineSource, machineReach } from '../lib/all-machines.ts';
-import type { ConnectionHealth, ConnectionHealthState } from '../lib/connection-health.ts';
+import type { ConnectionHealth, ConnectionHealthState } from '../../../../plugins/connections/app/lib/connection-health.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { DaemonFleetSlice, DaemonFleetStore } from '../lib/fleet-store.ts';
-import type { DaemonProjectsStore } from '../lib/projects-store.ts';
+import type { DaemonProjectsStore } from '../../../../plugins/projects/app/lib/projects-store.ts';
 
 /** One machine to list: its pairing and the name the reader knows it by. */
 export interface ListedMachine {

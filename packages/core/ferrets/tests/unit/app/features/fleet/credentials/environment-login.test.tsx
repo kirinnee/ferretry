@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetCredentialView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import { EnvironmentLogin } from '../../../../../../app/features/fleet/credentials/environment-login.tsx';
 import { secretRef } from '../../../../../../app/features/fleet/credentials/environment-model.ts';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { useMachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { LONG_PRESS_MS } from '../../../../../../app/shell/agent-sidebar-model.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { localModelsFixture } from '../../../../support/local-models.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { localModelsFixture } from '../../../../../../../../plugins/runtimes/tests/support/app/local-models.ts';
 import {
   APPLIED,
   type Call,
@@ -19,7 +19,7 @@ import {
   STUDIO,
   scripted,
   stagedFrom,
-} from '../account-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { DEEPSEEK, DEEPSEEK_MIRROR, ENVIRONMENT, FOUNDRY, OLLAMA, PROVIDERS } from './environment-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';

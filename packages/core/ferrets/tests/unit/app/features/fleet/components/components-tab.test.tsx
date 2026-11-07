@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { FleetComponentCatalogSchema } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import { ComponentsSurface, ComponentsTab } from '../../../../../../app/features/fleet/components/components-tab.tsx';
-import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
+import { DaemonConnectionStore } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
-import { type Mounted, mount, must } from '../../../../support/dom.ts';
+import { type AppStore, StoreProvider } from '@ferretry/app';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 import {
   claudeSettings,
   component,
@@ -16,7 +16,7 @@ import {
   models,
   notes,
   studioCatalog,
-} from './catalog-fixture.ts';
+} from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 import {
   choose,
   click,

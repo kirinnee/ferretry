@@ -5,7 +5,7 @@ import {
   FormField,
   FormFoot,
 } from '../../../../../app/features/session-actions/form-parts.tsx';
-import { mount, must, type Mounted } from '../../../support/dom.ts';
+import { mount, must, type Mounted } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

@@ -14,7 +14,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { isTopEscapeLayer, pushEscapeLayer } from '../../hooks/use-dialog-focus.ts';
+import { isTopEscapeLayer, pushEscapeLayer } from '@ferretry/app';
 import type { SessionActionEntry } from './registry.ts';
 import { DetailedFailure } from './session-operations.ts';
 

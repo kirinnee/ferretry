@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { FleetMachineView } from '@ferretry/protocol';
 import { AgentsTab } from '../../../../../../app/features/fleet/machine/agents-tab.tsx';
 import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import {
   APPLY_PATH,
   type Call,

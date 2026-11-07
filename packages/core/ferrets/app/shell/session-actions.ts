@@ -16,9 +16,9 @@
  * fallback: a caller that cannot name a daemon cannot render an action for it.
  */
 
-import type { SessionStatus, SessionView } from '@ferretry/protocol';
-import { reviveOffer } from './revive-offer.ts';
-import { TERMINAL_STATUSES } from './status-mark.tsx';
+import type { SessionStatus, SessionView } from '../../contract/index.ts';
+import { reviveOffer } from '../../../../plugins/updates/app/shell/revive-offer.ts';
+import { TERMINAL_STATUSES } from '@ferretry/app';
 
 export type SessionAction = 'interrupt' | 'stop' | 'resume' | 'rename' | 'migrate';
 

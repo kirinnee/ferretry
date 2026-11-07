@@ -7,7 +7,7 @@
 
 import { Info } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 
 interface SwitchRowProps {
   readonly checked: boolean;

@@ -12,7 +12,8 @@
  * own ink and surface, so each theme family and mode keeps its contrast.
  */
 
-import type { Harness, ImportableConversation } from '@ferretry/protocol';
+import type { Harness } from '../../../../contract/index.ts';
+import type { ImportableConversation } from '@ferretry/protocol';
 import { conversationFolder } from '@ferretry/protocol';
 import { Asterisk, CodeXml, FlaskConical, Folder, Laptop, PawPrint } from 'lucide-react';
 import type { ReactNode } from 'react';

@@ -14,7 +14,7 @@
 import type { FleetProviderPresetView } from '@ferretry/protocol';
 import { ClipboardPaste, Search } from 'lucide-react';
 import { type PointerEvent, useEffect, useId, useRef, useState } from 'react';
-import { LOCAL_TONE_CLASS, type LocalModelsRead, OLLAMA_PRESET_ID, tileWords } from '../../../lib/local-models.ts';
+import { LOCAL_TONE_CLASS, type LocalModelsRead, OLLAMA_PRESET_ID, tileWords } from '../../../../../../plugins/runtimes/app/lib/local-models.ts';
 import { LONG_PRESS_MS } from '../../../shell/agent-sidebar-model.ts';
 import { presetScope } from './environment-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';

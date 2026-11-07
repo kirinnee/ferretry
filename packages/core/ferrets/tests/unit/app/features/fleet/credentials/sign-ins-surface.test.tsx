@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { SignInsSurface } from '../../../../../../app/features/fleet/credentials/sign-ins-surface.tsx';
 import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { APPLIED, type Call, machine, READS, STUDIO, scripted, stagedFrom } from '../account-support.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { APPLIED, type Call, machine, READS, STUDIO, scripted, stagedFrom } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const HASH = '#machines/studio-mac/sign-ins';
 

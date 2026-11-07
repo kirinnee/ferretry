@@ -16,19 +16,19 @@
  * machine's outage, error or pending read reaches another machine's section or the page's controls.
  */
 
-import type { MachineRosters } from '../hooks/use-account-picker.ts';
-import type { PickerAccount } from '../lib/account-picker-catalog.ts';
+import type { MachineRosters } from '../../../../plugins/runtimes/app/hooks/use-account-picker.ts';
+import type { PickerAccount } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { type AllMachinesView, machineReachLabel } from '../lib/all-machines.ts';
-import type { DashboardView, Density } from '../lib/controls.ts';
+import type { DashboardView, Density } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { readOnlyReason } from '../lib/machine-outage.ts';
-import type { ClockEnvironment } from '../lib/message-clock.ts';
-import type { SessionQuotaResolver } from '../lib/usage.ts';
+import type { ClockEnvironment } from '../../../../plugins/conversation/app/lib/message-clock.ts';
+import type { SessionQuotaResolver } from '../../../../plugins/usage/app/lib/usage.ts';
 import { MachineReachDot, MachineReachWords } from '../shell/machine-chip.tsx';
 import { MachineStatusChip } from './machine-status.tsx';
 import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
 import { LeanSessionCard } from './session-dashboard-rows.tsx';
-import { Spinner } from './spinner.tsx';
+import { Spinner } from '@ferretry/app';
 
 export interface AllMachinesGroupsProps {
   readonly view: AllMachinesView;

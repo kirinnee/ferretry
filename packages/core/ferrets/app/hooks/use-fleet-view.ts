@@ -39,7 +39,7 @@
  */
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { DaemonControlsStore, UiControls } from '../lib/controls.ts';
+import type { DaemonControlsStore, UiControls } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { type FleetProject, type FleetView, fleetView } from '../lib/fleet-grouping.ts';
 import type { DaemonFleetSlice, DaemonFleetStore, FleetSnapshot } from '../lib/fleet-store.ts';

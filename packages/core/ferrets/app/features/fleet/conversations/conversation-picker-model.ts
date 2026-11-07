@@ -6,16 +6,8 @@
  * Nothing here reads a clock: every rule that depends on "now" is handed it.
  */
 
-import {
-  CONVERSATION_IMPORT_PATH,
-  CONVERSATION_LAUNCH_MAX,
-  type ConversationAdoptRequest,
-  type ConversationImportQuery,
-  type FleetRuntimeView,
-  type Harness,
-  type ImportableConversation,
-  type SessionStatus,
-} from '@ferretry/protocol';
+import { CONVERSATION_IMPORT_PATH, CONVERSATION_LAUNCH_MAX, type ConversationAdoptRequest, type ConversationImportQuery, type FleetRuntimeView, type ImportableConversation } from '@ferretry/protocol';
+import { type Harness, type SessionStatus } from '../../../../contract/index.ts';
 import { isTerminalSessionStatus } from '../../../lib/session-screens.ts';
 import { SETUP_HARNESS_NAMES } from '../setup/setup-words.ts';
 

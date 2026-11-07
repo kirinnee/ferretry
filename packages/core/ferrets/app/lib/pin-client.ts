@@ -1,17 +1,10 @@
-import {
-  FY_REQUEST_ID_HEADER,
-  MAX_PIN_NOTE_LENGTH,
-  MAX_PINS_PER_SESSION,
-  type PinActionRequest,
-  PinActionRequestSchema,
-  type PinSnapshot,
-  PinSnapshotSchema,
-} from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { MAX_PIN_NOTE_LENGTH, MAX_PINS_PER_SESSION, type PinActionRequest, PinActionRequestSchema, type PinSnapshot, PinSnapshotSchema } from '../../contract/index.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
-import { daemonRequest } from './daemon-transport.ts';
+import { daemonRequest } from '../../../../plugins/connections/app/lib/daemon-transport.ts';
 import { type DaemonPinEcho, DaemonPinStore } from './pin-store.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('pin scope must belong to the requested daemon');

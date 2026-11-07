@@ -13,13 +13,13 @@ import type { FleetCredentialList, FleetProviderPresetView } from '@ferretry/pro
 import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
-import { putSecret } from '../../secrets/secrets-api.ts';
+import { Badge, Button } from '@ferretry/app';
+import { putSecret } from '../../../../../../plugins/accounts/app/features/secrets/secrets-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { type EnvironmentDraft, environmentChange, environmentDraftProblem, presetScope } from './environment-model.ts';
-import { LocalModelsPanel } from './local-models-panel.tsx';
+import { LocalModelsPanel } from '../../../../../../plugins/runtimes/app/features/fleet/credentials/local-models-panel.tsx';
 import { LoginScopeChip } from './login-scope-chip.tsx';
 import { blankRequiredValues, oneClickDraft, type Prefill, type SecretField, secretFields } from './provider-model.ts';
 import { SecretPill } from './secret-pill.tsx';

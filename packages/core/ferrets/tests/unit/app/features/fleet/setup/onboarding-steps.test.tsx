@@ -1,14 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type {
-  ConfigFileView,
-  FleetMachineView,
-  LearningConfig,
-  PairedDevicesView,
-  SpeedupsView,
-  WardenConfig,
-  WardenConfigView,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { ConfigFileView, FleetMachineView, LearningConfig, PairedDevicesView, SpeedupsView, WardenConfig, WardenConfigView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
 import type { ReactElement } from 'react';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { OnboardingDoneRow } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
@@ -24,14 +16,14 @@ import {
   type VoiceCleanupPort,
 } from '../../../../../../app/features/fleet/setup/onboarding-steps.tsx';
 import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
-import type { PairingClientFactory } from '../../../../../src/features/settings/add-device-settings.tsx';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import { DEFAULT_STT_SETTINGS, type SttSettingsPatch } from '../../../../../src/lib/stt/stt-settings.ts';
-import { AVAILABLE_RECOGNITION } from '../../../../support/browser-recognition.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../../../../support/dom.ts';
-import { config as learningConfig } from '../../../../support/learning.ts';
-import { wardenConfig } from '../../../../support/warden.ts';
-import { fileView } from '../../config-files/config-files-support.ts';
+import type { PairingClientFactory } from '../../../../../../../../plugins/access/app/features/settings/add-device-settings.tsx';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
+import { DEFAULT_STT_SETTINGS, type SttSettingsPatch } from '../../../../../../../../plugins/voice/app/lib/stt/stt-settings.ts';
+import { AVAILABLE_RECOGNITION } from '../../../../../../../../plugins/browsers/tests/support/app/browser-recognition.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { config as learningConfig } from '@ferretry/app/testing';
+import { wardenConfig } from '../../../../../../../../plugins/warden/tests/support/app/warden.ts';
+import { fileView } from '../../../../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
 import {
   type Call,
   machineAnswer,

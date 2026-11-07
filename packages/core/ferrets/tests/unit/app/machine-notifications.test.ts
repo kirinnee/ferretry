@@ -10,7 +10,7 @@ import {
   readingFromFailure,
   turnOnAllTargets,
 } from '../../../app/lib/machine-notifications.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 const device = (id: string): PushDeviceView => ({
   id,

@@ -1,5 +1,6 @@
-import type { AskToStopJobsResult, IFyApiClient, InflightItem, SessionView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { AskToStopJobsResult, InflightItem, SessionView } from '../../contract/index.ts';
+import type { IFyApiClient } from '@ferretry/app';
+import { FyHttpError } from '@ferretry/app';
 import {
   AlertOctagon,
   AlertTriangle,
@@ -22,16 +23,16 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
+import type { DaemonAccountPickerStore } from '../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { UPDATE_MACHINE_WHERE } from '../lib/machine-update-words.ts';
-import { useDaemonClient } from '../lib/store.tsx';
-import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
-import { BottomSheet } from '../shell/bottom-sheet.tsx';
-import { pickerIdBase } from '../shell/picker-model.ts';
-import { Button } from '../shell/primitives.tsx';
-import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
+import { useDaemonClient } from '@ferretry/app';
+import type { DaemonUsageSlice, DaemonUsageStore } from '../../../../plugins/usage/app/lib/usage-store.ts';
+import { BottomSheet } from '@ferretry/app';
+import { pickerIdBase } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { statusMark, TERMINAL_STATUSES } from '@ferretry/app';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { AccountName, DaemonAccountName, DaemonAccountPicker } from './daemon-pickers.tsx';
 import {

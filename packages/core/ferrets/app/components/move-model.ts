@@ -1,5 +1,6 @@
-import { compareProtocolVersions, type MigrationRefusal, MigrationRefusedBodySchema } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { compareProtocolVersions } from '@ferretry/protocol';
+import { type MigrationRefusal, MigrationRefusedBodySchema } from '../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import { downgradeOf, downgradeSentence } from '../features/session-actions/context-downgrade.ts';
 
 export const SMALL_CONTEXT_WINDOW = 200_000;

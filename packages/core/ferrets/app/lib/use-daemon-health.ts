@@ -5,11 +5,11 @@
  * who runs `fy daemon update` in another window should not have to reload to see the longer limit.
  */
 
-import { HealthViewSchema } from '@ferretry/protocol';
+import { HealthViewSchema } from '@ferretry/app';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonHealthRead } from './daemon-health.ts';
-import { useDaemonClient, useOptionalAppStore } from './store.tsx';
+import { useDaemonClient, useOptionalAppStore } from '@ferretry/app';
 
 /**
  * @param refreshMs Read again on this period while the page is open, for a caller whose answer changes

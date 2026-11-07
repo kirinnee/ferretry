@@ -1,20 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  CONVERSATION_ADOPT_PATH,
-  CONVERSATION_IMPORT_PATH,
-  type ConversationPreview,
-  type FleetRuntimeView,
-  type ImportableConversation,
-  type SessionView,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { CONVERSATION_ADOPT_PATH, CONVERSATION_IMPORT_PATH, type ConversationPreview, type FleetRuntimeView, type ImportableConversation } from '@ferretry/protocol';
+import { type SessionView } from '../../../../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import type { z } from 'zod';
 import { ContinueConversation } from '../../../../../../app/features/fleet/conversations/continue-conversation.tsx';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
-import { sessionView } from '../../../../support/sessions.ts';
-import { RUNTIMES, runtime, STUDIO } from '../account-support.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
+import { RUNTIMES, runtime, STUDIO } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { conversation, listing, NOW, settle, type } from './conversation-support.ts';
 
 const RUNTIMES_PATH = '/v1/fleet/runtimes';

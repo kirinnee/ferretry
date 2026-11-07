@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useSyncExternalStore } from 'react';
-import type { DaemonBoardStore } from '../lib/board-store.ts';
+import type { DaemonBoardStore } from '../../../../plugins/board/app/lib/board-store.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { pairingKey } from './use-machines-poll.ts';
 

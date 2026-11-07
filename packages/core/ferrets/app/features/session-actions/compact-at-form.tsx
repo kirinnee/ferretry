@@ -5,14 +5,7 @@
  * Nothing is sent to a running harness: the value is read when the ferret next launches, and the form says so.
  */
 
-import {
-  COMPACT_AT_PRESETS,
-  COMPACT_AT_TRADE_OFF,
-  type CompactAt,
-  describeCompactAt,
-  formatTokens,
-  parseCompactAt,
-} from '@ferretry/protocol';
+import { COMPACT_AT_PRESETS, COMPACT_AT_TRADE_OFF, type CompactAt, describeCompactAt, formatTokens, parseCompactAt } from '@ferretry/protocol';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { FormFailure, FormField, FormFoot } from './form-parts.tsx';
 import type { SessionActionFormHost } from './registry.ts';

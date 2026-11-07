@@ -1,12 +1,13 @@
-import type { HandoffPointer, SessionStatus, TranscriptImageMarker } from '@ferretry/protocol';
-import type { LedgerBlockPlacement } from './ledger-placement.ts';
-import type { PackCall } from './pack-calls.ts';
-import type { SentMessage } from './peer-delivery.ts';
-import type { PeerFrom } from './peer-message.ts';
-import type { LedgerSendRecord } from './send-ledger.ts';
-import type { SlashCommand } from './slash-commands.ts';
-import type { SystemBlockInfo } from './system-blocks.ts';
-import type { ToolResultData, ToolUseData } from './tool-extract.ts';
+import type { HandoffPointer, TranscriptImageMarker } from '@ferretry/protocol';
+import type { SessionStatus } from '../../contract/index.ts';
+import type { LedgerBlockPlacement } from '../../../../plugins/conversation/app/lib/ledger-placement.ts';
+import type { PackCall } from '../../../../plugins/packs/app/lib/pack-calls.ts';
+import type { SentMessage } from '../../../../plugins/conversation/app/lib/peer-delivery.ts';
+import type { PeerFrom } from '../../../../plugins/conversation/app/lib/peer-message.ts';
+import type { LedgerSendRecord } from '../../../../plugins/conversation/app/lib/send-ledger.ts';
+import type { SlashCommand } from '../../../../plugins/conversation/app/lib/slash-commands.ts';
+import type { SystemBlockInfo } from '../../../../plugins/conversation/app/lib/system-blocks.ts';
+import type { ToolResultData, ToolUseData } from '../../../../plugins/conversation/app/lib/tool-extract.ts';
 
 /**
  * One tool invocation as the transcript shows it: the use, its result when one

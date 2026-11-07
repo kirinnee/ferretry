@@ -2,13 +2,13 @@
 
 import type { FleetMachineView } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
-import type { AccountCatalog } from '../../../../../src/features/fleet/components/account-catalog.ts';
+import type { AccountCatalog } from '../../../../../../../../plugins/accounts/app/features/fleet/components/account-catalog.ts';
 import type { FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from '../shell/change-support.ts';
-import { studioCatalog, studioMachine } from './catalog-fixture.ts';
+import { studioCatalog, studioMachine } from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 
 const STUDIO = daemonConnection({
   daemonId: 'studio',

@@ -10,7 +10,7 @@
  */
 
 import type { ListReach } from '../lib/all-machines.ts';
-import { cn } from '../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 
 export function MachineChip({ name, className }: { readonly name: string; readonly className?: string }) {
   return (

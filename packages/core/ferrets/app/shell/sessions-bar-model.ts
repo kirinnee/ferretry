@@ -39,14 +39,15 @@
  *   rollup chip can never disagree. A pending question or permission arrives as a real Agenda item.
  */
 
-import { PACK_CLEAN_UP_LABEL, type SessionView } from '@ferretry/protocol';
-import { agendaConversationPath, agendaFirst, sessionAgenda } from '../lib/agenda-inbox.ts';
-import type { Density, ModeFilter } from '../lib/controls.ts';
+import { PACK_CLEAN_UP_LABEL } from '@ferretry/protocol';
+import { type SessionView } from '../../contract/index.ts';
+import { agendaConversationPath, agendaFirst, sessionAgenda } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
+import type { Density, ModeFilter } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
-import { daemonSessionPath } from '../lib/pages/routes.ts';
+import { daemonSessionPath } from '@ferretry/app';
 import { sessionTask, sessionTitles } from './session-title.ts';
-import { TERMINAL_STATUSES } from './status-mark.tsx';
+import { TERMINAL_STATUSES } from '@ferretry/app';
 
 /**
  * Whether the bar draws one-line rows. Compact is the bar's default: only a reader who chose Full (Settings ›

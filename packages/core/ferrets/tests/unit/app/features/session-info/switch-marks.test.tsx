@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { InfoAbout } from '../../../../../app/features/session-info/info-about.tsx';
-import { useAgendaSessionActions } from '../../../../src/features/agenda/agenda-session-actions.tsx';
-import { useHypermediaSessionActions } from '../../../../src/features/hypermedia/hypermedia-session-actions.tsx';
-import { usePackSessionActions } from '../../../../src/features/pack/pack-session-actions.tsx';
+import { useAgendaSessionActions } from '../../../../../../../plugins/agenda/app/features/agenda/agenda-session-actions.tsx';
+import { useHypermediaSessionActions } from '../../../../../../../plugins/conversation/app/features/hypermedia/hypermedia-session-actions.tsx';
+import { usePackSessionActions } from '../../../../../../../plugins/packs/app/features/pack/pack-session-actions.tsx';
 import {
   AGENDA_MARK_LABEL,
   HYPERMEDIA_MARK_LABEL,
@@ -12,10 +12,10 @@ import {
   switchTapper,
 } from '../../../../../app/features/session-info/switch-marks.tsx';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import type { DaemonFetch } from '../../../../src/lib/runtime-models.ts';
-import { type Mounted, mount, must } from '../../../support/dom.ts';
-import { click, waitForText } from '../../../support/learning-dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import type { DaemonFetch } from '../../../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
+import { click, waitForText } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = daemonConnection({ daemonId: 'daemon/a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 

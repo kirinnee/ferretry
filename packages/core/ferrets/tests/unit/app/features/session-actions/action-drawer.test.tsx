@@ -3,7 +3,7 @@ import { CheckCheck } from 'lucide-react';
 import { useState } from 'react';
 import { ActionsMenu } from '../../../../../app/features/session-actions/actions-menu.tsx';
 import type { SessionActionSection } from '../../../../../app/features/session-actions/registry.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

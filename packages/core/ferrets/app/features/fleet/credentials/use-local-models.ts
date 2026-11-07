@@ -7,9 +7,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import type { LocalModelsRead } from '../../../lib/local-models.ts';
+import type { LocalModelsRead } from '../../../../../../plugins/runtimes/app/lib/local-models.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { refreshLocalModels } from '../local-models-api.ts';
+import { refreshLocalModels } from '../../../../../../plugins/runtimes/app/features/fleet/local-models-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 
 export interface UseLocalModelsOptions {

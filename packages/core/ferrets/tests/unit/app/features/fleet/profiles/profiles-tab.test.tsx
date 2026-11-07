@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetProfileDraftView, FleetResolvedEntry } from '@ferretry/protocol';
 import { ProfilesTab } from '../../../../../../app/features/fleet/profiles/profiles-tab.tsx';
-import { interact, type Mounted, mount } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import {
   profile,
   profileCatalog,
@@ -9,7 +9,7 @@ import {
   runtimeCatalog,
   stack,
   studioCatalog,
-} from '../components/catalog-fixture.ts';
+} from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 import {
   choose,
   click,

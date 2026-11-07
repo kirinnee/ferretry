@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
-import type {
-  ForkSessionOutcome,
-  IFyApiClient,
-  SessionTranscriptMessage,
-  SessionTranscriptPage,
-  SessionView,
-} from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
+import type { ForkSessionOutcome, SessionView } from '../../../../../contract/index.ts';
+import type { IFyApiClient } from '@ferretry/app';
+import type { SessionTranscriptMessage, SessionTranscriptPage } from '@ferretry/protocol';
 import {
   DetailedFailure,
   forkThroughLatest,
@@ -18,7 +14,7 @@ import {
   restartRefusedSentence,
   restartWithResume,
 } from '../../../../../app/features/session-actions/session-operations.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 /** Narrows away the `undefined` a `.find()` cannot promise is absent, failing out loud if it is. */
 const must = <T>(value: T | undefined, what: string): T => {

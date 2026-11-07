@@ -11,9 +11,9 @@
 
 import type { FleetDisabled } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
+import { cn } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { runtimeActionRefusal } from '../../../../../../plugins/runtimes/app/features/fleet/runtimes/runtime-actions-model.ts';
 import { type AccountChanges, ChangeApplyPanel } from './apply-change-panel.tsx';
 import {
   BLOCKS_STARTS,

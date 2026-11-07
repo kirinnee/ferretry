@@ -22,8 +22,8 @@ import {
 } from '../../../app/components/files-api.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import { browserFetch, DaemonResponseError } from '../../src/lib/runtime-models.ts';
-import { render, runAsync } from '../support/react.ts';
+import { browserFetch, DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { render, runAsync } from '@ferretry/app/testing';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b-token' });

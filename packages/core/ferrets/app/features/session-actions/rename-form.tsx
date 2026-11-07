@@ -6,7 +6,7 @@
  * The session id never changes, and the form says so.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { renameErrorsFor, renamePatch } from '../../components/rename-sheet.tsx';
 import { FormFailure, FormField, FormFoot } from './form-parts.tsx';

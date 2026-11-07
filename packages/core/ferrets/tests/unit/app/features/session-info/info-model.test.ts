@@ -24,7 +24,7 @@ import {
   scrollToShow,
   worktreeFact,
 } from '../../../../../app/features/session-info/info-model.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 describe('INFO_TABS', () => {
   it('orders the seven tabs, names each one, and drops Tasks for a host with no board', () => {

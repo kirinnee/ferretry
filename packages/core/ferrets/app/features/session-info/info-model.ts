@@ -11,14 +11,9 @@
  * WORDS: which tab a fact is on, how it is said, and what its explainer says.
  */
 
-import {
-  type LaunchInstructionSectionId,
-  type ManagedWorktreeView,
-  type SessionView,
-  sessionAgendaEnabled,
-  sessionHypermediaEnabled,
-} from '@ferretry/protocol';
-import { launchedModel } from '../../components/composer-runtime.tsx';
+import { type LaunchInstructionSectionId, type SessionView, sessionAgendaEnabled, sessionHypermediaEnabled } from '../../../contract/index.ts';
+import { type ManagedWorktreeView } from '@ferretry/protocol';
+import { launchedModel } from '../../../../../plugins/conversation/app/components/composer-runtime.tsx';
 
 export type InfoTab = 'overview' | 'agenda' | 'tasks' | 'runtime' | 'usage' | 'folder' | 'surfaces';
 

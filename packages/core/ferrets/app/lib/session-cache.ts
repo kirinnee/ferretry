@@ -26,7 +26,7 @@
  * is what survives a reload. A backend that fails or is missing only costs that survival.
  */
 
-import { type SessionView, SessionViewSchema } from '@ferretry/protocol';
+import { type SessionView, SessionViewSchema } from '../../contract/index.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 

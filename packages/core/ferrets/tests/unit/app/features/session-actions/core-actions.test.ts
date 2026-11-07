@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../../../../../contract/index.ts';
 import {
   CORE_SESSION_ACTIONS,
   type CoreActionContext,
   SESSION_ACTION_IDS,
 } from '../../../../../app/features/session-actions/core-actions.ts';
 import { sessionActionSections } from '../../../../../app/features/session-actions/registry.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const noop = (): void => undefined;
 

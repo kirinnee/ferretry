@@ -3,7 +3,7 @@ import { Copy, Plug, RotateCw, Server, Square } from 'lucide-react';
 import { useState } from 'react';
 import { ActionsMenu } from '../../../../../app/features/session-actions/actions-menu.tsx';
 import type { SessionActionFormHost, SessionActionSection } from '../../../../../app/features/session-actions/registry.ts';
-import { interact, mount, must, pressKey, type Mounted } from '../../../support/dom.ts';
+import { interact, mount, must, pressKey, type Mounted } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

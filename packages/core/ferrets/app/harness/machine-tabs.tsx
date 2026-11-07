@@ -5,7 +5,7 @@
 
 import { SignInsSurface } from '../features/fleet/credentials/sign-ins-surface.tsx';
 import { AgentsTab } from '../features/fleet/machine/agents-tab.tsx';
-import { BrowserTab } from '../src/features/fleet/machine/browser-tab.tsx';
+import { BrowserTab } from '../../../../plugins/browsers/app/features/fleet/machine/browser-tab.tsx';
 import { ProfilesSurface } from '../features/fleet/profiles/profiles-surface.tsx';
 import { RuntimesTab } from '../features/fleet/runtimes/runtimes-tab.tsx';
 import { emptyMachineTab, type MachineTabSurfaces } from '../features/fleet/shell/machines-surface.tsx';

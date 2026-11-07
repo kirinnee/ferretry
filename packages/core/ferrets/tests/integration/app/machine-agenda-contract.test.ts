@@ -5,7 +5,8 @@
  * This drives the daemon's real route and service and reads the answer with the app's real client.
  */
 import { describe, it } from 'bun:test';
-import { MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
+import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
+import { type SessionView } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type AgendaLedger,
@@ -14,18 +15,18 @@ import {
   AgendaService,
   MachineAgenda,
   type MachineMembersStore,
-} from '../../../daemon/src/lib/agenda/index.ts';
-import { ApiDispatcher } from '../../../daemon/src/lib/api/dispatcher.ts';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../daemon/src/lib/api/capability.ts';
-import { ApiRouter } from '../../../daemon/src/lib/api/router.ts';
-import { agendaMachineRoutes } from '../../../daemon/src/lib/runtime/mounts/agenda-machine.ts';
-import { request } from '../../../daemon/tests/unit/api/support.ts';
-import { CREDENTIALS, human } from '../../../daemon/tests/unit/runtime/mounts/support.ts';
-import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
-import { DaemonAgendaClient, fetchAgendaSnapshot } from '../../src/lib/agenda-client.ts';
+} from '../../../../asks/daemon/lib/agenda/index.ts';
+import { ApiDispatcher } from '../../../../gate/daemon/lib/api/dispatcher.ts';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../gate/daemon/lib/api/capability.ts';
+import { ApiRouter } from '../../../../gate/daemon/lib/api/router.ts';
+import { agendaMachineRoutes } from '../../../../../plugins/agenda/daemon/lib/runtime/mounts/agenda-machine.ts';
+import { request } from '../../../../gate/tests/unit/daemon/api/support.ts';
+import { CREDENTIALS, human } from '../../../../kernel/tests/unit/daemon/runtime/mounts/support.ts';
+import { DaemonAgendaStore } from '../../../../../plugins/agenda/app/lib/agenda-store.ts';
+import { DaemonAgendaClient, fetchAgendaSnapshot } from '../../../../../plugins/agenda/app/lib/agenda-client.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import { machineSessionView, withMachineAgendas } from '../../src/lib/machine-agenda.ts';
+import { machineSessionView, withMachineAgendas } from '../../../../../plugins/agenda/app/lib/machine-agenda.ts';
 
 const NOW = '2026-07-31T10:00:00Z';
 const DAEMON = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'token' });

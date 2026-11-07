@@ -8,7 +8,7 @@
  * ferret is on.
  */
 
-import type { SessionRelaunchDrift, SessionRelaunchSettings } from '@ferretry/protocol';
+import type { SessionRelaunchDrift, SessionRelaunchSettings } from '../../../contract/index.ts';
 import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { InfoChip, InfoRow } from './info-parts.tsx';

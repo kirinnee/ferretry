@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { MCP_OAUTH_PATH, type McpOAuthConnection } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { MCP_OAUTH_PATH } from '@ferretry/protocol';
+import { type McpOAuthConnection } from '@ferretry/plugin-mcp/contract';
+import { FyHttpError } from '@ferretry/app';
 import {
   browserChannel,
   McpSignInSheet,
   type McpSignInSheetProps,
 } from '../../../../../../app/features/fleet/components/mcp-sign-in-sheet.tsx';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import type { Mounted } from '../../../../support/dom.ts';
+import type { Mounted } from '@ferretry/app/testing';
 import {
   type Answers,
   AUTHORIZE_URL,

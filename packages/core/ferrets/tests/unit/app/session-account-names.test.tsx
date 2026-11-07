@@ -1,12 +1,12 @@
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { describe, expect, it } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SessionCard, SessionRow } from '../../../app/components/session-dashboard-rows.tsx';
-import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { daemonId } from '../../../app/lib/daemon-connection.ts';
-import { render } from '../support/react.ts';
-import { type SessionFixtureOverrides, sessionView } from '../support/sessions.ts';
+import { render } from '@ferretry/app/testing';
+import { type SessionFixtureOverrides, sessionView } from '@ferretry/app/testing';
 
 /**
  * A session names the ACCOUNT it runs on by the name its fleet gave it, never

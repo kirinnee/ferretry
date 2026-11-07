@@ -20,13 +20,13 @@ import type { FleetMachineView } from '@ferretry/protocol';
 import { Check, ChevronLeft } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
 import type { MachineData } from '../runtimes/machine-data.ts';
 import { type FirstRuntime, firstRuntimeFor } from '../runtimes/runtimes-model.ts';
-import { AccountStatus } from '../shell/account-status.tsx';
+import { AccountStatus } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { CredentialSignIn } from './credential-sign-in.tsx';
@@ -40,7 +40,7 @@ import {
   sameEmailLogin,
 } from './credentials-model.ts';
 import { useProviderCatalog } from './environment-login.tsx';
-import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
+import { OLLAMA_PRESET_ID } from '../../../../../../plugins/runtimes/app/lib/local-models.ts';
 import { type LocalModelsControl, useLocalModels } from './use-local-models.ts';
 import { offeredHarnesses, presetScope } from './environment-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';

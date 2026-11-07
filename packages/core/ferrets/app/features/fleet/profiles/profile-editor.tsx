@@ -16,21 +16,16 @@
  * A saved profile also offers **Edit as YAML**: its file, `config/profiles/<name>.yaml`.
  */
 
-import {
-  CONFIG_DIRECTORY_NAME,
-  configFilePath,
-  type FleetLayeredProfileView,
-  type FleetProfileDraftView,
-} from '@ferretry/protocol';
+import { CONFIG_DIRECTORY_NAME, configFilePath, type FleetLayeredProfileView, type FleetProfileDraftView } from '@ferretry/protocol';
 import { FileCode2, Plus, X } from 'lucide-react';
 import { type DragEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { ConfigFileEditor } from '../../config-files/config-files-settings.tsx';
-import { previewFleetProfileDraft } from '../catalog-api.ts';
-import type { AccountCatalog } from '../components/account-catalog.ts';
-import { CatalogNote, ComponentBadges, Hint } from '../components/catalog-ui.tsx';
+import { Button } from '@ferretry/app';
+import { ConfigFileEditor } from '../../../../../kernel/app/features/config-files/config-files-settings.tsx';
+import { previewFleetProfileDraft } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
+import type { AccountCatalog } from '../../../../../../plugins/accounts/app/features/fleet/components/account-catalog.ts';
+import { CatalogNote, ComponentBadges, Hint } from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 import { type CatalogHarness, counted, HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';

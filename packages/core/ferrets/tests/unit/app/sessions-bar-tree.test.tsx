@@ -3,9 +3,9 @@ import type { ComponentProps } from 'react';
 import type { MachineSource } from '../../../app/lib/all-machines.ts';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = 'alpha' as DaemonId;
 const recent = '2026-10-16T11:59:00.000Z';

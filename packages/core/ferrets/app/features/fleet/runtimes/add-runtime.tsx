@@ -12,10 +12,10 @@
 import type { FleetMachineView } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
-import { ComponentBadges } from '../components/catalog-ui.tsx';
+import { Badge, Button } from '@ferretry/app';
+import { ComponentBadges } from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 import { HARNESS_NAMES, profileScopeBadge } from '../components/component-model.ts';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
 import {
@@ -31,7 +31,7 @@ import { EnvironmentLogin } from '../credentials/environment-login.tsx';
 import { LoginScopeChip } from '../credentials/login-scope-chip.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
-import { AccountStatus } from '../shell/account-status.tsx';
+import { AccountStatus } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { machineHash } from '../shell/machine-route.ts';

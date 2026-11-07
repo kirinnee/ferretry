@@ -21,9 +21,9 @@ import {
   readingFromFailure,
   turnOnAllTargets,
 } from '../lib/machine-notifications.ts';
-import type { NotificationPermissionState } from '../lib/notify.ts';
-import { disablePushDelivery, enablePushDelivery, type PushEnrolmentContext } from '../lib/push-enrolment.ts';
-import type { NotificationControlsHost } from './use-notifications.ts';
+import type { NotificationPermissionState } from '../../../../plugins/agenda/app/lib/notify.ts';
+import { disablePushDelivery, enablePushDelivery, type PushEnrolmentContext } from '../../../../plugins/access/app/lib/push-enrolment.ts';
+import type { NotificationControlsHost } from '../../../../plugins/agenda/app/hooks/use-notifications.ts';
 
 export interface MachineNotificationSource {
   readonly connection: DaemonConnection;

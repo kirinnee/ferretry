@@ -14,12 +14,12 @@
  * sent — on success and on a refusal alike — and no answer this sheet posts on the channel repeats it.
  */
 
-import type { McpOAuthConnection, McpOAuthFlow } from '@ferretry/protocol';
+import type { McpOAuthConnection, McpOAuthFlow } from '@ferretry/plugin-mcp/contract';
 import { CheckCircle2, Clock3, ExternalLink, KeyRound, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { BottomSheet } from '../../../shell/bottom-sheet.tsx';
-import { Button } from '../../../shell/primitives.tsx';
+import { BottomSheet } from '@ferretry/app';
+import { Button } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { cancelMcpSignIn, finishMcpSignIn, startMcpSignIn } from '../mcp-auth-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';

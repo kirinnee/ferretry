@@ -6,9 +6,9 @@
 
 import { Check, ChevronRight } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { Badge } from '../../../shell/primitives.tsx';
-import { AccountStatus } from '../shell/account-status.tsx';
+import { cn } from '@ferretry/app';
+import { Badge } from '@ferretry/app';
+import { AccountStatus } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import type { RowTone } from './harness-import-model.ts';
 
 /**

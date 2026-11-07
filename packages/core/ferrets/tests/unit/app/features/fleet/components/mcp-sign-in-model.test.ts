@@ -13,7 +13,7 @@ import {
   signsInWithOAuth,
 } from '../../../../../../app/features/fleet/components/mcp-sign-in-model.ts';
 import { CALLBACK, mcpConnection, mcpFlow, NOW, OTHER_CALLBACK } from '../mcp-sign-in-support.ts';
-import { component, github } from './catalog-fixture.ts';
+import { component, github } from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 
 const remote = (auth?: 'oauth') =>
   component({

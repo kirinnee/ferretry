@@ -5,7 +5,7 @@ import {
   readConversationPreview,
   readImportableConversations,
 } from '../../../../../../app/features/fleet/conversations/conversations-api.ts';
-import { type Call, scripted } from '../account-support.ts';
+import { type Call, scripted } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { conversation, listing } from './conversation-support.ts';
 
 describe('conversations api', () => {

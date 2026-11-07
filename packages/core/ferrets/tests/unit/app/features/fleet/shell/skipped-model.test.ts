@@ -4,7 +4,7 @@ import {
   skippedCountLine,
   skippedItems,
 } from '../../../../../../app/features/fleet/shell/skipped-model.ts';
-import { runtime } from '../account-support.ts';
+import { runtime } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 describe('skippedItems', () => {
   it('should word each path inside the runtime with the one plain reason, never a folder on disk', () => {

@@ -9,9 +9,9 @@ import {
   MachinesSurface,
   type MachineTabProps,
 } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonId } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { machineClient, machineView, pairing } from './machine-support.ts';
 
 const studio = pairing('studio', 'studio-mac');

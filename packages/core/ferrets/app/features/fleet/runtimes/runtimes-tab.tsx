@@ -10,14 +10,14 @@
 import type { FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
 import { type MouseEvent, useRef, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { daemonNewSessionPath } from '../../../lib/pages/routes.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
+import { daemonNewSessionPath } from '@ferretry/app';
+import { Badge, Button } from '@ferretry/app';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { ImportConversations } from '../conversations/conversation-picker.tsx';
 import { credentialEmail } from '../credentials/credentials-model.ts';
-import { AccountStatus } from '../shell/account-status.tsx';
+import { AccountStatus } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
@@ -31,8 +31,8 @@ import {
   RenameRuntimeDialog,
   RuntimeActionButtons,
   RuntimeActionsMenu,
-} from './runtime-actions.tsx';
-import { runtimeActionRefusal } from './runtime-actions-model.ts';
+} from '../../../../../../plugins/runtimes/app/features/fleet/runtimes/runtime-actions.tsx';
+import { runtimeActionRefusal } from '../../../../../../plugins/runtimes/app/features/fleet/runtimes/runtime-actions-model.ts';
 import {
   harnessInstalled,
   launchLabel,

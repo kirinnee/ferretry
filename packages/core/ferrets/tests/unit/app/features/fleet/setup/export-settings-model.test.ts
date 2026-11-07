@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { type ConfigStatusView, secretReference } from '@ferretry/protocol';
+import { type ConfigStatusView } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
 import {
   crc32,
   EXPORT_ROOT,

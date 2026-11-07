@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionLiveActivity } from '@ferretry/protocol';
+import type { SessionLiveActivity } from '../../../contract/index.ts';
 import {
   COUNT_UP_MS,
   countUpValue,

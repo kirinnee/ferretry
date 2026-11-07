@@ -1,12 +1,12 @@
 /** Group/table scaffolds for the sessions dashboard; leaf markup lives in the row module. */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { FolderGit2 } from 'lucide-react';
-import type { PickerAccount } from '../lib/account-picker-catalog.ts';
-import type { DashboardView, Density } from '../lib/controls.ts';
+import type { PickerAccount } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import type { DashboardView, Density } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
-import type { SessionQuotaResolver } from '../lib/usage.ts';
+import type { SessionQuotaResolver } from '../../../../plugins/usage/app/lib/usage.ts';
 import {
   DENSITY_COLUMN_LABELS,
   DENSITY_COLUMN_WIDTHS,

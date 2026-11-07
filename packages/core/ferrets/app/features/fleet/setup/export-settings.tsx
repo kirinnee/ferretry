@@ -7,12 +7,12 @@
  * hold a pasted key) is left out and named.
  */
 
-import { secretReference } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
 import { ChevronLeft, Download } from 'lucide-react';
 import { useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { readConfigFile, readConfigStatus } from '../../config-files/config-files-api.ts';
+import { Button } from '@ferretry/app';
+import { readConfigFile, readConfigStatus } from '../../../../../kernel/app/features/config-files/config-files-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import {

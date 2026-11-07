@@ -1,25 +1,25 @@
 import { describe, expect, it } from 'bun:test';
 import type { PushDeviceView } from '@ferretry/protocol';
 
-import { MachineNotificationList, NotificationsOffBanner } from '../../src/features/settings/notification-machines.tsx';
+import { MachineNotificationList, NotificationsOffBanner } from '../../../../../plugins/agenda/app/features/settings/notification-machines.tsx';
 import {
   type MachineNotificationSource,
   type MachineNotifications,
   useMachineNotifications,
 } from '../../../app/hooks/use-machine-notifications.ts';
-import type { NotificationControlsHost } from '../../src/hooks/use-notifications.ts';
+import type { NotificationControlsHost } from '../../../../../plugins/agenda/app/hooks/use-notifications.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
-import { DaemonNotificationPreferences } from '../../src/lib/notification-preferences.ts';
-import type { NotificationPermissionState } from '../../src/lib/notify.ts';
+import { DaemonNotificationPreferences } from '../../../../../plugins/agenda/app/lib/notification-preferences.ts';
+import type { NotificationPermissionState } from '../../../../../plugins/agenda/app/lib/notify.ts';
 import {
   DaemonPushDevices,
   type DaemonPushService,
   type MachinePushRegistrationLike,
   type PushEnrolment,
   type PushSubscriptionHandle,
-} from '../../src/lib/push-enrolment.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
-import { render, run, runAsync } from '../support/react.ts';
+} from '../../../../../plugins/access/app/lib/push-enrolment.ts';
+import { DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { render, run, runAsync } from '@ferretry/app/testing';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });

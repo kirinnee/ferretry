@@ -11,17 +11,17 @@
  * Actions, composer — that machine's. A machine that is not answering keeps its last rows, greyed.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import type { ReactNode } from 'react';
-import type { MachineLearners } from '../features/learning/passive-learning.tsx';
+import type { MachineLearners } from '../../../../plugins/lessons/app/features/learning/passive-learning.tsx';
 import { type AllMachinesView, machineReachLabel } from '../lib/all-machines.ts';
-import { agendaFirst } from '../lib/agenda-inbox.ts';
+import { agendaFirst } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { readOnlyReason } from '../lib/machine-outage.ts';
 import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
 import { MachineHeadControls, type MoveMachine, useMachineReorder } from './machine-reorder.tsx';
-import { SessionMenuContext } from './session-menu-context.ts';
-import { SessionPinContext } from './session-pin-context.ts';
+import { SessionMenuContext } from '@ferretry/app';
+import { SessionPinContext } from '@ferretry/app';
 import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
 import { SessionsBarPinned } from './sessions-bar-pinned.tsx';
 import { sessionTree } from './sessions-bar-tree.ts';

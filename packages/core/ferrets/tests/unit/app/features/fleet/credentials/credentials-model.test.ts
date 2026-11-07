@@ -40,7 +40,7 @@ import {
   usageBarText,
   usdWords,
 } from '../../../../../../app/features/fleet/credentials/credentials-model.ts';
-import { CREDENTIALS, credential, NOW, withStatus } from '../account-support.ts';
+import { CREDENTIALS, credential, NOW, withStatus } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const byId = (id: string) => {
   const found = CREDENTIALS.credentials.find(entry => entry.id === id);

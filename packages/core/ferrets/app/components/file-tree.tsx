@@ -2,7 +2,7 @@ import { FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, ChevronRight } fr
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
+import { useDaemonFetch } from '@ferretry/app';
 import { describeFsError, fsApi, isAbort } from './files-api.ts';
 import { formatBytes } from './files-model.ts';
 import {

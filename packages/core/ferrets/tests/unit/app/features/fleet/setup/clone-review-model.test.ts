@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  CLONE_REVIEW_KINDS,
-  CLONE_REVIEW_STALE,
-  CloneableSecretNameSchema,
-  type CloneLoginTarget,
-  type CloneReviewItem,
-} from '@ferretry/protocol';
+import { CLONE_REVIEW_KINDS, CLONE_REVIEW_STALE, CloneableSecretNameSchema, type CloneReviewItem } from '@ferretry/plugin-runtimes/contract';
+import { type CloneLoginTarget } from '@ferretry/protocol';
 import {
   applyHold,
   chooseItem,

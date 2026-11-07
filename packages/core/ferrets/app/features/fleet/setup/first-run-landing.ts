@@ -13,8 +13,8 @@
  * that sent a working machine into setup would be worse than a first run Settings still offers.
  */
 
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { daemonMachineSetupPath, daemonHomePath } from '../../../lib/pages/routes.ts';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
+import { daemonMachineSetupPath, daemonHomePath } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { readMachineReach } from '../shell/machine-reach.ts';
 

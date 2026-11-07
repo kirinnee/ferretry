@@ -10,10 +10,10 @@
 
 import { Check, KeyRound, Lock } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
-import { Badge, Button } from '../../../shell/primitives.tsx';
+import { Badge, Button } from '@ferretry/app';
 import { LoosensBadge } from './clone-loosens-badge.tsx';
-import { browserClipboardWriter, type ClipboardWriter } from '../../onboarding/copy-button.tsx';
-import { ReplaceKeyCommand } from '../../secrets/replace-key-command.tsx';
+import { browserClipboardWriter, type ClipboardWriter } from '../../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
+import { ReplaceKeyCommand } from '../../../../../../plugins/accounts/app/features/secrets/replace-key-command.tsx';
 import { CLONE_KEEP_DEFAULT, CLONE_NO_DEFAULT, type CloneDefaultView } from './clone-model.ts';
 import {
   CLONE_ITEMS,

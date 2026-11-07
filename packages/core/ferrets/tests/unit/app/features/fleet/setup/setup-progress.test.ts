@@ -7,7 +7,7 @@ import {
   writeMachineSetupProgress,
 } from '../../../../../../app/features/fleet/setup/setup-progress.ts';
 import { daemonId } from '../../../../../../app/lib/daemon-connection.ts';
-import '../../../../support/dom.ts';
+import '@ferretry/app/testing';
 
 const studio = daemonId('studio');
 const work = daemonId('work');

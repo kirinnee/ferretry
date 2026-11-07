@@ -15,7 +15,7 @@
  * running, how many want you, how many are stopped.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { buildLineage, lineageLabel } from '../lib/lineage.ts';
 import { hasAgenda, isStopped } from './sessions-bar-model.ts';
 

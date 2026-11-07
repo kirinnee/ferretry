@@ -9,7 +9,7 @@
  */
 
 import type { FleetCredentialBudget } from '@ferretry/protocol';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import { budgetMeterRows, budgetScopeNote } from './credentials-model.ts';
 import { METER_LABEL, METER_WORDS } from './meter-layout.ts';
 

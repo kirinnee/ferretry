@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { type FleetCloneBundle, mcpOAuthSecretNames, type SpeedupsView, secretReference } from '@ferretry/protocol';
+import { type FleetCloneBundle, mcpOAuthSecretNames, type SpeedupsView } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
 import {
   ALL_CLONE_ITEMS,
   CLONE_ITEMS,

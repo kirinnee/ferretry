@@ -11,25 +11,25 @@
  * for the last pressed ferret and only `open` says whether the menu is on screen.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { Copy, MessageSquare } from 'lucide-react';
 import { type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { MigrateSheet } from '../../components/move-sheet.tsx';
 import { sessionDisplayName } from '../../components/session-top-bar.tsx';
-import { useAccountPickerSlice } from '../../hooks/use-account-picker.ts';
-import { useKnownProjects } from '../../hooks/use-projects.ts';
+import { useAccountPickerSlice } from '../../../../../plugins/runtimes/app/hooks/use-account-picker.ts';
+import { useKnownProjects } from '../../../../../plugins/projects/app/hooks/use-projects.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
-import { daemonLearningPath, daemonSessionPath } from '../../lib/pages/routes.ts';
-import { useAppStore, useConnectionSnapshot, useDaemonClient, useDaemonFetch } from '../../lib/store.tsx';
-import type { MenuAnchor } from '../../shell/context-menu.tsx';
-import type { SessionMenuState } from '../../shell/session-menu-context.ts';
-import { useAgendaSessionActions } from '../agenda/agenda-session-actions.tsx';
+import { daemonLearningPath, daemonSessionPath } from '@ferretry/app';
+import { useAppStore, useConnectionSnapshot, useDaemonClient, useDaemonFetch } from '@ferretry/app';
+import type { MenuAnchor } from '@ferretry/app';
+import type { SessionMenuState } from '@ferretry/app';
+import { useAgendaSessionActions } from '../../../../../plugins/agenda/app/features/agenda/agenda-session-actions.tsx';
 import { useCompactAtSessionActions } from './compact-at-session-actions.tsx';
-import { useHypermediaSessionActions } from '../hypermedia/hypermedia-session-actions.tsx';
-import { useLearningSessionActions } from '../learning/learning-session-actions.tsx';
-import { usePackSessionActions } from '../pack/pack-session-actions.tsx';
-import { useAskWardenActions } from '../warden/ask-warden.tsx';
+import { useHypermediaSessionActions } from '../../../../../plugins/conversation/app/features/hypermedia/hypermedia-session-actions.tsx';
+import { useLearningSessionActions } from '../../../../../plugins/lessons/app/features/learning/learning-session-actions.tsx';
+import { usePackSessionActions } from '../../../../../plugins/packs/app/features/pack/pack-session-actions.tsx';
+import { useAskWardenActions } from '../../../../../plugins/warden/app/features/warden/ask-warden.tsx';
 import { ActionToast } from './action-toast.tsx';
 import { ContextActionsMenu } from './context-actions-menu.tsx';
 import { CORE_SESSION_ACTIONS, type CoreActionContext } from './core-actions.ts';

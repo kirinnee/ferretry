@@ -13,21 +13,14 @@
  * shown, copied or sent here: the secrets a login named stay in the secret store, listed by name.
  */
 
-import type {
-  FleetAccountChange,
-  FleetAccountChangeView,
-  FleetCredentialView,
-  FleetMachineView,
-  FleetRunningSession,
-  FleetRuntimeView,
-} from '@ferretry/protocol';
+import type { FleetAccountChange, FleetAccountChangeView, FleetCredentialView, FleetMachineView, FleetRunningSession, FleetRuntimeView } from '@ferretry/protocol';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { moveConversation } from '../runtimes/runtime-actions-model.ts';
-import { RuntimeDialog, WRAPPING_SUBMIT } from '../runtimes/runtime-actions.tsx';
+import { moveConversation } from '../../../../../../plugins/runtimes/app/features/fleet/runtimes/runtime-actions-model.ts';
+import { RuntimeDialog, WRAPPING_SUBMIT } from '../../../../../../plugins/runtimes/app/features/fleet/runtimes/runtime-actions.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import {

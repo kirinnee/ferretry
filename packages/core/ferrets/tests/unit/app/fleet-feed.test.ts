@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { type FyEvent, QUEUE_CHANGED_EVENT } from '@ferretry/protocol';
+import { type FyEvent } from '../../../contract/index.ts';
+import { QUEUE_CHANGED_EVENT } from '@ferretry/protocol';
 import should from 'should';
 import {
   browserFleetFeedEnvironment,

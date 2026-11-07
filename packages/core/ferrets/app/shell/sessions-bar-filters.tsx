@@ -11,7 +11,7 @@
  * list says how many stopped sessions it is hiding and where the switch is.
  */
 
-import type { ModeFilter } from '../lib/controls.ts';
+import type { ModeFilter } from '@ferretry/app';
 import type { ModeCounts } from '../lib/fleet-grouping.ts';
 import type { SessionsListFilter } from './sessions-bar-model.ts';
 

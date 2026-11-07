@@ -9,9 +9,9 @@
  * holding that port rather than stopping it.
  */
 
-import type { HarnessLoginFlow } from '@ferretry/protocol';
+import type { HarnessLoginFlow } from '@ferretry/plugin-logins/contract';
 import { RotateCcw } from 'lucide-react';
-import { Button } from '../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 
 /** Said when a start picked up a sign-in already running for this login. */
 const RESUMED_SENTENCE = 'You started this sign-in earlier, so it carries on from where you left it.';

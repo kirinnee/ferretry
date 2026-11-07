@@ -19,7 +19,8 @@
  * because a feed with no replay cannot say what changed while it was away.
  */
 
-import { type FyEvent, isMachineAgendaId, QUEUE_CHANGED_EVENT, SURFACE_EVENT_TYPES } from '@ferretry/protocol';
+import { type FyEvent, SURFACE_EVENT_TYPES } from '../../contract/index.ts';
+import { isMachineAgendaId, QUEUE_CHANGED_EVENT } from '@ferretry/protocol';
 import { sessionEventStreamDeadlineMs, sessionEventStreamDelayMs } from '../components/session-event-stream-model.ts';
 
 /** What the poll beside a feed is told: whether it may stand back. */

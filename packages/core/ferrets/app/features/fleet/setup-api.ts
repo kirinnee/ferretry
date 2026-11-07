@@ -9,25 +9,7 @@
  * Every answer is parsed through the shared schema, which has no field a credential could occupy.
  */
 
-import {
-  FLEET_CLONE_KEYS_PATH,
-  type FleetCloneBundle,
-  FleetCloneBundleSchema,
-  type FleetCloneKeysRecordRequest,
-  FleetCloneKeysRecordRequestSchema,
-  type FleetCloneKeysRecordResult,
-  FleetCloneKeysRecordResultSchema,
-  type FleetCloneReview,
-  type FleetCloneReviewRequest,
-  FleetCloneReviewRequestSchema,
-  FleetCloneReviewSchema,
-  type FleetSetupScan,
-  FleetSetupScanSchema,
-  type FleetToolInstallRequest,
-  FleetToolInstallRequestSchema,
-  type FleetToolInstallResult,
-  FleetToolInstallResultSchema,
-} from '@ferretry/protocol';
+import { FLEET_CLONE_KEYS_PATH, type FleetCloneBundle, FleetCloneBundleSchema, type FleetCloneKeysRecordRequest, FleetCloneKeysRecordRequestSchema, type FleetCloneKeysRecordResult, FleetCloneKeysRecordResultSchema, type FleetCloneReview, type FleetCloneReviewRequest, FleetCloneReviewRequestSchema, FleetCloneReviewSchema, type FleetSetupScan, FleetSetupScanSchema, type FleetToolInstallRequest, FleetToolInstallRequestSchema, type FleetToolInstallResult, FleetToolInstallResultSchema } from '@ferretry/protocol';
 import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';

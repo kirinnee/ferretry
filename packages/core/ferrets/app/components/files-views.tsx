@@ -16,9 +16,9 @@
 
 import { CornerLeftUp, FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, X } from 'lucide-react';
 import { useMemo, type ReactNode, type RefObject } from 'react';
-import { highlightToHtml } from '../lib/highlight.ts';
-import { trustedHighlight } from '../lib/trusted-types.ts';
-import { langFromPath } from '../lib/tool-extract.ts';
+import { highlightToHtml } from '../../../../plugins/conversation/app/lib/highlight.ts';
+import { trustedHighlight } from '@ferretry/app';
+import { langFromPath } from '../../../../plugins/conversation/app/lib/tool-extract.ts';
 import type { FsChange, FsFile, FsListing } from './files-api.ts';
 import {
   baseName,
@@ -40,7 +40,7 @@ import {
   type FileLineSelection,
   type OpenFileTab,
 } from './files-tab-model.ts';
-import { Markdown, type MarkdownProps } from './markdown.tsx';
+import { Markdown, type MarkdownProps } from '../../../../plugins/conversation/app/components/markdown.tsx';
 import { RichFilePreview, richFileKind } from './rich-file-preview.tsx';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';

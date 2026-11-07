@@ -11,11 +11,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useMachineOrder } from '../../../../app/hooks/use-machine-order.ts';
 import { type MachineSource, machineDisplayOrder } from '../../../../app/lib/all-machines.ts';
-import { browserControlsStorage, DaemonControlsStore } from '../../../src/lib/controls.ts';
+import { browserControlsStorage, DaemonControlsStore } from '@ferretry/app';
 import { type DaemonId, daemonConnection } from '../../../../app/lib/daemon-connection.ts';
 import { moveMachine } from '../../../../app/lib/machine-order.ts';
 import { SessionsBar } from '../../../../app/shell/sessions-bar.tsx';
-import { sessionView } from '../../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const NOW = Date.parse('2026-10-20T12:00:00.000Z');
 const minutesAgo = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();

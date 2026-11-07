@@ -12,7 +12,7 @@ import {
   OpenFileTabs,
   SourceLines,
 } from '../../../app/components/files-views.tsx';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const byLabel = (container: HTMLElement, label: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[aria-label="${label}"]`), `an element labelled ${label}`);

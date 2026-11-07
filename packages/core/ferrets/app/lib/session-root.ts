@@ -8,7 +8,7 @@
  * mid-write might say so) ends where it first repeats.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 
 /** Each session's root view by session id: a session with no parent in `sessions` is its own root. */
 export const rootViews = (sessions: readonly SessionView[]): ReadonlyMap<string, SessionView> => {

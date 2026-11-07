@@ -16,7 +16,7 @@ import {
   sessionsBarView,
   sidebarCompact,
 } from '../../../app/shell/sessions-bar-model.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');
 const ago = (milliseconds: number): string => new Date(NOW - milliseconds).toISOString();

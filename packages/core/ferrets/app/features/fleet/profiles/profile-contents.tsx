@@ -10,8 +10,8 @@
 import type { FleetResolvedEntry } from '@ferretry/protocol';
 import { ArrowDown, ArrowUp, GripVertical, X } from 'lucide-react';
 import type { DragEvent } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { cn } from '@ferretry/app';
+import { Button } from '@ferretry/app';
 import { type CatalogHarness, HARNESS_NAMES } from '../components/component-model.ts';
 import { ITEM_ACTIONS, ITEM_ROW, ItemBody, ItemChips, ItemLine, ItemName, KindTag } from './profile-library.tsx';
 import { itemName, type OverrideChip, type ProfileItem, RESOLVED_FIELD_WORDS } from './profile-model.ts';

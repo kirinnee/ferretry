@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactElement } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Transcript } from '../../src/components/transcript.tsx';
-import { TranscriptRow } from '../../src/components/transcript-row.tsx';
+import { Transcript } from '../../../../../plugins/conversation/app/components/transcript.tsx';
+import { TranscriptRow } from '../../../../../plugins/conversation/app/components/transcript-row.tsx';
 import {
   type AgentRunMark,
   agentRuns,
@@ -10,7 +10,7 @@ import {
   type TranscriptEntry,
   transcriptItems,
 } from '../../../app/lib/session-screens.ts';
-import { render as mount, run } from '../support/react.ts';
+import { render as mount, run } from '@ferretry/app/testing';
 
 // An unmounted tree is a subscriber the transcript-hold gate no longer counts; a leaked one starves later suites.
 const mounted: ReactTestRenderer[] = [];

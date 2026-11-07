@@ -12,19 +12,14 @@
  * only one, or one the person picks — and the new session opens on its full history.
  */
 
-import type {
-  ConversationPreview,
-  FleetRuntimeView,
-  Harness,
-  ImportableConversation,
-  SessionView,
-} from '@ferretry/protocol';
+import type { ConversationPreview, FleetRuntimeView, ImportableConversation } from '@ferretry/protocol';
+import type { Harness, SessionView } from '../../../../contract/index.ts';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { daemonSessionPath } from '../../../lib/pages/routes.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { readFleetRuntimes } from '../catalog-api.ts';
+import { daemonSessionPath } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { readFleetRuntimes } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { useSetupAccess } from '../setup/setup-access.ts';
 import {

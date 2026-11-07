@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { Composer } from '../../src/components/composer.tsx';
-import { ComposerQuota, composerQuotaPercent, composerQuotaSpoken } from '../../src/components/composer-quota.tsx';
-import { quotableTranscriptSelectionText, Transcript } from '../../src/components/transcript.tsx';
-import { TranscriptRow } from '../../src/components/transcript-row.tsx';
+import { Composer } from '../../../../../plugins/conversation/app/components/composer.tsx';
+import { ComposerQuota, composerQuotaPercent, composerQuotaSpoken } from '../../../../../plugins/conversation/app/components/composer-quota.tsx';
+import { quotableTranscriptSelectionText, Transcript } from '../../../../../plugins/conversation/app/components/transcript.tsx';
+import { TranscriptRow } from '../../../../../plugins/conversation/app/components/transcript-row.tsx';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { DaemonDraftStore, type DraftStorage } from '../../../../../plugins/conversation/app/lib/drafts.ts';
 import { isTerminalSessionStatus, relativeTime } from '../../../app/lib/session-screens.ts';
-import { StatusMark, statusMark } from '../../src/shell/status-mark.tsx';
-import { render, run, runAsync } from '../support/react.ts';
-import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+import { StatusMark, statusMark } from '@ferretry/app';
+import { render, run, runAsync } from '@ferretry/app/testing';
+import { writeMdComposePref } from '../../../../../plugins/conversation/app/lib/md-compose.ts';
 
 // The general composer behaviour is one key arbitration for every editor style; these suites drive it
 // through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.

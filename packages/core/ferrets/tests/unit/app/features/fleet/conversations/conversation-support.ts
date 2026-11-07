@@ -3,13 +3,8 @@
  * schema so a wire change fails here first.
  */
 
-import {
-  type ConversationImportListing,
-  ConversationImportListingSchema,
-  type ImportableConversation,
-  ImportableConversationSchema,
-} from '@ferretry/protocol';
-import { interact } from '../../../../support/dom.ts';
+import { type ConversationImportListing, ConversationImportListingSchema, type ImportableConversation, ImportableConversationSchema } from '@ferretry/protocol';
+import { interact } from '@ferretry/app/testing';
 
 export const NOW = Date.parse('2026-10-13T08:00:00.000Z');
 const HOUR = 3_600_000;

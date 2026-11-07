@@ -22,9 +22,9 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
-import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
-import { cn } from '../lib/class-names.ts';
+import { ExternalLink as ExternalAnchor } from '../../../../plugins/browsers/app/features/browser/external-link.tsx';
+import { useDialogFocus } from '@ferretry/app';
+import { cn } from '@ferretry/app';
 import {
   clampTransform,
   distance,

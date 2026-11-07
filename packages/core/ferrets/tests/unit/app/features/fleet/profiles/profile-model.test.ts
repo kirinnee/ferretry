@@ -24,7 +24,7 @@ import {
   sameContents,
   scopeWord,
 } from '../../../../../../app/features/fleet/profiles/profile-model.ts';
-import { profile, profileCatalog, runtimeCatalog, studioCatalog } from '../components/catalog-fixture.ts';
+import { profile, profileCatalog, runtimeCatalog, studioCatalog } from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 
 const [, base, review] = profileCatalog().profiles as [
   ReturnType<typeof profile>,

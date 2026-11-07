@@ -8,22 +8,22 @@
  * These drive the real fleet store, the real machine-sources hook and the real Sessions page, with one
  * machine that HANGS (never answers), one that FAILS FAST, and one that FLAPS, beside a healthy machine.
  */
-import '../../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../contract/index.ts';
 import { SessionsPage } from '../../../../app/components/sessions-page.tsx';
 import { type ListedMachine, useMachineSources } from '../../../../app/hooks/use-machine-sources.ts';
-import type { ScopeNavigation } from '../../../src/hooks/use-project-scope.ts';
-import type { ConnectionHealth, ConnectionHealthState } from '../../../src/lib/connection-health.ts';
-import { type ControlsStorage, DaemonControlsStore } from '../../../src/lib/controls.ts';
+import type { ScopeNavigation } from '../../../../../../plugins/projects/app/hooks/use-project-scope.ts';
+import type { ConnectionHealth, ConnectionHealthState } from '../../../../../../plugins/connections/app/lib/connection-health.ts';
+import { type ControlsStorage, DaemonControlsStore } from '@ferretry/app';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../../app/lib/daemon-connection.ts';
 import { DaemonFleetStore } from '../../../../app/lib/fleet-store.ts';
 import type { DeadlineSchedule } from '../../../../app/lib/machine-deadline.ts';
-import { DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
-import { DaemonUsageStore } from '../../../src/lib/usage-store.ts';
-import { interact, mount, must } from '../../support/dom.ts';
-import { sessionView } from '../../support/sessions.ts';
+import { DaemonProjectsStore } from '../../../../../../plugins/projects/app/lib/projects-store.ts';
+import { DaemonUsageStore } from '../../../../../../plugins/usage/app/lib/usage-store.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const mbp = daemonConnection({ daemonId: 'liftoff-mbp', baseUrl: 'http://127.0.0.1:7431', deviceId: 'mbp' });
 const ec2 = daemonConnection({ daemonId: 'liftoff-ec2', baseUrl: 'https://ec2.invalid', deviceId: 'ec2' });

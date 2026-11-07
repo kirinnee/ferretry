@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { rootViews } from '../../../app/lib/session-root.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const child = (id: string, parent: string | undefined) => sessionView(id, { config: { parent } as never });
 

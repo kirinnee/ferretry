@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FyEvent, FyEventStreamIdle, SessionLiveActivity, SessionTranscriptMoved } from '@ferretry/protocol';
+import type { FyEvent, FyEventStreamIdle, SessionLiveActivity, SessionTranscriptMoved } from '../../../contract/index.ts';
 import {
   SESSION_EVENT_STREAM_BACKOFF,
   SESSION_EVENT_STREAM_QUIET_MS,

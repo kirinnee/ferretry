@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { combinedDelivery, type FyEvent, QUEUE_CHANGED_EVENT, turnFileInstruction } from '@ferretry/protocol';
+import { combinedDelivery, type FyEvent } from '../../../contract/index.ts';
+import { QUEUE_CHANGED_EVENT, turnFileInstruction } from '@ferretry/protocol';
 import {
   ACTED_WATCH_MS,
   NUDGE_SETTLE_MS,
@@ -14,9 +15,9 @@ import {
   transcriptEntriesFromLog,
 } from '../../../app/components/session-workspace-model.ts';
 import { startSessionEventStream } from '../../../app/components/session-event-stream-model.ts';
-import { rowAnchors, rowForOffset } from '../../src/lib/chat-search.ts';
-import { extractToolSummary, IMAGE_READ_TOOL } from '../../src/lib/tool-extract.ts';
-import { sessionView } from '../support/sessions.ts';
+import { rowAnchors, rowForOffset } from '../../../../../plugins/conversation/app/lib/chat-search.ts';
+import { extractToolSummary, IMAGE_READ_TOOL } from '../../../../../plugins/conversation/app/lib/tool-extract.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const NOW = Date.UTC(2026, 9, 18, 12, 0, 0);
 

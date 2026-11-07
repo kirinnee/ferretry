@@ -9,7 +9,7 @@
  * in their place when it is absent.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import {

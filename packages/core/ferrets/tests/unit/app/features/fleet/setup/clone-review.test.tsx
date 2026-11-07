@@ -1,20 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { analyseCloneSettings, reviewCloneSettings } from '@ferretry/fleet';
-import {
-  CLONE_REVIEW_STALE,
-  CLONE_SOURCE_SECRETS_LIMIT,
-  CloneableSecretNameSchema,
-  FleetAccountChangeSchema,
-  type CloneSettingsDoc,
-  type FleetCloneReview,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { CLONE_REVIEW_STALE, CLONE_SOURCE_SECRETS_LIMIT, CloneableSecretNameSchema, type CloneSettingsDoc } from '@ferretry/plugin-runtimes/contract';
+import { FleetAccountChangeSchema, type FleetCloneReview } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../../app/features/fleet/setup/clone.tsx';
 import { controlsText } from '../../../../../../app/features/fleet/setup/clone-settings-merge.ts';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import {
   FIRST_REVIEW,
   FULL_REVIEW,

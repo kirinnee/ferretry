@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 import {
   browserPresenceEnvironment,
   PRESENCE_WINDOW_MS,

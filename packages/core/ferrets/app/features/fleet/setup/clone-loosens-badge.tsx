@@ -5,8 +5,8 @@
  */
 
 import type { ComponentPropsWithoutRef } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { Badge } from '../../../shell/primitives.tsx';
+import { cn } from '@ferretry/app';
+import { Badge } from '@ferretry/app';
 
 type BadgeData = { readonly [attribute: `data-${string}`]: string };
 

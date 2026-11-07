@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { useFsResource, type FsResource, type FsResourceOptions } from '../../../app/components/files-resource.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 interface ProbeProps {
   resourceKey: string | null;

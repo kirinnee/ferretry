@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { ConversionPreview, SessionView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { ConversionPreview, SessionView } from '../../../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import { ConvertSheet, type ConvertSheetProps } from '../../../../../app/features/session-actions/convert-sheet.tsx';
-import type { PickerAccount } from '../../../../src/lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../../../app/lib/daemon-scope.ts';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({ daemonId: 'd-a', baseUrl: 'https://a.invalid', deviceId: 'tok' });
 const otherDaemon = daemonConnection({ daemonId: 'd-b', baseUrl: 'https://b.invalid', deviceId: 'tok' });

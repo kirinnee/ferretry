@@ -7,7 +7,7 @@
  * new ferret.
  */
 
-import type { ForkSessionOutcome, SessionView } from '@ferretry/protocol';
+import type { ForkSessionOutcome, SessionView } from '../../../contract/index.ts';
 import { GitFork } from 'lucide-react';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { displayCallsign } from '../../lib/callsign.ts';

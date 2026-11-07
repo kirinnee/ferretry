@@ -9,7 +9,7 @@ import {
   settingsFlowFromHash,
   useSettingsFlow,
 } from '../../../../../../app/features/fleet/setup/settings-route.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const fakeWindow = (hash: string): Window => {
   const target = new EventTarget();

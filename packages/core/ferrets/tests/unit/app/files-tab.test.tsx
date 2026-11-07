@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { type FsChanges, type FsFile, type FsListing, resetFsProbes } from '../../../app/components/files-api.ts';
 import { FilesTab } from '../../../app/components/files-tab.tsx';
 import { readFilesTabState, resetFilesTabStates } from '../../../app/components/files-tab-model.ts';
-import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { SessionSearchProvider } from '../../../../../plugins/conversation/app/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({
   daemonId: 'files-daemon',

@@ -4,11 +4,11 @@
  * settles, so retrying cannot overlap it; another machine's list never waits on any of it.
  */
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../contract/index.ts';
 import { daemonConnection } from '../../../../app/lib/daemon-connection.ts';
 import { DaemonFleetStore } from '../../../../app/lib/fleet-store.ts';
 import type { DeadlineSchedule } from '../../../../app/lib/machine-deadline.ts';
-import { sessionView } from '../../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const asleep = daemonConnection({ daemonId: 'asleep', baseUrl: 'https://asleep.invalid', deviceId: 'a' });
 const awake = daemonConnection({ daemonId: 'awake', baseUrl: 'https://awake.invalid', deviceId: 'b' });

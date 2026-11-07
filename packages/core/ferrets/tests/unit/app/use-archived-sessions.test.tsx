@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { SessionView } from '../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import {
   ARCHIVED_COUNT_POLL_MS,
   ARCHIVED_SESSIONS_LIMIT,
@@ -10,9 +10,9 @@ import {
   useArchivedSessions,
 } from '../../../app/hooks/use-archived-sessions.ts';
 import { type DaemonConnection, daemonConnection } from '../../../app/lib/daemon-connection.ts';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.invalid', deviceId: 'alpha-device' });
 const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-device' });

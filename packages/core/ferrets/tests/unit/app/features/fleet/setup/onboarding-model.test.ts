@@ -22,7 +22,7 @@ import {
   wardenStartingDraft,
 } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
 import { daemonId } from '../../../../../../app/lib/daemon-connection.ts';
-import { wardenConfig } from '../../../../support/warden.ts';
+import { wardenConfig } from '../../../../../../../../plugins/warden/tests/support/app/warden.ts';
 
 const studio = daemonId('studio');
 

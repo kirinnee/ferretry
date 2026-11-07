@@ -8,17 +8,18 @@
  * when the daemon wants it.
  */
 
-import type { FleetComponentView, McpOAuthConnection, McpOAuthFlow } from '@ferretry/protocol';
+import type { FleetComponentView } from '@ferretry/protocol';
+import type { McpOAuthConnection, McpOAuthFlow } from '@ferretry/plugin-mcp/contract';
 import { Lock } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { cn } from '../../../lib/class-names.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { cn } from '@ferretry/app';
+import { Button } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { readMcpSignIns, signOutMcp, startMcpSignIn } from '../mcp-auth-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
-import { CatalogNote, Hint, Section } from './catalog-ui.tsx';
+import { CatalogNote, Hint, Section } from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 import { issuerHost, mcpRedirectUri, mcpSignInStatus, type McpSignInTone } from './mcp-sign-in-model.ts';
 import { type McpSignInChannelFactory, McpSignInSheet } from './mcp-sign-in-sheet.tsx';
 

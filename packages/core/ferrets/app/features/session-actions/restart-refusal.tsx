@@ -12,9 +12,9 @@
  * restart looks like.
  */
 
-import type { ContextDowngrade, MigrationRefusal, SessionView } from '@ferretry/protocol';
+import type { ContextDowngrade, MigrationRefusal, SessionView } from '../../../contract/index.ts';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import { downgradeSentence } from './context-downgrade.ts';
 import {
   type PausedRestart,

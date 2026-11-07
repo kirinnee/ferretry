@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { FleetCredentialList, FleetMachineView, FleetRunningSession, IFyApiClient } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { FleetCredentialList, FleetMachineView, FleetRunningSession } from '@ferretry/protocol';
+import type { IFyApiClient } from '@ferretry/app';
+import { FyHttpError } from '@ferretry/app';
 import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import {
   APPLIED,
   type Call,
@@ -20,7 +21,7 @@ import {
   STUDIO,
   scripted,
   stagedFrom,
-} from '../account-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import { getSessionCompactAt, patchSessionCompactAt } from '../../../../src/lib/compact-at-api.ts';
-import { type DaemonFetch, DaemonResponseError } from '../../../../src/lib/runtime-models.ts';
-import { schemaValidSessionView } from '../../../support/schema-valid-sessions.ts';
+import { getSessionCompactAt, patchSessionCompactAt } from '../../../../../../../plugins/conversation/app/lib/compact-at-api.ts';
+import { type DaemonFetch, DaemonResponseError } from '../../../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { schemaValidSessionView } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
 

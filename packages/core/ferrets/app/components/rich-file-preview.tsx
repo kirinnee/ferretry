@@ -21,10 +21,10 @@
 
 import { Download, ExternalLink } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
+import { ExternalLink as ExternalAnchor } from '../../../../plugins/browsers/app/features/browser/external-link.tsx';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
+import { useDaemonFetch } from '@ferretry/app';
 import { fsApi } from './files-api.ts';
 import { StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';

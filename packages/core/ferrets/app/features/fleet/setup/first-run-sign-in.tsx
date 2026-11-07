@@ -13,7 +13,7 @@
 import type { FleetCredentialView } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
 import { readFleetCredentials } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';

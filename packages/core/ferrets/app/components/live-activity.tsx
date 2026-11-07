@@ -23,14 +23,14 @@
  * page's pane read, whichever is further along, and count up to each new reading.
  */
 
-import type { SessionLiveActivity } from '@ferretry/protocol';
+import type { SessionLiveActivity } from '../../contract/index.ts';
 import { useEffect, useState } from 'react';
-import { type LiveScheduler, useCountUp, useLiveElapsed } from '../hooks/use-live-counter.ts';
+import { type LiveScheduler, useCountUp, useLiveElapsed } from '@ferretry/app';
 import { formatElapsedSeconds, formatTokenCount, liveReadout } from '../lib/live-counter.ts';
 import { type PaneActivity, paneActivityDetail, parsePaneActivity } from '../lib/pane-activity.ts';
 import { type PaneReading, UNREAD_PANE } from '../lib/session-activity.ts';
-import { Spinner } from './spinner.tsx';
-import { thinkingActivityLabel } from './thinking-indicator.tsx';
+import { Spinner } from '@ferretry/app';
+import { thinkingActivityLabel } from '../../../../plugins/conversation/app/components/thinking-indicator.tsx';
 
 /** Reads the agent's pane as it is right now. */
 export type PaneFrameReader = (signal: AbortSignal) => Promise<string>;

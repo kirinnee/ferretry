@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { ReactNode } from 'react';
 import { INFO_TABS, type InfoTab } from '../../../../../app/features/session-info/info-model.ts';
 import { InfoPanel, type InfoPanelProps } from '../../../../../app/features/session-info/info-panel.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

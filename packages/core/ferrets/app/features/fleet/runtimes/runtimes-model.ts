@@ -12,13 +12,7 @@
  * - the words on the Launch button (R5).
  */
 
-import type {
-  FleetComponentCatalog,
-  FleetComponentView,
-  FleetLayeredProfileView,
-  FleetMachineView,
-  FleetRuntimeView,
-} from '@ferretry/protocol';
+import type { FleetComponentCatalog, FleetComponentView, FleetLayeredProfileView, FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
 import { HARNESS_NAMES, SCOPE_WORDS } from '../components/component-model.ts';
 import { HARNESS_SHORT, type HarnessKind, otherHarness, plural } from '../credentials/credentials-model.ts';
 

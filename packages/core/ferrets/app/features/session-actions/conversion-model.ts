@@ -5,9 +5,9 @@
  * say something the other does not.
  */
 
-import { type ConversionSummary, type MigrationRefusal, MigrationRefusedBodySchema } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
-import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
+import { type ConversionSummary, type MigrationRefusal, MigrationRefusedBodySchema } from '../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { HARNESS_SHORT, type HarnessKind, otherHarness } from '../fleet/credentials/credentials-model.ts';
 
 /** The name the small print uses: the CLI's own. */

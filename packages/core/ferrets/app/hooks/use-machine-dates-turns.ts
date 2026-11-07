@@ -1,8 +1,8 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { useCallback, useSyncExternalStore } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import type { AppStore } from '../lib/store.tsx';
-import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
+import type { AppStore } from '@ferretry/app';
+import { TERMINAL_STATUSES } from '@ferretry/app';
 
 /**
  * IS THIS COMPUTER RUNNING A FERRETRY TOO OLD TO AUTO-READ? Pure.

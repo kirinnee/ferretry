@@ -7,11 +7,11 @@
  * checks strip (health is one tile) or the sessions table (that page is one tap away).
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { ArrowRight, Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { unreadCount } from '../lib/agenda-inbox.ts';
-import { cn } from '../lib/class-names.ts';
+import { unreadCount } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAgendaPath,
@@ -20,11 +20,11 @@ import {
   daemonNewSessionPath,
   daemonSessionsPath,
   daemonWardenPath,
-} from '../lib/pages/routes.ts';
-import { RouteLink } from '../shell/route-link.tsx';
+} from '@ferretry/app';
+import { RouteLink } from '@ferretry/app';
 import { rowPreview, sessionRowPath, sessionsBarDirectory, sessionsBarNames } from '../shell/sessions-bar-model.ts';
-import { StatusMark } from '../shell/status-mark.tsx';
-import { UnreadBadge } from '../shell/unread-badge.tsx';
+import { StatusMark } from '@ferretry/app';
+import { UnreadBadge } from '@ferretry/app';
 import { type MachineHealth, machineCounts, topFerrets } from './machine-home-model.ts';
 import { sessionAge } from './session-dashboard-model.ts';
 

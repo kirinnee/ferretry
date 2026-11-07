@@ -7,9 +7,9 @@ import {
   TOP_FERRETS,
   topFerrets,
 } from '../../../app/components/machine-home-model.ts';
-import { sessionView } from '../support/sessions.ts';
-import { rawRow } from '../support/analytics-rows.ts';
-import { wardenAnomaly, wardenStatus } from '../support/warden.ts';
+import { sessionView } from '@ferretry/app/testing';
+import { rawRow } from '../../../../../plugins/usage/tests/support/app/analytics-rows.ts';
+import { wardenAnomaly, wardenStatus } from '../../../../../plugins/warden/tests/support/app/warden.ts';
 
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');
 const ago = (milliseconds: number): string => new Date(NOW - milliseconds).toISOString();

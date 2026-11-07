@@ -9,8 +9,8 @@
  */
 
 import type { FleetCredentialStatusWord, FleetMachineView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
-import { readFleetMachine } from '../catalog-api.ts';
+import { FyHttpError } from '@ferretry/app';
+import { readFleetMachine } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import type { FleetClient } from '../fleet-client.ts';
 
 export type MachineReach =

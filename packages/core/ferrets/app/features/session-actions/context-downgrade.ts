@@ -6,8 +6,8 @@
  * so the numbers are recovered from it when they can be and the field name never reaches the screen.
  */
 
-import { ContextDowngradeRefusedBodySchema, type ContextDowngrade } from '@ferretry/protocol';
-import type { FyHttpError } from '@ferretry/protocol/client';
+import { ContextDowngradeRefusedBodySchema, type ContextDowngrade } from '../../../contract/index.ts';
+import type { FyHttpError } from '@ferretry/app';
 
 const numberText = (tokens: number): string => tokens.toLocaleString('en-US');
 

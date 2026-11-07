@@ -1,4 +1,4 @@
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { describe, expect, it } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -15,9 +15,9 @@ import {
   Th,
 } from '../../../app/components/session-dashboard-rows.tsx';
 import { daemonId } from '../../../app/lib/daemon-connection.ts';
-import { DaemonUsageIndex } from '../../src/lib/usage.ts';
-import { render, run } from '../support/react.ts';
-import { sessionView } from '../support/sessions.ts';
+import { DaemonUsageIndex } from '../../../../../plugins/usage/app/lib/usage.ts';
+import { render, run } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = daemonId('dashboard-daemon');
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');

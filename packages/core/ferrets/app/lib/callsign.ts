@@ -15,7 +15,7 @@
  * living inside one feature is a dependency the other should never have to take.
  */
 
-import { displaySystemCallsign, isSystemCallsign } from '@ferretry/protocol';
+import { displaySystemCallsign, isSystemCallsign } from '../../contract/index.ts';
 
 /**
  * Title-cases a callsign slug for display: `ms-98` → `Ms-98`. A callsign Ferretry gave a session itself

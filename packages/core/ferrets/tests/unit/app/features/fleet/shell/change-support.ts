@@ -1,11 +1,6 @@
 /** A scripted daemon for the change suites: one answer (or failure) per path, every call recorded. */
 
-import type {
-  FleetAccountChangeOutcome,
-  FleetAccountChangeView,
-  FleetMachineAuthority,
-  FleetMachineView,
-} from '@ferretry/protocol';
+import type { FleetAccountChangeOutcome, FleetAccountChangeView, FleetMachineAuthority, FleetMachineView } from '@ferretry/protocol';
 import type { z } from 'zod';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 

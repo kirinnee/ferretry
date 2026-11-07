@@ -16,21 +16,12 @@
  * daemon runs it again.
  */
 
-import type {
-  McpOAuthFlow,
-  SessionMcpAdded,
-  SessionMcpAddRequest,
-  SessionMcpDiffLine,
-  SessionMcpListing,
-  SessionMcpPreview,
-  SessionMcpPreviewRequest,
-  SessionMcpScope,
-} from '@ferretry/protocol';
+import type { McpOAuthFlow, SessionMcpAdded, SessionMcpAddRequest, SessionMcpDiffLine, SessionMcpListing, SessionMcpPreview, SessionMcpPreviewRequest, SessionMcpScope } from '@ferretry/plugin-mcp/contract';
 import { CheckCircle2, Plus, RotateCw } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
-import { cn } from '../../lib/class-names.ts';
-import { Button } from '../../shell/primitives.tsx';
-import type { ContextMcpSignInHost } from '../context-rail/context-rail-mcp.tsx';
+import { cn } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import type { ContextMcpSignInHost } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-mcp.tsx';
 import { mcpRedirectUri } from '../fleet/components/mcp-sign-in-model.ts';
 import { McpSignInSheet } from '../fleet/components/mcp-sign-in-sheet.tsx';
 import { startMcpSignIn } from '../fleet/mcp-auth-api.ts';

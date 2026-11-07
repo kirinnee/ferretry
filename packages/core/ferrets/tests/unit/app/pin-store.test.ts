@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { PinSnapshot } from '@ferretry/protocol';
+import type { PinSnapshot } from '../../../contract/index.ts';
 import should from 'should';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';

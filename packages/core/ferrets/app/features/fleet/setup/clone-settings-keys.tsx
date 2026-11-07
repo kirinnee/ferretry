@@ -7,8 +7,8 @@
  * is none here to show.
  */
 
-import type { CloneKeyChoice } from '@ferretry/protocol';
-import { Badge } from '../../../shell/primitives.tsx';
+import type { CloneKeyChoice } from '@ferretry/plugin-runtimes/contract';
+import { Badge } from '@ferretry/app';
 import {
   choiceFor,
   documentLabel,

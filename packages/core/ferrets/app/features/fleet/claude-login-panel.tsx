@@ -34,12 +34,12 @@
  * about the wrong risk teaches people to distrust the right ones.
  */
 
-import type { ClaudeLoginFlow, HarnessLoginLastCode } from '@ferretry/protocol';
+import type { ClaudeLoginFlow, HarnessLoginLastCode } from '@ferretry/plugin-logins/contract';
 import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import { cn } from '../../lib/class-names.ts';
-import { Button } from '../../shell/primitives.tsx';
-import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import { cn } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
 import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from './harness-login-model.ts';
 

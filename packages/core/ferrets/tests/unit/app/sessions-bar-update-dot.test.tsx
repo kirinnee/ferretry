@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const DAEMON = 'alpha' as DaemonId;
 

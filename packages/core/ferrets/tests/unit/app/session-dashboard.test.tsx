@@ -1,13 +1,13 @@
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SessionDashboard, type SessionDashboardProps } from '../../../app/components/session-dashboard.tsx';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
-import { render, run } from '../support/react.ts';
-import { sessionView } from '../support/sessions.ts';
+import { render, run } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const connection = daemonConnection({
   daemonId: 'dashboard-daemon',

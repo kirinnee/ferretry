@@ -9,7 +9,7 @@ import {
   startStepper,
   stepForward,
 } from '../../../../../../app/features/fleet/shell/stepper-model.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const flow: StepperFlowInput = {
   kind: 'add-runtime',

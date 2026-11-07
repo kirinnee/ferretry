@@ -7,8 +7,8 @@
 
 import { Lock } from 'lucide-react';
 import { useId } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { Textarea } from '../../../shell/primitives.tsx';
+import { cn } from '@ferretry/app';
+import { Textarea } from '@ferretry/app';
 import {
   type ComponentDraft,
   draftDefault,

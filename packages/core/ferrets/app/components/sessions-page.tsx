@@ -16,16 +16,16 @@
 
 import { useCallback, useEffect, useMemo } from 'react';
 
-import { AgendaNeedsYou } from '../features/agenda/agenda-inbox-page.tsx';
-import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
-import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-picker.ts';
-import { useAgendaInbox } from '../hooks/use-agenda-inbox.ts';
-import { DiskPressureNote } from './disk-pressure-note.tsx';
-import { useConnectionHealth } from '../hooks/use-connection-health.ts';
-import { useDensity } from '../hooks/use-density.ts';
-import { useGroupNeedsYou } from '../hooks/use-group-needs-you.ts';
+import { AgendaNeedsYou } from '../../../../plugins/agenda/app/features/agenda/agenda-inbox-page.tsx';
+import type { WardenReportRequest } from '../../../../plugins/warden/app/features/warden/warden-verdicts.tsx';
+import { useAccountPickerSlice, useMachineRosters } from '../../../../plugins/runtimes/app/hooks/use-account-picker.ts';
+import { useAgendaInbox } from '../../../../plugins/agenda/app/hooks/use-agenda-inbox.ts';
+import { DiskPressureNote } from '@ferretry/app';
+import { useConnectionHealth } from '../../../../plugins/connections/app/hooks/use-connection-health.ts';
+import { useDensity } from '@ferretry/app';
+import { useGroupNeedsYou } from '../../../../plugins/agenda/app/hooks/use-group-needs-you.ts';
 import { useFleetView } from '../hooks/use-fleet-view.ts';
-import { type LiveClockOptions, useLiveClock } from '../hooks/use-live-clock.ts';
+import { type LiveClockOptions, useLiveClock } from '@ferretry/app';
 import {
   browserScopeNavigation,
   enterProjectScope,
@@ -33,22 +33,22 @@ import {
   projectScopePath,
   type ScopeNavigation,
   useProjectScope,
-} from '../hooks/use-project-scope.ts';
-import { useProjects } from '../hooks/use-projects.ts';
-import { useMachinesUsage, useUsage } from '../hooks/use-usage.ts';
-import { useWardenStatus, type WardenStatusReader } from '../hooks/use-warden-status.ts';
-import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
+} from '../../../../plugins/projects/app/hooks/use-project-scope.ts';
+import { useProjects } from '../../../../plugins/projects/app/hooks/use-projects.ts';
+import { useMachinesUsage, useUsage } from '../../../../plugins/usage/app/hooks/use-usage.ts';
+import { useWardenStatus, type WardenStatusReader } from '../../../../plugins/warden/app/hooks/use-warden-status.ts';
+import type { DaemonAccountPickerStore } from '../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
-import type { ConnectionHealth, ConnectionHealthState } from '../lib/connection-health.ts';
-import type { DaemonControlsStore } from '../lib/controls.ts';
+import type { ConnectionHealth, ConnectionHealthState } from '../../../../plugins/connections/app/lib/connection-health.ts';
+import type { DaemonControlsStore } from '@ferretry/app';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { filterSessions, projectKeyFor } from '../lib/fleet-grouping.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { machineOutage } from '../lib/machine-outage.ts';
-import { useDiskPressure } from '../lib/use-disk-pressure.ts';
-import type { DaemonProjectsStore } from '../lib/projects-store.ts';
-import type { DaemonUsageStore } from '../lib/usage-store.ts';
-import type { NewSessionMachine } from '../shell/new-session-menu.tsx';
+import { useDiskPressure } from '@ferretry/app';
+import type { DaemonProjectsStore } from '../../../../plugins/projects/app/lib/projects-store.ts';
+import type { DaemonUsageStore } from '../../../../plugins/usage/app/lib/usage-store.ts';
+import type { NewSessionMachine } from '@ferretry/app';
 import { SessionDashboard, type SessionDashboardProps } from './session-dashboard.tsx';
 
 export interface SessionsPageProps {

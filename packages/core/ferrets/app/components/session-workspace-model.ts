@@ -1,16 +1,12 @@
-import {
-  type IFyApiClient,
-  type QueuedMessage,
-  type SessionView,
-  splitTranscriptImageMarkers,
-  type TranscriptImageMarker,
-} from '@ferretry/protocol';
-import { projectPackCalls } from '../lib/pack-calls.ts';
-import { projectDeliveries } from '../lib/peer-delivery.ts';
+import { type IFyApiClient } from '@ferretry/app';
+import { type QueuedMessage, splitTranscriptImageMarkers, type TranscriptImageMarker } from '@ferretry/protocol';
+import { type SessionView } from '../../contract/index.ts';
+import { projectPackCalls } from '../../../../plugins/packs/app/lib/pack-calls.ts';
+import { projectDeliveries } from '../../../../plugins/conversation/app/lib/peer-delivery.ts';
 import { isTerminalSessionStatus, type TranscriptEntry } from '../lib/session-screens.ts';
-import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
-import { classifySystemText } from '../lib/system-blocks.ts';
-import { IMAGE_READ_TOOL, type ToolResultData, type ToolUseData } from '../lib/tool-extract.ts';
+import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../../../../plugins/conversation/app/lib/slash-commands.ts';
+import { classifySystemText } from '../../../../plugins/conversation/app/lib/system-blocks.ts';
+import { IMAGE_READ_TOOL, type ToolResultData, type ToolUseData } from '../../../../plugins/conversation/app/lib/tool-extract.ts';
 import {
   EMPTY_HISTORY,
   historyLog,
@@ -24,9 +20,9 @@ import {
   withGap,
   withOlder,
   withTail,
-} from '../lib/transcript-history.ts';
-import { readUserMessage } from '../lib/user-message.ts';
-import { fieldHash } from './session-chat-model.ts';
+} from '../../../../plugins/conversation/app/lib/transcript-history.ts';
+import { readUserMessage } from '../../../../plugins/conversation/app/lib/user-message.ts';
+import { fieldHash } from '../../../../plugins/conversation/app/components/session-chat-model.ts';
 
 const LOG_HEADER = /^(?:\[(\d{2}:\d{2}:\d{2})\] )?(user|assistant|developer|system|tool)\/([a-z-]+):(?: (.*))?$/u;
 

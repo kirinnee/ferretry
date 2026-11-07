@@ -11,7 +11,7 @@
  * nobody should settle an ask without reading it.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
 

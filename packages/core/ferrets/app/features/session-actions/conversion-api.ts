@@ -5,17 +5,12 @@
  * The preview is a read — no request id, nothing written — and is PARSED through the shared schema, so
  * a body this page cannot read is a failed read rather than a claim about the conversation.
  */
-import {
-  type ConversionPreview,
-  ConversionPreviewRequestSchema,
-  ConversionPreviewSchema,
-  type IFyApiClient,
-  type SessionView,
-} from '@ferretry/protocol';
+import { type ConversionPreview, ConversionPreviewRequestSchema, ConversionPreviewSchema, type SessionView } from '../../../contract/index.ts';
+import { type IFyApiClient } from '@ferretry/app';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { daemonRequest } from '../../lib/daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from '../../lib/runtime-models.ts';
+import { daemonRequest } from '../../../../../plugins/connections/app/lib/daemon-transport.ts';
+import { type DaemonFetch, DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 /** Asks the daemon that owns the session what moving it onto `agent` would carry, or why it cannot. */
 export const readConversionPreview = async (

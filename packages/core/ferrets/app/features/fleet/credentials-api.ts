@@ -11,21 +11,7 @@
  * through the secret store (`putSecret`), never through anything here (docs/provider-presets.md).
  */
 
-import {
-  FLEET_PRESETS_PATH,
-  type FleetCredentialCheckRequest,
-  FleetCredentialCheckRequestSchema,
-  type FleetCredentialList,
-  FleetCredentialListSchema,
-  type FleetCredentialTestRequest,
-  FleetCredentialTestRequestSchema,
-  type FleetCredentialTestResult,
-  FleetCredentialTestResultSchema,
-  type FleetCredentialView,
-  FleetCredentialViewSchema,
-  type FleetProviderPresetCatalog,
-  FleetProviderPresetCatalogSchema,
-} from '@ferretry/protocol';
+import { FLEET_PRESETS_PATH, type FleetCredentialCheckRequest, FleetCredentialCheckRequestSchema, type FleetCredentialList, FleetCredentialListSchema, type FleetCredentialTestRequest, FleetCredentialTestRequestSchema, type FleetCredentialTestResult, FleetCredentialTestResultSchema, type FleetCredentialView, FleetCredentialViewSchema, type FleetProviderPresetCatalog, FleetProviderPresetCatalogSchema } from '@ferretry/protocol';
 import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_CREDENTIALS_PATH = '/v1/fleet/credentials';

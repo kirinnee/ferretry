@@ -22,7 +22,7 @@
  * waiting, finished, starting — and this must never contradict one of them.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import type { PaneActivity } from './pane-activity.ts';
 
 /** One read of the agent's pane: whether a frame was read at all, and the status line it showed. */

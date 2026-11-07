@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useMachineOrder } from '../../../app/hooks/use-machine-order.ts';
-import { DaemonControlsStore } from '../../src/lib/controls.ts';
+import { DaemonControlsStore } from '@ferretry/app';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
-import { interact, type Mounted, mount } from '../support/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 
 const [A, B] = ['alpha', 'beta'] as DaemonId[] as [DaemonId, DaemonId];
 

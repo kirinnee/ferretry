@@ -6,23 +6,9 @@
  * chooses the words and the buttons for each of those answers, and never re-derives one.
  */
 
-import {
-  describeHarnessInstall,
-  HARNESS_CLI_LABELS,
-  HARNESS_UPDATE_CODES,
-  type HarnessCliLocation,
-  type HarnessCliView,
-  type HarnessUpdateJob,
-  HarnessUpdateUnverifiedBodySchema,
-  type HarnessUpdateView,
-  type HarnessVerification,
-  harnessInstallLabel,
-  harnessUpdateTargets,
-  installedHarnessVersion,
-  needsUnverifiedConsent,
-  type UpdateCheck,
-} from '@ferretry/protocol';
-import { ageWords, type JobTone } from './about-machine-model.ts';
+import { describeHarnessInstall, HARNESS_CLI_LABELS, type HarnessUpdateJob, type HarnessUpdateView, harnessInstallLabel, harnessUpdateTargets, installedHarnessVersion, needsUnverifiedConsent, type UpdateCheck } from '@ferretry/protocol';
+import { HARNESS_UPDATE_CODES, type HarnessCliLocation, type HarnessCliView, HarnessUpdateUnverifiedBodySchema, type HarnessVerification } from '@ferretry/plugin-claude-code/contract';
+import { ageWords, type JobTone } from '../../../../kernel/app/features/settings/about-machine-model.ts';
 
 /** The badge beside a harness's version: where it stands against what Ferretry verified. */
 export function verificationBadge(verification: HarnessVerification): {

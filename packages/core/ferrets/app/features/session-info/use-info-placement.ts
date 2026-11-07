@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import type { ContextRailTab } from '../context-rail/context-rail-model.ts';
+import type { ContextRailTab } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-model.ts';
 import type { InfoTab } from './info-model.ts';
 import type { InfoSheetSize } from './info-panel.tsx';
 

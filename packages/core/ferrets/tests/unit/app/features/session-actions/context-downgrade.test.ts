@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import { downgradeOf, downgradeSentence } from '../../../../../app/features/session-actions/context-downgrade.ts';
 
 describe('a smaller context window, in words', () => {

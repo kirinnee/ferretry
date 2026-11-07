@@ -3,7 +3,7 @@
  * kept, but only as a Details line.
  */
 import { describe, expect, it } from 'bun:test';
-import type { ConnectionHealthState } from '../../../src/lib/connection-health.ts';
+import type { ConnectionHealthState } from '../../../../../../plugins/connections/app/lib/connection-health.ts';
 import {
   machineOutage,
   NOT_ANSWERING_MARK,

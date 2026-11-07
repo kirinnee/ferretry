@@ -12,22 +12,12 @@
  * Every answer is PARSED through the shared schema: a preview decides what a person approves, so a body
  * this page cannot read is refused rather than shown.
  */
-import {
-  type SessionMcpAdded,
-  SessionMcpAddedSchema,
-  type SessionMcpAddRequest,
-  type SessionMcpListing,
-  SessionMcpListingSchema,
-  type SessionMcpPreview,
-  type SessionMcpPreviewRequest,
-  SessionMcpPreviewSchema,
-  type SessionMcpScope,
-} from '@ferretry/protocol';
+import { type SessionMcpAdded, SessionMcpAddedSchema, type SessionMcpAddRequest, type SessionMcpListing, SessionMcpListingSchema, type SessionMcpPreview, type SessionMcpPreviewRequest, SessionMcpPreviewSchema, type SessionMcpScope } from '@ferretry/plugin-mcp/contract';
 import type { z } from 'zod';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { daemonRequest } from '../../lib/daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from '../../lib/runtime-models.ts';
+import { daemonRequest } from '../../../../../plugins/connections/app/lib/daemon-transport.ts';
+import { type DaemonFetch, DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('MCP scope must belong to the requested daemon');

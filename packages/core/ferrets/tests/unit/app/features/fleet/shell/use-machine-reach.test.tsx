@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import { type ReactElement, useEffect } from 'react';
 import type { FleetClient, FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
 import {
@@ -7,10 +7,10 @@ import {
   type MachineReachState,
   useMachineReach,
 } from '../../../../../../app/features/fleet/shell/use-machine-reach.ts';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import { type DaemonId, daemonId } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { configChangeHarness } from '../../../config-change-support.tsx';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { configChangeHarness } from '../../../../../../../kernel/tests/unit/app/config-change-support.tsx';
 import { machineClient, machineView, pairing } from './machine-support.ts';
 
 const alpha = pairing('alpha', 'Alpha');

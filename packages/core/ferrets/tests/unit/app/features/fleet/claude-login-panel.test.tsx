@@ -6,10 +6,10 @@
  * parameterised suite over both would be evidence about a shape rather than about either sign-in.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { ClaudeLoginFlow } from '@ferretry/protocol';
+import type { ClaudeLoginFlow } from '@ferretry/plugin-logins/contract';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { ClaudeLoginPanel } from '../../../../../app/features/fleet/claude-login-panel.tsx';
-import { render, run } from '../../../support/react.ts';
+import { render, run } from '@ferretry/app/testing';
 import { CLAUDE_URL, claudeFlow } from './harness-login-support.ts';
 
 type FailedClaudeFlow = Extract<ClaudeLoginFlow, { state: 'failed' }>;

@@ -17,9 +17,9 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { clampMenuPosition, type MenuAnchor, type MenuPosition } from '../../shell/context-menu.tsx';
+import { useDialogFocus } from '@ferretry/app';
+import { BottomSheet } from '@ferretry/app';
+import { clampMenuPosition, type MenuAnchor, type MenuPosition } from '@ferretry/app';
 import { ActionDrawer } from './action-drawer.tsx';
 import { ActionForm, ActionSections } from './actions-menu.tsx';
 import { findSessionAction, type SessionActionFormHost, type SessionActionSection } from './registry.ts';

@@ -12,8 +12,8 @@ import {
 } from '../../../app/hooks/use-machines-poll.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import type { FleetFeedEnvironment } from '../../../app/lib/fleet-feed.ts';
-import '../support/dom.ts';
-import { interact, type Mounted, mount } from '../support/dom.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'alpha-device' });
 const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'beta-device' });

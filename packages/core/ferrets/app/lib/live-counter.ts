@@ -1,4 +1,4 @@
-import type { SessionLiveActivity } from '@ferretry/protocol';
+import type { SessionLiveActivity } from '../../contract/index.ts';
 import type { PaneActivity } from './pane-activity.ts';
 
 /**

@@ -1,20 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  CONVERSATION_ADOPT_PATH,
-  CONVERSATION_IMPORT_PATH,
-  type ConversationAdoptResult,
-  type FleetRuntimeView,
-  type ImportableConversation,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { CONVERSATION_ADOPT_PATH, CONVERSATION_IMPORT_PATH, type ConversationAdoptResult, type FleetRuntimeView, type ImportableConversation } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
 import type { z } from 'zod';
 import {
   ConversationPicker,
   ImportConversations,
 } from '../../../../../../app/features/fleet/conversations/conversation-picker.tsx';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
-import { runtime, STUDIO } from '../account-support.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { runtime, STUDIO } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { conversation, listing, NOW, settle, type } from './conversation-support.ts';
 
 const CLAUDE_LIST = `${CONVERSATION_IMPORT_PATH}?harness=claude&limit=5000`;

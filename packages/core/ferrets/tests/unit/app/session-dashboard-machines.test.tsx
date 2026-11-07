@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { SessionDashboard, type SessionDashboardProps } from '../../../app/components/session-dashboard.tsx';
-import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
 import { type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.invalid', deviceId: 'on-studio' });
 const LAPTOP = 'laptop' as DaemonId;

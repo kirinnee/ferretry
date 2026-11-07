@@ -8,8 +8,8 @@ import {
 } from '../../../app/components/rich-file-preview.tsx';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import type { DaemonFetch } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({
   daemonId: 'preview-daemon',

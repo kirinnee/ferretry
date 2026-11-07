@@ -24,10 +24,11 @@
  * for nothing; the next tick reads through whichever object is current anyway.
  */
 
-import { type FyEvent, MACHINE_AGENDA_ID } from '@ferretry/protocol';
+import { type FyEvent } from '../../contract/index.ts';
+import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import { useEffect, useRef } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
-import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
+import type { DaemonAgendaClient } from '../../../../plugins/agenda/app/lib/agenda-client.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import {
   browserFleetFeedEnvironment,

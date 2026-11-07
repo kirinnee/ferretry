@@ -15,22 +15,8 @@
  * to several, so nothing is cached at module scope.
  */
 
-import {
-  MCP_OAUTH_PATH,
-  type McpOAuthCompletion,
-  McpOAuthCompletionSchema,
-  McpOAuthCompleteRequestSchema,
-  type McpOAuthConnectionList,
-  McpOAuthConnectionListSchema,
-  type McpOAuthFlow,
-  type McpOAuthFlowCancelled,
-  McpOAuthFlowCancelledSchema,
-  McpOAuthFlowSchema,
-  type McpOAuthSignedOut,
-  McpOAuthSignedOutSchema,
-  type McpOAuthStartRequest,
-  McpOAuthStartRequestSchema,
-} from '@ferretry/protocol';
+import { MCP_OAUTH_PATH } from '@ferretry/protocol';
+import { type McpOAuthCompletion, McpOAuthCompletionSchema, McpOAuthCompleteRequestSchema, type McpOAuthConnectionList, McpOAuthConnectionListSchema, type McpOAuthFlow, type McpOAuthFlowCancelled, McpOAuthFlowCancelledSchema, McpOAuthFlowSchema, type McpOAuthSignedOut, McpOAuthSignedOutSchema, type McpOAuthStartRequest, McpOAuthStartRequestSchema } from '@ferretry/plugin-mcp/contract';
 import type { FleetClient } from './fleet-client.ts';
 
 const componentPath = (component: string): string => `${MCP_OAUTH_PATH}/${encodeURIComponent(component)}`;

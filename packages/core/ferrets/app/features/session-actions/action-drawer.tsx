@@ -13,7 +13,7 @@
 
 import { X } from 'lucide-react';
 import { type ReactNode, useId, useRef } from 'react';
-import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
+import { useDialogFocus } from '@ferretry/app';
 
 export function ActionDrawer({
   title,

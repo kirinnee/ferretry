@@ -21,19 +21,19 @@
  * instructions adds one more small glyph (Outdated, or Queued) at the head of the marks cell.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { Pin, PinOff } from 'lucide-react';
 import { type ReactNode, useContext, useState } from 'react';
-import { OutdatedGlyph, useOutdatedMarkState } from '../features/restart-outdated/outdated-mark.tsx';
+import { OutdatedGlyph, useOutdatedMarkState } from '../../../../plugins/updates/app/features/restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
-import { unreadCount } from '../lib/agenda-inbox.ts';
+import { unreadCount } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { MachineChip } from './machine-chip.tsx';
-import { RouteLink } from './route-link.tsx';
-import { useRowContextGesture } from './row-context-gesture.ts';
-import { SessionMenuContext } from './session-menu-context.ts';
-import { SessionPinContext } from './session-pin-context.ts';
+import { RouteLink } from '@ferretry/app';
+import { useRowContextGesture } from '@ferretry/app';
+import { SessionMenuContext } from '@ferretry/app';
+import { SessionPinContext } from '@ferretry/app';
 import {
   agendaWords,
   isStopped,
@@ -42,8 +42,8 @@ import {
   sessionsBarDirectory,
   sessionsBarNames,
 } from './sessions-bar-model.ts';
-import { StatusMark } from './status-mark.tsx';
-import { UnreadBadge } from './unread-badge.tsx';
+import { StatusMark } from '@ferretry/app';
+import { UnreadBadge } from '@ferretry/app';
 
 export function SessionsBarRow({
   view,

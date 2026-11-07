@@ -22,8 +22,9 @@
  * arrives after a switch, and a switch of machine starts from unread.
  */
 
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { IFyApiClient } from '@ferretry/app';
+import type { SessionView } from '../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionsBarArchived } from '../shell/sessions-bar-archived.tsx';

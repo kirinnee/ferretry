@@ -6,11 +6,11 @@
  * The answer is PARSED through the shared schema, so a body this page cannot read is a failed read
  * rather than a claim about the ferret.
  */
-import { type SessionRelaunchSettings, SessionRelaunchSettingsSchema } from '@ferretry/protocol';
+import { type SessionRelaunchSettings, SessionRelaunchSettingsSchema } from '../../../contract/index.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { daemonRequest } from '../../lib/daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from '../../lib/runtime-models.ts';
+import { daemonRequest } from '../../../../../plugins/connections/app/lib/daemon-transport.ts';
+import { type DaemonFetch, DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 /** Reads one ferret's answer from exactly the daemon that owns it. */
 export const readRelaunchSettings = async (

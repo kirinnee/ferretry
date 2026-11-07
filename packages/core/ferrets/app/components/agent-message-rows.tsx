@@ -1,4 +1,4 @@
-import { splitFerretryNotice } from '@ferretry/protocol';
+import { splitFerretryNotice } from '../../contract/index.ts';
 import {
   Activity,
   ArrowRightLeft,
@@ -12,21 +12,21 @@ import {
   SquareKanban,
 } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useId, useState } from 'react';
-import { linkNudgePullRequests } from '../lib/board-nudge.ts';
+import { linkNudgePullRequests } from '../../../../plugins/board/app/lib/board-nudge.ts';
 import { displayCallsign } from '../lib/callsign.ts';
-import { useCardPullRequests } from '../lib/card-pull-requests.tsx';
-import { ferretryLine, ferretryRest } from '../lib/ferretry-sender.ts';
-import type { InstructionsUpdate } from '../lib/instructions-update.ts';
-import { clockOfInstant } from '../lib/message-clock.ts';
-import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
-import { daemonSessionPath } from '../lib/pages/routes.ts';
-import type { PeerFrom } from '../lib/peer-message.ts';
-import { peerPreview } from '../lib/peer-preview.ts';
-import type { ResolvedAgent } from '../lib/references.ts';
+import { useCardPullRequests } from '../../../../plugins/board/app/lib/card-pull-requests.tsx';
+import { ferretryLine, ferretryRest } from '../../../../plugins/conversation/app/lib/ferretry-sender.ts';
+import type { InstructionsUpdate } from '../../../../plugins/updates/app/lib/instructions-update.ts';
+import { clockOfInstant } from '../../../../plugins/conversation/app/lib/message-clock.ts';
+import { ferretryChip, stripFraming } from '../../../../plugins/conversation/app/lib/message-framing.ts';
+import { daemonSessionPath } from '@ferretry/app';
+import type { PeerFrom } from '../../../../plugins/conversation/app/lib/peer-message.ts';
+import { peerPreview } from '../../../../plugins/conversation/app/lib/peer-preview.ts';
+import type { ResolvedAgent } from '../../../../plugins/conversation/app/lib/references.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
-import { Markdown } from './markdown.tsx';
-import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
-import { MessageFooter } from './send-receipt.tsx';
+import { Markdown } from '../../../../plugins/conversation/app/components/markdown.tsx';
+import { type ReferenceSurface, useReferenceSurface } from '../../../../plugins/conversation/app/components/reference-surface.tsx';
+import { MessageFooter } from '../../../../plugins/conversation/app/components/send-receipt.tsx';
 
 /**
  * The two transcript rows that arrive on the user channel but are NOT the person speaking.

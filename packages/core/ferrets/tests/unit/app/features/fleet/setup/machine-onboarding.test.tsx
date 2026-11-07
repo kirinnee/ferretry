@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ConfigFileView, FleetMachineView, SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import type { z } from 'zod';
 import type { FleetClient, FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
 import {
@@ -11,16 +11,16 @@ import {
   type MachineSetupProgress,
   ONBOARDING_START,
 } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
-import type { PairingClientFactory } from '../../../../../src/features/settings/add-device-settings.tsx';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
+import type { PairingClientFactory } from '../../../../../../../../plugins/access/app/features/settings/add-device-settings.tsx';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import type { ParakeetInstallSnapshot, ParakeetVoice } from '../../../../../src/lib/stt/parakeet-voice.ts';
-import { DEFAULT_STT_SETTINGS } from '../../../../../src/lib/stt/stt-settings.ts';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
-import { config as learningConfig } from '../../../../support/learning.ts';
-import { wardenConfig } from '../../../../support/warden.ts';
-import { fileView } from '../../config-files/config-files-support.ts';
-import { CREDENTIALS, PROFILES } from '../account-support.ts';
+import type { ParakeetInstallSnapshot, ParakeetVoice } from '../../../../../../../../plugins/voice/app/lib/stt/parakeet-voice.ts';
+import { DEFAULT_STT_SETTINGS } from '../../../../../../../../plugins/voice/app/lib/stt/stt-settings.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { config as learningConfig } from '@ferretry/app/testing';
+import { wardenConfig } from '../../../../../../../../plugins/warden/tests/support/app/warden.ts';
+import { fileView } from '../../../../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
+import { CREDENTIALS, PROFILES } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import {
   APPLY_PATH,
   bundle,

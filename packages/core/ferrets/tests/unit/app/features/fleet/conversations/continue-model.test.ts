@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../../../contract/index.ts';
 import {
   COMPUTER_LIMIT_FACTOR,
   CONTINUE_SOURCES,
@@ -13,7 +13,7 @@ import {
   keptConversationsQuery,
   sessionActivityAt,
 } from '../../../../../../app/features/fleet/conversations/continue-model.ts';
-import { sessionView } from '../../../../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 import { conversation, NOW } from './conversation-support.ts';
 
 const HOUR = 3_600_000;

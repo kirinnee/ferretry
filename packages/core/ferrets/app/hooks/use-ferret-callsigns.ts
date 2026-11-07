@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
-import type { AppStore } from '../lib/store.tsx';
+import type { AppStore } from '@ferretry/app';
 
 const NO_CALLSIGNS: ReadonlyMap<string, string> = new Map();
 const NO_FLEET = () => undefined;

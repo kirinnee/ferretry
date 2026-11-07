@@ -7,7 +7,7 @@
 
 import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Button } from '../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 
 export function FormField({
   id,

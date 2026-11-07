@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import type { HarnessLoginFlow } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { HarnessLoginFlow } from '@ferretry/plugin-logins/contract';
+import { FyHttpError } from '@ferretry/app';
 import { CredentialSignIn } from '../../../../../../app/features/fleet/credentials/credential-sign-in.tsx';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { CredentialLoginFlow } from '../../../../../../app/features/fleet/harness-login-api.ts';
 import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { type Call, claudeFlow, credential, machineWith, READS, STUDIO, scripted } from '../account-support.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { type Call, claudeFlow, credential, machineWith, READS, STUDIO, scripted } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';

@@ -12,11 +12,11 @@
  */
 
 import { type ReactNode, useCallback, useMemo, useRef } from 'react';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { daemonHomePath, daemonSettingsPath } from '../../../lib/pages/routes.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
-import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
+import { daemonHomePath, daemonSettingsPath } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import type { ParakeetVoice } from '../../../../../../plugins/voice/app/lib/stt/parakeet-voice.ts';
+import type { PairingClientFactory } from '../../../../../../plugins/access/app/features/settings/add-device-settings.tsx';
 import { distinctDaemonName } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { machineHash } from '../shell/machine-route.ts';

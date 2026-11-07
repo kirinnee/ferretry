@@ -8,12 +8,13 @@
  * with no quota reading says "usage unknown".
  */
 
-import type { AnalyticsAggregateResult, AnalyticsResponse, SessionView } from '@ferretry/protocol';
+import type { AnalyticsAggregateResult, AnalyticsResponse } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { BarChart3 } from 'lucide-react';
-import { contextReadout } from '../../lib/context-ring.ts';
-import type { ResolvedQuota } from '../../lib/usage.ts';
-import { quotaMoneyText, quotaResetsIn } from '../../shell/quota-readout.tsx';
-import { formatTokens, formatUsd } from '../analytics/analytics-overview.ts';
+import { contextReadout } from '@ferretry/app';
+import type { ResolvedQuota } from '../../../../../plugins/usage/app/lib/usage.ts';
+import { quotaMoneyText, quotaResetsIn } from '../../../../../plugins/usage/app/shell/quota-readout.tsx';
+import { formatTokens, formatUsd } from '../../../../../plugins/usage/app/features/analytics/analytics-overview.ts';
 import { INFO_HINT } from './info-model.ts';
 import { InfoMeter, InfoRow, InfoSection } from './info-parts.tsx';
 

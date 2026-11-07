@@ -14,10 +14,10 @@ import {
   sessionAccountLabel,
   sessionCapableAccountOptions,
 } from '../../../app/components/daemon-picker-model.ts';
-import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import type { FleetProject } from '../../../app/lib/fleet-grouping.ts';
-import { sessionView } from '../support/sessions.ts';
-import { pickerHealth } from './picker-support.ts';
+import { sessionView } from '@ferretry/app/testing';
+import { pickerHealth } from '@ferretry/app/testing';
 
 const CLAUDE_ID = 'rt-claude-auto-atelier';
 const CODEX_ID = 'rt-codex-auto-forge';

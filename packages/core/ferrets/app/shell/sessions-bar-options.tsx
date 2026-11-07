@@ -9,11 +9,11 @@
 
 import { Check, Ellipsis, RotateCw } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { restartButtonLabel } from '../features/restart-outdated/outdated-model.ts';
-import type { RestartOutdated } from '../features/restart-outdated/restart-outdated-strip.tsx';
-import { useInputModality } from '../hooks/use-input-modality.ts';
-import type { Density } from '../lib/controls.ts';
-import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
+import { restartButtonLabel } from '../../../../plugins/updates/app/features/restart-outdated/outdated-model.ts';
+import type { RestartOutdated } from '../../../../plugins/updates/app/features/restart-outdated/restart-outdated-strip.tsx';
+import { useInputModality } from '@ferretry/app';
+import type { Density } from '@ferretry/app';
+import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '@ferretry/app';
 
 const mark = (on: boolean) =>
   on ? <Check aria-hidden="true" size={14} /> : <span aria-hidden="true" className="inline-block w-[14px]" />;

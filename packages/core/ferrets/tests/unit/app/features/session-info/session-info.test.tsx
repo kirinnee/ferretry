@@ -5,25 +5,19 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import type {
-  AnalyticsResponse,
-  BrowserStatus,
-  ManagedWorktreeView,
-  McpInventory,
-  SessionRelaunchSettings,
-  TerminalListView,
-  WardenVerdict,
-} from '@ferretry/protocol';
+import type { AnalyticsResponse, BrowserStatus, ManagedWorktreeView, TerminalListView, WardenVerdict } from '@ferretry/protocol';
+import type { McpInventory } from '@ferretry/plugin-mcp/contract';
+import type { SessionRelaunchSettings } from '../../../../../contract/index.ts';
 import {
   SessionInfo,
   type SessionInfoPorts,
   type SessionInfoProps,
 } from '../../../../../app/features/session-info/session-info.tsx';
 import { type InfoPlacement, useInfoPlacement } from '../../../../../app/features/session-info/use-info-placement.ts';
-import { NO_SURFACE_DRIVING } from '../../../../src/features/workspace/use-surface-driving.ts';
-import { interact, type Mounted, must } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
-import { DOCS, MCP, mcpServer, SKILLS } from '../context-rail/context-rail-fixtures.ts';
+import { NO_SURFACE_DRIVING } from '../../../../../../../plugins/layouts/app/features/workspace/use-surface-driving.ts';
+import { interact, type Mounted, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
+import { DOCS, MCP, mcpServer, SKILLS } from '../../../../../../../plugins/conversation/tests/unit/app/features/context-rail/context-rail-fixtures.ts';
 import { mountSettled, settle } from '../fleet/components/view-support.tsx';
 
 const NOW = Date.parse('2026-10-16T10:00:00.000Z');

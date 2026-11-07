@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../../contract/index.ts';
 import { useCompactAtSessionActions } from '../../../../../app/features/session-actions/compact-at-session-actions.tsx';
 import type { SessionActionEntry, SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import type { DaemonFetch } from '../../../../src/lib/runtime-models.ts';
-import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
-import { schemaValidSessionView } from '../../../support/schema-valid-sessions.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import type { DaemonFetch } from '../../../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { interact, mount, must, type Mounted } from '@ferretry/app/testing';
+import { schemaValidSessionView } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
 

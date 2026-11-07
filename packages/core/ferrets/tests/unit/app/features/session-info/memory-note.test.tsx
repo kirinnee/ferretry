@@ -3,7 +3,7 @@ import type { LimitsView } from '@ferretry/protocol';
 import { cgroupConfigView } from '../../../../../protocol/tests/fixtures.ts';
 import { InfoAbout } from '../../../../../app/features/session-info/info-about.tsx';
 import { memoryNote } from '../../../../../app/features/session-info/memory-note.ts';
-import { render } from '../../../support/react.ts';
+import { render } from '@ferretry/app/testing';
 
 const view = (over: Partial<LimitsView>): LimitsView => ({ ...cgroupConfigView, ...over });
 

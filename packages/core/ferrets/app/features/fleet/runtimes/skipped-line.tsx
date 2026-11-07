@@ -6,7 +6,7 @@
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useId, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import { type SkippedItem, skippedCountLine } from '../shell/skipped-model.ts';
 
 export function SkippedLine({

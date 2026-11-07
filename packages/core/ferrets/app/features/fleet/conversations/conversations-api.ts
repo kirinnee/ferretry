@@ -8,20 +8,8 @@
  * never a whole transcript.
  */
 
-import {
-  CONVERSATION_ADOPT_PATH,
-  CONVERSATION_IMPORT_PATH,
-  type ConversationAdoptRequest,
-  ConversationAdoptRequestSchema,
-  type ConversationAdoptResult,
-  ConversationAdoptResultSchema,
-  type ConversationImportListing,
-  ConversationImportListingSchema,
-  type ConversationImportQuery,
-  type ConversationPreview,
-  ConversationPreviewSchema,
-  type Harness,
-} from '@ferretry/protocol';
+import { CONVERSATION_ADOPT_PATH, CONVERSATION_IMPORT_PATH, type ConversationAdoptRequest, ConversationAdoptRequestSchema, type ConversationAdoptResult, ConversationAdoptResultSchema, type ConversationImportListing, ConversationImportListingSchema, type ConversationImportQuery, type ConversationPreview, ConversationPreviewSchema } from '@ferretry/protocol';
+import { type Harness } from '../../../../contract/index.ts';
 import type { FleetClient } from '../fleet-client.ts';
 import { listingPath } from './conversation-picker-model.ts';
 

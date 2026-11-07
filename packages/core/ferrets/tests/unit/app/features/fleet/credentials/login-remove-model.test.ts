@@ -15,7 +15,7 @@ import {
   switchTargets,
   usedBySentence,
 } from '../../../../../../app/features/fleet/credentials/login-remove-model.ts';
-import { credential, machine, runtime, withStatus } from '../account-support.ts';
+import { credential, machine, runtime, withStatus } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const OLD = credential({ id: 'kirin-old', usedBy: ['alpha', 'beta'] });
 const WORK = credential({ id: 'kirin-work' });

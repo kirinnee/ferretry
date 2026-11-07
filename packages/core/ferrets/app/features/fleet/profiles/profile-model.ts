@@ -16,18 +16,8 @@
  * Pure.
  */
 
-import {
-  type FleetAccountChange,
-  type FleetComponentKind,
-  FleetComponentNameSchema,
-  type FleetComponentView,
-  type FleetHarnessScope,
-  type FleetLayeredProfileView,
-  type FleetProfileScope,
-  type FleetResolvedEntry,
-  type FleetRuntimeView,
-} from '@ferretry/protocol';
-import type { AccountCatalog } from '../components/account-catalog.ts';
+import { type FleetAccountChange, type FleetComponentKind, FleetComponentNameSchema, type FleetComponentView, type FleetHarnessScope, type FleetLayeredProfileView, type FleetProfileScope, type FleetResolvedEntry, type FleetRuntimeView } from '@ferretry/protocol';
+import type { AccountCatalog } from '../../../../../../plugins/accounts/app/features/fleet/components/account-catalog.ts';
 import {
   type CatalogHarness,
   COMPONENT_KINDS,

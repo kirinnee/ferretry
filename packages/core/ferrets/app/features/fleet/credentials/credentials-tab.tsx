@@ -9,16 +9,16 @@
 import type { FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
+import { OLLAMA_PRESET_ID } from '../../../../../../plugins/runtimes/app/lib/local-models.ts';
+import { Badge, Button } from '@ferretry/app';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { checkFleetCredential } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from '../runtimes/machine-data.ts';
-import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
-import { AccountStatus, ProviderQuota } from '../shell/account-status.tsx';
+import { runtimeActionRefusal } from '../../../../../../plugins/runtimes/app/features/fleet/runtimes/runtime-actions-model.ts';
+import { AccountStatus, ProviderQuota } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { DisableSwitch } from '../shell/disable-switch.tsx';
@@ -46,7 +46,7 @@ import {
   usageBars,
   usageBarText,
 } from './credentials-model.ts';
-import { LocalModelsPanel } from './local-models-panel.tsx';
+import { LocalModelsPanel } from '../../../../../../plugins/runtimes/app/features/fleet/credentials/local-models-panel.tsx';
 import { METER_LABEL, METER_WORDS } from './meter-layout.ts';
 import { SIGN_OUT_VERSUS_REMOVE } from './login-remove-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';

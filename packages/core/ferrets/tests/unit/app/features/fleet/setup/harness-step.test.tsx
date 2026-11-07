@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  FleetLayeredProfileCatalogSchema,
-  type FleetLayeredProfileView,
-  type FleetMachineView,
-  type FleetSetupScan,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FleetLayeredProfileCatalogSchema, type FleetLayeredProfileView, type FleetMachineView, type FleetSetupScan } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
 import { useState } from 'react';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
@@ -13,8 +8,8 @@ import type { HarnessAnswers } from '../../../../../../app/features/fleet/setup/
 import { OnboardingHarnessStep, providerProfile } from '../../../../../../app/features/fleet/setup/harness-step.tsx';
 import type { SetupHarness } from '../../../../../../app/features/fleet/setup/setup-words.ts';
 import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
-import { profile as profileView } from '../account-support.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { profile as profileView } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { PROVIDERS } from '../credentials/environment-support.ts';
 import {
   APPLY_PATH,

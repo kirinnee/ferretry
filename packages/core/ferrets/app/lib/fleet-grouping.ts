@@ -51,9 +51,10 @@
  * as another.
  */
 
-import type { ProjectInfo, SessionView } from '@ferretry/protocol';
-import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
-import type { UiControls } from './controls.ts';
+import type { ProjectInfo } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
+import { TERMINAL_STATUSES } from '@ferretry/app';
+import type { UiControls } from '@ferretry/app';
 import type { DaemonFleetSlice } from './fleet-store.ts';
 
 /**

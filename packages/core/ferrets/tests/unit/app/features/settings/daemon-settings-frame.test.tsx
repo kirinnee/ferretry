@@ -21,13 +21,13 @@ import {
   DaemonSettingsFrame,
   type DaemonSettingsTabDefinition,
 } from '../../../../../app/features/settings/daemon-settings-frame.tsx';
-import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../plugins/connections/app/lib/connections.ts';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { needsNewerFerretry, UPDATE_MACHINE_WHERE } from '../../../../../app/lib/machine-update-words.ts';
-import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
-import { interact, mount, must } from '../../../support/dom.ts';
-import { healthOf } from '../../../support/health.ts';
-import { render, run } from '../../../support/react.ts';
+import { DaemonClientProvider } from '@ferretry/app';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { healthOf } from '@ferretry/app/testing';
+import { render, run } from '@ferretry/app/testing';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',

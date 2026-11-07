@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { buildLineage, byNewestActivity, lineageLabel } from '../../../app/lib/lineage.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const session = (id: string, options: { parent?: string; teammate?: string; name?: string; activity?: string } = {}) =>
   sessionView(id, {

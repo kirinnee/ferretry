@@ -1,21 +1,22 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
-import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/protocol';
+import type { SessionView, StartSessionRequest } from '../../../contract/index.ts';
+import type { UsageFeedView } from '@ferretry/app';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactTestInstance } from 'react-test-renderer';
 
 import { NewSessionPage, type NewSessionPageProps } from '../../../app/components/new-session-page.tsx';
-import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
-import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import { type DaemonConnection, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
-import { DaemonProjectsStore, daemonProjectsPort } from '../../src/lib/projects-store.ts';
-import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
-import { type DaemonUsageSlice, DaemonUsageStore, daemonUsagePort } from '../../src/lib/usage-store.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
-import { sessionView } from '../support/sessions.ts';
-import { pickerHealth } from './picker-support.ts';
+import { DaemonProjectsStore, daemonProjectsPort } from '../../../../../plugins/projects/app/lib/projects-store.ts';
+import type { DaemonFetch } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { type DaemonUsageSlice, DaemonUsageStore, daemonUsagePort } from '../../../../../plugins/usage/app/lib/usage-store.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { render, run, runAsync } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
+import { pickerHealth } from '@ferretry/app/testing';
 
 const connection = daemonConnection({
   daemonId: 'daemon/a',

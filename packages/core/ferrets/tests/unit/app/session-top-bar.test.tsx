@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { HarnessDialog, PermissionRequest, SessionView } from '@ferretry/protocol';
+import type { HarnessDialog, SessionView } from '../../../contract/index.ts';
+import type { PermissionRequest } from '@ferretry/plugin-claude-code/contract';
 import { SessionTopBar, sessionDisplayName, sessionTitle } from '../../../app/components/session-top-bar.tsx';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

@@ -21,19 +21,19 @@ import type {
   AccountPickerHealthCatalog,
   PickerAccount,
   PickerAccountHealth,
-} from '../../src/lib/account-picker-catalog.ts';
+} from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import {
   type DaemonAccountPickerPort,
   type DaemonAccountPickerSlice,
   DaemonAccountPickerStore,
-} from '../../src/lib/account-picker-store.ts';
+} from '../../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import type { FleetProject } from '../../../app/lib/fleet-grouping.ts';
 import type { DaemonFleetSlice } from '../../../app/lib/fleet-store.ts';
-import type { DaemonProjectsSlice } from '../../src/lib/projects-store.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
-import { pickerHealth } from './picker-support.ts';
+import type { DaemonProjectsSlice } from '../../../../../plugins/projects/app/lib/projects-store.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
+import { pickerHealth } from '@ferretry/app/testing';
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
 

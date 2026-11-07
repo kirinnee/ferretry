@@ -18,17 +18,7 @@
  * from a machine that was broken into is how a command gets planted on the others.
  */
 
-import {
-  type CloneAgentRuntime,
-  type CloneRunnable,
-  cloneAgentRuntimes,
-  cloneBundleProblem,
-  cloneRunnables,
-  type FleetCloneBundle,
-  type FleetCredentialView,
-  type FleetMachineView,
-  suggestCloneDefault,
-} from '@ferretry/protocol';
+import { type CloneAgentRuntime, type CloneRunnable, cloneAgentRuntimes, cloneBundleProblem, cloneRunnables, type FleetCloneBundle, type FleetCredentialView, type FleetMachineView, suggestCloneDefault } from '@ferretry/protocol';
 import type { MachineReach } from '../shell/machine-reach.ts';
 import type { StepperStep } from '../shell/stepper-model.ts';
 import { countWords, SETUP_HARNESSES, type SetupHarness } from './setup-words.ts';

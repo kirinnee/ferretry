@@ -3,8 +3,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type InfoRelaunchRead, InfoRelaunchRow } from '../../../../../app/features/session-info/info-relaunch.tsx';
 import { InfoRuntime } from '../../../../../app/features/session-info/info-runtime.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

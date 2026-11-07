@@ -1,20 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  DAEMON_FEATURES,
-  type ConfigFileView,
-  type FleetBudgetPeriodView,
-  type FleetCredentialBudget,
-  type FleetCredentialView,
-} from '@ferretry/protocol';
+import { DAEMON_FEATURES, type ConfigFileView, type FleetBudgetPeriodView, type FleetCredentialBudget, type FleetCredentialView } from '@ferretry/protocol';
 import { BUDGET_UPDATE_WORDS } from '../../../../../../app/features/fleet/credentials/budget-editor.tsx';
 import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
-import type { FyApiClient } from '@ferretry/protocol/client';
-import { DaemonClientProvider } from '../../../../../src/lib/store.tsx';
-import { healthOf } from '../../../../support/health.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { httpError } from '../../config-files/config-files-support.ts';
-import { type Call, CREDENTIALS, credential, NOW, READS, STUDIO, scripted, withStatus } from '../account-support.ts';
+import type { FyApiClient } from '@ferretry/app';
+import { DaemonClientProvider } from '@ferretry/app';
+import { healthOf } from '@ferretry/app/testing';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { httpError } from '../../../../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
+import { type Call, CREDENTIALS, credential, NOW, READS, STUDIO, scripted, withStatus } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const LIST = 'GET /v1/fleet/credentials';
 const GET_MACHINE_FILE = 'GET /v1/config/file?path=machine.yaml';

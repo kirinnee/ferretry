@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, MAX_PIN_NOTE_LENGTH, type PinActionRequest } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { MAX_PIN_NOTE_LENGTH, type PinActionRequest } from '../../../contract/index.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import { applyPinAction, DaemonPinClient, fetchPinSnapshot, pinPath } from '../../../app/lib/pin-client.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });

@@ -12,7 +12,7 @@ import {
 } from '../../../app/lib/all-machines.ts';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import type { DaemonFleetSlice } from '../../../app/lib/fleet-store.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const STUDIO = 'studio' as DaemonId;
 const LAPTOP = 'laptop' as DaemonId;

@@ -12,7 +12,7 @@
  * cancelled here (its owner holds the transport and may still use a late answer); only the waiting stops.
  */
 
-import type { ReadSender } from './shared-reads.ts';
+import type { ReadSender } from '../../../../plugins/catalogs/app/lib/shared-reads.ts';
 
 /** The timer, injected so no suite waits on a real clock. Returns how to cancel the run. */
 export type DeadlineSchedule = (run: () => void, delayMs: number) => () => void;

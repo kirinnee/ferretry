@@ -1,16 +1,16 @@
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { DAEMON_FEATURES } from '@ferretry/protocol';
-import type { FyApiClient } from '@ferretry/protocol/client';
+import type { FyApiClient } from '@ferretry/app';
 import type { z } from 'zod';
 import type { DaemonHealthRead } from '../../../app/lib/daemon-health.ts';
-import { DaemonClientProvider } from '../../src/lib/store.tsx';
+import { DaemonClientProvider } from '@ferretry/app';
 import { useDaemonHealth } from '../../../app/lib/use-daemon-health.ts';
-import { type Mounted, mount } from '../support/dom.ts';
-import { healthOf } from '../support/health.ts';
-import { runAsync } from '../support/react.ts';
-import { settleUntil } from '../support/settle.ts';
-import { alpha } from './features/config-files/config-files-support.ts';
+import { type Mounted, mount } from '@ferretry/app/testing';
+import { healthOf } from '@ferretry/app/testing';
+import { runAsync } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
+import { alpha } from '../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
 
 let shown: Mounted | null = null;
 let latest: DaemonHealthRead | null = null;

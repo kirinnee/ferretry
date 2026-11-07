@@ -8,20 +8,21 @@
  * been launched since — has nothing to check: the row says which.
  */
 
-import type { FleetComponentView, McpInventory, McpInventoryServer } from '@ferretry/protocol';
+import type { FleetComponentView } from '@ferretry/protocol';
+import type { McpInventory, McpInventoryServer } from '@ferretry/plugin-mcp/contract';
 import { useCallback } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { type ContextRead, useContextRead } from '../../context-rail/context-rail-parts.tsx';
-import { readMachineMcpServers } from '../../mcp/mcp-api.ts';
-import { plainFailure } from '../../mcp/mcp-model.ts';
+import { type ContextRead, useContextRead } from '../../../../../../plugins/conversation/app/features/context-rail/context-rail-parts.tsx';
+import { readMachineMcpServers } from '../../../../../../plugins/mcp/app/features/mcp/mcp-api.ts';
+import { plainFailure } from '../../../../../../plugins/mcp/app/features/mcp/mcp-model.ts';
 import {
   type McpServerActions,
   McpServerRow,
   PlainFailureText,
   useMcpServerActions,
-} from '../../mcp/mcp-server-row.tsx';
+} from '../../../../../../plugins/mcp/app/features/mcp/mcp-server-row.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { Hint, Section } from './catalog-ui.tsx';
+import { Hint, Section } from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 
 export interface MachineMcpHost {
   readonly connection: DaemonConnection;

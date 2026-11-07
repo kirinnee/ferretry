@@ -1,4 +1,4 @@
-import type { StartSessionRequest } from '@ferretry/protocol';
+import type { StartSessionRequest } from '../../contract/index.ts';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ContinueConversation } from '../features/fleet/conversations/continue-conversation.tsx';
@@ -6,30 +6,30 @@ import { Segmented } from '../features/fleet/conversations/conversation-picker.t
 import type { FleetClientFactory } from '../features/fleet/fleet-client.ts';
 import { machineHash } from '../features/fleet/shell/machine-route.ts';
 import { daemonDisplayName } from '../features/settings/daemon-settings.tsx';
-import { useProjectsSlice } from '../hooks/use-projects.ts';
-import { useUsage } from '../hooks/use-usage.ts';
-import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
-import { cn } from '../lib/class-names.ts';
+import { useProjectsSlice } from '../../../../plugins/projects/app/hooks/use-projects.ts';
+import { useUsage } from '../../../../plugins/usage/app/hooks/use-usage.ts';
+import type { DaemonAccountPickerStore } from '../../../../plugins/accounts/app/lib/account-picker-store.ts';
+import { cn } from '@ferretry/app';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
-import { FAST_COST_NOTE } from '../lib/fast-mode.ts';
+import { FAST_COST_NOTE } from '../../../../plugins/runtimes/app/lib/fast-mode.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import {
   canSubmitNewSession,
   emptyNewSessionDraft,
   type NewSessionDraft,
   submitNewSession,
-} from '../lib/pages/new-session.ts';
-import { daemonSessionPath, daemonHomePath, daemonSettingsPath } from '../lib/pages/routes.ts';
-import type { DaemonProjectsStore } from '../lib/projects-store.ts';
-import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
-import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
-import { PageThemeSwitch } from '../shell/theme-toggle.tsx';
+} from '@ferretry/app';
+import { daemonSessionPath, daemonHomePath, daemonSettingsPath } from '@ferretry/app';
+import type { DaemonProjectsStore } from '../../../../plugins/projects/app/lib/projects-store.ts';
+import type { DaemonUsageSlice, DaemonUsageStore } from '../../../../plugins/usage/app/lib/usage-store.ts';
+import { Button, Card, PanelBody, Textarea } from '@ferretry/app';
+import { PageThemeSwitch } from '@ferretry/app';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonProjectPicker } from './daemon-pickers.tsx';
-import { FastSwitch } from './fast-switch.tsx';
-import { ModelSelect } from './model-select.tsx';
-import { type ChosenRuntime, RuntimeButtons } from './runtime-buttons.tsx';
+import { FastSwitch } from '@ferretry/app';
+import { ModelSelect } from '../../../../plugins/runtimes/app/components/model-select.tsx';
+import { type ChosenRuntime, RuntimeButtons } from '../../../../plugins/runtimes/app/components/runtime-buttons.tsx';
 
 /**
  * The agent runtime a first run makes for Claude Code — the example a person can actually type.

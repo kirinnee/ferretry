@@ -8,10 +8,10 @@
  */
 
 import type { BoardTaskView } from '@ferretry/protocol';
-import type { BoardModel } from './board-model.ts';
-import { taskAsker } from './board-human.ts';
-import { isMine } from './board-model.ts';
-import { cardPlaces } from './board-view.ts';
+import type { BoardModel } from '../../../../plugins/board/app/lib/board-model.ts';
+import { taskAsker } from '../../../../plugins/board/app/lib/board-human.ts';
+import { isMine } from '../../../../plugins/board/app/lib/board-model.ts';
+import { cardPlaces } from '../../../../plugins/board/app/lib/board-view.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
 /** What a chat shows and proves about one card. */

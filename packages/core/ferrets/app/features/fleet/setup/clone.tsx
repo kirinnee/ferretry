@@ -26,41 +26,28 @@
  * now, and **Copy secrets from <source>…** for anything else, picked by name.
  */
 
-import {
-  CLONE_REVIEW_STALE,
-  CLONE_SOURCE_SECRETS_LIMIT,
-  type CloneChoice,
-  type CloneKeyChoice,
-  type CloneLoginTarget,
-  type CloneRunnable,
-  type CloneSettingsDoc,
-  type ConfigStatusView,
-  type FleetCloneBundle,
-  type FleetCloneReview,
-  type FleetCredentialView,
-  isSignInSecretName,
-  type SpeedupsView,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { CLONE_REVIEW_STALE, CLONE_SOURCE_SECRETS_LIMIT, type CloneChoice, type CloneKeyChoice, type CloneSettingsDoc } from '@ferretry/plugin-runtimes/contract';
+import { type CloneLoginTarget, type CloneRunnable, type ConfigStatusView, type FleetCloneBundle, type FleetCloneReview, type FleetCredentialView, isSignInSecretName, type SpeedupsView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import {
   configInvalidBody,
   confirmConfigChange,
   readConfigFile,
   readConfigStatus,
   writeConfigFile,
-} from '../../config-files/config-files-api.ts';
-import { copySecrets as sealSecretsAcross } from '../../secrets/secret-clone-api.ts';
-import { copyRefusalSentence } from '../../secrets/secret-clone-model.ts';
-import { SecretCopyLauncher } from '../../secrets/secret-copy-panel.tsx';
-import { listSecrets, putSecret } from '../../secrets/secrets-api.ts';
+} from '../../../../../kernel/app/features/config-files/config-files-api.ts';
+import { copySecrets as sealSecretsAcross } from '../../../../../../plugins/accounts/app/features/secrets/secret-clone-api.ts';
+import { copyRefusalSentence } from '../../../../../../plugins/accounts/app/features/secrets/secret-clone-model.ts';
+import { SecretCopyLauncher } from '../../../../../../plugins/accounts/app/features/secrets/secret-copy-panel.tsx';
+import { listSecrets, putSecret } from '../../../../../../plugins/accounts/app/features/secrets/secrets-api.ts';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
-import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { readFleetMachine, readFleetProfiles } from '../catalog-api.ts';
+import { readSpeedups } from '../../../../../../plugins/voice/app/features/speedups/speedups-api.ts';
+import { readFleetMachine, readFleetProfiles } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
 import { readFleetExport, recordCloneKeys, reviewFleetClone } from '../setup-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';

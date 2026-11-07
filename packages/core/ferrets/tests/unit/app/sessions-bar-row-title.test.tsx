@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { SessionsBarRow } from '../../../app/shell/sessions-bar-row.tsx';
-import { type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = 'alpha' as DaemonId;
 

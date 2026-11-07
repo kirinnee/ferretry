@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { MigrationRefusal, SessionView } from '@ferretry/protocol';
+import type { MigrationRefusal, SessionView } from '../../../../../contract/index.ts';
 import { useRestartRefusal } from '../../../../../app/features/session-actions/restart-refusal.tsx';
 import {
   RestartDowngradeRefused,
   RestartRefused,
   RestartUnresumable,
 } from '../../../../../app/features/session-actions/session-operations.ts';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

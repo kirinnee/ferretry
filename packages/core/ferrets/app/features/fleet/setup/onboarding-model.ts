@@ -18,7 +18,7 @@
 
 import type { WardenConfig } from '@ferretry/protocol';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
-import { daemonSettingsPath } from '../../../lib/pages/routes.ts';
+import { daemonSettingsPath } from '@ferretry/app';
 import { type MachineTabId, machineHash } from '../shell/machine-route.ts';
 import type { HarnessAnswers } from './harness-import-model.ts';
 import { machineItemHash } from './settings-route.ts';

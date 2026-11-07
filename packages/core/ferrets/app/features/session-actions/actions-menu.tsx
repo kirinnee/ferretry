@@ -19,9 +19,9 @@
 
 import { ChevronDown, LoaderCircle } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
-import { cn } from '../../lib/class-names.ts';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { useDialogFocus } from '@ferretry/app';
+import { cn } from '@ferretry/app';
+import { BottomSheet } from '@ferretry/app';
 import { ActionDrawer } from './action-drawer.tsx';
 import {
   findSessionAction,

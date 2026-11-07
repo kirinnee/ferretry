@@ -21,7 +21,7 @@ import {
   toggleStart,
   visibleConversations,
 } from '../../../../../../app/features/fleet/conversations/conversation-picker-model.ts';
-import { runtime } from '../account-support.ts';
+import { runtime } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { conversation, NOW } from './conversation-support.ts';
 
 describe('the headline of a row', () => {

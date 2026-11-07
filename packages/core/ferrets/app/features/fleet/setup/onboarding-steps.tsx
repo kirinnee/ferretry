@@ -16,32 +16,24 @@
  * - **Agent controls** — the Machine tab's own controls and default runtime sections.
  */
 
-import {
-  LearningConfigSchema,
-  type SpeedupsView,
-  type VoiceEngine,
-  type WardenConfig,
-  type WardenConfigPatch,
-  type WardenConfigView,
-  WardenConfigViewSchema,
-} from '@ferretry/protocol';
+import { LearningConfigSchema, type SpeedupsView, type VoiceEngine, type WardenConfig, type WardenConfigPatch, type WardenConfigView, WardenConfigViewSchema } from '@ferretry/protocol';
 import { QrCode } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { useLayoutMode } from '../../../hooks/use-layout-mode.ts';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { useParakeetVoice } from '../../../lib/store.tsx';
-import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../../lib/stt/browser-recognition.ts';
-import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
-import type { SttSettings, SttSettingsPatch } from '../../../lib/stt/stt-settings.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
-import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
-import { PairPhoneSheet } from '../../settings/pair-phone.tsx';
-import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
-import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { SpeedupsSurface } from '../../speedups/speedups-surface.tsx';
-import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
-import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
+import { useLayoutMode } from '../../../../../../plugins/layouts/app/hooks/use-layout-mode.ts';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
+import { useParakeetVoice } from '@ferretry/app';
+import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../../../../../plugins/browsers/app/lib/stt/browser-recognition.ts';
+import type { ParakeetVoice } from '../../../../../../plugins/voice/app/lib/stt/parakeet-voice.ts';
+import type { SttSettings, SttSettingsPatch } from '../../../../../../plugins/voice/app/lib/stt/stt-settings.ts';
+import { Button } from '@ferretry/app';
+import { readConfigFile, writeConfigFile } from '../../../../../kernel/app/features/config-files/config-files-api.ts';
+import type { PairingClientFactory } from '../../../../../../plugins/access/app/features/settings/add-device-settings.tsx';
+import { PairPhoneSheet } from '../../../../../../plugins/access/app/features/settings/pair-phone.tsx';
+import { VoiceEngineChoice } from '../../../../../../plugins/voice/app/features/settings/voice-engine-choice.tsx';
+import { readSpeedups } from '../../../../../../plugins/voice/app/features/speedups/speedups-api.ts';
+import { SpeedupsSurface } from '../../../../../../plugins/voice/app/features/speedups/speedups-surface.tsx';
+import { jevKeyStatus, WardenConfigCard } from '../../../../../../plugins/warden/app/features/warden/warden-config-card.tsx';
+import { wardenConfigPatchFrom } from '../../../../../../plugins/warden/app/features/warden/warden-settings-model.ts';
 import { AgentControlSection } from '../machine/settings-tab.tsx';
 import { DefaultRuntimeSection } from '../runtimes/default-runtime.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';

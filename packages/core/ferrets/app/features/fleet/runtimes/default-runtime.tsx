@@ -10,8 +10,8 @@
 
 import type { FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
 import { useEffect, useId, useState } from 'react';
-import { Button } from '../../../shell/primitives.tsx';
-import { readFleetRuntimes } from '../catalog-api.ts';
+import { Button } from '@ferretry/app';
+import { readFleetRuntimes } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupSection } from '../setup/setup-ui.tsx';

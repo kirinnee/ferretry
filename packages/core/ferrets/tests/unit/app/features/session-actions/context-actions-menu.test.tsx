@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { Copy, Plug, RotateCw, Server } from 'lucide-react';
 import { ContextActionsMenu } from '../../../../../app/features/session-actions/context-actions-menu.tsx';
 import type { SessionActionFormHost, SessionActionSection } from '../../../../../app/features/session-actions/registry.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

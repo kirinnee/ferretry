@@ -7,14 +7,15 @@
  * Shown by the onboarding step for a CLI once it has a runtime, and by Settings › Runtimes.
  */
 
-import type { ConversationAdoptResult, FleetRuntimeView, Harness, ImportableConversation } from '@ferretry/protocol';
+import type { ConversationAdoptResult, FleetRuntimeView, ImportableConversation } from '@ferretry/protocol';
+import type { Harness } from '../../../../contract/index.ts';
 import { CONVERSATION_LAUNCH_MAX } from '@ferretry/protocol';
 import { ChevronLeft } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { sessionStatusLabel } from '../../../lib/session-screens.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { useSetupAccess } from '../setup/setup-access.ts';
 import { SetupNote } from '../setup/setup-ui.tsx';

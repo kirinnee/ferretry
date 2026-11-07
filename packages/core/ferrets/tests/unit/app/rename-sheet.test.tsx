@@ -1,9 +1,9 @@
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { renameErrorsFor, renamePatch } from '../../../app/components/rename-sheet.tsx';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const source = (parent = 'lead'): SessionView =>
   sessionView('same-session', {

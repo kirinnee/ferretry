@@ -14,7 +14,7 @@ import {
   type CloneLogin,
   type CloneNeed,
 } from '../../../../../../app/features/fleet/setup/clone-settings-model.ts';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const mounts: Mounted[] = [];
 afterEach(async () => {

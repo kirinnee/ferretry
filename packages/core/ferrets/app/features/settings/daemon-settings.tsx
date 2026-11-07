@@ -10,13 +10,13 @@
 import type { ConnectionChoice } from '@ferretry/relay';
 import { ChevronDown, LoaderCircle, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
-import { useKeptDraft } from '../../hooks/use-kept-draft.ts';
-import { cn } from '../../lib/class-names.ts';
-import type { DaemonConnectionRecord } from '../../lib/connections.ts';
+import { useKeptDraft } from '../../../../../plugins/conversation/app/hooks/use-kept-draft.ts';
+import { cn } from '@ferretry/app';
+import type { DaemonConnectionRecord } from '../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { sameDaemonConnection } from '../../lib/daemon-connection.ts';
-import { PanelPath } from '../../shell/panel-typography.tsx';
-import { ChangedElsewhereNote } from './changed-elsewhere.tsx';
+import { PanelPath } from '@ferretry/app';
+import { ChangedElsewhereNote } from '@ferretry/app';
 
 const DAEMON_REACHABILITY_INTERVAL_MS = 30_000;
 

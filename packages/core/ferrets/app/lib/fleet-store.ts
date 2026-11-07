@@ -77,11 +77,11 @@
  *     marking the session fleet itself errored.
  */
 
-import type { SessionState, SessionView } from '@ferretry/protocol';
+import type { SessionState, SessionView } from '../../contract/index.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { type DeadlineSchedule, MachineDeadlineError, realSchedule, withDeadline } from './machine-deadline.ts';
-import { ListRefresh } from './list-refresh.ts';
+import { ListRefresh } from '@ferretry/app';
 
 /** Whether one daemon's session list has been read, and how that read ended. */
 type FleetLoadStatus = 'idle' | 'loading' | 'ready' | 'error';

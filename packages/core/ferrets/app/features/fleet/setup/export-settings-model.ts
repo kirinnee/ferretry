@@ -16,7 +16,8 @@
  * Pure: texts in, bytes out.
  */
 
-import { type ConfigStatusView, secretReference } from '@ferretry/protocol';
+import { type ConfigStatusView } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
 
 /** One file in the export, by its path relative to the configuration directory. */
 export interface ExportFile {

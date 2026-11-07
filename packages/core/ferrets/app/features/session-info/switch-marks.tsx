@@ -11,7 +11,7 @@
  */
 
 import { ListTodo, PawPrint, Shapes } from 'lucide-react';
-import { PassiveLearningMark } from '../learning/passive-learning.tsx';
+import { PassiveLearningMark } from '../../../../../plugins/lessons/app/features/learning/passive-learning.tsx';
 
 /** What each mark says in words: its accessible name, and the tooltip a pointer reads. */
 export const HYPERMEDIA_MARK_LABEL = 'Hypermedia on: may explain with diagrams, drawings, interactive pages and media';

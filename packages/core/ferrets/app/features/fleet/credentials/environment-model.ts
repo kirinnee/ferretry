@@ -8,13 +8,7 @@
  * quota source and the Test.
  */
 
-import type {
-  FleetAccountChange,
-  FleetCredentialList,
-  FleetCredentialTestAct,
-  FleetCredentialTestResult,
-  FleetProviderPresetView,
-} from '@ferretry/protocol';
+import type { FleetAccountChange, FleetCredentialList, FleetCredentialTestAct, FleetCredentialTestResult, FleetProviderPresetView } from '@ferretry/protocol';
 import type { HarnessKind } from './credentials-model.ts';
 
 /** One CLI a preset has a half for, and whether that half is offered here. */

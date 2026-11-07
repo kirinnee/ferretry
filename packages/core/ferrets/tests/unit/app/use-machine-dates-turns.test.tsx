@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { machineIsOlder, useMachineIsOlder } from '../../../app/hooks/use-machine-dates-turns.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../../app/lib/daemon-connection.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
-import type { AppStore } from '../../src/lib/store.tsx';
-import { render, runAsync } from '../support/react.ts';
-import { sessionView } from '../support/sessions.ts';
+import type { AppStore } from '@ferretry/app';
+import { render, runAsync } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 /** Is the connected computer too old to auto-read? Only a machine with live ferrets that carry no turn is. */
 

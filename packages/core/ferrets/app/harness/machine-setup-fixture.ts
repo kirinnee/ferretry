@@ -9,13 +9,8 @@
  * No value is held: a stored "secret" is its name and two instants, as the daemon answers.
  */
 
-import {
-  DEFAULT_LEARNING_CONFIG,
-  DEFAULT_WARDEN_CONFIG,
-  type SpeedupsView,
-  type WardenConfig,
-} from '@ferretry/protocol';
-import { harnessRuntime } from './account-model-catalog.ts';
+import { DEFAULT_LEARNING_CONFIG, DEFAULT_WARDEN_CONFIG, type SpeedupsView, type WardenConfig } from '@ferretry/protocol';
+import { harnessRuntime } from '../../../../plugins/accounts/app/harness/account-model-catalog.ts';
 
 const NOW = '2026-10-16T09:00:00.000Z';
 

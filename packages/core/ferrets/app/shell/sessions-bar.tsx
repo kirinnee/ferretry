@@ -24,7 +24,7 @@
  * starts, because the page it opened is underneath it.
  */
 
-import type { RestartRequest, RestartResult, SessionView } from '@ferretry/protocol';
+import type { RestartRequest, RestartResult, SessionView } from '../../contract/index.ts';
 import {
   ChartNoAxesCombined,
   ChevronDown,
@@ -38,19 +38,19 @@ import {
   X,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { MachineLearners } from '../features/learning/passive-learning.tsx';
+import type { MachineLearners } from '../../../../plugins/lessons/app/features/learning/passive-learning.tsx';
 import {
   type RestartOutdated,
   RestartOutdatedResult,
   useRestartOutdated,
-} from '../features/restart-outdated/restart-outdated-strip.tsx';
-import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
-import { RailDivider } from '../features/workspace/split-divider.tsx';
-import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
-import { useInputModality } from '../hooks/use-input-modality.ts';
+} from '../../../../plugins/updates/app/features/restart-outdated/restart-outdated-strip.tsx';
+import { pairPhoneLabel } from '../../../../plugins/access/app/features/settings/pair-phone.tsx';
+import { RailDivider } from '../../../../plugins/layouts/app/features/workspace/split-divider.tsx';
+import { useDialogFocus } from '@ferretry/app';
+import { useInputModality } from '@ferretry/app';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
-import { cn } from '../lib/class-names.ts';
-import type { Density, ModeFilter } from '../lib/controls.ts';
+import { cn } from '@ferretry/app';
+import type { Density, ModeFilter } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { FleetProject } from '../lib/fleet-grouping.ts';
 import {
@@ -60,15 +60,15 @@ import {
   daemonProjectsPath,
   daemonSettingsPath,
   daemonSharingPath,
-} from '../lib/pages/routes.ts';
-import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
-import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
+} from '@ferretry/app';
+import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../../../../plugins/layouts/app/lib/workspace-rail-preferences.ts';
+import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '@ferretry/app';
 import type { MoveMachine } from './machine-reorder.tsx';
-import { NewSessionMenu, withReach } from './new-session-menu.tsx';
-import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
-import { RouteLink } from './route-link.tsx';
-import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
-import { SessionPinContext, type TogglePin } from './session-pin-context.ts';
+import { NewSessionMenu, withReach } from '@ferretry/app';
+import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '@ferretry/app';
+import { RouteLink } from '@ferretry/app';
+import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from '@ferretry/app';
+import { SessionPinContext, type TogglePin } from '@ferretry/app';
 import { SessionsBarAgenda } from './sessions-bar-agenda.tsx';
 import { type SessionsBarArchived, SessionsBarArchivedFooter } from './sessions-bar-archived.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';

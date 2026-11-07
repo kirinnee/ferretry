@@ -1,19 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type {
-  SessionMcpAdded,
-  SessionMcpAddRequest,
-  SessionMcpListing,
-  SessionMcpPreview,
-  SessionMcpPreviewRequest,
-  SessionMcpScope,
-} from '@ferretry/protocol';
+import type { SessionMcpAdded, SessionMcpAddRequest, SessionMcpListing, SessionMcpPreview, SessionMcpPreviewRequest, SessionMcpScope } from '@ferretry/plugin-mcp/contract';
 import { MCP_OAUTH_PATH } from '@ferretry/protocol';
-import type { ContextMcpSignInHost } from '../../../../src/features/context-rail/context-rail-mcp.tsx';
+import type { ContextMcpSignInHost } from '../../../../../../../plugins/conversation/app/features/context-rail/context-rail-mcp.tsx';
 import { AddMcpForm, type AddMcpPorts } from '../../../../../app/features/session-actions/add-mcp-form.tsx';
 import type { SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
-import { settleUntil } from '../../../support/settle.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
 import {
   CALLBACK,
   completion,

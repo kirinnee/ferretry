@@ -1,4 +1,5 @@
-import type { FyEvent, IFyApiClient, SessionLiveActivity, SessionTranscriptMoved } from '@ferretry/protocol';
+import type { FyEvent, SessionLiveActivity, SessionTranscriptMoved } from '../../contract/index.ts';
+import type { IFyApiClient } from '@ferretry/app';
 
 /**
  * What a reader is allowed to be told about the live feed, and nothing finer.

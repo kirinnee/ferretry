@@ -1,7 +1,7 @@
-import { isPlaceholderSessionName, type SessionView } from '@ferretry/protocol';
+import { isPlaceholderSessionName, type SessionView } from '../../contract/index.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { baseName } from '../lib/fleet-grouping.ts';
-import { parseTaskName } from './task-name.ts';
+import { parseTaskName } from '../../../../plugins/board/app/shell/task-name.ts';
 
 type TitledConfig = Pick<SessionView['config'], 'name' | 'cwd' | 'teammate' | 'id'>;
 

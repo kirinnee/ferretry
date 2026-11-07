@@ -6,25 +6,16 @@
  * is kept while the panel stays open, so moving between tabs neither re-reads nor blanks what is there.
  */
 
-import type {
-  AnalyticsResponse,
-  BrowserPageSummary,
-  BrowserStatus,
-  LimitsView,
-  ManagedWorktreeView,
-  SessionRelaunchSettings,
-  SessionView,
-  TerminalListView,
-  WardenVerdict,
-} from '@ferretry/protocol';
+import type { AnalyticsResponse, BrowserPageSummary, BrowserStatus, LimitsView, ManagedWorktreeView, TerminalListView, WardenVerdict } from '@ferretry/protocol';
+import type { SessionRelaunchSettings, SessionView } from '../../../contract/index.ts';
 import type { ReactNode } from 'react';
-import type { ResolvedQuota } from '../../lib/usage.ts';
-import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
-import { FOLDER_TABS, loadedSkillCount } from '../context-rail/context-rail-model.ts';
-import { useContextRead } from '../context-rail/context-rail-parts.tsx';
-import type { ContextLoader } from '../context-rail/context-rail-ports.ts';
-import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
-import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
+import type { ResolvedQuota } from '../../../../../plugins/usage/app/lib/usage.ts';
+import { ContextRailBody, type ContextRailBodyProps } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-body.tsx';
+import { FOLDER_TABS, loadedSkillCount } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-model.ts';
+import { useContextRead } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-parts.tsx';
+import type { ContextLoader } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-ports.ts';
+import type { ClipboardWriter } from '../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
+import type { SurfaceDriving } from '../../../../../plugins/layouts/app/features/workspace/use-surface-driving.ts';
 import type { InfoAboutProps } from './info-about.tsx';
 import { INFO_TABS, INFO_TABS_WITHOUT_BOARD } from './info-model.ts';
 import { InfoOverview } from './info-overview.tsx';

@@ -6,12 +6,12 @@
  * share one status vocabulary and one stable project-colour assignment.
  */
 
-import { isPlaceholderSessionName, type SessionView } from '@ferretry/protocol';
-import type { DashboardView, Density } from '../lib/controls.ts';
+import { isPlaceholderSessionName, type SessionView } from '../../contract/index.ts';
+import type { DashboardView, Density } from '@ferretry/app';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
-import type { BadgeTone } from '../shell/primitives.tsx';
+import type { BadgeTone } from '@ferretry/app';
 import { pullNeedsYou, rowPreview } from '../shell/sessions-bar-model.ts';
-import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
+import { TERMINAL_STATUSES } from '@ferretry/app';
 
 export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>> = {
   full: ['Agent', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],

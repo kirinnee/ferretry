@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../../app/features/fleet/fleet-client.ts';

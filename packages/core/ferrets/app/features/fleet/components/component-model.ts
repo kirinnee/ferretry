@@ -13,17 +13,7 @@
  * Pure.
  */
 
-import {
-  type FleetAccountChange,
-  type FleetComponentKind,
-  FleetComponentNameSchema,
-  type FleetComponentView,
-  type FleetEnvEntry,
-  type FleetEnvInput,
-  type FleetHarnessScope,
-  type FleetLayeredProfileView,
-  type FleetProfileScope,
-} from '@ferretry/protocol';
+import { type FleetAccountChange, type FleetComponentKind, FleetComponentNameSchema, type FleetComponentView, type FleetEnvEntry, type FleetEnvInput, type FleetHarnessScope, type FleetLayeredProfileView, type FleetProfileScope } from '@ferretry/protocol';
 import { cloneOriginName } from '../setup/clone-model.ts';
 
 export type CatalogHarness = 'claude' | 'codex';

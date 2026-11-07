@@ -1,23 +1,12 @@
-import {
-  type SessionFileIndexResponse,
-  SessionFileIndexResponseSchema,
-  type SessionFsChanges,
-  SessionFsChangesSchema,
-  type SessionFsEntry,
-  type SessionFsFile,
-  SessionFsFileSchema,
-  type SessionFsListing,
-  SessionFsListingSchema,
-  type SessionGitChange,
-} from '@ferretry/protocol';
+import { type SessionFileIndexResponse, SessionFileIndexResponseSchema, type SessionFsChanges, SessionFsChangesSchema, type SessionFsEntry, type SessionFsFile, SessionFsFileSchema, type SessionFsListing, SessionFsListingSchema, type SessionGitChange } from '@ferretry/protocol';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { z } from 'zod';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
-import { daemonRequest } from '../lib/daemon-transport.ts';
-import { grantRefusalNotice } from '../lib/grants.ts';
-import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
+import { daemonRequest } from '../../../../plugins/connections/app/lib/daemon-transport.ts';
+import { grantRefusalNotice } from '../../../../plugins/access/app/lib/grants.ts';
+import { type DaemonFetch, DaemonResponseError } from '../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { useDaemonFetch } from '@ferretry/app';
 import { baseName, isOpenableName, isOpenablePath, parentRel } from './files-model.ts';
 
 // The wire shapes are the protocol's. These names stay because the views already speak them.

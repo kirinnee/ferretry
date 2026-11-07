@@ -16,16 +16,8 @@
  * this browser can be paired to several, so nothing is cached at module scope.
  */
 
-import {
-  type HarnessLoginFlow,
-  HarnessLoginFlowSchema,
-  type HarnessLoginStartRequest,
-  HarnessLoginStartRequestSchema,
-  type HarnessLoginSubmission,
-  HarnessLoginSubmissionSchema,
-  HarnessLoginSubmitRequestSchema,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { type HarnessLoginFlow, HarnessLoginFlowSchema, type HarnessLoginStartRequest, HarnessLoginStartRequestSchema, type HarnessLoginSubmission, HarnessLoginSubmissionSchema, HarnessLoginSubmitRequestSchema } from '@ferretry/plugin-logins/contract';
+import { FyHttpError } from '@ferretry/app';
 import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_LOGIN_PATH = '/v1/fleet/login';

@@ -7,28 +7,28 @@
  * feed from leaking into another daemon's rows.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { Activity, Bot, FolderGit2, Sparkles } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
-import { TaskName } from '../features/tasks/task-name.tsx';
-import type { PickerAccount } from '../lib/account-picker-catalog.ts';
-import { unreadCount } from '../lib/agenda-inbox.ts';
+import { TaskName } from '../../../../plugins/board/app/features/tasks/task-name.tsx';
+import type { PickerAccount } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import { unreadCount } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 import { displayCallsign } from '../lib/callsign.ts';
-import { cn } from '../lib/class-names.ts';
-import type { Density } from '../lib/controls.ts';
+import { cn } from '@ferretry/app';
+import type { Density } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { absoluteTime } from '../lib/session-screens.ts';
-import type { SessionQuotaResolver } from '../lib/usage.ts';
+import type { SessionQuotaResolver } from '../../../../plugins/usage/app/lib/usage.ts';
 import { MachineChip } from '../shell/machine-chip.tsx';
-import { ModeBadge } from '../shell/mode-badge.tsx';
-import { Badge } from '../shell/primitives.tsx';
-import { QuotaReadout } from '../shell/quota-readout.tsx';
-import { RcBadge } from '../shell/rc-badge.tsx';
-import { RouteLink } from '../shell/route-link.tsx';
+import { ModeBadge } from '../../../../plugins/runtimes/app/shell/mode-badge.tsx';
+import { Badge } from '@ferretry/app';
+import { QuotaReadout } from '../../../../plugins/usage/app/shell/quota-readout.tsx';
+import { RcBadge } from '@ferretry/app';
+import { RouteLink } from '@ferretry/app';
 import { hasAgenda, rowPreview, sessionRowPath } from '../shell/sessions-bar-model.ts';
-import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
-import { UnreadBadge } from '../shell/unread-badge.tsx';
+import { nameToneClass, StatusMark } from '@ferretry/app';
+import { UnreadBadge } from '@ferretry/app';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
 import {
   activityLine,

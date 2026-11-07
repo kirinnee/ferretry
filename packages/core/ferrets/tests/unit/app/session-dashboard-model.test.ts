@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import {
   activityLine,
   DENSITY_COLUMN_LABELS,
@@ -19,7 +19,7 @@ import {
   statusWord,
 } from '../../../app/components/session-dashboard-model.ts';
 import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const at = Date.parse('2026-08-01T12:00:00.000Z');
 

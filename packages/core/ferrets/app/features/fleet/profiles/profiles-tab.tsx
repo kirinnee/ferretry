@@ -9,8 +9,8 @@
 
 import type { FleetAccountChange, FleetLayeredProfileView } from '@ferretry/protocol';
 import { useEffect, useId, useState } from 'react';
-import { Button } from '../../../shell/primitives.tsx';
-import { type AccountCatalog, useAccountCatalog } from '../components/account-catalog.ts';
+import { Button } from '@ferretry/app';
+import { type AccountCatalog, useAccountCatalog } from '../../../../../../plugins/accounts/app/features/fleet/components/account-catalog.ts';
 import {
   CatalogNote,
   ComponentBadges,
@@ -21,7 +21,7 @@ import {
   ReadFailed,
   RowList,
   Section,
-} from '../components/catalog-ui.tsx';
+} from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 import { counted, listed, profileScopeBadge, profileScopeWord } from '../components/component-model.ts';
 import { isComponentReference, itemHref, useHashItem } from '../components/machine-links.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';

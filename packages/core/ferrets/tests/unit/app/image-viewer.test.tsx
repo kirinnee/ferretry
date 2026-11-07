@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type { AttachmentView } from '@ferretry/protocol';
+import type { AttachmentView } from '@ferretry/app';
 import { useState } from 'react';
-import { AttachmentGalleryProvider, TranscriptAttachmentGallery } from '../../src/components/attachment-gallery.tsx';
-import { Composer } from '../../src/components/composer.tsx';
+import { AttachmentGalleryProvider, TranscriptAttachmentGallery } from '../../../../../plugins/conversation/app/components/attachment-gallery.tsx';
+import { Composer } from '../../../../../plugins/conversation/app/components/composer.tsx';
 import { ImageViewer, type ViewerImage } from '../../../app/components/image-viewer.tsx';
-import type { PendingAttachment } from '../../src/components/session-chat-model.ts';
-import { PendingAttachmentStrip } from '../../src/components/session-chat-parts.tsx';
-import type { AttachmentBlobUrlPort } from '../../src/lib/attachment-blob-cache.ts';
-import { loadAttachmentBlob } from '../../src/lib/attachment-source.ts';
-import { bytesToBase64 } from '../../src/lib/attachment-upload.ts';
-import type { StoredTranscriptAttachment } from '../../src/lib/attachments.ts';
+import type { PendingAttachment } from '../../../../../plugins/conversation/app/components/session-chat-model.ts';
+import { PendingAttachmentStrip } from '../../../../../plugins/conversation/app/components/session-chat-parts.tsx';
+import type { AttachmentBlobUrlPort } from '../../../../../plugins/conversation/app/lib/attachment-blob-cache.ts';
+import { loadAttachmentBlob } from '../../../../../plugins/conversation/app/lib/attachment-source.ts';
+import { bytesToBase64 } from '../../../../../plugins/conversation/app/lib/attachment-upload.ts';
+import type { StoredTranscriptAttachment } from '../../../../../plugins/conversation/app/lib/attachments.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
-import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
-import { writeMdComposePref } from '../../src/lib/md-compose.ts';
-import { relayResponse } from '../../src/lib/relay-carrier.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
+import { DaemonDraftStore, type DraftStorage } from '../../../../../plugins/conversation/app/lib/drafts.ts';
+import { writeMdComposePref } from '../../../../../plugins/conversation/app/lib/md-compose.ts';
+import { relayResponse } from '../../../../../plugins/connections/app/lib/relay-carrier.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({ daemonId: 'viewer', baseUrl: 'https://viewer.example.test', deviceId: 'device' });
 

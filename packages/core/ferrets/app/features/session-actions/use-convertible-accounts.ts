@@ -7,10 +7,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
-import type { DaemonAccountPickerStore } from '../../lib/account-picker-store.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import type { DaemonAccountPickerStore } from '../../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useConfigChangeEffect } from '../../lib/store.tsx';
+import { useConfigChangeEffect } from '@ferretry/app';
 import type { HarnessKind } from '../fleet/credentials/credentials-model.ts';
 import { convertibleAccounts } from './conversion-model.ts';
 

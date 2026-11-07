@@ -10,7 +10,7 @@ import type { FleetCredentialTestAct, FleetCredentialTestResult } from '@ferretr
 import { FlaskConical } from 'lucide-react';
 import { useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
+import { Badge, Button } from '@ferretry/app';
 import { testFleetCredential } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';

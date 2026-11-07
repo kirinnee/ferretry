@@ -12,16 +12,16 @@
  * deliberate way past, "Move anyway".
  */
 
-import type { ConversionPreview, SessionView } from '@ferretry/protocol';
+import type { ConversionPreview, SessionView } from '../../../contract/index.ts';
 import { AlertTriangle, ArrowLeftRight, LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { accountLabel } from '../../components/daemon-picker-model.ts';
-import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
-import { useDaemonClient, useDaemonFetch } from '../../lib/store.tsx';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { Button } from '../../shell/primitives.tsx';
+import { useDaemonClient, useDaemonFetch } from '@ferretry/app';
+import { BottomSheet } from '@ferretry/app';
+import { Button } from '@ferretry/app';
 import { moveToOtherHarness, readConversionPreview } from './conversion-api.ts';
 import { HARNESS_SHORT, otherHarness } from '../fleet/credentials/credentials-model.ts';
 import { type ConversionFailure, conversionFailure, conversionSentences } from './conversion-model.ts';

@@ -1,6 +1,6 @@
-import '../../../support/dom.ts';
+import '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { FyApiClient } from '@ferretry/protocol/client';
+import type { FyApiClient } from '@ferretry/app';
 import type { z } from 'zod';
 import {
   type MachineVoiceCleanup,
@@ -8,11 +8,11 @@ import {
   type VoiceCleanupSave,
 } from '../../../../../app/features/settings/use-machine-voice-cleanup.ts';
 import type { DaemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
-import { type Mounted, mount } from '../../../support/dom.ts';
-import { runAsync } from '../../../support/react.ts';
-import { settleUntil } from '../../../support/settle.ts';
-import { alpha, fileView } from '../config-files/config-files-support.ts';
+import { DaemonClientProvider } from '@ferretry/app';
+import { type Mounted, mount } from '@ferretry/app/testing';
+import { runAsync } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
+import { alpha, fileView } from '../../../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
 
 interface Wire {
   readonly method: string;

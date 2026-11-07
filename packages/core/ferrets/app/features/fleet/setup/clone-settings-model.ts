@@ -27,18 +27,8 @@
  * Pure: the source's files, bundle and machine view in; the items, the needs and the change out.
  */
 
-import {
-  type CloneLoginTarget,
-  type CloneTargetLogin,
-  type FleetAccountChange,
-  type FleetCloneBundle,
-  type FleetMachineView,
-  isSignInSecretName,
-  planCloneLogins,
-  type SpeedupProvider,
-  type SpeedupsView,
-  secretReferencesIn,
-} from '@ferretry/protocol';
+import { type CloneLoginTarget, type CloneTargetLogin, type FleetAccountChange, type FleetCloneBundle, type FleetMachineView, isSignInSecretName, planCloneLogins, type SpeedupProvider, type SpeedupsView } from '@ferretry/protocol';
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { countWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 /** One thing Clone can copy, with the id the checkbox and the result use. */

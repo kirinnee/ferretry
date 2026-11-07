@@ -4,9 +4,9 @@
  * Parent ids come from daemon records, so missing records and malformed cycles
  * are treated as roots instead of allowing a side-pane tree to recurse forever.
  */
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 
-import { parseTaskName, taskIsRedundant } from '../shell/task-name.ts';
+import { parseTaskName, taskIsRedundant } from '../../../../plugins/board/app/shell/task-name.ts';
 import { displayCallsign, shortSessionId } from './callsign.ts';
 
 export interface LineageIndex {

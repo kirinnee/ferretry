@@ -12,13 +12,8 @@
  * `use-daemon-health.ts` is the hook that makes the read.
  */
 
-import {
-  type DaemonFeature,
-  describeDiskSaturation,
-  type HealthView,
-  hasFeature,
-  type IoPressureView,
-} from '@ferretry/protocol';
+import { type DaemonFeature, describeDiskSaturation, hasFeature, type IoPressureView } from '@ferretry/protocol';
+import { type HealthView } from '@ferretry/app';
 
 export type DaemonHealthRead =
   | { readonly kind: 'loading' }

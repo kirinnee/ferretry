@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetCredentialList, FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import type { z } from 'zod';
 import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
 import { secretRef } from '../../../../../../app/features/fleet/credentials/environment-model.ts';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { localModelsFixture } from '../../../../support/local-models.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { localModelsFixture } from '../../../../../../../../plugins/runtimes/tests/support/app/local-models.ts';
 import {
   APPLIED,
   type Call,
@@ -22,7 +22,7 @@ import {
   scripted,
   stagedFrom,
   withStatus,
-} from '../account-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { ENVIRONMENT } from './environment-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';

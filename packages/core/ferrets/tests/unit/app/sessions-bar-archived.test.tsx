@@ -3,9 +3,9 @@ import type { ComponentProps } from 'react';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
 import type { SessionsBarArchived } from '../../../app/shell/sessions-bar-archived.tsx';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const ALPHA = 'alpha' as DaemonId;
 const at = (minutes: number): string => new Date(Date.UTC(2026, 10, 2, 9, minutes)).toISOString();

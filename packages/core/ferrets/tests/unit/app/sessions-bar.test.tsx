@@ -2,11 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { ComponentProps } from 'react';
 import type { MachineSource } from '../../../app/lib/all-machines.ts';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
-import { WORKSPACE_RAIL_BOUNDS, WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
+import { WORKSPACE_RAIL_BOUNDS, WorkspaceRailPreferenceStore } from '../../../../../plugins/layouts/app/lib/workspace-rail-preferences.ts';
 import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = 'alpha' as DaemonId;
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');

@@ -7,13 +7,14 @@
  * that follows its login's default shows that default rather than a guess.
  */
 
-import type { CompactAt, SessionCompactAt, SessionView } from '@ferretry/protocol';
+import type { CompactAt, SessionCompactAt } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { describeCompactAt } from '@ferretry/protocol';
 import { Gauge } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { getSessionCompactAt, patchSessionCompactAt } from '../../lib/compact-at-api.ts';
+import { getSessionCompactAt, patchSessionCompactAt } from '../../../../../plugins/conversation/app/lib/compact-at-api.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import type { DaemonFetch } from '../../lib/runtime-models.ts';
+import type { DaemonFetch } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
 import { CompactAtForm } from './compact-at-form.tsx';
 import type { SessionActionContribution, SessionActionFormHost } from './registry.ts';
 

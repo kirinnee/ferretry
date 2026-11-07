@@ -1,7 +1,7 @@
-import '../../../../support/dom.ts';
+import '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { VoiceEngine } from '@ferretry/protocol';
-import type { FyApiClient } from '@ferretry/protocol/client';
+import type { FyApiClient } from '@ferretry/app';
 import type { z } from 'zod';
 import {
   machineVoiceEngine,
@@ -10,12 +10,12 @@ import {
   withMachineVoiceEngine,
 } from '../../../../../../app/features/fleet/setup/voice-default.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { DaemonClientProvider } from '../../../../../src/lib/store.tsx';
-import { type Mounted, mount } from '../../../../support/dom.ts';
-import { runAsync } from '../../../../support/react.ts';
-import { settleUntil } from '../../../../support/settle.ts';
-import { alpha, fileView } from '../../config-files/config-files-support.ts';
-import { configChangeHarness } from '../../../config-change-support.tsx';
+import { DaemonClientProvider } from '@ferretry/app';
+import { type Mounted, mount } from '@ferretry/app/testing';
+import { runAsync } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
+import { alpha, fileView } from '../../../../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
+import { configChangeHarness } from '../../../../../../../kernel/tests/unit/app/config-change-support.tsx';
 
 const beta = daemonConnection({
   daemonId: 'beta',

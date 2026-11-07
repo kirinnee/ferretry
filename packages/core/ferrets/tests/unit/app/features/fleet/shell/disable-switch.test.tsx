@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetCredentialList, FleetRuntimeCatalog } from '@ferretry/protocol';
 import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
 import { RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import {
   APPLIED,
   type Call,
@@ -18,7 +18,7 @@ import {
   STUDIO,
   scripted,
   stagedFrom,
-} from '../account-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const PROPOSE = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;

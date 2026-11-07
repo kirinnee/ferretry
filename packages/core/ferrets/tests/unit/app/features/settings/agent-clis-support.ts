@@ -1,4 +1,5 @@
-import type { HarnessCliView, HarnessUpdateView } from '@ferretry/protocol';
+import type { HarnessCliView } from '@ferretry/plugin-claude-code/contract';
+import type { HarnessUpdateView } from '@ferretry/protocol';
 
 export const CHANGELOG = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md';
 export const VERIFIED_URL = 'https://github.com/kirinnee/ferretry/blob/main/packages/fleet/tests/contract/README.md';

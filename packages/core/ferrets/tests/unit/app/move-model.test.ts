@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import {
   AGENT_JOBS_ASK_SINCE,
   askNeedsDaemonUpdate,

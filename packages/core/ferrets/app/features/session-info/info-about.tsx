@@ -10,12 +10,12 @@
  * PRESENTATIONAL: the page owns every action and state and hands this block what to draw.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { useState } from 'react';
-import { activeSubFerrets, SubFerretsPack } from '../../components/sub-ferrets.tsx';
-import { type AgendaTabFilter, agendaSummary } from '../../lib/agenda-tab.ts';
-import { type ChatChip, chatCardLabel } from '../../lib/board-chat.ts';
-import { OutdatedGlyph, useOutdatedMarkState } from '../restart-outdated/outdated-mark.tsx';
+import { activeSubFerrets, SubFerretsPack } from '../../../../../plugins/packs/app/components/sub-ferrets.tsx';
+import { type AgendaTabFilter, agendaSummary } from '../../../../../plugins/agenda/app/lib/agenda-tab.ts';
+import { type ChatChip, chatCardLabel } from '../../../../../plugins/board/app/lib/board-chat.ts';
+import { OutdatedGlyph, useOutdatedMarkState } from '../../../../../plugins/updates/app/features/restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from './info-model.ts';
 import { InfoRow, InfoSection } from './info-parts.tsx';
 import type { MemoryNote } from './memory-note.ts';

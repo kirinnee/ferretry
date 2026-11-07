@@ -17,16 +17,11 @@
  * The shell reads only the first three segments, so it still opens the right tab.
  */
 
-import type {
-  FleetComponentCatalog,
-  FleetCredentialList,
-  FleetLayeredProfileCatalog,
-  FleetRuntimeCatalog,
-} from '@ferretry/protocol';
+import type { FleetComponentCatalog, FleetCredentialList, FleetLayeredProfileCatalog, FleetRuntimeCatalog } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { useConfigChangeEffect } from '../../../lib/store.tsx';
-import { readFleetComponents, readFleetProfiles, readFleetRuntimes } from '../catalog-api.ts';
+import { useConfigChangeEffect } from '@ferretry/app';
+import { readFleetComponents, readFleetProfiles, readFleetRuntimes } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';

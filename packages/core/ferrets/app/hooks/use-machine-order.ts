@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
-import type { DaemonControlsStore } from '../lib/controls.ts';
+import type { DaemonControlsStore } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 
 export interface MachineOrder {

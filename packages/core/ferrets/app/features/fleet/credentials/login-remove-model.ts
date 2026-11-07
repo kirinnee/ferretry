@@ -9,14 +9,7 @@
  * its id, its scope and its status, never what signs it in.
  */
 
-import type {
-  FleetAccountChange,
-  FleetAccountChangeView,
-  FleetCredentialView,
-  FleetMachineView,
-  FleetRunningSession,
-  FleetRuntimeView,
-} from '@ferretry/protocol';
+import type { FleetAccountChange, FleetAccountChangeView, FleetCredentialView, FleetMachineView, FleetRunningSession, FleetRuntimeView } from '@ferretry/protocol';
 import { plural } from './credentials-model.ts';
 
 /** What happens to one runtime that uses the login. */

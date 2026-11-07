@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import {
   archivedFooterShown,
   archivedFooterWords,
   archivedRows,
   byNewestFinished,
 } from '../../../app/shell/sessions-bar-archived.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const at = (minutes: number): string => new Date(Date.UTC(2026, 10, 2, 9, minutes)).toISOString();
 

@@ -1,4 +1,4 @@
-import { type PinSnapshot, PinSnapshotSchema } from '@ferretry/protocol';
+import { type PinSnapshot, PinSnapshotSchema } from '../../contract/index.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 

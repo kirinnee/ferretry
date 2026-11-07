@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type { ConversionPreview } from '@ferretry/protocol';
+import type { ConversionPreview } from '../../../../../contract/index.ts';
 import { moveToOtherHarness, readConversionPreview } from '../../../../../app/features/session-actions/conversion-api.ts';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../../../app/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../../../src/lib/runtime-models.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { DaemonResponseError } from '../../../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({ daemonId: 'd-a', baseUrl: 'https://a.invalid', deviceId: 'tok' });
 const other = daemonConnection({ daemonId: 'd-b', baseUrl: 'https://b.invalid', deviceId: 'tok' });

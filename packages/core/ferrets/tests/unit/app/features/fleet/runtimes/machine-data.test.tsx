@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import {
   type MachineData,
@@ -11,9 +11,9 @@ import {
   useMachineDetail,
 } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { CREDENTIALS, DATA, READS, STUDIO, scripted } from '../account-support.ts';
-import { configChangeHarness } from '../../../config-change-support.tsx';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { CREDENTIALS, DATA, READS, STUDIO, scripted } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
+import { configChangeHarness } from '../../../../../../../kernel/tests/unit/app/config-change-support.tsx';
 
 const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 

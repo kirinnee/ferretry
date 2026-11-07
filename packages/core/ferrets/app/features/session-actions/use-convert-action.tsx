@@ -7,9 +7,9 @@
  * other harness to move onto; a row whose sheet could only say "nothing to move to" is worse than none.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { type ReactNode, useEffect, useState } from 'react';
-import type { DaemonAccountPickerStore } from '../../lib/account-picker-store.ts';
+import type { DaemonAccountPickerStore } from '../../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { ConvertSheet } from './convert-sheet.tsx';

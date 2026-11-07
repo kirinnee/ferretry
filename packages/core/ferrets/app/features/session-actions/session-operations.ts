@@ -4,17 +4,10 @@
  * test hands in a fake and the page hands in the carrier-routed one.
  */
 
-import {
-  type ForkSessionOutcome,
-  type IFyApiClient,
-  type ContextDowngrade,
-  type MigrationConversation,
-  MigrationRefusedBodySchema,
-  type MigrationRefusal,
-  type SessionView,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
-import { staleMessageEvidence, withFreshMessageCursor } from '../../lib/message-cursor.ts';
+import { type ForkSessionOutcome, type ContextDowngrade, type MigrationConversation, MigrationRefusedBodySchema, type MigrationRefusal, type SessionView } from '../../../contract/index.ts';
+import { type IFyApiClient } from '@ferretry/app';
+import { FyHttpError } from '@ferretry/app';
+import { staleMessageEvidence, withFreshMessageCursor } from '../../../../../plugins/conversation/app/lib/message-cursor.ts';
 import { downgradeOf, downgradeSentence } from './context-downgrade.ts';
 
 /** The largest page the messages route serves. */

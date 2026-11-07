@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { DAEMON_FEATURES } from '@ferretry/protocol';
-import { healthOf } from '../support/health.ts';
+import { healthOf } from '@ferretry/app/testing';
 import {
   type DaemonHealthRead,
   diskPressureOf,

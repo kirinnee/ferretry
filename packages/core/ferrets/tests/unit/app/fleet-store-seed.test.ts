@@ -3,7 +3,7 @@ import should from 'should';
 
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonARotated = daemonConnection({

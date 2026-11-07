@@ -1,19 +1,6 @@
 /** Fixtures for the setup suites: a machine, a scan, an export, credentials and runtimes, all schema-checked. */
 
-import {
-  type FleetCloneBundle,
-  FleetCloneBundleSchema,
-  type FleetCredentialList,
-  FleetCredentialListSchema,
-  type FleetCredentialView,
-  type FleetMachineView,
-  FleetMachineViewSchema,
-  type FleetRuntimeCatalog,
-  FleetRuntimeCatalogSchema,
-  type FleetRuntimeView,
-  type FleetSetupScan,
-  FleetSetupScanSchema,
-} from '@ferretry/protocol';
+import { type FleetCloneBundle, FleetCloneBundleSchema, type FleetCredentialList, FleetCredentialListSchema, type FleetCredentialView, type FleetMachineView, FleetMachineViewSchema, type FleetRuntimeCatalog, FleetRuntimeCatalogSchema, type FleetRuntimeView, type FleetSetupScan, FleetSetupScanSchema } from '@ferretry/protocol';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 
 export { APPLY_PATH, type Call, machineAnswer, STAGED, scriptedClient } from '../shell/change-support.ts';

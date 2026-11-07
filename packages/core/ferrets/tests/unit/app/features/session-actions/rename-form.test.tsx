@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../../contract/index.ts';
 import { RenameForm } from '../../../../../app/features/session-actions/rename-form.tsx';
 import type { SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
-import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { interact, mount, must, type Mounted } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

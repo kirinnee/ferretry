@@ -7,13 +7,8 @@
  */
 
 import { splitCommandLine } from '../fleet/components/component-model.ts';
-import {
-  mcpServerRefusal,
-  type SessionMcpPreviewRequest,
-  type SessionMcpScope,
-  SessionMcpNameSchema,
-  type SessionMcpServer,
-} from '@ferretry/protocol';
+import { mcpServerRefusal } from '@ferretry/protocol';
+import { type SessionMcpPreviewRequest, type SessionMcpScope, SessionMcpNameSchema, type SessionMcpServer } from '@ferretry/plugin-mcp/contract';
 
 type McpTransport = 'command' | 'url';
 

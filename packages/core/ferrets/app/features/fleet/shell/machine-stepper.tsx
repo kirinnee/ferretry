@@ -27,9 +27,9 @@
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { AccountStatus } from './account-status.tsx';
+import { cn } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { AccountStatus } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import {
   backStep,
   cancelStepper,

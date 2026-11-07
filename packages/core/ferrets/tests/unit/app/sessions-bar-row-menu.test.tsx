@@ -3,11 +3,11 @@ import type { ComponentProps } from 'react';
 import type { MachineSource } from '../../../app/lib/all-machines.ts';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { LONG_PRESS_MS } from '../../../app/shell/agent-sidebar-model.ts';
-import type { SessionMenuState } from '../../src/shell/session-menu-context.ts';
+import type { SessionMenuState } from '@ferretry/app';
 import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = 'alpha' as DaemonId;
 const BETA = 'beta' as DaemonId;

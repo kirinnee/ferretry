@@ -6,9 +6,9 @@ import {
   type MachineSettingsTabProps,
   runningSessionsSentence,
 } from '../../../../../../app/features/fleet/machine/settings-tab.tsx';
-import { type DaemonConnectionRecord, DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
-import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { type DaemonConnectionRecord, DaemonConnectionStore } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
+import { type AppStore, StoreProvider } from '@ferretry/app';
+import { interact, mount, must } from '@ferretry/app/testing';
 import {
   type Call,
   FRESH_MACHINE,

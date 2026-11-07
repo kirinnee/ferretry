@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import should from 'should';
-import type { UiControls } from '../../src/lib/controls.ts';
+import type { UiControls } from '@ferretry/app';
 import {
   baseName,
   type FleetFilter,
@@ -17,7 +17,7 @@ import {
   sessionInScope,
 } from '../../../app/lib/fleet-grouping.ts';
 import type { DaemonFleetSlice } from '../../../app/lib/fleet-store.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const filter = (overrides: Partial<FleetFilter> = {}): FleetFilter => ({
   query: '',

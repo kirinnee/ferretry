@@ -13,14 +13,7 @@
  * - **Signing in or out says how many runtimes it changes** (C7, E31).
  */
 
-import type {
-  FleetBudgetLevel,
-  FleetBudgetPeriodView,
-  FleetCredentialBudget,
-  FleetCredentialList,
-  FleetCredentialUsageWindow,
-  FleetCredentialView,
-} from '@ferretry/protocol';
+import type { FleetBudgetLevel, FleetBudgetPeriodView, FleetCredentialBudget, FleetCredentialList, FleetCredentialUsageWindow, FleetCredentialView } from '@ferretry/protocol';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { timeUntil } from '../harness-login-model.ts';
 

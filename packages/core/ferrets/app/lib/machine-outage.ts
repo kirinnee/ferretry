@@ -13,7 +13,7 @@
  */
 
 import type { IoPressureView } from '@ferretry/protocol';
-import type { CarrierFailure, ConnectionHealthState, LikelyCause } from './connection-health.ts';
+import type { CarrierFailure, ConnectionHealthState, LikelyCause } from '../../../../plugins/connections/app/lib/connection-health.ts';
 import { diskPressureSentence } from './daemon-health.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';
 

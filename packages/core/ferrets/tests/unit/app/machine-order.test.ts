@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { machineDisplayOrder } from '../../../app/lib/all-machines.ts';
-import { parseControlsRecord } from '../../src/lib/controls.ts';
+import { parseControlsRecord } from '@ferretry/app';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { moveMachine, reconcileMachineOrder } from '../../../app/lib/machine-order.ts';
 

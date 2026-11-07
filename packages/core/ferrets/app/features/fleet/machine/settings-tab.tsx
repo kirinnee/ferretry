@@ -27,11 +27,11 @@
 import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight, Code, Copy, FolderInput, Rocket, Sparkles, Upload } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { useConfigChangeCounter, useConnectionSnapshot } from '../../../lib/store.tsx';
-import { Button } from '../../../shell/primitives.tsx';
-import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
+import { cn } from '@ferretry/app';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
+import { useConfigChangeCounter, useConnectionSnapshot } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { readConfigFile, writeConfigFile } from '../../../../../kernel/app/features/config-files/config-files-api.ts';
 import { Segmented } from '../conversations/conversation-picker.tsx';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';

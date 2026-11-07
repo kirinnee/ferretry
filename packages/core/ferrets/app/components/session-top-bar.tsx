@@ -26,16 +26,16 @@
  * same session mutation.
  */
 
-import { displaySystemCallsign, type SessionView } from '@ferretry/protocol';
+import { displaySystemCallsign, type SessionView } from '../../contract/index.ts';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
-import { harnessWord } from '../lib/harness-dialogs.ts';
-import { permissionPhrase } from '../lib/permission-requests.ts';
+import { harnessWord } from '../../../../plugins/claude-code/app/lib/harness-dialogs.ts';
+import { permissionPhrase } from '../../../../plugins/claude-code/app/lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { sessionTask } from '../shell/session-title.ts';
-import { StatusMark } from '../shell/status-mark.tsx';
+import { StatusMark } from '@ferretry/app';
 
 /**
  * WHO is working on this session: its callsign, else the name it was given, else its id. This is the

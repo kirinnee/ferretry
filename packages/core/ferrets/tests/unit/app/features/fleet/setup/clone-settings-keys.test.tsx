@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { CloneKeyChoice } from '@ferretry/protocol';
+import type { CloneKeyChoice } from '@ferretry/plugin-runtimes/contract';
 import { CloneSettingsKeys } from '../../../../../../app/features/fleet/setup/clone-settings-keys.tsx';
 import type { ReviewedSettings, SettingsPicks } from '../../../../../../app/features/fleet/setup/clone-settings-merge.ts';
-import { interact, type Mounted, mount } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 
 const mounts: Mounted[] = [];
 afterEach(async () => {

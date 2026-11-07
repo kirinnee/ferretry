@@ -14,11 +14,11 @@
 
 import { CloudOff, PowerOff, RefreshCw, TimerOff, TriangleAlert, WifiOff } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
-import { outageDuration } from '../features/connection/connection-copy.ts';
-import { cn } from '../lib/class-names.ts';
+import { outageDuration } from '../../../../plugins/connections/app/features/connection/connection-copy.ts';
+import { cn } from '@ferretry/app';
 import type { MachineOutage, OutageReason } from '../lib/machine-outage.ts';
-import { type ClockEnvironment, clockOfInstant } from '../lib/message-clock.ts';
-import { BottomSheet } from '../shell/bottom-sheet.tsx';
+import { type ClockEnvironment, clockOfInstant } from '../../../../plugins/conversation/app/lib/message-clock.ts';
+import { BottomSheet } from '@ferretry/app';
 
 const REASON_ICON: Readonly<Record<OutageReason, ReactNode>> = {
   'daemon-unreachable': <PowerOff aria-hidden="true" size={13} />,

@@ -26,8 +26,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { sharedChromium } from '../support/chromium.ts';
-import { boundedContext, overlapped } from '../support/overlap.ts';
+import { sharedChromium } from '@ferretry/app/testing';
+import { boundedContext, overlapped } from '@ferretry/app/testing';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_ALL_MACHINES_SHOTS_DIR ?? '';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { ChangeResult, StageResult } from '../../../../../../app/features/fleet/shell/apply-change.ts';
 import {
@@ -8,7 +8,7 @@ import {
   useAccountChanges,
 } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from './change-support.ts';
 
 const CHANGE = {

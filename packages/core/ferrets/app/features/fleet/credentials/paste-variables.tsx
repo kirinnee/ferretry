@@ -11,7 +11,7 @@
 import type { FleetProviderPresetView } from '@ferretry/protocol';
 import { ChevronLeft } from 'lucide-react';
 import { useId, useState } from 'react';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import {
   alsoMatchedSentence,
   detectionSentence,

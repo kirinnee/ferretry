@@ -6,7 +6,7 @@
 
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef } from 'react';
-import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
+import { SheetTabs, sheetPanelId, sheetTabId } from '@ferretry/app';
 import { INFO_TAB_LABEL, INFO_TABS_WITHOUT_BOARD, type InfoTab, scrollToShow } from './info-model.ts';
 
 export type InfoSheetSize = 'half' | 'full';

@@ -16,15 +16,15 @@
 
 import { LearningConfigSchema, WardenConfigViewSchema } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
-import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
-import { wardenMachineDefaultLogin, wardenSummary } from '../../warden/warden-settings-model.ts';
-import { readFleetRuntimes } from '../catalog-api.ts';
+import { cn } from '@ferretry/app';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
+import type { ParakeetVoice } from '../../../../../../plugins/voice/app/lib/stt/parakeet-voice.ts';
+import { Button } from '@ferretry/app';
+import type { PairingClientFactory } from '../../../../../../plugins/access/app/features/settings/add-device-settings.tsx';
+import { readSpeedups } from '../../../../../../plugins/voice/app/features/speedups/speedups-api.ts';
+import { jevKeyStatus } from '../../../../../../plugins/warden/app/features/warden/warden-config-card.tsx';
+import { wardenMachineDefaultLogin, wardenSummary } from '../../../../../../plugins/warden/app/features/warden/warden-settings-model.ts';
+import { readFleetRuntimes } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { OnboardingHarnessStep } from './harness-step.tsx';
 import {

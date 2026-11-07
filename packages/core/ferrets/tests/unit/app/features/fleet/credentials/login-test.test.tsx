@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetCredentialTestAct } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import { CredentialEnvironment } from '../../../../../../app/features/fleet/credentials/credential-environment.tsx';
 import { secretRef } from '../../../../../../app/features/fleet/credentials/environment-model.ts';
 import { LoginScopeChip } from '../../../../../../app/features/fleet/credentials/login-scope-chip.tsx';
 import { LoginTest } from '../../../../../../app/features/fleet/credentials/login-test.tsx';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { type Call, STUDIO, scripted } from '../account-support.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { type Call, STUDIO, scripted } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { ENVIRONMENT } from './environment-support.ts';
 
 const TEST = 'POST /v1/fleet/credentials/zai-glm/test';

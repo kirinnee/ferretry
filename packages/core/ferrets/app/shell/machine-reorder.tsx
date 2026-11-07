@@ -13,10 +13,10 @@
 
 import { Ellipsis, GripVertical } from 'lucide-react';
 import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useInputModality } from '../hooks/use-input-modality.ts';
+import { useInputModality } from '@ferretry/app';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { DropEdge } from '../lib/machine-order.ts';
-import { ContextMenu, type ContextMenuItem } from './context-menu.tsx';
+import { ContextMenu, type ContextMenuItem } from '@ferretry/app';
 import {
   autoScrollDelta,
   cancelledMessage,

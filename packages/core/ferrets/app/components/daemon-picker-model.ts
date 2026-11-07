@@ -37,10 +37,11 @@
  * sessions this module cannot support without reading them.
  */
 
-import type { SessionView, UsageAccountView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
+import type { UsageAccountView } from '@ferretry/app';
 
-import type { PickerAccount, PickerAccountHealth, RecentProjectPath } from '../lib/account-picker-catalog.ts';
-import { recentProjectPaths } from '../lib/account-picker-catalog.ts';
+import type { PickerAccount, PickerAccountHealth, RecentProjectPath } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import { recentProjectPaths } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { baseName, type FleetProject, normalizeProjectPath, projectKeyFor } from '../lib/fleet-grouping.ts';
 
 // ---------------------------------------------------------------------------

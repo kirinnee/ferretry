@@ -11,7 +11,7 @@
  */
 
 import type { PushDeviceView } from '@ferretry/protocol';
-import { DaemonResponseError } from './runtime-models.ts';
+import { DaemonResponseError } from '../../../../plugins/runtimes/app/lib/runtime-models.ts';
 
 /** What one machine's push device list said, or why it said nothing. */
 export type MachinePushReading =

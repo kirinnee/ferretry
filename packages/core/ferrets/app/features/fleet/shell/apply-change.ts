@@ -15,18 +15,13 @@
  * - **The change is the daemon's to derive.** A caller names one intent; it never sends a document.
  */
 
-import type {
-  FleetAccountChange,
-  FleetAccountChangeOutcome,
-  FleetAccountChangeView,
-  FleetMachineView,
-  GrantRefusal,
-} from '@ferretry/protocol';
-import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
+import type { FleetAccountChange, FleetAccountChangeOutcome, FleetAccountChangeView, FleetMachineView } from '@ferretry/protocol';
+import type { GrantRefusal } from '@ferretry/core-gate/contract';
+import { FyHttpError, FyTransportError } from '@ferretry/app';
 import { z } from 'zod';
-import { appVersion } from '../../../lib/app-version.ts';
-import { invalidRequestWords } from '../../../lib/request-refusal.ts';
-import { applyFleetChange, readFleetMachine, stageFleetChange } from '../catalog-api.ts';
+import { appVersion } from '@ferretry/app';
+import { invalidRequestWords } from '@ferretry/app';
+import { applyFleetChange, readFleetMachine, stageFleetChange } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import type { FleetClient } from '../fleet-client.ts';
 
 /** What this browser may do with a change on this machine, from the machine view's `authority`. */

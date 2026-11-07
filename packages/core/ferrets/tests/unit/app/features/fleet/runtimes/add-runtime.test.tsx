@@ -1,18 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  type FleetCredentialList,
-  FleetCredentialListSchema,
-  FleetLayeredProfileCatalogSchema,
-  type FleetMachineView,
-  FleetRuntimeCatalogSchema,
-} from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { type FleetCredentialList, FleetCredentialListSchema, FleetLayeredProfileCatalogSchema, type FleetMachineView, FleetRuntimeCatalogSchema } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/app';
 import { useState } from 'react';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { AddRuntime } from '../../../../../../app/features/fleet/runtimes/add-runtime.tsx';
 import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import {
   APPLIED,
   type Call,
@@ -31,7 +25,7 @@ import {
   scripted,
   stagedFrom,
   withStatus,
-} from '../account-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { DEEPSEEK, PROVIDERS } from '../credentials/environment-support.ts';
 
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;

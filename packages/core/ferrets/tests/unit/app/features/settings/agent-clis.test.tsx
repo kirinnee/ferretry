@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { HarnessUpdateStartRequest, HarnessUpdateView } from '@ferretry/protocol';
+import type { HarnessUpdateStartRequest } from '@ferretry/plugin-claude-code/contract';
+import type { HarnessUpdateView } from '@ferretry/protocol';
 import {
   type AgentClisClient,
   AgentClisSurface,
   agentClisSettingsTab,
 } from '../../../../../app/features/settings/agent-clis.tsx';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
-import { waitFor } from '../../../support/learning-dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { waitFor } from '@ferretry/app/testing';
 import { claudeCli, clisView, codexCli, VERIFIED_URL } from './agent-clis-support.ts';
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'device-a' });

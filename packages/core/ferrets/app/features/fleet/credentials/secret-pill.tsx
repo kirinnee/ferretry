@@ -7,7 +7,7 @@
 
 import { Lock } from 'lucide-react';
 import type { ComponentPropsWithRef } from 'react';
-import { cn } from '../../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import { secretRef } from './environment-model.ts';
 
 export interface SecretPillProps extends ComponentPropsWithRef<'span'> {

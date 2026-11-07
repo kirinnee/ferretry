@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRuntimeCatalog } from '@ferretry/protocol';
 import { RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
-import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount as mountView, must } from '@ferretry/app/testing';
 import {
   type Call,
   CHANGE_ID,
@@ -12,8 +12,8 @@ import {
   STUDIO,
   scripted,
   stagedFrom,
-} from '../account-support.ts';
-import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
+import { chooseRuntimeAction, menuButton, openRuntimeMenu } from '../../../../../../../../plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-menu-support.ts';
 
 const PROPOSE = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;

@@ -8,7 +8,7 @@ import {
   sessionVerdicts,
   VERDICT_WORDS,
 } from '../../../../../app/features/session-info/info-warden.tsx';
-import { type Mounted, mount, must } from '../../../support/dom.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 
 const NOW = Date.parse('2026-10-16T10:00:00.000Z');
 

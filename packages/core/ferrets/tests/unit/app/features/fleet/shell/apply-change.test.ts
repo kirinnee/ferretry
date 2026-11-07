@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
+import { FyHttpError, FyTransportError } from '@ferretry/app';
 import { z } from 'zod';
 import {
   applyAccountChange,

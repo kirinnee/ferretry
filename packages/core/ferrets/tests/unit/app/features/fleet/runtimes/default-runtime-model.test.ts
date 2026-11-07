@@ -6,7 +6,7 @@ import {
   keepDefaultLabel,
   runtimeStateWords,
 } from '../../../../../../app/features/fleet/runtimes/default-runtime-model.ts';
-import { machine, runtime } from '../account-support.ts';
+import { machine, runtime } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 describe('runtimeStateWords', () => {
   it('says the login word of a runtime that is fine', () => {

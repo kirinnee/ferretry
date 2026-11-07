@@ -9,12 +9,13 @@
  * Plain words: no kernel vocabulary reaches this panel. The daemon writes the sentences; this draws them.
  */
 
-import type { IFyApiClient, LimitsView } from '@ferretry/protocol';
+import type { IFyApiClient } from '@ferretry/app';
+import type { LimitsView } from '@ferretry/protocol';
 import { CircleAlert, Gauge, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useDaemonClient } from '../../lib/store.tsx';
+import { useDaemonClient } from '@ferretry/app';
 
 /** The badge: whether limits are doing their job on this machine. */
 export const limitsBadge = (view: LimitsView): { readonly text: string; readonly good: boolean } => {

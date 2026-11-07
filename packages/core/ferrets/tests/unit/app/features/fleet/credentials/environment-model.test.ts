@@ -13,7 +13,7 @@ import {
   testNote,
   testResultLine,
 } from '../../../../../../app/features/fleet/credentials/environment-model.ts';
-import { CREDENTIALS, credential } from '../account-support.ts';
+import { CREDENTIALS, credential } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { BEDROCK, DEEPSEEK, DEEPSEEK_MIRROR, OLLAMA, PRESETS, ZAI, ZAI_CODEX } from './environment-support.ts';
 
 const list = (ids: readonly string[]) => ({ ...CREDENTIALS, credentials: ids.map(id => credential({ id })) });

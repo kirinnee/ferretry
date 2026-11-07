@@ -8,12 +8,8 @@
  * single-uses the state — they only keep this tab from forwarding another tab's sign-in.
  */
 
-import {
-  MCP_OAUTH_CALLBACK_PATH,
-  type FleetComponentView,
-  type McpOAuthConnection,
-  type McpOAuthFlow,
-} from '@ferretry/protocol';
+import { MCP_OAUTH_CALLBACK_PATH, type McpOAuthConnection, type McpOAuthFlow } from '@ferretry/plugin-mcp/contract';
+import { type FleetComponentView } from '@ferretry/protocol';
 import { timeUntil } from '../harness-login-model.ts';
 
 /**

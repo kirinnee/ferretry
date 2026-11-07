@@ -29,8 +29,8 @@
  * to its own machine's route — which is what makes the header, Info, Actions and composer follow it.
  */
 
-import type { SessionView } from '@ferretry/protocol';
-import { agendaFirst } from './agenda-inbox.ts';
+import type { SessionView } from '../../contract/index.ts';
+import { agendaFirst } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 import {
   byPinOrder,
   isPinned,
@@ -40,7 +40,7 @@ import {
   hasAgenda,
   type SessionsListFilter,
 } from '../shell/sessions-bar-model.ts';
-import type { ConnectionHealthState } from './connection-health.ts';
+import type { ConnectionHealthState } from '../../../../plugins/connections/app/lib/connection-health.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from './fleet-grouping.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';

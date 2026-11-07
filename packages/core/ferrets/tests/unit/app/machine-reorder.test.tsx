@@ -3,7 +3,7 @@ import { type AllMachinesView, allMachinesView, type MachineSource } from '../..
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { LIFT_MS } from '../../../app/shell/machine-reorder-model.ts';
 import { SessionsBarMachines } from '../../../app/shell/sessions-bar-machines.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 const [A, B, C] = ['alpha', 'beta', 'gamma'] as DaemonId[] as [DaemonId, DaemonId, DaemonId];
 const NAMES = new Map<DaemonId, string>([

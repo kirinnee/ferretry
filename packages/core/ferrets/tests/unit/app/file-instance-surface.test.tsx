@@ -3,9 +3,9 @@ import { FileInstanceSurface } from '../../../app/components/file-instance-surfa
 import { type FsChanges, type FsFile, resetFsProbes } from '../../../app/components/files-api.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
-import type { SidePaneTabInstance } from '../../src/shell/side-pane-tab-model.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { DaemonResponseError } from '../../../../../plugins/runtimes/app/lib/runtime-models.ts';
+import type { SidePaneTabInstance } from '../../../../../plugins/layouts/app/shell/side-pane-tab-model.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const daemon = daemonConnection({
   daemonId: 'view-daemon',

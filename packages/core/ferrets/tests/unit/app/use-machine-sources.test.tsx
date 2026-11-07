@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { type ListedMachine, useMachineSources } from '../../../app/hooks/use-machine-sources.ts';
 import type { MachineSource } from '../../../app/lib/all-machines.ts';
-import { DaemonConnectionHealth } from '../../src/lib/connection-health.ts';
+import { DaemonConnectionHealth } from '../../../../../plugins/connections/app/lib/connection-health.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
-import { DaemonProjectsStore } from '../../src/lib/projects-store.ts';
-import '../support/dom.ts';
-import { interact, type Mounted, mount } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import { DaemonProjectsStore } from '../../../../../plugins/projects/app/lib/projects-store.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'on-studio' });
 const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'on-laptop' });

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { SessionLiveActivity } from '@ferretry/protocol';
+import type { SessionLiveActivity } from '../../../contract/index.ts';
 import { LiveActivityLine, type PaneFrameReader, usePaneActivity } from '../../../app/components/live-activity.tsx';
 import { type PaneReading, UNREAD_PANE } from '../../../app/lib/session-activity.ts';
-import '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
-import { manualScheduler } from '../support/live-scheduler.ts';
-import { settleUntil } from '../support/settle.ts';
+import '@ferretry/app/testing';
+import { render, run, runAsync } from '@ferretry/app/testing';
+import { manualScheduler } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
 
 const textOf = (value: unknown): string => {
   if (typeof value === 'string') return value;

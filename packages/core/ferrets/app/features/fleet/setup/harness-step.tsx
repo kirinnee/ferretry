@@ -18,17 +18,11 @@
  */
 
 import type { FleetRuntimeView, FleetSetupScan } from '@ferretry/protocol';
-import {
-  adoptionBatches,
-  CONVERSATION_IMPORT_WINDOW_DAYS,
-  type ConversationAdoptResult,
-  conversationsToImport,
-  type ImportableConversation,
-} from '@ferretry/protocol';
+import { adoptionBatches, CONVERSATION_IMPORT_WINDOW_DAYS, type ConversationAdoptResult, conversationsToImport, type ImportableConversation } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '../../../shell/primitives.tsx';
-import { readFleetRuntimes } from '../catalog-api.ts';
+import { Button } from '@ferretry/app';
+import { readFleetRuntimes } from '../../../../../../plugins/catalogs/app/features/fleet/catalog-api.ts';
 import { runtimeChoice } from '../conversations/conversation-picker-model.ts';
 import { adoptConversations, readImportableConversations } from '../conversations/conversations-api.ts';
 import { EnvironmentLogin } from '../credentials/environment-login.tsx';
@@ -64,7 +58,7 @@ import { machineItemHash } from './settings-route.ts';
 import { useSetupAccess } from './setup-access.ts';
 import { SetupBadges, SetupDisclosure, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
 import { countWords, listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
-import { ToolInstall } from './tool-install.tsx';
+import { ToolInstall } from '../../../../../../plugins/conversation/app/features/fleet/setup/tool-install.tsx';
 
 export interface OnboardingHarnessStepProps {
   readonly tab: MachineTabProps;

@@ -6,12 +6,12 @@
  * children are never lost. The branch holding the open session cannot be folded away.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { ChevronDown } from 'lucide-react';
 import { useId, useState } from 'react';
 import type { DaemonId } from '../lib/daemon-connection.ts';
-import { daemonSessionPath } from '../lib/pages/routes.ts';
-import { RouteLink } from './route-link.tsx';
+import { daemonSessionPath } from '@ferretry/app';
+import { RouteLink } from '@ferretry/app';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
 import {
   containsSession,

@@ -4,21 +4,21 @@
  * The page is open on one machine and lists a second, asleep one. Retry on the second must skip THAT
  * machine's backoff and read THAT machine again, through its own pairing — never the page's machine.
  */
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { SessionsPage } from '../../../app/components/sessions-page.tsx';
 import { type ListedMachine, useMachineSources } from '../../../app/hooks/use-machine-sources.ts';
-import type { ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
-import type { ConnectionHealth, ConnectionHealthState } from '../../src/lib/connection-health.ts';
-import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
+import type { ScopeNavigation } from '../../../../../plugins/projects/app/hooks/use-project-scope.ts';
+import type { ConnectionHealth, ConnectionHealthState } from '../../../../../plugins/connections/app/lib/connection-health.ts';
+import { type ControlsStorage, DaemonControlsStore } from '@ferretry/app';
 import { type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
-import { DaemonProjectsStore } from '../../src/lib/projects-store.ts';
-import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
-import { interact, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import { DaemonProjectsStore } from '../../../../../plugins/projects/app/lib/projects-store.ts';
+import { DaemonUsageStore } from '../../../../../plugins/usage/app/lib/usage-store.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const here = daemonConnection({ daemonId: 'liftoff-mbp', baseUrl: 'http://127.0.0.1:7431', deviceId: 'mbp' });
 const there = daemonConnection({ daemonId: 'liftoff-ec2', baseUrl: 'https://ec2.invalid', deviceId: 'ec2' });

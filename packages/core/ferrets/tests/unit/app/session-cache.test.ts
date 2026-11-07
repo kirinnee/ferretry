@@ -12,7 +12,7 @@ import {
   type SessionCacheLimits,
   seedFleetFromCache,
 } from '../../../app/lib/session-cache.ts';
-import { schemaValidSessionView as sessionView } from '../support/schema-valid-sessions.ts';
+import { schemaValidSessionView as sessionView } from '@ferretry/app/testing';
 
 const alpha = daemonId('alpha');
 const beta = daemonId('beta');

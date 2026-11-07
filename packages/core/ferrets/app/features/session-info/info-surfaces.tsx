@@ -11,10 +11,10 @@
 
 import type { BrowserPageSummary, BrowserStatus, TerminalListView } from '@ferretry/protocol';
 import { EyeOff, Globe, Hand, SquareTerminal } from 'lucide-react';
-import { sidePaneInstanceTabId } from '../../shell/side-pane-tab-model.ts';
-import { Button } from '../../shell/primitives.tsx';
-import { browserPageLabel } from '../browser/browser-surface-list.tsx';
-import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
+import { sidePaneInstanceTabId } from '../../../../../plugins/layouts/app/shell/side-pane-tab-model.ts';
+import { Button } from '@ferretry/app';
+import { browserPageLabel } from '../../../../../plugins/browsers/app/features/browser/browser-surface-list.tsx';
+import type { SurfaceDriving } from '../../../../../plugins/layouts/app/features/workspace/use-surface-driving.ts';
 import { InfoChip, InfoNote } from './info-parts.tsx';
 
 export interface InfoSurfacesProps {

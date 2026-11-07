@@ -12,11 +12,11 @@
  * cannot do.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 import { useId } from 'react';
 import type { DaemonId } from '../lib/daemon-connection.ts';
-import { SessionMenuContext } from './session-menu-context.ts';
-import { SessionPinContext } from './session-pin-context.ts';
+import { SessionMenuContext } from '@ferretry/app';
+import { SessionPinContext } from '@ferretry/app';
 import { archivedFooterShown, archivedFooterWords, archivedRows } from './sessions-bar-archived.ts';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
 

@@ -23,14 +23,9 @@
  * helpers would reintroduce the single-daemon `/session/:id` destination.
  */
 
-import {
-  type AgentAddressCandidate,
-  isLiveAgentCandidate,
-  resolveAgentAddress,
-  type SessionView,
-} from '@ferretry/protocol';
+import { type AgentAddressCandidate, isLiveAgentCandidate, resolveAgentAddress, type SessionView } from '../../contract/index.ts';
 import type { DaemonId } from './daemon-connection.ts';
-import type { AgentReferenceResolver, ResolvedAgent } from './references.ts';
+import type { AgentReferenceResolver, ResolvedAgent } from '../../../../plugins/conversation/app/lib/references.ts';
 
 const TEAMMATE_NAME = /^[a-z][a-z0-9-]{0,31}$/iu;
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;

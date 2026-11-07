@@ -7,10 +7,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../../../contract/index.ts';
 
 import { sessionActionSpecs, type SessionAction } from '../../../app/shell/session-actions.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const actionsFor = (status: SessionStatus, canMutate = true): readonly SessionAction[] =>
   sessionActionSpecs(sessionView('s1', { state: { status } }), canMutate).map(spec => spec.action);

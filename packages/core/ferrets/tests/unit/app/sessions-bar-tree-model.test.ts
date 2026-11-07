@@ -7,7 +7,7 @@ import {
   subFerretCount,
   type TreeEntry,
 } from '../../../app/shell/sessions-bar-tree.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 const lead = sessionView('lead', { config: { teammate: 'hadi', label: 'Lead the pack' } });
 const a = sessionView('a', { config: { parent: 'lead' } });

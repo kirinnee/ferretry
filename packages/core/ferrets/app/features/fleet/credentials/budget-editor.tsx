@@ -20,12 +20,12 @@ import {
   readConfigFile,
   reasonOf,
   writeConfigFile,
-} from '../../config-files/config-files-api.ts';
+} from '../../../../../kernel/app/features/config-files/config-files-api.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { machineLacks, machineOffers } from '../../../lib/daemon-health.ts';
 import { UPDATE_MACHINE_WHERE } from '../../../lib/machine-update-words.ts';
 import { useDaemonHealth } from '../../../lib/use-daemon-health.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import {

@@ -14,19 +14,8 @@
  *   logins are listed apart and the only choice they have is WHICH existing login a source sign-in uses.
  */
 
-import {
-  CLONE_OUTCOME_CHOICES,
-  CLONE_REVIEW_STALE,
-  type CloneChoice,
-  type CloneLoginTarget,
-  type CloneReviewItem,
-  type CloneReviewKind,
-  type CloneReviewLogin,
-  cloneBundleProblem,
-  cloneRunnables,
-  type FleetCloneBundle,
-  type FleetCloneReview,
-} from '@ferretry/protocol';
+import { CLONE_OUTCOME_CHOICES, CLONE_REVIEW_STALE, type CloneChoice, type CloneReviewItem, type CloneReviewKind, type CloneReviewLogin } from '@ferretry/plugin-runtimes/contract';
+import { type CloneLoginTarget, cloneBundleProblem, cloneRunnables, type FleetCloneBundle, type FleetCloneReview } from '@ferretry/protocol';
 import { countWords } from './setup-words.ts';
 
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────

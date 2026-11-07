@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { type PaneReading, sessionAtPrompt, sessionTurn, UNREAD_PANE } from '../../../app/lib/session-activity.ts';
-import { sessionView } from '../support/sessions.ts';
+import { sessionView } from '@ferretry/app/testing';
 
 /**
  * WORKING OR AT ITS PROMPT, decided from evidence rather than from `running`.

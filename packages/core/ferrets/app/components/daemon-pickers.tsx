@@ -42,24 +42,24 @@
 
 import { Activity, Check, FolderClock, FolderGit2, ShieldQuestion } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
+import { useAccountPickerSlice } from '../../../../plugins/runtimes/app/hooks/use-account-picker.ts';
 import {
   type AccountHealthTone,
   absoluteInstantLabel,
   accountHealthView,
   lastCheckedAt,
   UNREAD_ACCOUNT_HEALTH,
-} from '../lib/account-health-view.ts';
-import type { PickerAccount, PickerAccountHealth } from '../lib/account-picker-catalog.ts';
-import type { DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
-import { cn } from '../lib/class-names.ts';
+} from '../../../../plugins/accounts/app/lib/account-health-view.ts';
+import type { PickerAccount, PickerAccountHealth } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import type { DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../../../../plugins/accounts/app/lib/account-picker-store.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonFleetSlice } from '../lib/fleet-store.ts';
-import type { DaemonProjectsSlice } from '../lib/projects-store.ts';
-import { PickerCombobox } from '../shell/picker-combobox.tsx';
-import type { PickerOption, PickerSource } from '../shell/picker-model.ts';
-import { Button } from '../shell/primitives.tsx';
-import { QuotaReadout } from '../shell/quota-readout.tsx';
+import type { DaemonProjectsSlice } from '../../../../plugins/projects/app/lib/projects-store.ts';
+import { PickerCombobox } from '@ferretry/app';
+import type { PickerOption, PickerSource } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { QuotaReadout } from '../../../../plugins/usage/app/shell/quota-readout.tsx';
 import {
   type AccountPickerOption,
   type AccountUsageRow,

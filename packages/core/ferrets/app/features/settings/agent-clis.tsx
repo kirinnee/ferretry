@@ -12,22 +12,19 @@
  * with until they are restarted, and the panel says so.
  */
 
-import type {
-  Harness,
-  HarnessCliView,
-  HarnessUpdateStartRequest,
-  HarnessUpdateView,
-  IFyApiClient,
-} from '@ferretry/protocol';
+import type { Harness } from '../../../contract/index.ts';
+import type { HarnessCliView, HarnessUpdateStartRequest } from '@ferretry/plugin-claude-code/contract';
+import type { HarnessUpdateView } from '@ferretry/protocol';
+import type { IFyApiClient } from '@ferretry/app';
 import { ExternalLink } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { cn } from '../../lib/class-names.ts';
+import { cn } from '@ferretry/app';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useDaemonClient } from '../../lib/store.tsx';
-import { Badge, Button } from '../../shell/primitives.tsx';
-import { CommandBlock } from '../onboarding/command-block.tsx';
-import { browserClipboardWriter, type ClipboardWriter } from '../onboarding/copy-button.tsx';
-import { isMissingRoute } from './about-machine-model.ts';
+import { useDaemonClient } from '@ferretry/app';
+import { Badge, Button } from '@ferretry/app';
+import { CommandBlock } from '../../../../../plugins/onboarding/app/features/onboarding/command-block.tsx';
+import { browserClipboardWriter, type ClipboardWriter } from '../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
+import { isMissingRoute } from '../../../../kernel/app/features/settings/about-machine-model.ts';
 import {
   anyCliUpdate,
   type CliStartRefusal,

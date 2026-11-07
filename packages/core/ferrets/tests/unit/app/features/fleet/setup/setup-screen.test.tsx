@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { type MachineSetupStepId, ONBOARDING_START } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
 import {
@@ -8,9 +8,9 @@ import {
   writeMachineSetupProgress,
 } from '../../../../../../app/features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from '../../../../../../app/features/fleet/setup/setup-screen.tsx';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
-import { CREDENTIALS, PROFILES } from '../account-support.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { CREDENTIALS, PROFILES } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { pairing } from '../shell/machine-support.ts';
 import { FRESH_MACHINE, machineView, runtimes, scan, scriptedClient } from './setup-support.ts';
 

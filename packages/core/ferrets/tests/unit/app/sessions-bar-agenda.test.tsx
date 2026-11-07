@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import type { ComponentProps } from 'react';
 import { allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
 import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
@@ -12,9 +12,9 @@ import {
   sessionRowPath,
   sessionsBarView,
 } from '../../../app/shell/sessions-bar-model.ts';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const DAEMON = 'alpha' as DaemonId;
 const BETA = 'beta' as DaemonId;

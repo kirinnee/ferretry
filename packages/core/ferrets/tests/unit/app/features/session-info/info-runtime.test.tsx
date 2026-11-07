@@ -6,8 +6,8 @@ import {
   InfoRuntime,
   type InfoRuntimeProps,
 } from '../../../../../app/features/session-info/info-runtime.tsx';
-import { type Mounted, mount, must } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

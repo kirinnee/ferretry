@@ -1,11 +1,12 @@
 /** Info › Overview: who this ferret is, where it works, where it came from. */
 
-import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
+import type { ManagedWorktreeView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { GitBranch, Pencil } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { displayCallsign } from '../../lib/callsign.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
-import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
+import type { ClipboardWriter } from '../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
 import { InfoAbout, type InfoAboutProps } from './info-about.tsx';
 import { INFO_HINT, lineage, worktreeFact } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';

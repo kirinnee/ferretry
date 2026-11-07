@@ -22,14 +22,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { SessionDashboard } from '../../../../app/components/session-dashboard.tsx';
-import { ConnectionHealthNoticeView } from '../../../src/features/connection/connection-health-notice.tsx';
+import { ConnectionHealthNoticeView } from '../../../../../../plugins/connections/app/features/connection/connection-health-notice.tsx';
 import { allMachinesView, type MachineSource } from '../../../../app/lib/all-machines.ts';
-import type { ConnectionHealthState } from '../../../src/lib/connection-health.ts';
+import type { ConnectionHealthState } from '../../../../../../plugins/connections/app/lib/connection-health.ts';
 import { type DaemonId, daemonConnection, daemonId } from '../../../../app/lib/daemon-connection.ts';
-import { sessionView } from '../../support/sessions.ts';
-import { wardenAccount, wardenFailover, wardenStatus } from '../../support/warden.ts';
-import { appStylesheet } from '../support/app-stylesheet.ts';
-import { sharedChromium } from '../support/chromium.ts';
+import { sessionView } from '@ferretry/app/testing';
+import { wardenAccount, wardenFailover, wardenStatus } from '../../../../../../plugins/warden/tests/support/app/warden.ts';
+import { appStylesheet } from '@ferretry/app/testing';
+import { sharedChromium } from '@ferretry/app/testing';
 
 type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
 

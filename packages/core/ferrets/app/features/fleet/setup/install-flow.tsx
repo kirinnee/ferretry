@@ -6,7 +6,7 @@
 
 import type { FleetSetupScan } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import { readFleetSetupScan } from '../setup-api.ts';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
@@ -16,7 +16,7 @@ import type { InstallPhase } from './install-model.ts';
 import { useSetupAccess } from './setup-access.ts';
 import { SetupNote } from './setup-ui.tsx';
 import { SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
-import { ToolInstall } from './tool-install.tsx';
+import { ToolInstall } from '../../../../../../plugins/conversation/app/features/fleet/setup/tool-install.tsx';
 
 const INSTALL_FLOW_KIND = 'install';
 

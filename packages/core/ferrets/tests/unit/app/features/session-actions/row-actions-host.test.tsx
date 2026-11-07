@@ -1,19 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { DAEMON_CAPABILITIES, type GrantsView, type SessionView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { DAEMON_CAPABILITIES, type GrantsView } from '@ferretry/protocol';
+import { type SessionView } from '../../../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import {
   SessionRowActionsHost,
   sessionRowMenuRenderer,
 } from '../../../../../app/features/session-actions/row-actions-host.tsx';
-import { DaemonAccountPickerStore } from '../../../../src/lib/account-picker-store.ts';
-import { DaemonConnectionStore } from '../../../../src/lib/connections.ts';
+import { DaemonAccountPickerStore } from '../../../../../../../plugins/accounts/app/lib/account-picker-store.ts';
+import { DaemonConnectionStore } from '../../../../../../../plugins/connections/app/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { DaemonFleetStore } from '../../../../../app/lib/fleet-store.ts';
-import { DaemonProjectsStore } from '../../../../src/lib/projects-store.ts';
-import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
-import type { SessionMenuState } from '../../../../src/shell/session-menu-context.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
-import { sessionView } from '../../../support/sessions.ts';
+import { DaemonProjectsStore } from '../../../../../../../plugins/projects/app/lib/projects-store.ts';
+import { type AppStore, StoreProvider } from '@ferretry/app';
+import type { SessionMenuState } from '@ferretry/app';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const ALPHA = `fy_daemon_${'a'.repeat(43)}`;
 const BETA = `fy_daemon_${'b'.repeat(43)}`;

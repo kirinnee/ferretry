@@ -7,15 +7,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useConfigChangeCounter, useDaemonClient } from '../../lib/store.tsx';
+import { useConfigChangeCounter, useDaemonClient } from '@ferretry/app';
 import {
   DEFAULT_VOICE_CLEANUP,
   readVoiceCleanup,
   type VoiceCleanup,
   type VoiceCleanupPatch,
   withVoiceCleanup,
-} from '../../lib/stt/voice-cleanup.ts';
-import { readConfigFile, writeConfigFile } from '../config-files/config-files-api.ts';
+} from '../../../../../plugins/voice/app/lib/stt/voice-cleanup.ts';
+import { readConfigFile, writeConfigFile } from '../../../../kernel/app/features/config-files/config-files-api.ts';
 import { VOICE_FILE } from '../fleet/setup/voice-default.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 

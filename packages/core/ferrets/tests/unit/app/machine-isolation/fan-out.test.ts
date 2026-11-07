@@ -5,15 +5,15 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '@ferretry/protocol';
-import { readEveryMachine } from '../../../src/features/analytics/analytics-fanout.ts';
-import { offlineLabel } from '../../../src/features/connection/connection-copy.ts';
+import { readEveryMachine } from '../../../../../../plugins/usage/app/features/analytics/analytics-fanout.ts';
+import { offlineLabel } from '../../../../../../plugins/connections/app/features/connection/connection-copy.ts';
 import { allMachinesView, type MachineSource } from '../../../../app/lib/all-machines.ts';
 import { type DaemonId, daemonConnection } from '../../../../app/lib/daemon-connection.ts';
 import type { DaemonFleetSlice } from '../../../../app/lib/fleet-store.ts';
 import type { DeadlineSchedule } from '../../../../app/lib/machine-deadline.ts';
-import { defaultNewSessionMachine, newSessionMenuItems, withReach } from '../../../src/shell/new-session-menu.tsx';
-import { machinePaletteSessions, paletteResultId } from '../../../src/shell/palette-model.ts';
-import { sessionView } from '../../support/sessions.ts';
+import { defaultNewSessionMachine, newSessionMenuItems, withReach } from '@ferretry/app';
+import { machinePaletteSessions, paletteResultId } from '@ferretry/app';
+import { sessionView } from '@ferretry/app/testing';
 
 const MBP = 'liftoff-mbp' as DaemonId;
 const EC2 = 'liftoff-ec2' as DaemonId;

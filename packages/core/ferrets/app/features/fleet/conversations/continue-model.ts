@@ -16,9 +16,10 @@
  * Nothing here reads a clock: every rule that depends on "now" is handed it.
  */
 
-import type { ConversationImportQuery, Harness, ImportableConversation, SessionView } from '@ferretry/protocol';
+import type { ConversationImportQuery, ImportableConversation } from '@ferretry/protocol';
+import type { Harness, SessionView } from '../../../../contract/index.ts';
 import { displayCallsign } from '../../../lib/callsign.ts';
-import { reviveOffer } from '../../../shell/revive-offer.ts';
+import { reviveOffer } from '../../../../../../plugins/updates/app/shell/revive-offer.ts';
 import {
   type DateFilter,
   type FerretMark,

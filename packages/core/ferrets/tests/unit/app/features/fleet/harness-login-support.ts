@@ -6,7 +6,7 @@
  * never fail on the day the daemon's answer changes shape.
  */
 
-import type { ClaudeLoginFlow, CodexLoginFlow } from '@ferretry/protocol';
+import type { ClaudeLoginFlow, CodexLoginFlow } from '@ferretry/plugin-logins/contract';
 
 export const CLAUDE_CREDENTIAL_ID = 'claude-studio';
 const CODEX_CREDENTIAL_ID = 'codex-studio';

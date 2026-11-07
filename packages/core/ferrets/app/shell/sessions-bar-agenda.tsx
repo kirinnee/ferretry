@@ -12,9 +12,9 @@
  */
 
 import { Inbox } from 'lucide-react';
-import { RouteLink } from './route-link.tsx';
+import { RouteLink } from '@ferretry/app';
 import { agendaWords } from './sessions-bar-model.ts';
-import { UnreadBadge } from './unread-badge.tsx';
+import { UnreadBadge } from '@ferretry/app';
 
 export function SessionsBarAgenda({
   total,

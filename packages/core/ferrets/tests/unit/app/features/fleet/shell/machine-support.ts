@@ -2,7 +2,7 @@
 
 import type { FleetMachineView } from '@ferretry/protocol';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 
 export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMachineView => ({

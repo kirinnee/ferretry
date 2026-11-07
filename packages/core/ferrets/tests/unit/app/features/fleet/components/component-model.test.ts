@@ -31,7 +31,7 @@ import {
   profileCatalog,
   secretRef,
   skills,
-} from './catalog-fixture.ts';
+} from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 
 const all = [instructions, github, notes, skills, claudeSettings, hooks, models];
 

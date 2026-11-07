@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { ProfilesSurface } from '../../../../../../app/features/fleet/profiles/profiles-surface.tsx';
-import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
+import { DaemonConnectionStore } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
-import { type Mounted, must } from '../../../../support/dom.ts';
+import { type AppStore, StoreProvider } from '@ferretry/app';
+import { type Mounted, must } from '@ferretry/app/testing';
 import { click, followHash, mountSettled, scriptedMachine, tabProps, text } from '../components/view-support.tsx';
 
 let mounted: Mounted | undefined;

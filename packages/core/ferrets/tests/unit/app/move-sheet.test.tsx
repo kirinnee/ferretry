@@ -1,8 +1,8 @@
-import '../support/dom.ts';
+import '@ferretry/app/testing';
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { SessionView } from '../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
@@ -13,15 +13,15 @@ import {
   migrateSessionWithDaemon,
   migrationRequestKey,
 } from '../../../app/components/move-sheet.tsx';
-import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
-import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
+import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
+import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
-import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
-import { sessionView } from '../support/sessions.ts';
-import { pickerHealth } from './picker-support.ts';
+import { DaemonUsageStore } from '../../../../../plugins/usage/app/lib/usage-store.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { render, run, runAsync } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
+import { pickerHealth } from '@ferretry/app/testing';
 
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',

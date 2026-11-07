@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { MCP_OAUTH_PATH } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import {
   McpSignInSection,
   type McpSignInSectionProps,
 } from '../../../../../../app/features/fleet/components/mcp-sign-in-section.tsx';
 import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import type { Mounted } from '../../../../support/dom.ts';
+import type { Mounted } from '@ferretry/app/testing';
 import { machineAnswer } from '../shell/change-support.ts';
 import {
   type Answers,
@@ -20,7 +20,7 @@ import {
   NOW,
   SECRETS,
 } from '../mcp-sign-in-support.ts';
-import { component } from './catalog-fixture.ts';
+import { component } from '../../../../../../../../plugins/catalogs/tests/unit/app/features/fleet/components/catalog-fixture.ts';
 import { click, mountSettled, settle, text } from './view-support.tsx';
 
 const LINEAR = component({

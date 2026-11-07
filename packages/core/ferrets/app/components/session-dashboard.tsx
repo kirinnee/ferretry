@@ -16,33 +16,34 @@
  * transport's raw text behind Details — never the transport’s "could not reach fyd at <loopback address>".
  */
 
-import type { SessionView, WardenStatusView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
+import type { WardenStatusView } from '@ferretry/protocol';
 import { FolderGit2, Folders, LayoutGrid, Plus, Rows3 } from 'lucide-react';
 import { useId, useMemo } from 'react';
-import { WardenStrip } from '../features/warden/warden-strip.tsx';
+import { WardenStrip } from '../../../../plugins/warden/app/features/warden/warden-strip.tsx';
 import {
   type WardenReportRequest,
   WardenVerdicts,
   type WardenVerdictView,
-} from '../features/warden/warden-verdicts.tsx';
-import type { MachineRosters } from '../hooks/use-account-picker.ts';
+} from '../../../../plugins/warden/app/features/warden/warden-verdicts.tsx';
+import type { MachineRosters } from '../../../../plugins/runtimes/app/hooks/use-account-picker.ts';
 import { useDashboardNarrow } from '../hooks/use-dashboard-view.ts';
-import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
-import type { PickerAccount } from '../lib/account-picker-catalog.ts';
+import { PULL_TO_PALETTE_ATTR } from '@ferretry/app';
+import type { PickerAccount } from '../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import type { AllMachinesView } from '../lib/all-machines.ts';
-import { cn } from '../lib/class-names.ts';
-import type { DashboardView, Density } from '../lib/controls.ts';
+import { cn } from '@ferretry/app';
+import type { DashboardView, Density } from '@ferretry/app';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { type MachineOutage, machineOutage } from '../lib/machine-outage.ts';
-import type { ClockEnvironment } from '../lib/message-clock.ts';
-import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
-import type { SessionQuotaResolver } from '../lib/usage.ts';
-import { type NewSessionMachine, NewSessionMenu, withReach } from '../shell/new-session-menu.tsx';
-import { RouteLink } from '../shell/route-link.tsx';
-import { PageThemeSwitch } from '../shell/theme-toggle.tsx';
-import { ViewTabs } from '../shell/view-tabs.tsx';
-import { CacheUpdating } from './cache-updating.tsx';
+import type { ClockEnvironment } from '../../../../plugins/conversation/app/lib/message-clock.ts';
+import { daemonNewSessionPath, daemonSessionsPath } from '@ferretry/app';
+import type { SessionQuotaResolver } from '../../../../plugins/usage/app/lib/usage.ts';
+import { type NewSessionMachine, NewSessionMenu, withReach } from '@ferretry/app';
+import { RouteLink } from '@ferretry/app';
+import { PageThemeSwitch } from '@ferretry/app';
+import { ViewTabs } from '../../../../plugins/layouts/app/shell/view-tabs.tsx';
+import { CacheUpdating } from '@ferretry/app';
 import { MachineStatusRow } from './machine-status.tsx';
 import { FullDensityGroups, LeanDensityGroups, NeedsYouGroup } from './session-dashboard-groups.tsx';
 import { AllMachinesGroups } from './session-dashboard-machines.tsx';

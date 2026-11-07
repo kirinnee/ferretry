@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { ConversionSummary } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import type { ConversionSummary } from '../../../../../contract/index.ts';
+import { FyHttpError } from '@ferretry/app';
 import {
   convertibleAccounts,
   conversionFailure,
   conversionSentences,
   harnessProduct,
 } from '../../../../../app/features/session-actions/conversion-model.ts';
-import type { PickerAccount } from '../../../../src/lib/account-picker-catalog.ts';
+import type { PickerAccount } from '../../../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 
 const account = (id: string, kind: PickerAccount['kind'], over: Partial<PickerAccount> = {}): PickerAccount => ({
   id,

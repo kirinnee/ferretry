@@ -8,7 +8,7 @@ import {
   InfoRow,
   InfoSection,
 } from '../../../../../app/features/session-info/info-parts.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

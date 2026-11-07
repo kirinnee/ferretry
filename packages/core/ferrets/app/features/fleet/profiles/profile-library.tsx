@@ -8,10 +8,10 @@
 import { GripVertical } from 'lucide-react';
 import { type DragEvent, type ReactNode, useId } from 'react';
 import { createPortal } from 'react-dom';
-import { cn } from '../../../lib/class-names.ts';
-import { BottomSheet } from '../../../shell/bottom-sheet.tsx';
-import { Button } from '../../../shell/primitives.tsx';
-import { CatalogNote } from '../components/catalog-ui.tsx';
+import { cn } from '@ferretry/app';
+import { BottomSheet } from '@ferretry/app';
+import { Button } from '@ferretry/app';
+import { CatalogNote } from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 import { filterLibrary, ITEM_KIND_WORDS, ITEM_KINDS, type ItemKind, type ProfileItem } from './profile-model.ts';
 
 export interface LibraryFilter {

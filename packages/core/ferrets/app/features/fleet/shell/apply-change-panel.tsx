@@ -11,8 +11,8 @@
 import type { FleetAccountChange, FleetAccountChangeView } from '@ferretry/protocol';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { grantGuidance } from '../../../lib/grants.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { grantGuidance } from '../../../../../../plugins/access/app/lib/grants.ts';
+import { Button } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import {
   applyAccountChange,

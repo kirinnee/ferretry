@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  type FleetCloneBundle,
-  type FleetSetupScan,
-  type FleetToolInstallResult,
-  mcpOAuthSecretNames,
-} from '@ferretry/protocol';
+import { type FleetCloneBundle, type FleetSetupScan, type FleetToolInstallResult, mcpOAuthSecretNames } from '@ferretry/protocol';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../../app/features/fleet/fleet-client.ts';

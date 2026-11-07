@@ -7,14 +7,14 @@
  * Unread dots are sorted first by the caller: the rail has no headings, so order is its only grouping.
  */
 
-import type { SessionView } from '@ferretry/protocol';
-import { unreadCount } from '../lib/agenda-inbox.ts';
+import type { SessionView } from '../../contract/index.ts';
+import { unreadCount } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
-import { RouteLink } from './route-link.tsx';
+import { RouteLink } from '@ferretry/app';
 import { sessionLabel } from './session-title.ts';
 import { agendaWords, sessionRowPath, sessionsBarSubline } from './sessions-bar-model.ts';
-import { StatusMark } from './status-mark.tsx';
-import { UnreadBadge } from './unread-badge.tsx';
+import { StatusMark } from '@ferretry/app';
+import { UnreadBadge } from '@ferretry/app';
 
 export function SessionsRailDot({
   view,

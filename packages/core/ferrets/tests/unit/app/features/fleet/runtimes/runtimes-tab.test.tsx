@@ -3,7 +3,7 @@ import type { FleetMachineView, FleetRuntimeCatalog, FleetRuntimeView } from '@f
 import { FleetRuntimeCatalogSchema } from '@ferretry/protocol';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { launchHref, RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import {
   APPLIED,
   type Call,
@@ -16,7 +16,7 @@ import {
   STUDIO,
   scripted,
   stagedFrom,
-} from '../account-support.ts';
+} from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 

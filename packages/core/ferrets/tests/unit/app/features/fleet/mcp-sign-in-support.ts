@@ -5,7 +5,7 @@
  * Every address here is a fake: `fixture-state` is not a real single-use state, and the code is a word.
  */
 
-import type { McpOAuthCompletion, McpOAuthConnection, McpOAuthFlow } from '@ferretry/protocol';
+import type { McpOAuthCompletion, McpOAuthConnection, McpOAuthFlow } from '@ferretry/plugin-mcp/contract';
 import type { z } from 'zod';
 import type { FleetClient, FleetClientFactory } from '../../../../../app/features/fleet/fleet-client.ts';
 import type {

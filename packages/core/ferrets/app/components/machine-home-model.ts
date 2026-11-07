@@ -4,12 +4,13 @@
  * Inbox's cards, the board's lanes or the sessions table — each number is a way into the place that owns it.
  */
 
-import type { AnalyticsRawSession, SessionView, WardenStatusView } from '@ferretry/protocol';
-import { wardenNeedsYouCount } from '../features/warden/warden-status-model.ts';
+import type { AnalyticsRawSession, WardenStatusView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
+import { wardenNeedsYouCount } from '../../../../plugins/warden/app/features/warden/warden-status-model.ts';
 import { relativeTime } from '../lib/session-screens.ts';
-import { agendaFirst, unreadCount } from '../lib/agenda-inbox.ts';
+import { agendaFirst, unreadCount } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 import { isGuideBuilder, isStopped } from '../shell/sessions-bar-model.ts';
-import { statusMark } from '../shell/status-mark.tsx';
+import { statusMark } from '@ferretry/app';
 
 /** How many ferrets the home lists before "All sessions" takes over. */
 export const TOP_FERRETS = 6;

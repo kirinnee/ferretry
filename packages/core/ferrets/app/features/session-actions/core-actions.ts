@@ -10,7 +10,7 @@
  *     the plan's later PRs), through the same `SessionActionContribution` these use.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import {
   ArrowLeftRight,
   Copy,
@@ -27,10 +27,10 @@ import {
   Square,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
-import { isOutdated, outdatedSectionWords } from '../restart-outdated/outdated-model.ts';
+import { TERMINAL_STATUSES } from '@ferretry/app';
+import { isOutdated, outdatedSectionWords } from '../../../../../plugins/updates/app/features/restart-outdated/outdated-model.ts';
 import { HARNESS_SHORT, otherHarness } from '../fleet/credentials/credentials-model.ts';
-import { reviveOffer } from '../../shell/revive-offer.ts';
+import { reviveOffer } from '../../../../../plugins/updates/app/shell/revive-offer.ts';
 import type { SessionActionContribution, SessionActionFormHost } from './registry.ts';
 
 export interface CoreActionContext {

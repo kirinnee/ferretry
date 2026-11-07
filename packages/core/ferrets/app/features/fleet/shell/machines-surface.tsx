@@ -17,13 +17,13 @@
 import type { FleetMachineView } from '@ferretry/protocol';
 import { Globe, KeyRound, Layers, PawPrint, Play, SlidersHorizontal } from 'lucide-react';
 import type { ComponentType, ReactNode } from 'react';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import { UnderlineTabs } from '../../../shell/underline-tabs.tsx';
+import { Button } from '@ferretry/app';
+import { UnderlineTabs } from '@ferretry/app';
 import { daemonDisplayName, distinctDaemonName, replacedPairing } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { AccountStatus } from './account-status.tsx';
+import { AccountStatus } from '../../../../../../plugins/accounts/app/features/fleet/shell/account-status.tsx';
 import type { PanelGroupId } from './machine-panels.ts';
 import { reachLabel, reachWord, type ShownReach, shownReachSummary } from './machine-reach.ts';
 import { MACHINE_TABS, type MachineTabId } from './machine-route.ts';

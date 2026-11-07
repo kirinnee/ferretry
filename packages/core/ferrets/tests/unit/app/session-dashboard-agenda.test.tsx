@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { SessionDashboard, type SessionDashboardProps } from '../../../app/components/session-dashboard.tsx';
 import { activityLine, pullDashboardNeedsYou } from '../../../app/components/session-dashboard-model.ts';
 import { allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
 import { type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
-import '../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
+import '@ferretry/app/testing';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '@ferretry/app/testing';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.invalid', deviceId: 'on-studio' });
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');

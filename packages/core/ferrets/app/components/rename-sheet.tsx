@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../contract/index.ts';
 
 export interface RenameSessionPatch {
   readonly name?: string;

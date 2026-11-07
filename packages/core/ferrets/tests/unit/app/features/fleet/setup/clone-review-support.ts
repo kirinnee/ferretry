@@ -6,7 +6,8 @@
  * Every name, address and command here is made up. There is no credential, token or secret value.
  */
 
-import { type CloneReviewItem, type FleetCloneReview, FleetCloneReviewSchema } from '@ferretry/protocol';
+import { type CloneReviewItem } from '@ferretry/plugin-runtimes/contract';
+import { type FleetCloneReview, FleetCloneReviewSchema } from '@ferretry/protocol';
 import { bundle } from './setup-support.ts';
 
 const GUARD_SCRIPT = `#!/bin/sh

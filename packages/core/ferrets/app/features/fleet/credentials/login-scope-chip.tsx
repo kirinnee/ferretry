@@ -4,7 +4,7 @@
  * so a Codex login is never picked for a Claude Code runtime by mistake.
  */
 
-import { Badge } from '../../../shell/primitives.tsx';
+import { Badge } from '@ferretry/app';
 import { type HarnessKind, LOGIN_SCOPE_WORDS, scopeOfHarnesses } from './credentials-model.ts';
 
 export function LoginScopeChip({ harnesses }: { readonly harnesses: readonly HarnessKind[] }) {

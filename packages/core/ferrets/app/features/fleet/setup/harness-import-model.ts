@@ -11,13 +11,7 @@
  * Pure: a scan and the person's answers in, the rows, the name, the label and the change out.
  */
 
-import type {
-  FleetAccountChange,
-  FleetHarnessScan,
-  FleetHostLogin,
-  FleetSetupScan,
-  FleetSetupTool,
-} from '@ferretry/protocol';
+import type { FleetAccountChange, FleetHarnessScan, FleetHostLogin, FleetSetupScan, FleetSetupTool } from '@ferretry/protocol';
 import { countWords, fileName, listWords, type SetupHarness } from './setup-words.ts';
 
 type FleetSetupUpdate = FleetSetupScan['updates'][number];

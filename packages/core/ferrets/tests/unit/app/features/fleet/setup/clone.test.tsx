@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { type FleetMachineView, secretReference } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { type FleetMachineView } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
+import { FyHttpError } from '@ferretry/app';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../../app/features/fleet/setup/clone.tsx';
-import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../../plugins/connections/app/lib/connections.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
-import { typeInto } from '../../../../support/learning-dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { typeInto } from '@ferretry/app/testing';
 import {
   APPLY_PATH,
   ASLEEP,

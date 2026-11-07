@@ -6,7 +6,7 @@
  * makes one for the machine it is showing.
  */
 
-import type { IFyApiClient } from '@ferretry/protocol';
+import type { IFyApiClient } from '@ferretry/app';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 
 /**

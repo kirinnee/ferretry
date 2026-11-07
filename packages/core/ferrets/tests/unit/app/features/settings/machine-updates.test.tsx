@@ -5,11 +5,11 @@ import {
   HARNESS_UPDATE_PATH,
   useMachineUpdates,
 } from '../../../../../app/features/settings/machine-updates.ts';
-import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../../plugins/connections/app/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonId } from '../../../../../app/lib/daemon-connection.ts';
-import { interact, type Mounted, mount } from '../../../support/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { pairing } from '../fleet/shell/machine-support.ts';
-import { updateView } from './about-machine-support.ts';
+import { updateView } from '../../../../../../kernel/tests/unit/app/features/settings/about-machine-support.ts';
 import { claudeCli, clisView } from './agent-clis-support.ts';
 
 let mounted: Mounted | null = null;

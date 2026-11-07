@@ -21,13 +21,13 @@
 
 import { ArrowLeft, Code2, GitCompareArrows, ListTree, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SessionSearchControl } from '../features/session-search/session-search.tsx';
-import { useInputModality } from '../hooks/use-input-modality.ts';
-import { useLayoutMode } from '../hooks/use-layout-mode.ts';
+import { SessionSearchControl } from '../../../../plugins/conversation/app/features/session-search/session-search.tsx';
+import { useInputModality } from '@ferretry/app';
+import { useLayoutMode } from '../../../../plugins/layouts/app/hooks/use-layout-mode.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
-import { formatCodeReference } from '../lib/references.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
+import { formatCodeReference } from '../../../../plugins/conversation/app/lib/references.ts';
+import { useDaemonFetch } from '@ferretry/app';
 import { FileTree } from './file-tree.tsx';
 import { type FsFile, type FsListing, fsApi, useFsProbe } from './files-api.ts';
 import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';

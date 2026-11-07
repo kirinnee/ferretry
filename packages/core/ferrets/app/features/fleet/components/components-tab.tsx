@@ -10,13 +10,13 @@
 import type { FleetAccountChange, FleetComponentKind, FleetComponentView, FleetMachineView } from '@ferretry/protocol';
 import { Lock } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Markdown } from '../../../components/markdown.tsx';
-import { useConnectionSnapshot } from '../../../lib/store.tsx';
-import { Button } from '../../../shell/primitives.tsx';
+import { Markdown } from '../../../../../../plugins/conversation/app/components/markdown.tsx';
+import { useConnectionSnapshot } from '@ferretry/app';
+import { Button } from '@ferretry/app';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { type AccountCatalog, allComponents, useAccountCatalog } from './account-catalog.ts';
+import { type AccountCatalog, allComponents, useAccountCatalog } from '../../../../../../plugins/accounts/app/features/fleet/components/account-catalog.ts';
 import {
   CatalogNote,
   ComponentBadges,
@@ -29,7 +29,7 @@ import {
   ReadFailed,
   RowList,
   Section,
-} from './catalog-ui.tsx';
+} from '../../../../../../plugins/catalogs/app/features/fleet/components/catalog-ui.tsx';
 import { ComponentForm } from './component-form.tsx';
 import {
   blankDraft,

@@ -12,8 +12,8 @@
  * all stay answers about the live set, because that is what they ask.
  */
 
-import type { SessionView } from '@ferretry/protocol';
-import { instant } from '../lib/agenda-inbox.ts';
+import type { SessionView } from '../../contract/index.ts';
+import { instant } from '../../../../plugins/agenda/app/lib/agenda-inbox.ts';
 
 /** The footer's one sentence: "1 older finished session archived", "3 older finished sessions archived". */
 export const archivedFooterWords = (count: number): string =>

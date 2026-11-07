@@ -14,16 +14,8 @@
  *
  * Pure: the review, the source's files and the picks in; rows and a change out.
  */
-import type {
-  CloneKeyChoice,
-  CloneOutcome,
-  CloneReviewItem,
-  CloneSettingsDecisions,
-  CloneSettingsDoc,
-  CloneSettingsText,
-  FleetCloneReview,
-  FleetMachineView,
-} from '@ferretry/protocol';
+import type { CloneKeyChoice, CloneOutcome, CloneReviewItem, CloneSettingsDecisions, CloneSettingsDoc, CloneSettingsText } from '@ferretry/plugin-runtimes/contract';
+import type { FleetCloneReview, FleetMachineView } from '@ferretry/protocol';
 import { CLONE_SETTINGS_FILES, type CloneItemId, type SourceSettingsFile } from './clone-settings-model.ts';
 
 export type ReviewedSettings = FleetCloneReview['settings'][number];

@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../contract/index.ts';
 import { describe, test } from 'bun:test';
 import should from 'should';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../../../app/lib/agent-references.ts';

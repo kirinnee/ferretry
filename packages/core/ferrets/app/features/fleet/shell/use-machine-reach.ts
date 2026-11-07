@@ -9,9 +9,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
+import type { DaemonConnectionRecord } from '../../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
-import { useConfigChangeEffect } from '../../../lib/store.tsx';
+import { useConfigChangeEffect } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type MachineReach, readMachineReach, type ShownReach } from './machine-reach.ts';
 

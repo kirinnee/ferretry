@@ -5,7 +5,7 @@
  */
 
 import { type ReactNode, useId, useState } from 'react';
-import { type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import { type ClipboardWriter, CopyButton } from '../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
 
 export function InfoRow({
   label,

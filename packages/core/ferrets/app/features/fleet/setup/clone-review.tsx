@@ -15,10 +15,11 @@
  * The sheet is a view: the choices live in `clone.tsx` and the rules in `clone-review-model.ts`.
  */
 
-import type { CloneChoice, CloneReviewItem, CloneReviewLogin, FleetCloneReview } from '@ferretry/protocol';
+import type { CloneChoice, CloneReviewItem, CloneReviewLogin } from '@ferretry/plugin-runtimes/contract';
+import type { FleetCloneReview } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
-import { browserClipboardWriter, type ClipboardWriter } from '../../onboarding/copy-button.tsx';
+import { cn } from '@ferretry/app';
+import { browserClipboardWriter, type ClipboardWriter } from '../../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
 import { documentSize } from './clone-model.ts';
 import { NewerKeyRow } from './clone-settings.tsx';
 import {

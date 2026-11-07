@@ -11,12 +11,12 @@
 import { type ReactNode, useMemo } from 'react';
 
 import { useMachineTaskIds } from '../hooks/use-machine-task-ids.ts';
-import type { DaemonBoardStore } from '../lib/board-store.ts';
+import type { DaemonBoardStore } from '../../../../plugins/board/app/lib/board-store.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonBoardCardPath } from '../lib/pages/routes.ts';
-import { useOptionalAppStore } from '../lib/store.tsx';
-import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
-import { ReferenceSurfaceProvider, useReferenceSurface } from './reference-surface.tsx';
+import { daemonBoardCardPath } from '@ferretry/app';
+import { useOptionalAppStore } from '@ferretry/app';
+import { createTaskReferenceResolver } from '../../../../plugins/board/app/lib/task-reference-context.tsx';
+import { ReferenceSurfaceProvider, useReferenceSurface } from '../../../../plugins/conversation/app/components/reference-surface.tsx';
 
 export function DaemonTaskReferences({
   connection,

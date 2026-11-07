@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError } from '@ferretry/app';
 import { useMemo } from 'react';
 import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { type SetupAccess, useSetupAccess } from '../../../../../../app/features/fleet/setup/setup-access.ts';
-import { interact, mount, must } from '../../../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { machineAnswer, STUDIO, scriptedClient } from './setup-support.ts';
 
 interface Probe {

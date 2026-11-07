@@ -10,8 +10,8 @@
 import { type VoiceEngine, VoiceEngineSchema } from '@ferretry/protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { useConfigChangeCounter, useDaemonClient } from '../../../lib/store.tsx';
-import { readConfigFile } from '../../config-files/config-files-api.ts';
+import { useConfigChangeCounter, useDaemonClient } from '@ferretry/app';
+import { readConfigFile } from '../../../../../kernel/app/features/config-files/config-files-api.ts';
 
 export const VOICE_FILE = 'voice.yaml';
 

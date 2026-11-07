@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import { DaemonTaskReferences } from '../../../app/components/daemon-task-references.tsx';
-import { Markdown } from '../../src/components/markdown.tsx';
-import { ReferenceSurfaceProvider, useReferenceSurface } from '../../src/components/reference-surface.tsx';
+import { Markdown } from '../../../../../plugins/conversation/app/components/markdown.tsx';
+import { ReferenceSurfaceProvider, useReferenceSurface } from '../../../../../plugins/conversation/app/components/reference-surface.tsx';
 import { useMachineTaskIds } from '../../../app/hooks/use-machine-task-ids.ts';
-import { DaemonBoardStore } from '../../src/lib/board-store.ts';
+import { DaemonBoardStore } from '../../../../../plugins/board/app/lib/board-store.ts';
 import type { DaemonConnection } from '../../../app/lib/daemon-connection.ts';
-import { StoreProvider } from '../../src/lib/store.tsx';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { card, fakeEnvironment, fakePort, flush, laneSetFor, laptop, PROJECT } from './board-support.ts';
+import { StoreProvider } from '@ferretry/app';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { card, fakeEnvironment, fakePort, flush, laneSetFor, laptop, PROJECT } from '../../../../../plugins/board/tests/unit/app/board-support.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {

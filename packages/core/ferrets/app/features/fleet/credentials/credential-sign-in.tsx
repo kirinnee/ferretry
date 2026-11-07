@@ -17,12 +17,13 @@
  * somewhere this browser cannot see; it stops the moment the flow ends.
  */
 
-import type { FleetCredentialView, HarnessLoginCodexMethod, HarnessLoginFlow } from '@ferretry/protocol';
+import type { FleetCredentialView } from '@ferretry/protocol';
+import type { HarnessLoginCodexMethod, HarnessLoginFlow } from '@ferretry/plugin-logins/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { Button } from '../../../shell/primitives.tsx';
+import { Button } from '@ferretry/app';
 import { ClaudeLoginPanel } from '../claude-login-panel.tsx';
-import { CodexLoginPanel } from '../codex-login-panel.tsx';
+import { CodexLoginPanel } from '../../../../../../plugins/codex/app/features/fleet/codex-login-panel.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import {
