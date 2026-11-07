@@ -8,7 +8,8 @@ import { describe, expect, test } from 'bun:test';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { ferret, owner } from '@ferretry/kernel/testing';
 import manifest from '../../../manifest.ts';
-import { lessonsHost } from './host.ts';
+import { LESSONS_CONFIG } from '../../../contract/index.ts';
+import { lessonsHost, realLessonsConfig } from './host.ts';
 
 const json = (response: { readonly body?: unknown }): any => JSON.parse(String(response.body));
 
@@ -175,6 +176,65 @@ describe('the lessons routes', () => {
       expect(declared.has(key)).toBe(true);
   });
 
-  test.skip('R-0222 PATCH /v1/lessons/config writes lessons.yaml … pending port: kernel config write port (D2 #16)', () => {});
+  test('R-0222 PATCH /v1/learning/config is PATCH /v1/lessons/config: the switch is written into lessons.yaml by the kernel writer, comments kept', async () => {
+    const real = realLessonsConfig();
+    await real.handEdit('# how often the miner runs\nbatchSize: 5\n');
+    const { host } = await lessonsHost({ realConfig: real });
+
+    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
+
+    expect(answer.status).toBe(200);
+    expect(json(answer)).toMatchObject({ passiveDefault: false, batchSize: 5 });
+    expect(json(answer).held).toBeUndefined();
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(false);
+    const text = await real.text();
+    expect(text).toContain('# how often the miner runs');
+    expect(text).toContain('batchSize: 5');
+    expect(text).toContain('passiveDefault: false');
+  });
+
+  test('R-0222 a write the kernel holds for the owner is NOT in effect, and the answer says what waits', async () => {
+    const real = realLessonsConfig();
+    await real.handEdit('passiveDefault: true\n');
+    // A hand edit that names a secret waits for the owner; the version before it stays in effect.
+    await real.handEdit('passiveDefault: true\nmodel: ${secret:MINER_MODEL}\n');
+    const { host } = await lessonsHost({ realConfig: real });
+
+    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
+
+    expect(answer.status).toBe(200);
+    const body = json(answer);
+    expect(body.passiveDefault).toBe(true);
+    expect(body.held).toEqual([expect.stringContaining('MINER_MODEL')]);
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(true);
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
+  });
+
+  test('R-0222 a raw secret in lessons.yaml refuses the write, and the value is never echoed', async () => {
+    const pasted = ['gh', 'p_', 'Q7'.repeat(14)].join('');
+    const real = realLessonsConfig();
+    await real.handEdit('passiveDefault: true\n');
+    await real.handEdit(`passiveDefault: true\nmodel: ${pasted}\n`);
+    const { host } = await lessonsHost({ realConfig: real });
+
+    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
+    const typed = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: pasted } });
+
+    expect(answer.status).toBe(400);
+    expect(answer.body).toContain('raw secret');
+    expect(answer.body).not.toContain(pasted);
+    expect(typed.status).toBe(400);
+    expect(typed.body).not.toContain(pasted);
+    expect(await real.text()).toBe(`passiveDefault: true\nmodel: ${pasted}\n`);
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(true);
+  });
+
+  test('R-0222 a ferret cannot change the machine default: the route is for a person', () => {
+    expect(manifest.actions.routes.find(route => route.key === 'PATCH /v1/lessons/config')).toMatchObject({
+      minimum: 'operator',
+      caller: 'person',
+    });
+  });
+
   test.skip('R-0302 POST /v1/lessons/scan starts miners … pending port: Ferrets start work folder (D2 #19)', () => {});
 });

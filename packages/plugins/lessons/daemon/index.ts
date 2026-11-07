@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   AgentLessonToolCallSchema,
   type LessonsConfig,
+  type LessonsConfigPatch,
   LESSONS_CONFIG,
   LessonsChanged,
   lessonsConfigFromFile,
@@ -31,9 +32,6 @@ const BINARY_NAME = 'fy';
  * switch and the explicit scan.
  *
  * DECLARED GAPS (each says what is missing, in words, rather than guess):
- *  - `ConfigPort` has no write (D2 #16: the kernel's config write port is not on this base), so
- *    `PATCH /v1/lessons/config` REFUSES with a sentence naming `config/lessons.yaml`, the one source of truth. It never
- *    keeps a second copy of the switch anywhere else.
  *  - A scan's price comes from Usage's price list, which Lessons may not import: an estimate carries no `usd`.
  *  - There is no work folder of Lessons' own a ferret may be started in (D2 #19's additive Ferrets start work folder and
  *    kernel WorkFolders are not on this base), so starting a miner — a scan, or `POST /v1/lessons/run {spawn: true}` —
@@ -77,6 +75,7 @@ export default implementDaemon(manifest, {
       store,
       serial,
       config: async () => config(),
+      writeConfig: async (patch: LessonsConfigPatch) => await kernel.config.write(LESSONS_CONFIG, undefined, { patch }),
       now,
       run: async (spawn: boolean) => await miner.run(spawn),
       lessons,

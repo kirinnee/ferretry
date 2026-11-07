@@ -2,9 +2,8 @@
  * SETTINGS › LEARNING, on one machine: whether NEW ferrets are instructed to learn, and each current
  * ferret's own switch.
  *
- * The machine default is `lessons.yaml`'s `passiveDefault`. Until the kernel's config write port lands the daemon refuses
- * to write it (the sentence names the file to edit by hand), and the switch shows that refusal. It
- * only decides what a new ferret's fixed instructions say; a running ferret is switched on its own,
+ * The machine default is `lessons.yaml`'s `passiveDefault`, written by the daemon through the kernel's config
+ * writer; the switch shows the settings in effect afterwards, and any refusal. It only decides what a new ferret's fixed instructions say; a running ferret is switched on its own,
  * which re-instructs it.
  */
 

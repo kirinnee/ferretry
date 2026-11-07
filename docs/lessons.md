@@ -22,9 +22,11 @@ owner may change, its strength (how many times it was filed: `9×`) and its evid
 The **only** thing the passive switch controls is whether a ferret is _instructed_ to file lessons.
 
 - `lessons.yaml` `passiveDefault` (default `true`) decides it for every NEW ferret, and that file is the
-  only place it lives. Writing it from Settings › Lessons needs the kernel's config write port (D2 #16),
-  which is not built yet: until it is, `PATCH /v1/lessons/config` answers `503 config_write_unavailable`
-  with a sentence naming the file to edit by hand, and keeps no copy of the switch anywhere else (GAP).
+  only place it lives. Settings › Lessons writes it with `PATCH /v1/lessons/config` through the kernel's
+  config writer, which edits only that key (comments survive), refuses the write when the file holds a raw
+  secret (the answer never repeats it) and keeps no copy of the switch anywhere else. The answer is the
+  settings IN EFFECT; when the kernel holds the edit for the owner (the file names a secret the owner has
+  not confirmed), the old value stays in effect and `held` lists what waits.
   A miner or a warden is never instructed.
 - `PATCH /v1/ferrets/:ferretId/lessons {passive}` switches one ferret.
 - The teaching is a per-ferret part of the launch, contributed through the `launch.parts` hook: Lessons

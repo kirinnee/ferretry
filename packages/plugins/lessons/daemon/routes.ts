@@ -2,6 +2,7 @@ import {
   ApiError,
   type ApiResponse,
   type CallContext,
+  type ConfigWriteOutcome,
   decodeParameter,
   jsonResponse,
   queryValue,
@@ -20,12 +21,11 @@ import {
   AgentLessonToolCallSchema,
   type FerretLessonsPatchResult,
   LESSONS_APPLY_CONFLICT_CODE,
-  LESSONS_CONFIG_WRITE_GAP,
-  LESSONS_CONFIG_WRITE_GAP_CODE,
   LESSONS_MINER_GAP_CODE,
   type LessonsActionRequest,
   LessonsActionRequestSchema,
   LessonsApplyRequestSchema,
+  type LessonsConfigPatch,
   LessonsConfigPatchSchema,
   type LessonsGlobalDocument,
   LessonsGlobalWriteSchema,
@@ -61,6 +61,8 @@ export interface LessonsSubsystem {
   readonly serial: SerialSection;
   /** The mining schedule, the agent that will perform it and the machine switch, all from `lessons.yaml`. */
   config(): Promise<LessonsConfig>;
+  /** Writes the machine switch into `lessons.yaml` through the kernel's config write port (the one writer). */
+  writeConfig(patch: LessonsConfigPatch): Promise<ConfigWriteOutcome>;
   /** The instant a verdict is stamped with. */
   now(): string;
   /** Runs an ingest pass and, when requested, starts a bounded miner batch. */
@@ -394,6 +396,31 @@ async function scanView(subsystem: LessonsSubsystem): Promise<ApiResponse> {
   return jsonResponse((scan === undefined ? {} : { scan }) satisfies LessonsScanView);
 }
 
+/**
+ * What `PATCH /v1/lessons/config` answers (today's: the settings IN EFFECT after the write). A change the kernel HELD for
+ * the owner is not in effect, so the settings answered are still the ones in effect, and `held` says what waits. A
+ * refusal names what was wrong by the kernel's own sentences, which never quote a value (a pasted secret goes no further
+ * than its file).
+ */
+function configWritten(outcome: ConfigWriteOutcome, inEffect: LessonsConfig): ApiResponse {
+  switch (outcome.kind) {
+    case 'written':
+      return jsonResponse(inEffect);
+    case 'held':
+      return jsonResponse({ ...inEffect, held: [...outcome.sentences] });
+    case 'conflict':
+      throw new ApiError(409, 'config/lessons.yaml changed while it was being written; try again', 'conflict');
+    case 'refused': {
+      const why = outcome.issues.map(issue => issue.message).join('; ');
+      throw new ApiError(
+        400,
+        `config/lessons.yaml was not changed: ${why === '' ? outcome.reason : why}`,
+        'invalid_request',
+      );
+    }
+  }
+}
+
 /** The capability ref a demand names; Gate owns the vocabulary and these two are core names. */
 function capabilityRef(name: 'fleet' | 'filesystem') {
   return CAPABILITIES[name];
@@ -434,11 +461,11 @@ export function lessonsRoutes(subsystem: LessonsSubsystem) {
         throw new ApiError(403, 'a ferret cannot launch lesson miners; ask the owner', OWNER_ONLY_CODE);
       return jsonResponse(await subsystem.serial.run(async () => await subsystem.run(spawn)).catch(lessonsRefusal));
     },
-    // D2 #16: the write goes through the kernel's config write port, which this base does not have. Refuse, naming the
-    // file, rather than keep a second copy of the switch: `lessons.yaml` stays the one source of truth.
+    // `lessons.yaml` is the one source of truth: the switch is written there, key by key, through the kernel's writer.
     'PATCH /v1/lessons/config': async call => {
-      await parseBody(call.request, LessonsConfigPatchSchema);
-      throw new ApiError(503, LESSONS_CONFIG_WRITE_GAP, LESSONS_CONFIG_WRITE_GAP_CODE);
+      const patch = await parseBody(call.request, LessonsConfigPatchSchema);
+      const outcome = await subsystem.writeConfig(patch);
+      return configWritten(outcome, await subsystem.config());
     },
     'GET /v1/lessons/proposals/:id/apply-preview': async call =>
       jsonResponse(await subsystem.lessons.applyPreview(pathProposalId(call)).catch(lessonsRefusal)),

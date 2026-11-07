@@ -3,8 +3,6 @@ import should from 'should';
 import {
   AgentLessonToolResultSchema,
   LESSONS_APPLY_CONFLICT_CODE,
-  LESSONS_CONFIG_WRITE_GAP,
-  LESSONS_CONFIG_WRITE_GAP_CODE,
   LessonsApplyPreviewSchema,
   LessonsConfigSchema,
   LessonsPatchResponseSchema,
@@ -534,7 +532,7 @@ async function etagOf(subject: Lessons, id: string): Promise<string> {
 
 describe('the lessons mount', () => {
   describe('the machine default', () => {
-    it('should refuse to write the machine default until the kernel config write port lands, keeping no copy (D2 #16)', async () => {
+    it('should write the machine default through the config writer and answer the settings in effect, keeping no copy', async () => {
       // Arrange
       const subject = lessons();
       const before = { ...subject.world.config };
@@ -547,9 +545,8 @@ describe('the lessons mount', () => {
       });
 
       // Assert
-      should(answer.status).equal(503);
-      should(answer.body).containEql({ code: LESSONS_CONFIG_WRITE_GAP_CODE, error: LESSONS_CONFIG_WRITE_GAP });
-      should(subject.world.config).deepEqual(before);
+      should(answer.status).equal(200);
+      should(LessonsConfigSchema.parse(answer.body)).deepEqual({ ...before, passiveDefault: !before.passiveDefault });
       should(JSON.stringify(await subject.store.loadState())).not.containEql('passiveDefault');
     });
 

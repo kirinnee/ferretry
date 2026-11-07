@@ -64,7 +64,7 @@ const lessonsCall = async <Value>(
 export const fetchLessonsConfig = (connection: LessonsConnection): Promise<LessonsConfig> =>
   lessonsCall(connection, 'GET /v1/lessons/config', LessonsConfigSchema);
 
-/** Asks the daemon to write the machine default; refused (`config_write_unavailable`) until the kernel config write port lands. */
+/** Asks the daemon to write the machine default into `lessons.yaml`; answers the settings in effect afterwards. */
 export const patchLessonsConfig = (connection: LessonsConnection, patch: LessonsConfigPatch): Promise<LessonsConfig> =>
   lessonsCall(connection, 'PATCH /v1/lessons/config', LessonsConfigSchema, { body: patch });
 
