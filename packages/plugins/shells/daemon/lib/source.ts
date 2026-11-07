@@ -155,7 +155,7 @@ export function packagesExpression(nixpkgs: PinnedNixpkgs, packages: readonly st
         `(pkgs.lib.attrByPath (pkgs.lib.splitString "." ${nixString(attr)}) (throw ${nixString(`no package ${attr}`)}) pkgs)`,
     )
     .join(' ');
-  return `let pkgs = (builtins.getFlake ${nixString(url)}).legacyPackages.\${builtins.currentSystem}; in pkgs.mkShell { packages = [ ${list} ]; }`;
+  return `let pkgs = import (builtins.getFlake ${nixString(url)}) { system = builtins.currentSystem; }; in pkgs.mkShell { packages = [ ${list} ]; }`;
 }
 
 /** The arguments (after `nix`) that build a locked shell and print its environment. */
