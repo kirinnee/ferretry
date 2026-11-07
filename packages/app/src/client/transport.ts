@@ -60,6 +60,11 @@ export interface DaemonTransport {
   socket(path: string, listeners: SocketListeners): TransportSocket;
   /** Fires after a reconnect, before anything resumes: the client re-reads the inventory first (§9.6). */
   onReconnect(listener: () => void): () => void;
+  /**
+   * Ends every session this transport opened and every stream on it (R568). The shell calls it when the daemon is
+   * unpaired, so nothing keeps a live session or a key after that. A transport that owns no session has none to end.
+   */
+  close?(): void;
 }
 
 /** A refused answer, thrown by the generated client. `code` is the daemon's machine code or `plugin_paused`. */

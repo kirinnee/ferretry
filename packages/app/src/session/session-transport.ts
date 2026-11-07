@@ -416,7 +416,7 @@ export class SessionTransport implements DaemonTransport {
       if (closed) return;
       closed = true;
       this.#streams.delete(shutdown);
-      session?.closeStream(NORMAL_CLOSE, reason);
+      leave(NORMAL_CLOSE, reason);
       listeners.onClose(reason, NORMAL_CLOSE);
     };
     this.#streams.add(shutdown);
@@ -426,8 +426,19 @@ export class SessionTransport implements DaemonTransport {
       path: url.pathname,
       ...(query.length === 0 ? {} : { query }),
     });
-    const onData = (frame: RelayStreamFrame): void =>
+    // A stream closed while its session was still OPENING must not survive the daemon accepting it (R568): a session that
+    // is not yet streaming is ended outright (which aborts the handshake), and one that opens afterwards is ended the
+    // moment it does ({@link open}). Only a session already carrying the stream says so on the wire.
+    let streaming = false;
+    const leave = (code?: number, reason?: string): void => {
+      if (session === undefined) return;
+      if (streaming) session.closeStream(code, reason);
+      else session.close(reason);
+    };
+    const onData = (frame: RelayStreamFrame): void => {
+      if (closed) return;
       listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes);
+    };
     // The close code a refused stream carried survives to the page (R567): a `4429` ceiling must not read as a drop.
     const failed = (error: unknown): void =>
       end(
@@ -442,12 +453,18 @@ export class SessionTransport implements DaemonTransport {
     const open = (dial: CarrierDial, device: SessionDeviceClaim, retry?: { readonly refused: unknown }): void => {
       const opened = openSession(this.#options, dial, mode(device), onData);
       session = opened.session;
+      streaming = false;
       opened.session.onStreamClosed(closedWith => end(closedWith.reason, closedWith.code));
       opened.session.ready().then(
         () => {
+          if (closed) {
+            opened.session.close('the stream was closed before it opened');
+            return;
+          }
+          streaming = true;
           opened.socket.accepted?.();
           if (retry !== undefined) void rotation?.promote(daemonId).catch(() => undefined);
-          if (!closed) listeners.onOpen?.();
+          listeners.onOpen?.();
         },
         (error: unknown) => {
           if (closed) return;
@@ -490,7 +507,7 @@ export class SessionTransport implements DaemonTransport {
         if (closed) return;
         closed = true;
         this.#streams.delete(shutdown);
-        session?.closeStream(code, reason);
+        leave(code, reason);
       },
     };
   }

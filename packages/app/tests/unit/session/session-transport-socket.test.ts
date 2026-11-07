@@ -26,6 +26,8 @@ async function streamDaemon() {
   let daemon: ScriptedDaemon | undefined;
   let deliver: ((frame: Uint8Array) => Promise<void>) | undefined;
   let accept: (() => Promise<void>) | undefined;
+  let carrierClosed = false;
+  const sent: string[] = [];
   const dial = (events: CarrierSocketEvents) => {
     const scripted = new ScriptedDaemon(identity, testSessionId(1));
     daemon = scripted;
@@ -46,6 +48,7 @@ async function streamDaemon() {
           }
           if (decoded.frame.kind !== FRAME_KINDS.data) return;
           const record = (await scripted.receive(copy)) as Record<string, unknown>;
+          sent.push(String(record.t));
           if (record.t === 'stream') {
             accept = async () =>
               deliver?.(
@@ -59,12 +62,26 @@ async function streamDaemon() {
         });
       },
       sendText() {},
-      close() {},
+      close() {
+        carrierClosed = true;
+      },
     };
   };
   return {
     identity,
     dial,
+    /** Whether the session closed the carrier, and the sealed record kinds it sent before that. */
+    carrier: () => ({ closed: carrierClosed, sent: [...sent] }),
+    /** The daemon's `stream-opened`, delivered whether or not the session is still waiting for it. */
+    acceptLate: async () => {
+      await accept?.();
+      await settle();
+    },
+    /** A text frame the daemon pushes down its stream. */
+    push: async (text: string) => {
+      await deliver?.(await (daemon as ScriptedDaemon).record({ t: 'data', text }));
+      await settle();
+    },
     accept: async () => {
       await settle();
       await accept?.();
@@ -148,6 +165,52 @@ describe('a stream the rendezvous refuses for its session ceiling', () => {
     expect(closes[0]?.[0]).toContain(reason);
     expect(closes[0]?.[1]).toBe(4429);
     expect(carrier.dials).toEqual([1]);
+  });
+});
+
+describe('a stream closed before the daemon accepts it', () => {
+  const opening = async (how: 'transport' | 'page') => {
+    const daemon = await streamDaemon();
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    const seen: string[] = [];
+    const socket = transport.socket('/v1/browsers/stream', {
+      onOpen: () => seen.push('open'),
+      onFrame: frame => seen.push(`frame ${String(frame)}`),
+      onClose: (reason, code) => seen.push(`close ${code ?? ''} ${reason}`),
+    });
+    // The `stream` record has left; the daemon has not answered it yet.
+    await settle();
+    await settle();
+    if (how === 'transport') transport.close();
+    else socket.close(1000, 'the viewer left');
+    await settle();
+    return { daemon, seen, socket };
+  };
+
+  for (const how of ['transport', 'page'] as const) {
+    test(`R568 a stream closed by the ${how} during the handshake is closed after accept, answers nothing and holds no session`, async () => {
+      const { daemon, seen, socket } = await opening(how);
+      expect(daemon.carrier().sent).toContain('stream');
+      // Closing ends the opening session at once, and the carrier with it.
+      expect(daemon.carrier().closed).toBe(true);
+      await daemon.acceptLate();
+      await daemon.push('late');
+      // Nothing opened, nothing was delivered, and the session refuses a frame.
+      expect(seen.filter(line => line === 'open' || line.startsWith('frame'))).toEqual([]);
+      expect(() => socket.send('x')).toThrow();
+      expect(daemon.carrier().sent).not.toContain('data');
+      expect(daemon.carrier().sent).not.toContain('renew');
+    });
+  }
+
+  test('R568 the page is told once, with the code the close carried', async () => {
+    const { seen } = await opening('transport');
+    expect(seen.filter(line => line.startsWith('close'))).toEqual(['close 1000 the transport was closed']);
   });
 });
 

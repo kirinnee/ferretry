@@ -72,7 +72,15 @@ export function buildConnect(
   preferences.subscribe(daemonId => router.rewalk(daemonId));
   // Back online, back in the foreground, a new network: prove every held session is still alive (4 s) rather than
   // waiting for its next ping. Document-lifetime, like the router (`registeredConnect` builds this once per document).
-  watchConnectionSignals(signals, { checkLiveness: () => router.checkLiveness() });
+  // GAP(parity): R88's "retry every outage now" and the WebRTC network nudge are NOT wired — no reconnect loop is built in
+  // this half yet, so a daemon that is reconnecting waits for its backoff timer. Said out loud here (and in
+  // ports-pending.json) rather than hidden by an optional field.
+  watchConnectionSignals(signals, {
+    reconnecting: () => [],
+    retryNow: () => {},
+    networkChanged: () => {},
+    checkLiveness: () => router.checkLiveness(),
+  });
   ports.daemons.registerCache({ clearDaemon: daemonId => router.clearDaemon(daemonId) });
   const pairing = pairingWalk({ openSocket: ports.openSocket, after: ports.after, hostedRelay: discovery.hostedRelay });
   return { router, preferences, discovery, pairing };

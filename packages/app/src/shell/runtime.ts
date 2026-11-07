@@ -36,7 +36,7 @@ export interface ShellRuntimeOptions {
 type Connection =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'unreachable' }
-  | { readonly kind: 'connected'; readonly client: DaemonClient };
+  | { readonly kind: 'connected'; readonly client: DaemonClient; readonly transport: DaemonTransport };
 
 export class ShellRuntime {
   readonly appVersion: string;
@@ -163,7 +163,7 @@ export class ShellRuntime {
       this.#halves.clearDaemon(paired.daemon);
       this.#changed();
     });
-    this.#connections.set(paired.daemon, { kind: 'connected', client });
+    this.#connections.set(paired.daemon, { kind: 'connected', client, transport });
     this.#changed();
     await client.start();
   }
@@ -178,7 +178,12 @@ export class ShellRuntime {
 
   #drop(daemon: string): void {
     const connection = this.#connections.get(daemon);
-    if (connection?.kind === 'connected') connection.client.stop();
+    if (connection?.kind === 'connected') {
+      connection.client.stop();
+      // The transport's own sessions end here too (R568): the client only stops what it holds, and a request lane
+      // opened by this device would otherwise stay live after the unpair.
+      connection.transport.close?.();
+    }
     this.#connections.delete(daemon);
     this.#halves.clearDaemon(daemon);
     for (const key of [...this.#packageClients.keys()]) {
