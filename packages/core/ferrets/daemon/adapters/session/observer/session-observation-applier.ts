@@ -1,4 +1,4 @@
-import { SessionStateSchema } from '@ferretry/protocol';
+import { SessionStateSchema } from '../../../lib/protocol/session.ts';
 import {
   type AnswerLedger,
   isTurnStatus,

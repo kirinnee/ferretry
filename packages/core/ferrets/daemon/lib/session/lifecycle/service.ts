@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { SESSION_MODE_ENV } from '@ferretry/fleet';
-import type { BoardProjectId, SessionLaunchInstructions } from '@ferretry/protocol';
+import type { BoardProjectId } from '../../protocol/board-refs.ts';
+import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionConversationLeases } from '../conversation-lease.ts';

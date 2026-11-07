@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../protocol/session.ts';
 
 /**
  * Keeps the view a derived mark made from one input view, so the same input answers with the same output.

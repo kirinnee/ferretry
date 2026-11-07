@@ -7,7 +7,7 @@
  * through unchanged; every other launcher call is delegated untouched.
  */
 import { describe, it } from 'bun:test';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   type PaneScreenReader,

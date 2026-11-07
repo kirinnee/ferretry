@@ -14,7 +14,7 @@
  * Housekeeping after an ending never fails the ending: the supervisor answers a value and never throws,
  * and a session id whose record cannot be read is simply not followed up.
  */
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { SessionLaunchInstructions } from '../../../lib/protocol/session.ts';
 import { type CodexAppServerOutcome, codexLaunchFailure } from '../../../lib/fleet/codex-runtime.ts';
 import {
   diedParked,

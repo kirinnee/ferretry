@@ -21,7 +21,7 @@
  *    Until the lineage can be proved, any session might be its lead, so the pass
  *    archives nothing: unknown is never read as "no parent".
  */
-import { SESSION_ENDED_STATUSES } from '@ferretry/protocol';
+import { SESSION_ENDED_STATUSES } from '../../protocol/session-subtree.ts';
 
 /** How long a finished autonomous session stays in the live set: one day. */
 export const ARCHIVE_AFTER_MS_DEFAULT = 24 * 60 * 60_000;

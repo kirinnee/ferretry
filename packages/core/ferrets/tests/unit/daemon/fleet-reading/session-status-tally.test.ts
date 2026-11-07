@@ -7,7 +7,7 @@
  * read that fails leaves the last tally standing and is tried again by the next caller.
  */
 import { describe, it } from 'bun:test';
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   SESSION_STATUS_TALLY_MAX_AGE_MS,

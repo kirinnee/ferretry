@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SessionListSchema, type SessionView, SessionViewSchema } from '@ferretry/protocol';
+import { SessionListSchema, type SessionView, SessionViewSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { gunzipSync } from 'node:zlib';
 import { NodeGzip } from '../../../../src/adapters/api/node-gzip.ts';

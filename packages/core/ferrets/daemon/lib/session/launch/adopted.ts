@@ -1,4 +1,4 @@
-import type { CompactAt } from '@ferretry/protocol';
+import type { CompactAt } from '../../protocol/compact-at.ts';
 import { buildLaunchArgv, FixedSettingsUnreadableError, type LaunchArgvParts } from './argv.ts';
 import { currentLaunchCompactAt } from './current.ts';
 

@@ -22,7 +22,7 @@
  * record whose whole purpose is to survive.
  */
 
-import type { SessionProvenance } from '@ferretry/protocol';
+import type { SessionProvenance } from '../../protocol/session.ts';
 import type { SessionProvenanceStamper } from './stamper.ts';
 import type { SessionAncestor, SessionSpawnRequest } from './types.ts';
 

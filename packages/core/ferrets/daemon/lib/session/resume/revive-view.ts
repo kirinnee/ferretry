@@ -1,4 +1,5 @@
-import { reviveRuling, type SessionView } from '@ferretry/protocol';
+import { reviveRuling } from '../../protocol/session-revive.ts';
+import { type SessionView } from '../../protocol/session.ts';
 import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
 import { createViewMemo } from '../directory/view-memo.ts';
 

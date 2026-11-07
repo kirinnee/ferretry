@@ -1,4 +1,4 @@
-import type { SessionState } from '@ferretry/protocol';
+import type { SessionState } from '../../protocol/session.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import {
   type ObservedRuntime,

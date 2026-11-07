@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../../../lib/protocol/session.ts';
 import { waitDeadline } from '../../../lib/session/monitor/policy.ts';
 import type { SessionMonitorSettings } from '../../../lib/session/monitor/settings.ts';
 import type { MonitorWaits, ParkedSession, WaitExpiry } from '../../../lib/session/monitor/types.ts';

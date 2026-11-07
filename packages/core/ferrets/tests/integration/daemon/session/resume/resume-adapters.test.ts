@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   BunSqliteIndexFactory,

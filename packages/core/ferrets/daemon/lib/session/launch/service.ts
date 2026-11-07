@@ -19,7 +19,12 @@
  */
 
 import type { HarnessKind } from '@ferretry/fleet';
-import type { SessionConfig, SessionRelaunchDrift, SessionRelaunchSettings, SessionState } from '@ferretry/protocol';
+import type {
+  SessionConfig,
+  SessionRelaunchDrift,
+  SessionRelaunchSettings,
+  SessionState,
+} from '../../protocol/session.ts';
 import { type CoreAccount, canServeModel } from '../../core/inventory.ts';
 import type { SessionPlanner } from '../../core/session-planner.ts';
 import type { SessionId } from '../../session-id.ts';

@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../protocol/session.ts';
 import type { SessionDirectorySubsystem } from '../runtime/mounts/sessions.ts';
 import { createViewMemo } from '../session/directory/view-memo.ts';
 import type { AgentPinService } from './service.ts';

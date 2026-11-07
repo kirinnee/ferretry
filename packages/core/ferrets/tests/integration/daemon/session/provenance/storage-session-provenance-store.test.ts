@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SessionProvenance } from '@ferretry/protocol';
+import type { SessionProvenance } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   BunSqliteIndexFactory,

@@ -1,4 +1,9 @@
-import { type SessionConfig, SessionConfigSchema, type SessionState, SessionStateSchema } from '@ferretry/protocol';
+import {
+  type SessionConfig,
+  SessionConfigSchema,
+  type SessionState,
+  SessionStateSchema,
+} from '../../../../../daemon/lib/protocol/session.ts';
 import type { CoreAccount } from '../../../../src/lib/index.ts';
 
 /** When every fixture session was created. */

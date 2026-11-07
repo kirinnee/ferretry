@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   type AgentPin,

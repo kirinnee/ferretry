@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { reviveRuling, type SessionView } from '@ferretry/protocol';
+import { reviveRuling } from '../../../../../daemon/lib/protocol/session-revive.ts';
+import { type SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { withRevive } from '../../../../../daemon/lib/session/resume/revive-view.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';

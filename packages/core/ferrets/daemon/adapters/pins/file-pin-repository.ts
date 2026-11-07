@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { PIN_SCHEMA_VERSION, PinSnapshotSchema, type Pin, type PinSnapshot } from '@ferretry/protocol';
+import { PIN_SCHEMA_VERSION, PinSnapshotSchema, type Pin, type PinSnapshot } from '../../lib/protocol/pins.ts';
 import type { FileSystemPort, FoundationPaths, SerialExecutor } from '../../lib/index.ts';
 import { normalizedPins, type PinClock, type PinRepository, type PinSessionDirectory } from '../../lib/pins/index.ts';
 

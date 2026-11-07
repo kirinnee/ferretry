@@ -15,7 +15,8 @@
  * not drag the session back onto the model it just left.
  */
 
-import type { CompactAt, SessionConfig, SessionState } from '@ferretry/protocol';
+import type { CompactAt } from '../../protocol/compact-at.ts';
+import type { SessionConfig, SessionState } from '../../protocol/session.ts';
 import { resolveCompactAt } from '../compact-at/resolve.ts';
 
 /** A `[1m]`-style selector suffix, which a harness drops from the model it reports. */

@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionConfigSchema, SessionListSchema, SessionViewSchema } from '@ferretry/protocol';
+import {
+  SessionConfigSchema,
+  SessionListSchema,
+  SessionViewSchema,
+} from '../../../../../daemon/lib/protocol/session.ts';
 import {
   createSessionDirectory,
   SESSION_LIST_BATCH,

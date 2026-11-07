@@ -1,12 +1,11 @@
 import { isAbsolute } from 'node:path';
+import { type BoardProjectId, BoardProjectIdSchema } from '../../protocol/board-refs.ts';
+import { NonNegativeIntegerSchema } from '../../protocol/common.ts';
 import {
-  type BoardProjectId,
-  BoardProjectIdSchema,
-  NonNegativeIntegerSchema,
   type SessionLaunchInstructions,
   SessionLaunchInstructionsSchema,
   SessionStatusSchema,
-} from '@ferretry/protocol';
+} from '../../protocol/session.ts';
 import { z } from 'zod';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';

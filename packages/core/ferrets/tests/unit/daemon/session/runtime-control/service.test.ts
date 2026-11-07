@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { RuntimeControlRequest, SessionView } from '@ferretry/protocol';
+import type { RuntimeControlRequest, SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import type { CodexPickerCleanup } from '../../../../src/lib/session/harness/cleanup.ts';
 import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';

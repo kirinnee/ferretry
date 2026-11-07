@@ -17,15 +17,15 @@
  * child made every tick read, parse and project all ~500 sessions on the box and stalled its loop.
  */
 
+import type { LaunchInstructionSectionId } from '../../protocol/session.ts';
 import type {
-  LaunchInstructionSectionId,
   RestartQueued,
   RestartQueueEntry,
   RestartQueueReason,
   RestartRequest,
   RestartResult,
   RestartStatus,
-} from '@ferretry/protocol';
+} from '../../protocol/session-restart.ts';
 
 /** One ferret as the restart sees it. */
 export interface RestartSubject {

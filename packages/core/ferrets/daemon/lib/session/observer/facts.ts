@@ -1,4 +1,4 @@
-import type { SessionState } from '@ferretry/protocol';
+import type { SessionState } from '../../protocol/session.ts';
 import { type TurnFacts, turnFactsOf } from './turn.ts';
 
 /**

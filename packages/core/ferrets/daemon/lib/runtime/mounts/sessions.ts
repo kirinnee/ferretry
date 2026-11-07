@@ -1,4 +1,4 @@
-import type { SessionList, SessionView } from '@ferretry/protocol';
+import type { SessionList, SessionView } from '../../protocol/session.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { conditionalWithTag, entityTag, jsonResponse, jsonTextResponse } from '../../api/responses.ts';

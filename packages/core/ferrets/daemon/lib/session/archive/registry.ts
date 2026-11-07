@@ -13,7 +13,7 @@
  * session does not change (a write revives it first), so that row stays true, and it is what lets
  * `findSession` answer for an archived id from memory without a disk read.
  */
-import { InstantSchema } from '@ferretry/protocol';
+import { InstantSchema } from '../../protocol/common.ts';
 import { z } from 'zod';
 import type { IndexedSession } from '../../storage-types.ts';
 import { tryParseSessionId, type SessionId } from '../../session-id.ts';

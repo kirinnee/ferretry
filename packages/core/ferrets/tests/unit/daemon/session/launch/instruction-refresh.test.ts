@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { type AlwaysOnSection, instructionDigest } from '@ferretry/fleet';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   changedInstructions,

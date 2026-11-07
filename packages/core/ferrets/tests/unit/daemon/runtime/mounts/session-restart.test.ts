@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
+import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
-  FY_REQUEST_ID_HEADER,
   RestartCancelResultSchema,
   RestartResultSchema,
   RestartStatusSchema,
   type RestartRequest,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/session-restart.ts';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

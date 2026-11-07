@@ -12,7 +12,7 @@
  * tier into the unit coverage ledger.
  */
 
-import type { RuntimeControlRequest, RuntimeModelCatalog, SessionView } from '@ferretry/protocol';
+import type { RuntimeControlRequest, RuntimeModelCatalog, SessionView } from '../../protocol/session.ts';
 import type { InjectionOutcome } from '../../tmux/delivery.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { CodexPickerDrivePort } from '../harness/picker-drive.ts';

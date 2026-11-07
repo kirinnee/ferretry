@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type SessionView, SessionViewSchema } from '@ferretry/protocol';
+import { type SessionView, SessionViewSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { AgentPinError } from '../../../../../daemon/lib/agent-pins/index.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';

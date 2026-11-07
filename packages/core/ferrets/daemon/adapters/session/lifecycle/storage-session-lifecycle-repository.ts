@@ -1,6 +1,6 @@
 import { type FileHandle, open } from 'node:fs/promises';
 import { basename } from 'node:path';
-import type { SessionConfig } from '@ferretry/protocol';
+import type { SessionConfig } from '../../../lib/protocol/session.ts';
 import { createSessionPaths, parseSessionId, type SessionId } from '../../../lib/index.ts';
 import type {
   SessionLifecycleEvent,

@@ -1,4 +1,4 @@
-import { type AutoResumeSummary, AutoResumeSummarySchema } from '@ferretry/protocol';
+import { type AutoResumeSummary, AutoResumeSummarySchema } from '../../../lib/protocol/auto-resume.ts';
 import type { FileSystemPort } from '../../../lib/ports.ts';
 
 /** What the last auto-resume pass did, kept so the app can still say so after a daemon restart. */

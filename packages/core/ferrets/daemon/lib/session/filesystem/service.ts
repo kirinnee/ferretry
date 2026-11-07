@@ -8,7 +8,7 @@ import {
   type SessionFileIndexSkip,
   type SessionFileIndexSkipReason,
   SessionFileIndexSkipReasonSchema,
-} from '@ferretry/protocol';
+} from '../../protocol/session-search.ts';
 import { deniedSegment, gateCandidates, isDeniedPath, looksBinary, normalizeRelativePath } from './path-policy.ts';
 import type {
   AfterValidationHook,

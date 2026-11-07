@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { appendFile, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type SessionState, SessionStateSchema } from '@ferretry/protocol';
+import { type SessionState, SessionStateSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { unrefFileEventTimers } from '../../../../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../../../../src/adapters/file-events/platform.ts';

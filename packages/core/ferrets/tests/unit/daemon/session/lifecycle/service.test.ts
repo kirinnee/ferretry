@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
+import { type SessionLaunchInstructions, SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../../daemon/lib/agent-tools/policy.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';

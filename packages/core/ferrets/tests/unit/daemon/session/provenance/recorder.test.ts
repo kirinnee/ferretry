@@ -1,4 +1,4 @@
-import type { SessionProvenance } from '@ferretry/protocol';
+import type { SessionProvenance } from '../../../../../daemon/lib/protocol/session.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   type SessionAncestor,

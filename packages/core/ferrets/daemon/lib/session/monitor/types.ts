@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../../protocol/session.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { DeclaredWait } from '../signal/types.ts';
 

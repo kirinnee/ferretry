@@ -1,4 +1,4 @@
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 import type { SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {

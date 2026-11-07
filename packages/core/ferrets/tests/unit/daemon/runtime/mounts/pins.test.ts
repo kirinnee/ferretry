@@ -1,5 +1,5 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { PIN_SCHEMA_VERSION } from '@ferretry/protocol';
+import { PIN_SCHEMA_VERSION } from '../../../../../daemon/lib/protocol/pins.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type ApiResponse } from '../../../../src/lib/api/index.ts';

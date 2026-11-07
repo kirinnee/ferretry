@@ -10,7 +10,7 @@ import type {
   WorktreeRemovalDecision,
   WorktreeRemovalOverride,
   WorktreeStatusSummaryView,
-} from '@ferretry/protocol';
+} from '../protocol/worktrees.ts';
 
 /**
  * THE DECISION VOCABULARY IS NOT DECLARED HERE, and that is deliberate.

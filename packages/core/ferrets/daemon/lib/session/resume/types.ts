@@ -1,5 +1,5 @@
-import type { QueueAuthor } from '@ferretry/protocol';
-import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
+import type { QueueAuthor } from '../../protocol/session.ts';
+import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '../../protocol/session.ts';
 import { z } from 'zod';
 import type { SessionId } from '../../session-id.ts';
 

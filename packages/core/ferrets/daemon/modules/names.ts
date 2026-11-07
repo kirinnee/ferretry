@@ -1,4 +1,4 @@
-import { SessionConfigSchema } from '@ferretry/protocol';
+import { SessionConfigSchema } from '../lib/protocol/session.ts';
 import { join } from 'node:path';
 import { FileNameClaimStore, FileSystemCallsignCounters } from '../adapters/names/index.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';

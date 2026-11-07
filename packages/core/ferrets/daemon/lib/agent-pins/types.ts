@@ -1,4 +1,4 @@
-import { InstantSchema } from '@ferretry/protocol';
+import { InstantSchema } from '../protocol/common.ts';
 import { z } from 'zod';
 
 /** The most ferrets one owner can keep pinned on a machine; a pin list is a shortcut, not a second roster. */

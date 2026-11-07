@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { QueueAuthor, SessionLaunchInstructions } from '@ferretry/protocol';
+import type { QueueAuthor, SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
 import {

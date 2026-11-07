@@ -6,7 +6,7 @@
  * between awaits — the order is the contract, and it is checked in a test that reads like the list.
  */
 
-import type { RuntimeControlRequest, SessionStatus, SessionView } from '@ferretry/protocol';
+import type { RuntimeControlRequest, SessionStatus, SessionView } from '../../protocol/session.ts';
 import { isPickerQuarantined, pickerInputRefusal } from '../harness/quarantine.ts';
 import type { HarnessRuntimeSwitchRequest } from '../harness/runtime-switch.ts';
 import { TERMINAL_SEND_STATUSES } from '../send/types.ts';

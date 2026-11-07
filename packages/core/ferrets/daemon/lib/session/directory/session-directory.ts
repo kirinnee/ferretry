@@ -1,4 +1,9 @@
-import { type SessionConfig, SessionConfigSchema, SessionStateSchema, type SessionView } from '@ferretry/protocol';
+import {
+  type SessionConfig,
+  SessionConfigSchema,
+  SessionStateSchema,
+  type SessionView,
+} from '../../protocol/session.ts';
 import { tryParseSessionId, type SessionId } from '../../session-id.ts';
 import { SessionReadError, type SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
 import type { IndexedSession } from '../../storage-types.ts';

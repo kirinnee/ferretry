@@ -1,4 +1,4 @@
-import { type SessionView } from '@ferretry/protocol';
+import { type SessionView } from '../../../lib/protocol/session.ts';
 import type { BoardTask } from '@ferretry/protocol';
 import type { LaneSets } from '../../../lib/board/graph.ts';
 import { createSessionPaths } from '../../../lib/paths.ts';

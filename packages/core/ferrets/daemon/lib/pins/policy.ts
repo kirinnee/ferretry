@@ -1,4 +1,4 @@
-import { MAX_PIN_NOTE_LENGTH, MAX_PIN_PREVIEW_LENGTH, MAX_PINS_PER_SESSION, type Pin } from '@ferretry/protocol';
+import { MAX_PIN_NOTE_LENGTH, MAX_PIN_PREVIEW_LENGTH, MAX_PINS_PER_SESSION, type Pin } from '../protocol/pins.ts';
 import { MAX_AGENT_PINS_PER_SESSION, PinError, type PinActor, type PinProvenance } from './types.ts';
 
 const SESSION_ID = /^[a-z0-9][a-z0-9_-]{0,127}$/u;

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { ArchivedSessionsSchema } from '@ferretry/protocol';
+import { ArchivedSessionsSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

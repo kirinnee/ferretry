@@ -1,4 +1,4 @@
-import type { ArchivedSessions, SessionView } from '@ferretry/protocol';
+import type { ArchivedSessions, SessionView } from '../../protocol/session.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiRequest, ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';

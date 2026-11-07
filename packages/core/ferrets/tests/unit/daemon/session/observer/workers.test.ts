@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionState } from '@ferretry/protocol';
+import type { SessionState } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   NEW_WORKER,

@@ -1,4 +1,5 @@
-import { DORMANT_AGENT_STATUSES, type LaunchInstructionSectionId, type SessionView } from '@ferretry/protocol';
+import { DORMANT_AGENT_STATUSES } from '../../protocol/agent-address.ts';
+import { type LaunchInstructionSectionId, type SessionView } from '../../protocol/session.ts';
 import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
 import { createViewMemo } from '../directory/view-memo.ts';
 

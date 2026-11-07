@@ -1,4 +1,4 @@
-import type { RuntimeModelChoice, SessionView } from '@ferretry/protocol';
+import type { RuntimeModelChoice, SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
 import type {
   SessionEffectAdmission,

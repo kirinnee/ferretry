@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { launchInstructions } from '@ferretry/fleet';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { launchEnvironment } from '../../../../src/lib/fleet/launch-environment.ts';
 import { outdatedSections, relaunchInstructionEnvironment } from '../../../../../daemon/lib/session/launch/outdated.ts';

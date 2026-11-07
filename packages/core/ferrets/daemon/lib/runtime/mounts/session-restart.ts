@@ -1,11 +1,11 @@
+import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
 import {
-  FY_REQUEST_ID_HEADER,
   RestartRequestSchema,
   type RestartCancelResult,
   type RestartRequest,
   type RestartResult,
   type RestartStatus,
-} from '@ferretry/protocol';
+} from '../../protocol/session-restart.ts';
 import { parseBody } from '../../api/body.ts';
 import { headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';

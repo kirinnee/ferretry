@@ -1,4 +1,4 @@
-import type { NameSuggestions } from '@ferretry/protocol';
+import type { NameSuggestions } from '../../protocol/session.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiRequest, ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';

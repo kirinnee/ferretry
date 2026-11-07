@@ -1,4 +1,4 @@
-import { SignalSessionRequestSchema, type SessionView, type SignalSessionRequest } from '@ferretry/protocol';
+import { SignalSessionRequestSchema, type SessionView, type SignalSessionRequest } from '../../protocol/session.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';

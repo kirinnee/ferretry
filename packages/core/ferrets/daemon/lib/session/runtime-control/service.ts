@@ -24,7 +24,12 @@
  * without constructing a second mount-owned runtime implementation.
  */
 
-import type { RuntimeControlRequest, RuntimeModelCatalog, RuntimeModelChoice, SessionView } from '@ferretry/protocol';
+import type {
+  RuntimeControlRequest,
+  RuntimeModelCatalog,
+  RuntimeModelChoice,
+  SessionView,
+} from '../../protocol/session.ts';
 import {
   type AccountInventoryPort,
   type CoreAccount,

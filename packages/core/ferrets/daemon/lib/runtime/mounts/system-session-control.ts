@@ -1,4 +1,4 @@
-import type { SystemCallsignPrefix } from '@ferretry/protocol';
+import type { SystemCallsignPrefix } from '../../protocol/system-callsigns.ts';
 import { startWithSystemCallsign, type SystemCallsignIssuer } from '../../names/index.ts';
 import { SessionControlError, type SessionControlSubsystem } from './session-control.ts';
 

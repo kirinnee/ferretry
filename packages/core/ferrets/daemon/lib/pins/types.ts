@@ -1,4 +1,4 @@
-import type { Pin, PinBlockKind, PinBy, PinSnapshot } from '@ferretry/protocol';
+import type { Pin, PinBlockKind, PinBy, PinSnapshot } from '../protocol/pins.ts';
 
 export const MAX_AGENT_PINS_PER_SESSION = 10;
 

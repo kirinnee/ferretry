@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SessionFileIndexResponseSchema } from '@ferretry/protocol';
+import { SessionFileIndexResponseSchema } from '../../../../../daemon/lib/protocol/session-search.ts';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { sessionFilesystemRoutes } from '../../../../src/lib/runtime/index.ts';

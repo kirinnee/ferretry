@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { RuntimeControlRequest } from '@ferretry/protocol';
+import type { RuntimeControlRequest } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { runtimeRequestFingerprint } from '../../../../../daemon/lib/session/runtime-control/ledger.ts';
 

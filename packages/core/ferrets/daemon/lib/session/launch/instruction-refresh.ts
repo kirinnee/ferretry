@@ -24,7 +24,7 @@
  */
 
 import { type AlwaysOnSection, instructionDigest } from '@ferretry/fleet';
-import type { LaunchInstructionSection, SessionLaunchInstructions } from '@ferretry/protocol';
+import type { LaunchInstructionSection, SessionLaunchInstructions } from '../../protocol/session.ts';
 
 /** The sender chip's feature for the note: the app says "Ferretry · Instructions", never a tag in the text. */
 export const INSTRUCTIONS_FEATURE = 'Instructions';

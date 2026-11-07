@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { QueueAuthor } from '@ferretry/protocol';
+import type { QueueAuthor } from '../../../lib/protocol/session.ts';
 import type { ResumeTurnStore } from '../../../lib/session/resume/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 

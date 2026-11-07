@@ -1,6 +1,6 @@
 /** The stable identity of one parsed runtime request, stored by the shared durable effect ledger. */
 
-import type { RuntimeControlRequest } from '@ferretry/protocol';
+import type { RuntimeControlRequest } from '../../protocol/session.ts';
 
 /**
  * The control itself, in its parsed form.

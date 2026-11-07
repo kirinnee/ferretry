@@ -1,4 +1,4 @@
-import { type SessionState, SessionStateSchema } from '@ferretry/protocol';
+import { type SessionState, SessionStateSchema } from '../../../lib/protocol/session.ts';
 import {
   type AnswerLedger,
   type AskedQuestion,

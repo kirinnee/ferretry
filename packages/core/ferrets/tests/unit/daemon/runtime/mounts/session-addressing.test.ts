@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AgentAddressCandidate } from '@ferretry/protocol';
+import type { AgentAddressCandidate } from '../../../../../daemon/lib/protocol/agent-address.ts';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';

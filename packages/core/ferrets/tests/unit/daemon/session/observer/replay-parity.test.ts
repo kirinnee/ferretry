@@ -15,7 +15,7 @@
  */
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { SessionState } from '@ferretry/protocol';
+import type { SessionState } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { backgroundTerminalCount } from '../../../../src/lib/migrate/background-terminals.ts';
 import { observedRuntimeStatePatch, projectObservedRuntime } from '../../../../src/lib/session/harness/observation.ts';

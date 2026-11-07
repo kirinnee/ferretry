@@ -1,4 +1,4 @@
-import type { AutoResumeSummary } from '@ferretry/protocol';
+import type { AutoResumeSummary } from '../../protocol/auto-resume.ts';
 import { bootNotice, freshCandidates, stillOwed } from './policy.ts';
 import type { AutoResumeCandidate, AutoResumeOutcome, AutoResumePorts, AutoResumeSettings } from './types.ts';
 

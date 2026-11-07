@@ -481,7 +481,7 @@ export const TranscriptProvenanceSchema = z
 export type TranscriptProvenance = z.infer<typeof TranscriptProvenanceSchema>;
 
 /**
- * Where a session's conversation came from, when a cross-harness migration converted it
+ * Where a session's conversation came from, when a cross-harness move converted it
  * (`conversation: 'convert'`). The original transcript is never deleted; this is the pointer back to
  * it, and the reason the converted one opens with a notice saying it was carried.
  */
@@ -519,7 +519,7 @@ export const SessionConfigSchema = z.object({
   parent: z.string().optional(),
   /**
    * A person revoked this session's credential (`fy session revoke-credential`, docs/agent-tools.md): no launch
-   * hands it one again — no Warden revive, peer resume, restart or migration — until a person resumes it. Absent
+   * hands it one again — no Warden revive, peer resume, restart or move — until a person resumes it. Absent
    * on every session that was never cut off.
    */
   credentialRevoked: z.literal(true).optional(),
@@ -597,7 +597,7 @@ export const SessionConfigSchema = z.object({
   directSendMaxChars: NonNegativeIntegerSchema,
   resumeMenuChoice: z.enum(['full', 'summary']),
   maxSnapshots: PositiveIntegerSchema,
-  migration: z
+  move: z
     .object({
       from: z.string().min(1),
       to: z.string().min(1),
@@ -605,17 +605,17 @@ export const SessionConfigSchema = z.object({
     })
     .optional(),
   /**
-   * EVERY move this session made, oldest first — `migration` is only the last. What a spend budget books a
-   * request against (docs/budgets.md): the login the session ran on when the request was made. Absent on a
-   * session that predates it, where `migration` is all the history there is.
+   * EVERY move this session made, oldest first — `move` is only the last. What a spend budget books a
+   * request against (docs/budgets.md): the login the session ran on when the request was made. Absent until
+   * the first move.
    */
-  migrations: z
+  moves: z
     .array(z.object({ from: z.string().min(1), to: z.string().min(1), at: InstantSchema }))
     .max(1_000)
     .optional(),
   /** Target-only lineage back to the transfer decision that created this fresh session. */
   transferredFrom: SessionTransferEdgeSchema.optional(),
-  /** Where the conversation came from, when a cross-harness migration converted it. */
+  /** Where the conversation came from, when a cross-harness move converted it. */
   conversion: ConversationConversionSchema.optional(),
   /**
    * Optional because a session started before this record existed has none, and because a harness
@@ -638,7 +638,7 @@ export const SessionConfigSchema = z.object({
   /**
    * Whether this ferret is told to keep an agenda of items for the owner (docs/agenda.md). ABSENT MEANS OFF, unlike
    * hypermedia and Pack: a ferret that recorded nothing is off, a new ferret records ON from the machine default
-   * (`machine.yaml` agendaMode), and the one-time migration records it ON for a ferret that already had open items. Read at launch, so a change takes effect at the next launch.
+   * (`machine.yaml` agendaMode), and it is recorded ON for a ferret that already had open items. Read at launch, so a change takes effect at the next launch.
    */
   agenda: z.boolean().optional(),
   /**
@@ -1170,18 +1170,7 @@ const StartSessionRequestShapeSchema = z.discriminatedUnion('mode', [
   StartSessionBaseSchema.extend({ mode: z.literal('interactive'), prompt: z.string().trim().min(1).optional() }),
 ]);
 
-/**
- * Drops the `boardAccess` key the retired task-board ACL used to carry. Old configs, envelopes and
- * clients still send it, so a read strips it rather than rejecting a strict object over a field
- * nothing honours any more.
- */
-export function withoutBoardAccess(input: unknown): unknown {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) return input;
-  const { boardAccess: _retired, ...rest } = input as Record<string, unknown>;
-  return rest;
-}
-
-export const StartSessionRequestSchema = z.preprocess(withoutBoardAccess, StartSessionRequestShapeSchema);
+export const StartSessionRequestSchema = StartSessionRequestShapeSchema;
 export type StartSessionRequest = z.infer<typeof StartSessionRequestShapeSchema>;
 export type StartSessionRequestInput = z.input<typeof StartSessionRequestShapeSchema>;
 
@@ -1207,7 +1196,7 @@ export type SendRequest = z.infer<typeof SendRequestSchema>;
 /**
  * One answer in an ordered structured-question set.
  *
- * The legacy `labels`/`other`/`responses` fields below cannot represent a
+ * The flat `labels`/`other`/`responses` fields below cannot represent a
  * multi-select question inside a multi-question set: `responses` has room for
  * only one string per question.  This discriminated shape is deliberately
  * exclusive, so a free-form answer can never be mistaken for an option label,
@@ -1230,7 +1219,7 @@ export const AnswerSessionRequestSchema = z.strictObject({
   labels: z.array(z.string().min(1)),
   other: z.string().optional(),
   responses: z.array(z.string()).optional(),
-  /** Lossless ordered answers. Legacy fields remain for older callers. */
+  /** Lossless ordered answers, beside the flat fields. */
   answers: z.array(StructuredQuestionAnswerSchema).min(1).optional(),
 });
 export type AnswerSessionRequest = z.infer<typeof AnswerSessionRequestSchema>;
@@ -1247,211 +1236,6 @@ export const ResumeSessionRequestSchema = z.strictObject({
   message: z.string().min(1).optional(),
 });
 export type ResumeSessionRequest = z.infer<typeof ResumeSessionRequestSchema>;
-
-/**
- * What a Restart or a same-harness migration does with the conversation the session is bound to.
- *
- *   * `resume` — the default, and what Restart means: the relaunched CLI continues the SAME harness
- *     conversation (Claude `--resume <id>`, Codex `resume <thread>`), its transcript carried into the
- *     target login's home when the login changes. When that cannot be done the daemon refuses with
- *     `409 conversation_unresumable` and changes nothing — it never quietly starts a new conversation.
- *   * `fresh` — the person chose to start a new conversation: the target's own transcript is captured
- *     as a start would, and the old conversation stays on disk untouched.
- *   * `previous` — the repair for a session a Restart already moved onto a new conversation: rebind to
- *     the newest OTHER transcript in the same harness home that mentions this session's directory, and
- *     resume that one. Refused like `resume` when there is none.
- *   * `convert` — move onto an account of the OTHER harness (Claude ↔ Codex): the conversation is
- *     rewritten in the target's own format under a fresh id the target owns, the target CLI is shown to
- *     accept it before anything is switched, and the session is rebound to it. The original transcript
- *     stays on disk; the session records where the converted one came from ({@link ConversationConversionSchema}).
- *     Refused with `409 conversation_unresumable` when it cannot be converted or the target rejects it.
- *     See `docs/migration-cross-harness.md`.
- */
-export const MigrationConversationSchema = z.enum(['resume', 'fresh', 'previous', 'convert']);
-export type MigrationConversation = z.infer<typeof MigrationConversationSchema>;
-
-export const MigrateSessionRequestSchema = z.strictObject({
-  agent: z.string().min(1),
-  model: z.string().min(1).optional(),
-  allowContextDowngrade: z.boolean().default(false),
-  /** Proceed past a refusal the in-flight inventory raised. Only an explicit, human-confirmed Restart anyway sets it. */
-  forceInflight: z.boolean().default(false),
-  /**
-   * What happens to the conversation the session is bound to; omitted means `resume`. See
-   * {@link MigrationConversationSchema}. Optional rather than defaulted so a client never sends it
-   * unasked: a daemon that predates the field refuses an unknown key, and Restart must keep working there.
-   */
-  conversation: MigrationConversationSchema.optional(),
-});
-export type MigrateSessionRequest = z.infer<typeof MigrateSessionRequestSchema>;
-export type MigrateSessionRequestInput = z.input<typeof MigrateSessionRequestSchema>;
-
-/** `POST /v1/sessions/:sessionId/conversion-preview`: what converting onto `agent` would carry. */
-export const ConversionPreviewRequestSchema = z.strictObject({
-  agent: z.string().min(1),
-  model: z.string().min(1).optional(),
-});
-export type ConversionPreviewRequest = z.infer<typeof ConversionPreviewRequestSchema>;
-
-/** What a conversion dropped rather than carried. */
-export const ConversionDroppedSchema = z.strictObject({
-  /** Thinking or reasoning blocks — neither provider accepts the other's. */
-  reasoning: NonNegativeIntegerSchema,
-  /** Records of a subagent's own conversation. */
-  sidechains: NonNegativeIntegerSchema,
-  /** Harness-internal records: reminders, meta records, developer messages, delivery plumbing. */
-  internal: NonNegativeIntegerSchema,
-  /** Compactions the source harness had already made; only what followed the newest one is carried. */
-  compactions: NonNegativeIntegerSchema,
-});
-export type ConversionDropped = z.infer<typeof ConversionDroppedSchema>;
-
-/**
- * A conversion's account of itself — what a person confirms before "Move to Codex…" switches anything,
- * and what the session keeps afterwards.
- */
-export const ConversionSummarySchema = z.strictObject({
-  /** The converter's own version, bumped whenever what it produces changes. */
-  converter: PositiveIntegerSchema,
-  sourceHarness: HarnessSchema,
-  sourceVersion: z.string().min(1).optional(),
-  targetHarness: HarnessSchema,
-  targetVersion: z.string().min(1),
-  /** Turns in the source once harness-internal records are dropped: one per thing the person said. */
-  turns: NonNegativeIntegerSchema,
-  keptTurns: NonNegativeIntegerSchema,
-  /** The oldest turns left out to fit the target's window; the target is told how many. */
-  omittedTurns: NonNegativeIntegerSchema,
-  /** Whether the newest turn itself was too long and was cut. */
-  cutNewest: z.boolean(),
-  /** Messages carried as messages: the person's and the agent's. */
-  messages: NonNegativeIntegerSchema,
-  /** Shell commands carried as the target's own shell tool calls, with their output. */
-  nativeToolCalls: NonNegativeIntegerSchema,
-  /** Other tool calls, carried as text lines inside the agent's turns. */
-  toolCallsAsText: NonNegativeIntegerSchema,
-  /** Attachments carried as references to files the target can open. */
-  attachments: NonNegativeIntegerSchema,
-  dropped: ConversionDroppedSchema,
-  estimatedTokens: NonNegativeIntegerSchema,
-  /** The share of the target's window the history was allowed. */
-  budgetTokens: NonNegativeIntegerSchema,
-  /** Set when a Codex version the converter was not tested on was let through because its format is the validated one. */
-  formatNote: z.string().min(1).optional(),
-});
-export type ConversionSummary = z.infer<typeof ConversionSummarySchema>;
-
-/**
- * The preview's answer: what the conversion would carry, or why it cannot be made. A refusal is an
- * answer rather than an error status, because the sheet shows it in place of the confirm button.
- */
-export const ConversionPreviewSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('ready'),
-    targetAgent: z.string().min(1),
-    targetModel: z.string().min(1),
-    summary: ConversionSummarySchema,
-  }),
-  z.strictObject({ kind: z.literal('refused'), targetAgent: z.string().min(1), reason: z.string().min(1) }),
-]);
-export type ConversionPreview = z.infer<typeof ConversionPreviewSchema>;
-
-/**
- * One thing the in-flight inventory saw while a Restart was being checked, in words a person reads.
- *
- * `title` is a plain sentence ("A program Ferretry doesn't recognise is running"), `detail` the command
- * or tool input behind it, trimmed to one line. `blocks` is whether THIS item is what made the daemon
- * refuse; the rest are listed so the confirmation shows the whole picture rather than one culprit.
- */
-export const InflightItemSchema = z.strictObject({
-  kind: z.enum(['process', 'tool', 'terminal', 'unreadable']),
-  verdict: z.enum(['safe_to_kill', 're_armable', 'destructive_to_interrupt', 'unknown']),
-  title: z.string().min(1),
-  detail: z.string().optional(),
-  age: z.string().optional(),
-  blocks: z.boolean(),
-  /**
-   * Set on a process the agent started from its own tool shell and left running — a background job of
-   * the agent's, which the agent can be asked to stop (`askToStopJobs`). Absent on everything else,
-   * and on every item from a daemon that predates it.
-   */
-  backgroundJob: z.literal(true).optional(),
-  /** The process id, carried on a background job so the agent can be told which one. */
-  pid: PositiveIntegerSchema.optional(),
-});
-export type InflightItem = z.infer<typeof InflightItemSchema>;
-
-/** The ask names nothing: the daemon looks again and asks about what it finds. */
-export const AskToStopJobsRequestSchema = z.strictObject({});
-export type AskToStopJobsRequest = z.infer<typeof AskToStopJobsRequestSchema>;
-
-/** One of the agent's background jobs a refused migration asked it to stop. */
-export const AgentJobSchema = z.strictObject({
-  pid: PositiveIntegerSchema,
-  /** The command line, trimmed to one line. */
-  command: z.string().min(1),
-  age: z.string().optional(),
-});
-export type AgentJob = z.infer<typeof AgentJobSchema>;
-
-/**
- * `POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs`: the daemon looked again, found the agent's
- * own background jobs that block a migration, and queued ONE message asking the agent to stop them
- * (or say why not). It stops nothing itself. `alreadyAsked` means the same jobs were asked about before
- * and that message is the one answered with, so a second press never asks twice.
- */
-export const AskToStopJobsResultSchema = z.strictObject({
-  messageId: z.string().min(1),
-  jobs: z.array(AgentJobSchema).min(1),
-  alreadyAsked: z.boolean(),
-});
-export type AskToStopJobsResult = z.infer<typeof AskToStopJobsResultSchema>;
-
-/**
- * Why a Restart (a migration) was refused, as data. `restartsWithCli` counts the processes the
- * inventory recognised as the agent's own — the Ferretry tools server, the harness's helpers, servers
- * from its configuration — which a restart relaunches and which therefore never block it.
- */
-export const MigrationRefusalSchema = z.strictObject({
-  status: z.string().min(1),
-  turn: NonNegativeIntegerSchema,
-  blockedBy: z.enum(['unknown', 'destructive', 'unreadable']),
-  items: z.array(InflightItemSchema),
-  restartsWithCli: NonNegativeIntegerSchema,
-});
-export type MigrationRefusal = z.infer<typeof MigrationRefusalSchema>;
-
-/** The `409 migration_refused` body. `inflight` is absent from a daemon that predates it. */
-export const MigrationRefusedBodySchema = ApiErrorResponseSchema.extend({
-  code: z.literal('migration_refused'),
-  inflight: MigrationRefusalSchema.optional(),
-});
-export type MigrationRefusedBody = z.infer<typeof MigrationRefusedBodySchema>;
-
-/** A smaller window the target would give the conversation, as the numbers rather than a sentence. */
-export const ContextDowngradeSchema = z.strictObject({
-  model: z.string().min(1),
-  targetWindow: PositiveIntegerSchema,
-  currentWindow: PositiveIntegerSchema,
-});
-export type ContextDowngrade = z.infer<typeof ContextDowngradeSchema>;
-
-/** The `409 context_downgrade_refused` body. `downgrade` is absent from a daemon that predates it. */
-export const ContextDowngradeRefusedBodySchema = ApiErrorResponseSchema.extend({
-  code: z.literal('context_downgrade_refused'),
-  downgrade: ContextDowngradeSchema.optional(),
-});
-export type ContextDowngradeRefusedBody = z.infer<typeof ContextDowngradeRefusedBodySchema>;
-
-/**
- * The `409 conversation_unresumable` body: the session's conversation could not be carried into the
- * relaunch, so nothing was restarted. `error` says why in plain words; the only ways past are a
- * request with `conversation: 'fresh'`, which the person must choose, or `'previous'`.
- */
-export const ConversationUnresumableBodySchema = ApiErrorResponseSchema.extend({
-  code: z.literal('conversation_unresumable'),
-});
-export type ConversationUnresumableBody = z.infer<typeof ConversationUnresumableBodySchema>;
 
 /**
  * An agent's first name as a caller may type it: `Hadi`, `marin`, `mary-jane`.

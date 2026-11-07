@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { SYSTEM_CALLSIGN_MAX_SEQUENCE, type SessionView, type StartSessionRequest } from '@ferretry/protocol';
+import { SYSTEM_CALLSIGN_MAX_SEQUENCE } from '../../../../daemon/lib/protocol/system-callsigns.ts';
+import { type SessionView, type StartSessionRequest } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/index.ts';
 import type { FileSystemPort } from '../../../src/lib/index.ts';
@@ -11,7 +12,10 @@ import {
   type NameClaimAttempt,
   type NameClaimStore,
 } from '../../../../daemon/lib/names/index.ts';
-import { SessionControlError, type SessionControlSubsystem } from '../../../../daemon/lib/runtime/mounts/session-control.ts';
+import {
+  SessionControlError,
+  type SessionControlSubsystem,
+} from '../../../../daemon/lib/runtime/mounts/session-control.ts';
 import { withSystemCallsign } from '../../../../daemon/lib/runtime/mounts/system-session-control.ts';
 import { issuerOver, MemoryCounters } from './system-callsigns-support.ts';
 import { DAEMON_START } from '../../../src/lib/api/state-homes.ts';

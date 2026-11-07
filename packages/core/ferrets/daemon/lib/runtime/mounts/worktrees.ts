@@ -7,7 +7,7 @@ import {
   type WorktreeRemovalDecision,
   type WorktreeRemovalRequest,
   WorktreeRemovalRequestSchema,
-} from '@ferretry/protocol';
+} from '../../protocol/worktrees.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, queryValue } from '../../api/http.ts';

@@ -7,7 +7,7 @@
  * makes, never durable records anybody else reads.
  */
 
-import type { SessionProvenance } from '@ferretry/protocol';
+import type { SessionProvenance } from '../../protocol/session.ts';
 
 export type { SessionProvenance, SessionSpawnOrigin, WardenLineageSource } from '@ferretry/protocol';
 export { SessionProvenanceSchema, SessionSpawnOriginSchema, WardenLineageSourceSchema } from '@ferretry/protocol';

@@ -1,13 +1,12 @@
 import { basename } from 'node:path';
 import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '@ferretry/fleet';
+import { type BoardProjectId } from '../../protocol/board-refs.ts';
+import { INTERACTIVE_PLACEHOLDER_NAME, type SessionLaunchInstructions } from '../../protocol/session.ts';
 import {
-  type BoardProjectId,
-  INTERACTIVE_PLACEHOLDER_NAME,
   assignedTaskDocument as protocolAssignedTaskDocument,
-  type SessionLaunchInstructions,
-  taskTitleFor,
   turnFileInstruction,
-} from '@ferretry/protocol';
+} from '../../protocol/turn-handoff.ts';
+import { taskTitleFor } from '../../protocol/task-title.ts';
 import type { CoreAccount } from '../../core/inventory.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';

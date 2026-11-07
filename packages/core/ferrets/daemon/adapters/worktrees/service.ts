@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { unclearedRemovalBlockers, type WorktreeLiveState } from '@ferretry/protocol';
+import { unclearedRemovalBlockers, type WorktreeLiveState } from '../../lib/protocol/worktrees.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from '../../lib/worktrees/errors.ts';
 import { assessBranchDeletion, assessWorktreeRemoval, isWithinDirectory } from '../../lib/worktrees/policy.ts';
 import type {

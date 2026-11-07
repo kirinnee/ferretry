@@ -1,4 +1,6 @@
-import type { HarnessDialog, PermissionRequest, SessionState, SessionTurnState } from '@ferretry/protocol';
+import type { HarnessDialog } from '../../protocol/session-dialog.ts';
+import type { PermissionRequest } from '../../protocol/session-permission.ts';
+import type { SessionState, SessionTurnState } from '../../protocol/session.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import {
   isTurnStatus,

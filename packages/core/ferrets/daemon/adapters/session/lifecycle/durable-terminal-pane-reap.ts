@@ -1,4 +1,4 @@
-import type { ProcessIncarnation } from '@ferretry/protocol';
+import type { ProcessIncarnation } from '../../../lib/protocol/process-incarnation.ts';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import {
   createSessionPaths,

@@ -26,7 +26,8 @@
  */
 
 import type { HarnessKind } from '@ferretry/fleet';
-import type { CompactAt, TranscriptProvenance } from '@ferretry/protocol';
+import type { CompactAt } from '../../protocol/compact-at.ts';
+import type { TranscriptProvenance } from '../../protocol/session.ts';
 import { handoffReadArguments } from '../send/handoff.ts';
 import { claudeSessionArguments } from '../transcript/claude-path.ts';
 import { codexCorrelationArguments, isCodexCorrelationPair } from '../transcript/codex-rollout.ts';

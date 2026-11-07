@@ -1,4 +1,8 @@
-import type { SessionCompactionState, SessionLiveActivity, SessionLiveTokensSource } from '@ferretry/protocol';
+import type {
+  SessionCompactionState,
+  SessionLiveActivity,
+  SessionLiveTokensSource,
+} from '../../protocol/session-live.ts';
 import type { TranscriptEvent, TranscriptHarness, TranscriptUsageEvent } from '../../transcript/types.ts';
 
 /**

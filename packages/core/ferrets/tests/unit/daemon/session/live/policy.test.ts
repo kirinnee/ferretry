@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionLiveActivity } from '@ferretry/protocol';
+import type { SessionLiveActivity } from '../../../../../daemon/lib/protocol/session-live.ts';
 import should from 'should';
 import {
   liveActivitySample,

@@ -1,5 +1,5 @@
-import type { AutoResumeSummary } from '@ferretry/protocol';
-import { InstantSchema, NonEmptyStringSchema } from '@ferretry/protocol';
+import type { AutoResumeSummary } from '../../protocol/auto-resume.ts';
+import { InstantSchema, NonEmptyStringSchema } from '../../protocol/common.ts';
 import { z } from 'zod';
 
 /**

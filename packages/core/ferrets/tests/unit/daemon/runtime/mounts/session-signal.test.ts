@@ -1,6 +1,6 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { SessionViewSchema } from '@ferretry/protocol';
+import { SessionViewSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';

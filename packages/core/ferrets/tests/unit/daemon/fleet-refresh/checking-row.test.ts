@@ -22,7 +22,7 @@ import {
   InMemoryCredentialStatusStore,
   type LocalCredentialFacts,
 } from '@ferretry/fleet';
-import type { AccountUsage } from '@ferretry/protocol';
+import type { AccountUsage } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   createFleetCredentialsSubsystem,

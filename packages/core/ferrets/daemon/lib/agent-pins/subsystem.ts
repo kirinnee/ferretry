@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView } from '../protocol/session.ts';
 import type { SessionDirectorySubsystem } from '../runtime/mounts/sessions.ts';
 import type { AgentPinService } from './service.ts';
 import { AgentPinError } from './types.ts';

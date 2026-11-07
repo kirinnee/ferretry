@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { LaunchInstructionSectionId, SessionView } from '@ferretry/protocol';
+import type { LaunchInstructionSectionId, SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { withOutdated } from '../../../../../daemon/lib/session/restart/outdated-view.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';

@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import type { LaunchInstructionSectionId, RestartQueueEntry } from '@ferretry/protocol';
+import type { LaunchInstructionSectionId } from '../../../../../daemon/lib/protocol/session.ts';
+import type { RestartQueueEntry } from '../../../../../daemon/lib/protocol/session-restart.ts';
 import should from 'should';
 import {
   RESTART_RETRY_BASE_MS,

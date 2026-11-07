@@ -17,7 +17,7 @@ import type {
   LaunchInstructionSection,
   LaunchInstructionSectionId,
   SessionLaunchInstructions,
-} from '@ferretry/protocol';
+} from '../../protocol/session.ts';
 import type { SessionId } from '../../session-id.ts';
 import { sessionPaneEnvironment } from '../lifecycle/policy.ts';
 

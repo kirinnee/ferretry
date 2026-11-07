@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../../protocol/session.ts';
 import { isBusyStatus } from '../../migrate/inflight-report.ts';
 import type { AutoResumeCandidate, AutoResumeSubject } from './types.ts';
 

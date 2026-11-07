@@ -1,4 +1,4 @@
-import { PinActionRequestSchema } from '@ferretry/protocol';
+import { PinActionRequestSchema } from '../../protocol/pins.ts';
 import { parseActor, type ApiActor } from '../../api/actor.ts';
 import { callerIsAgent } from '../../api/agent-caller.ts';
 import type { AuthenticatedCredential } from '../../api/authentication.ts';

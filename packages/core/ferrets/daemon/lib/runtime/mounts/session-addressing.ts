@@ -1,4 +1,8 @@
-import { type AgentAddressCandidate, ambiguousAgentAddressMessage, resolveAgentAddress } from '@ferretry/protocol';
+import {
+  type AgentAddressCandidate,
+  ambiguousAgentAddressMessage,
+  resolveAgentAddress,
+} from '../../protocol/agent-address.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type RouteParameters } from '../../api/http.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';

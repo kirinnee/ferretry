@@ -1,5 +1,5 @@
 import { join, relative } from 'node:path';
-import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '@ferretry/protocol';
+import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '../../protocol/session-search.ts';
 import { agentSessionOf, isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
 import { resolvedStateHomes, type StateHomeReach } from '../../api/state-homes.ts';

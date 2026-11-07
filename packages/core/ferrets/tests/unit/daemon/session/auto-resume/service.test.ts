@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AutoResumeSummary } from '@ferretry/protocol';
+import type { AutoResumeSummary } from '../../../../../daemon/lib/protocol/auto-resume.ts';
 import should from 'should';
 import { AutoResumeService } from '../../../../../daemon/lib/session/auto-resume/service.ts';
 import {

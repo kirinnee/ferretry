@@ -3,9 +3,12 @@ import { afterEach, describe, it } from 'bun:test';
 import { appendFile, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SessionLiveActivitySchema } from '@ferretry/protocol';
+import { SessionLiveActivitySchema } from '../../../../../daemon/lib/protocol/session-live.ts';
 import should from 'should';
-import { type LiveActivityReads, StorageLiveActivitySource } from '../../../../../daemon/adapters/session/live/index.ts';
+import {
+  type LiveActivityReads,
+  StorageLiveActivitySource,
+} from '../../../../../daemon/adapters/session/live/index.ts';
 import type {
   CompactionHistory,
   CompactionRecord,

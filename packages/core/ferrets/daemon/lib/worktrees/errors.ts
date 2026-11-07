@@ -1,4 +1,4 @@
-import type { BranchDeletionBlocker, WorktreeRemovalBlocker } from '@ferretry/protocol';
+import type { BranchDeletionBlocker, WorktreeRemovalBlocker } from '../protocol/worktrees.ts';
 
 /**
  * Why a managed-worktree operation was refused.

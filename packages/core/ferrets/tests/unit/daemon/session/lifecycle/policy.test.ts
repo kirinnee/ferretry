@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SessionStatusSchema } from '@ferretry/protocol';
+import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
 import { parseSessionId } from '../../../../src/lib/index.ts';

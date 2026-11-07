@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises';
-import { type SessionCompactionState, type SessionLiveActivity, SessionStateSchema } from '@ferretry/protocol';
+import { type SessionCompactionState, type SessionLiveActivity } from '../../../lib/protocol/session-live.ts';
+import { SessionStateSchema } from '../../../lib/protocol/session.ts';
 import {
   type ClockPort,
   type CompactionHistory,

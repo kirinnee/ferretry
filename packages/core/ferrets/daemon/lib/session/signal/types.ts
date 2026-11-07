@@ -1,4 +1,4 @@
-import { SessionStatusSchema, type SessionHealth, type SessionStatus } from '@ferretry/protocol';
+import { SessionStatusSchema, type SessionHealth, type SessionStatus } from '../../protocol/session.ts';
 import type { SessionId } from '../../session-id.ts';
 
 /**

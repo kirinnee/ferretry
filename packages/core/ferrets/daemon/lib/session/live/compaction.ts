@@ -1,4 +1,4 @@
-import type { SessionCompactionBasis, SessionCompactionState } from '@ferretry/protocol';
+import type { SessionCompactionBasis, SessionCompactionState } from '../../protocol/session-live.ts';
 import { z } from 'zod';
 import type { TranscriptEvent, TranscriptHarness } from '../../transcript/types.ts';
 import { tokenCounterValue } from './policy.ts';

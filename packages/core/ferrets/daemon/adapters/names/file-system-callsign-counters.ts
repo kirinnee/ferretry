@@ -1,4 +1,4 @@
-import { SYSTEM_CALLSIGN_MAX_SEQUENCE, SYSTEM_CALLSIGN_PREFIXES } from '@ferretry/protocol';
+import { SYSTEM_CALLSIGN_MAX_SEQUENCE, SYSTEM_CALLSIGN_PREFIXES } from '../../lib/protocol/system-callsigns.ts';
 import { z } from 'zod';
 import type { FileSystemPort } from '../../lib/index.ts';
 import type { SystemCallsignCounters, SystemCallsignCounterStore } from '../../lib/names/index.ts';

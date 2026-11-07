@@ -16,7 +16,7 @@
  * read at the latest {@link SessionStatusTallyPorts.maxAgeMs} after the last read, so correctness never
  * depends on hearing every write; only how often every document is read does.
  */
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus } from '../protocol/session.ts';
 
 export interface SessionStatusTallyPorts {
   /** Every session's status by id, from its documents: the costly read the tally exists to avoid repeating. */

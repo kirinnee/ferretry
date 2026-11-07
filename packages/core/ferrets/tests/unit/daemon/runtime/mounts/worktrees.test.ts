@@ -7,7 +7,7 @@ import type {
   WorktreeListResponse,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/worktrees.ts';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { type WorktreeSubsystem, worktreeRoutes } from '../../../../../daemon/lib/runtime/mounts/worktrees.ts';
