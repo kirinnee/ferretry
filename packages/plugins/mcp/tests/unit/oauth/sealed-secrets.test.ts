@@ -134,13 +134,34 @@ describe('MCP sign-in secrets: the use path', () => {
     expect(JSON.stringify(listed).includes(VALUE)).toBe(false);
     expect(sealed.reads).toEqual([]);
 
-    // Today's use: the service opens the internal values to send the refresh token to its provider.
-    expect((await internal.values()).get(REFRESH)).toBe(VALUE);
+    // Today's use: the service opens the internal value to send the refresh token to its provider.
+    expect(await internal.value(REFRESH)).toBe(VALUE);
     expect(sealed.reads).toEqual([REFRESH]);
 
     expect(await internal.remove(REFRESH)).toBe(true);
     expect(await internal.list()).toEqual([]);
     expect(await internal.remove(REFRESH)).toBe(false);
+  });
+
+  test('S174 spending one value opens only that entry, never the other servers’ tokens or client secrets', async () => {
+    const sealed = new RecordingSealedDocuments();
+    const internal = sealedMcpOAuthSecrets(sealed, mcpState(state.createMemoryHostFs()));
+    const spent = 'MCP_B_REFRESH' as SecretName;
+    await internal.put('MCP_A_REFRESH' as SecretName, 'fixture-a-refresh-not-real');
+    await internal.put(spent, 'fixture-b-refresh-not-real');
+    await internal.put('MCP_C_CLIENT' as SecretName, 'fixture-c-client-secret-not-real');
+
+    expect((await internal.list()).map(entry => entry.name).sort()).toEqual([
+      'MCP_A_REFRESH',
+      'MCP_B_REFRESH',
+      'MCP_C_CLIENT',
+    ]);
+    expect(sealed.reads).toEqual([]);
+
+    expect(await internal.value(spent)).toBe('fixture-b-refresh-not-real');
+    expect(sealed.reads).toEqual([spent]);
+    expect(await internal.value('MCP_D_REFRESH' as SecretName)).toBeUndefined();
+    expect(sealed.reads).toEqual([spent, 'MCP_D_REFRESH']);
   });
 
   test('S8 the daemon half opens only MCP_OAUTH_SECRETS over its own state, and its port has no value getter', async () => {

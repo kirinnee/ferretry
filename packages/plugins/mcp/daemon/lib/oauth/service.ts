@@ -132,8 +132,10 @@ export class McpOAuthRefusal extends Error {
 /**
  * A store this service both writes and reads: the daemon-internal one (`state/mcp/oauth-secrets.json`, sealed). It
  * lists names only — a sealed document keeps no summary — and nothing but this service is ever handed it.
+ * It opens ONE named value at a time, the one being spent, so no other server's token or client secret is decrypted.
  */
-export interface McpOAuthInternalSecrets extends McpOAuthSecretValues {
+export interface McpOAuthInternalSecrets {
+  value(name: SecretName): Promise<string | undefined>;
   list(): Promise<readonly Pick<SecretSummary, 'name'>[]>;
   put(name: SecretName, value: string): Promise<unknown>;
   remove(name: SecretName): Promise<boolean>;
@@ -753,7 +755,7 @@ export class McpOAuthService {
     if (!client.hasClientSecret) return FORM;
     const secret =
       client.clientSecretRef === undefined
-        ? (await this.deps.internal.values()).get(clientSecretName(component, client.issuer, client.redirectUri))
+        ? await this.deps.internal.value(clientSecretName(component, client.issuer, client.redirectUri))
         : (await this.deps.values.values()).get(client.clientSecretRef);
     if (secret === undefined) return FORM;
     if (client.tokenAuth === 'client_secret_basic')
@@ -832,7 +834,7 @@ export class McpOAuthService {
     // Defence in depth: the endpoint on disk is re-checked before a refresh token is sent to it.
     if (!endpointAllowed(record.tokenEndpoint, record.serverUrl)) return await this.markNeedsSignIn(component);
     const names = mcpOAuthSecretNames(component, record.serverUrl);
-    const refreshToken = (await this.deps.internal.values()).get(names.refresh);
+    const refreshToken = await this.deps.internal.value(names.refresh);
     if (refreshToken === undefined) return await this.markNeedsSignIn(component);
     const form = new URLSearchParams({
       grant_type: 'refresh_token',
@@ -927,7 +929,7 @@ export class McpOAuthService {
   private async revoke(component: string, record: McpOAuthRecord): Promise<boolean> {
     try {
       const names = mcpOAuthSecretNames(component, record.serverUrl);
-      const refresh = (await this.deps.internal.values()).get(names.refresh);
+      const refresh = await this.deps.internal.value(names.refresh);
       const token = refresh ?? (await this.deps.values.values()).get(names.access);
       if (token === undefined) return false;
       return await this.revokeToken(component, record, token, refresh === undefined ? 'access_token' : 'refresh_token');

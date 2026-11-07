@@ -946,7 +946,7 @@ describe('McpOAuthService — review round 2', () => {
     // Arrange
     const w = world();
     await signIn(w);
-    w.internal.values = async () => {
+    w.internal.value = async () => {
       throw new Error('damaged');
     };
 
