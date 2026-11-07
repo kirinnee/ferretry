@@ -1,3 +1,4 @@
+import { failureResponse } from '../host/responses.ts';
 import type { HostFactsPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -1041,7 +1042,14 @@ async function start(world: World): Promise<TestHost> {
         return result;
       }
       const accept = b.half.sockets?.[found.route.key] as SocketAccept;
-      const attach = await accept({ request, params: found.params, ...decision.standing } as CallContext);
+      let attach: Awaited<ReturnType<SocketAccept>>;
+      try {
+        attach = await accept({ request, params: found.params, ...decision.standing } as CallContext);
+      } catch (error) {
+        // as the real dispatcher's upgrade: a refusal the accept named keeps its status and body, anything else a 500
+        result.response = toTestResponse(failureResponse(error));
+        return result;
+      }
       const downstream: SocketDownstream = {
         send(frame, permit) {
           let allowed = true;
