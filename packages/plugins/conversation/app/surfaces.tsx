@@ -43,6 +43,7 @@ export interface ConversationSurfaces {
     readonly attachments: AppComponent<PanelProps>;
     readonly queue: AppComponent<PanelProps>;
     readonly 'compact-at': AppComponent<PanelProps>;
+    readonly 'chat-width': AppComponent<PanelProps>;
   };
   readonly settings: { readonly conversation: AppComponent<SettingsProps> };
   readonly renderers: { readonly 'ask:question': AppComponent<RendererProps> };
@@ -57,6 +58,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     attachments: scoped<PanelProps>(client, Pending),
     queue: scoped<PanelProps>(client, Pending),
     'compact-at': scoped<PanelProps>(client, Pending),
+    'chat-width': scoped<PanelProps>(client, Pending),
   },
   settings: { conversation: scoped<SettingsProps>(client, Pending) },
   renderers: { 'ask:question': scoped<RendererProps>(client, Pending) },

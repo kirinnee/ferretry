@@ -1,11 +1,12 @@
 import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { type ConversationApi, LinkKept, QuestionSchema, SearchSources } from '../contract/index.ts';
+import { type ConversationApi, LinkKept, QuestionSchema, ReferenceCatalog, SearchSources } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
 import { buildReading } from './reading.ts';
 import { maskedBody } from './seams/masked-body.ts';
+import { referenceCatalogRoute } from './references/catalog.ts';
 
 const unavailable =
   (sentence: string): RouteHandler =>
@@ -71,7 +72,13 @@ export default implementDaemon(manifest, {
       b.stop();
     });
 
-    const served = { ...a.routes, ...b.routes };
+    const served: Readonly<Record<string, RouteHandler | undefined>> = {
+      ...a.routes,
+      ...b.routes,
+      'GET /v1/ferrets/:ferretId/references': referenceCatalogRoute(prefix =>
+        ctx.hooks.provider(ReferenceCatalog, prefix),
+      ),
+    };
     const routes = declared(
       manifest.actions.routes.map(route => route.key),
       Object.fromEntries(
