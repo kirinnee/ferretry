@@ -263,7 +263,7 @@ describe('DaemonPushDevices', () => {
 });
 
 describe('daemonPushService', () => {
-  it.skip('binds every call to the connection it was given — blocked on app-shell connect interface (origin/rebuild/app-shell-fill)', async () => {
+  it('binds every call to the connection it was given', async () => {
     const calls: string[] = [];
     const bound = daemonPushService(async url => {
       calls.push(String(url));
@@ -710,7 +710,7 @@ const containerFor = (
 };
 
 describe('containerPushEnrolment', () => {
-  it.skip('registers the signed worker at the daemon’s own scope, labelled with the reader’s name for it — blocked on app-shell connect interface (origin/rebuild/app-shell-fill)', async () => {
+  it('registers the signed worker at the daemon’s own scope, labelled with the reader’s name for it', async () => {
     const { enrolment: browser, registered } = containerFor([]);
 
     const registration = await browser.register(daemonA.daemonId);
@@ -720,7 +720,7 @@ describe('containerPushEnrolment', () => {
     should(browser.deviceName()).equal('Ferretry PWA');
   });
 
-  it.skip('waits for a freshly installed worker to activate before it can subscribe — blocked on app-shell connect interface (origin/rebuild/app-shell-fill)', async () => {
+  it('waits for a freshly installed worker to activate before it can subscribe', async () => {
     const installing = fakeWorker(`${ORIGIN}/sw.verified.js`, 'installing');
     const { enrolment: browser } = containerFor([], (_url, scope) => ({
       ...fakeRegistration(scope, null),
@@ -735,7 +735,7 @@ describe('containerPushEnrolment', () => {
     should(installing.listeners).be.empty();
   });
 
-  it.skip('refuses a worker that never starts, and a registration that cannot hold a subscription — blocked on app-shell connect interface (origin/rebuild/app-shell-fill)', async () => {
+  it('refuses a worker that never starts, and a registration that cannot hold a subscription', async () => {
     const dying = fakeWorker(`${ORIGIN}/sw.verified.js`, 'installing');
     const redundant = containerFor([], (_url, scope) => ({ ...fakeRegistration(scope, null), waiting: dying }));
     const pending = redundant.enrolment.register(daemonA.daemonId);
@@ -758,7 +758,7 @@ describe('containerPushEnrolment', () => {
     should(await browser.existing(daemonB.daemonId)).be.null();
   });
 
-  it.skip('reconciles: drops an unpaired daemon’s worker, re-labels a renamed one, leaves the rest — blocked on app-shell connect interface (origin/rebuild/app-shell-fill)', async () => {
+  it('reconciles: drops an unpaired daemon’s worker, re-labels a renamed one, leaves the rest', async () => {
     const app = fakeRegistration('/', fakeWorker(`${ORIGIN}/sw.verified.js`));
     const kept = fakeRegistration('/push/daemon-a/', fakeWorker(`${ORIGIN}/sw.verified.js?machine=Work%20laptop`));
     const renamed = fakeRegistration('/push/daemon-b/', null);

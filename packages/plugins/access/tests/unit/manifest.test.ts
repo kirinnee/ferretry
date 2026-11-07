@@ -7,7 +7,10 @@ const byKey = new Map(routes.map(route => [route.key, route]));
 
 describe('access manifest', () => {
   test("declares today's pairing, passkey, unlock and push routes, and not the daemon-wide grants", () => {
-    expect(routes).toHaveLength(20);
+    expect(routes).toHaveLength(19);
+    // DECISIONS-1 #4: the seen route is Agenda's; Access keeps push subscriptions.
+    expect(routes.map(route => route.key as string)).not.toContain('POST /v1/push/seen');
+    expect(byKey.has('POST /v1/push/subscriptions')).toBe(true);
     expect(byKey.has('POST /v1/pair/code')).toBe(true);
     expect(byKey.has('POST /v1/unlock')).toBe(true);
     expect([...byKey.keys()].some(key => key.includes('/v1/grants'))).toBe(false);
@@ -44,10 +47,12 @@ describe('access manifest', () => {
       'session.modes:pair',
     ]);
   });
-  test('every half is a skeleton', async () => {
+  test('every half is implemented, and the app half provides the device claims to the shell', async () => {
     for (const half of ['daemon', 'app', 'cli']) {
       const module = await import(`../../${half}/index.ts`);
-      expect(module.default.skeleton).toBe(true);
+      expect(module.default.skeleton).not.toBe(true);
     }
+    const app = (await import('../../app/index.ts')).default;
+    expect(typeof app.shell.claims).toBe('function');
   });
 });

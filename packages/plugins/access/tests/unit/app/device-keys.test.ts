@@ -144,8 +144,8 @@ describe('the IndexedDB device key store', () => {
     should((await crypto.subtle.sign('Ed25519', loaded, new Uint8Array([1]))).byteLength).equal(64);
     await should(crypto.subtle.exportKey('pkcs8', loaded)).be.rejected();
     should(database.opened).eql([
-      { name: 'ferretry-device-keys', version: 1 },
-      { name: 'ferretry-device-keys', version: 1 },
+      { name: 'fy-access', version: 1 },
+      { name: 'fy-access', version: 1 },
     ]);
     should([...database.stores]).eql(['keys']);
     // Held connections block a future version change; this store holds none.

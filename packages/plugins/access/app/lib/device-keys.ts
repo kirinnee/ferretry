@@ -24,6 +24,7 @@
  * USE the key while the tab is open — it cannot carry it away — and that limit is stated in the design.
  */
 
+import { databaseName } from '@ferretry/app';
 import { toBase64Url } from '../shell-pairing.ts';
 
 /** Said when a browser cannot mint the key Ferretry pairs with, which every supported browser can. */
@@ -117,7 +118,7 @@ export interface DeviceKeyDatabaseFactory {
   open(name: string, version?: number): IDBOpenDBRequest;
 }
 
-const DATABASE = 'ferretry-device-keys';
+const DATABASE = databaseName('access');
 const STORE = 'keys';
 const VERSION = 1;
 

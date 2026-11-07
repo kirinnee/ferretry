@@ -39,18 +39,11 @@ import {
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
-import { defaultDeviceName, deviceNameSuffix, normalizedDeviceName } from '../../lib/device-name.ts';
+import { browserDeviceName, normalizedDeviceName } from '../../lib/device-name.ts';
 import { PairScanner } from './pair-scanner.tsx';
 
 /** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
 type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<void>;
-
-/** What this browser is called before the person changes it: browser, system and a short suffix. */
-const browserDeviceName = (): string =>
-  defaultDeviceName(
-    typeof navigator === 'undefined' ? '' : navigator.userAgent,
-    deviceNameSuffix(length => crypto.getRandomValues(new Uint8Array(length))),
-  );
 
 export interface PairingScreenProps {
   /** Existing pairings from the host-owned, browser-local registry. */

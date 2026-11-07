@@ -46,6 +46,13 @@ export function deviceNameSuffix(random: (length: number) => Uint8Array): string
   return [...random(SUFFIX_LENGTH)].map(byte => SUFFIX_ALPHABET[byte % SUFFIX_ALPHABET.length]).join('');
 }
 
+/** What this browser is called before the person changes it: browser, system and a short suffix. */
+export const browserDeviceName = (): string =>
+  defaultDeviceName(
+    typeof navigator === 'undefined' ? '' : navigator.userAgent,
+    deviceNameSuffix(length => crypto.getRandomValues(new Uint8Array(length))),
+  );
+
 /** "Chrome on macOS · K7Q2" — or as much of it as the user-agent says. */
 export function defaultDeviceName(userAgent: string, suffix: string): string {
   const browser = firstMatch(BROWSERS, userAgent) ?? 'Browser';
