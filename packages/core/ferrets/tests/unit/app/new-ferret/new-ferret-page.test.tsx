@@ -88,6 +88,44 @@ describe('NewFerretPage', () => {
     expect(post(untouched)?.body).not.toHaveProperty('fast');
   });
 
+  it('turns Fast off for a model with no fast mode, says why, and never sends fast for it', async () => {
+    const account: ChosenFerretAccount = {
+      ...CLAUDE,
+      models: [
+        { id: 'opus', label: 'Opus', available: true, fast: true },
+        { id: 'haiku', label: 'Haiku', available: true, fast: false },
+      ],
+    };
+    const harness = page({ panel: slot => <StubPicker account={account} slot={slot} /> });
+    run(() => harness.view.root.findByProps({ 'data-stub-runtime': 'claude-a' }).props.onClick());
+    // The runtime's own default (opus) has a fast mode: the switch works and fast is sent.
+    expect(harness.view.root.findByProps({ 'data-fast-switch': 'off' }).props.disabled).toBeFalsy();
+    run(() => harness.view.root.findByProps({ 'data-fast-switch': 'off' }).props.onClick());
+    change(harness.view, 'fy-new-ferret-folder', '/work/x');
+    change(harness.view, 'fy-new-ferret-prompt', 'Go');
+    await runAsync(async () => button(harness.view, 'Create ferret').props.onClick());
+    expect(post(harness)?.body).toMatchObject({ fast: true });
+
+    // Typing a model that has none turns the switch off with the reason, and the request drops fast.
+    const none = page({ panel: slot => <StubPicker account={account} slot={slot} /> });
+    run(() => none.view.root.findByProps({ 'data-stub-runtime': 'claude-a' }).props.onClick());
+    run(() => none.view.root.findByProps({ 'data-fast-switch': 'off' }).props.onClick());
+    change(none.view, 'fy-new-ferret-model', 'haiku');
+    expect(JSON.stringify(none.view.toJSON())).toContain('Haiku has no fast mode.');
+    expect(none.view.root.findByProps({ 'data-fast-switch': 'off' }).props.disabled).toBeTrue();
+    change(none.view, 'fy-new-ferret-folder', '/work/x');
+    change(none.view, 'fy-new-ferret-prompt', 'Go');
+    await runAsync(async () => button(none.view, 'Create ferret').props.onClick());
+    expect(post(none)?.body).not.toHaveProperty('fast');
+    expect(post(none)?.body).toMatchObject({ model: 'haiku' });
+  });
+
+  it('keeps Fast available for a model the panel could not say anything about', () => {
+    const harness = page({ panel: slot => <StubPicker account={CLAUDE} slot={slot} /> });
+    run(() => harness.view.root.findByProps({ 'data-stub-runtime': 'claude-a' }).props.onClick());
+    expect(harness.view.root.findByProps({ 'data-fast-switch': 'off' }).props.disabled).toBeFalsy();
+  });
+
   it('starts with Remote Control off, and sends it only when the Advanced options box was ticked', async () => {
     const harness = page();
     const box = (): ReactTestInstance => input(harness.view, 'fy-new-ferret-remote-control');

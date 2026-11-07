@@ -61,6 +61,16 @@ const modelSuggestions = (account: ChosenFerretAccount | null): readonly string[
 const modelPlaceholder = (account: ChosenFerretAccount | null): string =>
   account?.defaultModel ? `default: ${account.defaultModel}` : '';
 
+const FAST_REASON_ID = 'fy-new-ferret-fast-reason';
+
+/** Why the chosen model cannot launch in fast mode, or nothing when it can or nobody can say. */
+export const fastUnavailableReason = (account: ChosenFerretAccount | null, typed: string): string | undefined => {
+  if (account === null) return undefined;
+  const id = typed.trim() === '' ? (account.defaultModel ?? undefined) : typed.trim();
+  const model = account.models.find(candidate => candidate.id === id);
+  return model?.fast === false ? `${model.label ?? model.id} has no fast mode.` : undefined;
+};
+
 /** What each mode MEANS to the person starting it, one short line each. */
 const MODE_MEANING: Readonly<Record<NewFerretDraft['mode'], string>> = {
   auto: 'the agent works through your request on its own',
@@ -152,6 +162,9 @@ export function NewFerretPage({
   const chosen = chosenForDraft(chosenRuntime, draft.runtime);
   const models = modelSuggestions(chosen);
   const blocker = createBlocker(draft, submitting, noRunnableAccount);
+  // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
+  // the request never carries it (the daemon would refuse it too).
+  const fastReason = fastUnavailableReason(chosen, draft.model);
   const remoteControlReason = chosen?.kind === 'codex' ? REMOTE_CONTROL_CODEX_REASON : undefined;
   const typedRuntime = (
     <input
@@ -185,6 +198,7 @@ export function NewFerretPage({
     try {
       const id = await startFerret(client, {
         ...draft,
+        fast: draft.fast && fastReason === undefined,
         remoteControl: draft.remoteControl && remoteControlReason === undefined,
       });
       onNavigate(ferretChatHref(daemon, id));
@@ -306,10 +320,18 @@ export function NewFerretPage({
           <div data-new-ferret-fast="">
             <FastSwitch
               ariaLabel="Fast mode"
+              disabled={fastReason !== undefined}
+              {...(fastReason === undefined ? {} : { disabledReason: fastReason })}
               onPress={() => setDraft(current => ({ ...current, fast: !current.fast }))}
-              pressed={draft.fast}
+              pressed={draft.fast && fastReason === undefined}
+              reasonId={FAST_REASON_ID}
               variant="field"
             />
+            {fastReason === undefined ? null : (
+              <p className="sr-only" id={FAST_REASON_ID}>
+                {fastReason}
+              </p>
+            )}
             <p className="m-0 mt-1.5 text-meta leading-base text-muted">
               Faster output on models that offer it. {FAST_COST_NOTE}
             </p>
