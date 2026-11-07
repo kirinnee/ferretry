@@ -29,7 +29,6 @@ import {
   type FerretId,
   type KernelPorts,
   jsonResponse,
-  type StateFileDef,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, implementDaemon, type ToolResult } from '@ferretry/kernel/manifest';
 import { instantFromEpochMs, milliseconds } from '@ferretry/std';
@@ -59,6 +58,8 @@ import {
   RedactingTerminalStreamService,
   type StreamAct,
   StateSurfaceEvents,
+  StateTerminalPanes,
+  type TerminalsStateFile,
   systemLoginShell,
   TerminalRuntimeError,
   TerminalServiceError,
@@ -78,7 +79,8 @@ import {
 } from './lib/agent-tools/service.ts';
 import type { AgentToolCaller } from './lib/agent-tools/types.ts';
 import { parseBody } from './lib/api/body.ts';
-import { SttyTerminalModes } from './lib/inputs/terminal-modes.ts';
+import type { CodeProgramPort, ProgramProofPort } from './lib/inputs/ports.ts';
+import { type ProgramRunner, SttyTerminalModes, type TerminalModes } from './lib/inputs/terminal-modes.ts';
 import { TmuxInputTarget } from './lib/inputs/terminal-target.ts';
 import type { SurfaceController } from './lib/protocol/surface-control.ts';
 import {
@@ -111,6 +113,14 @@ export interface TerminalsOverrides {
   readonly socketPath?: string;
   /** The terminals' runtime (the daemon: `TmuxTerminalRuntime` over `tmux`). */
   readonly runtime?: TerminalRuntimePort;
+  /** What the guarded write asks of the host (the daemon: tmux above, `ps`/`stty` via kernel.spawn, the kernel's proofs). */
+  readonly inputs?: {
+    readonly tmux?: TmuxCommandPort;
+    readonly run?: ProgramRunner;
+    readonly modes?: TerminalModes;
+    readonly programs?: CodeProgramPort;
+    readonly proofs?: ProgramProofPort;
+  };
 }
 
 /**
@@ -380,11 +390,9 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   };
 
   // ─── the terminal tools ─────────────────────────────────────────────────────────────────────────────────────────
-  const [, controlFile] = manifest.data.state;
-  const control = new SurfaceControl(
-    new StateSurfaceEvents(kernel.state, controlFile as unknown as StateFileDef<'terminals', unknown>),
-    { now: nowMs },
-  );
+  const [, stateFile] = manifest.data.state;
+  const terminalsState: TerminalsStateFile = stateFile;
+  const control = new SurfaceControl(new StateSurfaceEvents(kernel.state, terminalsState), { now: nowMs });
   const tools = new TerminalToolService({
     terminals: subsystem,
     control,
@@ -422,24 +430,24 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     };
 
   // ─── the guarded write (`input.targets:terminal`) ───────────────────────────────────────────────────────────────
-  const run = programRunner(kernel.spawn);
+  const run = overrides.inputs?.run ?? programRunner(kernel.spawn);
   const located = async (ferret: string, key: string) => {
     // A ferret this daemon does not hold has no terminal to type into: that is `target_gone`, never a throw.
     const { terminals } = await service.list(ferret).catch(() => ({ terminals: [] as const }));
     return terminals.find(terminal => terminal.name === key || terminal.id === key);
   };
   const target = new TmuxInputTarget(
-    tmux,
+    overrides.inputs?.tmux ?? tmux,
     {
       locate: async (ferret, key) =>
         (await runtime.list()).find(record => record.ownerId === ferret && (record.name === key || record.id === key)),
     },
-    new SttyTerminalModes(hostPlatform, run),
+    overrides.inputs?.modes ?? new SttyTerminalModes(hostPlatform, run),
     run,
     // An echo-off code prompt stays a code only from a code program this account cannot replace (never the ps name).
-    ExecutableCodePrograms.forPlatform(hostPlatform, hostUserId),
+    overrides.inputs?.programs ?? ExecutableCodePrograms.forPlatform(hostPlatform, hostUserId),
     // Who can read the TTY, proved by the kernel for EVERY process of the foreground group, never by the name ps shows.
-    KernelProgramProof.forPlatform(hostPlatform, run, hostUserId),
+    overrides.inputs?.proofs ?? KernelProgramProof.forPlatform(hostPlatform, run, hostUserId),
   );
   const inputTarget: InputTargetAdapter = {
     masking: 'cells',
@@ -468,20 +476,24 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
 
   // ─── the runner ─────────────────────────────────────────────────────────────────────────────────────────────────
   const incarnation = processIncarnationFor(hostPlatform, kernel.spawn);
-  /** The pane each ferret runs in, as the runner started or adopted it (Ferrets persists the handle). */
-  const panes = new Map<string, RunnerPane>();
+  /**
+   * The pane each ferret runs in, as the runner started or adopted it, registered in `terminals.json` as today's durable
+   * pane registration was (Ferrets persists the handle; this keeps the incarnation the proofs need after a restart).
+   */
+  const panes = new StateTerminalPanes(kernel.state, terminalsState);
   const remember = async (ferret: string, paneId: string, pid: number | undefined): Promise<void> => {
     if (pid === undefined) return;
     const start = await incarnation.startOf(pid).catch(() => undefined);
     if (start === undefined) return;
-    panes.set(ferret, { tmuxSession: ferretTmuxSession(ferret), paneId, pid, processStartTicks: start });
+    const pane: RunnerPane = { tmuxSession: ferretTmuxSession(ferret), paneId, pid, processStartTicks: start };
+    await panes.register(ferret, pane);
   };
   const processes = buildProcesses({
     kernel,
     tmux,
     socketPath,
     ferrets,
-    paneOf: async ferret => panes.get(ferret),
+    paneOf: async ferret => await panes.of(ferret),
     refusedOutputRoots: [socketPath.slice(0, socketPath.lastIndexOf('/state/'))],
     binaryName: BINARY_NAME,
   });

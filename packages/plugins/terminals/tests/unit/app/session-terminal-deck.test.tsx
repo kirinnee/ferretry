@@ -1046,7 +1046,7 @@ describe('SessionTerminalDeck on screen', () => {
   const frames = (socket: { readonly sent: unknown[] }): string[] =>
     socket.sent.filter((frame): frame is string => typeof frame === 'string');
 
-  test('holds no stream while its workspace tab is not the one shown, and attaches once it is', async () => {
+  test('R563 holds no stream while its workspace tab is not the one shown, and attaches once it is', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     const element = (active: boolean) => (
       <SessionTerminalDeck
@@ -1072,7 +1072,7 @@ describe('SessionTerminalDeck on screen', () => {
     run(() => page.unmount());
   });
 
-  test('detaches while the page is hidden and attaches a fresh stream when it is shown again', async () => {
+  test('R563 detaches while the page is hidden and attaches a fresh stream when it is shown again', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
@@ -1093,7 +1093,7 @@ describe('SessionTerminalDeck on screen', () => {
     run(() => page.unmount());
   });
 
-  test('sizes the stream once however many times the observer reports the same size, and again when it changes', async () => {
+  test('R563 sizes the stream once however many times the observer reports the same size, and again when it changes', async () => {
     const observers: Array<() => void> = [];
     const original = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class {

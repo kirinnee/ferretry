@@ -18,6 +18,7 @@ import {
   TerminalSendInputSchema,
   TerminalsConfigSchema,
   TerminalsPort,
+  TerminalsStateSchema,
   TerminalWaitInputSchema,
   USE,
 } from './contract/index.ts';
@@ -281,7 +282,13 @@ export default definePlugin({
         format: 1,
         onDamaged: { narrower: 'a new tmux server is started; no pane is adopted' },
       }),
-      defineState({ name: 'terminals', path: 'terminals.json', store: 'json', format: 1 }),
+      defineState({
+        name: 'terminals',
+        path: 'terminals.json',
+        store: 'json',
+        format: 1,
+        schema: TerminalsStateSchema,
+      }),
     ],
     config: [
       defineConfig({

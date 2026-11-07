@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { inputTargetConformance } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
-import { FERRET, SECRET, terminalsHalf } from '../../support/daemon/half.ts';
+import { FERRET, liveTerminalSubject, SECRET, terminalsHalf } from '../../support/daemon/half.ts';
 
 /**
  * Terminals' rows on the whole daemon half (the kernel's test host), each named by its id. "With: vault" rows run
@@ -203,7 +203,4 @@ describe('the tmux runner', () => {
   });
 });
 
-inputTargetConformance('terminals', async () => {
-  const half = await terminalsHalf();
-  return { adapter: half.inputTarget(), unknownKey: 'nothing-here', kind: 'terminal' };
-});
+inputTargetConformance('terminals', liveTerminalSubject);
