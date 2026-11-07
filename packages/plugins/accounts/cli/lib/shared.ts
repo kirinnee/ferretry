@@ -51,3 +51,7 @@ export function unique<T>(found: readonly T[], reference: string, what: string, 
 /** Whether a refused call answered this HTTP status (the client's error carries `status`). */
 export const refusedWith = (error: unknown, status: number): boolean =>
   typeof error === 'object' && error !== null && 'status' in error && (error as { status: unknown }).status === status;
+
+/** Whether a refused call answered this error code (the client's error carries `code`). */
+export const refusedCode = (error: unknown, code: string): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === code;

@@ -5,8 +5,8 @@ import { RulesController } from './lib/rules/controller.ts';
 import { ProtocolRulesGateway } from './lib/rules/gateway.ts';
 
 /**
- * HALF B of Accounts' `fy` half (accounts-b): `fy rules …` over the plugin client. `copy …`, `plan …` and `account site
- * recipe …` are not ported by half b yet, so `./index.ts` answers them with the skeleton sentence.
+ * HALF B of Accounts' `fy` half (accounts-b): `fy rules …` over the plugin client. `copy …` and `plan …` are `./lib/copy`; `account site
+ * recipe …` are the account verbs.
  */
 export function rulesVerbs(ctx: {
   readonly client: PluginClient;

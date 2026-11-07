@@ -1,10 +1,14 @@
 import { implementCli, type VerbHandler } from '@ferretry/kernel/manifest';
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import manifest from '../manifest.ts';
-import { nowMs, ownSessionId, recipeReader, sleep, TerminalPrompt } from './adapters/terminal.ts';
+import { nowMs, ownSessionId, paneCredentialMarker, recipeReader, sleep, TerminalPrompt } from './adapters/terminal.ts';
 import { AccountController } from './lib/account-controller.ts';
 import { ProtocolAccountGateway } from './lib/account-gateway.ts';
 import { accountVerbs } from './lib/commands.ts';
+import { copyVerbs } from './lib/copy/commands.ts';
+import { CopyController } from './lib/copy/controller.ts';
+import { ProtocolCopyGateway, ProtocolPlanGateway } from './lib/copy/gateway.ts';
+import { PlanController } from './lib/copy/plan-controller.ts';
 import { TwoFactorSeedController } from './lib/factor-controller.ts';
 import { ProtocolTwoFactorSeedGateway } from './lib/factor-gateway.ts';
 import { FactorKeyController } from './lib/factor-keys-controller.ts';
@@ -15,7 +19,7 @@ import { ExitStatus } from './shell.ts';
 /**
  * Accounts' `fy` half (§2.3). Half a: `fy account …` (accounts, sign-ins, defaults, 2FA keys), today's
  * `cli/src/lib/secrets/account-*` composition with the gateways on `ctx.client` and the manifest's route keys. Half b
- * (`copy …`, `plan …`, `rules …`, `account site recipe …`) is `./rules.ts`, accounts-b's to fill; every declared verb
+ * (`copy …`, `plan …`, `rules …`, `account site recipe …`) is `./rules.ts` and `./lib/copy`; every declared verb
  * neither half answers says the skeleton sentence and exits 1.
  */
 export default implementCli(manifest, {
@@ -47,12 +51,31 @@ export default implementCli(manifest, {
         nowMs,
       }),
     });
+    const owner = { ownSessionId: ownSessionId(), agentCredential: paneCredentialMarker() };
+    const copyOut = { success: out.success, diagnostic: (message: string) => io.err(`${message}\n`) };
+    const copyControllers = () => ({
+      copy: new CopyController({
+        ...owner,
+        gateway: new ProtocolCopyGateway(client),
+        out: copyOut,
+        sleep,
+        nowMs,
+      }),
+      plans: new PlanController({
+        ...owner,
+        gateway: new ProtocolPlanGateway(client),
+        out: copyOut,
+        sleep,
+        nowMs,
+      }),
+    });
     const notBuilt: VerbHandler = async () => {
       io.err(`${skeletonSentence(manifest.title)}\n`);
       return 1;
     };
     const answered: Readonly<Record<string, VerbHandler>> = {
       ...rulesVerbs({ client, io }),
+      ...copyVerbs(copyControllers, io, exit),
       ...accountVerbs(controllers, io, exit),
     };
     return {
