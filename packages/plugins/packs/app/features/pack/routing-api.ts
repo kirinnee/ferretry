@@ -26,9 +26,7 @@ export async function startCleanUp(client: PacksClient, request: PackCleanUpRequ
 
 /** One clean-up run, and its checked rewrite once it has one. */
 export async function readCleanUpJob(client: PacksClient, jobId: string): Promise<PackCleanUpJobResult> {
-  return PackCleanUpJobResultSchema.parse(
-    await client.call('GET /v1/pack/routing/jobs/:jobId', { params: { jobId } }),
-  );
+  return PackCleanUpJobResultSchema.parse(await client.call('GET /v1/pack/routing/jobs/:jobId', { params: { jobId } }));
 }
 
 /** Write the reviewed rewrite, keeping the prompt it replaces for one undo. */

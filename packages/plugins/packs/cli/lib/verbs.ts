@@ -153,7 +153,9 @@ export function packVerbs(parts: PackVerbParts) {
         ...(flag(options, 'json') ? { json: true } : {}),
         ...(timeout === undefined ? {} : { timeout }),
         ...(interval === undefined ? {} : { interval }),
-        ...(text(options, 'until-marker') === undefined ? {} : { untilMarker: text(options, 'until-marker') as string }),
+        ...(text(options, 'until-marker') === undefined
+          ? {}
+          : { untilMarker: text(options, 'until-marker') as string }),
         ...(flag(options, 'keep') ? { keep: true } : {}),
       });
     }),
@@ -199,4 +201,3 @@ export function packVerbs(parts: PackVerbParts) {
     }),
   };
 }
-

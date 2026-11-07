@@ -18,11 +18,7 @@ describe('the clean-up job card', () => {
   it('says a read of the run failed and that it will try again, keeping the run on screen', async () => {
     // Act
     shown = await mount(
-      <CleanUpJobCard
-        job={RUNNING_JOB}
-        nowMs={Date.parse(RUNNING_JOB.startedAt)}
-        readError="offline"
-      />,
+      <CleanUpJobCard job={RUNNING_JOB} nowMs={Date.parse(RUNNING_JOB.startedAt)} readError="offline" />,
     );
 
     // Assert
@@ -38,11 +34,7 @@ describe('the clean-up job card without a model', () => {
 
     // Act
     shown = await mount(
-      <CleanUpJobCard
-        job={withoutModel}
-        nowMs={Date.parse(RUNNING_JOB.startedAt)}
-        readError={null}
-      />,
+      <CleanUpJobCard job={withoutModel} nowMs={Date.parse(RUNNING_JOB.startedAt)} readError={null} />,
     );
 
     // Assert

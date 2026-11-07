@@ -57,13 +57,7 @@ export interface RoutingPromptCardProps {
   readonly initial?: { readonly job: PackCleanUpJob; readonly suggestion?: PackCleanUpSuggestion };
 }
 
-export function RoutingPromptCard({
-  view,
-  state,
-  pollMs = CLEAN_UP_POLL_MS,
-  timers,
-  initial,
-}: RoutingPromptCardProps) {
+export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, timers, initial }: RoutingPromptCardProps) {
   const shellClock = useShellClock();
   const clock = timers ?? shellClock;
   const id = useId().replace(/:/gu, '');
@@ -340,7 +334,7 @@ export function RoutingPromptCard({
               onChange={setIdea}
               onSubmit={submitWrite}
               disabled={busy || running}
-              />
+            />
             <Button
               variant="primary"
               className="min-h-[44px] w-full sm:w-auto sm:self-start"

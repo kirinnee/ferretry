@@ -205,7 +205,6 @@ export const simpleCommands = (script: string): readonly (readonly Word[])[] => 
   return commands.filter(command => command.length > 0);
 };
 
-
 /** The binary's own name, or a path ending in it. */
 const isClient = (word: string, clientName: string): boolean => word === clientName || word.endsWith(`/${clientName}`);
 

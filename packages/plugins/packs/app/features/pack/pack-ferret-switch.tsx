@@ -70,17 +70,25 @@ export function usePackFerretSwitch({ client }: { readonly client: PacksClient }
 }
 
 /** The switch: one checkbox row, labelled by what it decides. */
-export function PackSwitchRow({ ferretId, control }: { readonly ferretId: string; readonly control: PackFerretSwitch }) {
+export function PackSwitchRow({
+  ferretId,
+  control,
+}: {
+  readonly ferretId: string;
+  readonly control: PackFerretSwitch;
+}) {
   const on = control.onFor(ferretId);
   return (
     <label
-      className={cn(
-        'flex min-h-[44px] cursor-pointer items-center gap-2 text-ui',
-        on ? 'text-fg' : 'text-muted',
-      )}
+      className={cn('flex min-h-[44px] cursor-pointer items-center gap-2 text-ui', on ? 'text-fg' : 'text-muted')}
       data-pack-ferret-switch=""
     >
-      <input type="checkbox" role="switch" checked={on} onChange={event => void control.tap(ferretId, event.currentTarget.checked)} />
+      <input
+        type="checkbox"
+        role="switch"
+        checked={on}
+        onChange={event => void control.tap(ferretId, event.currentTarget.checked)}
+      />
       <span>Pack mode</span>
       <span className="text-meta text-faint">{on ? 'On · next launch' : 'Off · next launch'}</span>
     </label>

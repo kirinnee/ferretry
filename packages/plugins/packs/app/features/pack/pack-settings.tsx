@@ -216,8 +216,8 @@ function PackPanel({ view, state }: { readonly view: PackView; readonly state: M
               Pack mode on this machine
             </h3>
             <p className="m-0 mt-1 text-meta leading-base text-muted">
-              Ferrets may start helpers for parts of their work and pick the model each one runs on. Off: no ferret
-              is told about it, and <span className="mono">fy new</span> refuses.
+              Ferrets may start helpers for parts of their work and pick the model each one runs on. Off: no ferret is
+              told about it, and <span className="mono">fy new</span> refuses.
             </p>
           </div>
           <button
@@ -329,7 +329,13 @@ function PackSettingsView({ state }: { readonly state: MachinePack }) {
   return <PackPanel view={read.view} state={state} />;
 }
 
-function ConnectedPackSettings({ client, configFiles }: { readonly client: PacksClient; readonly configFiles: ConfigFiles }) {
+function ConnectedPackSettings({
+  client,
+  configFiles,
+}: {
+  readonly client: PacksClient;
+  readonly configFiles: ConfigFiles;
+}) {
   return <PackSettingsView state={useMachinePack(client, configFiles)} />;
 }
 

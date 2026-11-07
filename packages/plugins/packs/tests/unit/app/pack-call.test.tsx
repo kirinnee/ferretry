@@ -11,9 +11,9 @@ import { interact, type Mounted, mount, must } from '../support/dom.ts';
 mock.module('../../../app/ui.ts', () => ({
   Markdown: ({ text, className }: { text: string; className?: string }): ReactNode => (
     <div className={className}>
-      {text.split(/(\*\*[^*]+\*\*)/u).map(part =>
-        part.startsWith('**') ? <strong key={part}>{part.slice(2, -2)}</strong> : part,
-      )}
+      {text
+        .split(/(\*\*[^*]+\*\*)/u)
+        .map(part => (part.startsWith('**') ? <strong key={part}>{part.slice(2, -2)}</strong> : part))}
     </div>
   ),
   PeerName: ({ peer }: { peer: { name: string; ferretId: string } }): ReactNode => (

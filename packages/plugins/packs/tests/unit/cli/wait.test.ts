@@ -204,7 +204,12 @@ function loop(results: Array<Result | Error>, options: { marker?: boolean[]; lea
       },
       table: async () => {
         const next = options.table?.shift();
-        return (next ?? { root: { id: 'lead', name: 'lead' }, at: at('2026-11-03T12:00:00.000Z'), endedWindowMs: 0, rows: [] }) as never;
+        return (next ?? {
+          root: { id: 'lead', name: 'lead' },
+          at: at('2026-11-03T12:00:00.000Z'),
+          endedWindowMs: 0,
+          rows: [],
+        }) as never;
       },
       stop: async (id, reason) => void stops.push([id, reason]),
     },
@@ -216,7 +221,10 @@ function loop(results: Array<Result | Error>, options: { marker?: boolean[]; lea
         now += ms;
       },
     },
-    { exists: async () => (markers.length > 1 ? markers.shift() : markers[0]) === true, resolve: path => `/work/${path}` },
+    {
+      exists: async () => (markers.length > 1 ? markers.shift() : markers[0]) === true,
+      resolve: path => `/work/${path}`,
+    },
     'foo',
     options.lead,
   );

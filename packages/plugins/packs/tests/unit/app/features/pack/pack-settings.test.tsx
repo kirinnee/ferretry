@@ -112,9 +112,7 @@ describe('Settings › Pack mode', () => {
 
   it('is a Settings tab that reads its own machine without an injected state', async () => {
     expect(PACK_SETTINGS_TAB.id).toBe('pack');
-    shown = await mount(
-      <PACK_SETTINGS_TAB.Surface client={client} configFiles={uiDoubles.useConfigFiles()} />,
-    );
+    shown = await mount(<PACK_SETTINGS_TAB.Surface client={client} configFiles={uiDoubles.useConfigFiles()} />);
     expect(textOf(shown.container)).toContain('Reading Pack mode…');
   });
 });

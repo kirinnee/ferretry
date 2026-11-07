@@ -192,5 +192,5 @@ export default definePlugin({
 
   // Jev ranks the models usable now through Vault's `authorizeFetch`: one named secret on one request to its one host.
   // The probe and the clean-up ferret run through Runtimes and Ferrets, not a process of Packs.
-  permissions: { roots: [], network: ['api.typesafe.ai'], spawn: [], secrets: ['JEV_API_KEY'] },
+  permissions: { roots: ['agent-homes'], network: ['api.typesafe.ai'], spawn: [], secrets: ['JEV_API_KEY'] },
 });

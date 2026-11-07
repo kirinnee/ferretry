@@ -177,7 +177,10 @@ describe('useMachinePack', () => {
 
 describe('useMachinePack › Clean up', () => {
   const started = { outcome: 'started', job: RUNNING_JOB };
-  const written: PackRoutingWriteResult = { outcome: 'applied', message: 'Routing prompt saved. Undo keeps the old one.' };
+  const written: PackRoutingWriteResult = {
+    outcome: 'applied',
+    message: 'Routing prompt saved. Undo keeps the old one.',
+  };
 
   it('starts a clean-up with exactly what was asked, and reads the view again to find it', async () => {
     const served = fake({ routing: () => started });

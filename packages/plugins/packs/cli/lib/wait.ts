@@ -255,7 +255,12 @@ export class WaitController {
     if (last !== undefined) {
       this.out.success(
         options.json === true
-          ? JSON.stringify({ id, state: last.state, finished: last.finished, ...(summary === undefined ? {} : { result: summary }) })
+          ? JSON.stringify({
+              id,
+              state: last.state,
+              finished: last.finished,
+              ...(summary === undefined ? {} : { result: summary }),
+            })
           : `${id} is ${last.state}${summary === undefined ? '' : `\n\n${summary}`}`,
       );
     }

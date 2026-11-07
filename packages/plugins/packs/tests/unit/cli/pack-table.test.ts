@@ -110,7 +110,11 @@ describe('PackTableSchema (the --json shape)', () => {
 
   it('should refuse a last line over 100 characters', () => {
     const long = table([
-      row({ id: 'a', name: 'ada', last: { at: at('2026-11-03T11:58:00.000Z'), source: 'note', text: 'x'.repeat(101) } }),
+      row({
+        id: 'a',
+        name: 'ada',
+        last: { at: at('2026-11-03T11:58:00.000Z'), source: 'note', text: 'x'.repeat(101) },
+      }),
     ]);
 
     should(PackTableSchema.safeParse(long).success).be.false();

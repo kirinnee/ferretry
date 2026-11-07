@@ -34,8 +34,5 @@ export interface ConfigFiles {
 
 export const readPacksText = async (files: ConfigFiles): Promise<ConfigFileView> => await files.read(PACKS_FILE);
 
-export const writePacksText = async (
-  files: ConfigFiles,
-  text: string,
-  etag: string,
-): Promise<ConfigFilePutResult> => await files.write(PACKS_FILE, text, etag);
+export const writePacksText = async (files: ConfigFiles, text: string, etag: string): Promise<ConfigFilePutResult> =>
+  await files.write(PACKS_FILE, text, etag);

@@ -86,27 +86,25 @@ export function useMachinePack(client: PacksClient, configFiles: ConfigFiles): M
     };
   }, [client, reread]);
 
-  const write = useCallback(
-    async (edit: (text: string) => string | null): Promise<PackSave> => {
-      try {
-        const file = await readPacksText(store.current);
-        const text = edit(file.text);
-        if (text === null) return { kind: 'refused', message: 'packs.yaml has a problem; fix it in the Files panel first.' };
-        const written = await writePacksText(store.current, text, file.etag);
-        // What is in effect is the daemon's to say, so the view is read again rather than guessed.
-        setReread(count => count + 1);
-        return written.outcome === 'pending'
-          ? {
-              kind: 'pending',
-              message: `Saved, but not in effect until you confirm it: ${(written.changes ?? []).join('; ')}.`,
-            }
-          : { kind: 'applied' };
-      } catch (cause) {
-        return { kind: 'refused', message: refusalSentence(cause) };
-      }
-    },
-    [],
-  );
+  const write = useCallback(async (edit: (text: string) => string | null): Promise<PackSave> => {
+    try {
+      const file = await readPacksText(store.current);
+      const text = edit(file.text);
+      if (text === null)
+        return { kind: 'refused', message: 'packs.yaml has a problem; fix it in the Files panel first.' };
+      const written = await writePacksText(store.current, text, file.etag);
+      // What is in effect is the daemon's to say, so the view is read again rather than guessed.
+      setReread(count => count + 1);
+      return written.outcome === 'pending'
+        ? {
+            kind: 'pending',
+            message: `Saved, but not in effect until you confirm it: ${(written.changes ?? []).join('; ')}.`,
+          }
+        : { kind: 'applied' };
+    } catch (cause) {
+      return { kind: 'refused', message: refusalSentence(cause) };
+    }
+  }, []);
 
   const saveConfig = useCallback(
     async (patch: PackConfigPatch) => await write(text => files.current.withPackConfig(text, patch)),
@@ -142,23 +140,23 @@ export function useMachinePack(client: PacksClient, configFiles: ConfigFiles): M
     },
     [client],
   );
-  const routingWrite = useCallback(
-    async (run: () => Promise<PackRoutingWriteResult>): Promise<RoutingWrite> => {
-      try {
-        const done = await run();
-        setReread(count => count + 1);
-        return { kind: done.outcome, message: done.message };
-      } catch (cause) {
-        return { kind: 'refused', message: refusalSentence(cause) };
-      }
-    },
-    [],
-  );
+  const routingWrite = useCallback(async (run: () => Promise<PackRoutingWriteResult>): Promise<RoutingWrite> => {
+    try {
+      const done = await run();
+      setReread(count => count + 1);
+      return { kind: done.outcome, message: done.message };
+    } catch (cause) {
+      return { kind: 'refused', message: refusalSentence(cause) };
+    }
+  }, []);
   const accept = useCallback(
     async (request: PackRoutingAcceptRequest) => await routingWrite(async () => await acceptRouting(client, request)),
     [client, routingWrite],
   );
-  const undo = useCallback(async () => await routingWrite(async () => await undoRouting(client)), [client, routingWrite]);
+  const undo = useCallback(
+    async () => await routingWrite(async () => await undoRouting(client)),
+    [client, routingWrite],
+  );
 
   return { read, saveConfig, savePrompt, cleanUp, readJob, accept, undo };
 }

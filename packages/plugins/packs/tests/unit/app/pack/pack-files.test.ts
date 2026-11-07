@@ -3,7 +3,6 @@ import { MAX_ROUTING_PROMPT_CHARS, RoutingFileSchema } from '../../../../contrac
 import { packFiles } from '../../../../app/lib/pack/pack-files.ts';
 import { kernelConfigText, parsedConfig } from '../../support/config-text.ts';
 
-
 const { readPacksFile: readPackFile, withPackConfig, withRoutingPrompt } = packFiles(kernelConfigText);
 
 describe('readPacksFile', () => {
@@ -50,7 +49,6 @@ describe('withPackConfig', () => {
     expect(withPackConfig('enabled: maybe\n', { enabled: true })).toBeNull();
     expect(withPackConfig('', { limits: { maxDepth: 99 } })).toBeNull();
   });
-
 });
 
 describe('withRoutingPrompt', () => {

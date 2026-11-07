@@ -14,7 +14,11 @@ const row = (id: string, overrides: Partial<PackRow> = {}): PackRow => ({
   ...overrides,
 });
 
-const last = (text: string): PackRow['last'] => ({ at: InstantSchema.parse('2026-10-20T00:00:00.000Z'), source: 'note', text });
+const last = (text: string): PackRow['last'] => ({
+  at: InstantSchema.parse('2026-10-20T00:00:00.000Z'),
+  source: 'note',
+  text,
+});
 
 describe('helperState', () => {
   test('reads every row state as one of the lead reader’s words, with the reason when there is one', () => {

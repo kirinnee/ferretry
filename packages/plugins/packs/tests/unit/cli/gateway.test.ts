@@ -95,7 +95,12 @@ describe('ClientPackGateway', () => {
     // Arrange
     const result = { id: 'a/b', state: 'stopped', finished: true, summary: 'done' };
     const one = build(result);
-    const two = build({ root: { id: 'a/b', name: 'a' }, at: at('2026-11-03T12:00:00.000Z'), endedWindowMs: 7_200_000, rows: [] });
+    const two = build({
+      root: { id: 'a/b', name: 'a' },
+      at: at('2026-11-03T12:00:00.000Z'),
+      endedWindowMs: 7_200_000,
+      rows: [],
+    });
 
     // Act
     const answer = await one.gateway.result('a/b');
