@@ -2,7 +2,7 @@ import { AsksPort } from '@ferretry/core-asks/contract';
 import { AUDIT_KINDS, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
-import { definePlugin, route } from '@ferretry/kernel/manifest';
+import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
   AutoResumeFile,
@@ -127,6 +127,48 @@ export default definePlugin({
         audit: { skip: 'a file read records nothing, as today' },
         guard: 'secrets',
       }),
+    ],
+    // Today's `fy` verbs (packages/cli/src/lib/{session,stop,restart,worktrees}), V-rows of the parity inventory.
+    cli: [
+      verb('ps', { summary: 'list ferrets' }),
+      verb('status [id]', { summary: 'show one ferret in detail, or with --subtree a table of its helpers' }),
+      verb('start [prompt...]', { summary: 'start a ferret on one of your agent runtimes' }),
+      verb('new [words...]', { summary: 'start a helper ferret (Pack mode)' }),
+      verb('stop', { summary: 'stop ferrets in bulk, selected by lineage or pack' }),
+      verb('stop orphan <session>', { summary: 'stop one ferret and leave its helpers running' }),
+      verb('stop cascade <session>', { summary: 'stop a ferret and every transitive helper' }),
+      verb('stop children <session>', { summary: 'stop every transitive helper and keep the ferret running' }),
+      verb('stop label <label>', { summary: 'stop every ferret in a pack, independent of lineage' }),
+      verb('rename <session> [name]', { summary: 'give a ferret a new first name' }),
+      verb('name', { summary: 'print available callsigns so a name can be chosen before start' }),
+      verb('resume <id> [message...]', { summary: 'revive a stopped ferret with its conversation intact' }),
+      verb('restart [ids...]', {
+        summary:
+          'restart ferrets on the same runtime, keeping the conversation; a busy one waits for its next idle moment',
+      }),
+      verb('signal <kind> [message...]', {
+        summary: 'done | help | waiting | working — the teammate lifecycle signals',
+      }),
+      verb('session', { summary: "act on a ferret's own standing with this daemon" }),
+      verb('session revoke-credential <session>', {
+        summary: 'cut a ferret off at once: its own credential stops working until a person resumes it',
+      }),
+      verb('session pin <session>', { summary: 'pin a ferret to the top of the sidebar' }),
+      verb('session unpin <session>', { summary: 'unpin a ferret from the top of the sidebar' }),
+      verb('session compact-at <session> [value]', {
+        summary: 'show or set where a ferret squeezes its conversation (a size like 250k, auto, or inherit)',
+      }),
+      verb('worktree', { summary: 'inspect and remove the checkouts the daemon created for ferrets' }),
+      verb('worktrees', { summary: 'alias of fy worktree' }),
+      verb('worktree ls', { summary: 'every managed worktree, live ones first' }),
+      verb('worktree list', { summary: 'alias of fy worktree ls' }),
+      verb('worktree check <path>', { summary: 'say whether a worktree can be removed, and what stands in the way' }),
+      verb('worktree rm <path>', { summary: 'remove a worktree once every blocker is accounted for' }),
+      verb('worktree remove <path>', { summary: 'alias of fy worktree rm' }),
+      verb('worktree fork <branch>', {
+        summary: 'fork a new checkout for a branch, and say where to start work in it',
+      }),
+      verb('worktree add <branch>', { summary: 'alias of fy worktree fork' }),
     ],
   },
   data: {

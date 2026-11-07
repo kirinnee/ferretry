@@ -27,6 +27,7 @@ export const START_FLAGS_ELSEWHERE: readonly string[] = [
   'card',
   'parent',
   'teammate-fallback',
+  'name',
 ];
 
 /** Every `start` flag Ferrets' start takes, already read out of argv by the CLI half. */
