@@ -13,9 +13,8 @@
  * `packages/app/release-signing-key.pub` and names the release by the repository.
  *
  * Writes three files:
- *   - `sw.verified.js`         the worker (`src/worker/service-worker.ts`) with every plugin worker extension
- *                              (`packages/{core,plugins}/<id>/app/worker.ts`), the committed public
- *                              key, the app's rewrites and its header rules compiled in;
+ *   - `sw.verified.js`         the worker (`src/worker/service-worker.ts`) with the committed public key,
+ *                              the app's rewrites and its header rules compiled in — and no plugin code;
  *   - `release-manifest.json`  every file in `dist/` and the SHA-256 of its bytes;
  *   - `release-manifest.sig`   the UNSIGNED marker. Only `scripts/ci/sign-pwa-release.sh`, holding
  *                              the key, replaces it with a signature.
@@ -28,7 +27,6 @@
 import { spawnSync } from 'node:child_process';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
-import { workerGlobalsIn } from '../../../scripts/validate/banned-globals.ts';
 import {
   RELEASE_MANIFEST_FILE,
   RELEASE_SIGNATURE_FILE,
@@ -65,60 +63,35 @@ const listFiles = async (directory: string): Promise<string[]> => {
 const COMMITTED_RELEASE_KEY = join(packageRoot, 'release-signing-key.pub');
 
 /**
- * Every plugin worker extension (`src/worker/extensions.ts`): `packages/core/<id>/app/worker.ts`, then
- * `packages/plugins/<id>/app/worker.ts`, each group by id. Compiled INTO the signed worker, never loaded at run time.
+ * NO PLUGIN CODE RUNS IN THE RELEASE WORKER. Code evaluated in the worker's realm could rewrite the globals the release
+ * check serves through (`Response`, `crypto.subtle`, `caches`, …) before any event arrives, and no list of names can
+ * stop that — so the worker compiles `src/worker/service-worker.ts` and the shell's own modules only, and the build
+ * REFUSES any `packages/{core,plugins}/<id>/app/worker.ts`. A plugin that needs worker behaviour (push, notification
+ * taps) asks for it as declarative data the worker interprets, through its own contract — later; none does today.
  */
-const workerExtensionFiles = async (): Promise<string[]> => {
+export async function pluginWorkerFiles(root: string): Promise<string[]> {
   const found: string[] = [];
   for (const group of ['packages/core', 'packages/plugins']) {
-    const ids = (await readdir(join(repositoryRoot, group), { withFileTypes: true }))
+    const entries = await readdir(join(root, group), { withFileTypes: true }).catch(() => []);
+    const ids = entries
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
       .sort();
     for (const id of ids) {
-      const file = join(repositoryRoot, group, id, 'app/worker.ts');
-      if (await Bun.file(file).exists()) found.push(file);
+      const file = join(root, group, id, 'app/worker.ts');
+      if (await Bun.file(file).exists()) found.push(relative(root, file).split(sep).join('/'));
     }
   }
   return found;
-};
+}
 
-/** The body `src/worker/extension-list.ts` is built with: one import per extension, in that order. */
-const extensionListSource = (files: readonly string[]): string =>
-  [
-    "import type { WorkerExtension } from './extensions.ts';",
-    ...files.map((file, index) => `import extension${index} from ${JSON.stringify(file)};`),
-    `export const workerExtensions: readonly WorkerExtension[] = [${files.map((_, index) => `extension${index}`).join(', ')}];`,
-  ].join('\n');
-
-/** Validate initializers throughout each extension's import graph, not just its app/worker.ts entry point. */
-export async function validateWorkerExtensions(files: readonly string[]): Promise<void> {
-  if (files.length === 0) return;
-  const result = await Bun.build({
-    entrypoints: [...files],
-    target: 'browser',
-    // This is the one trusted, capability-limited API. Do not pull its host implementation into the scan.
-    external: ['@ferretry/app/worker'],
-    plugins: [
-      {
-        name: 'fy-worker-capabilities',
-        setup(build) {
-          build.onResolve({ filter: /^(?:https?:|data:|blob:|node:)/u }, ({ path }) => {
-            throw new Error(`worker extension cannot import external code: ${path}`);
-          });
-          build.onLoad({ filter: /\.[cm]?[jt]sx?$/u }, ({ path }) => {
-            const findings = workerGlobalsIn(path, relative(repositoryRoot, path));
-            if (findings.length > 0) throw new Error(findings.map(f => `${f.where}: ${f.message}`).join('\n'));
-            return undefined;
-          });
-        },
-      },
-    ],
-  }).catch((error: unknown) => {
-    const details = error instanceof AggregateError ? error.errors.map(String).join('\n') : String(error);
-    return fail(`worker extension capabilities refused:\n${details}`);
-  });
-  if (!result.success) fail(`worker extension capabilities refused:\n${result.logs.join('\n')}`);
+/** Fails the build when any plugin ships worker code (see {@link pluginWorkerFiles}). */
+export async function refusePluginWorkers(root: string): Promise<void> {
+  const found = await pluginWorkerFiles(root);
+  if (found.length > 0)
+    fail(
+      `no plugin code may run in the signed service worker; remove ${found.join(', ')} (a plugin needing worker behaviour asks for it as declarative data in its contract)`,
+    );
 }
 
 /** The arguments that are neither a `--flag` nor a flag's value. */
@@ -148,22 +121,9 @@ const buildRelease = async (
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
   if (headers.length === 0) fail('public/_headers names no header rules');
 
-  const extensionFiles = await workerExtensionFiles();
-  await validateWorkerExtensions(extensionFiles);
-  const extensionList = extensionListSource(extensionFiles);
+  await refusePluginWorkers(repositoryRoot);
   const worker = await Bun.build({
     entrypoints: [join(packageRoot, 'src/worker/service-worker.ts')],
-    plugins: [
-      {
-        name: 'fy-worker-extensions',
-        setup: build => {
-          build.onLoad({ filter: /[\\/]src[\\/]worker[\\/]extension-list\.ts$/u }, () => ({
-            contents: extensionList,
-            loader: 'ts',
-          }));
-        },
-      },
-    ],
     format: 'esm',
     minify: true,
     splitting: false,

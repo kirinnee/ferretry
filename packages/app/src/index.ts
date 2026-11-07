@@ -2,8 +2,7 @@
  * `@ferretry/app` — THE APP SHELL'S PUBLIC API (§2.1, §5): what a plugin's app half may import from the shell. The
  * shell holds no feature; this is the seam plugin halves plug into. See `packages/app/README.md`.
  *
- * Subpaths: `@ferretry/app/ui` (the shared UI kit), `@ferretry/app/worker` (the service-worker extension point),
- * `@ferretry/app/testing` (fakes for the connect interface).
+ * Subpaths: `@ferretry/app/ui` (the shared UI kit) and `@ferretry/app/testing` (fakes for the connect interface).
  */
 
 // ─── reaching a daemon: what Access and Connections provide (§4.8, §4.13) ─────────────────────────────────────────
