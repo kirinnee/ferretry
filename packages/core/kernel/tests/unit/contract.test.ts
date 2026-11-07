@@ -18,7 +18,10 @@ describe('closeAck (§4.7 runtime layer)', () => {
     });
   });
   test('a minted id is kept', () => {
-    expect(closeAck({ status: 'done', ids: ['p1'] }, minted(['p1']))).toEqual({ status: 'done', ids: ['p1' as OpaqueId] });
+    expect(closeAck({ status: 'done', ids: ['p1'] }, minted(['p1']))).toEqual({
+      status: 'done',
+      ids: ['p1' as OpaqueId],
+    });
   });
   test('a getter, a class instance or an unknown status is malformed', () => {
     const getter = Object.defineProperty({}, 'status', { get: () => 'done', enumerable: true });
