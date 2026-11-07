@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
+import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { FerretId, SpawnResult } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
@@ -380,4 +381,15 @@ describe('ClaudeHarness', () => {
     expect(await harness.dialogs.current(FERRET)).toBeUndefined();
     expect(await harness.dialogs.answer(FERRET, '0123456789abcdef', '1')).toMatchObject({ status: 'refused' });
   });
+});
+
+harnessConformance('Claude Code (real kernel roots)', () => {
+  const { harness, tmux } = build();
+  return {
+    harness,
+    runner: new FakeRunner(),
+    spec: spec(),
+    // Each delivery that reaches the ferret types its text into the pane once (`send-keys -l`).
+    deliveredCount: () => tmux.filter(args => args[0] === 'send-keys' && args.includes('-l')).length,
+  };
 });

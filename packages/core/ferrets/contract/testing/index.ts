@@ -223,6 +223,11 @@ export interface HarnessSubject {
   readonly spec: LaunchSpec;
   /** How many times a message with this id reached the ferret. */
   deliveredCount(id: string): number;
+  /**
+   * Set for a harness that refuses every `deliver` because another subsystem owns its send path (Codex: Conversation).
+   * The delivery case then holds it to refusing both attempts and reaching the ferret zero times.
+   */
+  readonly deliversElsewhere?: true;
 }
 
 export const sampleLaunchSpec = (harness: HarnessKey = 'claude-code'): LaunchSpec => ({
@@ -251,7 +256,6 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
     });
     test('S42 homeFor names one absolute home per ferret, and prepareHome refuses any other home', async () => {
       const { harness, spec } = await make();
-      if (harness.homeFor === undefined) throw new Error('a harness names its own ferret home (homeFor)');
       const own = await harness.homeFor(spec.ferret);
       const other = await harness.homeFor(ferretId(`${spec.ferret}-other`));
       expect(own).toBe(spec.home);
@@ -273,8 +277,13 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
       const started = await subject.harness.start(subject.spec, subject.runner, emptyChildEnvironment());
       if (!started.ok) throw new Error('start refused');
       const message = { id: 'm1', text: 'hello' };
-      await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
-      await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
+      const first = await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
+      const second = await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
+      if (subject.deliversElsewhere === true) {
+        expect([first.status, second.status]).toEqual(['refused', 'refused']);
+        expect(subject.deliveredCount('m1')).toBe(0);
+        return;
+      }
       expect(subject.deliveredCount('m1')).toBe(1);
     });
   });
