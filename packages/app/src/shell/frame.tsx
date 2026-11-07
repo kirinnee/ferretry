@@ -23,9 +23,14 @@ import { ScreenView, ShellLine } from './views.tsx';
 const routeDaemon = (route: Route): string | undefined =>
   'daemon' in route && typeof route.daemon === 'string' ? route.daemon : undefined;
 
-function navHref(entry: NavEntry, daemon: string | undefined, href: (e: NavEntry) => string | undefined): string | undefined {
+function navHref(
+  entry: NavEntry,
+  daemon: string | undefined,
+  href: (e: NavEntry) => string | undefined,
+): string | undefined {
   if (entry.kind === 'shell') {
-    if (entry.item === 'settings') return daemon === undefined ? DEVICE_SETTINGS_HREF : `${daemonHomeHref(daemon)}/settings`;
+    if (entry.item === 'settings')
+      return daemon === undefined ? DEVICE_SETTINGS_HREF : `${daemonHomeHref(daemon)}/settings`;
     return HOME_HREF;
   }
   return href(entry);
@@ -42,7 +47,10 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
   };
   const side = plan.nav.side;
   return (
-    <nav className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`} data-slot={side === 'bottom' ? 'bottom' : 'nav'}>
+    <nav
+      className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`}
+      data-slot={side === 'bottom' ? 'bottom' : 'nav'}
+    >
       {plan.nav.entries.map(entry => {
         const to = navHref(entry, daemon, href);
         const label = entry.kind === 'screen' ? entry.screen.label : entry.item === 'settings' ? 'Settings' : 'Daemons';
@@ -98,7 +106,8 @@ function TopBar({ daemon }: { readonly daemon: string | undefined }) {
       {plan.top.map(item => {
         if (item === 'daemon-picker') return <DaemonPicker key={item} daemon={daemon} />;
         // GAP: search and the command bar (`fy layout set` from the app) are not built in the shell yet.
-        if (item === 'search') return <input key={item} className="fy-search" type="search" placeholder="Search" disabled />;
+        if (item === 'search')
+          return <input key={item} className="fy-search" type="search" placeholder="Search" disabled />;
         return null;
       })}
     </header>

@@ -1,7 +1,8 @@
 /**
  * `act-runner` (§4.7, §7.9), static layer. Fails when:
  *
- * - a tool-kind plugin declares an agent tool with no `op`, or an `op` that is not one of the twelve `OPS`;
+ * - a tool-kind plugin declares an agent tool with no `op` (unless it is in {@link EXEMPT_TOOLS}), or an `op` that is
+ *   not one of the twelve `OPS`;
  * - a tool-kind plugin's daemon half is ported (not a skeleton) and none of its daemon files calls `.act(` — every act
  *   goes through `kernel.act`;
  * - the type-level layer is missing: `packages/core/kernel/tests/types/act.types.ts` (compiled by `tsc --noEmit`)
@@ -21,6 +22,18 @@ import { areaOf } from '../gen/lib/imports.ts';
 import { loadHalf, sourceFiles } from '../gen/lib/workspace.ts';
 
 export const ACT_TYPES = 'packages/core/kernel/tests/types/act.types.ts';
+
+/**
+ * Tools that raise an ask or an input request to the owner instead of acting on a target, so they have no Op. An
+ * EXPLICIT list of exact tool names, each with its reason: no glob, no prefix, no suffix — a look-alike name (a new
+ * `terminal_ask_owner2`) is not exempt, and any other tool without an Op still fails.
+ */
+export const EXEMPT_TOOLS: ReadonlyMap<string, string> = new Map([
+  ['terminal_ask_owner', 'hands a terminal to the owner; raises an ask, never acts on a target'],
+  ['terminal_request_input', 'raises an input card through the Vault; answers its state, never acts on a target'],
+  ['browser_ask_owner', 'hands a page to the owner; raises an ask, never acts on a target'],
+  ['browser_request_input', 'raises an input card through the Vault; answers its state, never acts on a target'],
+]);
 
 function callsAct(file: string): boolean {
   let found = false;
@@ -47,8 +60,10 @@ export const check: Check = {
       if (!s.manifest.kinds.includes('tool')) continue;
       const tools = s.manifest.actions?.agentTools ?? [];
       for (const tool of tools) {
-        if (tool.op === undefined) findings.push({ check, where: s.id, message: `tool ${tool.name} declares no Op` });
-        else if (!ops.has(tool.op))
+        if (tool.op === undefined) {
+          if (!EXEMPT_TOOLS.has(tool.name))
+            findings.push({ check, where: s.id, message: `tool ${tool.name} declares no Op` });
+        } else if (!ops.has(tool.op))
           findings.push({ check, where: s.id, message: `tool ${tool.name} declares unknown Op "${tool.op}"` });
       }
       if (tools.length === 0) continue;

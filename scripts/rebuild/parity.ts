@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import ts from 'typescript';
+import { parseSync } from 'oxc-parser';
 
 type Kind = 'R' | 'V' | 'T' | 'S' | 'J' | 'F';
 interface Row {
@@ -284,80 +284,228 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
   });
 }
 
+/**
+ * A syntax node as `oxc-parser` returns it (ESTree with the TypeScript extensions). The tree is only ever READ by shape;
+ * nothing in it is executed. `parent` is set by `normalize`. The index signature is `any` on purpose: the generator
+ * walks dozens of node shapes by field name, and a type per shape would be a second copy of the parser's own.
+ */
+type N = { type: string; start: number; end: number; parent?: N; [key: string]: any };
+interface Source {
+  text: string;
+  lines: number[];
+}
 interface Module {
   file: string;
-  ast: ts.SourceFile;
-  declarations: Map<string, ts.Node[]>;
+  ast: N;
+  source: string;
+  declarations: Map<string, N[]>;
   imports: Map<string, [string, string]>;
 }
 const modules = new Map<string, Module>();
+const sources = new WeakMap<N, Source>();
+
+const isNode = (value: unknown): value is N =>
+  typeof value === 'object' && value !== null && typeof (value as N).type === 'string';
+/** `a?.b` is a `ChainExpression` wrapper in ESTree and nothing extra in the TypeScript tree this generator was built on. */
+const unchain = (node: N): N => (node.type === 'ChainExpression' ? unchain(node.expression) : node);
+/** Sets every `parent` and removes the chain wrappers. */
+function normalize(root: N) {
+  const pending: N[] = [root];
+  for (let node = pending.pop(); node; node = pending.pop()) {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'parent') continue;
+      if (Array.isArray(value))
+        value.forEach((item, index) => {
+          if (!isNode(item)) return;
+          const child = unchain(item);
+          value[index] = child;
+          child.parent = node;
+          pending.push(child);
+        });
+      else if (isNode(value)) {
+        const child = unchain(value);
+        node[key] = child;
+        child.parent = node;
+        pending.push(child);
+      }
+    }
+  }
+}
+/** Child nodes in source order (the order the TypeScript tree visits them). A shorthand property is one node. */
+function children(node: N): N[] {
+  if (node.type === 'Property' && node.shorthand) return [node.value];
+  const out: N[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'parent') continue;
+    if (Array.isArray(value)) {
+      for (const item of value) if (isNode(item)) out.push(item);
+    } else if (isNode(value)) out.push(value);
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+function walk(node: N, visit: (node: N) => void) {
+  visit(node);
+  for (const child of children(node)) walk(child, visit);
+}
 function parse(file: string): Module {
   const cached = modules.get(file);
   if (cached) return cached;
-  const content = readFileSync(join(sourceRoot, file), 'utf8');
-  const ast = ts.createSourceFile(
-    file,
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    file.endsWith('tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
-  const mod: Module = { file, ast, declarations: new Map(), imports: new Map() };
+  const source = readFileSync(join(sourceRoot, file), 'utf8');
+  const ast = parseSync(file, source, {
+    lang: file.endsWith('tsx') ? 'tsx' : 'ts',
+    sourceType: 'module',
+    astType: 'ts',
+  }).program as unknown as N;
+  normalize(ast);
+  const lines = [0];
+  for (let index = source.indexOf('\n'); index >= 0; index = source.indexOf('\n', index + 1)) lines.push(index + 1);
+  sources.set(ast, { text: source, lines });
+  const mod: Module = { file, ast, source, declarations: new Map(), imports: new Map() };
   modules.set(file, mod);
+  const declare = (name: string, node: N) => {
+    const list = mod.declarations.get(name) ?? [];
+    list.push(node);
+    mod.declarations.set(name, list);
+  };
   walk(ast, node => {
-    if (
-      (ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isParameter(node)) &&
-      node.name &&
-      ts.isIdentifier(node.name)
-    ) {
-      const list = mod.declarations.get(node.name.text) ?? [];
-      list.push(node);
-      mod.declarations.set(node.name.text, list);
-    }
-    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      const path = node.moduleSpecifier.text;
-      if (node.importClause?.name) mod.imports.set(node.importClause.name.text, [path, 'default']);
-      const bindings = node.importClause?.namedBindings;
-      if (bindings && ts.isNamedImports(bindings))
-        for (const binding of bindings.elements)
-          mod.imports.set(binding.name.text, [path, binding.propertyName?.text ?? binding.name.text]);
+    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') declare(node.id.name, node);
+    else if (isFunctionDeclaration(node) && node.id) declare(node.id.name, node);
+    if (isFunctionLike(node))
+      for (const parameter of node.params as N[]) {
+        const name = bindingTarget(parameter);
+        if (name.type === 'Identifier') declare(name.name, name);
+      }
+    if (node.type === 'ImportDeclaration' && isStringLiteral(node.source)) {
+      const path = node.source.value as string;
+      for (const specifier of node.specifiers as N[]) {
+        if (specifier.type === 'ImportDefaultSpecifier') mod.imports.set(specifier.local.name, [path, 'default']);
+        else if (specifier.type === 'ImportSpecifier')
+          mod.imports.set(specifier.local.name, [path, nameOf(specifier.imported)]);
+      }
     }
   });
   return mod;
 }
-function walk(node: ts.Node, visit: (node: ts.Node) => void) {
-  visit(node);
-  ts.forEachChild(node, child => walk(child, visit));
+
+const FUNCTION_LIKE = new Set([
+  'FunctionDeclaration',
+  'FunctionExpression',
+  'ArrowFunctionExpression',
+  'TSDeclareFunction',
+  'TSEmptyBodyFunctionExpression',
+]);
+const isFunctionLike = (node: N) => FUNCTION_LIKE.has(node.type);
+const isFunctionDeclaration = (node: N) => node.type === 'FunctionDeclaration' || node.type === 'TSDeclareFunction';
+const isStringLiteral = (node: N) => node.type === 'Literal' && typeof node.value === 'string';
+const isNumericLiteral = (node: N) => node.type === 'Literal' && typeof node.value === 'number';
+/** A string literal or a template with no substitutions. */
+const isStringLike = (node: N) =>
+  isStringLiteral(node) || (node.type === 'TemplateLiteral' && node.expressions.length === 0);
+/** A template with substitutions. */
+const isTemplateExpression = (node: N) => node.type === 'TemplateLiteral' && node.expressions.length > 0;
+const cooked = (element: N): string => element.value.cooked ?? element.value.raw;
+const stringValue = (node: N): string => (node.type === 'Literal' ? (node.value as string) : cooked(node.quasis[0]));
+/** The text pieces of a template: its head, then each substitution with the text that follows it. */
+const templateHead = (node: N): string => cooked(node.quasis[0]);
+const templateSpans = (node: N): { expression: N; text: string }[] =>
+  (node.expressions as N[]).map((expression, index) => ({ expression, text: cooked(node.quasis[index + 1]) }));
+const isPropertyAccess = (node: N) => node.type === 'MemberExpression' && !node.computed;
+const isElementAccess = (node: N) => node.type === 'MemberExpression' && node.computed;
+const memberName = (node: N): string =>
+  node.property.type === 'PrivateIdentifier' ? `#${node.property.name}` : node.property.name;
+const isTrue = (node: N) => node.type === 'Literal' && node.value === true;
+const isFalse = (node: N) => node.type === 'Literal' && node.value === false;
+/** `export function f` is a statement of its own in the TypeScript tree, and an export wrapper here. */
+const statementOf = (statement: N): N =>
+  statement.type === 'ExportNamedDeclaration' && statement.declaration ? statement.declaration : statement;
+const nameOf = (node: N): string => (node.type === 'Literal' ? String(node.value) : node.name);
+
+type Property = 'assign' | 'shorthand' | 'spread' | 'method' | 'accessor';
+/** What an object-literal member is, in the words the TypeScript tree used. Anything else is not an object member. */
+function propertyKind(node: N): Property | undefined {
+  if (node.type === 'SpreadElement') return 'spread';
+  if (node.type !== 'Property' || node.parent?.type !== 'ObjectExpression') return undefined;
+  if (node.kind !== 'init') return 'accessor';
+  return node.method ? 'method' : node.shorthand ? 'shorthand' : 'assign';
 }
-const lineOf = (node: ts.Node) => node.getSourceFile().getLineAndCharacterOfPosition(node.getStart()).line + 1;
-const textOf = (node: ts.Node | undefined) => (node ? compact(node.getText()) : '');
-function unwrap(node: ts.Node): ts.Node {
-  return ts.isAsExpression(node) ||
-    ts.isSatisfiesExpression(node) ||
-    ts.isParenthesizedExpression(node) ||
-    ts.isNonNullExpression(node)
+/** A member that carries a name (every object member but a spread). */
+const hasName = (node: N) => node.type === 'Property';
+const keyName = (node: N): string => propName(node.key, node.computed);
+/** `name: value`, not shorthand, not a method. */
+const isPropertyAssignment = (node: N) => propertyKind(node) === 'assign';
+const isShorthandAssignment = (node: N) => propertyKind(node) === 'shorthand';
+const isMethodDeclaration = (node: N) =>
+  propertyKind(node) === 'method' ||
+  ((node.type === 'MethodDefinition' || node.type === 'TSAbstractMethodDefinition') && node.kind === 'method');
+/** The binding a parameter or element introduces, without its default or rest wrapper. */
+function bindingTarget(node: N): N {
+  if (node.type === 'AssignmentPattern') return node.left;
+  if (node.type === 'RestElement') return node.argument;
+  if (node.type === 'TSParameterProperty') return bindingTarget(node.parameter);
+  return node;
+}
+function bindingDefault(node: N): N | undefined {
+  if (node.type === 'AssignmentPattern') return node.right;
+  if (node.type === 'TSParameterProperty') return bindingDefault(node.parameter);
+  return undefined;
+}
+
+const rootOf = (node: N): N => {
+  let current = node;
+  while (current.parent) current = current.parent;
+  return current;
+};
+const sourceOf = (node: N): Source => sources.get(rootOf(node))!;
+function lineOf(node: N): number {
+  const { lines } = sourceOf(node);
+  let low = 0;
+  let high = lines.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (lines[middle]! <= node.start) low = middle;
+    else high = middle - 1;
+  }
+  return low + 1;
+}
+const textOf = (node: N | null | undefined) => (node ? compact(sourceOf(node).text.slice(node.start, node.end)) : '');
+/** A binding's own text. A parser that widens an identifier to its type annotation is read as the bare name. */
+function bindingText(node: N): string {
+  if (node.type === 'Identifier') return node.name;
+  const annotation = node.typeAnnotation as N | null | undefined;
+  return compact(sourceOf(node).text.slice(node.start, annotation ? annotation.start : node.end));
+}
+function unwrap(node: N): N {
+  return node.type === 'TSAsExpression' ||
+    node.type === 'TSSatisfiesExpression' ||
+    node.type === 'ParenthesizedExpression' ||
+    node.type === 'TSNonNullExpression'
     ? unwrap(node.expression)
     : node;
 }
-function propName(node: ts.PropertyName | ts.BindingName | undefined): string {
-  return node && (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) ? node.text : '';
+function propName(node: N | null | undefined, computed = false): string {
+  if (!node || computed) return '';
+  if (node.type === 'Identifier') return node.name;
+  if (node.type === 'Literal' && (typeof node.value === 'string' || typeof node.value === 'number'))
+    return String(node.value);
+  return '';
 }
-function enclosingScope(node: ts.Node): ts.Node {
+function enclosingScope(node: N): N | undefined {
   let current = node.parent;
-  while (current && !ts.isFunctionLike(current) && !ts.isSourceFile(current)) current = current.parent;
+  while (current && !isFunctionLike(current) && current.type !== 'Program') current = current.parent;
   return current;
 }
-function declaration(mod: Module, name: string, from: ts.Node): ts.Node | undefined {
+function declaration(mod: Module, name: string, from: N): N | undefined {
   const candidates = mod.declarations.get(name) ?? [];
-  const scopes: ts.Node[] = [];
-  let current: ts.Node | undefined = from;
+  const scopes: N[] = [];
+  let current: N | undefined = from;
   while (current) {
-    if (ts.isFunctionLike(current) || ts.isSourceFile(current)) scopes.push(current);
+    if (isFunctionLike(current) || current.type === 'Program') scopes.push(current);
     current = current.parent;
   }
+  const scopeOf = (candidate: N) => scopes.indexOf(enclosingScope(candidate) as N);
   return candidates
-    .filter(candidate => scopes.includes(enclosingScope(candidate)))
-    .sort((a, b) => scopes.indexOf(enclosingScope(a)) - scopes.indexOf(enclosingScope(b)) || b.pos - a.pos)[0];
+    .filter(candidate => scopes.includes(enclosingScope(candidate) as N))
+    .sort((a, b) => scopeOf(a) - scopeOf(b) || b.start - a.start)[0];
 }
 function importedFile(mod: Module, path: string): string | undefined {
   let base: string;
@@ -373,23 +521,22 @@ function importedFile(mod: Module, path: string): string | undefined {
 }
 
 /** Small static expression reader for route descriptors and declaration constants. Unknowns remain source text. */
-function literal(node: ts.Node | undefined, mod: Module, seen = new Set<ts.Node>()): unknown {
+function literal(node: N | null | undefined, mod: Module, seen = new Set<N>()): unknown {
   if (!node || seen.has(node)) return undefined;
   node = unwrap(node);
   seen = new Set(seen).add(node);
-  if (ts.isStringLiteralLike(node) || ts.isNumericLiteral(node))
-    return ts.isNumericLiteral(node) ? Number(node.text) : node.text;
-  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (ts.isIdentifier(node)) {
-    const decl = declaration(mod, node.text, node);
-    if (decl && ts.isVariableDeclaration(decl)) return literal(decl.initializer, mod, seen);
-    const imported = mod.imports.get(node.text);
+  if (isStringLike(node) || isNumericLiteral(node)) return isNumericLiteral(node) ? node.value : stringValue(node);
+  if (isTrue(node)) return true;
+  if (isFalse(node)) return false;
+  if (node.type === 'Identifier') {
+    const decl = declaration(mod, node.name, node);
+    if (decl && decl.type === 'VariableDeclarator') return literal(decl.init, mod, seen);
+    const imported = mod.imports.get(node.name);
     const file = imported && importedFile(mod, imported[0]);
     if (file) {
       const target = parse(file);
       const decl = target.declarations.get(imported![1])?.[0];
-      if (decl && ts.isVariableDeclaration(decl)) return literal(decl.initializer, target, seen);
+      if (decl && decl.type === 'VariableDeclarator') return literal(decl.init, target, seen);
       // Public contracts often re-export the constant through an index barrel.
       const exported = lookup(imported![1], target, moduleEnv(target));
       if (
@@ -401,24 +548,33 @@ function literal(node: ts.Node | undefined, mod: Module, seen = new Set<ts.Node>
     }
     return undefined;
   }
-  if (ts.isArrayLiteralExpression(node)) return node.elements.map(element => literal(element, mod, seen));
-  if (ts.isObjectLiteralExpression(node)) {
+  if (node.type === 'ArrayExpression')
+    return (node.elements as (N | null)[]).map(element => literal(element, mod, seen));
+  if (node.type === 'ObjectExpression') {
     const result: Record<string, unknown> = {};
-    for (const property of node.properties) {
-      if (ts.isPropertyAssignment(property))
-        result[propName(property.name)] = literal(property.initializer, mod, seen) ?? textOf(property.initializer);
-      else if (ts.isShorthandPropertyAssignment(property))
-        result[property.name.text] = literal(property.name, mod, seen) ?? property.name.text;
-      else if (ts.isSpreadAssignment(property)) Object.assign(result, literal(property.expression, mod, seen));
-      else if (ts.isMethodDeclaration(property)) result[propName(property.name)] = '<handler>';
+    for (const property of node.properties as N[]) {
+      switch (propertyKind(property)) {
+        case 'assign':
+          result[keyName(property)] = literal(property.value, mod, seen) ?? textOf(property.value);
+          break;
+        case 'shorthand':
+          result[property.key.name] = literal(property.value, mod, seen) ?? property.key.name;
+          break;
+        case 'spread':
+          Object.assign(result, literal(property.argument, mod, seen));
+          break;
+        case 'method':
+          result[keyName(property)] = '<handler>';
+          break;
+      }
     }
     return result;
   }
-  if (ts.isPropertyAccessExpression(node)) {
-    const target = literal(node.expression, mod, seen);
-    if (target && typeof target === 'object') return (target as Record<string, unknown>)[node.name.text];
+  if (isPropertyAccess(node)) {
+    const target = literal(node.object, mod, seen);
+    if (target && typeof target === 'object') return (target as Record<string, unknown>)[memberName(node)];
   }
-  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
     const left = literal(node.left, mod, seen);
     const right = literal(node.right, mod, seen);
     if (left !== undefined && right !== undefined) return `${left}${right}`;
@@ -432,8 +588,8 @@ function valueText(value: unknown): string {
 // Routes: declarations only. Audit fragments deliberately do not count as duplicate live routes.
 function routes(mod: Module) {
   walk(mod.ast, node => {
-    if (!ts.isObjectLiteralExpression(node)) return;
-    const keys = new Set(node.properties.map(property => ('name' in property ? propName(property.name) : '')));
+    if (node.type !== 'ObjectExpression') return;
+    const keys = new Set((node.properties as N[]).map(property => (hasName(property) ? keyName(property) : '')));
     if (!keys.has('path') || (!keys.has('handle') && !keys.has('accept'))) return;
     const data = literal(node, mod) as Record<string, unknown>;
     if (!data.method || !data.path) return;
@@ -464,7 +620,7 @@ class Cmd {
   }
 }
 interface Fn {
-  fn: ts.FunctionLikeDeclaration;
+  fn: N;
   mod: Module;
   env: Env;
 }
@@ -473,20 +629,20 @@ const rootCommand = new Cmd('fy');
 const visitedCommandCalls = new Set<string>();
 const moduleEnvs = new Map<string, Env>();
 let callDepth = 0;
-function bind(name: ts.BindingName, value: unknown, env: Env) {
-  if (ts.isIdentifier(name)) env.set(name.text, value);
-  else if (ts.isObjectBindingPattern(name))
-    for (const element of name.elements)
+function bind(name: N, value: unknown, env: Env) {
+  if (name.type === 'Identifier') env.set(name.name, value);
+  else if (name.type === 'ObjectPattern')
+    for (const element of name.properties as N[]) {
+      const key = element.type === 'RestElement' ? propName(element.argument) : keyName(element);
       bind(
-        element.name,
-        value && typeof value === 'object'
-          ? (value as Record<string, unknown>)[propName(element.propertyName ?? element.name)]
-          : undefined,
+        bindingTarget(element.type === 'RestElement' ? element : element.value),
+        value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined,
         env,
       );
-  else if (ts.isArrayBindingPattern(name))
-    name.elements.forEach((element, index) => {
-      if (ts.isBindingElement(element)) bind(element.name, Array.isArray(value) ? value[index] : undefined, env);
+    }
+  else if (name.type === 'ArrayPattern')
+    (name.elements as (N | null)[]).forEach((element, index) => {
+      if (element) bind(bindingTarget(element), Array.isArray(value) ? value[index] : undefined, env);
     });
 }
 function moduleEnv(mod: Module): Env {
@@ -494,9 +650,9 @@ function moduleEnv(mod: Module): Env {
   if (env) return env;
   env = new Map();
   moduleEnvs.set(mod.file, env);
-  for (const statement of mod.ast.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name)
-      env.set(statement.name.text, { fn: statement, mod, env });
+  for (const body of mod.ast.body as N[]) {
+    const statement = statementOf(body);
+    if (isFunctionDeclaration(statement) && statement.id) env.set(statement.id.name, { fn: statement, mod, env });
   }
   return env;
 }
@@ -506,9 +662,9 @@ function lookup(name: string, mod: Module, env: Env): unknown {
   const global = moduleEnv(mod);
   if (global.has(name)) return global.get(name);
   const decl = mod.declarations.get(name)?.find(candidate => enclosingScope(candidate) === mod.ast);
-  if (decl && ts.isVariableDeclaration(decl) && decl.initializer) {
+  if (decl && decl.type === 'VariableDeclarator' && decl.init) {
     global.set(name, undefined);
-    const value = evaluate(decl.initializer, mod, global);
+    const value = evaluate(decl.init, mod, global);
     global.set(name, value);
     return value;
   }
@@ -516,25 +672,20 @@ function lookup(name: string, mod: Module, env: Env): unknown {
   const file = imported && importedFile(mod, imported[0]);
   if (file) return lookup(imported![1], parse(file), moduleEnv(parse(file)));
   // Resolve barrel re-exports without loading or running a module.
-  for (const statement of mod.ast.statements) {
-    if (
-      !ts.isExportDeclaration(statement) ||
-      !statement.moduleSpecifier ||
-      !ts.isStringLiteral(statement.moduleSpecifier)
-    )
-      continue;
-    const names =
-      statement.exportClause && ts.isNamedExports(statement.exportClause) ? statement.exportClause.elements : undefined;
-    if (names && !names.some(element => element.name.text === name)) continue;
-    const target = importedFile(mod, statement.moduleSpecifier.text);
+  for (const statement of mod.ast.body as N[]) {
+    let names: N[] | undefined;
+    if (statement.type === 'ExportAllDeclaration') names = undefined;
+    else if (statement.type === 'ExportNamedDeclaration' && statement.source && !statement.declaration)
+      names = statement.specifiers as N[];
+    else continue;
+    if (!isStringLiteral(statement.source)) continue;
+    if (names && !names.some(element => nameOf(element.exported) === name)) continue;
+    const target = importedFile(mod, statement.source.value as string);
     if (!target || target === mod.file) continue;
     const targetMod = parse(target);
-    if (targetMod.declarations.has(name) || targetMod.ast.text.includes(` ${name}`)) {
-      const value = lookup(
-        names?.find(element => element.name.text === name)?.propertyName?.text ?? name,
-        targetMod,
-        moduleEnv(targetMod),
-      );
+    if (targetMod.declarations.has(name) || targetMod.source.includes(` ${name}`)) {
+      const element = names?.find(candidate => nameOf(candidate.exported) === name);
+      const value = lookup(element ? nameOf(element.local) : name, targetMod, moduleEnv(targetMod));
       if (value !== undefined) return value;
     }
   }
@@ -546,92 +697,100 @@ function invoke(fn: unknown, values: unknown[]): unknown {
   // Only registration code and pure flag wrappers. Never evaluate an action/controller/helper body.
   if (
     !/\.command\s*\(|\.option\s*\(|\.requiredOption\s*\(|\.addOption\s*\(|register[A-Z]|\bverb\s*\(|writeFlags\s*\(|\.name\(\)\s*===/.test(
-      node.getText(),
+      sourceOf(node).text.slice(node.start, node.end),
     )
   )
     return undefined;
   if (++callDepth > 45) throw new Error(`Commander recursion: ${mod.file}:${lineOf(node)}`);
   const local = new Map(env);
-  node.parameters.forEach((parameter, index) =>
+  (node.params as N[]).forEach((parameter, index) => {
+    const initializer = bindingDefault(parameter);
     bind(
-      parameter.name,
-      values[index] ?? (parameter.initializer ? evaluate(parameter.initializer, mod, local) : undefined),
+      bindingTarget(parameter),
+      values[index] ?? (initializer ? evaluate(initializer, mod, local) : undefined),
       local,
-    ),
-  );
+    );
+  });
   const result =
     node.body &&
-    (ts.isBlock(node.body) ? statements(node.body.statements, mod, local) : { value: evaluate(node.body, mod, local) });
+    (node.body.type === 'BlockStatement'
+      ? statements(node.body.body, mod, local)
+      : { value: evaluate(node.body, mod, local) });
   callDepth--;
   return result?.value;
 }
-function evaluate(input: ts.Node | undefined, mod: Module, env: Env): unknown {
+function evaluate(input: N | null | undefined, mod: Module, env: Env): unknown {
   if (!input) return undefined;
   const node = unwrap(input);
-  if (ts.isIdentifier(node)) return lookup(node.text, mod, env);
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
-  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return { fn: node, mod, env } satisfies Fn;
-  if (ts.isArrayLiteralExpression(node))
-    return node.elements.flatMap(element =>
-      ts.isSpreadElement(element)
-        ? ((evaluate(element.expression, mod, env) as unknown[]) ?? [])
+  if (node.type === 'Identifier') return lookup(node.name, mod, env);
+  if (isStringLike(node)) return stringValue(node);
+  if (isNumericLiteral(node)) return node.value;
+  if (isTrue(node)) return true;
+  if (isFalse(node)) return false;
+  if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression')
+    return { fn: node, mod, env } satisfies Fn;
+  if (node.type === 'ArrayExpression')
+    return (node.elements as (N | null)[]).flatMap(element =>
+      element?.type === 'SpreadElement'
+        ? ((evaluate(element.argument, mod, env) as unknown[]) ?? [])
         : [evaluate(element, mod, env)],
     );
-  if (ts.isObjectLiteralExpression(node)) {
+  if (node.type === 'ObjectExpression') {
     const result: Record<string, unknown> = {};
-    for (const property of node.properties) {
-      if (ts.isPropertyAssignment(property)) result[propName(property.name)] = evaluate(property.initializer, mod, env);
-      if (ts.isShorthandPropertyAssignment(property)) result[property.name.text] = lookup(property.name.text, mod, env);
-      if (ts.isSpreadAssignment(property)) Object.assign(result, evaluate(property.expression, mod, env));
+    for (const property of node.properties as N[]) {
+      const kind = propertyKind(property);
+      if (kind === 'assign') result[keyName(property)] = evaluate(property.value, mod, env);
+      if (kind === 'shorthand') result[property.key.name] = lookup(property.key.name, mod, env);
+      if (kind === 'spread') Object.assign(result, evaluate(property.argument, mod, env));
     }
     return result;
   }
-  if (ts.isTemplateExpression(node))
+  if (isTemplateExpression(node))
     return (
-      node.head.text +
-      node.templateSpans
-        .map(span => `${evaluate(span.expression, mod, env) ?? '{dynamic}'}${span.literal.text}`)
+      templateHead(node) +
+      templateSpans(node)
+        .map(span => `${evaluate(span.expression, mod, env) ?? '{dynamic}'}${span.text}`)
         .join('')
     );
-  if (ts.isPropertyAccessExpression(node)) {
-    const value = evaluate(node.expression, mod, env);
-    if (value instanceof Cmd && node.name.text === 'commands') return value.children;
-    return value && typeof value === 'object' ? (value as Record<string, unknown>)[node.name.text] : undefined;
+  if (isPropertyAccess(node)) {
+    const value = evaluate(node.object, mod, env);
+    if (value instanceof Cmd && memberName(node) === 'commands') return value.children;
+    return value && typeof value === 'object' ? (value as Record<string, unknown>)[memberName(node)] : undefined;
   }
-  if (ts.isElementAccessExpression(node)) {
-    const value = evaluate(node.expression, mod, env);
-    const key = evaluate(node.argumentExpression, mod, env);
+  if (isElementAccess(node)) {
+    const value = evaluate(node.object, mod, env);
+    const key = evaluate(node.property, mod, env);
     return value && key !== undefined ? (value as Record<string, unknown>)[String(key)] : undefined;
   }
-  if (ts.isBinaryExpression(node)) {
+  // The TypeScript tree reads assignment, logical and comma expressions as binary ones: both sides are evaluated.
+  if (node.type === 'BinaryExpression' || node.type === 'LogicalExpression' || node.type === 'AssignmentExpression') {
     const left = evaluate(node.left, mod, env);
     const right = evaluate(node.right, mod, env);
-    switch (node.operatorToken.kind) {
-      case ts.SyntaxKind.EqualsEqualsEqualsToken:
+    switch (node.operator) {
+      case '===':
         return left === right;
-      case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+      case '!==':
         return left !== right;
-      case ts.SyntaxKind.QuestionQuestionToken:
+      case '??':
         return left ?? right;
-      case ts.SyntaxKind.BarBarToken:
+      case '||':
         return left || right;
-      case ts.SyntaxKind.PlusToken:
+      case '+':
         return typeof left === 'string' || typeof right === 'string' ? `${left ?? ''}${right ?? ''}` : undefined;
     }
   }
-  if (ts.isConditionalExpression(node))
-    return evaluate(evaluate(node.condition, mod, env) ? node.whenTrue : node.whenFalse, mod, env);
-  if (ts.isNewExpression(node))
-    return node.expression.getText() === 'Command'
-      ? new Cmd(String(evaluate(node.arguments?.[0], mod, env) ?? 'fy'))
+  if (node.type === 'SequenceExpression')
+    for (const expression of node.expressions as N[]) evaluate(expression, mod, env);
+  if (node.type === 'ConditionalExpression')
+    return evaluate(evaluate(node.test, mod, env) ? node.consequent : node.alternate, mod, env);
+  if (node.type === 'NewExpression')
+    return textOf(node.callee) === 'Command'
+      ? new Cmd(String(evaluate(node.arguments[0], mod, env) ?? 'fy'))
       : undefined;
-  if (ts.isCallExpression(node)) {
-    if (ts.isPropertyAccessExpression(node.expression)) {
-      const name = node.expression.name.text;
-      const receiver = evaluate(node.expression.expression, mod, env);
+  if (node.type === 'CallExpression') {
+    if (isPropertyAccess(node.callee)) {
+      const name = memberName(node.callee);
+      const receiver = evaluate(node.callee.object, mod, env);
       if (receiver instanceof Cmd) {
         // Arguments to action/hooks may contain arbitrary product code: deliberately do not traverse them.
         if (
@@ -650,9 +809,9 @@ function evaluate(input: ts.Node | undefined, mod: Module, env: Env): unknown {
           ].includes(name)
         )
           return receiver;
-        const values = node.arguments.map(argument => evaluate(argument, mod, env));
+        const values = (node.arguments as N[]).map(argument => evaluate(argument, mod, env));
         if (name === 'command') {
-          visitedCommandCalls.add(`${mod.file}:${node.pos}`);
+          visitedCommandCalls.add(`${mod.file}:${node.start}`);
           if (typeof values[0] !== 'string') {
             warnings.add(`Commander name unresolved: ${mod.file}:${lineOf(node)} ${textOf(node)}`);
             return undefined;
@@ -677,7 +836,7 @@ function evaluate(input: ts.Node | undefined, mod: Module, env: Env): unknown {
         if (name === 'version') receiver.flags.add(typeof values[1] === 'string' ? values[1] : '-V, --version');
         return receiver;
       }
-      const values = node.arguments.map(argument => evaluate(argument, mod, env));
+      const values = (node.arguments as N[]).map(argument => evaluate(argument, mod, env));
       if (Array.isArray(receiver)) {
         if (name === 'find') return receiver.find(value => invokePredicate(values[0], value));
         if (name === 'forEach') {
@@ -691,8 +850,8 @@ function evaluate(input: ts.Node | undefined, mod: Module, env: Env): unknown {
       return undefined;
     }
     return invoke(
-      evaluate(node.expression, mod, env),
-      node.arguments.map(argument => evaluate(argument, mod, env)),
+      evaluate(node.callee, mod, env),
+      (node.arguments as N[]).map(argument => evaluate(argument, mod, env)),
     );
   }
   return undefined;
@@ -701,33 +860,34 @@ function invokePredicate(value: unknown, argument: unknown): boolean {
   if (!value || typeof value !== 'object' || !('fn' in value)) return false;
   const fn = value as Fn;
   const local = new Map(fn.env);
-  if (fn.fn.parameters[0]) bind(fn.fn.parameters[0].name, argument, local);
+  const first = (fn.fn.params as N[])[0];
+  if (first) bind(bindingTarget(first), argument, local);
   return fn.fn.body ? Boolean(evaluate(fn.fn.body, fn.mod, local)) : false;
 }
-function statements(nodes: ts.NodeArray<ts.Statement>, mod: Module, env: Env): { value: unknown } | undefined {
+function statements(nodes: N[], mod: Module, env: Env): { value: unknown } | undefined {
   for (const node of nodes) {
-    if (ts.isFunctionDeclaration(node) && node.name) env.set(node.name.text, { fn: node, mod, env });
-    else if (ts.isVariableStatement(node))
-      for (const decl of node.declarationList.declarations) bind(decl.name, evaluate(decl.initializer, mod, env), env);
-    else if (ts.isExpressionStatement(node)) evaluate(node.expression, mod, env);
-    else if (ts.isReturnStatement(node)) return { value: evaluate(node.expression, mod, env) };
-    else if (ts.isForOfStatement(node)) {
-      const iterable = evaluate(node.expression, mod, env);
-      if (Array.isArray(iterable) && ts.isVariableDeclarationList(node.initializer))
+    if (isFunctionDeclaration(node) && node.id) env.set(node.id.name, { fn: node, mod, env });
+    else if (node.type === 'VariableDeclaration')
+      for (const decl of node.declarations as N[]) bind(decl.id, evaluate(decl.init, mod, env), env);
+    else if (node.type === 'ExpressionStatement') evaluate(node.expression, mod, env);
+    else if (node.type === 'ReturnStatement') return { value: evaluate(node.argument, mod, env) };
+    else if (node.type === 'ForOfStatement') {
+      const iterable = evaluate(node.right, mod, env);
+      if (Array.isArray(iterable) && node.left.type === 'VariableDeclaration')
         for (const value of iterable) {
           const local = new Map(env);
-          bind(node.initializer.declarations[0]!.name, value, local);
-          if (ts.isBlock(node.statement)) statements(node.statement.statements, mod, local);
-          else if (ts.isExpressionStatement(node.statement)) evaluate(node.statement.expression, mod, local);
+          bind(node.left.declarations[0].id, value, local);
+          if (node.body.type === 'BlockStatement') statements(node.body.body, mod, local);
+          else if (node.body.type === 'ExpressionStatement') evaluate(node.body.expression, mod, local);
         }
-    } else if (ts.isBlock(node)) statements(node.statements, mod, env);
+    } else if (node.type === 'BlockStatement') statements(node.body, mod, env);
     // Guards in registration files are dependency checks, not action handlers. Unknown dependencies
     // cannot hide an existing command from the inventory; register both syntactic arms if necessary.
-    else if (ts.isIfStatement(node)) {
-      for (const arm of [node.thenStatement, node.elseStatement])
+    else if (node.type === 'IfStatement') {
+      for (const arm of [node.consequent, node.alternate] as (N | null)[])
         if (arm) {
-          if (ts.isBlock(arm)) statements(arm.statements, mod, env);
-          else if (ts.isExpressionStatement(arm)) evaluate(arm.expression, mod, env);
+          if (arm.type === 'BlockStatement') statements(arm.body, mod, env);
+          else if (arm.type === 'ExpressionStatement') evaluate(arm.expression, mod, env);
         }
     }
   }
@@ -782,28 +942,27 @@ function commands() {
 function tools(mod: Module) {
   if (mod.file !== 'packages/cli/src/lib/mcp/tools.ts') return;
   walk(mod.ast, node => {
-    if (!ts.isObjectLiteralExpression(node)) return;
-    const keys = node.properties.map(property => ('name' in property ? propName(property.name) : ''));
+    if (node.type !== 'ObjectExpression') return;
+    const keys = (node.properties as N[]).map(property => (hasName(property) ? keyName(property) : ''));
     if (!keys.includes('name') || !keys.includes('inputSchema') || !keys.includes('description')) return;
     const data = literal(node, mod) as Record<string, unknown>;
     add('T', String(data.name), mod.file, lineOf(node), `wire=${data.tool ?? data.name}; ${data.description}`);
   });
 }
 
-function contextName(node: ts.Node): string {
+/** The name a node gives the code inside it (a function, a method, a property, a variable), or ''. */
+function contextOwnName(node: N): string {
+  if (isFunctionDeclaration(node)) return node.id ? propName(node.id) : '';
+  if (isMethodDeclaration(node) || isPropertyAssignment(node)) return keyName(node);
+  if (node.type === 'VariableDeclarator') return propName(node.id);
+  return '';
+}
+function contextName(node: N): string {
   let current = node.parent;
   const parts: string[] = [];
-  while (current && !ts.isSourceFile(current)) {
-    if (
-      (ts.isFunctionDeclaration(current) ||
-        ts.isMethodDeclaration(current) ||
-        ts.isPropertyAssignment(current) ||
-        ts.isVariableDeclaration(current)) &&
-      current.name
-    ) {
-      const name = propName(current.name);
-      if (name && !parts.includes(name)) parts.unshift(name);
-    }
+  while (current && current.type !== 'Program') {
+    const name = contextOwnName(current);
+    if (name && !parts.includes(name)) parts.unshift(name);
     current = current.parent;
   }
   return parts.join('.');
@@ -813,22 +972,22 @@ function jobs(mod: Module) {
   walk(mod.ast, node => {
     if (
       mod.file.includes('/bin/modules/') &&
-      ts.isPropertyAssignment(node) &&
-      propName(node.name) === 'jobs' &&
-      ts.isObjectLiteralExpression(node.initializer)
+      isPropertyAssignment(node) &&
+      keyName(node) === 'jobs' &&
+      node.value.type === 'ObjectExpression'
     ) {
-      for (const property of node.initializer.properties)
-        if ('name' in property)
+      for (const property of node.value.properties as N[])
+        if (hasName(property))
           add(
             'J',
-            `module job ${moduleName(mod.file)}.${propName(property.name)}`,
+            `module job ${moduleName(mod.file)}.${keyName(property)}`,
             mod.file,
             lineOf(property),
             textOf(property),
           );
     }
-    if (!ts.isCallExpression(node)) return;
-    const callee = textOf(node.expression);
+    if (node.type !== 'CallExpression') return;
+    const callee = textOf(node.callee);
     const timer =
       /(?:^|\.)(?:setInterval|setTimeout|watch|watchFile)$/.test(callee) ||
       /(?:scheduler|timers?|clock)\.(?:after|every|interval|repeat|schedule)$/.test(callee) ||
@@ -871,8 +1030,9 @@ function surfaces(mod: Module) {
   if (file.endsWith('.tsx'))
     walk(mod.ast, node => {
       const named =
-        (ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node)) && node.name && ts.isIdentifier(node.name)
-          ? node.name.text
+        (isFunctionDeclaration(node) && node.id) ||
+        (node.type === 'VariableDeclarator' && node.id.type === 'Identifier')
+          ? (node.id as N).name
           : '';
       if (
         named &&
@@ -890,23 +1050,27 @@ function surfaces(mod: Module) {
   if (file.endsWith('/lib/pages/routes.ts'))
     walk(mod.ast, node => {
       if (
-        ts.isVariableDeclaration(node) &&
-        ts.isIdentifier(node.name) &&
-        /Path$/.test(node.name.text) &&
-        node.initializer
+        node.type === 'VariableDeclarator' &&
+        node.id.type === 'Identifier' &&
+        /Path$/.test(node.id.name) &&
+        node.init
       ) {
-        add(
-          'S',
-          `route ${node.name.text}: ${routeTemplate(node.initializer, mod)}`,
-          file,
-          lineOf(node),
-          textOf(node.initializer),
-        );
+        add('S', `route ${node.id.name}: ${routeTemplate(node.init, mod)}`, file, lineOf(node), textOf(node.init));
       }
-      if (ts.isInterfaceDeclaration(node)) {
-        const kind = node.members.find(member => 'name' in member && propName(member.name) === 'kind');
-        if (kind && ts.isPropertySignature(kind) && kind.type)
-          add('S', `screen ${textOf(kind.type)}`, file, lineOf(node), `route model ${node.name.text}`);
+      if (node.type === 'TSInterfaceDeclaration') {
+        const kind = (node.body.body as N[]).find(
+          member =>
+            (member.type === 'TSPropertySignature' || member.type === 'TSMethodSignature') &&
+            propName(member.key, member.computed) === 'kind',
+        );
+        if (kind && kind.type === 'TSPropertySignature' && kind.typeAnnotation)
+          add(
+            'S',
+            `screen ${textOf(kind.typeAnnotation.typeAnnotation)}`,
+            file,
+            lineOf(node),
+            `route model ${node.id.name}`,
+          );
       }
     });
   if (
@@ -915,16 +1079,15 @@ function surfaces(mod: Module) {
     )
   )
     walk(mod.ast, node => {
-      if (ts.isObjectLiteralExpression(node)) {
-        const keys = node.properties.map(property => ('name' in property ? propName(property.name) : ''));
+      if (node.type === 'ObjectExpression') {
+        const keys = (node.properties as N[]).map(property => (hasName(property) ? keyName(property) : ''));
         if (!keys.includes('id') && !keys.includes('key')) return;
         if (!keys.some(key => ['label', 'title', 'settingIds', 'render', 'Component'].includes(key))) return;
         const data = literal(node, mod) as Record<string, unknown>;
-        const identity = node.properties.find(
-          property => ts.isPropertyAssignment(property) && ['id', 'key'].includes(propName(property.name)),
+        const identity = (node.properties as N[]).find(
+          property => isPropertyAssignment(property) && ['id', 'key'].includes(keyName(property)),
         );
-        if (!identity || !ts.isPropertyAssignment(identity) || typeof literal(identity.initializer, mod) !== 'string')
-          return;
+        if (!identity || !isPropertyAssignment(identity) || typeof literal(identity.value, mod) !== 'string') return;
         add(
           'S',
           `settings/navigation ${String(data.id ?? data.key)}: ${String(data.label ?? data.title ?? '')}`,
@@ -944,55 +1107,58 @@ function surfaces(mod: Module) {
               );
       }
       if (
-        ts.isTypeAliasDeclaration(node) &&
-        /(?:Tab|Pane|Panel|Section)(?:Id|Key|Name)?$/.test(node.name.text) &&
-        ts.isUnionTypeNode(node.type)
+        node.type === 'TSTypeAliasDeclaration' &&
+        /(?:Tab|Pane|Panel|Section)(?:Id|Key|Name)?$/.test(node.id.name) &&
+        node.typeAnnotation.type === 'TSUnionType'
       ) {
-        for (const type of node.type.types)
-          if (ts.isLiteralTypeNode(type))
-            add('S', `${node.name.text} ${textOf(type)}`, file, lineOf(type), 'tab/panel/section discriminant');
+        for (const type of node.typeAnnotation.types as N[])
+          if (type.type === 'TSLiteralType')
+            add('S', `${node.id.name} ${textOf(type)}`, file, lineOf(type), 'tab/panel/section discriminant');
       }
-      if (ts.isVariableDeclaration(node) && /(?:SLOTS|TABS|DESTINATIONS)$/.test(textOf(node.name))) {
-        const value = node.initializer && unwrap(node.initializer);
-        if (value && ts.isObjectLiteralExpression(value))
-          for (const property of value.properties)
-            if ('name' in property)
-              add('S', `${textOf(node.name)} ${propName(property.name)}`, file, lineOf(property), textOf(property));
+      if (node.type === 'VariableDeclarator' && /(?:SLOTS|TABS|DESTINATIONS)$/.test(bindingText(node.id))) {
+        const value = node.init && unwrap(node.init);
+        if (value && value.type === 'ObjectExpression')
+          for (const property of value.properties as N[])
+            if (hasName(property))
+              add('S', `${bindingText(node.id)} ${keyName(property)}`, file, lineOf(property), textOf(property));
       }
     });
 }
 
 /** Expand the app's path builders symbolically; never call the production router. */
-function routeTemplate(input: ts.Node, mod: Module, seen = new Set<ts.Node>()): string {
+function routeTemplate(input: N, mod: Module, seen = new Set<N>()): string {
   const node = unwrap(input);
   if (seen.has(node)) return ':dynamic';
   seen = new Set(seen).add(node);
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-    if (!ts.isBlock(node.body)) return routeTemplate(node.body, mod, seen);
-    const returns = node.body.statements.filter(ts.isReturnStatement);
-    return returns.at(-1)?.expression ? routeTemplate(returns.at(-1)!.expression!, mod, seen) : ':dynamic';
+  if (isStringLike(node)) return stringValue(node);
+  if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression') {
+    if (node.body.type !== 'BlockStatement') return routeTemplate(node.body, mod, seen);
+    const returns = (node.body.body as N[]).filter(statement => statement.type === 'ReturnStatement');
+    const last = returns.at(-1);
+    return last?.argument ? routeTemplate(last.argument, mod, seen) : ':dynamic';
   }
-  if (ts.isTemplateExpression(node))
+  if (isTemplateExpression(node))
     return (
-      node.head.text +
-      node.templateSpans.map(span => `${routeTemplate(span.expression, mod, seen)}${span.literal.text}`).join('')
+      templateHead(node) +
+      templateSpans(node)
+        .map(span => `${routeTemplate(span.expression, mod, seen)}${span.text}`)
+        .join('')
     );
-  if (ts.isIdentifier(node)) {
-    const decl = declaration(mod, node.text, node);
-    if (decl && ts.isVariableDeclaration(decl) && decl.initializer) return routeTemplate(decl.initializer, mod, seen);
-    return node.text === 'id' ? ':daemonId' : `:${node.text}`;
+  if (node.type === 'Identifier') {
+    const decl = declaration(mod, node.name, node);
+    if (decl && decl.type === 'VariableDeclarator' && decl.init) return routeTemplate(decl.init, mod, seen);
+    return node.name === 'id' ? ':daemonId' : `:${node.name}`;
   }
-  if (ts.isPropertyAccessExpression(node)) return `:${node.name.text}`;
-  if (ts.isCallExpression(node)) {
-    if (textOf(node.expression) === 'encodeURIComponent') return routeTemplate(node.arguments[0]!, mod, seen);
-    const name = textOf(node.expression);
+  if (isPropertyAccess(node)) return `:${memberName(node)}`;
+  if (node.type === 'CallExpression') {
+    if (textOf(node.callee) === 'encodeURIComponent') return routeTemplate(node.arguments[0], mod, seen);
+    const name = textOf(node.callee);
     const decl = mod.declarations.get(name)?.[0];
-    if (decl && ts.isVariableDeclaration(decl) && decl.initializer) return routeTemplate(decl.initializer, mod, seen);
-    return `:${ts.isPropertyAccessExpression(node.expression) ? textOf(node.expression.expression) : 'dynamic'}`;
+    if (decl && decl.type === 'VariableDeclarator' && decl.init) return routeTemplate(decl.init, mod, seen);
+    return `:${isPropertyAccess(node.callee) ? textOf(node.callee.object) : 'dynamic'}`;
   }
-  if (ts.isConditionalExpression(node))
-    return `{${routeTemplate(node.whenTrue, mod, seen)}|${routeTemplate(node.whenFalse, mod, seen)}}`;
+  if (node.type === 'ConditionalExpression')
+    return `{${routeTemplate(node.consequent, mod, seen)}|${routeTemplate(node.alternate, mod, seen)}}`;
   return ':dynamic';
 }
 
@@ -1000,7 +1166,7 @@ function configPaths(mod: Module) {
   if (mod.file !== 'packages/protocol/src/lib/config-files.ts') return;
   const value = (name: string) => {
     const decl = mod.declarations.get(name)?.[0];
-    return decl && ts.isVariableDeclaration(decl) ? literal(decl.initializer, mod) : undefined;
+    return decl && decl.type === 'VariableDeclarator' ? literal(decl.init, mod) : undefined;
   };
   const singletons = value('SINGLETON_FILES') as Record<string, string> | undefined;
   const named = value('NAMED_DIRECTORIES') as Record<string, string> | undefined;
@@ -1107,50 +1273,52 @@ const knownRoots: Record<string, string> = {
   wardenRoot: 'FY_HOME/state/warden',
 };
 /** Preserve dynamic segments; this is a path declaration inventory, not a filesystem scan. */
-function pathValue(input: ts.Node | undefined, mod: Module, seen = new Set<ts.Node>()): string {
+function pathValue(input: N | null | undefined, mod: Module, seen = new Set<N>()): string {
   if (!input) return '{unknown}';
   const node = unwrap(input);
   if (seen.has(node)) return `{${textOf(node)}}`;
   seen = new Set(seen).add(node);
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isTemplateExpression(node))
+  if (isStringLike(node)) return stringValue(node);
+  if (isTemplateExpression(node))
     return (
-      node.head.text +
-      node.templateSpans.map(span => `${pathValue(span.expression, mod, seen)}${span.literal.text}`).join('')
+      templateHead(node) +
+      templateSpans(node)
+        .map(span => `${pathValue(span.expression, mod, seen)}${span.text}`)
+        .join('')
     );
-  if (ts.isIdentifier(node)) {
+  if (node.type === 'Identifier') {
     const value = literal(node, mod);
     if (typeof value === 'string') return value;
-    if (node.text === 'home' && mod.file === 'packages/daemon/src/lib/paths.ts') return 'FY_HOME';
-    const root = constructorRoot(node, mod, node.text);
+    if (node.name === 'home' && mod.file === 'packages/daemon/src/lib/paths.ts') return 'FY_HOME';
+    const root = constructorRoot(node, mod, node.name);
     if (root) return root;
-    const decl = declaration(mod, node.text, node);
-    if (decl && ts.isVariableDeclaration(decl) && decl.initializer) return pathValue(decl.initializer, mod, seen);
-    if (knownRoots[node.text]) return knownRoots[node.text]!;
-    return `{${node.text}}`;
+    const decl = declaration(mod, node.name, node);
+    if (decl && decl.type === 'VariableDeclarator' && decl.init) return pathValue(decl.init, mod, seen);
+    if (knownRoots[node.name]) return knownRoots[node.name]!;
+    return `{${node.name}}`;
   }
-  if (ts.isPropertyAccessExpression(node)) {
-    const expression = textOf(node.expression);
+  if (isPropertyAccess(node)) {
+    const expression = textOf(node.object);
     if (
       /^(?:this\.)?paths$/.test(expression) &&
       localPathMaps.has(mod.file) &&
       !/create\w*Paths/.test(contextName(node))
     ) {
-      const local = localPathMaps.get(mod.file)![node.name.text];
+      const local = localPathMaps.get(mod.file)![memberName(node)];
       if (local) return local;
     }
     if (expression === 'this') {
-      const root = constructorRoot(node, mod, node.name.text);
+      const root = constructorRoot(node, mod, memberName(node));
       if (root) return root;
       // Class path fields initialized from a constructor's confined root.
-      let enclosing: ts.Node | undefined = node;
-      while (enclosing && !ts.isClassDeclaration(enclosing)) enclosing = enclosing.parent;
+      let enclosing: N | undefined = node;
+      while (enclosing && enclosing.type !== 'ClassDeclaration') enclosing = enclosing.parent;
       if (enclosing) {
         let result: string | undefined;
         walk(enclosing, candidate => {
           if (
-            ts.isBinaryExpression(candidate) &&
-            candidate.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            candidate.type === 'AssignmentExpression' &&
+            candidate.operator === '=' &&
             textOf(candidate.left) === textOf(node)
           )
             result = pathValue(candidate.right, mod, seen);
@@ -1159,64 +1327,67 @@ function pathValue(input: ts.Node | undefined, mod: Module, seen = new Set<ts.No
       }
     }
     if (/createSessionPaths\(/.test(expression) || expression === 'sessionPaths')
-      return sessionPaths[node.name.text] ?? `{${textOf(node)}}`;
+      return sessionPaths[memberName(node)] ?? `{${textOf(node)}}`;
     if (
       /(?:^|\.)(?:paths|foundation|layout)$/.test(expression) ||
       expression === 'this.paths' ||
       expression.endsWith('.paths')
     ) {
-      if (foundation[node.name.text]) return foundation[node.name.text]!;
-      if (knownRoots[node.name.text]) return knownRoots[node.name.text]!;
+      if (foundation[memberName(node)]) return foundation[memberName(node)]!;
+      if (knownRoots[memberName(node)]) return knownRoots[memberName(node)]!;
     }
     if (/stateHome(?:\.path)?$/.test(textOf(node))) return 'FY_HOME';
     return `{${textOf(node)}}`;
   }
-  if (ts.isCallExpression(node)) {
-    if (/(?:^|\.)(?:join|resolve|joinPath)$/.test(textOf(node.expression)))
-      return node.arguments
+  if (node.type === 'CallExpression') {
+    if (/(?:^|\.)(?:join|resolve|joinPath)$/.test(textOf(node.callee)))
+      return (node.arguments as N[])
         .map(argument => pathValue(argument, mod, seen))
         .join('/')
         .replace(/\/{2,}/g, '/');
-    if (ts.isPropertyAccessExpression(node.expression) && textOf(node.expression.expression) === 'this') {
-      const root = constructorRoot(node, mod, node.expression.name.text);
+    if (isPropertyAccess(node.callee) && textOf(node.callee.object) === 'this') {
+      const root = constructorRoot(node, mod, memberName(node.callee));
       if (root) return root;
     }
   }
-  if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) return pathValue(node.body, mod, seen);
+  if (node.type === 'ArrowFunctionExpression' && node.body.type !== 'BlockStatement')
+    return pathValue(node.body, mod, seen);
   return `{${textOf(node).slice(0, 160)}}`;
 }
-function constructorRoot(node: ts.Node, _mod: Module, name: string): string | undefined {
-  let enclosing: ts.Node | undefined = node;
-  while (enclosing && !ts.isClassDeclaration(enclosing)) enclosing = enclosing.parent;
-  if (!enclosing || !enclosing.name) return;
-  const ctor = enclosing.members.find(ts.isConstructorDeclaration);
+function constructorRoot(node: N, _mod: Module, name: string): string | undefined {
+  let enclosing: N | undefined = node;
+  while (enclosing && enclosing.type !== 'ClassDeclaration') enclosing = enclosing.parent;
+  if (!enclosing || !enclosing.id) return;
+  const ctor = (enclosing.body.body as N[]).find(
+    member => member.type === 'MethodDefinition' && member.kind === 'constructor',
+  );
   if (!ctor) return;
-  const index = ctor.parameters.findIndex(parameter => propName(parameter.name) === name);
+  const index = (ctor.value.params as N[]).findIndex(parameter => propName(bindingTarget(parameter)) === name);
   if (index < 0) return;
-  const roots = constructorRoots.get(enclosing.name.text)?.get(index);
+  const roots = constructorRoots.get(enclosing.id.name)?.get(index);
   return roots?.size === 1 ? [...roots][0] : undefined;
 }
 function storage(mod: Module) {
   if (!/^packages\/(?:daemon|fleet|cli|protocol)\//.test(mod.file)) return;
   walk(mod.ast, node => {
-    const joinCall = ts.isCallExpression(node) && /(?:^|\.)(?:join|resolve|joinPath)$/.test(textOf(node.expression));
-    const template = ts.isTemplateExpression(node);
+    const joinCall = node.type === 'CallExpression' && /(?:^|\.)(?:join|resolve|joinPath)$/.test(textOf(node.callee));
+    const template = isTemplateExpression(node);
     const pathConstant =
-      ts.isVariableDeclaration(node) &&
-      /(?:PATH|FILE|FILENAME|DOCUMENT|BACKUP|MARKER|OUTBOX|PENDING|NAME)$/.test(textOf(node.name)) &&
-      node.initializer;
+      node.type === 'VariableDeclarator' &&
+      /(?:PATH|FILE|FILENAME|DOCUMENT|BACKUP|MARKER|OUTBOX|PENDING|NAME)$/.test(bindingText(node.id)) &&
+      node.init;
     const filename =
-      ts.isStringLiteral(node) &&
-      /^[\w.-]+\.(?:jsonl?|ya?ml|sqlite|db|log|sock|key|txt|toml)$/.test(node.text) &&
+      isStringLiteral(node) &&
+      /^[\w.-]+\.(?:jsonl?|ya?ml|sqlite|db|log|sock|key|txt|toml)$/.test(node.value as string) &&
       /\/adapters\/|\/lib\/(?:agenda|scratch|pack|account|usage|shared-history|config-files)/.test(mod.file) &&
       !/\/host-harness-scan|syscall-tracer|browser\/|imports\//.test(mod.file);
     if (!joinCall && !template && !pathConstant && !filename) return;
-    const expression = pathConstant ? (node as ts.VariableDeclaration).initializer! : node;
+    const expression: N = pathConstant ? node.init : node;
     if (
       pathConstant &&
-      !ts.isStringLiteralLike(unwrap(expression)) &&
-      !ts.isTemplateExpression(unwrap(expression)) &&
-      !ts.isCallExpression(unwrap(expression))
+      !isStringLike(unwrap(expression)) &&
+      !isTemplateExpression(unwrap(expression)) &&
+      unwrap(expression).type !== 'CallExpression'
     )
       return;
     const value = pathValue(expression, mod);
@@ -1272,21 +1443,18 @@ const definiteHome = (value: string) => value.includes('FY_HOME');
 // Resolve the canonical foundation first so later adapters retain the actual FY_HOME-relative path.
 const pathsModule = parse('packages/daemon/src/lib/paths.ts');
 walk(pathsModule.ast, node => {
-  if (
-    (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
-    /createFoundationPaths/.test(contextName(node))
-  ) {
-    const name = propName(node.name);
-    const expression = ts.isPropertyAssignment(node) ? node.initializer : node.name;
-    if (ts.isIdentifier(expression) || ts.isCallExpression(expression)) {
+  if ((isPropertyAssignment(node) || isShorthandAssignment(node)) && /createFoundationPaths/.test(contextName(node))) {
+    const name = keyName(node);
+    const expression: N = node.value;
+    if (expression.type === 'Identifier' || expression.type === 'CallExpression') {
       const value = pathValue(expression, pathsModule);
       if (value.includes('FY_HOME')) foundation[name] = value;
     }
   }
 });
 walk(pathsModule.ast, node => {
-  if (ts.isPropertyAssignment(node) && /createSessionPaths/.test(contextName(node))) {
-    sessionPaths[propName(node.name)] = pathValue(node.initializer, pathsModule);
+  if (isPropertyAssignment(node) && /createSessionPaths/.test(contextName(node))) {
+    sessionPaths[keyName(node)] = pathValue(node.value, pathsModule);
   }
 });
 sessionPaths.directory = 'FY_HOME/state/sessions/{sessionId}';
@@ -1299,9 +1467,9 @@ for (const file of files.filter(file => /^packages\/(?:daemon|cli|fleet)\//.test
   if (!/new \w+\(/.test(content) || !/paths\.|stateHome|stateDirectory/.test(content)) continue;
   const mod = parse(file);
   walk(mod.ast, node => {
-    if (!ts.isNewExpression(node) || !node.arguments) return;
-    const name = textOf(node.expression);
-    node.arguments.forEach((argument, index) => {
+    if (node.type !== 'NewExpression') return;
+    const name = textOf(node.callee);
+    (node.arguments as N[]).forEach((argument, index) => {
       const value = pathValue(argument, mod);
       if (!value.startsWith('FY_HOME') || (value.includes('{') && !/sessions\/\{/.test(value))) return;
       const roots = constructorRoots.get(name) ?? new Map<number, Set<string>>();
@@ -1321,10 +1489,10 @@ for (const file of files) {
   if (file.startsWith('packages/cli/'))
     walk(mod.ast, node => {
       if (
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text === 'command' &&
-        !visitedCommandCalls.has(`${file}:${node.pos}`)
+        node.type === 'CallExpression' &&
+        isPropertyAccess(node.callee) &&
+        memberName(node.callee) === 'command' &&
+        !visitedCommandCalls.has(`${file}:${node.start}`)
       )
         warnings.add(
           `Commander declaration not reached from DOMAIN_REGISTRARS: ${file}:${lineOf(node)} ${textOf(node).slice(0, 200)}`,
@@ -1335,11 +1503,11 @@ for (const file of files) {
   const local: Record<string, string> = {};
   walk(mod.ast, node => {
     if (
-      (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+      (isPropertyAssignment(node) || isShorthandAssignment(node)) &&
       /create\w+Paths/.test(contextName(node)) &&
       !/createFoundationPaths|createSessionPaths/.test(contextName(node))
     )
-      local[propName(node.name)] = pathValue(ts.isPropertyAssignment(node) ? node.initializer : node.name, mod);
+      local[keyName(node)] = pathValue(node.value, mod);
   });
   if (Object.keys(local).length) localPathMaps.set(file, local);
   if (file.startsWith('packages/daemon/')) routes(mod);
@@ -1440,11 +1608,11 @@ const out: string[] = [
   '',
   `Reference commit: \`${sourceHead}\`. Tracked product-source SHA-256: \`${digest.digest('hex')}\`.`,
   '',
-  'Install the isolated syntax parser first: `bun install --cwd scripts/rebuild`. Reproduce: `bun scripts/rebuild/parity.ts --source ../rebuild-ref`. Validate without writing: append `--check`.',
+  'Reproduce: `bun scripts/rebuild/parity.ts --source ../rebuild-ref`. Validate without writing: append `--check`. The syntax parser is `oxc-parser`, already a dev dependency; nothing else needs installing.',
   '',
   'Generator regression checks: `bun test scripts/rebuild/parity.test.ts` (first observe the team’s single-test-process limit). The fixture uses a temporary source repository and an untouched temporary FY_HOME; it proves that production imports and command actions never run.',
   '',
-  'Generator typecheck: `bun run --cwd scripts/rebuild typecheck` (the isolated TypeScript 6 parser API, with strict indexed-access checks).',
+  'Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.json`, run by `scripts/validate/typecheck.sh`), with strict indexed-access checks.',
   '',
   `**${inventory.length} rows; ${removed} removed by design; ${unplaced.length} unplaced owners.**`,
   '',

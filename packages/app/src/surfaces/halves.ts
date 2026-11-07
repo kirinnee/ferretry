@@ -1,4 +1,11 @@
-import type { AppHalf, Manifest, PanelProps, RendererProps, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
+import type {
+  AppHalf,
+  Manifest,
+  PanelProps,
+  RendererProps,
+  ScreenProps,
+  SettingsProps,
+} from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import type { ShellPluginClient } from '../client/daemon-client.ts';
 import type { SurfaceEntry } from './registry.ts';

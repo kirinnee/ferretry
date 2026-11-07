@@ -46,6 +46,7 @@ export {
 } from '@ferretry/kernel/contract';
 export * from './inputs.ts';
 export * from './port.ts';
+export * from './sealed.ts';
 export * from './secrets.ts';
 export * from './store.ts';
 export * from './targets.ts';

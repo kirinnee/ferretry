@@ -48,7 +48,12 @@ import {
   utf8Bytes,
   verifyDeviceProof,
 } from '../../src/session/wire/index.ts';
-import { CREDIT_WINDOW_FRAMES, HEARTBEAT_SECONDS, MAX_FRAME_BYTES, MAX_SESSIONS_PER_RENDEZVOUS } from '../../src/session/wire/index.ts';
+import {
+  CREDIT_WINDOW_FRAMES,
+  HEARTBEAT_SECONDS,
+  MAX_FRAME_BYTES,
+  MAX_SESSIONS_PER_RENDEZVOUS,
+} from '../../src/session/wire/index.ts';
 
 /** The limits a rendezvous publishes (the daemon-role constant, rebuilt here for the scripted rendezvous). */
 export const RELAY_LIMITS: RelayLimits = {
@@ -61,7 +66,6 @@ export const RELAY_LIMITS: RelayLimits = {
 /** A control message as a scripted rendezvous sends it (the client parses; this side only encodes). */
 export type ControlMessage = Readonly<Record<string, unknown>> & { readonly t: string };
 const encodeControlMessage = (message: ControlMessage): Uint8Array => utf8Bytes(JSON.stringify(message));
-
 
 /** One adapter for every test, because the protocol is only ever proved against real primitives. */
 export const relayCrypto = new WebCryptoRelayCrypto();

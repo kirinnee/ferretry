@@ -244,7 +244,12 @@ const mountEntries = async (
   newEntryKey = countingKeys(),
 ) =>
   await mount(
-    <RouterProvider parseRoute={parse} browser={browser as unknown as Window} newEntryKey={newEntryKey} trailStorage={trailStorage}>
+    <RouterProvider
+      parseRoute={parse}
+      browser={browser as unknown as Window}
+      newEntryKey={newEntryKey}
+      trailStorage={trailStorage}
+    >
       <EntryProbe />
     </RouterProvider>,
   );
@@ -505,7 +510,6 @@ describe('RouterProvider history entries', () => {
       }
     }
   });
-
 });
 
 describe('readTrail', () => {
