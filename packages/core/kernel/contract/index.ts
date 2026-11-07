@@ -2,6 +2,7 @@
  * `@ferretry/kernel/contract` — the leaf every contract may import (§2.1). Generic: no subsystem's vocabulary.
  * Frozen after day 1; a change needs the lead's yes (docs/rebuild/spine.md).
  */
+export * from './accepted.ts';
 export * from './act.ts';
 export * from './body.ts';
 export * from './bound.ts';
