@@ -2,12 +2,7 @@ import { z } from 'zod';
 import { SessionAgendaSummarySchema } from './agenda.ts';
 import { PEER_MESSAGE_LABELS } from './agent-messages.ts';
 import { BoardProjectIdSchema, BoardSkipSchema, BoardTaskIdSchema, TaskRefSchema } from './board-refs.ts';
-import {
-  InstantSchema,
-  NonNegativeFiniteSchema,
-  NonNegativeIntegerSchema,
-  PositiveIntegerSchema,
-} from './common.ts';
+import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { CompactAtSchema } from './compact-at.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema, SessionStatusSchema } from './session-base.ts';
@@ -647,7 +642,6 @@ export const AccountUsageSchema = z.object({
   /** Equivalent cost this month from this daemon's transcripts, when no provider endpoint answers. */
   spendUsd: NonNegativeFiniteSchema.optional(),
 });
-export type AccountUsage = z.infer<typeof AccountUsageSchema>;
 
 const QuotaSchema = z.object({
   usageBased: z.boolean().optional(),
@@ -889,7 +883,6 @@ export const SessionViewSchema = z.object({
 export type SessionView = z.infer<typeof SessionViewSchema>;
 
 export const SessionListSchema = z.array(SessionViewSchema);
-export type SessionList = z.infer<typeof SessionListSchema>;
 
 /**
  * The older finished autonomous sessions the daemon has taken out of the live list — `GET /v1/archived-sessions`
@@ -965,7 +958,6 @@ export const SessionConsoleInputResultSchema = z.strictObject({
 export type SessionConsoleInputResult = z.infer<typeof SessionConsoleInputResultSchema>;
 
 export const NameSuggestionsSchema = z.array(z.string().min(1));
-export type NameSuggestions = z.infer<typeof NameSuggestionsSchema>;
 
 export const FyEventSourceSchema = z.string().min(1);
 
@@ -1117,7 +1109,6 @@ const StartSessionRequestShapeSchema = z.discriminatedUnion('mode', [
 ]);
 
 export const StartSessionRequestSchema = StartSessionRequestShapeSchema;
-export type StartSessionRequest = z.infer<typeof StartSessionRequestShapeSchema>;
 export type StartSessionRequestInput = z.input<typeof StartSessionRequestShapeSchema>;
 
 /** Client-authored fields only; actor identity and idempotency come from headers. */
@@ -1211,7 +1202,6 @@ export const RenameSessionRequestSchema = z
       context.addIssue({ code: 'custom', message: 'name, teammate, or clearParent is required' });
     }
   });
-export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>;
 
 /**
  * `POST /v1/sessions/:sessionId/revoke-credential` — a person cuts one ferret off at once

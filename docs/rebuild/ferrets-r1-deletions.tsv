@@ -1,0 +1,74 @@
+path	owner	reason
+packages/core/ferrets/daemon/lib/fleet-refresh/index.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
+packages/core/ferrets/daemon/lib/fleet-refresh/service.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
+packages/core/ferrets/daemon/lib/fleet/agent-control.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/daemon/lib/fleet/mutations.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/daemon/lib/fleet/start-resolution.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/daemon/lib/fleet/wire.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/daemon/lib/runtime/mounts/agent-control.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/names.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/session-addressing.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/session-control.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/session-rename.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/session-resume.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/sessions.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/daemon/lib/runtime/mounts/system-session-control.ts	Learning/Packs	system-session orchestration belongs to the plugin starting it; callsign issuer remains in Ferrets
+packages/core/ferrets/daemon/modules/names.ts	Kernel module host; active Ferrets names route	superseded module bootstrap/router harness
+packages/core/ferrets/tests/integration/daemon/fleet/account-model-files.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/account-stores-fixture.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/clone-world.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/config-files-fixture.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/fenced-source.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/manifest-file.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/runtime-ids-file.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/runtime-session-records.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/setup-files.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/integration/daemon/fleet/setup-journey.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/realworld/daemon/session-document-watch.test.ts	Kernel state/watch host	real host watcher and storage bootstrap moved to Kernel
+packages/core/ferrets/tests/unit/daemon/fleet-refresh/checking-row.test.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
+packages/core/ferrets/tests/unit/daemon/fleet-refresh/service.test.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
+packages/core/ferrets/tests/unit/daemon/fleet/account-changes.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/agent-control.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/catalog-service.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/catalog.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/codex-runtime.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/credentials-service.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/disable-expiry.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/disabled-view.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/launch-environment.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/launch-renewal.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/proposals.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/publication.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/redact-differential.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/redact-false-hits.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/resolved-view.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/runtime-sessions.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/secret-references.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/setup-service.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/start-resolution.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/state-home-fence-contract.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/tool-install.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/wire.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/modules/names/fixture.ts	Kernel module host; active Ferrets names route	superseded module bootstrap/router harness
+packages/core/ferrets/tests/unit/daemon/modules/names/route-contract.ts	Kernel module host; active Ferrets names route	superseded module bootstrap/router harness
+packages/core/ferrets/tests/unit/daemon/names/auto-title.test.ts	Conversation/Board	message/card-driven title updates belong to the conversation and card owners
+packages/core/ferrets/tests/unit/daemon/names/auto-titling-send-channel.test.ts	Conversation/Board	message/card-driven title updates belong to the conversation and card owners
+packages/core/ferrets/tests/unit/daemon/protocol/fork-fixtures.ts	Ferrets transfer contract	unreferenced fixture for removed protocol import; current transfer contract tests retained
+packages/core/ferrets/tests/unit/daemon/protocol/session-list-sharing.test.ts	Kernel CLI transport; Ferrets R502	former shared protocol client removed; current R502 held-list tests retained
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/agent-control.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/names.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/session-addressing.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/session-control.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/session-mounts-branches.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/session-rename.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/session-resume.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/runtime/mounts/sessions.test.ts	Kernel HTTP host; active Ferrets routes	superseded router/context harness; live handlers are daemon/index.ts and unit/daemon/ferrets route tests
+packages/core/ferrets/tests/unit/daemon/sub-ferret/agenda.test.ts	Agenda	subject moved; lineage remains tested in Ferrets registry and lineage tests
+packages/core/ferrets/tests/unit/daemon/sub-ferret/board.test.ts	Board	subject moved; lineage remains tested in Ferrets registry and lineage tests
+packages/core/ferrets/tests/unit/daemon/sub-ferret/nudges.test.ts	Board/Conversation	subject moved; lineage remains tested in Ferrets registry and lineage tests
+packages/core/ferrets/tests/unit/daemon/sub-ferret/lineage.test.ts#agenda-tests	Agenda	Removed Agenda service cases; retained pure Ferrets lineage cycle/depth/self tests
+packages/core/ferrets/tests/unit/daemon/names/system-callsigns.test.ts#system-session-orchestration	Learning/Packs	Removed plugin start orchestration; retained callsign issuance and persistence tests
+packages/core/ferrets/tests/unit/cli/session/controllers.test.ts#V-0432	Conversation	Removed copied compaction controller test; Conversation owns V-0432; no Ferrets guarantee row moved
+packages/core/ferrets/cli/lib/session/compact-at.ts	Conversation	Removed duplicate compaction controller; Z1 CLI absence regression retained
+packages/core/ferrets/daemon/lib/names/system-callsigns.ts#startWithSystemCallsign	Learning/Packs	Removed orphan plugin start orchestration helper; callsign issuer remains
+packages/core/ferrets/daemon/lib/sub-ferret/index.ts#board-agenda-policy	Board/Agenda	Removed unused board/agenda refusal and nudge helpers; Ferrets registry and pure lineage remain

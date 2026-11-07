@@ -1,4 +1,4 @@
-import type { SerialExecutor } from '../../../src/lib/index.ts';
+import type { SerialExecutor } from '../../../../daemon/lib/ports.ts';
 import type { SystemCallsignCounters, SystemCallsignCounterStore } from '../../../../daemon/lib/names/index.ts';
 import { SystemCallsignIssuer } from '../../../../daemon/lib/names/index.ts';
 

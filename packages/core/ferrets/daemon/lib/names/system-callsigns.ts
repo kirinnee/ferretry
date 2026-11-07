@@ -51,22 +51,3 @@ export class SystemCallsignIssuer {
     });
   }
 }
-
-/**
- * Starts a system session under its own callsign: `start` is handed the id, and when the start is
- * refused because that id was taken the next one is issued and the start retried ONCE. Any other
- * failure, and a second refusal, reach the caller unchanged.
- */
-export async function startWithSystemCallsign<T>(
-  issuer: SystemCallsignIssuer,
-  prefix: SystemCallsignPrefix,
-  isTaken: (error: unknown) => boolean,
-  start: (teammate: string) => Promise<T>,
-): Promise<T> {
-  try {
-    return await start(await issuer.next(prefix));
-  } catch (error) {
-    if (!isTaken(error)) throw error;
-    return await start(await issuer.next(prefix));
-  }
-}

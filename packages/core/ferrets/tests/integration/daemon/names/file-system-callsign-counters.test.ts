@@ -3,9 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
-import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { nameFiles } from '../../../support/daemon/name-files.ts';
 import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/index.ts';
-import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 
 /**
  * The system-callsign counters over a real state home: what a restart reads back, and that a missing or
@@ -17,9 +16,8 @@ const homes = new Set<string>();
 async function fixture(): Promise<{ readonly file: string; readonly counters: FileSystemCallsignCounters }> {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-system-callsigns-'));
   homes.add(home);
-  const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
-  const file = join(paths.state, 'system-callsigns.json');
-  return { file, counters: new FileSystemCallsignCounters(file, new StateFileSystem(paths)) };
+  const file = join(home, 'state', 'system-callsigns.json');
+  return { file, counters: new FileSystemCallsignCounters(file, nameFiles) };
 }
 
 async function plant(file: string, text: string): Promise<void> {

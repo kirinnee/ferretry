@@ -3,17 +3,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
-import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { nameFiles } from '../../../support/daemon/name-files.ts';
 import { FileNameClaimStore } from '../../../../daemon/adapters/names/index.ts';
-import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import { KeyedSerialExecutor } from '../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import {
   CALLSIGN_WINDOW_MS,
-  createFoundationPaths,
   DEFAULT_CALLSIGN_POOL,
   NameAllocator,
   type NameClaim,
-  resolveStateHome,
-} from '../../../src/lib/index.ts';
+} from '../../../../daemon/lib/names/index.ts';
 
 /**
  * The callsign ledger, over a real state home and the REAL allocator above it.
@@ -34,9 +32,8 @@ async function fixture(live: readonly NameClaim[] = []): Promise<{
 }> {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-callsigns-'));
   homes.add(home);
-  const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
-  const file = join(paths.state, 'callsigns.json');
-  const store = new FileNameClaimStore(file, new StateFileSystem(paths), new KeyedSerialExecutor(), async () => live);
+  const file = join(home, 'state', 'callsigns.json');
+  const store = new FileNameClaimStore(file, nameFiles, new KeyedSerialExecutor(), async () => live);
   // A fixed start index, so a case can assert exactly which callsign the pool hands over. Production
   // rotates it; the ORDER it walks from there is the same either way.
   return { file, store, allocator: new NameAllocator(store, { nextIndex: () => 0 }) };

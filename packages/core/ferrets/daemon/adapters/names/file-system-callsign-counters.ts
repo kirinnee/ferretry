@@ -16,7 +16,7 @@ const sequence = z.number().int().min(0).max(SYSTEM_CALLSIGN_MAX_SEQUENCE);
 export class FileSystemCallsignCounters implements SystemCallsignCounterStore {
   constructor(
     private readonly file: string,
-    private readonly files: FileSystemPort,
+    private readonly files: Pick<FileSystemPort, 'readText' | 'writeTextAtomic'>,
   ) {}
 
   async read(): Promise<SystemCallsignCounters> {

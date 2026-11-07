@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import { NameClaimSchema } from '../../../contract/state.ts';
 import type { FileSystemPort, SerialExecutor } from '../../lib/ports.ts';
-import {
-  type NameClaim,
-  type NameClaimAttempt,
-  type NameClaimStore,
-} from '../../lib/names/index.ts';
+import { type NameClaim, type NameClaimAttempt, type NameClaimStore } from '../../lib/names/index.ts';
 
 /**
  * The callsign reservation ledger, in one file inside the state home.
@@ -37,7 +33,7 @@ export type HeldCallsigns = () => Promise<readonly NameClaim[]>;
 export class FileNameClaimStore implements NameClaimStore {
   constructor(
     private readonly file: string,
-    private readonly files: FileSystemPort,
+    private readonly files: Pick<FileSystemPort, 'readText' | 'writeTextAtomic'>,
     private readonly executor: SerialExecutor,
     private readonly held: HeldCallsigns,
   ) {}
