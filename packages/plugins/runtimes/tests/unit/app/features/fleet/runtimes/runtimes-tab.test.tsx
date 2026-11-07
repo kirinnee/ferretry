@@ -6,6 +6,7 @@ import {
   type RuntimeView,
 } from '../../../../../../contract/index.ts';
 import { launchHref, RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
+import { CONVERSATIONS_HREF } from '../../../../../../app/lib/conversations-link.ts';
 import type { RuntimesClient } from '../../../../../../app/lib/client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
@@ -534,17 +535,13 @@ describe('Launch', () => {
   });
 });
 
-// GAP(conversation): the button and screen are gone from this tab; the verb is now Conversation's `fy link` (V-0285).
 describe('Runtimes tab › Import conversations', () => {
-  it.skip('swaps to the picker next to Add runtime, and Back returns to the list … pending port: Conversation fy link (V-0285)', async () => {
+  it('V-0285 links to Conversation’s links screen, where `fy link` is drawn, next to Add runtime', async () => {
     const view = await open();
-    await click(view.container, '[data-import-conversations-open]');
-    expect(text(view.container, '[data-import-conversations] h3')).toBe('Import conversations');
-    await view.unmount();
-  });
-
-  it('offers no Import conversations button on the tab any more', async () => {
-    const view = await open();
+    const link = must(view.container.querySelector<HTMLAnchorElement>('a[data-import-conversations-link]'), 'link');
+    expect(link.textContent).toBe('Import conversations');
+    expect(link.getAttribute('href')).toBe('/links');
+    expect(link.getAttribute('href')).toBe(CONVERSATIONS_HREF);
     expect(view.container.querySelector('[data-import-conversations-open]')).toBeNull();
     await view.unmount();
   });
