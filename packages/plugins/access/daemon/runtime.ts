@@ -82,7 +82,7 @@ import {
   StepUpService,
 } from './lib/step-up/index.ts';
 import type { ApiRoute } from './lib/wire.ts';
-import { type AccessStepUpProvider, stepUpProvider } from './step-up-provider.ts';
+import { stepUpProvider } from './step-up-provider.ts';
 
 /**
  * What Access needs from the host that no kernel or plugin port gives yet (sent to the lead): the daemon identity
@@ -422,12 +422,8 @@ export class AccessRuntime {
     generation: () => this.#generation,
   };
 
-  /** `step-up:device`: the passkeys a device may answer with. Verification is Access's own step-up service. */
-  readonly witness: StepUpWitness & AccessStepUpProvider = {
-    ...stepUpProvider(() => this.#current?.stepUp),
-    passkeys: () => 'unknown',
-    verify: async () => ({ refused: 'not-verified' }),
-  };
+  /** `step-up:device`: Gate's `StepUpWitness`, answered by Access's own step-up service (fail closed while none is open). */
+  readonly witness: StepUpWitness = stepUpProvider(() => this.#current?.stepUp);
 
   /** What other plugins may ask of Access (Catalogs' verifier, Agenda's buzz). */
   readonly port: AccessApi = {

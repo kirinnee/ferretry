@@ -15,6 +15,7 @@ import {
   LIMITED_DEVICE_GRANTS,
   STEP_UP_ACTS,
 } from '@ferretry/core-gate/contract';
+import { stepUpWitnessConformance } from '@ferretry/core-gate/contract/testing';
 import type {
   CarrierKey,
   EventDef,
@@ -916,4 +917,73 @@ test('G141 a malformed grants field fails the device document closed, and every 
     expect([response.status, jsonBody(response).code]).toEqual([503, 'plugin_failed']);
     expect(damaged.runtime.credentials.standing(device.deviceId as HolderId, damaged.clock.now())).toBe('unknown');
   }
+});
+
+// ─── Gate's StepUpWitness, answered by Access's REAL witness (production path; no fake) ───────────────────────────
+
+/**
+ * Gate's `step-up` conformance suite against `AccessRuntime.witness`: every copy of the app that "proved a passkey"
+ * does so through the real ceremony (options, a software authenticator's assertion, the real WebAuthn verifier, the
+ * real registry), on a copy with a live session.
+ */
+stepUpWitnessConformance('AccessRuntime.witness', async () => {
+  const p = await prepared();
+  let signCount = 0;
+  let copies = 0;
+  return {
+    witness: p.w.runtime.witness,
+    proved: async act => {
+      copies += 1;
+      const watch = watcher(`conformance-copy-${copies}`);
+      p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, watch.watch);
+      const subject = { deviceId: p.device.deviceId, appSession: watch.watch.appSession };
+      const caller = { device: subject, hostLocal: false };
+      const options = await p.wired.stepUp.stepUpOptions(caller, p.origin, act);
+      if (!options.ok) throw new Error('options refused');
+      signCount += 1;
+      const done = await p.wired.stepUp.stepUp(caller, await signed(p, options.value, signCount));
+      if (!done.ok) throw new Error('the ceremony was refused');
+      return subject;
+    },
+  };
+});
+
+test('the witness hands a kept proof as its holder, claims it once, and re-verifies it against the paired device', async () => {
+  const STAGE = `srs_${'d'.repeat(24)}`;
+  const CHALLENGE = new Uint8Array(32).fill(5);
+  const p = await prepared();
+  const watch = watcher('stored-proof-copy');
+  const release = p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, watch.watch);
+  const subject = { deviceId: p.device.deviceId, appSession: watch.watch.appSession };
+  const caller = { device: subject, hostLocal: false };
+  const options = await p.wired.stepUp.stepUpOptions(
+    caller,
+    p.origin,
+    STEP_UP_ACTS.approveSignInRule,
+    STAGE as never,
+    CHALLENGE,
+  );
+  if (!options.ok) throw new Error('options refused');
+  expect((await p.wired.stepUp.stepUp(caller, await signed(p, options.value))).ok).toBe(true);
+  const witness = p.w.runtime.witness;
+  // A different challenge, or a stage it was not proved for, takes nothing and spends nothing.
+  expect(
+    witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, STAGE as never, new Uint8Array(32).fill(6)),
+  ).toBeUndefined();
+  expect(
+    witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, `srs_${'e'.repeat(24)}` as never, CHALLENGE),
+  ).toBeUndefined();
+  const kept = witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, STAGE as never, CHALLENGE);
+  if (kept === undefined) throw new Error('expected the kept proof');
+  expect(kept.holder).toBe(p.device.deviceId as HolderId);
+  expect(Object.keys(kept).sort()).toEqual(
+    ['authenticatorData', 'clientDataJSON', 'credentialId', 'holder', 'signature'].sort(),
+  );
+  expect(witness.claimStoredProof(subject, STEP_UP_ACTS.approveSignInRule, STAGE as never, CHALLENGE)).toBeUndefined();
+  expect(await witness.verifyStoredProof(kept, CHALLENGE)).toBe(true);
+  expect(await witness.verifyStoredProof(kept, new Uint8Array(32).fill(6))).toBe(false);
+  // The holder must still be paired: after a revocation the same evidence verifies for nobody.
+  await revoke(p.w, p.device.deviceId);
+  expect(await witness.verifyStoredProof(kept, CHALLENGE)).toBe(false);
+  release?.();
 });
