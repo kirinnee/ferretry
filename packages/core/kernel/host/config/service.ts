@@ -27,6 +27,7 @@
  * Every load and every write runs one at a time, so two of them can never each decide against a record the other is
  * about to replace.
  */
+import { secretReferencesIn } from '../secrets.ts';
 import { createHash } from 'node:crypto';
 import { type Duration, milliseconds } from '@ferretry/std';
 import type {
@@ -196,6 +197,11 @@ export interface ConfigFiles {
   publishSchemas(): Promise<void>;
   /** The writer over every declared file, as Gate receives it (`kernel.configFiles`). */
   writer(): ConfigFilesWriter;
+  /**
+   * Every `${secret:NAME}` the plugin's OWN files name, as they are IN EFFECT (an edit held for the owner names
+   * nothing yet): what `kernel.secrets` checks a name against.
+   */
+  secretReferences(plugin: string): ReadonlySet<string>;
 }
 
 /** A write result as the contract says it: never thrown, `conflict` on its own. */
@@ -795,6 +801,12 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     write,
     remove,
     read,
+    secretReferences: plugin => {
+      const named = new Set<string>();
+      for (const entry of settled.values())
+        if (entry.slot.declaration.plugin === plugin) secretReferencesIn(entry.evaluated.value, named);
+      return named;
+    },
     held: () => heldOf(settled),
     confirm,
     discard,

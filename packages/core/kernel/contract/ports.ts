@@ -1,3 +1,4 @@
+import type { SecretsPort } from './secrets.ts';
 import type { Duration, Instant, Result } from '@ferretry/std';
 import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
@@ -30,6 +31,8 @@ export interface KernelPorts {
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
   readonly paths: PathsPort;
+  /** This plugin's OWN secrets, for its own daemon-side use: declared, named by its own config, known to the Vault. */
+  readonly secrets: SecretsPort;
   /**
    * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
    * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.

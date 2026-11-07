@@ -5,6 +5,8 @@ import {
   AdmissionPort,
   type ChildEnvironmentOpener,
   ChildEnvironmentPort,
+  SecretResolverPort,
+  type SecretResolver,
   InputHoldsPort,
   OutputGuardPort,
   RedactionPort,
@@ -62,6 +64,7 @@ import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
+import { ownSecretsPort } from './secrets.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
@@ -115,6 +118,8 @@ export interface HostConfig {
   writer?(): ConfigFilesWriter;
   reload(): Promise<void>;
   startWatching?(): () => void;
+  /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
+  secretReferences?(plugin: string): ReadonlySet<string>;
 }
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
@@ -379,6 +384,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     redaction?: Redaction;
     workFolders?: WorkFolders;
     childEnvironments?: ChildEnvironmentOpener;
+    secretResolver?: SecretResolver;
   } = {};
   const act = createActRunner(() => bound.holds, ids);
   const redaction: Redaction = {
@@ -448,6 +454,11 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     ),
     identity: identityPort,
     paths: ownerPaths,
+    secrets: ownSecretsPort(
+      manifest.permissions?.secrets ?? [],
+      () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
+      () => bound.secretResolver,
+    ),
     signer: signerFor(manifest.id, sessionSigner),
     ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
     act,
@@ -561,6 +572,8 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const workFolders = boundValue(WorkFoldersPort);
   const childEnvironments = boundValue(ChildEnvironmentPort);
   if (childEnvironments !== undefined) bound.childEnvironments = childEnvironments;
+  const secretResolver = boundValue(SecretResolverPort);
+  if (secretResolver !== undefined) bound.secretResolver = secretResolver;
   if (admission !== undefined) {
     bound.admission = admission;
     judgeAdmission.current = admission;

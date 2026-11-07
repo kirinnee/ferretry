@@ -1,3 +1,4 @@
+import { ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { hours, instantFromEpochMs } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
@@ -103,6 +104,8 @@ export interface TestHostOptions {
   readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
+  /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
+  readonly vault?: Readonly<Record<string, string>>;
 }
 
 export interface TestResponse {
@@ -730,6 +733,17 @@ async function start(world: World): Promise<TestHost> {
       },
       identity,
       paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
+      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
+      secrets: ownSecretsPort(
+        manifest.permissions?.secrets ?? [],
+        () => {
+          const named = new Set<string>();
+          for (const def of manifest.data?.config ?? [])
+            secretReferencesIn(world.config.get(def.shape === 'file' ? def.file : def.collection), named);
+          return named;
+        },
+        () => (options.vault === undefined ? undefined : { resolve: async name => options.vault?.[name] }),
+      ),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,
