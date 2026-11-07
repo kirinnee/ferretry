@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
+import { threadWorkers } from '../../support/thread-workers.ts';
+import { wallClock } from '../../support/wall-clock.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
@@ -20,8 +22,8 @@ import { waitFor } from '../../support/wait-for.ts';
  */
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-const node = Bun.which('node');
-const WORKER = join(import.meta.dir, '../../../../bin/browser-worker.ts');
+/** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
+const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
 
 let root = '';
 let site: ReturnType<typeof Bun.serve>;
@@ -30,7 +32,7 @@ let base = '';
 
 describe.if(process.platform === 'linux')('the agent browser over its DevTools pipe, in a real Chrome', () => {
   beforeAll(async () => {
-    if (chrome === null || node === null) throw new Error('this test needs a real Chrome and Node on PATH');
+    if (chrome === null) throw new Error('this test needs a real Chrome on PATH');
     root = await mkdtemp(join(tmpdir(), 'ferretry-agent-pipe-'));
     site = Bun.serve({
       port: 0,
@@ -45,8 +47,8 @@ describe.if(process.platform === 'linux')('the agent browser over its DevTools p
       { get: async id => (id === 's1' ? {} : undefined) },
       new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
-        { kind: 'source', entry: WORKER },
-        node,
+        WORKERS.start,
+        wallClock(),
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
         { mode: async () => 'headless', platform: 'linux', transport: async () => 'pipe' },
@@ -75,7 +77,7 @@ describe.if(process.platform === 'linux')('the agent browser over its DevTools p
     const read = await browser.actOnPage('s1', 'piped', { action: 'read', selector: '#said' });
     await waitFor(() => frames.length > 0, 'the viewer to receive a screencast frame');
     viewer.detach();
-    const record: unknown = JSON.parse(await readFile(join(root, 'browser', 'profile.lock'), 'utf8'));
+    const record: unknown = JSON.parse(await readFile(join(root, 'profile.lock'), 'utf8'));
     const chromePid = (record as { readonly chromePid: number }).chromePid;
     const started = (await readFile(`/proc/${String(chromePid)}/cmdline`, 'utf8')).split('\0');
 

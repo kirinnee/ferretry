@@ -12,18 +12,19 @@ import {
 import { BrowserWorkerClient } from '../../../daemon/worker/client.ts';
 import { BrowserControlError } from '../../../daemon/worker/control/index.ts';
 import type { ResolvedBrowserProxy } from '../../../daemon/proxy/index.ts';
-import type { BrowserWorkerProgram } from '../../../../src/lib/browser/runtime/index.ts'; // PORT: unresolved
 import { type BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import { BrowserTransportError } from '../../../daemon/worker/protocol.ts';
+import { threadWorkers } from '../../support/thread-workers.ts';
+import { wallClock } from '../../support/wall-clock.ts';
 
-/** The same scriptable worker the transport tier drives, reached here through the launcher's OWN
- *  default wiring rather than an injected one. */
-const WORKER_ENTRY: BrowserWorkerProgram = {
-  kind: 'source',
-  entry: join(import.meta.dir, '..', 'transport', 'fixtures', 'fake-worker.mjs'),
+/** The same scriptable worker the client tier drives, as a Bun worker thread the way `kernel.workers.start` makes
+ *  one, reached here through the launcher's OWN default wiring rather than an injected one. */
+const THREADS = threadWorkers(new URL('./fixtures/fake-worker.mjs', import.meta.url));
+/** A worker the injected `connectWorker` stands in for, so it is never started. */
+const INJECTED_WORKER = () => {
+  throw new Error('the injected connectWorker starts no worker');
 };
-/** A worker the injected `connectWorker` stands in for, so its path is never spawned. */
-const INJECTED_WORKER: BrowserWorkerProgram = { kind: 'source', entry: '/worker.ts' };
+const CLOCK = wallClock();
 
 /** The shipped launcher gives a Chrome that ignores SIGTERM two seconds before SIGKILL; these cases only need the escalation. */
 const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250 };
@@ -130,7 +131,7 @@ function environment(chrome: string): Record<string, string | undefined> {
  * later assertion needs can be captured at all.
  */
 async function leasedChromePid(root: string): Promise<number> {
-  const record: unknown = JSON.parse(await readFile(join(root, 'browser', 'profile.lock'), 'utf8'));
+  const record: unknown = JSON.parse(await readFile(join(root, 'profile.lock'), 'utf8'));
   const pid = (record as { readonly chromePid?: unknown }).chromePid;
   should(pid).be.a.Number();
   return pid as number;
@@ -161,7 +162,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
       async options => {
         calls.push(`worker:${options.endpoint}`);
@@ -186,7 +187,7 @@ describe('NodeSessionBrowserLauncher', () => {
     roots.push(root);
     const calls: string[] = [];
     const facts = {
-      kind: 'browser' as const,
+      kind: 'page' as const,
       pageId: 'p1',
       origin: 'https://example.test',
       secure: true,
@@ -236,7 +237,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       async () => worker as never,
       PIPE,
@@ -285,7 +286,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       async options => {
         calls.push(`worker:${options.endpoint}`);
@@ -325,7 +326,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => {
           throw new Error('the worker must not be reached');
@@ -354,7 +355,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       async () => worker as never,
       {
@@ -371,24 +372,24 @@ describe('NodeSessionBrowserLauncher', () => {
     should(started).not.containEql('--remote-debugging-pipe');
   });
 
-  it('should connect its own worker client, so composition names only a runtime and an entry point', async () => {
+  it('should connect its own worker client, so composition names only how to start the worker thread', async () => {
     // THE POINT OF THIS CASE IS THE ARGUMENT IT DOES NOT PASS. The case above injects a `connectWorker`,
-    // which proves the lease and the CDP wait but leaves the launcher's own default — the one thing
-    // `bin/fyd.ts` actually relies on — unexercised: composition hands this class a runtime and a
-    // worker entry and nothing else, so if the default did not spawn and handshake a worker, a daemon
-    // would compose cleanly and fail only when a session first asked for a browser.
+    // which proves the lease and the CDP wait but leaves the launcher's own default — the one thing the
+    // daemon half actually relies on — unexercised: composition hands this class `kernel.workers.start` and
+    // nothing else, so if the default did not start and handshake a worker, a daemon would compose cleanly
+    // and fail only when a session first asked for a browser.
     // Arrange
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
-    const launcher = new NodeSessionBrowserLauncher(new BrowserProfileStore(root), WORKER_ENTRY, process.execPath, {
+    const launcher = new NodeSessionBrowserLauncher(new BrowserProfileStore(root), THREADS.start, CLOCK, {
       FY_CHROME_BIN: chrome,
       DISPLAY: ':99',
       PATH: process.env.PATH,
       HOME: process.env.HOME,
     });
 
-    // Act — a real worker process, spawned and handshaken by the launcher's own client.
+    // Act — a real worker thread, started and handshaken by the launcher's own client.
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const snapshot = await browser.navigate('p1', 'https://example.test/');
@@ -406,8 +407,8 @@ describe('NodeSessionBrowserLauncher', () => {
     ): NodeSessionBrowserLauncher {
       return new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
-        WORKER_ENTRY,
-        process.execPath,
+        THREADS.start,
+        CLOCK,
         environment(chrome),
         async options => {
           const worker = await BrowserWorkerClient.connect(options);
@@ -460,7 +461,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => ({ unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined }) as never,
         PIPE,
@@ -485,12 +486,13 @@ describe('NodeSessionBrowserLauncher', () => {
       roots.push(root);
       const workers: BrowserWorkerClient[] = [];
       const launcher = pipeLauncher(root, chrome, workers);
+      const firstThread = THREADS.started();
       const first = await launcher.launch({ width: 800, height: 600 });
       opened.push(first);
       const firstChrome = await leasedChromePid(root);
 
       // Act — the worker dies without a word: the only end of the pipe besides Chrome's goes with it.
-      process.kill((workers[0] as BrowserWorkerClient).pid, 'SIGKILL');
+      THREADS.crash(firstThread);
       await first.unexpectedExit;
       const second = await launcher.launch({ width: 800, height: 600 });
       opened.push(second);
@@ -498,7 +500,7 @@ describe('NodeSessionBrowserLauncher', () => {
       // Assert — the first pair is gone and the profile was freed for the second, which is a new Chrome
       // and a new worker that answer over a new pipe.
       should(alive(firstChrome)).be.false();
-      should(alive((workers[0] as BrowserWorkerClient).pid)).be.false();
+      should(THREADS.terminated(firstThread)).be.true();
       const secondChrome = await leasedChromePid(root);
       should(secondChrome).not.equal(firstChrome);
       should(workers).have.length(2);
@@ -507,47 +509,19 @@ describe('NodeSessionBrowserLauncher', () => {
     });
   });
 
-  it('should refuse a missing worker with its remedy before it leases the profile or starts Chrome', async () => {
-    // Arrange — a compiled daemon with no worker beside it: the composition root resolves `missing`.
-    const chrome = await fakeChrome();
-    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
-    roots.push(root);
-    const message = 'this install has no browser worker; reinstall Ferretry';
-    const launcher = new NodeSessionBrowserLauncher(
-      new BrowserProfileStore(root),
-      { kind: 'missing', message },
-      process.execPath,
-      environment(chrome),
-      async () => {
-        throw new Error('no worker may be connected when none exists');
-      },
-    );
-
-    // Act
-    const launched = launcher.launch({ width: 800, height: 600 });
-
-    // Assert — the refusal is the plain sentence, and nothing was leased on the way to it.
-    await should(launched).be.rejectedWith(message);
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'next' })).have.property('sessionId', 'next');
-  });
-
-  it('should run a compiled worker directly, and Chrome headless on every platform — even with a display', async () => {
+  it('should run Chrome headless on every platform — even with a display', async () => {
     // Arrange — a Chrome stand-in that records the arguments it was started with.
     const chrome = await fakeChrome({ recordArguments: true });
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
-    const connected: { workerEntry: string; workerExecutable?: boolean }[] = [];
     const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      { kind: 'executable', path: '/opt/ferretry/fyd-browser-worker' },
-      process.execPath,
+      INJECTED_WORKER,
+      CLOCK,
       // A display IS available: the agent browser is headless anyway, so every window keeps painting.
       { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
-      async options => {
-        connected.push({ workerEntry: options.workerEntry, workerExecutable: options.workerExecutable });
-        return worker as never;
-      },
+      async () => worker as never,
     );
 
     // Act
@@ -555,7 +529,6 @@ describe('NodeSessionBrowserLauncher', () => {
     opened.push(browser);
 
     // Assert
-    should(connected).deepEqual([{ workerEntry: '/opt/ferretry/fyd-browser-worker', workerExecutable: true }]);
     const started = await readFile(`${chrome}.args`, 'utf8');
     should(started).containEql('--headless=new');
     should(started).not.containEql('--ozone-platform=x11');
@@ -583,7 +556,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => worker as never,
         { ...PORT, ports, proxy: async () => proxy },
@@ -633,7 +606,7 @@ describe('NodeSessionBrowserLauncher', () => {
         const launcher = new NodeSessionBrowserLauncher(
           new BrowserProfileStore(root),
           INJECTED_WORKER,
-          process.execPath,
+          CLOCK,
           environment(chrome),
           async () => worker as never,
           { ...PORT, ports: fixed, checkFirewall, listenerProver: OWN_LISTENER },
@@ -657,7 +630,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(await fakeChrome()),
         async () => {
           throw new Error('no worker should start');
@@ -685,7 +658,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => worker as never,
         {
@@ -707,7 +680,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(await fakeChrome()),
         async () => {
           throw new Error('no worker should start');
@@ -732,7 +705,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => worker as never,
         { platform: 'linux', proxy: async () => proxy },
@@ -789,7 +762,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         // The host's own DISPLAY is set, and must never be what a real window draws on.
         environment(chrome),
         async () => worker as never,
@@ -904,7 +877,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
-    const launcher = new NodeSessionBrowserLauncher(new BrowserProfileStore(root), WORKER_ENTRY, process.execPath, {
+    const launcher = new NodeSessionBrowserLauncher(new BrowserProfileStore(root), THREADS.start, CLOCK, {
       FY_CHROME_BIN: chrome,
       DISPLAY: ':99',
       PATH: process.env.PATH,
@@ -945,8 +918,8 @@ describe('NodeSessionBrowserLauncher', () => {
     let worker: BrowserWorkerClient | undefined;
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      WORKER_ENTRY,
-      process.execPath,
+      THREADS.start,
+      CLOCK,
       environment(chrome),
       async options => {
         worker = await BrowserWorkerClient.connect(options);
@@ -969,7 +942,7 @@ describe('NodeSessionBrowserLauncher', () => {
     // caller that learns the browser died can never win a race against its own cleanup.
     should(code).equal(3);
     should(alive(chromePid)).be.false();
-    should(alive((worker as BrowserWorkerClient).pid)).be.false();
+    should(THREADS.terminated(THREADS.started() - 1)).be.true();
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
   });
 
@@ -983,8 +956,8 @@ describe('NodeSessionBrowserLauncher', () => {
     let worker: BrowserWorkerClient | undefined;
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      WORKER_ENTRY,
-      process.execPath,
+      THREADS.start,
+      CLOCK,
       environment(chrome),
       async options => {
         worker = await BrowserWorkerClient.connect(options);
@@ -1001,7 +974,7 @@ describe('NodeSessionBrowserLauncher', () => {
 
     // Assert
     should(alive(chromePid)).be.false();
-    should(alive((worker as BrowserWorkerClient).pid)).be.false();
+    should(THREADS.terminated(THREADS.started() - 1)).be.true();
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
   });
 
@@ -1016,8 +989,8 @@ describe('NodeSessionBrowserLauncher', () => {
     let worker: BrowserWorkerClient | undefined;
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      WORKER_ENTRY,
-      process.execPath,
+      THREADS.start,
+      CLOCK,
       environment(chrome),
       async options => {
         worker = await BrowserWorkerClient.connect(options);
@@ -1036,7 +1009,7 @@ describe('NodeSessionBrowserLauncher', () => {
 
     // Assert
     should(alive(chromePid)).be.false();
-    should(alive((worker as BrowserWorkerClient).pid)).be.false();
+    should(THREADS.terminated(THREADS.started() - 1)).be.true();
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
   });
 
@@ -1051,8 +1024,8 @@ describe('NodeSessionBrowserLauncher', () => {
     let chromePid = 0;
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      WORKER_ENTRY,
-      process.execPath,
+      THREADS.start,
+      CLOCK,
       environment(chrome),
       async () => {
         // Captured while the launch is still in flight: the failure deletes the lease record, and this
@@ -1089,7 +1062,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       async () => worker as never,
     );
@@ -1128,7 +1101,7 @@ describe('NodeSessionBrowserLauncher', () => {
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       async () => worker as never,
     );
@@ -1167,7 +1140,7 @@ exit 7
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       // What a real worker reports when the Chrome it was handed closed the pipe under it.
       async () => {
@@ -1202,7 +1175,7 @@ exit 7
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       INJECTED_WORKER,
-      process.execPath,
+      CLOCK,
       environment(chrome),
       async () => {
         throw new Error('the worker must not be reached');
@@ -1253,7 +1226,7 @@ exit 7
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => {
           chromePid = await leasedChromePid(root);
@@ -1280,7 +1253,7 @@ exit 7
       const launcher = new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         INJECTED_WORKER,
-        process.execPath,
+        CLOCK,
         environment(chrome),
         async () => ({ unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined }) as never,
       );
@@ -1297,7 +1270,7 @@ exit 7
 });
 
 describe('shared browser limits at the actual child launch seams', () => {
-  it('should wrap both children without losing their PIDs, lease or DevTools pipe', async () => {
+  it('should wrap Chrome, the one child, without losing its PID, lease or DevTools pipe', async () => {
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-browser-limits-'));
     roots.push(root);
@@ -1310,8 +1283,8 @@ describe('shared browser limits at the actual child launch seams', () => {
     const workers: BrowserWorkerClient[] = [];
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      WORKER_ENTRY,
-      process.execPath,
+      THREADS.start,
+      CLOCK,
       environment(chrome),
       async options => {
         const worker = await BrowserWorkerClient.connect(options);
@@ -1332,21 +1305,17 @@ describe('shared browser limits at the actual child launch seams', () => {
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const chromePid = await leasedChromePid(root);
-    const workerPid = (workers[0] as BrowserWorkerClient).pid;
-    should(planned).have.length(2);
+    // The worker is a thread of the daemon's own process now, so Chrome is the only command the planner wraps.
+    should(workers).have.length(1);
+    should(planned).have.length(1);
     should(planned[0]?.[0]).equal(chrome);
-    should(planned[1]?.slice(0, 3)).deepEqual([
-      process.execPath,
-      WORKER_ENTRY.kind === 'source' ? WORKER_ENTRY.entry : '',
-      'pipe',
-    ]);
     const actualPids = (await readFile(pidFile, 'utf8')).trim().split('\n').map(Number);
-    should(actualPids).deepEqual([chromePid, workerPid]);
+    should(actualPids).deepEqual([chromePid]);
     const answer = await browser.navigate('p1', 'cdp-round-trip');
     should(decodeURIComponent(answer.url)).containEql('"chrome":"FakeChrome/150.0"');
     await browser.close();
     should(alive(chromePid)).be.false();
-    should(alive(workerPid)).be.false();
+    should(THREADS.terminated(THREADS.started() - 1)).be.true();
     const next = await new BrowserProfileStore(root).acquire({ sessionId: 'again' });
     await next.release();
   });
@@ -1357,8 +1326,8 @@ describe('shared browser limits at the actual child launch seams', () => {
     roots.push(root);
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      WORKER_ENTRY,
-      process.execPath,
+      THREADS.start,
+      CLOCK,
       environment(chrome),
       undefined,
       {

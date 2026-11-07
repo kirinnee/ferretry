@@ -1,22 +1,28 @@
-// A scriptable stand-in for the real browser worker: it speaks the same JSON-lines protocol with no
+// A scriptable stand-in for the real browser worker THREAD: it speaks the same JSON-lines protocol with no
 // browser behind it, so the client's framing, timeouts, and lifecycle can be tested for real.
 //
-// The endpoint argument selects a launch behaviour; individual request methods select reply
-// behaviours. Nothing here touches the network, a browser, or any state outside this process.
+// The start message's endpoint selects a launch behaviour; individual request methods select reply
+// behaviours. Nothing here touches the network, a browser, or any state outside this thread.
 
-const endpoint = process.argv[2] ?? 'ready';
+/** The `start` message, the first one the client posts. */
+const start = await new Promise(resolve => {
+  const first = event => {
+    removeEventListener('message', first);
+    resolve(JSON.parse(event.data));
+  };
+  addEventListener('message', first);
+});
+const endpoint = start.endpoint ?? 'ready';
 
-if (endpoint === 'stubborn-close') {
-  // A real browser worker traps SIGTERM to close Chrome cleanly. This one never finishes, which is
-  // what makes SIGKILL escalation the only way out.
-  process.on('SIGTERM', () => {});
-  // stdin ending must not end the process either, or the escalation path is never reached.
-  process.stdin.on('end', () => {});
-  setInterval(() => {}, 1_000);
+/** Where the worker process exited, the thread says so, and then answers nothing more. */
+let gone = false;
+function exit(code) {
+  gone = true;
+  postMessage({ type: 'exit', code });
 }
 
 function emit(record) {
-  process.stdout.write(`${JSON.stringify(record)}\n`);
+  if (!gone) postMessage(`${JSON.stringify(record)}\n`);
 }
 
 function reply(id, ok, payload) {
@@ -55,18 +61,18 @@ function frame(overrides = {}) {
 }
 
 /**
- * The worker's end of Chrome's DevTools pipe, as the launcher hands it over: requests out on fd 3, replies in
- * on fd 4, each JSON object followed by a NUL. `Bun.file` because the daemon's ends are non-blocking sockets.
+ * The worker's end of Chrome's DevTools pipe, as the launcher hands it over in the start message: requests out on
+ * `toChrome`, replies in on `fromChrome`, each JSON object followed by a NUL. The thread shares the daemon's descriptors.
  */
 function chromePipe() {
-  const writer = Bun.file(3).writer();
+  const writer = Bun.file(start.cdpPipe.toChrome).writer();
   const waiting = new Map();
   let next = 1;
   let closed = false;
   void (async () => {
     const decoder = new TextDecoder();
     let pending = '';
-    for await (const chunk of Bun.file(4).stream()) {
+    for await (const chunk of Bun.file(start.cdpPipe.fromChrome).stream()) {
       pending += decoder.decode(chunk, { stream: true });
       for (let end = pending.indexOf('\0'); end !== -1; end = pending.indexOf('\0')) {
         const message = JSON.parse(pending.slice(0, end));
@@ -100,26 +106,26 @@ if (cdp !== undefined) {
     await cdp.call('Browser.getVersion');
   } catch (error) {
     emit({ type: 'fatal', error: error.message });
-    process.exit(1);
+    exit(1);
   }
 }
 
-if (endpoint === 'exit-during-launch') process.exit(7);
+if (endpoint === 'exit-during-launch') exit(7);
 if (endpoint === 'fatal') {
   emit({ type: 'fatal', error: 'chromium is missing\nstack line' });
 } else if (endpoint === 'overflow-during-launch') {
-  process.stdout.write('x'.repeat(4_096));
+  postMessage('x'.repeat(4_096));
 } else if (endpoint !== 'silent-launch') {
   // Junk before the handshake must not confuse the client.
-  process.stdout.write('not json at all\n');
+  postMessage('not json at all\n');
   emit({ type: 'unknown-record' });
   emit({ type: 'ready' });
 }
 
 let buffer = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => {
-  buffer += chunk;
+addEventListener('message', event => {
+  if (gone) return;
+  buffer += event.data;
   for (;;) {
     const newline = buffer.indexOf('\n');
     if (newline === -1) return;
@@ -320,21 +326,10 @@ function handle({ id, method, params }) {
       reply(id, true, { activePageId: 'p1', pages: [{ id: 'p1', url: 'https://example.test/', title: 'x' }] });
       return;
     case 'overflows':
-      process.stdout.write('x'.repeat(4_096));
-      return;
-    case 'environment':
-      // Reported through the snapshot params, so the test reads it back over the real protocol.
-      reply(
-        id,
-        true,
-        snapshot(
-          method,
-          Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, key === 'PATH' ? 'set' : value])),
-        ),
-      );
+      postMessage('x'.repeat(4_096));
       return;
     case 'crashes':
-      process.exit(3);
+      exit(3);
       return;
     case 'cdp-round-trip':
       // One more request over the pipe AFTER launch: the daemon has closed its copies by now, so an answer
@@ -365,7 +360,8 @@ function handle({ id, method, params }) {
       return;
     case 'close':
       reply(id, true, {});
-      if (endpoint !== 'stubborn-close') process.exit(0);
+      // A stubborn worker answers and never goes: only the client's terminate ends it.
+      if (endpoint !== 'stubborn-close') exit(0);
       return;
     default:
       reply(id, true, snapshot(method, params));

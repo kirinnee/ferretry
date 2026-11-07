@@ -23,7 +23,6 @@ import { waitFor } from '../../support/wait-for.ts';
  */
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-const node = Bun.which('node');
 const WORKER = join(import.meta.dir, '../../../../bin/browser-worker.ts');
 const sessions = new Set(['s1', 's2']);
 
@@ -73,7 +72,7 @@ async function cookieSeenBy(sessionId: string, page: string): Promise<string> {
 }
 
 beforeAll(async () => {
-  if (chrome === null || node === null) throw new Error('this test needs a real Chrome and Node on PATH');
+  if (chrome === null) throw new Error('this test needs a real Chrome on PATH');
   root = await mkdtemp(join(tmpdir(), 'ferretry-agent-browser-'));
   await mkdir(join(root, 'work'), { recursive: true });
   await mkdir(join(root, 'work', '.fy'), { recursive: true });

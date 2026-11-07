@@ -317,8 +317,8 @@ export default definePlugin({
       'x11vnc',
       'timeout',
     ],
-    /** Uploads come from the ferret's own folder; downloads and PDFs are saved to its downloads root (S51). */
-    roots: ['work', 'downloads'],
+    /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */
+    roots: ['work'],
     /** Chrome's own DevTools endpoint on loopback, which the launcher waits for. */
     network: ['127.0.0.1'],
   },

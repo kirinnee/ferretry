@@ -1193,10 +1193,19 @@ function parse(line: string): Request {
   };
 }
 
+/**
+ * Where the worker PROCESS exited, the thread says so: `{ type: 'exit', code }` is the client's `exited`, and the
+ * client then terminates the thread. A thread cannot end the daemon's process, so it never calls `process.exit`.
+ */
+function exit(code: number): void {
+  postMessage({ type: 'exit', code });
+}
+
 async function answer(request: Request): Promise<void> {
   try {
     const result = await run(request);
     send({ id: request.id, ok: true, result });
+    if (request.method === 'close') exit(0);
   } catch (error) {
     send({ id: request.id, ok: false, error: safeError(error) });
   }
@@ -1226,6 +1235,7 @@ function startOf(message: unknown): boolean {
 export async function startBrowserWorker(): Promise<void> {
   if (!endpoint) {
     send({ type: 'fatal', error: 'a CDP endpoint is required' });
+    exit(2);
     return;
   }
   try {
@@ -1241,6 +1251,7 @@ export async function startBrowserWorker(): Promise<void> {
     send({ type: 'ready' });
   } catch (error) {
     send({ type: 'fatal', error: safeError(error) });
+    exit(1);
   }
 }
 

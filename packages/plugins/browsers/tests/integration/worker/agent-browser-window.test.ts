@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
+import { threadWorkers } from '../../support/thread-workers.ts';
+import { wallClock } from '../../support/wall-clock.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runtime.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
@@ -21,9 +23,9 @@ import { waitFor } from '../../support/wait-for.ts';
  */
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-const node = Bun.which('node');
 const xvfb = Bun.which('Xvfb');
-const WORKER = join(import.meta.dir, '../../../../bin/browser-worker.ts');
+/** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
+const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
 
 let root = '';
 let site: ReturnType<typeof Bun.serve>;
@@ -33,7 +35,7 @@ let base = '';
 
 describe.if(process.platform === 'linux')('the agent browser as a real window, in a real Chrome', () => {
   beforeAll(async () => {
-    if (chrome === null || node === null || xvfb === null)
+    if (chrome === null || xvfb === null)
       throw new Error('this test needs a real Chrome, Node and Xvfb on PATH (the dev shell has all three)');
     root = await mkdtemp(join(tmpdir(), 'ferretry-agent-window-'));
     site = Bun.serve({
@@ -60,8 +62,8 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
       { get: async id => (id === 's1' ? {} : undefined) },
       new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
-        { kind: 'source', entry: WORKER },
-        node,
+        WORKERS.start,
+        wallClock(),
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
         // Over the loopback PORT, named outright: the default, and the transport whose `navigator.webdriver`

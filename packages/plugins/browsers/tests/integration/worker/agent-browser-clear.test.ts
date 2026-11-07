@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
+import { threadWorkers } from '../../support/thread-workers.ts';
+import { wallClock } from '../../support/wall-clock.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { type BrowserAutomation } from '../../../daemon/pages/automation.ts';
@@ -20,8 +22,8 @@ import { BrowserSessionService } from '../../../daemon/pages/service.ts';
  */
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-const node = Bun.which('node');
-const WORKER = join(import.meta.dir, '../../../../bin/browser-worker.ts');
+/** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
+const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
 const SECRET = 'correct-horse-battery-staple';
 
 const LOGIN = `<html><head><title>Sign in</title></head><body>
@@ -70,7 +72,7 @@ const jobOf = (facts: BrowserInputFacts) => ({
 
 describe.if(process.platform === 'linux')('a grant fill’s field emptying, in a real Chrome', () => {
   beforeAll(async () => {
-    if (chrome === null || node === null) throw new Error('this test needs a real Chrome and Node on PATH');
+    if (chrome === null) throw new Error('this test needs a real Chrome on PATH');
     root = await mkdtemp(join(tmpdir(), 'ferretry-grant-clear-'));
     site = Bun.serve({
       port: 0,
@@ -87,8 +89,8 @@ describe.if(process.platform === 'linux')('a grant fill’s field emptying, in a
       { get: async id => (id === 's1' ? {} : undefined) },
       new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
-        { kind: 'source', entry: WORKER },
-        node,
+        WORKERS.start,
+        wallClock(),
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
         { mode: async () => 'headless', platform: 'linux', transport: async () => 'pipe' },

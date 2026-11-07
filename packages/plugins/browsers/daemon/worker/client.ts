@@ -221,7 +221,7 @@ function workerChannel(handle: WorkerHandle): WorkerChannel {
           message !== null &&
           (message as { readonly type?: unknown }).type === 'exit'
         )
-          exit.resolve(0);
+          exit.resolve(Number((message as { readonly code?: unknown }).code ?? 0));
       });
     },
     exited: exit.promise,

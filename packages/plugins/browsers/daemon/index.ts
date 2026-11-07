@@ -141,8 +141,9 @@ export default implementDaemon(manifest, {
       browser: pages,
       control,
       kernel,
-      // GAP: "What agents may control" is Ferrets' and no port reads it yet; files and page scripts fail closed.
-      policy: { allows: async () => false },
+      // GAP: "What agents may control" is Ferrets' machine switches and no port reads them yet. Browsers is on (an
+      // enabled Browsers plugin is the owner's yes); Files and Page scripts, off by default today, fail closed.
+      policy: { allows: async kind => kind === 'browser' },
       files: rootFiles(kernel.roots, nodeStagedFiles),
       binaryName: 'fy',
     });
