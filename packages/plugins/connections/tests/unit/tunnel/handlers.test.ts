@@ -2,7 +2,7 @@ import { expect, it } from 'bun:test';
 import { headersFrom, queryFrom, type ApiRequest, type RouteHandler } from '@ferretry/kernel/contract';
 import { device, owner, testArrival, testPrincipal } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
-import { createConnectionB } from '../../../daemon/connection-b.ts';
+import { createConnectionB, verifiedWebRtcDevice } from '../../../daemon/connection-b.ts';
 
 function harness() {
   const offers: string[] = [];
@@ -101,4 +101,15 @@ it('R657 tunnel handlers parse a switch, persist it and answer its live view', a
   expect(h.writes).toEqual([true]);
   const response = await h.built.routes['GET /v1/tunnel']();
   expect(JSON.parse(response.body)).toMatchObject({ enabled: true, explicit: true, state: 'provisioning' });
+});
+
+it('R684 peer replacement keys come only from the kernel principal appSession', () => {
+  const h = harness();
+  const call = h.call('{"appSession":"untrusted-body"}', true);
+  expect(verifiedWebRtcDevice(call)).toBeUndefined();
+  const principal = call.request.principal;
+  if (principal === undefined) throw new Error('missing test principal');
+  const verified = { ...call, request: { ...call.request, principal: { ...principal, appSession: 'verified-page' } } };
+  expect(verifiedWebRtcDevice(verified)).toEqual({ deviceId: 'verified-holder', appSession: 'verified-page' });
+  expect(verifiedWebRtcDevice(h.call('{"appSession":"untrusted-body"}'))).toBeUndefined();
 });

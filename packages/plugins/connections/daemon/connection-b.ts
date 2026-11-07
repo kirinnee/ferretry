@@ -34,6 +34,15 @@ async function parseBody<Schema extends z.ZodType>(
   throw new ApiError(400, `the request body is invalid — ${detail}`, 'invalid_request', result.error.issues);
 }
 
+/** TODO(kernel contract): appSession is stamped from the mode's verified credential by the kernel fill-in. */
+export function verifiedWebRtcDevice(call: Parameters<RouteHandler>[0]): SessionDevice | undefined {
+  const principal = call.request.principal;
+  if (principal?.kind !== 'device') return undefined;
+  const appSession = (principal as typeof principal & { readonly appSession?: string }).appSession;
+  if (typeof appSession !== 'string' || appSession === '') return undefined;
+  return { deviceId: principal.holder, appSession };
+}
+
 /** B's copied lifecycles; Connections A composes these into the package's daemon half. */
 export function createConnectionB(deps: {
   readonly tunnel: TunnelCarrierDependencies;
