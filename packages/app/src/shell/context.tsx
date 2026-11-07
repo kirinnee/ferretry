@@ -11,6 +11,7 @@ import {
   type ThemePreferenceStore,
   themeAttribute,
 } from '../theme/preferences.ts';
+import type { ScrollMemory } from '../scroll/scroll-memory.ts';
 import type { ShellRuntime } from './runtime.ts';
 import { z } from 'zod';
 
@@ -23,6 +24,8 @@ export interface ShellModel {
   readonly plan: FramePlan;
   readonly viewport: Viewport;
   readonly themes: ThemePreferenceStore;
+  /** Where each page was scrolled, per history entry (`fy:app:scroll`, this tab only). */
+  readonly scroll: ScrollMemory;
 }
 
 const ShellContext = createContext<ShellModel | null>(null);
@@ -76,10 +79,11 @@ export interface ShellProviderProps {
   /** This device's local storage, for the `--device` layout override. */
   readonly storage: KeyValueStore | null;
   readonly browser: ShellWindow;
+  readonly scroll: ScrollMemory;
   readonly children: ReactNode;
 }
 
-export function ShellProvider({ runtime, themes, storage, browser, children }: ShellProviderProps) {
+export function ShellProvider({ runtime, themes, storage, browser, scroll, children }: ShellProviderProps) {
   const phone = useMedia(browser, PHONE_QUERY);
   const preference = useSyncExternalStore(themes.subscribe, () => themes.snapshot());
   const views = useMemo(() => viewsOf(runtime.surfaces), [runtime]);
@@ -94,8 +98,8 @@ export function ShellProvider({ runtime, themes, storage, browser, children }: S
   const plan = useMemo(() => planFrame(resolveLayout(layout.layout, viewport), views), [layout, viewport, views]);
   useAppliedTheme(browser, preference, plan.density);
   const model = useMemo<ShellModel>(
-    () => ({ runtime, views, routes, layout, plan, viewport, themes }),
-    [runtime, views, routes, layout, plan, viewport, themes],
+    () => ({ runtime, views, routes, layout, plan, viewport, themes, scroll }),
+    [runtime, views, routes, layout, plan, viewport, themes, scroll],
   );
   return <ShellContext.Provider value={model}>{children}</ShellContext.Provider>;
 }

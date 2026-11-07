@@ -14,6 +14,7 @@ import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { directDial, type SocketLike } from './session/direct-dial.ts';
 import { noDeviceClaims } from './session/device-claims.ts';
+import { ScrollMemory } from './scroll/scroll-memory.ts';
 import { SessionTransport } from './session/session-transport.ts';
 import { WebCryptoRelayCrypto } from './session/webcrypto.ts';
 import { App } from './shell/app.tsx';
@@ -30,6 +31,15 @@ if (!host) throw new Error('missing #root â€” the host document is not this appâ
 function localStore(): KeyValueStore | null {
   try {
     return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** This tab's sessionStorage (the router trail and scroll memory), or `null` where refused. */
+function tabStore(): KeyValueStore | null {
+  try {
+    return window.sessionStorage;
   } catch {
     return null;
   }
@@ -81,6 +91,6 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 createRoot(host).render(
   <StrictMode>
-    <App runtime={runtime} themes={themes} storage={storage} browser={window} />
+    <App runtime={runtime} themes={themes} storage={storage} browser={window} scroll={new ScrollMemory(tabStore())} />
   </StrictMode>,
 );

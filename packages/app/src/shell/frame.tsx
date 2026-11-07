@@ -11,6 +11,7 @@ import {
   Link,
   NotFoundPage,
 } from './pages.tsx';
+import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
 import { ScreenView, ShellLine } from './views.tsx';
 
 /**
@@ -135,9 +136,9 @@ function Side({ daemon }: { readonly daemon: string | undefined }) {
 }
 
 export function Frame() {
-  const { runtime, plan } = useShell();
+  const { runtime, plan, scroll } = useShell();
   useRuntimeVersion(runtime);
-  const { route } = useRouter();
+  const { route, entryKey } = useRouter();
   const daemon = routeDaemon(route);
   const whole = daemon === undefined ? undefined : runtime.wholeDaemonLine(daemon);
   return (
@@ -147,7 +148,9 @@ export function Frame() {
         <TopBar daemon={daemon} />
         <div className="fy-columns">
           <main className="fy-main" data-slot="main">
-            {whole === undefined ? <Main route={route} /> : <ShellLine tone="warn">{whole}</ShellLine>}
+            <PageScrollRegion entryKey={entryKey} memory={scroll}>
+              {whole === undefined ? <Main route={route} /> : <ShellLine tone="warn">{whole}</ShellLine>}
+            </PageScrollRegion>
           </main>
           {whole === undefined ? <Side daemon={daemon} /> : null}
         </div>

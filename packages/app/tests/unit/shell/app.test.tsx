@@ -7,6 +7,7 @@ import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
+import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { interact, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
@@ -122,7 +123,7 @@ describe('the app shell', () => {
     go('/app/');
     const { runtime, storage } = setup({});
     const view = await mount(
-      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} />,
+      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />,
     );
     expect(view.container.querySelector('h2')?.textContent).toBe('laptop');
     expect(view.container.textContent).toContain('laptop');
@@ -134,7 +135,7 @@ describe('the app shell', () => {
     built = 0;
     const { runtime, storage, transport } = setup({});
     const view = await mount(
-      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} />,
+      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />,
     );
     await settle();
     expect(transport.paths().slice(0, 2)).toEqual(['GET /v1/plugins', 'GET /v1/health']);
@@ -148,7 +149,7 @@ describe('the app shell', () => {
     built = 0;
     const { runtime, storage } = setup({ board: 'h-board-next' });
     const view = await mount(
-      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} />,
+      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />,
     );
     await settle();
     expect(view.container.textContent).toContain('Update this daemon to use Board');
@@ -160,7 +161,7 @@ describe('the app shell', () => {
     go('/d/d1/agenda');
     const { runtime, storage } = setup({});
     const view = await mount(
-      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} />,
+      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />,
     );
     await settle();
     expect(view.container.textContent).toContain('Agenda is not built yet in this version of Ferretry.');
@@ -171,7 +172,7 @@ describe('the app shell', () => {
     go('/d/d1/board');
     const { runtime, storage } = setup({ gate: 'h-gate-next' });
     const view = await mount(
-      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} />,
+      <App runtime={runtime} themes={new ThemePreferenceStore(storage)} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />,
     );
     await settle();
     expect(view.container.querySelector('main')?.textContent).toContain('This daemon needs an update');
@@ -183,7 +184,7 @@ describe('the app shell', () => {
     const { runtime, storage } = setup({});
     const themes = new ThemePreferenceStore(storage);
     themes.setFamily('mission');
-    const view = await mount(<App runtime={runtime} themes={themes} storage={storage} browser={browser} />);
+    const view = await mount(<App runtime={runtime} themes={themes} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />);
     await settle();
     const nav = view.container.querySelector('nav[data-slot="nav"]');
     expect(nav?.className).toContain('fy-nav--left');

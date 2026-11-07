@@ -134,3 +134,8 @@
   flex-direction: column;
   gap: 8px;
 }
+
+/* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */
+.contents {
+  display: contents;
+}
