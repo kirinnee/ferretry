@@ -1,7 +1,7 @@
 path	owner	reason
 packages/core/ferrets/daemon/lib/fleet-refresh/index.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
 packages/core/ferrets/daemon/lib/fleet-refresh/service.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
-packages/core/ferrets/daemon/lib/fleet/agent-control.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/daemon/lib/fleet/agent-control.ts	Ferrets limits contract / Kernel config	Account-model policy replaced by active FerretsService.agentControl over limits.yaml; rewritten test unit/daemon/ferrets/agent-control.test.ts
 packages/core/ferrets/daemon/lib/fleet/mutations.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
 packages/core/ferrets/daemon/lib/fleet/start-resolution.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
 packages/core/ferrets/daemon/lib/fleet/wire.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
@@ -28,7 +28,7 @@ packages/core/ferrets/tests/realworld/daemon/session-document-watch.test.ts	Kern
 packages/core/ferrets/tests/unit/daemon/fleet-refresh/checking-row.test.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
 packages/core/ferrets/tests/unit/daemon/fleet-refresh/service.test.ts	Runtimes/Logins/Usage	inventory refresh and usage feed now belong to their plugins
 packages/core/ferrets/tests/unit/daemon/fleet/account-changes.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
-packages/core/ferrets/tests/unit/daemon/fleet/agent-control.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
+packages/core/ferrets/tests/unit/daemon/fleet/agent-control.test.ts	Ferrets limits contract / Kernel config	Account-model policy replaced by active FerretsService.agentControl over limits.yaml; rewritten test unit/daemon/ferrets/agent-control.test.ts
 packages/core/ferrets/tests/unit/daemon/fleet/catalog-service.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
 packages/core/ferrets/tests/unit/daemon/fleet/catalog.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
 packages/core/ferrets/tests/unit/daemon/fleet/codex-runtime.test.ts	Runtimes/Logins/Catalogs/Config	copied account-model setup/catalog/login implementation; those packages own the 5.0 contracts
