@@ -8,6 +8,8 @@
  *                                                  scoped to one package, scoped to it
  *   --tests                                        then runs that package's own tests (one bun test process)
  *   --strict                                       `guarantees` also checks rows owned by pending packages
+ *   --results <junit.xml|folder>                   `guarantees` reads whether a test passed (repeatable); --existence-only skips that
+ *   --tier unit|int                                `guarantees` proves only the rows with a test in that tier (CI: one job per tier)
  *   --base <ref>                                   the ref `ports-pending.json` may not grow from
  *   --list                                         prints the checks and exits
  *
