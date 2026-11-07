@@ -15,7 +15,7 @@
  * - `inventory.json` and `payloads/` have no v4 source: v4 computed the inventory live and pinned no payloads.
  */
 import { SealedDocumentSchema } from '@ferretry/core-vault/contract';
-import { MCP_OAUTH_STATE, McpOAuthStateFileSchema } from '@ferretry/plugin-mcp/contract';
+import { MCP_OAUTH_SECRETS, MCP_OAUTH_STATE, McpOAuthStateFileSchema } from '@ferretry/plugin-mcp/contract';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StepReport } from '../report.ts';
@@ -25,8 +25,8 @@ import { V4_MCP_OAUTH, V4_MCP_OAUTH_SECRETS, V4McpOAuthDocument } from '../v4/mc
 import type { Step } from './index.ts';
 
 export const V5_MCP_OAUTH = join('state/mcp', MCP_OAUTH_STATE.path);
-/** MCP's sealed document (lead decision 2026-11-07); the Vault key opens it. */
-export const V5_MCP_OAUTH_SECRETS = 'state/mcp/oauth-secrets.json';
+/** MCP's sealed document (`MCP_OAUTH_SECRETS`, lead decision 2026-11-07); the Vault key opens it. */
+export const V5_MCP_OAUTH_SECRETS = join('state/mcp', MCP_OAUTH_SECRETS.state.path);
 const V4_VAULT_KEY = 'state/secrets.key';
 
 export const mcpStep: Step = {
@@ -54,6 +54,11 @@ export const mcpStep: Step = {
       // The sealed half: its envelope re-labelled, every entry's bytes kept; never decrypted.
       const secrets = await lstat(join(home, V4_MCP_OAUTH_SECRETS)).catch(() => undefined);
       if (secrets !== undefined) {
+        // The entries move unchanged, so they open in v5 only under v4's AAD (the entry name alone).
+        if (MCP_OAUTH_SECRETS.additionalData !== '' || !MCP_OAUTH_SECRETS.stamped)
+          throw new V4InputError(
+            `${V4_MCP_OAUTH_SECRETS}: v5 MCP seals with another AAD or shape; a converter update is needed`,
+          );
         if ((await lstat(join(home, V4_VAULT_KEY)).catch(() => undefined)) === undefined)
           throw new V4InputError(
             `${V4_MCP_OAUTH_SECRETS} exists but the vault key ${V4_VAULT_KEY} that seals it does not`,
@@ -61,7 +66,7 @@ export const mcpStep: Step = {
         if (ctx.dryRun) sealed.push({ file: V5_MCP_OAUTH_SECRETS, bytes: secrets.size });
         else {
           const moved = await rewrapSealed(join(home, V4_MCP_OAUTH_SECRETS), ctx.v5.resolve(V5_MCP_OAUTH_SECRETS), {
-            stamped: true,
+            stamped: MCP_OAUTH_SECRETS.stamped,
             schema: SealedDocumentSchema,
           });
           sealed.push({ file: V5_MCP_OAUTH_SECRETS, bytes: (await lstat(moved.to)).size });
