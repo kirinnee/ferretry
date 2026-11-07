@@ -54,7 +54,6 @@
         "daemon/lib/session/peers/transcript.ts",
         "daemon/lib/session/peers/question.ts",
         "daemon/lib/session/peers/send.ts",
-        "daemon/lib/session/peers/tmux.ts",
         "daemon/lib/session/restart/index.ts",
         "daemon/lib/session/live/index.ts",
         "daemon/adapters/session/archive/index.ts",
