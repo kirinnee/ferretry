@@ -1,14 +1,10 @@
 import type { ConfigPort } from '@ferretry/kernel/contract';
 import { WARDEN_CONFIG, effectiveWardenConfig, type WardenFile } from '../../contract/index.ts';
-import { type ConfigDoor, configDoorOf } from '../lib/config-door.ts';
 import type { WardenConfig, WardenConfigPatch, WardenConfigStore } from '../lib/index.ts';
 
-/** `warden.yaml` cannot be written here (the host gives no write door), or the kernel refused the edit. */
+/** The kernel refused the edit of `warden.yaml` (its sentences never quote a value). */
 export class WardenConfigRefused extends Error {
-  constructor(
-    readonly kind: 'unavailable' | 'refused',
-    message: string,
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = 'WardenConfigRefused';
   }
@@ -30,22 +26,17 @@ const SECTIONS = [
 
 /**
  * The settings, read from `config/warden.yaml` as the kernel has them in effect (the last good version) and written
- * through the kernel's config door, which checks the schema, keeps the comments and HOLDS a loosening for the owner.
+ * through the kernel's config write port, which checks the schema, refuses a raw secret, keeps the comments and HOLDS a
+ * loosening for the owner unless Gate's judge lets this call put it into effect.
  */
 export class ConfigWardenConfigStore implements WardenConfigStore {
-  private readonly door: ConfigDoor | undefined;
-
-  constructor(private readonly config: ConfigPort) {
-    this.door = configDoorOf(config);
-  }
+  constructor(private readonly config: ConfigPort) {}
 
   async read(): Promise<unknown> {
     return effectiveWardenConfig(this.config.file(WARDEN_CONFIG) ?? {});
   }
 
   async write(_config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
-    if (this.door === undefined)
-      throw new WardenConfigRefused('unavailable', 'This host does not let the warden change warden.yaml yet.');
     const file = (this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile;
     const keys: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(patch)) {
@@ -53,9 +44,10 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
         keys[key] = { ...((file as Record<string, object | undefined>)[key] ?? {}), ...value };
       else keys[key] = value;
     }
-    const result = await this.door.write(WARDEN_CONFIG, undefined, { patch: keys });
+    const result = await this.config.write(WARDEN_CONFIG, undefined, { patch: keys });
     if (result.kind === 'refused')
-      throw new WardenConfigRefused('refused', result.issues.map(issue => issue.message).join('; ') || result.reason);
+      throw new WardenConfigRefused(result.issues.map(issue => issue.message).join('; ') || result.reason);
+    if (result.kind === 'conflict') throw new WardenConfigRefused('warden.yaml changed while it was being written');
     return result.kind === 'held' ? result.sentences : [];
   }
 }

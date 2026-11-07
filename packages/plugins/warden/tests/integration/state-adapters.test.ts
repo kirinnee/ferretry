@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
-import { WardenConfigRefused, ConfigWardenConfigStore } from '../../daemon/adapters/config-store.ts';
+import { ConfigWardenConfigStore } from '../../daemon/adapters/config-store.ts';
 import { StateWardenJevCheckLog } from '../../daemon/adapters/jev-checks.ts';
 import { FileWardenArtifacts } from '../../daemon/adapters/artifacts.ts';
 import { StateWardenReportFiles, reportInstantMs } from '../../daemon/adapters/report-files.ts';
@@ -132,7 +132,7 @@ describe('reports as state files', () => {
   });
 });
 
-describe('warden.yaml through the config door', () => {
+describe('warden.yaml through the kernel config write port', () => {
   const door = (applied: unknown[], result: unknown) => {
     return Object.assign(wardenConfig({ caps: { jevDaily: 5 } }), {
       write: async (_def: unknown, _name: unknown, edit: unknown) => {
@@ -159,7 +159,7 @@ describe('warden.yaml through the config door', () => {
     // Arrange
     const applied: unknown[] = [];
     const store = new ConfigWardenConfigStore(
-      door(applied, { kind: 'held', sentences: ['a bigger cap waits for you'] }),
+      door(applied, { kind: 'held', etag: 'e', id: 'warden.yaml@e', sentences: ['a bigger cap waits for you'] }),
     );
 
     // Act
@@ -170,24 +170,10 @@ describe('warden.yaml through the config door', () => {
     should(held).eql(['a bigger cap waits for you']);
   });
 
-  it('should say so when the host gives no door to write through', async () => {
-    // Arrange
-    const store = new ConfigWardenConfigStore(wardenConfig());
-
-    // Act
-    const writing = store.write({} as never, { enabled: true } as never);
-
-    // Assert
-    await writing.then(
-      () => should.fail('', '', 'should have been refused'),
-      (error: unknown) => should((error as WardenConfigRefused).kind).equal('unavailable'),
-    );
-  });
-
   it('should carry a refusal with the reasons the kernel gave', async () => {
     // Arrange
     const store = new ConfigWardenConfigStore(
-      door([], { kind: 'refused', reason: 'bad', issues: [{ message: 'caps.jevDaily must be positive' }] }),
+      door([], { kind: 'refused', reason: 'schema', issues: [{ message: 'caps.jevDaily must be positive' }] }),
     );
 
     // Act

@@ -40,12 +40,7 @@ function refuse(error: unknown): never {
     const refusal = REQUEST_REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
-  if (error instanceof WardenConfigRefused)
-    throw new ApiError(
-      error.kind === 'unavailable' ? 503 : 400,
-      error.message,
-      error.kind === 'unavailable' ? 'plugin_unavailable' : 'invalid_request',
-    );
+  if (error instanceof WardenConfigRefused) throw new ApiError(400, error.message, 'invalid_request');
   throw error;
 }
 

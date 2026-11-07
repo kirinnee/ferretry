@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { entryId, sourceKey } from '@ferretry/core-asks/contract/testing';
 import { ferretId, T0 } from '@ferretry/core-ferrets/contract/testing';
 import { ferret, owner } from '@ferretry/kernel/testing';
+import { WARDEN_CONFIG } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
-import { wardenHost } from './host.ts';
+import { realWardenConfig, wardenHost } from './host.ts';
 
 const route = (key: string) => manifest.actions.routes.find(candidate => candidate.key === key);
 
@@ -75,6 +76,38 @@ describe('route parity', () => {
 
     expect(response.status).toBe(200);
     expect(response.json<{ config: { enabled: boolean } }>().config.enabled).toBe(false);
+  });
+
+  test('R-0232 on the real kernel writer a settings change is written into warden.yaml key by key, comments kept', async () => {
+    const real = realWardenConfig();
+    await real.handEdit('# the owner keeps notes here\nmaxAssignedWardens: 1\n');
+    const { host } = await wardenHost({ realConfig: real });
+
+    const response = await host.request('PATCH', '/v1/warden/config', { body: { enabled: false }, as: owner() });
+
+    expect(response.status).toBe(200);
+    expect(response.json<{ held?: string[] }>().held).toBeUndefined();
+    expect(
+      (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{ config: { enabled: boolean } }>(),
+    ).toMatchObject({ config: { enabled: false } });
+    const text = await real.text();
+    expect(text).toContain('# the owner keeps notes here');
+    expect(text).toContain('enabled: false');
+  });
+
+  test('R-0232 on the real kernel writer a loosening is held for the owner: not in effect, and the answer says so', async () => {
+    const real = realWardenConfig();
+    await real.handEdit('enabled: false\n');
+    const { host } = await wardenHost({ realConfig: real });
+
+    const response = await host.request('PATCH', '/v1/warden/config', { body: { enabled: true }, as: owner() });
+
+    expect(response.status).toBe(200);
+    expect(response.json<{ held?: string[] }>().held).toEqual(['the warden is switched on']);
+    expect(
+      (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{ config: { enabled: boolean } }>(),
+    ).toMatchObject({ config: { enabled: false } });
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
   });
 
   test('R-0406 investigating a ferret nobody has is refused, and R-0407 leaving a clean one alone is refused', async () => {
