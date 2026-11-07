@@ -18,6 +18,9 @@ const ownershipText = (opener: SurfaceOpener | undefined): string => {
 /** How a reference addresses a terminal: its name when it has one, else its id (today's `sessionSurfaces`). */
 const keyOf = (terminal: TerminalView): string => terminal.name ?? terminal.id;
 
+/** The entry schema's own bounds: a program sets a pane's title, so a long one is cut rather than failing the whole menu. */
+const clip = (text: string, max: number): string => (text.length <= max ? text : text.slice(0, max));
+
 /**
  * THE `%terminal` MENU OF A FERRET'S COMPOSER (reference.catalog, lead decision Q6): the terminals this ferret holds,
  * as the composer offered them before, in the order Terminals lists them (creation order: a row must not move out from
@@ -46,8 +49,8 @@ export class TerminalsReferenceMenu implements ReferenceCatalogProvider {
       .filter(terminal => wanted === '' || `${keyOf(terminal)} ${terminal.title}`.toLowerCase().includes(wanted))
       .slice(0, referenceCatalogLimit('%terminal'))
       .map(terminal => ({
-        token: keyOf(terminal),
-        label: terminal.title,
+        token: clip(keyOf(terminal), 512),
+        label: clip(terminal.title, 256),
         detail: `${terminal.viewers === 1 ? '1 viewer' : `${String(terminal.viewers)} viewers`} · ${ownershipText(terminal.openedBy)}`,
       }));
   }

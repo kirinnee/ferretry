@@ -106,6 +106,12 @@ describe('terminals provides the %terminal reference menu (reference.catalog)', 
     expect(entries.some(entry => entry.closed !== undefined)).toBe(false);
   });
 
+  test('a title a program set past the entry bound is cut, so the menu still answers', async () => {
+    const [entry] = await menu([terminal({ id: 't1', title: 'x'.repeat(5_000) })]).entries(ask());
+    expect(entry?.label.length).toBe(256);
+    expect(ReferenceCatalogEntrySchema.array().safeParse([entry]).success).toBe(true);
+  });
+
   test('a ferret with no terminal has an empty menu', async () => {
     expect(await menu([]).entries(ask())).toEqual([]);
   });
