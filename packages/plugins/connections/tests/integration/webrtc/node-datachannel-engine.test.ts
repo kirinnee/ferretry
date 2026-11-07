@@ -1,3 +1,4 @@
+import { scriptedModule, type ScriptedPeer } from '../../support/scripted-webrtc-engine.ts';
 import { clock } from '../../support/io.ts';
 /**
  * The WebRTC engine's self-test, against the REAL libdatachannel wherever the property is the engine.
@@ -213,61 +214,6 @@ describe('the node-datachannel WebRTC engine', () => {
     });
   });
 });
-
-/** A peer whose gathering a case scripts: what it announces, and what description it ends with. */
-function scriptedModule(script: {
-  readonly onRemote?: (peer: ScriptedPeer) => void;
-  readonly description?: { readonly sdp: string; readonly type: string } | null;
-  readonly refuseRemote?: boolean;
-}): { readonly module: NodeDataChannelModule; readonly peers: ScriptedPeer[] } {
-  const peers: ScriptedPeer[] = [];
-  class Peer implements EnginePeerConnection {
-    gathering: ((state: string) => void) | undefined;
-    candidate: ((candidate: string, mid: string) => void) | undefined;
-    stateListener: ((state: string) => void) | undefined;
-    channelListener: ((channel: EngineDataChannel) => void) | undefined;
-    closed = 0;
-    constructor() {
-      peers.push(this);
-    }
-    onLocalDescription(): void {}
-    onLocalCandidate(callback: (candidate: string, mid: string) => void): void {
-      this.candidate = callback;
-    }
-    onGatheringStateChange(callback: (state: string) => void): void {
-      this.gathering = callback;
-    }
-    onStateChange(callback: (state: string) => void): void {
-      this.stateListener = callback;
-    }
-    onDataChannel(callback: (channel: EngineDataChannel) => void): void {
-      this.channelListener = callback;
-    }
-    setRemoteDescription(): void {
-      if (script.refuseRemote === true) throw new Error('Invalid SDP\n  at native');
-      script.onRemote?.(this);
-    }
-    localDescription(): { readonly sdp: string; readonly type: string } | null {
-      return script.description === undefined ? { sdp: 'scripted answer', type: 'answer' } : script.description;
-    }
-    addRemoteCandidate(): void {}
-    createDataChannel(): EngineDataChannel {
-      throw new Error('not used');
-    }
-    close(): void {
-      this.closed += 1;
-      throw new Error('already closed');
-    }
-  }
-  return { module: { PeerConnection: Peer, getLibraryVersion: () => '9.9.9', cleanup: () => undefined }, peers };
-}
-type ScriptedPeer = EnginePeerConnection & {
-  gathering: ((state: string) => void) | undefined;
-  candidate: ((candidate: string, mid: string) => void) | undefined;
-  stateListener: ((state: string) => void) | undefined;
-  channelListener: ((channel: EngineDataChannel) => void) | undefined;
-  closed: number;
-};
 
 describe('the node-datachannel engine answering an offer', () => {
   it('should refuse an offer the real engine cannot parse, as a refusal rather than a fault', async () => {
@@ -616,35 +562,5 @@ describe('the node-datachannel engine’s lifetime', () => {
 
     // Assert
     should(loads).equal(0);
-  });
-
-  it('should refuse every later offer once a release did not finish, and never release again', async () => {
-    // Arrange
-    const { module } = scriptedModule({ onRemote: peer => peer.gathering?.('complete') });
-    let cleaned = 0;
-    const subject = new NodeDataChannelEngine({
-      clock,
-      load: async () => ({
-        ...module,
-        cleanup: () => {
-          cleaned += 1;
-          throw new Error('libdatachannel error# cleanup timeout (possible deadlock)\n  at native');
-        },
-      }),
-    });
-    (await subject.answer('offer', [])).peer.close();
-
-    // Act
-    subject.release();
-    subject.release();
-
-    // Assert
-    const refused: unknown = await subject.answer('offer', []).catch((error: unknown) => error);
-    should(refused).be.instanceOf(WebRtcEngineUnavailable);
-    should((refused as Error).message).equal(
-      'the WebRTC engine did not stop cleanly (libdatachannel error# cleanup timeout (possible deadlock)); ' +
-        'restart the daemon to use peer-to-peer connections again',
-    );
-    should(cleaned).equal(1);
   });
 });
