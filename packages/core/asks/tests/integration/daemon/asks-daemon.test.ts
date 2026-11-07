@@ -131,17 +131,6 @@ describe('the Asks daemon half over a kernel state folder', () => {
     await expect(raised).rejects.toThrow(/no plugin registers the ask source "card"/u);
   });
 
-  it('should say clear-all is not available yet rather than clear nothing silently', async () => {
-    // Arrange
-    const half = await world();
-
-    // Act
-    const cleared = await half.call('POST /v1/agenda/clear-agents', {}, {});
-
-    // Assert
-    expect(cleared.status).toBe(503);
-  });
-
   it("should hold the owner's answer for a ferret while nothing can type into it, and say it is held", async () => {
     // Arrange
     const half = await world();

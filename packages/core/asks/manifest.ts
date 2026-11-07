@@ -122,11 +122,6 @@ export default definePlugin({
         guard: { none: 'the version number this device last opened' },
       }),
       route('POST /v1/ferrets/:ferretId/agenda/replies', { ...read, caller: 'person' }),
-      route('POST /v1/agenda/clear-agents', {
-        ...read,
-        caller: 'person',
-        guard: { none: 'two counts: items cleared and boards they were on' },
-      }),
     ],
   },
   instructions: [{ id: 'asks', text: 'instructions/asks.md', when: { role: 'any' } }],

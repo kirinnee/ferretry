@@ -8,7 +8,6 @@
  * - **Card asks** go to the Board's `ask.sources:card` `apply` before the answer is recorded; with no Board running, an
  *   answer to a card ask is refused and the ask stays open.
  * - **Held configuration edits** (`--confirms`): no config port yet, so `--confirms` is refused.
- * - **Clear all from agent ferrets**: which ferrets are agent ferrets is the Agenda plugin's; meanwhile `503`.
  * - **Answers into a ferret's terminal**: typing into a ferret is Conversation's, provided under `ask.delivery:ferret`;
  *   unprovided, answers are held in the ferret's outbox, never lost, and shown as held.
  * - **Which ferrets exist**: Ferrets needs Asks, so Asks cannot ask Ferrets (a core cycle): any well-formed ferret id
@@ -35,7 +34,6 @@ import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agen
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
-import { agendaClearRoutes } from './lib/routes/agenda-clear.ts';
 import {
   AgendaRepliesFiles,
   AgendaPendingChangesFiles,
@@ -149,7 +147,6 @@ export default implementDaemon(manifest, {
           cardAskAnswers(agenda, () => sources(CARD_SOURCE), now),
           sourceAnswers(agenda, sources, now),
         ),
-        ...agendaClearRoutes(undefined),
       },
       provides: { asks: asksPort(agenda, boards, sources) },
     };

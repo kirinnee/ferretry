@@ -137,3 +137,4 @@ route	PUT /v1/sessions/:sessionId/agenda/:id/seen	removed	session routes renamed
 route	PUT /v1/ferrets/:ferretId/agenda/:id/seen	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/agenda/replies	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/agenda/replies	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/agenda/clear-agents	removed	Agenda owns the roll-up clear operation (lead decision X2); Asks drops its descriptor and handler
