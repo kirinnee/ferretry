@@ -3,7 +3,7 @@ id: compact
 nav: { side: left, style: rail, items: [agenda, ferrets, board, insights, settings] }
 side: { show: never, holds: ferret }
 top: [daemon-picker, search]
-composer.tools: [attachments, dictation, composer-quota]
+composer.tools: [attachments, dictation, runtime-picker, composer-quota]
 panels:
   ferret.side: [sitrep]
 density: compact

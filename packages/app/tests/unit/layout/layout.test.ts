@@ -37,9 +37,10 @@ const surfaces = [
     panels: [{ id: 'usage', slot: 'ferret.side', order: 3 }],
   }),
   plugin('conversation', { panels: [{ id: 'sitrep', slot: 'ferret.side', order: 2 }] }),
-  // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, usage).
+  // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, runtimes, usage).
   plugin('voice', { panels: [{ id: 'dictation', slot: 'composer.tools', order: 20 }] }),
   plugin('conversation-files', { panels: [{ id: 'attachments', slot: 'composer.tools', order: 10 }] }),
+  plugin('runtimes', { panels: [{ id: 'runtime-picker', slot: 'composer.tools', order: 10 }] }),
   plugin('quota', { panels: [{ id: 'composer-quota', slot: 'composer.tools', order: 90 }] }),
 ];
 const views = viewsOf(surfaces);
@@ -157,13 +158,13 @@ describe('the owner layout and this device (§5.3)', () => {
 });
 
 describe('the frame plan', () => {
-  test('every built-in layout draws the three composer.tools panels, in the order the composer always drew them', () => {
+  test('every built-in layout draws the four composer.tools panels, in the order the composer always drew them', () => {
     for (const layout of [DEFAULT_LAYOUT, COMPACT_LAYOUT]) {
       for (const viewport of ['wide', 'phone'] as const) {
         const ids = planFrame(resolveLayout(layout, viewport), views)
           .panels('composer.tools')
           .map(panel => panel.id);
-        expect(ids).toEqual(['attachments', 'dictation', 'composer-quota']);
+        expect(ids).toEqual(['attachments', 'dictation', 'runtime-picker', 'composer-quota']);
       }
     }
   });
@@ -179,7 +180,12 @@ describe('the frame plan', () => {
     ]);
     expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { plugin: 'ferrets', id: 'ferret' } });
     expect(plan.panels('ferret.side').map(p => p.id)).toEqual(['cards-of-ferret', 'sitrep', 'usage']);
-    expect(plan.panels('composer.tools').map(p => p.id)).toEqual(['attachments', 'dictation', 'composer-quota']);
+    expect(plan.panels('composer.tools').map(p => p.id)).toEqual([
+      'attachments',
+      'dictation',
+      'runtime-picker',
+      'composer-quota',
+    ]);
   });
 
   test('a slot the layout does not list shows every declared panel by order', () => {

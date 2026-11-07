@@ -48,8 +48,8 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 ## App
 
 - **The transcript card** (`app/components/pack-call.tsx`) is a panel in Conversation's `conversation.row` slot
-  (`pack-call`, an optional `uses` of Conversation). The slot hands it a tool row's commands that run `fy` and what they
-  printed (masked as the daemon masked the transcript; never the device outbox, never a refused send's text). The card
+  (`pack-call`, an optional `uses` of Conversation). The slot hands it a tool row's shell calls whose whole script is one plain `fy` command (no `cd … &&`, pipe or
+  redirect) and what they printed (masked as the daemon masked the transcript; never the device outbox, never a refused send's text). The card
   sees one row at a time: a `wait` folds into its start only in the same row (otherwise it is its own "Waited for"
   card), and "retried" is marked only within a row. Conversation's tool group still draws the raw call in the row; the
   card is beside it. Its PeerName, MessageFooter and command list are the card's own (`components/card-parts.tsx`):

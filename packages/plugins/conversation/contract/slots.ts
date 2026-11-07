@@ -4,7 +4,8 @@
  * the row's entry in its props and the ferret as its `subject`. Conversation imports nothing of a contributor.
  *
  *   - `conversation.row` ........ beside a row of the transcript; the panel sees only {id, kind, text, at?, label?, tools?}; `tools`
- *                                 are a tool row's commands that run `fy`, and their text answers; never another command or tool.
+ *                                 are a tool row's shell calls whose WHOLE script is one plain command of a program named `fy`
+ *                                 (no pipe, list, redirect, subshell or expansion), and their text answers; never another script or tool.
  *   - `conversation.row-actions`  in an assistant message's footer: Voice offers "Read aloud" on the message.
  */
 
@@ -29,10 +30,13 @@ export interface ConversationRowEntry {
   readonly at?: number;
   readonly label?: string;
   /**
-   * A `tool` row's commands that run the product's own CLI (`fy`) and what they printed, for a contributor that reads what
-   * a ferret asked of it (Packs draws the helpers a ferret started). Only a call to a shell tool (Bash, exec_command,
-   * shell, local_shell) whose command runs `fy` is offered, and only the command and the text of its answer: no other
-   * command, no other tool's input, no image, no attachment. Built from the daemon's
+   * A `tool` row's shell calls whose whole script is exactly one plain command of a program named `fy`, and what they
+   * printed, for a contributor that reads what a ferret asked of it (Packs draws the helpers a ferret started). Only a
+   * call to a shell tool (Bash, exec_command, shell, local_shell) is offered, only when the script is that one command
+   * (a script with a pipe, a list `; && ||`, `&`, a second line, a subshell or group, a redirect, a backtick or a `$`
+   * is left out, and so is one that mixes `fy` with any other command), and only the script and the text of its answer:
+   * no other command, no other tool's input, no image, no attachment. The program is identified by its NAME (`fy`, or
+   * a path ending in `/fy`), not by proof of which program that is. Built from the daemon's
    * redacted reading like `text`, so a value Vault masks is masked here too. Absent on every other row, and on a row that
    * is a send a ferret made.
    */

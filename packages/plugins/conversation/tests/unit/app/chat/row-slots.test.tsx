@@ -179,7 +179,7 @@ describe('the shell commands a tool row offers a slot', () => {
         },
         {
           key: 'e',
-          use: { name: 'Bash', input: { command: 'cd /repo && direnv exec . fy new --auto "go"' } },
+          use: { name: 'Bash', input: { command: 'direnv exec . fy new --auto "go"' } },
           result: { text: 'Started nadia' },
         },
         {
@@ -191,6 +191,86 @@ describe('the shell commands a tool row offers a slot', () => {
     );
     expect(offered?.tools?.map(call => call.key)).toEqual(['e', 'f']);
     expect(JSON.stringify(offered)).not.toContain(SECRET);
+  });
+
+  const HEREDOC_BRIEF = 'fy new --auto "$(cat <<\'EOF\'\nthe brief\nEOF\n)"';
+
+  /** Whether a shell call with this script reaches a slot, with its output (which would carry the secret). */
+  const offeredCommand = (call: Record<string, unknown>): boolean => {
+    const offered = rowSlotEntry(shellRow([{ key: 'k', result: { text: SECRET }, ...call }] as never));
+    if (offered?.tools === undefined) expect(JSON.stringify(offered)).not.toContain(SECRET);
+    return offered?.tools !== undefined;
+  };
+  const bash = (command: string) => ({ use: { name: 'Bash', input: { command } } });
+
+  test.each([
+    'fy status; cat ~/.ssh/id_rsa',
+    'cat .env.local; fy status',
+    'cat .env.local && fy status',
+    'fy status || cat .env.local',
+    'fy status\ncat .env.local',
+    'cat secret & fy status',
+    'fy status &',
+    'fy status;',
+    '(cat secret); fy status',
+    '(fy status)',
+    '{ cat secret; }; fy status',
+    '{ fy status; }',
+    'fy status | cat - .env.local',
+    'cat .env.local | fy send x -',
+    'fy status | xargs cat',
+    'direnv exec . fy status && cat secret',
+    'cd /repo && direnv exec . fy new "go"',
+    'fy wait x 2>&1 | tail -20',
+    'fy status > out.txt',
+    'fy status 2>&1',
+    'fy send x < .env.local',
+    'fy $(cat k)',
+    'fy $' + '{HOME}',
+    'fy $HOME',
+    'fy `cat k`',
+    'fy status "$(cat k)"',
+    'fy status "`cat k`"',
+    'fy status \\\ncat k',
+    'fy new "$(cat <<EOF\n$(cat ~/.ssh/id_rsa)\nEOF\n)"',
+    'fy new "$(cat <<\'EOF\'\nbrief\nEOF\ncat ~/.ssh/id_rsa\nEOF\n)"',
+    "fy new \"$(cat <<'EOF'\nbrief\nEOF\n); cat ~/.ssh/id_rsa",
+    'FOO=1 fy status',
+    'fyx status',
+    "sh -c 'fy status'",
+    'eval fy status',
+    "fy 'unterminated",
+    '',
+  ])('a script that is not exactly one plain fy command is never offered: %j', script => {
+    expect(offeredCommand(bash(script))).toBe(false);
+  });
+
+  test('a compound script is not offered whichever shell tool carries it', () => {
+    expect(offeredCommand({ use: { name: 'shell', input: { command: ['bash', '-lc', 'cat x; fy status'] } } })).toBe(
+      false,
+    );
+    expect(offeredCommand({ use: { name: 'local_shell', input: { command: ['fy', 'status;', 'cat', 'x'] } } })).toBe(
+      false,
+    );
+    expect(offeredCommand({ use: { name: 'exec_command', input: { cmd: 'cat secret; fy status' } } })).toBe(false);
+  });
+
+  test.each([
+    'fy status',
+    'direnv exec . fy new --auto "go"',
+    '/usr/local/bin/fy wait nadia',
+    "fy send x 'a; b | c'",
+    'fy send x "a; b | c & d"',
+    HEREDOC_BRIEF,
+    'direnv exec . ' + HEREDOC_BRIEF,
+    '  fy status  ',
+  ])('a script that is exactly one plain fy command is offered: %j', script => {
+    expect(offeredCommand(bash(script))).toBe(true);
+  });
+
+  test('a one-command Codex script is offered', () => {
+    expect(offeredCommand({ use: { name: 'shell', input: { command: ['bash', '-lc', 'fy status'] } } })).toBe(true);
+    expect(offeredCommand({ use: { name: 'exec_command', input: { cmd: 'fy status' } } })).toBe(true);
   });
 
   test('a row whose only shell commands are not fy has no tools key', () => {
