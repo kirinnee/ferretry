@@ -1,0 +1,131 @@
+name: Migration v4 to v5
+
+# Proves the one-time v4 -> v5 converter (`migration/v4-to-v5/`) against REAL v4 output: it builds a v4 home with the
+# released 4.291.5 binaries (fixtures/build-v4-home.ts), runs the converter's unit tests, then runs the converter on
+# that home, dry then for real.
+#
+# CI-ONLY. The fixture builder starts a v4 daemon and a tmux server, which a shared developer box must not carry. It
+# does no network access beyond fetch-v4.sh's one download of the v4 release, and it runs only in a disposable temp dir.
+#
+# The converter is a tool beside the product (scripts/validate/migration-isolated.sh): this is the ONE workflow that
+# may name it, and it is deleted with it once every machine is on v5.
+on:
+  push:
+    branches: ['rebuild/**']
+    paths:
+      - 'migration/v4-to-v5/**'
+      - '.github/workflows/migration-v4-to-v5.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixtures:
+    name: v4 fixture home and converter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # The pinned toolchain (bun, tmux, jq, shellcheck) comes from the flake dev shell, like every other job.
+      - uses: ./.github/actions/install-nix
+
+      - name: Fetch the v4 release binaries (the only network access of the fixtures)
+        env:
+          # The v4 release lives in this repository; the job token may read it, and a private repository needs it.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v4_dir="$(bash migration/v4-to-v5/fixtures/fetch-v4.sh)"
+          "${v4_dir}/fy" --version | grep -qx '4.291.5'
+          echo "FY_V4_DIR=${v4_dir}" >>"${GITHUB_ENV}"
+
+      - name: Install the converter's dependencies and the repository's
+        run: |
+          ./scripts/ci/in-devshell.sh bun install --frozen-lockfile
+          cd migration/v4-to-v5 && ../../scripts/ci/in-devshell.sh bun install --frozen-lockfile
+
+      - name: Typecheck the converter and the fixtures
+        run: |
+          cd migration/v4-to-v5
+          ../../scripts/ci/in-devshell.sh bunx tsc --noEmit -p .
+          ../../scripts/ci/in-devshell.sh bunx tsc --noEmit -p fixtures
+
+      - name: Build one v4 fixture home
+        run: |
+          # A folder under the OS temp dir: the builder refuses anywhere else.
+          out="$(mktemp -d)"
+          echo "FIXTURE_OUT=${out}" >>"${GITHUB_ENV}"
+          ./scripts/ci/in-devshell.sh bun migration/v4-to-v5/fixtures/build-v4-home.ts --out "${out}" --v4-dir "${FY_V4_DIR}"
+
+      - name: Check what the fixture made
+        run: |
+          jq -e '.complete == true' "${FIXTURE_OUT}/made.json" >/dev/null
+          # Every required step is done; an optional step the v4 CLI could not do is a warning, never silent.
+          jq -e '[.steps[] | select(.required and .status != "done")] | length == 0' "${FIXTURE_OUT}/made.json" >/dev/null
+          jq -r '.steps[] | select(.status == "skipped") | "::warning title=fixture step skipped::\(.name): \(.reason)"' "${FIXTURE_OUT}/made.json"
+          # The stopped home the converter will read.
+          test -d "${FIXTURE_OUT}/home"
+          # made.json holds names and ids, never the fixture secret's value.
+          ! grep -q 'fixture-not-a-secret' "${FIXTURE_OUT}/made.json"
+
+      - name: Converter unit tests
+        run: cd migration/v4-to-v5 && ../../scripts/ci/in-devshell.sh bun test tests
+
+      - name: Convert the fixture home (dry run, then for real)
+        run: |
+          cd migration/v4-to-v5
+          # Exit 0 = complete. Exit 3 = ran, but a step is pending: EXPECTED in Phase A, no v5 schema has landed.
+          # Anything else (2 refused, 64 usage, a crash) is a failure.
+          set +e
+          ../../scripts/ci/in-devshell.sh bun src/main.ts --from "${FIXTURE_OUT}/home" --to "${FIXTURE_OUT}/v5-dry" --report "${FIXTURE_OUT}/report-dry.json" --dry-run
+          dry=$?
+          ../../scripts/ci/in-devshell.sh bun src/main.ts --from "${FIXTURE_OUT}/home" --to "${FIXTURE_OUT}/v5" --report "${FIXTURE_OUT}/report.json"
+          real=$?
+          set -e
+          echo "dry run exit ${dry}, real run exit ${real}"
+          for code in "${dry}" "${real}"; do
+            if [ "${code}" != 0 ] && [ "${code}" != 3 ]; then
+              echo "::error::the converter exited ${code}; only 0 (complete) or 3 (pending steps, expected in Phase A) pass"
+              exit 1
+            fi
+          done
+          # The report must list every step the converter declares, once each.
+          ../../scripts/ci/in-devshell.sh bun -e "import { STEPS } from './src/steps/index.ts'; console.log(JSON.stringify(STEPS.map(step => step.id)))" >"${FIXTURE_OUT}/declared-steps.json"
+          for report in report-dry report; do
+            jq -e --slurpfile declared "${FIXTURE_OUT}/declared-steps.json" \
+              '([.steps[].id] | sort) == ($declared[0] | sort) and (.steps | length > 0)' "${FIXTURE_OUT}/${report}.json" >/dev/null || {
+              echo "::error::${report}.json does not list every declared step"
+              exit 1
+            }
+          done
+          # The dry run writes nothing; the real run wrote home.json only if it finished (exit 0).
+          test ! -e "${FIXTURE_OUT}/v5-dry"
+          if [ "${real}" = 0 ]; then test -f "${FIXTURE_OUT}/v5/home.json"; else test ! -e "${FIXTURE_OUT}/v5/home.json"; fi
+
+      - name: Upload made.json and the conversion reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-v4-to-v5
+          path: |
+            ${{ env.FIXTURE_OUT }}/made.json
+            ${{ env.FIXTURE_OUT }}/report-dry.json
+            ${{ env.FIXTURE_OUT }}/report.json
+          if-no-files-found: warn
+
+      # The daemon's own log, only when something failed: it is the first thing the next fix needs.
+      - name: Upload the fixture daemon log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-v4-to-v5-daemon-log
+          path: |
+            ${{ env.FIXTURE_OUT }}/fyd.log
+            ${{ env.FIXTURE_OUT }}/fake-claude.log
+          if-no-files-found: ignore
+          retention-days: 3
