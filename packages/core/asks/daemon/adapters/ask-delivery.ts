@@ -34,7 +34,11 @@ export function askDelivery(source: AskDeliverySource): {
     ports: {
       composer: { state: async ferret => (await provider()?.composer?.(ferret)) ?? 'empty' },
       receipts: {
-        receipt: async (ferret, sendId) => (await provider()?.receipt?.(ferret, sendId)) ?? { state: 'delivered' },
+        receipt: async (ferret, sendId) => {
+          const delivery = provider();
+          if (delivery === undefined) return { state: 'pending' };
+          return delivery.receipt === undefined ? { state: 'delivered' } : await delivery.receipt(ferret, sendId);
+        },
       },
       // An answer that never arrived goes back to the owner as an open card once Conversation can say so.
       undelivered: { undelivered: async () => undefined },

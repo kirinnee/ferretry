@@ -259,6 +259,12 @@ async function apply(
             : {}),
         })
       : undefined;
+  if (
+    request.action === 'resolve' &&
+    (request.cardAsk !== undefined || request.gate === true) &&
+    request.response === undefined
+  )
+    throw new ApiError(400, 'an attached card answer needs a response', 'invalid');
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     sourced === undefined && request.action === 'resolve' && request.response !== undefined && gates !== undefined

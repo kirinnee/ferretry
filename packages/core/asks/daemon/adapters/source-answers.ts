@@ -18,7 +18,6 @@ export function sourceAnswers(
   now: () => string,
 ) {
   return async (answer: SourceAnswer) => {
-    if (answer.cardAsk !== undefined || answer.gate === true) return undefined;
     const listed = await agenda.list(answer.sessionId);
     if (!listed.ok) return undefined;
     const item = [...listed.value.items, ...listed.value.resolved].find(each => each.id === answer.id);
@@ -29,6 +28,9 @@ export function sourceAnswers(
     if (answer.actor.kind !== 'human') throw new ApiError(403, 'only the owner answers this question', 'forbidden');
     const denied = obligation.source === 'card' ? answer.permitted?.() : undefined;
     if (denied !== undefined) throw new ApiError(403, denied, 'forbidden');
+    // The stored source owns this question. Caller-supplied card targets must never redirect it to a plain resolve.
+    if (answer.cardAsk !== undefined || answer.gate === true)
+      throw new ApiError(400, 'answer the source question itself, without an attached card target', 'invalid');
     const receipt = createHash('sha256')
       .update(
         JSON.stringify([
@@ -66,7 +68,15 @@ export function sourceAnswers(
       async () => {
         if (spec === 'unavailable')
           throw new ApiError(409, 'the source is unavailable, so this question stays open', 'source_unavailable');
-        if (spec.apply === undefined) return;
+        if (spec.apply === undefined) {
+          if (obligation.source === 'card')
+            throw new ApiError(
+              409,
+              'the board cannot move the card right now, so this question stays open',
+              'source_unavailable',
+            );
+          return;
+        }
         const applied = await spec.apply({
           ...envelope,
           id: `an_${receipt.slice(0, 24)}` as AnswerId,

@@ -13,6 +13,7 @@ import { askedCardAsks, cardAskOf, cardAskReference } from '../lib/protocol/agen
 import { gateChoice, gateReopenOption } from '../lib/protocol/agenda-gate.ts';
 import type { AgendaResponse } from '../lib/protocol/agenda.ts';
 import type { AgendaGatePort, GateAnswer, GateAnswerOutcome } from '../lib/routes/agenda-gates.ts';
+import { parseObligation } from './asks-port.ts';
 
 /** The source the Board plugin registers its card asks under (`ask.sources:card`). */
 export const CARD_SOURCE = 'card' as SourceKey;
@@ -38,16 +39,25 @@ export function cardAskAnswers(
   source: () => AskSourceSpec | 'unavailable',
   now: () => string,
 ): AgendaGatePort {
-  const askOn = async (sessionId: string, id: string, reference?: string) => {
+  const itemOn = async (sessionId: string, id: string) => {
     const listed = await agenda.list(sessionId);
     if (!listed.ok) return undefined;
-    const item = [...listed.value.items, ...listed.value.resolved].find(each => each.id === id);
+    return [...listed.value.items, ...listed.value.resolved].find(each => each.id === id);
+  };
+  const askOn = async (sessionId: string, id: string, reference?: string) => {
+    const item = await itemOn(sessionId, id);
     if (item === undefined) return undefined;
     const open = askedCardAsks(item);
     return reference === undefined ? open[0] : cardAskOf(item, reference);
   };
   return {
-    isGate: async (sessionId, id) => (await askOn(sessionId, id)) !== undefined,
+    isGate: async (sessionId, id) => {
+      const item = await itemOn(sessionId, id);
+      return (
+        item !== undefined &&
+        (parseObligation(item.sourceRef)?.source === CARD_SOURCE || askedCardAsks(item).length > 0)
+      );
+    },
     answer: async (answer: GateAnswer): Promise<GateAnswerOutcome> => {
       // Only an explicitly addressed card answer acts on its source. Plain words answer the item's own question.
       if (answer.cardAsk === undefined && answer.gate !== true) return { handled: false };
@@ -81,10 +91,30 @@ export function cardAskAnswers(
       )
         return refused('invalid', 'say what is not good so the ferret can fix it');
       if (text.length > 2_048) return refused('invalid', 'keep your answer within 2048 characters');
+      // Today's board/gate-items.ts filesRefusal: files only accompany a reopen from this agenda's own ferret.
+      const files = answer.attachments;
+      if (files !== undefined) {
+        const reopens =
+          response.kind === 'other' || (choice?.kind === 'option' && choice.option.outcome === 'reopen-with-agenda');
+        if (!reopens) return refused('invalid', `only a Not good takes files, and ${answer.id} was answered otherwise`);
+        if (files.from !== answer.sessionId)
+          return refused('invalid', `the files for ${answer.id} must be uploaded to the session it is on`);
+        // The frozen card-source answer has no file-carry seam yet. Refuse before applying or recording anything.
+        return refused('invalid', 'this daemon cannot carry files with an answer (update it: fy daemon update)');
+      }
       const reference = cardAskReference(ask);
       const at = now();
       const receipt = createHash('sha256')
-        .update(JSON.stringify([answer.sessionId, answer.id, reference, response, note]))
+        .update(
+          JSON.stringify([
+            answer.sessionId,
+            answer.id,
+            reference,
+            response,
+            note,
+            answer.attachments === undefined ? null : [answer.attachments.from, answer.attachments.ids],
+          ]),
+        )
         .digest('hex');
       if (ask.answer !== undefined) {
         if (ask.answer.receipt !== receipt) return refused('moved-on', `${answer.id}'s question is already answered`);
