@@ -18,6 +18,7 @@ export type Protocol = typeof PROTOCOL;
  */
 export interface SessionPrincipal {
   readonly kind: 'device' | 'member';
+  /** For a Catalogs member session: the member KEY id (SessionMember.keyId), for per-key tracking, unlock and revoke. */
   readonly holder: HolderId;
   readonly session: SessionId;
   /** The access lease (15 min from proof, renewed; R241). */
