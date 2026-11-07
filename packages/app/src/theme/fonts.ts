@@ -1,3 +1,4 @@
+/// <reference path="./woff2.d.ts" />
 /**
  * WHICH FONT FILES EACH THEME FAMILY DRAWS WITH — and the hint that fetches the first-paint ones early.
  *
