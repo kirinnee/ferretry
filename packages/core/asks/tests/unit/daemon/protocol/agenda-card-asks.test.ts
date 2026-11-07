@@ -22,7 +22,6 @@ import {
   repliedToOwnAsk,
 } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
 import { canonicalJson } from '@ferretry/std';
-import { type AgendaQueueSource, needsYouQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
 
 const AT = '2026-11-03T09:00:00.000Z';
 const LATER = '2026-11-03T10:00:00.000Z';
@@ -119,19 +118,6 @@ describe('carriesCard', () => {
     should(carriesCard({ task: { id: 'F1', machineId: 'm-1' } }, 'F1', 'm-1')).be.true();
     should(carriesCard({ task: { id: 'F1' } }, 'F1', 'm-2')).be.true();
     should(carriesCard({ task: { id: 'F1' }, notice: true }, 'F1')).be.false();
-  });
-});
-
-describe('needsYouQueue and card asks', () => {
-  it('should put an agenda with an open card ask among the blockers, and an answered one back by time', () => {
-    const items = [
-      { id: 'A1', waitingSince: AT },
-      { id: 'A2', waitingSince: LATER, cardAsks: [open('F1')] },
-      { id: 'A3', waitingSince: LATER, blockingNow: true as const },
-      { id: 'A4', waitingSince: AT, cardAsks: [answered('F2')] },
-    ] as AgendaQueueSource[];
-
-    should(needsYouQueue(items).map(each => each.id)).deepEqual(['A2', 'A3', 'A1', 'A4']);
   });
 });
 

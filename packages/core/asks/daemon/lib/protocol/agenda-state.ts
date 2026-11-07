@@ -23,7 +23,7 @@ import { z } from 'zod';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
 
 const AgendaRestSubStateSchema = z.enum(['waiting-on-ferret', 'working']);
-export type AgendaRestSubState = z.infer<typeof AgendaRestSubStateSchema>;
+type AgendaRestSubState = z.infer<typeof AgendaRestSubStateSchema>;
 
 /** The longest line a ferret says it is working on (`fy agenda rest --why`). */
 export const MAX_AGENDA_REST_WHY_LENGTH = 1_024;

@@ -39,10 +39,3 @@ export const agendaStage = (item: {
   if (item.resolvedAt !== undefined) return 'done';
   return item.stage ?? agendaStageOfKind(agendaCardKind(item));
 };
-
-/**
- * When an item last STARTED needing the owner: its `waitingSince`. A raise, a wake and a genuinely new ask set it;
- * a reply that rests the item and the ferret's answer that brings it back leave it alone, which is how an item
- * returns to its OLD place in the queue. One field, one fact: the queue reads no second clock.
- */
-export const agendaNeedsYouSince = (item: { readonly waitingSince: string }): string => item.waitingSince;

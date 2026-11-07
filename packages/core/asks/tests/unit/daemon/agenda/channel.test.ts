@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import { type AgendaItem, AGENDA_URGENT_WAKE_MS } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
-import { needsYouQueue, restingQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
 import should from 'should';
 import {
   type AgendaActor,
@@ -83,8 +82,6 @@ const item = (ledger: AgendaLedger, id = 'A1'): AgendaItem => {
   return found;
 };
 
-const queue = (ledger: AgendaLedger): string[] => needsYouQueue(agendaSnapshot(ledger).items).map(each => each.id);
-
 const reply = (ledger: AgendaLedger, at = T2) =>
   ok(apply(ledger, { action: 'reply', actor: HUMAN, id: 'A1', note: 'what is EU?', at })).ledger;
 
@@ -118,7 +115,6 @@ describe('the agenda as a channel', () => {
     // Assert
     should(agendaState(item(replied))).deepEqual({ state: 'resting', sub: 'waiting-on-ferret', since: T2 });
     should(item(replied).parked).deepEqual({ reason: 'replied', at: T2 });
-    should(queue(replied)).deepEqual(['A2']);
   });
 
   it('should never make an item done on the owner’s answer: it rests, carrying the answer', () => {
@@ -164,7 +160,6 @@ describe('the agenda as a channel', () => {
     should(answered.item?.waitingSince).equal(T0);
     should(answered.item?.parked).be.undefined();
     should(answered.item?.resting).be.undefined();
-    should(queue(answered.ledger)).deepEqual(['A1', 'A2']);
   });
 
   it('should re-enter FRESH when the ferret answers on an item it took on (working): it is a new need', () => {
@@ -179,7 +174,6 @@ describe('the agenda as a channel', () => {
     should(agendaState(working.item ?? item(working.ledger))).containDeep({ state: 'resting', sub: 'working' });
     should(working.item?.resting?.why).equal('checking the regions');
     should(answered.item?.waitingSince).equal(T3);
-    should(queue(answered.ledger)).deepEqual(['A2', 'A1']);
   });
 
   it('should take an item on only for its ferret, never through the owner’s snooze', () => {
@@ -193,18 +187,6 @@ describe('the agenda as a channel', () => {
     // Assert
     should(byOwner.error.code).equal('forbidden');
     should(throughSnooze.error.message).match(/snoozed by the owner/u);
-  });
-
-  it('should list a resting item waiting on its ferret before one it works on, in the Resting list', () => {
-    // Arrange
-    const working = ok(apply(board(), { action: 'rest', actor: AGENT, id: 'A1', why: 'checking', at: T1 })).ledger;
-    const both = ok(apply(working, { action: 'reply', actor: HUMAN, id: 'A2', note: 'hm', at: T2 })).ledger;
-
-    // Act
-    const resting = restingQueue(agendaSnapshot(both).items).map(each => each.id);
-
-    // Assert
-    should(resting).deepEqual(['A2', 'A1']);
   });
 
   it('should keep a plain rewrite of a resting item resting: nothing reaches the owner', () => {
@@ -249,7 +231,6 @@ describe('a replaced ask', () => {
     should(replaced.item?.ownerAnswer).be.undefined();
     should(replaced.item?.questionAnswer).be.undefined();
     should(replaced.item?.revisions?.at(-1)?.changed).containDeep(['ask', 'kind', 'questionAnswer']);
-    should(queue(replaced.ledger)).deepEqual(['A2', 'A1']);
   });
 
   it('should refuse an answer to the old ask 409 ask_changed, and take one to the new ask', () => {
@@ -456,7 +437,6 @@ describe('a replaced ask', () => {
       should(done.error.code).equal('ask_changed');
       should(skipped.error.code).equal('ask_changed');
       should(item(replaced)).containDeep({ askVersion: 2, kind: 'choice' });
-      should(queue(replaced)).deepEqual(['A1']);
     });
 
     it('should close the item on a Done or Skip given from the ask it shows', () => {
@@ -717,7 +697,6 @@ describe('a blocker and a snooze', () => {
     // Assert
     should(woken.item?.parked).be.undefined();
     should(woken.item).containDeep({ blockingNow: true, waitingSince: T2, urgentAt: T2 });
-    should(queue(woken.ledger)).deepEqual(['A1', 'A2']);
   });
 
   it('should wake it for a new blocker even when it already woke as urgent within the hour', () => {
@@ -735,7 +714,6 @@ describe('a blocker and a snooze', () => {
     // Assert
     should(awake.item?.parked).be.undefined();
     should(awake.item).containDeep({ blockingNow: true, waitingSince: soon });
-    should(queue(awake.ledger)).deepEqual(['A1', 'A2']);
   });
 
   it('should still throttle the optional --now urgency to once an hour', () => {

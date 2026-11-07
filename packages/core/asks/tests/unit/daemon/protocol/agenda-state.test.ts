@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  AgendaActionRequestSchema,
-  AgendaItemSchema,
-  agendaBadgeCount,
-} from '../../../../daemon/lib/protocol/agenda.ts';
-import { type AgendaQueueSource, needsYouQueue, restingQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
+import { AgendaActionRequestSchema, AgendaItemSchema } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaStage, agendaStageOfKind } from '../../../../daemon/lib/protocol/agenda-stage.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 
@@ -13,10 +8,6 @@ const T1 = '2026-11-03T09:00:00.000Z';
 const T2 = '2026-11-03T10:00:00.000Z';
 const T3 = '2026-11-03T11:00:00.000Z';
 const T4 = '2026-11-03T12:00:00.000Z';
-
-/** A queue item: an id and when it began needing the owner, and whatever else the case says. */
-const item = (id: string, waitingSince: string, rest: Record<string, unknown> = {}): AgendaQueueSource =>
-  ({ id, waitingSince, ...rest }) as AgendaQueueSource;
 
 describe('agendaState', () => {
   it('should read a closed item and a notice as done, whatever else they carry', () => {
@@ -62,86 +53,6 @@ describe('agendaState', () => {
     // Assert
     should(agendaState({})).deepEqual({ state: 'needs-you' });
     should(agendaState({ resting: { sub: 'working', at: T1 } })).deepEqual({ state: 'needs-you' });
-  });
-});
-
-describe('needsYouQueue', () => {
-  it('should list each item at most once, blockers first, then by when each started needing the owner', () => {
-    // Arrange
-    const items = [
-      item('A1', T3),
-      item('A2', T1),
-      item('A3', T4, { blockingNow: true }),
-      item('A2', T1),
-      item('A4', T2, { blockingNow: true }),
-    ];
-
-    // Act
-    const queue = needsYouQueue(items);
-
-    // Assert
-    should(queue.map(each => each.id)).deepEqual(['A4', 'A3', 'A2', 'A1']);
-  });
-
-  it('should order two items that started needing the owner together by their key, whatever order they arrive in', () => {
-    // Arrange
-    const items = [item('A9', T1), item('A2', T1), item('A5', T1, { blockingNow: true }), item('A1', T1)];
-
-    // Act
-    const queue = needsYouQueue(items);
-
-    // Assert
-    should(queue.map(each => each.id)).deepEqual(['A5', 'A1', 'A2', 'A9']);
-  });
-
-  it('should leave out what waits on nobody: resting, snoozed, done and notices', () => {
-    // Arrange
-    const items = [
-      item('A1', T1),
-      item('A2', T1, { parked: { reason: 'replied', at: T2 } }),
-      item('A3', T1, { parked: { reason: 'snoozed', at: T2, until: T4 } }),
-      item('A4', T1, { notice: true }),
-      item('A5', T1, { waitingOn: 'ferret', askedAt: T2 }),
-    ];
-
-    // Assert
-    should(needsYouQueue(items).map(each => each.id)).deepEqual(['A1']);
-    should(agendaBadgeCount({ items })).equal(1);
-  });
-
-  it('should key items across boards by the key it is given, so two boards’ A1 are two entries', () => {
-    // Arrange
-    const items = [
-      { ...item('A1', T2), sessionId: 's1' },
-      { ...item('A1', T1), sessionId: 's2' },
-      { ...item('A1', T2), sessionId: 's1' },
-    ];
-
-    // Act
-    const queue = needsYouQueue(items, each => `${each.sessionId}/${each.id}`);
-
-    // Assert
-    should(queue.map(each => each.sessionId)).deepEqual(['s2', 's1']);
-  });
-});
-
-describe('restingQueue', () => {
-  it('should list the items waiting on their ferret first, then the ones being worked on, then the snoozed by wake', () => {
-    // Arrange
-    const items = [
-      item('A1', T1, { parked: { reason: 'snoozed', at: T1, until: T4 } }),
-      item('A2', T1, { parked: { reason: 'replied', at: T1 }, resting: { sub: 'working', at: T1, why: 'rebasing' } }),
-      item('A3', T1, { parked: { reason: 'replied', at: T3 } }),
-      item('A4', T1, { parked: { reason: 'snoozed', at: T1, until: T2 } }),
-      item('A5', T1, { waitingOn: 'ferret', askedAt: T2 }),
-      item('A6', T1),
-    ];
-
-    // Act
-    const resting = restingQueue(items);
-
-    // Assert
-    should(resting.map(each => each.id)).deepEqual(['A5', 'A3', 'A2', 'A4', 'A1']);
   });
 });
 

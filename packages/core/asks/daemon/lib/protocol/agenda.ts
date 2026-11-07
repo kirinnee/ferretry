@@ -73,7 +73,7 @@ export const MAX_AGENDA_POINTS_LENGTH = 16_000;
 /** The longest "where we are now" and the longest folded from-zero detail, as Markdown. */
 export const MAX_AGENDA_WHERE_LENGTH = 200_000;
 export const MAX_AGENDA_FOLDED_DETAIL_LENGTH = 200_000;
-export const MAX_AGENDA_SOURCE_REF_LENGTH = 512;
+const MAX_AGENDA_SOURCE_REF_LENGTH = 512;
 const MAX_AGENDA_ASK_OPTIONS = 12;
 const MAX_AGENDA_ASK_OPTION_LENGTH = 120;
 /** The most fields a form carries, and the longest id one has. */
