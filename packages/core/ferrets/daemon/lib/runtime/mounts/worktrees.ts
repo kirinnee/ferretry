@@ -7,7 +7,7 @@ import {
   type WorktreeRemovalDecision,
   type WorktreeRemovalRequest,
   WorktreeRemovalRequestSchema,
-} from '../../protocol/worktrees.ts';
+} from '../../../../contract/index.ts';
 import {
   ApiError,
   type ApiResponse,

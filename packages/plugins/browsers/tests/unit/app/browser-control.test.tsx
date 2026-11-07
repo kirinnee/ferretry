@@ -168,12 +168,22 @@ describe('the browser control hook', () => {
   it('SF3 polls every ten seconds with no feed, every two minutes while it is live, and never while hidden', async () => {
     const h = await harness(() => view());
     const reads = () => h.calls.filter(call => call.route === READ).length;
-    h.poll.advance(30_000);
+    // Each tick settles before the next: a tick skips a read still in flight.
+    const flush = (): Promise<void> =>
+      runAsync(async () => {
+        for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      });
+    for (let tick = 0; tick < 3; tick += 1) {
+      h.poll.advance(10_000);
+      await flush();
+    }
     expect(reads()).toBe(4);
     await runAsync(async () => h.heard.live(true));
     h.poll.advance(10_000);
+    await flush();
     const afterLive = reads();
     h.poll.advance(120_000);
+    await flush();
     expect(reads()).toBe(afterLive + 1);
     h.poll.hide();
     h.poll.advance(240_000);

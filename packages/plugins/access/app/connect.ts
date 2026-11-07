@@ -4,7 +4,9 @@
  * The shell holds no device key. For each session it asks Access which grant this device proves on that daemon and
  * signs the session's transcript through the handle it gets back; a handle is never serialised and never leaves the
  * page. Access keeps the keys: IndexedDB `fy-access` (§9.4), one non-extractable Ed25519 key per daemon, the same
- * store the rotation and the pairing exchange use (`lib/device-keys.ts`).
+ * store the rotation and the pairing exchange use (`lib/device-keys.ts`). The ROTATION rides with the claims: today's
+ * `KeyRotation` over that same store (`lib/key-rotation.ts`), which the shell's session applies inside the next unlock or
+ * step-up once the daemon says the key is due (R248) and falls back to once on a refused session (R252).
  */
 import type { ConnectPorts, DeviceClaims, PairingKey } from '@ferretry/app';
 import { PairingResponseSchema } from '../contract/index.ts';
@@ -15,6 +17,7 @@ import {
   mintDeviceKey,
 } from './lib/device-keys.ts';
 import { browserDeviceName } from './lib/device-name.ts';
+import { KeyRotation } from './lib/key-rotation.ts';
 
 export interface AccessClaimsOptions {
   /** Where the keys live. The page's IndexedDB by default. */
@@ -23,6 +26,8 @@ export interface AccessClaimsOptions {
   readonly appSession?: string;
   /** The name a fresh pairing key is offered under until the person changes it. */
   readonly deviceName?: () => string;
+  /** Epoch milliseconds, for when a rotation is due. A parameter so a suite can place `rotateBy` either side of it. */
+  readonly now?: () => number;
 }
 
 /** The pieces of the ports the claims read. */
@@ -36,7 +41,14 @@ export function accessClaims(ports: ClaimPorts, options: AccessClaimsOptions = {
   const store = options.store ?? accessKeyStore(ports);
   const appSession = options.appSession ?? crypto.randomUUID();
   const deviceName = options.deviceName ?? browserDeviceName;
+  // Today's `rotation: new KeyRotation({ store: deviceKeys, crypto })`: one rotation over the claims' own store.
+  const rotation = new KeyRotation({
+    store,
+    crypto: ports.crypto,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
   return {
+    rotation,
     claim: async daemon => {
       let key: CryptoKey | undefined;
       try {
