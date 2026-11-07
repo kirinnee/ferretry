@@ -1,6 +1,7 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
+import { ApiError } from '@ferretry/kernel/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
 import type {
@@ -224,6 +225,8 @@ export class FerretsService implements FerretsApi {
     if (record === undefined || record.state === 'stopped') return;
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
+    if (record.handle !== undefined && (harness === undefined || runner === undefined))
+      throw new ApiError(503, 'the harness or runner needed to stop this ferret is unavailable', 'plugin_unavailable');
     if (record.handle !== undefined && harness !== undefined && runner !== undefined)
       await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
     await this.settle(record, 'stopped', 'stopped');

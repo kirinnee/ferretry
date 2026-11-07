@@ -85,3 +85,17 @@ test('R-0363 stop waits for an in-flight resume then terminates its process', as
   expect(await f.runner.alive('%1' as never)).toBe(false);
   expect(f.tokens.holds(f.id)).toBe(false);
 });
+
+test('R-0372 unavailable stop keeps its live handle and token and answers 503', async () => {
+  for (const missing of ['harness', 'runner'] as const) {
+    const f = fixture();
+    await f.service.resume(f.id);
+    const handle = await f.service.handle(f.id);
+    f.ports[missing] = () => undefined;
+    await expect(f.service.stop(f.id, 'now')).rejects.toMatchObject({ status: 503 });
+    expect(await f.service.handle(f.id)).toBe(handle);
+    expect(f.registry.get(f.id)?.state).toBe('working');
+    expect(f.tokens.holds(f.id)).toBe(true);
+    expect(await f.runner.alive(handle!)).toBe(true);
+  }
+});
