@@ -206,7 +206,7 @@ P24	kept	connections	access,kernel	behaviour as written	pairing	P24
 P25	kept	access	kernel	behaviour as written	pairing	P25
 P26	kept	access	kernel	behaviour as written	pairing	P26
 P27	kept	access	kernel	behaviour as written	pairing	P27
-P28	kept	app-shell	access,kernel	behaviour as written	pairing	P28
+P28	kept	app-shell	access,kernel	`pairOverDirect` in app	pairing	P28
 P29	kept	connections	access,kernel	behaviour as written	pairing	P29
 P30	kept	connections	access,kernel	`PairingUnreachableError` in `packages/pwa/src/lib/pairing-unreachable.ts`	pairing	P30
 P31	kept	connections	access,kernel	behaviour as written	pairing	P31
@@ -980,7 +980,7 @@ R240	kept	access	gate	behaviour as written	relay-protocol	R240
 R241	kept	kernel	access,gate	`renew` / `renewed`	relay-protocol	R241
 R242	kept	access	gate	behaviour as written	relay-protocol	R242
 R243	kept	access	gate	behaviour as written	relay-protocol	R243
-R244	kept	kernel	access,gate	behaviour as written	relay-protocol	R244
+R244	kept	kernel	access,gate,app-shell	kernel close codes; app read retry	relay-protocol	R244
 R245	kept	kernel	access,gate	behaviour as written	relay-protocol	R245
 R246	kept	access	gate	behaviour as written	relay-protocol	R246
 R247	kept	kernel	access,gate	`FYD_TEST_TIMINGS` (`leaseSeconds`, `renewLeadSeconds`, `maxSessionSeconds`, `idleDaySeconds`)	relay-protocol	R247
@@ -1078,7 +1078,7 @@ R571	kept	access	kernel	behaviour as written	relay-protocol	R571
 R572	kept	kernel	access	behaviour as written	relay-protocol	R572
 R573	kept	access	kernel	behaviour as written	relay-protocol	R573
 R574	kept	access	kernel	`PairingResponseSchema`	relay-protocol	R574
-R575	kept	app-shell	access,kernel	behaviour as written	relay-protocol	R575
+R575	kept	app-shell	access,kernel	`RelayClientSession` in app	relay-protocol	R575
 R576	kept	access	kernel	behaviour as written	relay-protocol	R576
 R577	kept	access	kernel	`ApiRequest`	relay-protocol	R577
 R578	kept	access	kernel	behaviour as written	relay-protocol	R578
