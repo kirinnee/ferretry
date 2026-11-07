@@ -5,9 +5,10 @@ import { DaemonAgendaClient } from '../../../app/lib/agenda-client.ts';
 import { historyLine } from '../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
-import { mount } from '../../support/app/dom.ts';
+import { mount } from '@ferretry/app/testing';
+import { callFromFetch } from '../../support/app/call-from-fetch.ts';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemon = daemonConnection({ daemonId: 'daemon-a' });
 const scope = daemonSessionScope(daemon, 'same/session');
 
 describe('Markdown with a Copy writer', () => {
@@ -31,21 +32,24 @@ describe('Markdown with a Copy writer', () => {
 describe('the attention client', () => {
   test('posts a progress tick and a needs-info request as board actions', async () => {
     const bodies: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return new Response(
-        JSON.stringify({
-          v: 1,
-          sessionId: 'same/session',
-          items: [],
-          resolved: [],
-          count: 0,
-          parseErrors: 0,
-          updatedAt: '2026-07-31T00:00:00.000Z',
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    });
+    const client = new DaemonAgendaClient(
+      undefined,
+      callFromFetch(async (_input, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({
+            v: 1,
+            sessionId: 'same/session',
+            items: [],
+            resolved: [],
+            count: 0,
+            parseErrors: 0,
+            updatedAt: '2026-07-31T00:00:00.000Z',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
     await client.progress(daemon, scope, 'A8', 2, true);
     await client.needsInfo(daemon, scope, 'A8', 'which key?');
     await client.needsInfo(daemon, scope, 'A8');

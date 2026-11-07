@@ -75,7 +75,6 @@ export type NodeDataChannelLoader = () => Promise<NodeDataChannelModule>;
 
 export interface NodeDataChannelEngineOptions {
   readonly clock: Pick<Clock, 'after' | 'nowMs'>;
-  readonly platform?: string;
   readonly load?: NodeDataChannelLoader;
   readonly timeoutMs?: number;
   /** §16's gathering bounds; a suite shortens them, production never does. */
@@ -160,8 +159,8 @@ function peerPort(peer: EnginePeerConnection, close: () => void): WebRtcPeerPort
 }
 
 /** The sentence for a library that would not load, on this platform, with the first line it threw. */
-function loadFailure(error: unknown, platform: string): string {
-  return `the WebRTC engine could not be loaded on ${platform} (${firstLine(error)})`;
+function loadFailure(error: unknown): string {
+  return `the WebRTC engine could not be loaded on ${process.platform}-${process.arch} (${firstLine(error)})`;
 }
 
 export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine {
@@ -243,7 +242,7 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
     try {
       module = await this.#module();
     } catch (error) {
-      throw new WebRtcEngineUnavailable(loadFailure(error, this.options.platform ?? 'this machine'));
+      throw new WebRtcEngineUnavailable(loadFailure(error));
     }
     const peer = new module.PeerConnection('fy-webrtc-peer', { iceServers: [...iceServers] });
     const close = this.#counted(peer);
@@ -303,7 +302,7 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
     try {
       module = await this.#module();
     } catch (error) {
-      return { kind: 'unavailable', reason: loadFailure(error, this.options.platform ?? 'this machine') };
+      return { kind: 'unavailable', reason: loadFailure(error) };
     }
     const started = this.now();
     const echoed = await this.#echoBetweenLoopbackPeers(module);

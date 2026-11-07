@@ -19,3 +19,7 @@ export * from './compact-at-rules.ts';
 export * from './draft-ops.ts';
 export * from './peer-messages.ts';
 export * from './turn-handoff.ts';
+export * from './fy-render-caps.ts';
+export * from './fy-render.ts';
+export * from './reference-catalog.ts';
+export * from './slots.ts';

@@ -7,25 +7,16 @@
  * runtime" has one meaning and one derivation.
  */
 import { posix } from 'node:path';
-import {
-  type BrowserMode,
-  type BrowserPortsSetting,
-  type LoweredHarness,
-  looksLikeRawSecret,
-  lowerHarness,
-} from './foreign.ts';
+import { type BrowserMode, type BrowserPortsSetting, type LoweredHarness, lowerHarness } from './foreign.ts';
 import {
   type AccountModel,
   AccountModelSchema,
   type ComponentKind,
-  type Credential,
   isRuntimeName,
   resolveDefaultRuntime,
 } from '../account/schema.ts';
-import { accountSecretReferences } from '../env-profiles.ts';
 import { componentFilePath, freeName, looksSecret } from '../account/import.ts';
-import { credentialFromPreset, presetLoginRefusal } from '../presets/login.ts';
-import { credentialHarnesses, credentialVariables, hasHalves } from '../account/halves.ts';
+import { credentialHarnesses } from '../account/halves.ts';
 import {
   describeScopeConflict,
   HARNESS_SCOPE_WORDS,
@@ -38,7 +29,6 @@ import {
 } from '../account/scope.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
-import type { ProviderPreset } from '../presets/schema.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { skillSourceReference } from '../account/adapt.ts';
 import { slugName } from '../account/document.ts';
@@ -84,20 +74,43 @@ export class FleetMutationRefusal extends Error {
 // lowered once, at {@link deriveAccountChange}, and every function below reads the lowered shape.
 type ComponentInput = LoweredHarness<WireComponentInput>;
 
-/** The changes that derive a new configuration, as they arrive. Sign-out, setup and clone run their own executors. */
+/** Every change to ONE login: Logins stages and applies them (`ctx.needs.logins.changes`); Runtimes only carries a removal's runtimes. */
+export type LoginAccountChange = Extract<
+  WireAccountChange,
+  {
+    kind:
+      | 'credential.add'
+      | 'credential.env'
+      | 'credential.label'
+      | 'credential.remove'
+      | 'credential.signout'
+      | 'credential.disable'
+      | 'credential.enable';
+  }
+>;
+
+/** Whether Logins owns this change (every `credential.*`). */
+export const isLoginAccountChange = (
+  change: WireAccountChange | WireCatalogInstallChange,
+): change is LoginAccountChange => change.kind.startsWith('credential.');
+
+/** A login's removal, as Runtimes sees it: the runtimes still on it, to move or remove before Logins removes the login. */
+export type LoginRemoval = Extract<LoginAccountChange, { kind: 'credential.remove' }>;
+
+/** The changes that derive a new configuration in Runtimes, as they arrive. Setup and clone run their own executors. */
 export type AccountPlanChange =
-  | Exclude<WireAccountChange, { kind: 'credential.signout' } | { kind: 'setup.import' } | { kind: 'clone.import' }>
+  | Exclude<WireAccountChange, LoginAccountChange | { kind: 'setup.import' } | { kind: 'clone.import' }>
   | WireCatalogInstallChange;
 
-type PlanChange = LoweredHarness<AccountPlanChange>;
+type PlanChange = LoweredHarness<AccountPlanChange | LoginRemoval>;
 
-/** The kinds that are not a configuration edit. */
-const EXECUTED_KINDS: ReadonlySet<string> = new Set(['credential.signout', 'setup.import', 'clone.import']);
+/** The kinds that are not a configuration edit in Runtimes. */
+const EXECUTED_KINDS: ReadonlySet<string> = new Set(['setup.import', 'clone.import']);
 
 /** Whether this change derives a new configuration (and so goes through the plan and its apply). */
 export const isAccountPlanChange = (
   change: WireAccountChange | WireCatalogInstallChange,
-): change is AccountPlanChange => !EXECUTED_KINDS.has(change.kind);
+): change is AccountPlanChange => !EXECUTED_KINDS.has(change.kind) && !isLoginAccountChange(change);
 
 /** One component document a change writes, relative to the asset tree. */
 export interface AccountComponentFile {
@@ -122,8 +135,6 @@ export interface AccountChangeFacts {
   readonly runningSessions: number;
   /** Each settings component's parsed file, by name: what an edit by entry keeps a hidden value from. */
   readonly settingsBodies?: Readonly<Record<string, SettingsObject>>;
-  /** The provider presets this machine offers (docs/provider-presets.md), for a login made from one. */
-  readonly presets?: readonly ProviderPreset[];
   /**
    * Every other spelling `ids.json` resolves to a runtime — each former name and each id — mapped to
    * the runtime it reaches, so a rename never takes a name that already starts something else.
@@ -354,17 +365,6 @@ function componentBody(
   }
 }
 
-/** A label two logins of one harness may not share (C9, E26). */
-function assertLabelFree(model: AccountModel, id: string, harness: HarnessKind, label: string | undefined): void {
-  if (label === undefined) return;
-  const clash = Object.entries(model.credentials).find(
-    ([other, credential]) => other !== id && credential.harness === harness && credential.label === label,
-  );
-  if (clash !== undefined) {
-    refuse(`another ${HARNESS_DISPLAY_NAMES[harness]} login is already labelled ${label}; pick a different label`);
-  }
-}
-
 type Draft = {
   machine: Record<string, unknown>;
   credentials: Record<string, Record<string, unknown>>;
@@ -380,7 +380,7 @@ type Draft = {
  */
 export function deriveAccountChange(
   model: AccountModel,
-  change: AccountPlanChange,
+  change: AccountPlanChange | LoginRemoval,
   facts: AccountChangeFacts,
 ): AccountModelEdit {
   const draft = structuredClone(model) as unknown as Draft;
@@ -402,8 +402,7 @@ export function deriveAccountChange(
       `Runtime ${misfit.runtime} uses a ${HARNESS_DISPLAY_NAMES[misfit.harness]} login, and this change would make its profile ${misfit.profile} ${HARNESS_SCOPE_WORDS[misfit.scope]}. Move it to another profile first.`,
     );
   }
-  const orphanedSecrets = change.kind === 'credential.remove' ? orphanedSecretsOf(model, change.id) : [];
-  return { model: next, files, summary, consequences, ...(orphanedSecrets.length === 0 ? {} : { orphanedSecrets }) };
+  return { model: next, files, summary, consequences };
 }
 
 function applyAccountChange(
@@ -438,61 +437,6 @@ function applyAccountChange(
       return removeComponent(model, draft, change, consequences);
     case 'catalog.install':
       return installCatalogItem(model, draft, change, facts, files, consequences);
-    case 'credential.add': {
-      assertFreeRuntimeName(change.id, id => model.credentials[id] !== undefined, 'login', facts.machineName);
-      assertLabelFree(model, change.id, change.harness, change.label);
-      const store = change.store ?? 'ferretry';
-      if (store === 'environment') return addEnvironmentLogin(draft, change, facts, consequences);
-      if (change.preset !== undefined || change.env !== undefined || change.cloudCredential !== undefined) {
-        refuse('a preset, variables and a cloud credential belong only to an environment login');
-      }
-      if (store === 'host') {
-        // One pointer at the person's own login is all there is to point at: the import reuses it.
-        const existing = Object.entries(model.credentials).find(
-          ([, credential]) => credential.harness === change.harness && credential.store === 'host',
-        )?.[0];
-        if (existing !== undefined)
-          refuse(`${existing} is already your own ${HARNESS_DISPLAY_NAMES[change.harness]} login on this machine`);
-      }
-      draft.credentials[change.id] = {
-        harness: change.harness,
-        store,
-        ...(change.label === undefined ? {} : { label: change.label }),
-      };
-      if (store === 'host') {
-        consequences.push(
-          `It is your own ${HARNESS_DISPLAY_NAMES[change.harness]} login, shared with ${change.harness} in your terminal: signing in here signs that in too.`,
-        );
-        return `Add your own ${HARNESS_DISPLAY_NAMES[change.harness]} login as ${change.id}`;
-      }
-      consequences.push('It starts as an empty login that needs sign-in.');
-      return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id}`;
-    }
-    case 'credential.label': {
-      const credential = model.credentials[change.id];
-      if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
-      const target = draft.credentials[change.id] as Record<string, unknown>;
-      if (change.label === null) {
-        delete target.label;
-        return `Remove the label from login ${change.id}`;
-      }
-      assertLabelFree(model, change.id, credential.harness, change.label);
-      target.label = change.label;
-      return `Label login ${change.id} ${change.label}`;
-    }
-    case 'credential.disable': {
-      if (model.credentials[change.id] === undefined) return refuse(`no login ${change.id} exists on this machine`);
-      (draft.credentials[change.id] as Record<string, unknown>).disabled = disabledBlock(change);
-      consequences.push(
-        'Nothing running is stopped: ferrets already on this login keep going. New starts on it are refused.',
-      );
-      return `Disable login ${change.id}`;
-    }
-    case 'credential.enable': {
-      if (model.credentials[change.id] === undefined) return refuse(`no login ${change.id} exists on this machine`);
-      delete (draft.credentials[change.id] as Record<string, unknown>).disabled;
-      return `Enable login ${change.id}`;
-    }
     case 'runtime.disable': {
       if (model.runtimes[change.name] === undefined) return refuse(`no runtime ${change.name} exists on this machine`);
       (draft.runtimes[change.name] as Record<string, unknown>).disabled = disabledBlock(change);
@@ -513,8 +457,6 @@ function applyAccountChange(
       }
       return `Enable runtime ${change.name}`;
     }
-    case 'credential.env':
-      return putEnvironmentLogin(model, draft, change, facts, consequences);
     case 'credential.remove':
       return removeCredential(model, draft, change, facts, consequences);
     default:
@@ -522,29 +464,12 @@ function applyAccountChange(
   }
 }
 
-const secretsOfLogin = (id: string): ((reference: { readonly origin: string }) => boolean) => {
-  const prefix = `credential ${id} env `;
-  return reference => reference.origin.startsWith(prefix);
-};
-
-/** The secret names only login `id` refers to: removing the login leaves them in the store, unused. */
-function orphanedSecretsOf(model: AccountModel, id: string): readonly string[] {
-  const references = accountSecretReferences(model);
-  const own = secretsOfLogin(id);
-  const elsewhere = new Set(references.filter(reference => !own(reference)).map(reference => reference.name));
-  return [...new Set(references.filter(own).map(reference => reference.name))]
-    .filter(name => !elsewhere.has(name))
-    .toSorted();
-}
-
 /**
- * `credential.remove`: the login goes, and — in the SAME apply, so a half-done removal can never be
- * left — every runtime still on it is either switched to another login of the same CLI or removed (the
- * rules of `runtime.remove`: the machine's default runtime needs another default first).
- *
- * What it does NOT delete, because each is another capability's to delete: the secret store's entries
- * (docs/secrets.md) and a Ferretry-kept login's saved sign-in (it is signed out first, by the
- * reviewed `credential.signout`). Both are said in the consequences, by name.
+ * `credential.remove`, the RUNTIMES half: every runtime still on the login is either switched to another login of the
+ * same CLI or removed (the rules of `runtime.remove`: the machine's default runtime needs another default first), and a
+ * login a runtime still uses is refused (C10) — here, first, because Logins cannot see runtime use. The login itself is
+ * Logins' to remove (`login.remove`), and what that leaves behind (the secret store's entries, a Ferretry-kept login's
+ * saved sign-in) is said by Logins' own consequences. The edit leaves `model.credentials` as it is.
  */
 function removeCredential(
   model: AccountModel,
@@ -601,7 +526,6 @@ function removeCredential(
       `${counted(left.length, 'runtime')} still ${left.length === 1 ? 'uses' : 'use'} this login (${listed(left)}). ${switches.length + removals.length === 0 ? `Move ${left.length === 1 ? 'it' : 'them'} to another login first.` : `Switch ${left.length === 1 ? 'it' : 'them'} to another login or remove ${left.length === 1 ? 'it' : 'them'} first.`}`,
     );
   }
-  delete draft.credentials[change.id];
 
   for (const [to, names] of byTarget) {
     consequences.push(
@@ -620,17 +544,6 @@ function removeCredential(
   if (running.length > 0) {
     consequences.push(
       `${counted(running.length, 'ferret')} ${running.length === 1 ? 'is' : 'are'} running on ${users.length === 1 ? 'that runtime' : 'those runtimes'}. ${running.length === 1 ? 'It keeps' : 'They keep'} running${removals.length === 0 ? '' : ', but restarting one on a removed runtime later needs another runtime'}.`,
-    );
-  }
-  if (credential.store === 'host') {
-    consequences.push(`Your own ${credential.harness} in your terminal keeps its login; Ferretry only stops using it.`);
-  } else if (credential.store === 'ferretry') {
-    consequences.push('Its saved sign-in stays on this machine. To delete it, sign the login out before removing it.');
-  }
-  const orphaned = orphanedSecretsOf(model, change.id);
-  if (orphaned.length > 0) {
-    consequences.push(
-      `${counted(orphaned.length, 'saved secret')} (${listed(orphaned)}) ${orphaned.length === 1 ? 'is' : 'are'} used by nothing else now, and ${orphaned.length === 1 ? 'stays' : 'stay'} in the secret store until you delete ${orphaned.length === 1 ? 'it' : 'them'} there.`,
     );
   }
 
@@ -1158,159 +1071,6 @@ function removeComponent(
   }
   delete draft.components[kind][change.name];
   return `Delete ${word} ${change.name}`;
-}
-
-// ── Environment logins (docs/provider-presets.md) ────────────────────────────────────────────────
-
-type AddLoginChange = Extract<PlanChange, { kind: 'credential.add' }>;
-
-/** Every variable of an environment login, refused if one holds what looks like a raw key (E7). */
-function assertNoRawSecrets(env: Readonly<Record<string, string>>, owner: string): void {
-  for (const [name, value] of Object.entries(env)) {
-    if (looksSecret(name, value) || looksLikeRawSecret(name, value)) {
-      refuse(
-        `${name} in ${owner} looks like a secret, and a secret never sits in a login file. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
-      );
-    }
-  }
-}
-
-/** The sentence every new or changed environment login carries: what launches with what. */
-const ENVIRONMENT_CONSEQUENCE =
-  'Runtimes on it launch with these variables. A secret is put in from the secret store at launch and never written anywhere.';
-
-/** `credential.add` with `store: environment`: from a preset when one is named, else from the variables given. */
-function addEnvironmentLogin(
-  draft: Draft,
-  change: AddLoginChange,
-  facts: AccountChangeFacts,
-  consequences: string[],
-): string {
-  const env = change.env ?? {};
-  const owner = `login ${change.id}`;
-  assertNoRawSecrets(env, owner);
-  const input = {
-    env,
-    ...(change.cloudCredential === undefined ? {} : { cloudCredential: change.cloudCredential }),
-    ...(change.label === undefined ? {} : { label: change.label }),
-  };
-  if (change.preset === undefined) {
-    draft.credentials[change.id] = {
-      harness: change.harness,
-      store: 'environment',
-      ...(change.label === undefined ? {} : { label: change.label }),
-      ...(Object.keys(env).length === 0 ? {} : { env: { ...env } }),
-      ...(change.cloudCredential === undefined ? {} : { cloudCredential: change.cloudCredential }),
-    };
-    consequences.push(ENVIRONMENT_CONSEQUENCE);
-    return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id} from its environment`;
-  }
-  const preset = facts.presets?.find(candidate => candidate.id === change.preset);
-  if (preset === undefined) return refuse(`there is no preset ${change.preset} on ${facts.machineName}`);
-  // The login gets every half the preset offers; `harness` only says which is listed first.
-  const refusal = presetLoginRefusal(preset, { ...input, harness: change.harness });
-  if (refusal !== undefined) refuse(refusal);
-  const credential = credentialFromPreset(preset, { ...input, harness: change.harness });
-  draft.credentials[change.id] = { ...credential };
-  const harnesses = credentialHarnesses(credential);
-  consequences.push(ENVIRONMENT_CONSEQUENCE);
-  if (harnesses.length > 1) {
-    consequences.push(
-      `One login, one secret: runtimes on it can run ${harnesses.map(name => HARNESS_DISPLAY_NAMES[name]).join(' or ')}.`,
-    );
-  }
-  return `Add a ${harnesses.map(name => HARNESS_DISPLAY_NAMES[name]).join(' + ')} login ${change.id} from ${preset.label}`;
-}
-
-/** A two-CLI login's variables, put back where each belongs. */
-interface SplitVariables {
-  readonly shared: Record<string, string>;
-  readonly claude?: Record<string, string>;
-  readonly codex?: Record<string, string>;
-}
-
-/**
- * A login with halves, its edited variables put back: a name it shares stays shared, a name a half
- * sets stays in that half (in both, when both set it), a new name goes to the half its preset declares
- * it in, and anything else is shared by both.
- */
-function splitHalves(
-  credential: Credential,
-  preset: ProviderPreset | undefined,
-  env: Readonly<Record<string, string>>,
-): SplitVariables {
-  const harnesses = credentialHarnesses(credential);
-  const halves: Partial<Record<HarnessKind, Record<string, string>>> = Object.fromEntries(
-    harnesses.map(harness => [harness, {}]),
-  );
-  const shared: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) {
-    const owners = harnesses.filter(harness => credential[harness]?.env?.[name] !== undefined);
-    const declared = harnesses.filter(harness => preset?.halves[harness]?.env[name] !== undefined);
-    const into = credential.env?.[name] !== undefined ? [] : owners.length > 0 ? owners : declared;
-    if (into.length === 0) shared[name] = value;
-    for (const harness of into) (halves[harness] as Record<string, string>)[name] = value;
-  }
-  return { shared, ...halves };
-}
-
-/** `credential.env`: an environment login's variables and cloud credential reference, changed. */
-function putEnvironmentLogin(
-  model: AccountModel,
-  draft: Draft,
-  change: Extract<PlanChange, { kind: 'credential.env' }>,
-  facts: AccountChangeFacts,
-  consequences: string[],
-): string {
-  const credential = model.credentials[change.id];
-  if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
-  if (credential.store !== 'environment') {
-    refuse(`login ${change.id} is signed in, not made from environment variables — it has no variables to change`);
-  }
-  const owner = `login ${change.id}`;
-  // A login that drives both CLIs is edited as one set of variables and put back half by half.
-  const env = resolvedEnv(change.env, credentialVariables(credential), owner) ?? {};
-  assertNoRawSecrets(
-    Object.fromEntries(Object.entries(change.env).filter(([, value]) => typeof value === 'string')) as Record<
-      string,
-      string
-    >,
-    owner,
-  );
-  const cloudCredential =
-    change.cloudCredential === undefined ? credential.cloudCredential : (change.cloudCredential ?? undefined);
-  const preset =
-    credential.preset === undefined ? undefined : facts.presets?.find(candidate => candidate.id === credential.preset);
-  const harnesses = credentialHarnesses(credential);
-  if (preset !== undefined) {
-    const refusal = presetLoginRefusal(preset, {
-      env,
-      halves: harnesses,
-      ...(cloudCredential === undefined ? {} : { cloudCredential }),
-    });
-    if (refusal !== undefined) refuse(refusal);
-  }
-  const target = draft.credentials[change.id] as Record<string, unknown>;
-  const split = hasHalves(credential) ? splitHalves(credential, preset, env) : { shared: env };
-  if (Object.keys(split.shared).length === 0) delete target.env;
-  else target.env = split.shared;
-  for (const harness of harnesses) {
-    const half = split[harness];
-    if (half === undefined) continue;
-    const written = { ...(target[harness] as Record<string, unknown>) };
-    if (Object.keys(half).length === 0) delete written.env;
-    else written.env = half;
-    target[harness] = written;
-  }
-  if (cloudCredential === undefined) delete target.cloudCredential;
-  else target.cloudCredential = cloudCredential;
-  const users = runtimesUsingCredential(model, change.id);
-  consequences.push(
-    users.length === 0
-      ? ENVIRONMENT_CONSEQUENCE
-      : `${listed(users)} ${users.length === 1 ? 'starts' : 'start'} with the new variables next launch. Running sessions keep the old ones until restarted.`,
-  );
-  return `Change the variables of login ${change.id}`;
 }
 
 /** The `disabled:` block a disable change writes: only what the caller said. */

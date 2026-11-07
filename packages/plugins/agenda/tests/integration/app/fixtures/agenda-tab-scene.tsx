@@ -7,7 +7,7 @@
  *   ?theme=<family>-<mode>
  */
 
-import type { AgendaItem, ResolvedAgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem, ResolvedAgendaItem } from '@ferretry/core-asks/contract';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgendaTab } from '../../../../app/features/agenda/agenda-tab.tsx';

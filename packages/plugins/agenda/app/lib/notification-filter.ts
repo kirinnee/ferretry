@@ -38,7 +38,9 @@
  * comment names the least-bad compliant answer it picked.
  */
 
-import type { PushNotificationKind } from '../shell.ts';
+/** The push kinds a notification names (today's protocol `PushNotificationKind`). */
+export type PushNotificationKind = 'attention' | 'agenda' | 'question' | 'failed' | 'completed' | 'device-paired';
+
 import type { NotificationFilterMirrorWriter } from './notification-filter-mirror.ts';
 
 /**

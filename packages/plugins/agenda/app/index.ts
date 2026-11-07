@@ -3,33 +3,48 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
 
-type ViewName = 'agenda-screen' | 'agenda-ask-screen' | 'agenda-panel' | 'agenda-settings';
+type Surfaces = {
+  readonly screens: Record<string, AppComponent<ScreenProps>>;
+  readonly panels: Record<string, AppComponent<PanelProps>>;
+  readonly settings: Record<string, AppComponent<SettingsProps>>;
+};
 
 /**
- * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), which
- * is also why the type-checker, which has no React in this workspace yet, does not follow it into the views.
+ * The view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), so
+ * the registry generator, which only inspects this module, never loads React.
  */
-const loadView = (name: ViewName): Promise<Record<string, unknown>> => import(`./views/${name}.tsx`);
-
-/** A component built by the view's factory with the plugin client, once the view has loaded. */
-const viewOf = <Props>(name: ViewName, factory: string, client: PluginClient): AppComponent<Props> =>
-  lazyComponent<Props>(async () =>
-    ((await loadView(name))[factory] as (client: PluginClient) => AppComponent<Props>)(client),
-  );
+const loadSurfaces = (): Promise<Record<string, unknown>> => import(`./views/${'surfaces'}.tsx`);
 
 /**
  * Agenda's app half: the `agenda` page and the page a buzz opens (`agenda-ask`), one ferret's agenda beside its chat
- * (`ferret-agenda`) and the `agenda` Settings tab. The views are React and load on first use (`./lazy.ts`), so this
- * module imports no React and stays loadable by the registry generator before the app shell, which owns React, is in
- * place.
+ * (`ferret-agenda`) and the `agenda` Settings tab. Every surface reads and answers through the one generated client,
+ * over one runtime built for the daemon (`views/surfaces.tsx`). The ask page offers the `agenda.conversation` slot
+ * (contract/slots.ts) where the ferret's conversation goes.
  */
 export default implementApp(manifest, {
-  build: ({ client }) => ({
-    screens: {
-      agenda: viewOf<ScreenProps>('agenda-screen', 'createAgendaScreen', client),
-      'agenda-ask': viewOf<ScreenProps>('agenda-ask-screen', 'createAgendaAskScreen', client),
-    },
-    panels: { 'ferret-agenda': viewOf<PanelProps>('agenda-panel', 'createAgendaPanel', client) },
-    settings: { agenda: viewOf<SettingsProps>('agenda-settings', 'createAgendaSettings', client) },
-  }),
+  build: ({ client }) => {
+    let surfaces: Promise<Surfaces> | undefined;
+    const surfacesOf = (): Promise<Surfaces> => {
+      surfaces ??= loadSurfaces().then(module => (module.createSurfaces as (client: PluginClient) => Surfaces)(client));
+      return surfaces;
+    };
+    const screen = (id: 'agenda' | 'agenda-ask') =>
+      lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
+    return {
+      screens: { agenda: screen('agenda'), 'agenda-ask': screen('agenda-ask') },
+      panels: {
+        'ferret-agenda': lazyComponent<PanelProps>(
+          async () => (await surfacesOf()).panels['ferret-agenda'] as AppComponent<PanelProps>,
+        ),
+        'ferret-agenda-mode': lazyComponent<PanelProps>(
+          async () => (await surfacesOf()).panels['ferret-agenda-mode'] as AppComponent<PanelProps>,
+        ),
+      },
+      settings: {
+        agenda: lazyComponent<SettingsProps>(
+          async () => (await surfacesOf()).settings.agenda as AppComponent<SettingsProps>,
+        ),
+      },
+    };
+  },
 });

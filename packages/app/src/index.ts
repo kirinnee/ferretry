@@ -105,7 +105,9 @@ export {
 } from './layout/layout.ts';
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
-export { PanelSlot } from './shell/views.tsx';
+export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
+/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar. */
+export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,
@@ -148,3 +150,148 @@ export {
 export { Badge, Button, cn, FullscreenToggle, useDocumentVisible, useFullscreen } from './ui/index.ts';
 export { describeSurfaceOwnership, type SurfaceOwnership, type SurfaceOwnershipLabel } from './references/ownership.ts';
 export { FY_REQUEST_ID_HEADER } from './client/request-id.ts';
+export {
+  type DeadlineSchedule,
+  MACHINE_READ_DEADLINE_MS,
+  MachineDeadlineError,
+  realSchedule,
+  untilAborted,
+  withDeadline,
+} from './client/machine-deadline.ts';
+export {
+  browserListRefreshEnvironment,
+  LIST_REFRESH_MIN_MS,
+  ListRefresh,
+  type ListRefreshEnvironment,
+} from './client/list-refresh.ts';
+
+// ─── prose: Markdown and the kit around it (conversation-app plan C1-1 … C1-10) ───────────────────────────────────
+export {
+  Markdown,
+  type MarkdownAstFenceNode,
+  type MarkdownFences,
+  type MarkdownProps,
+  locationFenceBody,
+  referenceHasTrustedOrigin,
+} from './prose/markdown.tsx';
+export { CopyableFence, CopyableSpan } from './prose/markdown-copy.tsx';
+export { MarkdownTable, type MarkdownTableProps } from './prose/markdown-table.tsx';
+export { cellText, remarkTableLabels } from './prose/remark-table-labels.ts';
+export {
+  DEFAULT_TABLE_VIEW,
+  parseTableView,
+  TABLE_VIEW_KEY,
+  type TableView,
+  TableViewPreferenceStore,
+  type TableViewStorage,
+} from './prose/table-view-preference.ts';
+export { ChatProse } from './prose/chat-prose.tsx';
+export { CodeBlock, type CodeBlockProps } from './prose/code-block.tsx';
+export { escapeHtml, fenceLanguage, highlightToHtml, isKnownLanguage, type Tokenizer } from './prose/highlight.ts';
+export {
+  type ReferenceSurface,
+  ReferenceSurfaceProvider,
+  useReferenceSurface,
+} from './references/reference-surface.tsx';
+export {
+  type BrowserStatus,
+  createSurfaceReferenceResolver,
+  type SessionSurface,
+  sessionSurfaces,
+  type SurfaceScope,
+  type TerminalListView,
+  terminalIdForSurfaceKey,
+} from './references/surface-references.ts';
+export {
+  asLocationError,
+  accuracyLabel,
+  browserLocationShareHost,
+  cleanPlace,
+  coordinatePair,
+  formatLocationBlock,
+  LOCATION_FENCE_LANGUAGE,
+  LOCATION_TIMEOUT_MS,
+  type LocationEnvironment,
+  LocationError,
+  type LocationFailureCode,
+  type LocationFix,
+  type LocationShareHost,
+  parseLocationBlock,
+} from './shared/location-share.ts';
+export {
+  type LocationDraft,
+  LocationChip,
+  PendingLocationChip,
+  type PendingLocationChipProps,
+} from './shared/location-chip.tsx';
+export { type ClockEnvironment, clockOfInstant, type MessageClock } from './shared/message-clock.ts';
+export {
+  nameToneClass,
+  StatusMark,
+  statusMark,
+  type StatusMarkInfo,
+  type StatusMarkProps,
+  type StatusMarkStatus,
+  type StatusMarkView,
+  TERMINAL_STATUSES,
+  WAITING_STATUSES,
+} from './shared/status-mark.tsx';
+export { absoluteTime, relativeTime, statusLabel } from './shared/time-labels.ts';
+
+// ─── mounting other plugins' views, and addressing screens ────────────────────────────────────────────────────────
+export { RendererView } from './shell/renderer-view.tsx';
+export { ScreenHrefProvider, type ScreenHrefOf, screenHref, useScreenHref } from './router/screen-href.ts';
+
+// ─── the composer's shared kit: the editor, quoting, this device's controls and preferences ───────────────────────
+export * from './compose/composer-editing.ts';
+export * from './compose/live-markdown.ts';
+export * from './compose/live-markdown-editor.tsx';
+export * from './compose/md-compose.ts';
+export * from './compose/quote.ts';
+export * from './compose/ferret-scope.ts';
+export * from './compose/composer-keybinding.ts';
+export * from './compose/controls.ts';
+export * from './compose/device-controls.ts';
+export * from './compose/setting-row.tsx';
+export * from './compose/context-readout.ts';
+export * from './compose/context-ring.tsx';
+export * from './compose/use-location-share.ts';
+export * from './compose/composer-draft.ts';
+export { type DevicePreference, devicePreference } from './storage/device-preference.ts';
+
+// ─── the chat's chrome: receipts, command rows, the live readout, quoting, the reading position (C3-1 … C3-6) ──────
+export { ReceiptMark, type SendReceiptKind } from './shared/receipt-mark.tsx';
+export { CommandRow, commandOutputIsLong, commandOutputSummary, type SlashCommand } from './shared/command-row.tsx';
+export {
+  LiveStreamIndicator,
+  type LiveStreamIndicatorProps,
+  type LiveStreamState,
+  liveStreamState,
+  type SessionEventStreamStatus,
+} from './shared/live-stream-indicator.tsx';
+export {
+  type CountUpOptions,
+  type LiveCounterOptions,
+  type LiveScheduler,
+  useCountUp,
+  useLiveActivity,
+  useLiveElapsed,
+} from './shared/use-live-counter.ts';
+export { COUNT_UP_MS, countUpValue, msToNextSecond, wholeSecondsSince } from './shared/live-counter-clock.ts';
+export { createLiveActivityHub, type LiveActivityFeed, type LiveActivityHub } from './shared/live-activity-feed.ts';
+export {
+  type QuoteSelectionLike,
+  type QuoteSurfaceHandlers,
+  quotableTranscriptSelectionText,
+  useQuoteMenu,
+} from './shared/quote-menu.tsx';
+export {
+  type ChatScroll,
+  type ChatScrollSlot,
+  chatScrollSlot,
+  restorableTop,
+  ScrollMemory,
+  type ScrollMemoryStorage,
+} from './scroll/scroll-memory.ts';
+export { useRouteScrollMemory } from './scroll/use-route-scroll-memory.ts';
+export { useChatScrollSlot } from './scroll/chat-scroll.ts';

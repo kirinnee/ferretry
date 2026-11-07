@@ -222,7 +222,7 @@ async function runPluginVerb(
     clock: world.host.clock,
     sleep: (delay, signal) => world.host.sleep(delay, signal),
     readText: path => world.host.readText(path),
-    env: pluginEnvironment(world.environment),
+    env: pluginEnvironment(world.environment, world.host.cwd()),
     ownState: world.host.ownState(plugin.manifest),
   });
   const handler = (built.verbs as Readonly<Record<string, VerbHandler | undefined>>)[entry.line];

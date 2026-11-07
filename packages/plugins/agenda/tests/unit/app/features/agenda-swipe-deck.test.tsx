@@ -31,7 +31,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');

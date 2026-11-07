@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { shellClock } from '../shell.ts';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import type { DaemonConnection } from '../shell.ts';
 import type { DaemonSessionScope } from '../shell.ts';
@@ -12,9 +11,10 @@ export interface RepliesClock {
 }
 
 export const browserRepliesClock: RepliesClock = {
-  now: () => shellClock.nowMs(),
+  now: () => Date.now(),
   every: (tick, ms) => {
-    return shellClock.every(tick, ms);
+    const timer = setInterval(tick, ms);
+    return () => clearInterval(timer);
   },
 };
 

@@ -11,7 +11,7 @@
  * once rather than once per daemon, and the daemon no longer stores or enforces a per-device
  * preference at all — see `notification-filter-settings.tsx`, rendered alongside this card.
  */
-import type { PushDeviceView } from '../../shell.ts';
+import type { PushDeviceView } from '../../lib/push-delivery.ts';
 
 import { cn } from '../../shell.ts';
 

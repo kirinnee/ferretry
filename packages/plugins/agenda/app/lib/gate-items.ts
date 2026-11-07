@@ -16,12 +16,12 @@ import {
   type AgendaItem,
   type BoardReopenAttachments,
   cardAskOf,
-  openCardAsks,
   gateAnswers,
   gateAskOptions,
   gateReference,
+  openCardAsks,
   TEST_KIND_LABEL,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import type { InboxAction } from './agenda-answers.ts';
 
 /** A view of a thread as the card ask it carries: the card, lane and options. */

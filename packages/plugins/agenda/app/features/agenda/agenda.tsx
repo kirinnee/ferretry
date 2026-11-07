@@ -27,14 +27,13 @@
  *   ledger does not hold is said out loud as no longer open.
  */
 
-import { shellClock } from '../../shell.ts';
 import type {
   AgendaId,
   AgendaItem,
   AgendaListRecord,
   AgendaListSnapshot,
   ResolvedAgendaItem,
-} from '../../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
@@ -53,17 +52,12 @@ import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../shell.ts';
-import { laneEditDestination } from '../../shell.ts';
+import { laneEditDestination } from '../../lib/lane-edit.ts';
 import { composerQuoteTarget } from '../../shell.ts';
-import { useOptionalRouter } from '../../shell.ts';
-import type { TranscriptEntry } from '../../shell.ts';
-import { InputCardHost } from '../../shell.ts';
-import { PhoneApprovalHost } from '../../shell.ts';
-import { TwoFactorSeedHost } from '../../shell.ts';
+import type { TranscriptEntry } from '../../lib/transcript.ts';
+import { RendererView, useOptionalRouter } from '../../shell.ts';
 import { browserClipboardWriter } from '../../shell.ts';
-import { CopyPlanHost } from '../../shell.ts';
-import { SignInRuleSuggestionHost } from '../../shell.ts';
-import { TaskPlanHost } from '../../shell.ts';
+import { askRendererFor, INPUT_RENDERER } from './ask-renderers.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
@@ -73,6 +67,37 @@ import { AgendaSettled, isResolved } from './agenda-settled.tsx';
 import { AgendaTab } from './agenda-tab.tsx';
 import { useItemLifecycle } from './use-item-lifecycle.ts';
 import { useAgendaItem } from './use-agenda-item.ts';
+
+/**
+ * An input card's form, drawn by the input-request owner's renderer (`ask:input`). While the card holds the view (a Send
+ * on its way, a follow-up offer on screen) the view stays open, and a card that leaves the view (another version picked,
+ * the view paged away) lets its hold go with it.
+ *
+ * GAP(input-hold): `onHold` is where the owner's card says it holds the view or is done (`settled`, in its own words).
+ * No contract carries that from a renderer yet, so only this half calls it today: the hold the view keeps is the one
+ * this card was told of, and it is let go when the card goes.
+ */
+export function AgendaInputCard({
+  daemon,
+  value,
+  held,
+  onHold,
+}: {
+  readonly daemon: string;
+  readonly value: unknown;
+  readonly held: boolean;
+  readonly onHold: (held: boolean, settled?: string) => void;
+}) {
+  const latest = useRef({ held, onHold });
+  latest.current = { held, onHold };
+  useEffect(
+    () => () => {
+      if (latest.current.held) latest.current.onHold(false);
+    },
+    [],
+  );
+  return <RendererView daemon={daemon} rendererKey={INPUT_RENDERER} value={value} />;
+}
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
@@ -175,6 +200,11 @@ export interface UseAgendaInput {
    * down on this device and the owner's others (docs/notifications.md § When an alert is cleared).
    */
   readonly onItemOpened?: (daemon: DaemonConnection, sessionId: string, agendaId: string) => unknown;
+  /**
+   * Where Edit on a lane-proposal card goes: Board's lane editor for a project, spelt by the host (this half hard-codes
+   * no Board path). Absent: the answer is sent and the page stays.
+   */
+  readonly laneEditor?: (projectId: string) => string | undefined;
   readonly now?: number;
 }
 
@@ -233,6 +263,7 @@ export const useAgenda = ({
   entries = NO_ENTRIES,
   onAnswered,
   onItemOpened,
+  laneEditor,
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
@@ -291,7 +322,8 @@ export const useAgenda = ({
   } | null>(null);
   useEffect(() => {
     if (sentForm === null) return undefined;
-    return shellClock.after(() => setSentForm(null), SENT_FORM_MS);
+    const timer = setTimeout(() => setSentForm(null), SENT_FORM_MS);
+    return () => clearTimeout(timer);
   }, [sentForm]);
   const [jumpHost, setJumpHost] = useState<HTMLElement | null>(null);
   // A form's Send is its answer, not a message: the view waits for the answer to land (`act` closes it).
@@ -330,7 +362,7 @@ export const useAgenda = ({
         update(current => (current.card === item.id ? { card: null } : {}));
         onAnswered?.();
         // Edit on a lane proposal: the answer is sent, now the editor opens.
-        const editor = laneEditDestination(connection.daemonId, item, action);
+        const editor = laneEditDestination(item, action, laneEditor);
         if (editor !== undefined) router?.navigate(editor);
       },
       (reason: unknown) => setCard(item.id, failure(reason)),
@@ -563,6 +595,28 @@ export const useAgenda = ({
             answering.current = true;
             act(formItem, action, '');
           });
+  // What another plugin draws inside the card: its owner's renderer, by key (§5.2), never that owner's component.
+  const owned =
+    cardItem === undefined
+      ? undefined
+      : askRendererFor(cardItem, { ferret: scope.sessionId, ferretName: ferret, projectId });
+  const ownerForms =
+    cardItem === undefined || owned === undefined
+      ? {}
+      : owned.slot === 'input'
+        ? {
+            inputForm: (
+              <AgendaInputCard
+                daemon={connection.daemonId}
+                held={holding.has(cardItem.id)}
+                onHold={holdFor(cardItem.id)}
+                value={owned.value}
+              />
+            ),
+          }
+        : {
+            planForm: <RendererView daemon={connection.daemonId} rendererKey={owned.key} value={owned.value} />,
+          };
   const view =
     cardItem === undefined ? (
       selectedItem === undefined ? null : (
@@ -588,7 +642,6 @@ export const useAgenda = ({
       <AgendaDeliveryContext.Provider value={deliveryState}>
         <AgendaItemView
           busy={busyIds.has(cardItem.id)}
-          daemonId={connection.daemonId}
           error={typeof cardError === 'string' ? cardError : null}
           ferret={ferret}
           history={history}
@@ -603,73 +656,9 @@ export const useAgenda = ({
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
-          quoteScope={scope}
           renderProse={agendaProse(copyWriter)}
           {...(formKey === undefined ? {} : { formKey })}
-          {...(cardItem.copyPlan !== undefined
-            ? {
-                planForm: (
-                  <CopyPlanHost
-                    agentName={ferret}
-                    connection={connection}
-                    item={cardItem}
-                    sessionId={scope.sessionId}
-                  />
-                ),
-              }
-            : {})}
-          {...(cardItem.taskPlan !== undefined
-            ? {
-                planForm: (
-                  <TaskPlanHost
-                    agentName={ferret}
-                    connection={connection}
-                    item={cardItem}
-                    sessionId={scope.sessionId}
-                  />
-                ),
-              }
-            : {})}
-          {...(cardItem.signInRuleSuggestion !== undefined
-            ? {
-                planForm: (
-                  <SignInRuleSuggestionHost
-                    agentName={ferret}
-                    connection={connection}
-                    item={cardItem}
-                    {...(projectId === undefined ? {} : { projectId })}
-                    sessionId={scope.sessionId}
-                  />
-                ),
-              }
-            : {})}
-          {...(cardItem.phoneApproval !== undefined
-            ? {
-                planForm: (
-                  <PhoneApprovalHost
-                    approvalId={cardItem.phoneApproval.id}
-                    connection={connection}
-                    sessionId={scope.sessionId}
-                  />
-                ),
-              }
-            : {})}
-          {...(cardItem.twoFactorSeed !== undefined
-            ? { planForm: <TwoFactorSeedHost connection={connection} item={cardItem} /> }
-            : {})}
-          {...(cardItem.kind === 'input'
-            ? {
-                inputForm: (
-                  <InputCardHost
-                    agentName={ferret}
-                    connection={connection}
-                    item={cardItem}
-                    onHold={holdFor(cardItem.id)}
-                    sessionId={scope.sessionId}
-                  />
-                ),
-              }
-            : {})}
+          {...ownerForms}
           swipeable={swipeable}
           {...(standing === undefined || questionKept
             ? // A ferret's rule suggestion is never snoozed: the ferret reads its own board (C2).
@@ -701,7 +690,7 @@ export const useAgenda = ({
 
   const hasTab = agendaMode || board.some(item => item.notice !== true) || records.length > 0;
   const modelNow = (): ReturnType<typeof agendaTabModel> =>
-    agendaTabModel({ items: board, resolved: records, ferret, now: now ?? shellClock.nowMs() });
+    agendaTabModel({ items: board, resolved: records, ferret, now: now ?? Date.now() });
   const tab = (afterOpen?: () => void, lead?: { readonly name: string; readonly open: () => void }): ReactNode =>
     hasTab ? (
       <AgendaDeliveryContext.Provider value={deliveryState}>

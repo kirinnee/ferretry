@@ -12,6 +12,7 @@ import {
   neverLoosens,
   type Word,
 } from '@ferretry/kernel/contract';
+import type { AuthorizedOutcome, CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
 import {
@@ -22,6 +23,10 @@ import {
   type LoginFile,
   LoginFileSchema,
   LoginIdSchema,
+  type LoginChange,
+  type LoginChangeOutcome,
+  type LoginChangeRefusalCode,
+  type LoginChangeView,
   type LoginList,
   type LoginUsage,
   type LoginView,
@@ -51,8 +56,8 @@ export const LOGINS_WORDS: readonly Word[] = [
 
 /**
  * What others read about logins: Runtimes (which login a runtime spends), Usage (budgets and quota per login),
- * Onboarding (is anything signed in), the app. Reads only; writing a login is a config file (the kernel's config
- * layer) or a route here. No method returns an access token, a refresh token or a digest of one.
+ * Onboarding (is anything signed in), the app. Writing a login is a config file (the kernel's config layer), a route
+ * here, or `changes` below. No method returns an access token, a refresh token or a digest of one.
  */
 export interface LoginsApi {
   /** Every login on this machine, with status, usage, budget and what signing out would do. */
@@ -64,8 +69,44 @@ export interface LoginsApi {
   presets(): Promise<ProviderPresetCatalog>;
   /** The model catalogs in effect and the state of the published catalog. */
   models(): Promise<ModelCatalogsView>;
+  /**
+   * Puts ONE login's own key on ONE request to a host it names, and returns only what came back (Usage's quota read).
+   * The caller names the LOGIN and the variable that carries its key, never a secret: Logins resolves the secret from
+   * that login's own record, so the only secrets reachable are the ones an owner-written login names, and the Vault
+   * holds Logins to its own manifest's hosts. A login that is not an environment login, a variable that is not a single
+   * `${secret:NAME}`, or a host outside the Vault's allowance is `refused`.
+   */
+  authorizeFetch(
+    loginId: z.output<typeof LoginIdSchema>,
+    variable: string,
+    hostAllowlist: readonly string[],
+    request: OutboundHttpRequest,
+    placement?: CredentialPlacement,
+  ): Promise<AuthorizedOutcome>;
+
+  /**
+   * One login changed, by the same service the `/v1/logins/changes` routes use: the same refusals (a
+   * {@link LoginChangeError}), the same held review, the same events. `stage` holds a change and says what applying it
+   * does; `apply` runs exactly that. A caller that must refuse something first (Runtimes: a login a runtime still uses)
+   * does so BEFORE it stages here, because Logins cannot see runtime use.
+   */
+  readonly changes: {
+    stage(change: LoginChange): Promise<LoginChangeView>;
+    apply(id: string): Promise<LoginChangeOutcome>;
+  };
 }
 export const LoginsPort = definePort<LoginsApi>('logins');
+
+/** A change refused, in the transport's taxonomy: a code a client branches on and a sentence for the person. */
+export class LoginChangeError extends Error {
+  constructor(
+    readonly code: LoginChangeRefusalCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LoginChangeError';
+  }
+}
 
 /** Read models others and the app may call (`manifest.data.readModels`). */
 export const LOGINS_READ_MODELS = ['list', 'get', 'quota', 'presets', 'models'] as const;
@@ -147,6 +188,8 @@ export const LOGINS_CONFIG = configDef(
     schema: LoginFileSchema,
     axis: 'configure',
     loosens: loginFileLoosens,
+    // A login record names the secret its key is made from: the one def whose `${secret:NAME}` counts as Logins' own.
+    credentialRecords: true,
   }),
 );
 
@@ -180,6 +223,8 @@ export const LOGINS_AUDIT = {
   signInAnswer: 'fleet.configured:sign-in-answer',
   signInCancel: 'fleet.configured:sign-in-cancel',
   loginTest: 'secrets.used:login-test',
+  changeStage: 'fleet.configured:propose',
+  changeApply: 'fleet.configured:apply',
 } as const;
 
 export type { EndpointFile, LocalModels, ModelCatalogFile, ModelCatalogRefreshResult };

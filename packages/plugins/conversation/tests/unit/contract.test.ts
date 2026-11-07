@@ -13,6 +13,7 @@ import {
   RenderIdSchema,
   RenderSaveRequestSchema,
   SendRequestSchema,
+  TranscriptImageDownloadSchema,
   WorkSearchQuerySchema,
 } from '../../contract/index.ts';
 import { at } from '../support/instant.ts';
@@ -100,5 +101,20 @@ describe('conversation wire schemas', () => {
   test('the config defaults to keeping drafts in sync and refuses an unknown key', () => {
     expect(ConversationConfigSchema.parse({}).keepInSync).toBe(true);
     expect(ConversationConfigSchema.safeParse({ other: 1 }).success).toBe(false);
+  });
+});
+
+describe('the transcript image download wire schema', () => {
+  const download = (handle: string) => ({
+    image: { handle, mediaType: 'image/png', byteLength: 32 },
+    base64: 'iVBORw0K',
+  });
+  test('G162 a dotted handle (record offset, length, ordinal) is accepted', () => {
+    expect(TranscriptImageDownloadSchema.safeParse(download('4096.2048.0')).success).toBe(true);
+    expect(TranscriptImageDownloadSchema.safeParse(download('0.3145728.255')).success).toBe(true);
+  });
+  test('G162 anything that is not exactly three dotted numbers is refused', () => {
+    for (const bad of ['nope', 'abcdefgh', '4096.2048', '4096.0.0', '04096.2048.0', '4096.2048.0.1', '4096.2048.-1'])
+      expect(TranscriptImageDownloadSchema.safeParse(download(bad)).success).toBe(false);
   });
 });

@@ -1,11 +1,13 @@
 /**
  * EVERY INBOX COUNT IS ONE NUMBER, AND "UPDATING" ENDS. The shell's inbox, built from a fleet like the owner's —
  * several machines, plain notifications, items waiting on a ferret for more information, a snoozed item, a gate
- * card, a card to test, and one machine that does not answer — drawn by every surface that shows the count: the
- * sidebar's Inbox entry, the top bar, the phone's tab bar and the Inbox page's heading.
+ * card, a card to test, and one machine that does not answer — drawn by every surface this half draws the count on:
+ * its navigation entry (`AgendaNavEntry`) and the Inbox page's heading. The top bar and the phone's tab bar are the
+ * app shell's, which 5.0 has not given an Inbox count; they are not drawn here.
  */
+import { type SessionAgendaSummary } from '../../../../contract/wire.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary } from '../../../../app/wire/index.ts';
+import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../../app/shell.ts';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { type AgendaInboxMachine, useAgendaInboxModel } from '../../../../app/hooks/use-agenda-inbox.ts';
@@ -16,15 +18,14 @@ import { AgendaRollupStore } from '../../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../app/shell.ts';
 import { DaemonResponseError } from '../../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../../app/shell.ts';
-import { AppBar, AppTabBar } from '../../../../app/shell.ts';
-import { SessionsBarAgenda } from '../../../../app/shell.ts';
+import { AgendaNavEntry } from '../../../../app/features/agenda/agenda-nav.tsx';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
-const ec2 = daemonConnection({ daemonId: 'ec2', baseUrl: 'https://ec2.example.test', deviceId: 'd-ec2' });
-const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
-const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
+const ec2 = daemonConnection({ daemonId: 'ec2' });
+const studio = daemonConnection({ daemonId: 'studio' });
+const laptop = daemonConnection({ daemonId: 'laptop' });
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
 const at = (minutes: number): string => new Date(Date.UTC(2026, 7, 1, 10, minutes)).toISOString();
@@ -134,15 +135,7 @@ function Surfaces({ client }: { readonly client: DaemonAgendaClient }) {
   const inbox = useAgendaInboxModel(client, MACHINES, quietTimers);
   return (
     <div data-total={inbox.total}>
-      <SessionsBarAgenda current href="/inbox" onNavigate={() => undefined} rail={false} total={inbox.total} />
-      <AppBar
-        active="attention"
-        agendaCount={inbox.total}
-        crumbs={[{ label: 'Inbox' }]}
-        daemon={ec2.daemonId}
-        onOpenPalette={() => undefined}
-      />
-      <AppTabBar active="attention" agendaCount={inbox.total} daemon={ec2.daemonId} onOpenPalette={() => undefined} />
+      <AgendaNavEntry current href="/inbox" onNavigate={() => undefined} rail={false} total={inbox.total} />
       <AgendaInboxPage inbox={inbox} now={NOW} onNavigate={() => undefined} phone={false} />
     </div>
   );
@@ -160,10 +153,6 @@ const counts = (mounted: Mounted) => {
   return {
     sidebar: of('[data-sbar-agenda]'),
     page: of('h1.fy-attn-inbox__title'),
-    tabBar: mounted.container.querySelector('.kt-tabbar__badge[data-unread-badge]')?.getAttribute('data-count') ?? null,
-    topBar: [...mounted.container.querySelectorAll('header [data-unread-badge]')].map(badge =>
-      badge.getAttribute('data-count'),
-    ),
   };
 };
 
@@ -174,7 +163,7 @@ afterEach(async () => {
 });
 
 describe('the Inbox count across the shell', () => {
-  it('shows one number on the sidebar, the top bar, the tab bar and the page, and clears Updating once read', async () => {
+  it('shows one number on the navigation entry and the page, and clears Updating once read', async () => {
     view = await mount(<Surfaces client={fakeClient()} />);
     await settle();
 
@@ -185,9 +174,6 @@ describe('the Inbox count across the shell', () => {
     const shown = counts(view);
     expect(shown.sidebar).toBe(total);
     expect(shown.page).toBe(total);
-    expect(shown.tabBar).toBe(total);
-    expect(shown.topBar.length).toBeGreaterThan(0);
-    for (const count of shown.topBar) expect(count).toBe(total);
 
     // Nothing is in flight: no Updating, and the laptop says it could not be read instead of spinning.
     expect(view.container.querySelector('[data-agenda-updating]')).toBeNull();
@@ -216,6 +202,5 @@ describe('the Inbox count across the shell', () => {
     const after = counts(view);
     expect(after.sidebar).toBe(String(2 + 1 + 1 + 3));
     expect(after.page).toBe(after.sidebar);
-    expect(after.tabBar).toBe(after.sidebar);
   });
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { type AgendaItem, type AgendaSnapshot, isMachineAgendaId, MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
+import {
+  type AgendaItem,
+  type AgendaSnapshot,
+  isMachineAgendaId,
+  MACHINE_AGENDA_ID,
+} from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../app/shell.ts';
 import { type DaemonId, daemonId } from '../../../app/shell.ts';
 import { MACHINE_GROUP_NAME, machineSessionView, withMachineAgendas } from '../../../app/lib/machine-agenda.ts';

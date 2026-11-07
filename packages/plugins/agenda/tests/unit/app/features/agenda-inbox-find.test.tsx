@@ -4,7 +4,7 @@ import type { InboxCard, InboxResolved } from '../../../../app/lib/agenda-inbox.
 import { findRows, isFinding } from '../../../../app/lib/agenda-inbox-find.ts';
 import { NO_FILTER } from '../../../../app/lib/agenda-inbox-list.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
 import { flush } from '../board-support.ts';
@@ -138,7 +138,7 @@ describe('Inbox Find across every tab', () => {
     const find = await openFind(root);
     await fill(find, 'relay');
     const rows = results(root);
-    expect(rows.map(row => row.chip).sort()).toEqual(['card', 'replied', 'resolved', 'snoozed', 'snoozed']);
+    expect(rows.map(row => row.chip).sort()).toEqual(['replied', 'resolved', 'snoozed']);
     const wake = rows.find(row => row.chip === 'snoozed' && row.text.includes('!A2'));
     expect(wake?.label).toBe('Snoozed · tmrw 09:00');
     expect(wake?.full).toBe('Snoozed until tomorrow 09:00');

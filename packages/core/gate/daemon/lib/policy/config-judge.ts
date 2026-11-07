@@ -1,11 +1,14 @@
-import type { ConfigWriteJudgement } from '@ferretry/kernel/contract';
+import type { CallStanding, ConfigWriteJudgement } from '@ferretry/kernel/contract';
 import { proofClaimed } from '../../../contract/claimed-standings.ts';
 import { CAPABILITIES, isFerretCall } from '../../../contract/index.ts';
 
 /** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
 const WARDEN_FILE = 'warden.yaml';
 
-/** The calls whose one fresh proof a loosening already spent: a second loosening in the same call holds. */
+/**
+ * The proofs a loosening already spent, keyed by the standing AND its claim function: a second loosening on the same
+ * call holds, whichever object (the standing, or a `{ ...standing }` copy sharing its one claim) carries it.
+ */
 const spent = new WeakSet<object>();
 
 /**
@@ -23,6 +26,20 @@ const spent = new WeakSet<object>();
  * a second claim, once: that claim is the act's own, and its loosening write rides on it.
  * Anything undetermined (no standing, no grant standing, a missing claim) holds.
  */
+/**
+ * Takes the call's one fresh passkey proof for a loosening, atomically: of two requests admitted on ONE proof exactly
+ * one gets `true`. A standing that already used its proof (here, or an owner-only act) gets `false`; a standing
+ * whose proof an owner-only act claimed for THIS request is accepted once without a second claim.
+ */
+export function claimLooseningProof(standing: CallStanding): boolean {
+  if (spent.has(standing) || (standing.claimFreshStepUp !== undefined && spent.has(standing.claimFreshStepUp)))
+    return false;
+  if (!proofClaimed(standing.claimFreshStepUp) && standing.claimFreshStepUp?.() !== true) return false;
+  spent.add(standing);
+  if (standing.claimFreshStepUp !== undefined) spent.add(standing.claimFreshStepUp);
+  return true;
+}
+
 export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hold' {
   if (input.actor === 'ferret' || input.actor === 'warden') return 'hold';
   const standing = input.standing;
@@ -34,8 +51,5 @@ export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hol
   if (!governance.decide({ capability, axis: 'configure' }).allowed) return 'hold';
   if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
   if (!governance.governed) return 'apply';
-  if (spent.has(standing)) return 'hold';
-  if (!proofClaimed(standing.claimFreshStepUp) && standing.claimFreshStepUp?.() !== true) return 'hold';
-  spent.add(standing);
-  return 'apply';
+  return claimLooseningProof(standing) ? 'apply' : 'hold';
 }

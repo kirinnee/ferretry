@@ -4,7 +4,10 @@ import { CORE_IDS } from '../contract/ids.ts';
 import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort, WorkersPort } from '../contract/ports.ts';
 import { WORKER_STATE_KEY } from '../worker.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
+import { hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
 import type { PinRegistry } from './pins.ts';
+
+export { hostAllowed, WILDCARD };
 
 /** What the owner-installed, pinned items of one kind name: their programs and their hosts. */
 export interface ItemReach {
@@ -77,8 +80,6 @@ export class PermissionError extends Error {
   }
 }
 
-const programName = (program: string): string => program.slice(program.lastIndexOf('/') + 1);
-
 /**
  * Whether `program` is declared: a declared name matches the program or its basename (an absolute path to a declared
  * program passes, today's rule); an installed item that names an ABSOLUTE path allows exactly that path, never another
@@ -86,10 +87,7 @@ const programName = (program: string): string => program.slice(program.lastIndex
  */
 export function spawnPermitted(declared: readonly PermissionEntry[], items: ItemReachOf, program: string): boolean {
   const named = expand(declared, items, 'programs');
-  if (named.includes(WILDCARD)) return true;
-  const exact = new Set(named.filter(entry => entry.includes('/')));
-  const allowed = new Set(named.filter(entry => !entry.includes('/')));
-  return exact.has(program) || allowed.has(program) || allowed.has(programName(program));
+  return programAmong(named, program);
 }
 
 /** Whether `hostname` is declared, directly or by an installed item of a declared `{ items }` kind. */
@@ -103,9 +101,6 @@ export function hostPermitted(
   const named = expand(declared, items, 'hosts');
   return named.includes(WILDCARD) || hostAllowed(hostname, named) || resolverAllows(declared, resolve, hostname, host);
 }
-
-/** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone (plugin-graph refuses it). */
-export const WILDCARD = '*';
 
 /** What the host hands the restrict wrappers: a non-core manifest's `'*'` is dropped, so it grants nothing. */
 export function effectivePermissions(plugin: string, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
@@ -136,17 +131,6 @@ export function restrictSpawn(
     runBytes: async (program, args, options) => await base.runBytes(program, args, check(program, options)),
     start: (program, args, options) => base.start(program, args, check(program, options)),
   };
-}
-
-/** `*.example.com` matches subdomains only; an exact host matches itself. */
-export function hostAllowed(host: string, declared: readonly string[]): boolean {
-  const lower = host.toLowerCase();
-  return declared.some(entry => {
-    const pattern = entry.toLowerCase();
-    return pattern.startsWith('*.')
-      ? lower.endsWith(pattern.slice(1)) && lower !== pattern.slice(2)
-      : lower === pattern;
-  });
 }
 
 /** HTTP only to hosts the manifest declared in `permissions.network`; refused before a socket opens. */

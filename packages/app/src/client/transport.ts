@@ -68,7 +68,8 @@ export class DaemonCallError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
-    /** The refusal's JSON body, when the daemon sent one: where it attaches data to a refusal (an in-flight inventory, a size). */
+    /** The refusal's whole JSON body, for a route whose refusal carries a fact beside its sentence (a 409 naming
+     *  the draft that holds the agent's box, the send that was typed but never shown, an in-flight inventory, a size). */
     readonly body?: unknown,
   ) {
     super(message);

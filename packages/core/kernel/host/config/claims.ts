@@ -58,3 +58,21 @@ export function assertNoSharedPaths(declarations: readonly ConfigDeclaration[]):
     }
   }
 }
+
+/** The declared file or collection item a path under `config/` names, or `undefined` when no plugin reads it. */
+export function targetOfPath(
+  declarations: readonly ConfigDeclaration[],
+  path: string,
+): { readonly plugin: string; readonly def: AnyConfigDef; readonly name?: string } | undefined {
+  for (const { plugin, def } of declarations) {
+    if (def.shape === 'file') {
+      if (def.file === path) return { plugin, def };
+      continue;
+    }
+    const prefix = `${def.collection}/`;
+    if (!path.startsWith(prefix) || !path.endsWith(CONFIG_EXTENSION)) continue;
+    const name = path.slice(prefix.length, -CONFIG_EXTENSION.length);
+    if (!name.includes('/') && def.name.test(name)) return { plugin, def, name };
+  }
+  return undefined;
+}

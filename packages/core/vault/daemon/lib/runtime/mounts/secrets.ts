@@ -22,7 +22,7 @@ import {
   SecretImportIdSchema,
   SecretImportOfferSchema,
   SecretImportResultSchema,
-} from '../../secrets/wire.ts';
+} from '../../../../contract/index.ts';
 
 /**
  * The secret store's HTTP surface (today's `lib/runtime/mounts/secrets.ts`, the vault half: `/v1/secrets*`). The
@@ -143,7 +143,10 @@ async function exportSecrets(exports: SecretExportService, call: CallContext): P
     throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
   const importId = pathImportId(call);
   const request = await parseBody(call.request, SecretExportRequestSchema);
-  if (call.governance.governed && call.presentation?.freshStepUp !== true)
+  // ONE PROOF, ONE ACT: a governed caller's proof is CLAIMED here, before anything is sealed, never read off the
+  // admission snapshot and spent after — of two requests admitted on one proof exactly one seals. No restore: a seal
+  // that then fails has used the proof up, and the person confirms again. The owner at the machine claims nothing.
+  if (call.governance.governed && call.claimFreshStepUp?.() !== true)
     return jsonResponse(
       {
         error: 'copying secrets to another machine needs a passkey confirmation for it, from this device',
@@ -153,9 +156,7 @@ async function exportSecrets(exports: SecretExportService, call: CallContext): P
       403,
     );
   try {
-    const sealed = SecretExportResponseSchema.parse(await exports.seal(importId, request));
-    call.spendFreshStepUp?.();
-    return jsonResponse(sealed);
+    return jsonResponse(SecretExportResponseSchema.parse(await exports.seal(importId, request)));
   } catch (error) {
     return reraise(error);
   }

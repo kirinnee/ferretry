@@ -1,38 +1,35 @@
 /**
- * The browser's half of the Agenda switch (docs/agenda.md): one write, through the fetch a
- * screen passes (`useDaemonFetch`), so a daemon only the relay reaches is reached and nothing here
- * carries a credential.
+ * The browser's half of the Agenda switch (docs/agenda.md): whether one ferret is told to keep an agenda. One read and
+ * one write, through this half's client by route key, so nothing here holds an address or a credential.
  */
 
-import { type SessionAgendaModePatchResult, SessionAgendaModePatchResultSchema } from '../wire/index.ts';
-import { FY_REQUEST_ID_HEADER } from '../shell.ts';
-import type { DaemonConnection } from '../shell.ts';
-import { daemonRequest } from '../shell.ts';
-import { type DaemonFetch, DaemonResponseError } from '../shell.ts';
+import {
+  type AgendaMode,
+  type AgendaModePatchResult,
+  AgendaModePatchResultSchema,
+  AgendaModePatchSchema,
+  AgendaModeSchema,
+} from '../../contract/wire.ts';
+import { type AgendaCall, agendaCall, requestIdHeaders } from './agenda-call.ts';
+import { AGENDA_MODE } from './agenda-wire.ts';
 
-/** The daemon's refusal, in its own words when it gave any. */
-const refusal = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
-};
+/** The switch as it reads now. */
+export const AGENDA_MODE_READ = 'GET /v1/ferrets/:ferretId/agenda-mode';
+
+/** Reads whether one ferret is told to keep an agenda, and the daemon's sentence about it. */
+export const readSessionAgenda = async (client: AgendaCall, ferret: string): Promise<AgendaMode> =>
+  AgendaModeSchema.parse(await agendaCall(client, AGENDA_MODE_READ, { params: { ferretId: ferret } }));
 
 /** Switches whether one ferret is told to keep an agenda; it takes effect at that ferret's next launch. */
 export const patchSessionAgenda = async (
-  daemon: DaemonConnection,
-  sessionId: string,
+  client: AgendaCall,
+  ferret: string,
   enabled: boolean,
-  fetcher: DaemonFetch,
-): Promise<SessionAgendaModePatchResult> => {
-  const request = daemonRequest(daemon, `/v1/ferrets/${encodeURIComponent(sessionId)}/agenda-mode`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
-    body: JSON.stringify({ enabled }),
-  });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await refusal(response);
-  return SessionAgendaModePatchResultSchema.parse(await response.json());
-};
+): Promise<AgendaModePatchResult> =>
+  AgendaModePatchResultSchema.parse(
+    await agendaCall(client, AGENDA_MODE, {
+      params: { ferretId: ferret },
+      body: AgendaModePatchSchema.parse({ enabled }),
+      headers: requestIdHeaders(),
+    }),
+  );

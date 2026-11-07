@@ -131,6 +131,39 @@ describe('the new-ferret account slot, Usage on', () => {
     expect(page.value).toBe('codex-b');
   });
 
+  it('carries each model’s fast-mode flag to the page: false stays false, true stays true, absent stays absent', async () => {
+    const choice = { efforts: [], available: true } as const;
+    const catalog = runtimeCatalog(
+      runtimeView({
+        wrapper: 'claude-a',
+        models: {
+          catalog: {
+            id: 'claude',
+            label: 'Claude',
+            origin: 'built-in',
+            customIds: false,
+            docs: 'docs/model-catalog.md',
+          },
+          choices: [
+            { ...choice, id: 'with-fast', label: 'With fast', fast: true },
+            { ...choice, id: 'no-fast', label: 'No fast', fast: false },
+            { ...choice, id: 'unknown-fast', label: 'Unknown fast' },
+          ],
+        },
+      }),
+    );
+    const page: Page = { value: 'claude-a', chosen: undefined };
+    await draw(panelFor(NEW_FERRET_ACCOUNT_SLOT, { ...READS, 'GET /v1/runtimes': catalog }), page);
+    const models = must(page.chosen, 'a chosen account').models;
+    expect(models.find(model => model.id === 'with-fast')?.fast).toBe(true);
+    expect(models.find(model => model.id === 'no-fast')?.fast).toBe(false);
+    const unknown = must(
+      models.find(model => model.id === 'unknown-fast'),
+      'the model with no fast flag',
+    );
+    expect('fast' in unknown).toBe(false);
+  });
+
   it('a launch hint the page passes is used when that runtime is offered and usable', async () => {
     const page: Page = { value: '', chosen: undefined };
     await draw(panelFor(NEW_FERRET_ACCOUNT_SLOT, { ...READS, 'GET /v1/usage': FEED }), page, { preferred: 'codex-b' });

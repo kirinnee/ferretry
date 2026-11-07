@@ -1,14 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { PermissionAnswerRequest, PermissionRequest } from '../../../app/shell.ts';
+import {
+  type PermissionAnswerRequest,
+  PermissionPromptGone,
+  type PermissionRequest,
+} from '../../../app/lib/permission-request.ts';
 import { ApprovalCard, type PermissionAnswerApi } from '../../../app/features/permission-request/approval-card.tsx';
 import { daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
-import { PermissionPromptGone } from '../../../app/shell.ts';
 import { DaemonResponseError } from '../../../app/shell.ts';
-import '../../support/app/dom.ts';
-import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const daemon = daemonConnection({ daemonId: 'daemon-a' });
 const scope = daemonSessionScope(daemon, 's1');
 const ID = '0123456789abcdef';
 

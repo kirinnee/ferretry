@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FilterMenu, FindBox, FindToggle } from '../../../../app/features/agenda/inbox-filter-menu.tsx';
-import { interact, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, mount, must, pressKey } from '@ferretry/app/testing';
 
 const CHOICES = [
   { value: 'open', label: 'Open' },

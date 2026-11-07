@@ -1,20 +1,28 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaId } from '../../../../app/wire/index.ts';
-import { Composer } from '../../../../app/shell.ts';
-import { DictationControl } from '../../../../app/shell.ts';
-import { LiveMarkdownEditor } from '../../../../app/shell.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { AgendaInboxComposer } from '../../../../app/features/agenda/agenda-inbox-composer.tsx';
 import { agendaForms } from '../../../../app/lib/agenda-form-state.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
-import { DEFAULT_STT_SETTINGS } from '../../../../app/shell.ts';
-import '../../../support/app/dom.ts';
-import { render, run, runAsync } from '../../../support/app/react.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { render as renderTree, run, runAsync } from '@ferretry/app/testing';
+import type { ReactElement } from 'react';
+import { FakeComposer, WithFakeComposer } from '../../../support/app/composer-port.tsx';
 import { sessionView } from '../../../support/app/sessions.ts';
 
-const daemon = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'device' });
+// The composer is Conversation's: the Inbox's reply box is whatever composer the host binds (`AgendaComposerContext`),
+// here the suites' host composer. What is asserted is what the Agenda hands it.
+const Composer = FakeComposer;
+const render = (element: ReactElement) => renderTree(<WithFakeComposer>{element}</WithFakeComposer>);
+/** This device's dictation settings, as the chat composer reads them (opaque to the Agenda). */
+const DEFAULT_STT_SETTINGS = { engine: 'browser' } as const;
+/** The mic the host composer draws when it is handed dictation settings. */
+const isMic = (node: { readonly props: Record<string, unknown> }): boolean => node.props['data-composer-mic'] === '';
+
+const daemon = daemonConnection({ daemonId: 'laptop' });
 
 describe('the open Inbox item’s composer', () => {
-  test('is the real composer, for the ferret that asked, and sends what is typed about the item', async () => {
+  test('is the host’s composer, for the ferret that asked, and sends what is typed about the item', async () => {
     const sent: { sessionId: string; message: string }[] = [];
     const api = {
       send: async (sessionId: string, request: { message: string }) => {
@@ -39,7 +47,7 @@ describe('the open Inbox item’s composer', () => {
     const composer = view.root.findByType(Composer);
     expect(composer.props.sessionId).toBe('sess-2');
     expect(composer.props.placeholder).toBe('Reply to Kai…');
-    const field = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
+    const field = () => view.root.find(node => node.type === 'textarea');
     run(() =>
       field().props.onChange({ currentTarget: { value: 'only after lunch', selectionStart: 16, selectionEnd: 16 } }),
     );
@@ -153,13 +161,32 @@ describe('the open Inbox item’s voice', () => {
   test('carries the chat composer’s mic, from the same dictation settings', async () => {
     const view = await mount(DEFAULT_STT_SETTINGS);
     expect(view.root.findByType(Composer).props.dictationSettings).toBe(DEFAULT_STT_SETTINGS);
-    expect(view.root.findAllByType(DictationControl)).toHaveLength(1);
+    expect(view.root.findAll(isMic)).toHaveLength(1);
     run(() => view.unmount());
   });
 
   test('without dictation settings the box has no mic, as the chat composer does not', async () => {
     const view = await mount();
-    expect(view.root.findAllByType(DictationControl)).toHaveLength(0);
+    expect(view.root.findAll(isMic)).toHaveLength(0);
+    run(() => view.unmount());
+  });
+});
+
+describe('the open Inbox item’s composer without a host composer', () => {
+  test('draws no box at all', async () => {
+    const view = renderTree(
+      <AgendaInboxComposer
+        clientFor={async () => ({ send: async () => ({}) as never })}
+        compact
+        connection={daemon}
+        itemId={'A5' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    expect(view.toJSON()).toBeNull();
     run(() => view.unmount());
   });
 });

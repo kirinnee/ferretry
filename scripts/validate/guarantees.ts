@@ -6,14 +6,21 @@
  * `guarantees` fails when a kept row (or the kept half of a split row) has no test whose name STARTS with its id
  * (`test('G11 person route refuses …')`; `.skip` and `.todo` do not count), or when a REMOVED row still has a test (its
  * code remains). Rows owned by a package still in `ports-pending.json`, or cut from the release (`deferred.json`),
- * are skipped unless `--strict`. Whether the test PASSES is the test run's job, not this check's.
+ * are skipped unless `--strict`.
+ *
+ * A test that EXISTS is not a test that PASSES: `guarantees` also reads the JUnit files the test tiers write
+ * (every `junit.xml` under `coverage/`, or each `--results <path>`) and fails a kept row when a test named with its id, in its
+ * owner's suite, failed, or when no run of one passed (it was skipped, or is in no report). With no report at all it
+ * says so, rather than passing on titles alone; `--existence-only` (the commit hook, which runs no tests) opts out.
+ * `--tier unit|int` (CI: each test job judges its own report) proves only the rows with a test in that tier, so a row
+ * tested in the integration tier alone is never "missing" from the unit report, nor a unit row from the integration one.
  *
  * `guarantee-owner` fails when a row's tests all live outside its owner's suite, or when an identifier the row's
  * enforcer names (in backticks) resolves to no symbol in the owner package or a contract it consumes. Owners that are
  * not subsystems: `repo-tooling` (scripts/), `fy-shell` (packages/cli), `app-shell` (packages/app).
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Workspace } from '../gen/lib/workspace.ts';
 import { contractPath, loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
@@ -65,19 +72,88 @@ export function testIds(root: string, ws: Workspace): Map<string, string[]> {
   ];
   const ids = new Map<string, string[]>();
   for (const file of new Set(files)) {
-    if (file.includes(`${sep}node_modules${sep}`) || file.includes(`${sep}.tmp${sep}`)) continue;
+    // Judged on the path INSIDE the root: a fixture workspace itself lives under a `.tmp` folder.
+    const rel = relative(root, file).split(sep).join('/');
+    if (rel.includes('node_modules/') || rel.includes('.tmp/')) continue;
     const source = readFileSync(file, 'utf8');
     for (const match of source.matchAll(TEST_NAME)) {
       const modifier = match[1] ?? '';
-      if (modifier.startsWith('.skip') || modifier.startsWith('.todo')) continue;
+      // `.failing` passes when the body THROWS: it is a known bug, never proof that a guarantee holds.
+      if (modifier.startsWith('.skip') || modifier.startsWith('.todo') || modifier.startsWith('.failing')) continue;
       const id = match[3] as string;
-      const rel = relative(root, file).split(sep).join('/');
       const list = ids.get(id) ?? [];
       if (!list.includes(rel)) list.push(rel);
       ids.set(id, list);
     }
   }
   return ids;
+}
+
+/** One test as a JUnit report records it. */
+export interface TestResult {
+  readonly id: string;
+  readonly name: string;
+  readonly file: string;
+  readonly status: 'passed' | 'failed' | 'skipped';
+}
+
+const xmlText = (value: string): string =>
+  value
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
+
+/** Every test of one JUnit report whose name starts with a row id (`G11 …`). */
+export function parseJunit(xml: string): TestResult[] {
+  const out: TestResult[] = [];
+  for (const match of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
+    const attrs = match[1] ?? '';
+    const name = xmlText(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? '');
+    const id = /^([A-Z]+[0-9]+[a-z]?)(?=[\s'"`:.,]|$)/.exec(name)?.[1];
+    if (id === undefined) continue;
+    const body = match[2] ?? '';
+    const status = /<(?:failure|error)\b/.test(body) ? 'failed' : /<skipped\b/.test(body) ? 'skipped' : 'passed';
+    out.push({ id, name, file: xmlText(/\bfile="([^"]*)"/.exec(attrs)?.[1] ?? '').replace(/^\.\//, ''), status });
+  }
+  return out;
+}
+
+/** `--results` paths (files, or folders searched for `junit.xml` and the quarantine's `junit.rerun.xml`); default every tier's report under `coverage/`. */
+export function readResults(root: string, paths: readonly string[] | undefined): TestResult[] | undefined {
+  const files = new Set<string>();
+  for (const path of paths ?? ['coverage']) {
+    const abs = resolve(root, path);
+    if (!existsSync(abs)) continue;
+    if (statSync(abs).isDirectory()) {
+      for (const rel of new Bun.Glob('**/junit{,.rerun}.xml').scanSync({ cwd: abs, onlyFiles: true })) {
+        // The realworld tier gates nothing and holds machine-dependent tests: it proves no guarantee.
+        if (paths === undefined && rel.startsWith('realworld/')) continue;
+        files.add(join(abs, rel));
+      }
+    } else files.add(abs);
+  }
+  if (files.size === 0) return undefined;
+  return [...files].flatMap(file => parseJunit(readFileSync(file, 'utf8')));
+}
+
+/** The integration tier lives in `tests/integration/`; every other test file (unit, scripts, ...) is the unit report's. */
+export const inTier = (file: string, tier: 'unit' | 'int'): boolean =>
+  (tier === 'int') === /(?:^|\/)tests\/integration\//.test(file);
+
+/** The id → files map narrowed to one tier (an id with no file in the tier is dropped). */
+export function tierTests(
+  tests: ReadonlyMap<string, readonly string[]>,
+  tier: 'unit' | 'int' | undefined,
+): ReadonlyMap<string, readonly string[]> {
+  if (tier === undefined) return tests;
+  const out = new Map<string, readonly string[]>();
+  for (const [id, files] of tests) {
+    const mine = files.filter(file => inTier(file, tier));
+    if (mine.length > 0) out.set(id, mine);
+  }
+  return out;
 }
 
 export function readRows(root: string): GuaranteeRow[] | Finding {
@@ -142,6 +218,55 @@ export function guaranteeFindings(
         check: 'guarantees',
         where: row.id,
         message: `${row.status} row owned by ${row.owner || '?'} has no test named "${row.id} …"`,
+      });
+  }
+  return findings;
+}
+
+/**
+ * The kept rows whose id-named test, in the owner's suite, does not provably pass. A test counts once however many
+ * reports hold it (a quarantine rerun writes the same test again): it passed when ANY run passed, and failed only
+ * when none did. A kept row with no test at all is `guaranteeFindings`'s, not repeated here.
+ */
+export function passFindings(
+  rows: readonly GuaranteeRow[],
+  tests: ReadonlyMap<string, readonly string[]>,
+  results: readonly TestResult[],
+  folderOf: (owner: string) => string | undefined,
+  pending: ReadonlySet<string>,
+  cut: ReadonlySet<string> | undefined,
+  strict: boolean,
+): Finding[] {
+  const findings: Finding[] = [];
+  for (const row of rows) {
+    if (row.status === 'removed' || skipped(row, pending, cut, strict)) continue;
+    if ((tests.get(row.id) ?? []).length === 0) continue;
+    const folder = folderOf(row.owner);
+    const mine = results.filter(
+      result =>
+        result.id === row.id && (folder === undefined || result.file === '' || result.file.startsWith(`${folder}/`)),
+    );
+    const byTest = new Map<string, TestResult['status']>();
+    for (const result of mine) {
+      const key = `${result.file}\0${result.name}`;
+      const was = byTest.get(key);
+      if (was === 'passed' || result.status === 'passed') byTest.set(key, 'passed');
+      else byTest.set(key, was === 'failed' || result.status === 'failed' ? 'failed' : 'skipped');
+    }
+    const failed = [...byTest]
+      .filter(([, status]) => status === 'failed')
+      .map(([key]) => key.split('\0').reverse().join(' in '));
+    if (failed.length > 0)
+      findings.push({
+        check: 'guarantees',
+        where: row.id,
+        message: `${row.status} row owned by ${row.owner || '?'} has a FAILING test: ${failed.join('; ')}`,
+      });
+    else if (![...byTest.values()].includes('passed'))
+      findings.push({
+        check: 'guarantees',
+        where: row.id,
+        message: `${row.status} row owned by ${row.owner || '?'} has a test named "${row.id} …" but no passing run of it in the results (skipped, not run, or outside ${folder ?? 'its owner'})`,
       });
   }
   return findings;
@@ -226,7 +351,38 @@ export const check: Check = {
     const ws = loadWorkspace(ctx.root);
     const pending = new Set(readPending(ctx.root).pending);
     const relevant = ctx.packageId === undefined ? rows : rows.filter(row => row.owner === ctx.packageId);
-    return guaranteeFindings(relevant, testIds(ctx.root, ws), pending, releaseCut(ctx.root), ctx.strict === true);
+    const tests = testIds(ctx.root, ws);
+    const cut = releaseCut(ctx.root);
+    const strict = ctx.strict === true;
+    // A tier judges its own rows' passes; "no test" and "REMOVED row left a test" are tier-independent, so the
+    // unit job reports them once and the integration job does not repeat them.
+    const found = ctx.tier === 'int' ? [] : guaranteeFindings(relevant, tests, pending, cut, strict);
+    if (ctx.existenceOnly === true) return found;
+    const results = readResults(ctx.root, ctx.results);
+    if (results === undefined)
+      return ctx.packageId !== undefined
+        ? found
+        : [
+            ...found,
+            {
+              check: 'guarantees',
+              where: 'results',
+              message:
+                'no JUnit report found (run the unit tier, or pass --results <junit.xml|folder>), so no test is proven to PASS; --existence-only checks titles alone',
+            },
+          ];
+    return [
+      ...found,
+      ...passFindings(
+        relevant,
+        tierTests(tests, ctx.tier),
+        results,
+        owner => ownerFolder(ws, owner),
+        pending,
+        cut,
+        strict,
+      ),
+    ];
   },
 };
 

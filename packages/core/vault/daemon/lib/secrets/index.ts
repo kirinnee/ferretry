@@ -9,4 +9,3 @@ export * from './types.ts';
 export * from './use.ts';
 export * from './vault.ts';
 export * from './view.ts';
-export * from './wire.ts';

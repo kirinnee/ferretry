@@ -377,3 +377,24 @@ describe('PushService.notify', () => {
     should(store.forgotten).be.empty();
   });
 });
+
+describe('G166 revoking a device takes its push enrolments, and an endpoint must be a browser push service', () => {
+  it('G166 should take a revoked device’s enrolments with it and leave another device’s alone', async () => {
+    const phone = record({ subscription: subscription('https://fcm.googleapis.com/send/pixel') });
+    const tablet = record({
+      id: 'push-44444444-4444-4444-8444-444444444444',
+      deviceId: deviceId('b'),
+      deviceName: 'iPad',
+      subscription: subscription('https://fcm.googleapis.com/send/ipad', 5),
+    });
+    const { service, store } = world({ records: [phone, tablet], granted: [deviceId('a'), deviceId('b')] });
+
+    should(await service.forgetDevice(deviceId('a'))).equal(1);
+
+    // Gone from the stored document, not merely filtered out of an answer: a surviving row would be a
+    // capability to wake a phone whose owner revoked it.
+    should(store.records.map(entry => entry.id)).eql([tablet.id]);
+    should(JSON.stringify(store.records)).not.match(/send\/pixel/u);
+    should((await service.list()).map(entry => entry.id)).eql([tablet.id]);
+  });
+});

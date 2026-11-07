@@ -1,5 +1,6 @@
+import { type SessionAgendaSummary } from '../../../contract/wire.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary } from '../../../app/wire/index.ts';
+import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../app/shell.ts';
 import {
   type AgendaInbox,
@@ -13,14 +14,16 @@ import { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { AgendaRollupStore } from '../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../app/shell.ts';
-import type { DaemonFleetStore, FleetSnapshot } from '../../../app/shell.ts';
-import '../../support/app/dom.ts';
-import { interact, type Mounted, mount } from '../../support/app/dom.ts';
+import type { DaemonFleetStore, FleetSnapshot } from '../../../app/lib/ferret-store.ts';
+import { callFromFetch } from '../../support/app/call-from-fetch.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { sessionView } from '../../support/app/sessions.ts';
-import { settleUntil } from '../../support/app/settle.ts';
+import { settleUntil } from '@ferretry/app/testing';
 
-const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
-const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
+const studio = daemonConnection({ daemonId: 'studio' });
+const laptop = daemonConnection({ daemonId: 'laptop' });
 const at = (minutes: number): string => new Date(Date.UTC(2026, 9, 23, 12, minutes)).toISOString();
 
 const summary = (open: number, latest: number): SessionAgendaSummary => ({
@@ -72,17 +75,20 @@ const fakeClient = (
   rollups: Record<string, Record<string, readonly AgendaItem[]>> = {},
 ) => {
   const rolled: string[] = [];
-  const rollup = new AgendaRollupStore(async input => {
-    const host = new URL(String(input)).host.split('.')[0] ?? '';
-    rolled.push(host);
-    const held = rollups[host];
-    // A machine the test gave no roll-up answers none, so the Inbox keeps reading that machine's boards.
-    if (held === undefined) return new Response('{}', { status: 404 });
-    return new Response(
-      JSON.stringify({ sessions: Object.entries(held).map(([sessionId, items]) => ({ sessionId, items })) }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
-  });
+  // Each machine's roll-up through its own client, named by host.
+  const rollup = new AgendaRollupStore(daemon =>
+    callFromFetch(async input => {
+      const host = new URL(input).host.split('.')[0] ?? '';
+      rolled.push(host);
+      const held = rollups[host];
+      // A machine the test gave no roll-up answers none, so the Inbox keeps reading that machine's boards.
+      if (held === undefined) return new Response('{}', { status: 404 });
+      return new Response(
+        JSON.stringify({ sessions: Object.entries(held).map(([sessionId, items]) => ({ sessionId, items })) }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }, `https://${daemon.daemonId}.example.test`),
+  );
   const calls: Call[] = [];
   const store = new DaemonAgendaStore();
   const record =
@@ -307,7 +313,7 @@ describe('useAgendaInboxModel', () => {
     expect(read.withFerret.map(entry => entry.item.id).sort()).toEqual(['A2', 'A3']);
     expect(read.parked.map(entry => entry.item.id)).toEqual(['A5']);
     expect(read.total).toBe(read.cards.length);
-    expect(read.total).toBe(3);
+    expect(read.total).toBe(2);
   });
 });
 

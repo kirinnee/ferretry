@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { AgendaConfigChange, configChangeLine } from '../../../../app/features/agenda/agenda-config-change.tsx';
-import { mount } from '../../../support/app/dom.ts';
+import { mount } from '@ferretry/app/testing';
 
 const PRICE = 'the Jev price the cap counts with goes down from 2 to 0.042';
 const LAYER = 'the Warden may now spend on AI investigations';

@@ -22,12 +22,7 @@
  * provider directly, so the daemon never sees them. That is a declared gap.
  */
 import { instantFromEpochMs } from '@ferretry/std';
-import type {
-  AuthorizedOutcome,
-  CredentialPlacement,
-  OutboundHttpRequest,
-  SecretName,
-} from '@ferretry/core-vault/contract';
+import type { AuthorizedOutcome, CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 import type { ProviderQuotaReading, ProviderQuotaSpend } from '../../../../contract/index.ts';
 import type { ParsedProviderQuota, ProviderQuotaParse } from './parse.ts';
 import { hasQuotaEndpoint, type ProviderQuotaLogin, planProviderQuota } from './plan.ts';
@@ -49,10 +44,15 @@ export interface TranscriptSpendPort {
   spend(agents: readonly string[], sinceMs: number): Promise<TranscriptSpend | undefined>;
 }
 
-/** The Vault's `authorizeFetch`, seen as the one call this reader makes: the key is placed on the request inside the Vault. */
+/**
+ * Logins' `authorizeFetch`, seen as the one call this reader makes: it names a LOGIN and the variable that carries its
+ * key, never a secret; Logins resolves the secret from that login's own record and the key is placed on the request
+ * inside the Vault.
+ */
 export interface OutboundAuthorizerPort {
   send(
-    secretName: SecretName,
+    loginId: string,
+    variable: string,
     hostAllowlist: readonly string[],
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
@@ -194,7 +194,7 @@ export class ProviderQuotaService {
         failure = plan.reason;
       } else {
         const outcome = await this.deps.authorizer
-          .send(plan.secretName, plan.hosts, plan.request, plan.placement)
+          .send(login.id, plan.variable, plan.hosts, plan.request, plan.placement)
           .catch((): AuthorizedOutcome => ({ kind: 'unreachable' }));
         const result = outcomeOf(outcome, plan.parse, this.deps.clock.nowMs());
         if ('quota' in result) {

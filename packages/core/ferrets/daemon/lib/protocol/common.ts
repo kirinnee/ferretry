@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
-/** An ISO-8601 instant with an explicit timezone (the contract owns it: `IsoInstantSchema`). */
-export { IsoInstantSchema as InstantSchema } from '../../../contract/records.ts';
-
-export const NonEmptyStringSchema = z.string().trim().min(1);
-export const NonNegativeIntegerSchema = z.number().int().nonnegative();
-export const PositiveIntegerSchema = z.number().int().positive();
-export const NonNegativeFiniteSchema = z.number().finite().nonnegative();
+/** The instant and number shapes a ferret view carries: the contract owns them (`contract/view/common.ts`). */
+export {
+  InstantSchema,
+  NonEmptyStringSchema,
+  NonNegativeFiniteSchema,
+  NonNegativeIntegerSchema,
+  PositiveIntegerSchema,
+} from '../../../contract/view/common.ts';
 
 export const StringMapSchema = z.record(z.string(), z.unknown());
 

@@ -16,6 +16,7 @@ import {
   McpPort,
   McpServerAdded,
   McpSignInChanged,
+  SIGN_IN_SECRET_NAME,
 } from './contract/index.ts';
 
 /**
@@ -206,5 +207,7 @@ export default definePlugin({
     network: [],
     spawn: [],
     secrets: [],
+    // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.
+    mintedSecrets: [SIGN_IN_SECRET_NAME],
   },
 });

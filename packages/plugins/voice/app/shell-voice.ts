@@ -411,38 +411,3 @@ export const daemonRequest = (
 
 /** STAND-IN for the "this machine is older than the app" check, which reads the fleet; absent, nothing is claimed. */
 export const useMachineIsOlder = (_store: unknown, _daemon: DaemonConnection | undefined): boolean => false;
-
-// ─── the composer this half's panel sits in ───────────────────────────────────────────────────────────────────────
-
-/** What the `composer.tools` slot's host (Conversation's composer) hands the dictation panel. */
-export interface ComposerDraftBinding {
-  /** The live draft, read at insert time so text typed during the flow is kept. */
-  readonly draft: string;
-  /** The textarea's caret, when it has one. */
-  readonly selectionRef?: {
-    readonly current: { readonly selectionStart: number; readonly selectionEnd: number } | null;
-  };
-  /** Receives the COMPLETE next draft and where the caret should sit. */
-  readonly onDraftChange: (result: { readonly text: string; readonly caret: number }) => void;
-  /** The conversation this page already shows, oldest first. */
-  readonly readConversation?: () => readonly string[];
-  readonly sessionId?: string;
-  readonly composerRef?: { current: HTMLElement | null };
-}
-
-const ComposerDraftContext = createContext<ComposerDraftBinding | null>(null);
-
-/** GAP: Conversation's composer wraps its `composer.tools` slot in this; until it does the panel has no draft to write to. */
-export function ComposerDraftProvider({
-  binding,
-  children,
-}: {
-  readonly binding: ComposerDraftBinding;
-  readonly children?: ReactNode;
-}) {
-  return createElement(ComposerDraftContext.Provider, { value: binding }, children);
-}
-
-export function useComposerDraft(): ComposerDraftBinding | null {
-  return useContext(ComposerDraftContext);
-}

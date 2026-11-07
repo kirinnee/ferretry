@@ -9,7 +9,7 @@
  * inside another; only an fy-render mock-up that is bigger than the width scrolls, inside its own box.
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { ReactNode } from 'react';
 import { revisionHighlight } from '../../lib/agenda-revisions.ts';
 import { type AgendaBriefProps, AgendaBriefSections } from './agenda-brief.tsx';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaItem, ResolvedAgendaItem } from '../../../app/wire/index.ts';
+import type { AgendaItem, ResolvedAgendaItem } from '@ferretry/core-asks/contract';
 import { AGENDA_TAB_FILTERS, agendaSummary, agendaTabModel } from '../../../app/lib/agenda-tab.ts';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
 

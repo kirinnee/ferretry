@@ -7,8 +7,7 @@
  * A ferret's-turn row is dimmed.
  */
 
-import { shellClock } from '../../shell.ts';
-import { type AgendaItem, hasOwnTitle } from '../../wire/index.ts';
+import { type AgendaItem, hasOwnTitle } from '@ferretry/core-asks/contract';
 import { bulletPoints } from '../../lib/agenda-revisions.ts';
 import { type AgendaStatus, agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
@@ -38,7 +37,7 @@ export const agendaAsk = (item: AgendaItem): string | null => {
   return leadOf(item.premise) ?? leadOf(item.context);
 };
 
-export function AgendaRow({ item, ferret, now = shellClock.nowMs(), onOpen }: AgendaRowProps) {
+export function AgendaRow({ item, ferret, now = Date.now(), onOpen }: AgendaRowProps) {
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const ask = agendaAsk(item);
   return (

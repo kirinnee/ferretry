@@ -13,8 +13,6 @@ const ROOT = resolve(import.meta.dir, '../../../../../../..');
  * declared (the test below fails if a listed rule already matches), so this list can only shrink.
  */
 const PENDING: Readonly<Record<string, string>> = {
-  'PUT /v1/config/file': 'kernel (config routes, D2 #3)',
-  'POST /v1/config/confirm': 'kernel (config routes, D2 #3)',
   'POST /v1/agent/config': 'kernel (config routes, D2 #3)',
 };
 

@@ -8,7 +8,7 @@
  * never navigates. Code spans and existing links are never marked.
  */
 
-import type { AgendaTerm } from '../../wire/index.ts';
+import type { AgendaTerm } from '@ferretry/core-asks/contract';
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 const TERM_HREF = '#fy-term-';

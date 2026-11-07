@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { ReactNode } from 'react';
 import { ChatProse } from '../../../../app/shell.ts';
 import { ReferenceSurfaceProvider } from '../../../../app/shell.ts';
@@ -10,7 +10,7 @@ import { AgendaBody } from '../../../../app/features/agenda/agenda-steps.tsx';
 import type { ClipboardWriter } from '../../../../app/shell.ts';
 import { historyLine, type InboxAction, swipeMap, updatedSinceAsked } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -64,7 +64,10 @@ describe('agenda card Markdown and hypermedia', () => {
     expect(body.querySelector('h2')?.textContent).toBe('Why');
     expect(body.querySelectorAll('li')).toHaveLength(2);
     expect(body.querySelector('strong')?.textContent).toBe('old');
-    expect(view.container.querySelector('[data-fy-render-type="svg"]')).not.toBeNull();
+    // The step goes through the chat's renderer whole. Drawing an fy-render block is Conversation's fence kind (it
+    // brings it to the surface as `fences`); a surface without it shows the block as its source, never as markup.
+    expect(view.container.querySelector('[data-fy-render-type]')).toBeNull();
+    expect([...view.container.querySelectorAll('pre')].some(pre => pre.textContent?.includes('type: svg'))).toBe(true);
   });
 
   test('links a reference the surface proved and leaves an unproven one as prose', async () => {

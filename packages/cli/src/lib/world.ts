@@ -45,6 +45,8 @@ export interface PluginHost {
   sleep(delay: Duration, signal?: AbortSignal): Promise<void>;
   /** As today's `readRecipe`: UTF-8 text from a path relative to the working directory; `-` reads standard input. No size cap. */
   readText(path: string): Promise<string>;
+  /** The CLI's real working directory, never the inherited `PWD`, which a parent's `cwd:` option leaves stale. */
+  cwd(): string;
   /** The kernel's state port over ONLY this plugin's own declared opaque files; any other file is refused. */
   ownState(manifest: Manifest): NonNullable<CliContext<Manifest>['ownState']>;
 }

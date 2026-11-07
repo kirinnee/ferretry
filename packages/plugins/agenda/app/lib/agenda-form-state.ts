@@ -4,7 +4,7 @@
  * form is sent. The words and the rules for what a form answer is are the protocol's (`agenda-form.ts`).
  */
 
-import type { AgendaFormField } from '../wire/index.ts';
+import type { AgendaFormField } from '@ferretry/core-asks/contract';
 import { useSyncExternalStore } from 'react';
 
 /** The values picked on each field, by field id: one for a pick-one or yes/no, any for a pick-many. */

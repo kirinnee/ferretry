@@ -54,10 +54,17 @@ export interface Admission<Standing extends object = CallStanding, Member extend
   watch?(listener: () => void): Cancel;
   /**
    * Projects `GET /v1/plugins` for this caller (§9.6): every package for the owner on the host and a ferret; for a
-   * device, core, Access and each plugin with a route, tool or event its grants admit; core and Warden for the remote
-   * warden. Anything not returned is omitted, so a limited device cannot discover it.
+   * device, core, Access and each plugin with a route, socket or agent tool its grants admit (events carry no demand
+   * of their own, so they do not count); core and Warden for the remote
+   * warden. Anything not returned is omitted, so a limited device cannot discover it. `surfaces` is every declared
+   * route, socket and agent tool of each plugin, by plugin id, as the kernel read them from the manifests: the
+   * projection asks the device's grants about them, so without them a device would see only core and Access.
    */
-  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+  inventory(
+    request: ApiRequest,
+    entries: readonly InventoryEntry[],
+    surfaces: InventorySurfaces,
+  ): readonly InventoryEntry[];
   /**
    * The Gate axis of a plugin's own config write (`kernel.config.write`/`remove`): asked only when the edit
    * LOOSENS, with the plain sentences of what widens and the actor of the call in progress (the default actor outside
@@ -65,6 +72,14 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    * effect; `hold` (and an absent judge, or one that throws) holds it for the owner, the tighter version in effect.
    */
   judgeConfigWrite?(input: ConfigWriteJudgement): 'apply' | 'hold';
+  /**
+   * The Gate axis of the KERNEL's own config routes (`GET/PUT /v1/config/file`, `POST /v1/config/confirm`), asked
+   * once per file the call touches, before it does: the file's capability on the axis the act needs (`read` is
+   * `use`; `write` and `confirm` are `configure`), a person only for the acts that change, and — to
+   * put a held edit into effect — the passkey proved for that act. An absent judge, or one that throws, refuses the
+   * call (nobody can say who may change what).
+   */
+  judgeConfigAccess?(input: ConfigAccessJudgement): ConfigAccessVerdict;
   /**
    * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
    * the handler's own refusals (an `ApiError`) and failures included, as today's audited-route decorator recorded
@@ -74,6 +89,31 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    */
   recorded?(call: RecordedCall): void;
 }
+
+/** What the caller does to one config file (`Admission.judgeConfigAccess`). */
+export type ConfigAct = 'read' | 'write' | 'confirm';
+
+/** What Gate is asked before the kernel's config routes touch one file. */
+export interface ConfigAccessJudgement {
+  readonly plugin: string;
+  /** The file, relative to `config/`. */
+  readonly path: string;
+  readonly act: ConfigAct;
+  /** Who the call in progress runs as. */
+  readonly actor: Actor;
+  /** The standing admission put on the call in progress; absent when none is (a job) and on a member call. */
+  readonly standing?: CallStanding;
+}
+
+/**
+ * Gate's answer: the call may go on, or it is refused with Gate's own answer (a grant refusal, a step-up demand, an
+ * owner-only refusal). On a write, `mayLoosen` says this call may put a loosening into effect in this same act
+ * (somebody at this machine), and `claimLoosening` is how a call that holds a passkey proof earns that: asked ONLY when
+ * the text really loosens, it takes the one proof atomically (`true`: put it into effect). One proof, one loosening.
+ */
+export type ConfigAccessVerdict =
+  | { readonly allowed: true; readonly mayLoosen?: boolean; readonly claimLoosening?: () => boolean }
+  | { readonly allowed: false; readonly response: ApiResponse };
 
 /** What Gate's judge is asked about one loosening config edit. */
 export interface ConfigWriteJudgement {
@@ -107,6 +147,9 @@ export interface RecordedCall {
   /** The answer as built (a route's), for a rule that reads NAMES out of it; absent for a socket. */
   readonly response?: ApiResponse;
 }
+
+/** Every declared route, socket and agent tool of one plugin, as descriptors (no method, no path), by plugin id. */
+export type InventorySurfaces = ReadonlyMap<string, readonly Omit<ScopedRoute, 'method' | 'path'>[]>;
 
 /** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */
 export interface InventoryEntry {

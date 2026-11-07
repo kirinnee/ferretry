@@ -124,8 +124,15 @@ export const ForeignHistoryEntrySchema = z.strictObject({
   harness: HarnessIdSchema,
   title: z.string().optional(),
   at: InstantSchema,
+  /** The turns the conversation holds (a floor when `turnsAtLeast`: its file could not be read through). */
+  turns: z.number().int().nonnegative(),
+  turnsAtLeast: z.literal(true).optional(),
 });
-export const ForeignHistoryListSchema = z.strictObject({ entries: z.array(ForeignHistoryEntrySchema) });
+export const ForeignHistoryListSchema = z.strictObject({
+  entries: z.array(ForeignHistoryEntrySchema),
+  /** The transcripts the listing could not read: said aloud, never swapped for an empty conversation. */
+  skipped: z.number().int().nonnegative(),
+});
 export const ForeignHistorySchema = z.strictObject({
   entry: ForeignHistoryEntrySchema,
   messages: z.array(ExchangeMessageSchema),

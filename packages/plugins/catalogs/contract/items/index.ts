@@ -5,7 +5,7 @@
  * Absence refuses that kind; it never grants access or supplies an empty inventory as truth.
  */
 import { defineHook } from '@ferretry/kernel/contract';
-import type { CallerGovernance, CapabilityPresentation } from '@ferretry/core-gate/contract';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import { z } from 'zod';
 import { CatalogItemKindSchema } from '../wire.ts';
 import type { CatalogProvenance, CatalogSkillFile } from '../wire/index.ts';
@@ -16,10 +16,15 @@ export * from './sources.ts';
 export * from './skill-files.ts';
 export * from './mcp-files.ts';
 
-/** Exactly today's apply witness; a provider must enforce it, never infer it from an actor label. */
+/**
+ * Today's apply witness, tightened to a CLAIM: a provider must enforce it, never infer it from an actor label.
+ * `claim` TAKES the caller's fresh passkey proof in one step (Gate's `claimFreshStepUp`): of two requests admitted on one
+ * proof exactly one is answered `true`. It is asked BEFORE the act it allows, never read from the admission snapshot
+ * and spent after, and there is no restore — an act that then fails has used the proof up. A caller with no proved
+ * device is answered `false`.
+ */
 export interface FreshStepUpContext {
-  readonly presentation: CapabilityPresentation | undefined;
-  readonly spend: () => void;
+  readonly claim: () => boolean;
   readonly agent: boolean;
 }
 export interface CatalogRuntimeTarget {

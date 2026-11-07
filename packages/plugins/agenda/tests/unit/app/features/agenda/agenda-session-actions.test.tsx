@@ -1,37 +1,18 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { SessionConfig, SessionView } from '../../../../../app/shell.ts';
-import { useState } from 'react';
 import {
-  type AgendaActionContext,
+  AgendaModeSwitch,
   useAgendaSessionActions,
 } from '../../../../../app/features/agenda/agenda-session-actions.tsx';
-import { ActionsMenu } from '../../../../../app/shell.ts';
-import { sessionActionSections } from '../../../../../app/shell.ts';
+import { createAgendaModePanel } from '../../../../../app/views/agenda-mode-panel.tsx';
+import type { AgendaRuntime } from '../../../../../app/lib/agenda-runtime.ts';
+import type { PanelProps } from '@ferretry/kernel/manifest';
 import { patchSessionAgenda } from '../../../../../app/lib/agenda-api.ts';
-import { daemonConnection } from '../../../../../app/shell.ts';
-import type { DaemonFetch } from '../../../../../app/shell.ts';
-import { type Mounted, mount, must } from '../../../../support/app/dom.ts';
+import type { AgendaCall } from '../../../../../app/lib/agenda-call.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 import { click, textOf, waitFor, waitForText } from '../../../../support/app/learning-dom.ts';
-import { sessionView } from '../../../../support/app/sessions.ts';
+import { callFromFetch } from '../../../../support/app/call-from-fetch.ts';
 
-const DAEMON = daemonConnection({ daemonId: 'daemon/a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const LEGACY = sessionView('session-hadi', { config: { teammate: 'hadi', mode: 'interactive' } });
-/** What the wire adds to the shell fixture, so an answer parses against the protocol schema. */
-const WIRE_CONFIG: Partial<SessionConfig> = {
-  incarnation: 'session-hadi-1',
-  runtimeGeneration: 1,
-  remoteControl: false,
-  harnessFlags: [],
-  turn: 4,
-  intervalSeconds: 30,
-  timeoutSeconds: 0,
-  nudgeAfterSeconds: 0,
-  killAfterSeconds: 0,
-  directSendMaxChars: 0,
-  resumeMenuChoice: 'full',
-  maxSnapshots: 5,
-  retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
-};
+const FERRET = 'session-hadi';
 
 interface Call {
   readonly method: string;
@@ -39,24 +20,29 @@ interface Call {
   readonly body: unknown;
 }
 
-/** An in-memory daemon answering the one agenda-mode route, or the refusal a test queued. */
-function fakeDaemon() {
+/** An in-memory daemon answering Agenda's agenda-mode routes, or the refusal a test queued. */
+function fakeDaemon(initially = false) {
   const calls: Call[] = [];
   const refusals: Array<{ readonly status: number; readonly body: unknown }> = [];
-  const fetch: DaemonFetch = async (input, init) => {
-    const url = new URL(String(input));
-    const body: unknown = JSON.parse(String(init?.body ?? 'null'));
-    calls.push({ method: init?.method ?? 'GET', path: url.pathname, body });
+  let enabled = initially;
+  const client = callFromFetch(async (input, init) => {
+    const url = new URL(input);
+    const method = init.method ?? 'GET';
+    const body: unknown = init.body === undefined ? null : JSON.parse(String(init.body));
+    calls.push({ method, path: url.pathname, body });
+    if (method === 'GET')
+      return Response.json({ enabled, restartRequired: false, note: `Agenda mode is ${enabled ? 'on' : 'off'}.` });
     const refusal = refusals.shift();
     if (refusal !== undefined) return Response.json(refusal.body, { status: refusal.status });
-    const enabled = (body as { enabled: boolean }).enabled;
+    enabled = (body as { enabled: boolean }).enabled;
     return Response.json({
-      view: sessionView('session-hadi', { config: { ...WIRE_CONFIG, teammate: 'hadi', agenda: enabled } }),
+      ferret: FERRET,
+      enabled,
       restartRequired: true,
       note: `Agenda mode is ${enabled ? 'on' : 'off'}. This ferret is running, so it takes effect when the ferret restarts.`,
     });
-  };
-  return { calls, refusals, fetch };
+  });
+  return { calls, refusals, client };
 }
 
 let mounted: Mounted | undefined;
@@ -66,76 +52,90 @@ afterEach(async () => {
 });
 
 function Page({
-  fetcher,
-  view,
+  client,
   canControl,
   failures,
 }: {
-  readonly fetcher: DaemonFetch;
-  readonly view: SessionView;
+  readonly client: AgendaCall;
   readonly canControl: boolean;
-  readonly failures: string[];
+  readonly failures?: string[];
 }) {
-  const { contributions, host } = useAgendaSessionActions({ connection: DAEMON, fetcher });
-  const [form, setForm] = useState<string | null>(null);
-  const context: AgendaActionContext = { view, canControl };
+  const actions = useAgendaSessionActions({ client });
   return (
     <>
-      <ActionsMenu
-        sections={sessionActionSections(contributions, context)}
-        compact={false}
-        name="Hadi"
-        form={form}
-        onFormChange={setForm}
-        onFailure={sentence => failures.push(sentence)}
+      <AgendaModeSwitch
+        actions={actions}
+        ferret={FERRET}
+        canControl={canControl}
+        {...(failures === undefined ? {} : { onFailure: (sentence: string) => failures.push(sentence) })}
       />
-      {host}
+      {actions.host}
     </>
   );
 }
 
-const openMenu = async (root: HTMLElement) =>
-  click(must(root.querySelector('[data-session-actions-trigger]'), 'Actions trigger'));
 const row = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-session-action-item="agenda"]');
+const toggleOf = (root: HTMLElement) => must(row(root)?.querySelector('input[role="switch"]'), 'agenda switch');
 
-describe('Agenda mode in a ferret’s Actions menu', () => {
-  it('reads a ferret with no setting as off, switches it on for the next launch, and says so', async () => {
+describe('Agenda mode in a ferret’s toolbar', () => {
+  it('reads a ferret that is off as off, switches it on for the next launch, and says so', async () => {
     const daemon = fakeDaemon();
     const failures: string[] = [];
-    mounted = await mount(<Page fetcher={daemon.fetch} view={LEGACY} canControl failures={failures} />);
+    mounted = await mount(<Page client={daemon.client} canControl failures={failures} />);
     const root = mounted.container;
-    await openMenu(root);
-    const toggle = must(row(root), 'agenda row');
-    expect(toggle.getAttribute('role')).toBe('menuitemcheckbox');
-    expect(toggle.getAttribute('aria-checked')).toBe('false');
-    expect(textOf(toggle)).toContain('Off');
-    await click(toggle);
+    await waitFor(() => toggleOf(root).getAttribute('aria-checked') === 'false' && textOf(root).includes('Off'), 'off');
+    expect(daemon.calls).toEqual([{ method: 'GET', path: `/v1/ferrets/${FERRET}/agenda-mode`, body: null }]);
+    await click(toggleOf(root));
     await waitForText(root, 'takes effect when the ferret restarts');
-    expect(daemon.calls).toEqual([
-      { method: 'PATCH', path: '/v1/ferrets/session-hadi/agenda-mode', body: { enabled: true } },
+    expect(daemon.calls.slice(1)).toEqual([
+      { method: 'PATCH', path: `/v1/ferrets/${FERRET}/agenda-mode`, body: { enabled: true } },
     ]);
     const note = must(root.querySelector('[data-agenda-action-note]'), 'note');
     expect(note.getAttribute('role')).toBe('status');
-    // The daemon's answer wins until the list re-reads the session, so the row does not flip back.
-    if (row(root) === null) await openMenu(root);
-    await waitFor(() => row(root)?.getAttribute('aria-checked') === 'true', 'the row to read on');
+    // The daemon's answer wins, so the switch does not flip back.
+    await waitFor(() => toggleOf(root).getAttribute('aria-checked') === 'true', 'the switch to read on');
     await click(must(note.querySelector('button[aria-label="Dismiss"]'), 'Dismiss'));
     expect(root.querySelector('[data-agenda-action-note]')).toBeNull();
 
     daemon.refusals.push({ status: 403, body: { error: 'operator access is closed', code: 'forbidden' } });
-    await click(must(row(root), 'row'));
+    await click(toggleOf(root));
     await waitFor(() => failures.length === 1, 'the failure');
     expect(failures[0]).toContain('operator access is closed');
   });
 
-  it('offers nothing to a reader who cannot control this ferret', async () => {
-    mounted = await mount(<Page fetcher={fakeDaemon().fetch} view={LEGACY} canControl={false} failures={[]} />);
+  it('says a refusal in its own status line when the toolbar has no failure line', async () => {
+    const daemon = fakeDaemon(true);
+    daemon.refusals.push({ status: 403, body: { error: 'operator access is closed', code: 'forbidden' } });
+    mounted = await mount(<Page client={daemon.client} canControl />);
+    const root = mounted.container;
+    await waitFor(() => toggleOf(root).getAttribute('aria-checked') === 'true', 'on');
+    await click(toggleOf(root));
+    await waitForText(root, 'Agenda mode could not be switched: operator access is closed');
+  });
+
+  it('offers nothing to a reader who cannot control this ferret, and reads nothing for one', async () => {
+    const daemon = fakeDaemon();
+    mounted = await mount(<Page client={daemon.client} canControl={false} />);
     expect(row(mounted.container)).toBeNull();
+    expect(daemon.calls).toEqual([]);
+  });
+
+  it('the toolbar panel itself draws the daemon’s note and a refusal (it has no failure line)', async () => {
+    const daemon = fakeDaemon();
+    const Panel = createAgendaModePanel({ client: daemon.client } as unknown as AgendaRuntime);
+    mounted = await mount(<Panel {...({ subject: FERRET } as unknown as PanelProps)} />);
+    const root = mounted.container;
+    await waitFor(() => toggleOf(root).getAttribute('aria-checked') === 'false', 'off');
+    await click(toggleOf(root));
+    await waitForText(root, 'takes effect when the ferret restarts');
+    daemon.refusals.push({ status: 403, body: { error: 'operator access is closed', code: 'forbidden' } });
+    await click(toggleOf(root));
+    await waitForText(root, 'Agenda mode could not be switched: operator access is closed');
   });
 
   it('says HTTP when a refusal carries no words', async () => {
-    const bare: DaemonFetch = async () => new Response('not json', { status: 502 });
-    const refused = await patchSessionAgenda(DAEMON, 'session-hadi', true, bare).catch((error: unknown) => error);
+    const bare = callFromFetch(async () => new Response('not json', { status: 502 }));
+    const refused = await patchSessionAgenda(bare, FERRET, true).catch((error: unknown) => error);
     expect(refused).toMatchObject({ status: 502, message: 'HTTP 502' });
   });
 });

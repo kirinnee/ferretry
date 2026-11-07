@@ -1,22 +1,15 @@
 /// <reference lib="dom" />
 import { afterEach, expect, test } from 'bun:test';
-import { GlobalRegistrator } from '@happy-dom/global-registrator';
 import { act, createElement, type ComponentType } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import app from '../../app/index.ts';
 import manifest from '../../manifest.ts';
 import { ABSENT_VIEW } from '../../contract/testing/index.ts';
 import type { HarnessCliView } from '../../contract/index.ts';
+// `createRoot` comes from the support file: it registers the DOM first (see why there).
+import { createRoot } from '../support/dom.ts';
 
-// ONE registration per process: the unit tier runs every package's files in one bun process, and happy-dom refuses a
-// second global registration. Every suite that needs a DOM shares this flag (see the app's `tests/support/dom.ts`).
-const domFlag = globalThis as typeof globalThis & { __ferretryDomRegistered?: boolean };
-if (!domFlag.__ferretryDomRegistered) {
-  GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
-  domFlag.__ferretryDomRegistered = true;
-}
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const mounted: Root[] = [];
 afterEach(async () => {
   await act(async () => {

@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { ChatProse } from '../../../../app/shell.ts';
 import { AgendaBriefSections, PointForm } from '../../../../app/features/agenda/agenda-brief.tsx';
 import { AgendaQuickReplies } from '../../../../app/features/agenda/agenda-quick-replies.tsx';
 import { cardModel } from '../../../../app/lib/agenda-card-model.ts';
 import { swipeMap } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

@@ -1,6 +1,6 @@
 /** DOM helpers for the Inbox's toolbar menus and Find (kept apart from the harness so a browser scene can import that). */
 
-import { interact, must } from './dom.ts';
+import { interact, must } from '@ferretry/app/testing';
 
 /** The Inbox's filter menus: Show (`filter`), Ferrets (`kind`), Machine. */
 type InboxMenu = 'filter' | 'kind' | 'machine';

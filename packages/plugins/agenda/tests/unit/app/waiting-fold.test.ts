@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { LedgerSendRecord } from '../../../app/shell.ts';
-import type { QueueView } from '../../../app/shell.ts';
-import type { TranscriptEntry } from '../../../app/shell.ts';
-import { hideWaiting, isWaitingSend } from '../../../app/lib/waiting-fold.ts';
+import {
+  hideWaiting,
+  isWaitingSend,
+  type WaitingFoldSend as LedgerSendRecord,
+  type WaitingFoldQueue as QueueView,
+  type WaitingFoldEntry as TranscriptEntry,
+} from '../../../app/lib/waiting-fold.ts';
 
 const queue = (state: QueueView['state'], extra: Partial<QueueView> = {}): QueueView => ({
   state,

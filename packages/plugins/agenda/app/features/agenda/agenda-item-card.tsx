@@ -33,8 +33,8 @@ import {
   type AgendaItem,
   plainLabel,
   singleAgendaQuestion,
-} from '../../wire/index.ts';
-import { inputContextLines } from '../../shell.ts';
+} from '@ferretry/core-asks/contract';
+import { inputContextLines } from '../../lib/input-context.ts';
 import { Check } from 'lucide-react';
 import { type ReactNode, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -61,7 +61,6 @@ import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
 import { openTab, sectionTab, viewTabs } from '../../lib/agenda-tab-view.ts';
 import { attachedGateLead, toGateAction, gateOf } from '../../lib/gate-items.ts';
 import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
-import { HowToTest } from '../../shell.ts';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
@@ -77,6 +76,7 @@ import { AgendaTabs, Section } from './agenda-tabs.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
 import { VersionDiffPanel } from './agenda-version-diff.tsx';
+import { HowToTest } from './how-to-test.tsx';
 import { useChangedTabs } from './use-changed-tabs.ts';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 import { useDownSwipe } from './use-down-swipe.ts';

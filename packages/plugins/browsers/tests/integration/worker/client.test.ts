@@ -671,7 +671,7 @@ describe('browser worker client — the input bridge', () => {
     // Arrange
     const client = await connect();
     const facts = {
-      kind: 'browser' as const,
+      kind: 'page' as const,
       pageId: 'p1',
       origin: 'https://example.test',
       secure: true,
@@ -698,7 +698,7 @@ describe('browser worker client — the input bridge', () => {
 
 describe('browser worker client — a grant fill’s arm and clear (R3a-4)', () => {
   const facts = {
-    kind: 'browser' as const,
+    kind: 'page' as const,
     pageId: 'p1',
     origin: 'https://example.test',
     secure: true,

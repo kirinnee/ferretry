@@ -1,12 +1,12 @@
+import { type TranscriptEntry } from '../../../app/lib/transcript.ts';
 import { describe, expect, test } from 'bun:test';
 import {
-  type AgendaItem,
   agendaAnswerMessage,
   agendaDismissedMessage,
+  type AgendaItem,
   agendaReMessage,
-} from '../../../app/wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { type HistoryEvent, itemHistory } from '../../../app/lib/agenda-history.ts';
-import type { TranscriptEntry } from '../../../app/shell.ts';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
 
 const A47 = { id: 'A47', quote: 'Ship the relay fix?' } as never;
