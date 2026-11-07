@@ -20,7 +20,8 @@ export class WardenConfigRefused extends Error {
  * - while the kernel holds an edit, the owner's save is refused (this error), never written over it;
  * - a broken file, or a hand edit the kernel has not reloaded yet, is OVERWRITTEN with the value in effect: every
  *   setting is written from the settings in effect plus the owner's patch, so such an edit is never put into effect,
- *   but it is lost (today's fail-safe);
+ *   but it is lost (today's fail-safe) (a file with a top-level key the schema does not know is refused instead; the
+ *   owner repairs it by hand);
  * - refusing a write over a file that moved since the kernel's last reload (so that hand edit is held, not lost) waits
  *   on the kernel.
  */
