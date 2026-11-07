@@ -2,10 +2,14 @@
 import { describe, expect, test } from 'bun:test';
 import { loadManifests, loadWorkspace } from '../lib/workspace.ts';
 
-const ALLOWED = new Set(['GET /v1/sessions', 'GET /v1/board', 'GET /v1/board/ids']);
+const ALLOWED = new Set(['GET /v1/ferrets', 'GET /v1/board', 'GET /v1/board/ids']);
 
 describe('R513 compression opt-in allowlist', () => {
-  test('R513 every route with compress: true is one of GET /v1/sessions, GET /v1/board, GET /v1/board/ids', async () => {
+  test('R513 the 5.0 ferrets path opts in and the replaced sessions path does not', () => {
+    expect(ALLOWED.has('GET /v1/ferrets')).toBe(true);
+    expect(ALLOWED.has('GET /v1/sessions')).toBe(false);
+  });
+  test('R513 every route with compress: true is one of GET /v1/ferrets, GET /v1/board, GET /v1/board/ids', async () => {
     const { loaded } = await loadManifests(loadWorkspace(process.cwd()));
     const opted = loaded.flatMap(({ manifest }) =>
       (manifest.actions?.routes ?? []).filter(route => route.compress === true).map(route => route.key),
