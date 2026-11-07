@@ -6,7 +6,7 @@ import type { SessionEnvironment, StartBody } from './ports.ts';
 /**
  * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): where a conversation compacts and the
  * opening attachments are the Conversation's, a prompt file and a detached start are not this CLI half's to read, a
- * start's idempotency key is the shell's header, and a parent always comes from the caller's own token. A typed one is
+ * start's idempotency key is the shell's header. A typed one is
  * refused by name rather than sent and dropped, because a flag that was accepted and ignored is worse than a refusal.
  */
 export const START_FLAGS_ELSEWHERE: readonly string[] = [
@@ -15,7 +15,6 @@ export const START_FLAGS_ELSEWHERE: readonly string[] = [
   'prompt-file',
   'detach',
   'request-id',
-  'parent',
 ];
 
 /**
@@ -41,6 +40,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly agent?: string;
   readonly mode: 'auto' | 'interactive';
   readonly prompt?: string;
+  /** The ferret to start it under (`--parent`): the owner may name any; a ferret only itself (the daemon decides). */
+  readonly parent?: string;
   /** The first name to give it (`--teammate`), else the daemon picks a free callsign. */
   readonly teammate?: string;
   /** With `--teammate`: take a free callsign instead of failing on a collision. */
@@ -115,7 +116,7 @@ export function startWarnings(flags: StartNumericFlags): readonly string[] {
  *
  * Auto mode still needs a task — an autonomous teammate with no assignment can only misbehave — while an interactive
  * one is a terminal for a human and may start bare. The folder is the one the command was typed in unless `--cwd`
- * names another (relative to it); a parent is never sent: a ferret's start is its own helper, from its token.
+ * names another (relative to it). `--parent` is sent as typed; a ferret naming another parent is refused by the daemon.
  *
  * Today's renamed timers are kept: `--turn-timeout` (kill a turn that overruns) and `--stall-kill-after` (kill a
  * ferret with no life signs), validated here instead of failing on the wire.
@@ -140,6 +141,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     folder,
     ...(flags.agent === undefined ? {} : { runtime: flags.agent }),
     ...(flags.teammate === undefined ? {} : { name: flags.teammate }),
+    ...(flags.parent === undefined ? {} : { parent: flags.parent }),
     ...(flags.harness === undefined ? {} : { harness: flags.harness }),
     ...(flags.login === undefined ? {} : { login: flags.login }),
     ...(flags.pack === undefined ? {} : { pack: flags.pack }),

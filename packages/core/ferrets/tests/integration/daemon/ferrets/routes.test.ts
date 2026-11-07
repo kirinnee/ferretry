@@ -215,7 +215,7 @@ describe('starting, tokens and attach', () => {
     expect(runner.starts).toBe(1);
   });
 
-  test('a ferret’s start is its own helper: the parent comes from its token, never the body', async () => {
+  test('G12 a ferret’s start is its own helper: an absent parent is filled from its token', async () => {
     const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner() });
     const started = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/b' } });
     expect(started.status).toBe(201);
@@ -224,8 +224,22 @@ describe('starting, tokens and attach', () => {
       parent: 'lead',
       role: 'helper',
     });
-    const forged = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/c', parent: 'lead' } });
-    expect(forged.status).toBe(400);
+    const named = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/c', parent: 'lead' } });
+    expect(named.status).toBe(201);
+  });
+
+  test('G12 a ferret naming another parent is refused parent_mismatch; the owner may name any parent', async () => {
+    const h = await host([record('lead'), record('other')], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const mismatch = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/c', parent: 'other' } });
+    expect(mismatch.status).toBe(403);
+    expect(mismatch.json<{ code: string }>().code).toBe('parent_mismatch');
+    const owners = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/d', parent: 'other' } });
+    expect(owners.status).toBe(201);
+    const id = owners.json<{ id: string }>().id;
+    expect((await h.request('GET', `/v1/ferrets/${id}`)).json<{ parent: string }>().parent).toBe('other');
+    const missing = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/e', parent: 'ghost' } });
+    expect(missing.status).toBe(404);
+    expect(missing.json<{ code: string }>().code).toBe('unknown_parent');
   });
 
   test('revoke-credential is a person’s act and the bearer stops naming the ferret', async () => {
@@ -506,5 +520,31 @@ describe('session routes whose services are not bound in this build', () => {
       expect(answer.status).toBe(503);
       expect(answer.json<{ code: string }>().code).toBe('plugin_unavailable');
     }
+  });
+});
+
+describe('a start’s options reach the launch spec', () => {
+  test('model, effort and the rest of today’s start fields are handed to the harness, on start and on resume', async () => {
+    const harness = new FakeHarness();
+    const h = await host([], { harness, runner: new FakeRunner() });
+    const started = await h.request('POST', '/v1/ferrets', {
+      body: {
+        folder: '/work/a',
+        model: 'claude-opus-5-5',
+        effort: 'high',
+        harnessFlags: ['--verbose'],
+        intervalSeconds: 30,
+        timeoutSeconds: 3_600,
+      },
+    });
+    expect(started.status).toBe(201);
+    const id = started.json<{ id: string }>().id;
+    const first = harness.launched.at(-1);
+    expect(first?.model).toBe('claude-opus-5-5');
+    expect(first?.effort).toBe('high');
+    expect(first?.options).toMatchObject({ harnessFlags: ['--verbose'], intervalSeconds: 30, timeoutSeconds: 3_600 });
+    await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' } });
+    expect((await h.request('POST', `/v1/ferrets/${id}/resume`)).status).toBeLessThan(300);
+    expect(harness.launched.at(-1)?.options).toMatchObject({ harnessFlags: ['--verbose'], intervalSeconds: 30 });
   });
 });

@@ -115,6 +115,7 @@ export default implementCli(manifest, {
         if (mode !== 'auto' && mode !== 'interactive') throw new SessionCommandError('--mode is auto or interactive');
         const agent = text(invocation, 'agent', 'a', 'runtime');
         const teammate = text(invocation, 'teammate');
+        const parent = role === 'start' ? text(invocation, 'parent') : undefined;
         const harness = text(invocation, 'harness');
         const login = text(invocation, 'login');
         const pack = text(invocation, 'pack');
@@ -157,6 +158,7 @@ export default implementCli(manifest, {
           ...Object.fromEntries(Object.entries(numbers).filter(([, value]) => value !== undefined)),
           ...(agent === undefined ? {} : { agent }),
           ...(teammate === undefined ? {} : { teammate }),
+          ...(parent === undefined ? {} : { parent }),
           ...(harness === undefined ? {} : { harness }),
           ...(login === undefined ? {} : { login }),
           ...(pack === undefined ? {} : { pack }),

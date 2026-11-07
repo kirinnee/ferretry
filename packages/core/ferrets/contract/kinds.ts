@@ -2,6 +2,7 @@ import type { FencedPath, FerretId, InstructionEntry } from '@ferretry/kernel/co
 import type { ChildEnvironment, InputRequestId } from '@ferretry/core-vault/contract';
 import type { Brand, Instant, JsonValue, Result } from '@ferretry/std';
 import type { FerretRole, HarnessKey, LoginKindKey, PackId, RunnerKey } from './ids.ts';
+import type { StartOptions } from './port.ts';
 
 /**
  * The kinds Ferrets offers (§4.3 harness, §4.4 login, §4.6 runner): the interfaces a plugin's provide hook value
@@ -33,6 +34,12 @@ export interface LaunchSpec {
   readonly parts: readonly LaunchPart[];
   /** The first message, when the owner gave one. */
   readonly prompt?: string;
+  /**
+   * The start's options as they were given (today's start fields: harness flags, fast, remote control, the supervision
+   * timers, …), kept in `details.json` so every resume launches with the same ones. `model` and `effort` are also
+   * lifted to their own fields above.
+   */
+  readonly options?: Omit<StartOptions, 'title'>;
 }
 
 /** One piece a plugin adds to a launch (`launch.parts`): an MCP server, a skill, a shell, an instruction, env. */

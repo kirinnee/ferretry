@@ -28,6 +28,7 @@ export interface ICellColour {
  */
 export interface StartBody extends StartOptions {
   readonly name?: string;
+  readonly parent?: string;
   readonly pack?: string;
   readonly role?: 'lead' | 'helper';
   readonly harness?: string;

@@ -41,6 +41,7 @@ import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
 import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
+import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
 import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
@@ -376,6 +377,21 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const text = await call.request.text();
         const parsed = parseStartBody(parseJson(text));
         const own = callerFerret(call);
+        // Today's `lineageOf` (G12): a ferret starts only its own helpers. Naming any other parent is refused; naming
+        // none is filled from its token below, so a ferret never starts a parent-less ferret. The owner (no ferret on the
+        // call) may start under any parent, which must exist, or none.
+        if (own !== undefined && parsed.parent !== undefined && parsed.parent !== own)
+          throw new ApiError(
+            403,
+            'a ferret starts sessions only as its own children; leave the parent out, the daemon reads it from your session',
+            'parent_mismatch',
+          );
+        if (own === undefined && parsed.parent !== undefined && registry.get(parsed.parent) === undefined)
+          throw new ApiError(404, `there is no ferret ${parsed.parent} to start a helper of`, 'unknown_parent');
+        // The Warden's own label marks the Warden's tree (exempt from the helper limits and supervision); only the Warden
+        // starts under it, so an agent asking for it is refused, as today.
+        if (parsed.options?.label?.trim() === WARDEN_LABEL && callerIsAgent(call))
+          throw new ApiError(403, 'only the Warden starts a ferret under its own label; leave --label out', 'owner_only');
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
           const started = await service.start({

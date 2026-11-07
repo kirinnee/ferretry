@@ -125,6 +125,8 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
 export class FakeHarness implements Harness {
   readonly accepts: readonly LoginKindKey[] = ['anthropic', 'api-key'];
   readonly delivered: OutboundMessage[] = [];
+  /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
+  readonly launched: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
   constructor(readonly key: HarnessKey = 'claude-code') {}
 
@@ -135,10 +137,12 @@ export class FakeHarness implements Harness {
     return { files: [fenced(`${spec.home}/INSTRUCTIONS.md`)], args: [] };
   }
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
+    this.launched.push(spec);
     const running = await runner.start({ ferret: spec.ferret, command: ['fake-harness'], cwd: spec.folder, env });
     return running.ok ? ok({ running: running.value, harnessConversation: `conv-${spec.ferret}` }) : running;
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
+    this.launched.push(spec);
     const running = await runner.resume(
       { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
       conversation,

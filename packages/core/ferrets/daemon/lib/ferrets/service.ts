@@ -346,6 +346,7 @@ export class FerretsService implements FerretsApi {
       harness: record.harness,
       ...(record.runtime === undefined ? {} : { runtime: record.runtime }),
       ...(record.login === undefined ? {} : { login: record.login }),
+      ...launchOptions(this.registry.detailsOf(record.id)?.options),
       folder: record.folder as FencedPath,
       home: this.ports.home(record.id),
       instructions: this.ports.instructions().filter(
@@ -426,4 +427,19 @@ export class FerretsService implements FerretsApi {
       change,
     });
   }
+}
+
+/**
+ * The launch spec's share of a ferret's start options: `model` and `effort` on their own fields (where the harness
+ * already reads them), and the rest whole, so a harness, runner or supervisor reads today's start fields from the spec.
+ */
+function launchOptions(
+  options: FerretDetails['options'],
+): Pick<LaunchSpec, 'model' | 'effort' | 'options'> {
+  if (options === undefined) return {};
+  return {
+    ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.effort === undefined ? {} : { effort: options.effort }),
+    options,
+  };
 }

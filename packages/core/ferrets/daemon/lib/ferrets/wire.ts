@@ -1,6 +1,7 @@
 import { ApiError } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
+  FerretIdSchema,
   FerretNameSchema,
   FerretRoleSchema,
   FerretTitleSchema,
@@ -14,9 +15,9 @@ import {
 } from '../../../contract/index.ts';
 
 /**
- * The bodies of `POST /v1/ferrets` and `POST /v1/ferrets/:id/rename`, parsed strictly at the boundary. A body never
- * names the parent: a ferret's start is its own helper (the route sets it from the caller's token), and the owner's
- * start has none.
+ * The bodies of `POST /v1/ferrets` and `POST /v1/ferrets/:id/rename`, parsed strictly at the boundary. A body may name
+ * a parent (today's `fy start --parent`): the route keeps it for a person and replaces it for a ferret, whose start is
+ * always its own helper (today's `lineageOf`).
  *
  * A start carries today's start fields FLAT, as today's wire did (`model`, `label`, `intervalSeconds`, …); they are
  * gathered into the request's `options` ({@link StartOptionsSchema}). Today's task-title field was `name`; in Ferrets
@@ -24,6 +25,7 @@ import {
  */
 const StartIdentitySchema = z.strictObject({
   name: FerretNameSchema.optional(),
+  parent: FerretIdSchema.optional(),
   pack: PackIdSchema.optional(),
   role: FerretRoleSchema.optional(),
   harness: HarnessKeySchema.optional(),
@@ -71,13 +73,13 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
 
 const OPTION_KEYS: ReadonlySet<string> = new Set(Object.keys(StartOptionsSchema.shape));
 
-export const parseStartBody = (value: unknown): Omit<StartRequest, 'by' | 'parent'> => {
+export const parseStartBody = (value: unknown): Omit<StartRequest, 'by'> => {
   const identity: Record<string, unknown> = {};
   const options: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(parse(StartBodySchema, value)))
     if (field !== undefined) (OPTION_KEYS.has(key) ? options : identity)[key] = field;
   return {
-    ...(identity as Omit<StartRequest, 'by' | 'parent' | 'options'>),
+    ...(identity as Omit<StartRequest, 'by' | 'options'>),
     ...(Object.keys(options).length === 0 ? {} : { options: options as StartOptions }),
   };
 };
