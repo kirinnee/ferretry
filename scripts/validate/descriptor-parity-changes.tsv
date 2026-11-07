@@ -153,3 +153,5 @@ route	POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in
 route	POST /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/confirm-in-app	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/task-plans/:planId/revoke	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/task-plans/:planId/revoke	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/task-plans	removed	Accounts owns task plans: moved under its own prefix as /v1/accounts/plans (the replaced word `task`); lead decision 2026-11-07 (DECISIONS-1 item 16); descriptor fields unchanged
+route	GET /v1/accounts/plans	added	Accounts owns task plans: moved under its own prefix as /v1/accounts/plans (the replaced word `task`); lead decision 2026-11-07 (DECISIONS-1 item 16); descriptor fields unchanged

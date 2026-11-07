@@ -24,7 +24,11 @@
     "@ferretry/kernel": "workspace:*",
     "@ferretry/plugin-access": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "react": "^19.0.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0"
+  }
 }

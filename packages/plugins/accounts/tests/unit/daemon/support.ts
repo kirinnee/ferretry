@@ -114,8 +114,8 @@ export async function plantSeed(
 }
 
 /**
- * The Vault's sealed documents in memory WITH `names()` (TODO(vault contract): the Vault's own `FakeSealedDocuments`
- * gains it with the handle). Counts every call in order, and fails a put or a delete on demand.
+ * The Vault's sealed documents in memory, recording every call in order and failing a put on demand: what the
+ * reseal-order tests (S83) need beyond the Vault's own `FakeSealedDocuments`.
  */
 export class NamedSealedDocuments {
   readonly values = new Map<string, string>();

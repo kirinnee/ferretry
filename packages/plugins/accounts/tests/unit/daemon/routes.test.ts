@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { ApiRequest, ApiResponse, CallContext, FerretId } from '@ferretry/kernel/contract';
 import { device, ferret, owner, testArrival, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
@@ -11,14 +11,7 @@ import { AccountsPort } from '../../../contract/index.ts';
 import accounts from '../../../daemon/index.ts';
 import { accountRoutes } from '../../../daemon/routes/accounts.ts';
 import { TwoFactorSeedStages } from './lib.ts';
-import {
-  CountingSealed,
-  daemonOver,
-  FakeSecretCipher,
-  MemoryLoginIndex,
-  NamedSealedDocuments,
-  SEED,
-} from './support.ts';
+import { CountingSealed, daemonOver, FakeSecretCipher, MemoryLoginIndex, SEED } from './support.ts';
 
 /**
  * The `/v1/accounts` routes of half a (today's `runtime/mounts/accounts-routes`, `factor-seed-routes` and
@@ -30,7 +23,7 @@ import {
 const host = async () =>
   await testHost({
     plugins: [accounts],
-    fakes: { vault: new FakeVault(), asks: new FakeAsks(), sealed: new NamedSealedDocuments() },
+    fakes: { vault: new FakeVault(), asks: new FakeAsks(), sealed: new FakeSealedDocuments() },
   });
 
 const F1 = 'F1' as FerretId;

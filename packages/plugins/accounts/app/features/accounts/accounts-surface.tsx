@@ -8,7 +8,12 @@
  * screen says so (defaults) or shows no banner (look-alikes), and the list still stands.
  */
 
-import type { AccountId, AccountList, PutAccountDefaultRequest, TwoFactorStageId } from '../../../contract/routes/index.ts';
+import type {
+  AccountId,
+  AccountList,
+  PutAccountDefaultRequest,
+  TwoFactorStageId,
+} from '../../../contract/routes/index.ts';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DefaultsRead } from '../../lib/accounts-screen.ts';
 import { readDefaults } from '../../shell.tsx';
@@ -30,7 +35,6 @@ import {
 } from './accounts-api.ts';
 import type { AccountOps } from './accounts-parts.tsx';
 import { AccountsScreen } from './accounts-screen.tsx';
-import type { RulesBinding } from './sign-in-rules-slot.tsx';
 
 interface Loaded {
   readonly list: AccountList;
@@ -58,7 +62,6 @@ export function AccountsSurface({
   client: given,
   addKey,
   withKeys = true,
-  rules,
 }: {
   /** The machine's client (the shell builds the half per machine). */
   readonly client: AccountsClient;
@@ -66,8 +69,6 @@ export function AccountsSurface({
   readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
   /** Whether this machine has 2FA keys; false hides their tab. */
   readonly withKeys?: boolean;
-  /** Present only when this machine reports standing sign-in rules: asks the passkey bound to a staged rule. */
-  readonly rules?: { readonly askPasskey: RulesBinding['askPasskey'] };
 }) {
   const [client, setClient] = useState<AccountsClient | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -173,7 +174,8 @@ export function AccountsSurface({
       onNavigate={() => setError(null)}
       onRefresh={() => void refresh()}
       ops={ops}
-      rules={rules === undefined ? undefined : { client, askPasskey: rules.askPasskey }}
+      // ACCOUNTS-B: the standing-rule binding (`sign-in-rules-slot.tsx`) is not built, so no rule views are drawn.
+      rules={undefined}
     />
   );
 }

@@ -13,13 +13,6 @@ import {
   type SecretVaultDocument,
 } from '../lib/seal.ts';
 
-/**
- * TODO(vault contract): `names()` on `SealedDocumentHandle` (lead asked the Vault owner, 2026-11-07). The account store
- * needs it for today's sweep of values no account points at (S73, I152, I188), the redactor's masks (S10) and the
- * damaged-store check (S70). Until the Vault's handle has it, a handle without it fails CLOSED as `key_missing`.
- */
-export type SealedHandleWithNames = SealedDocumentHandle & { names?(): Promise<readonly SealedName[]> };
-
 /** An entry the Vault holds: the account store sees its name, never its bytes; opening it asks the Vault. */
 const IN_VAULT = 'vault';
 /** An entry sealed in THIS process's memory under {@link MemoryCipher}'s key: a new value on its way in. */
@@ -97,13 +90,11 @@ const failed = (error: unknown, what: string): never => {
  *   document no longer has (the sweep). A value in use is never overwritten: new values get fresh names.
  * - `openAll()` opens an in-memory entry here and asks the Vault for a stored one.
  */
-export function vaultSealedStore(handle: SealedHandleWithNames): AccountSealedStore {
+export function vaultSealedStore(handle: SealedDocumentHandle): AccountSealedStore {
   const memory = new MemoryCipher();
-  const names = async (): Promise<readonly SealedName[]> => {
-    if (handle.names === undefined)
-      throw new SecretStoreError('key_missing', 'the Vault cannot list the accounts’ sealed values yet');
-    return await handle.names().catch((error: unknown) => failed(error, 'list the accounts’ sealed values'));
-  };
+  /** The sweep (S73, I152, I188), the redactor's masks (S10) and the damaged-store check (S70) read the names. */
+  const names = async (): Promise<readonly SealedName[]> =>
+    await handle.names().catch((error: unknown) => failed(error, 'list the accounts’ sealed values'));
   const sealed: SecretDocumentStore = {
     read: async (): Promise<SecretVaultDocument | undefined> => {
       const held = await names();

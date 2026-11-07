@@ -746,7 +746,7 @@ export const TaskPlanSchema = z
   });
 export type TaskPlan = z.infer<typeof TaskPlanSchema>;
 
-/** `GET /v1/task-plans`. */
+/** `GET /v1/accounts/plans`. */
 export const TaskPlanListSchema = z.strictObject({ plans: z.array(TaskPlanSchema).max(100) });
 export type TaskPlanList = z.infer<typeof TaskPlanListSchema>;
 

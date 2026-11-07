@@ -1,4 +1,17 @@
-import { TASK_PLAN_ERROR_CODES, type TaskPlan, TaskPlanApprovalAnswerSchema, TaskPlanApprovalSchema, TaskPlanConfirmingSchema, type TaskPlanList, TaskPlanRevokeSchema, TaskPlanSchema, TaskPlanStageDroppedSchema, type TaskPlanStageId, TaskPlanStageIdSchema, TaskPlanStageViewSchema } from '../../../../contract/routes/index.ts';
+import {
+  TASK_PLAN_ERROR_CODES,
+  type TaskPlan,
+  TaskPlanApprovalAnswerSchema,
+  TaskPlanApprovalSchema,
+  TaskPlanConfirmingSchema,
+  type TaskPlanList,
+  TaskPlanRevokeSchema,
+  TaskPlanSchema,
+  TaskPlanStageDroppedSchema,
+  type TaskPlanStageId,
+  TaskPlanStageIdSchema,
+  TaskPlanStageViewSchema,
+} from '../../../../contract/routes/index.ts';
 import { parseBody } from '../../http/body.ts';
 import { ApiError, type ApiResponse, jsonResponse } from '@ferretry/kernel/contract';
 import type { RouteContext } from '../../http/grants.ts';
@@ -115,7 +128,6 @@ const proofDemand = (): ApiResponse =>
     403,
   );
 
-
 export function taskPlanRoutes(plans: TaskPlanService): readonly MountedRoute[] {
   const at = (context: RouteContext) => ({
     caller: owner(context),
@@ -125,7 +137,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly MountedRoute[] 
   return [
     {
       method: 'GET',
-      path: '/v1/task-plans',
+      path: '/v1/accounts/plans',
       handle: async context => {
         const names = refusedAccountNames(context);
         if (names !== undefined) return names;
@@ -196,7 +208,11 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly MountedRoute[] 
             sessionId,
             planId,
             stage,
-            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approveTaskPlan, freshSubject(STEP_UP_ACTS.approveTaskPlan, subject)) === true,
+            subject =>
+              context.claimFreshStepUp?.(
+                STEP_UP_ACTS.approveTaskPlan,
+                freshSubject(STEP_UP_ACTS.approveTaskPlan, subject),
+              ) === true,
           );
           if (reach.store) spentSecretWrite(context);
           return jsonResponse(TaskPlanSchema.parse(settled));

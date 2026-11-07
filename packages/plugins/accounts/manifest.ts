@@ -538,7 +538,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/task-plans', {
+      route('GET /v1/accounts/plans', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,

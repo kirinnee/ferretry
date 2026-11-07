@@ -20,6 +20,11 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
     'packages/core/kernel/contract/home.ts#CARRY_OVER_PROMPT',
     'names the carry-over runbook path (docs/migration/); lead decision 2026-11-07',
   ],
+  [
+    'packages/plugins/accounts/contract/routes/two-factor.ts#AUTHENTICATOR_EXPORT_SCHEME',
+    "Google Authenticator's own export-link scheme (`otpauth-migration://`), an external format name the key reader " +
+      'refuses by name; lead decision 2026-11-07 (DECISIONS-1 item 6)',
+  ],
 ]);
 
 export function compatIn(file: string, where = file): Finding[] {

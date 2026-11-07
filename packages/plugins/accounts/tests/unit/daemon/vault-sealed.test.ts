@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { AccountIndexDocument } from '../../../contract/routes/index.ts';
-import { MemoryCipher, type SealedHandleWithNames, vaultSealedStore } from '../../../daemon/adapters/vault-sealed.ts';
+import { MemoryCipher, vaultSealedStore } from '../../../daemon/adapters/vault-sealed.ts';
 import { AccountDirectory, AccountVault } from './lib.ts';
 import { CLOCK, MemoryLoginIndex, NamedSealedDocuments } from './support.ts';
 
@@ -108,13 +108,19 @@ describe('the account store over the Vault', () => {
     should(w.vault.values.size).equal(1);
   });
 
-  it('should fail closed, naming no value, when the Vault cannot list the names', async () => {
+  it('S70 should fail closed, naming no value, when the Vault cannot list the names', async () => {
     const vault = new NamedSealedDocuments();
-    const { names: _names, ...noNames } = vault.open(undefined, undefined);
-    const { sealed, cipher } = vaultSealedStore(noNames as SealedHandleWithNames);
+    const handle = vault.open(undefined, undefined);
+    const { sealed, cipher } = vaultSealedStore({
+      ...handle,
+      names: async () => {
+        throw new Error(`EIO reading ${PASSWORD}`);
+      },
+    });
     const directory = new AccountDirectory(new MemoryLoginIndex(), sealed, cipher, CLOCK, { hostName: 'kirin-box' });
     const refused = await directory.list().catch((error: unknown) => error as { failure?: string; message: string });
-    should(refused).match({ failure: 'key_missing' });
+    should(refused).match({ failure: 'unreadable' });
+    should(String((refused as { message: string }).message)).not.containEql(PASSWORD);
   });
 });
 

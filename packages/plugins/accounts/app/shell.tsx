@@ -8,14 +8,13 @@
  *   - readDefaults ........... config-files-api `readConfigFile` ..... STAND-IN: Gate's config route is not a route a
  *                                                                        plugin client can call, so the defaults read
  *                                                                        as "cannot be shown here" (never as "none")
- *   - grantRefusalNotice ..... pwa/src/lib/grants.ts ................. STAND-IN: the codes are Gate's; one plain
+ *   - grantRefusalNotice ..... pwa/src/lib/grants.ts ................. STAND-IN: Gate's `grant_*` codes; one plain
  *                                                                        explanation, then the daemon's own sentence
  *                                                                        (Access's app port carries the full copy)
  *   - useAddKeyStepUp ........ pwa/src/lib/store.tsx ................. NOT PASSED: Access's passkey ceremony is not on
  *                                                                        this base, so `addKey` is absent and no seed
  *                                                                        can be saved from here (today's no-passkey path)
  */
-import { GRANT_REFUSALS, grantRefusalCode } from '@ferretry/core-gate/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import type { DefaultsRead } from './lib/accounts-screen.ts';
@@ -29,7 +28,8 @@ export const readDefaults = async (_client: AccountsClient): Promise<DefaultsRea
   why: 'This app cannot show accounts.yaml yet: read it under Settings › Config files, or with `fy config`',
 });
 
-const GRANT_CODES: ReadonlySet<string> = new Set(GRANT_REFUSALS.map(grantRefusalCode));
+/** Gate's refusal codes are `grant_<refusal>` (`grantRefusalCode`); the app half does not consume Gate's contract. */
+const GRANT_CODE = /^grant_[a-z_]+$/u;
 
 /** A grant refusal (a 403, or a 503 when the daemon cannot read its grants) as words, or `null` for any other failure. */
 export function grantRefusalNotice(
@@ -37,7 +37,7 @@ export function grantRefusalNotice(
 ): { readonly detail: string; readonly guidance: { readonly explanation: string } } | null {
   if (error === null || typeof error !== 'object') return null;
   const failure = error as { readonly status?: unknown; readonly code?: unknown; readonly message?: unknown };
-  if (typeof failure.code !== 'string' || !GRANT_CODES.has(failure.code)) return null;
+  if (typeof failure.code !== 'string' || !GRANT_CODE.test(failure.code)) return null;
   if (failure.status !== 403 && failure.status !== 503) return null;
   const detail = typeof failure.message === 'string' ? failure.message : '';
   return { detail, guidance: { explanation: 'This device’s access to this machine does not allow that.' } };
@@ -45,13 +45,14 @@ export function grantRefusalNotice(
 
 // ─── icons (lucide-react's shapes, inline) ────────────────────────────────────────────────────────────────────────
 
+/** Every icon here is decorative: the control it sits in carries the words. */
 type IconProps = { readonly size?: number; readonly className?: string; readonly 'aria-hidden'?: boolean | 'true' };
 
 const icon =
   (paths: ReactNode) =>
-  ({ size = 16, className, ...rest }: IconProps) => (
+  ({ size = 16, className }: IconProps) => (
     <svg
-      aria-hidden={rest['aria-hidden'] ?? true}
+      aria-hidden="true"
       className={className}
       fill="none"
       height={size}
