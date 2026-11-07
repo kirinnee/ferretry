@@ -6,6 +6,9 @@
  * the feature exists: a sign-in left behind holds this machine's callback port, so the next one cannot
  * listen. Here the "harness" is a stand-in `codex` that binds the port it is given and prints Codex's
  * link line only once it has; if the port is still taken it exits without one, and the flow fails.
+ *
+ * No test here guesses a port. The first child binds port 0, so the OS picks, and records the port it
+ * got; the service is then pointed at THAT port, which a child holds the whole time.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -37,30 +40,52 @@ const LINK_URL =
 /** A paired browser the boundary let through. */
 const BROWSER: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) };
 
-/** A loopback port that was free a moment ago. */
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
-  const port = Number(probe.port);
-  await probe.stop(true);
+/**
+ * The callback port a test's children share. It starts unknown (`ports` empty, so a child is told port 0 and the
+ * OS picks); once a child has recorded the port it bound, `learn` adds it, and every later child and the service's
+ * `callbackPorts` use that one.
+ */
+interface CallbackPort {
+  readonly ports: number[];
+  readonly file: string;
+}
+
+/** The port the next child is told to bind: the learned one, else 0 (the OS picks). */
+function toBind(callback: CallbackPort): string {
+  return String(callback.ports[0] ?? 0);
+}
+
+/** Read the port a child recorded once it bound, and remember it. The child writes it before it prints its link line. */
+async function learn(callback: CallbackPort): Promise<number> {
+  const port = Number((await Bun.file(callback.file).text()).trim());
+  if (!Number.isInteger(port) || port <= 0) throw new Error('the stand-in codex recorded no port');
+  callback.ports.splice(0, callback.ports.length, port);
   return port;
 }
 
 /**
- * A stand-in `codex`: binds `FAKE_CALLBACK_PORT`, prints Codex's link line, and waits. Run as
- * `codex … login`, which is also exactly what a leftover Codex sign-in looks like.
+ * A stand-in `codex`: binds `FAKE_CALLBACK_PORT` (0 lets the OS pick), writes the port it got to
+ * `FAKE_PORT_FILE`, prints Codex's link line, and waits. Run as `codex … login`, which is also exactly what a
+ * leftover Codex sign-in looks like.
  */
-async function fakeCodex(): Promise<{ readonly binary: string; readonly program: string }> {
+async function fakeCodex(): Promise<{
+  readonly binary: string;
+  readonly program: string;
+  readonly callback: CallbackPort;
+}> {
   const root = await mkdtemp(join(tmpdir(), 'fy-start-over-'));
   temporaryDirectories.push(root);
   const program = join(root, 'codex');
   await writeFile(
     program,
     [
+      'let server;',
       'try {',
-      "  Bun.serve({ hostname: '127.0.0.1', port: Number(process.env.FAKE_CALLBACK_PORT), fetch: () => new Response('') });",
+      "  server = Bun.serve({ hostname: '127.0.0.1', port: Number(process.env.FAKE_CALLBACK_PORT), fetch: () => new Response('') });",
       '} catch {',
       '  process.exit(3);',
       '}',
+      "require('node:fs').writeFileSync(process.env.FAKE_PORT_FILE, String(server.port));",
       `console.log(${JSON.stringify(`Starting local login server. If your browser did not open, navigate to this URL to authenticate: ${LINK_URL}`)});`,
       'setInterval(() => undefined, 1000);',
     ].join('\n'),
@@ -69,7 +94,7 @@ async function fakeCodex(): Promise<{ readonly binary: string; readonly program:
   const binary = join(root, 'codex-launcher');
   await writeFile(binary, `#!/bin/sh\nexec "${process.execPath}" "${program}" "$@"\n`, 'utf8');
   await chmod(binary, 0o700);
-  return { binary, program };
+  return { binary, program, callback: { ports: [], file: join(root, 'callback-port') } };
 }
 
 /** The real timer, except that a test can fire a timer by its delay instead of waiting that long. */
@@ -92,7 +117,7 @@ function drivenTimer() {
 
 function service(
   binary: string,
-  port: number,
+  callback: CallbackPort,
   windowMinutes?: number,
   loginTimer: HarnessLoginTimer = timer,
 ): HarnessLoginService {
@@ -109,7 +134,7 @@ function service(
         kind: 'store' as const,
         loginId: loginId as LoginId,
         harness: 'codex',
-        environment: { FAKE_CALLBACK_PORT: String(port) },
+        environment: { FAKE_CALLBACK_PORT: toBind(callback), FAKE_PORT_FILE: callback.file },
         arguments: [],
         prepare: async () => undefined,
         check: async () => ({ signedIn: false as const, finding: 'Checked nothing.' }),
@@ -117,7 +142,7 @@ function service(
     },
     locate: () => binary,
     portHolders: realPortHolders(),
-    callbackPorts: [port],
+    callbackPorts: callback.ports,
     ...(windowMinutes === undefined ? {} : { windowMinutes }),
   });
   services.push(created);
@@ -148,11 +173,12 @@ async function bindable(port: number): Promise<boolean> {
 describe('starting a Codex sign-in over, for real', () => {
   it('should pick the running sign-in up, then start over onto a port the old one freed', async () => {
     // Arrange
-    const port = await freePort();
-    const { binary } = await fakeCodex();
-    const subject = service(binary, port);
+    const { binary, callback } = await fakeCodex();
+    const subject = service(binary, callback);
     const first = await subject.start({ loginId: 'team' as LoginId, method: 'link' }, BROWSER);
     should(await settledOnto(subject, first.flowId)).have.property('state', 'awaiting-callback');
+    // The first child bound port 0 and holds what it got; from here the service and the fresh child use that port.
+    const port = await learn(callback);
 
     // Act
     const picked = await subject.start({ loginId: 'team' as LoginId }, BROWSER);
@@ -162,19 +188,20 @@ describe('starting a Codex sign-in over, for real', () => {
     should(picked).match({ flowId: first.flowId, resumed: true, state: 'awaiting-callback' });
     should(await settledOnto(subject, fresh.flowId)).have.property('state', 'awaiting-callback');
     should(await subject.status(first.flowId)).have.property('reason', 'this sign-in was replaced by a new one');
+    should(await learn(callback)).equal(port);
   });
 
   it('should stop a leftover Codex sign-in a previous daemon left on the port', async () => {
     // Arrange — the leftover runs as `codex login` and holds the port; no flow here knows about it.
-    const port = await freePort();
-    const { binary, program } = await fakeCodex();
+    const { binary, program, callback } = await fakeCodex();
     const leftover = Bun.spawn([process.execPath, program, 'login'], {
-      env: { FAKE_CALLBACK_PORT: String(port) },
+      env: { FAKE_CALLBACK_PORT: toBind(callback), FAKE_PORT_FILE: callback.file },
       stdout: 'pipe',
     });
     leftovers.push(leftover);
     await leftover.stdout.getReader().read();
-    const subject = service(binary, port);
+    await learn(callback);
+    const subject = service(binary, callback);
 
     // Act
     const fresh = await subject.start({ loginId: 'team' as LoginId, method: 'link', restart: true }, BROWSER);
@@ -186,11 +213,12 @@ describe('starting a Codex sign-in over, for real', () => {
 
   it('should name and leave alone a program that is not a Codex sign-in', async () => {
     // Arrange — somebody's own server on the port, bound by the OS so no number is ever guessed.
-    const { binary } = await fakeCodex();
+    const { binary, callback } = await fakeCodex();
     const theirs = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('theirs') });
     const port = Number(theirs.port);
+    callback.ports.push(port);
     try {
-      const subject = service(binary, port);
+      const subject = service(binary, callback);
 
       // Act
       const fresh = await subject.start({ loginId: 'team' as LoginId, method: 'link', restart: true }, BROWSER);
@@ -212,12 +240,12 @@ describe('starting a Codex sign-in over, for real', () => {
 
   it('should end a sign-in whose window closed, and free the port its child held', async () => {
     // Arrange — a window of a fraction of a second, fired by the test rather than waited out.
-    const port = await freePort();
-    const { binary } = await fakeCodex();
+    const { binary, callback } = await fakeCodex();
     const driven = drivenTimer();
-    const subject = service(binary, port, 0.01, driven.timer);
+    const subject = service(binary, callback, 0.01, driven.timer);
     const started = await subject.start({ loginId: 'team' as LoginId, method: 'link' }, BROWSER);
     await settledOnto(subject, started.flowId);
+    const port = await learn(callback);
 
     // Act
     driven.fire(0.01 * 60_000);
