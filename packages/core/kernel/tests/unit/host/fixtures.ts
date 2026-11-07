@@ -1,5 +1,6 @@
 import { instantFromEpochMs, milliseconds } from '@ferretry/std';
 import type { Admission, AdmissionDecision } from '../../../contract/bound.ts';
+import type { CallStanding, MemberStanding } from '../../../contract/route.ts';
 import type { ApiRequest } from '../../../contract/http.ts';
 import { headersFrom, queryFrom } from '../../../contract/http.ts';
 import type { Clock, Log } from '../../../contract/ports.ts';
@@ -70,7 +71,7 @@ export function recordingAdmission(allow: (path: string) => boolean = () => true
   const asked: string[] = [];
   const decide = (path: string): AdmissionDecision =>
     allow(path)
-      ? { outcome: 'admitted', standing: { actor: 'owner' }, actor: 'owner-tools' }
+      ? { outcome: 'admitted', standing: { actor: 'owner' } as unknown as CallStanding, actor: 'owner-tools' }
       : {
           outcome: 'refused',
           response: { status: 401, headers: new Map(), body: '{"error":"who are you","code":"unauthenticated"}' },
@@ -83,7 +84,7 @@ export function recordingAdmission(allow: (path: string) => boolean = () => true
     },
     admitMember: input => {
       asked.push(`member ${input.descriptor.path}`);
-      return decide(input.request.path);
+      return decide(input.request.path) as unknown as AdmissionDecision<MemberStanding>;
     },
     readmit: () => true,
     inventory: (_request, entries) => entries,

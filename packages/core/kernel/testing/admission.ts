@@ -1,4 +1,5 @@
 import type { Instant } from '@ferretry/std';
+import type { Actor } from '../contract/act.ts';
 import type { Admission, AdmissionDecision, AdmissionInput } from '../contract/bound.ts';
 import type { ApiRequest } from '../contract/http.ts';
 import { errorResponse } from '../contract/http.ts';
@@ -61,7 +62,8 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
   });
   const decide = (request: ApiRequest, d: ScopedRoute): AdmissionDecision<CallStanding> => {
     const caller = callerOf(request);
-    const admitted = { outcome: 'admitted', standing: { caller } as CallStanding } as const;
+    const actor: Actor = caller.kind === 'warden' ? 'warden' : caller.kind === 'ferret' ? 'ferret' : 'owner-tools';
+    const admitted = { outcome: 'admitted', standing: { caller } as CallStanding, actor } as const;
     if (caller.kind === 'warden') {
       if (d.wardenRemedy === undefined || !(caller.remedies ?? []).includes(d.wardenRemedy))
         return refuse(403, 'A warden may not act here.', 'forbidden');
@@ -99,8 +101,10 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
       const caller = callerOf(input.request);
       if (caller.kind !== 'member')
         return refuse(403, 'Member routes are for members.', 'forbidden') as AdmissionDecision<MemberStanding>;
-      return { outcome: 'admitted', standing: { caller } as unknown as MemberStanding };
+      return { outcome: 'admitted', standing: { caller } as unknown as MemberStanding, actor: 'owner-tools' as const };
     },
     readmit: (request, descriptor) => decide(request, descriptor).outcome === 'admitted',
+    // The stand-in shows every package; Gate's real projection (§9.6) is Gate's to test.
+    inventory: (_request, entries) => entries,
   };
 }

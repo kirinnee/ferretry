@@ -498,6 +498,8 @@ async function start(world: World): Promise<TestHost> {
         minted: world.minted,
         record: entry => acts.push(entry),
       }),
+      // A fresh key per call: the test registry mints `opaque-N`, whatever the prefix.
+      ids: { mint: () => world.minted.mint({}) },
       redaction,
       snapshot: {
         current: () => {
@@ -702,7 +704,7 @@ async function start(world: World): Promise<TestHost> {
       } catch {
         if (route.minimum !== 'none' || route.wardenRemedy !== undefined)
           return toTestResponse(errorResponse(503, 'Admission is unavailable.', 'admission_unavailable'));
-        decision = { outcome: 'admitted', standing: {} as never };
+        decision = { outcome: 'admitted', standing: {} as never, actor: 'ferret' };
       }
       if (decision.outcome === 'refused') return toTestResponse(decision.response);
       const b = route.plugin;

@@ -6,6 +6,7 @@ import type { PluginId } from '../contract/ids.ts';
 import type {
   CallContext,
   MemberRouteDescriptor,
+  MemberCallContext,
   MemberRouteHandler,
   RouteDescriptor,
   RouteHandler,
@@ -260,7 +261,7 @@ export class Dispatcher {
     const handle = found.route.handle;
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
-    const call = { request, params: found.params, ...decision.standing };
+    const call = { request, params: found.params, ...decision.standing } as MemberCallContext;
     return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
   }
 
