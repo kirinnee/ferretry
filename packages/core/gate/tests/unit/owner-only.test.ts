@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/kernel/contract';
-import { claimOwnerOnly, type OwnerOnlyCall, ownerOnly, STEP_UP_REQUIRED_CODE } from '../../contract/index.ts';
+import * as contract from '../../contract/index.ts';
+import { claimOwnerOnly, type OwnerOnlyCall, STEP_UP_REQUIRED_CODE } from '../../contract/index.ts';
 import { deviceStanding, ferretStanding, ownerStanding, wardenStanding } from '../../contract/testing/index.ts';
 
 const ACT = 'update this machine';
 
 /** A remote device as Gate admits it: governed, with or without a fresh passkey proof. */
-function governedDevice(freshStepUp: boolean): OwnerOnlyCall {
+function governedDevice(freshStepUp: boolean, claim: () => boolean = () => freshStepUp): OwnerOnlyCall {
   const base = deviceStanding('phone');
   return {
     ...base,
+    claimFreshStepUp: claim as OwnerOnlyCall['claimFreshStepUp'],
     governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) },
     presentation: { local: false, adminToken: false, actor: 'device:phone', stepUp: false, freshStepUp },
   };
@@ -24,20 +26,24 @@ const refusedWith = (run: () => unknown): { status: number; code?: string; messa
   throw new Error('expected a refusal');
 };
 
-describe('ownerOnly: putting new code on the machine is the owner’s act', () => {
+describe('claimOwnerOnly: putting new code on the machine is the owner’s act', () => {
+  test('G22 G25 the snapshot-only pre-filter is not exported: claimOwnerOnly is the only way in', () => {
+    expect(Object.keys(contract).filter(name => /^ownerOnly$/u.test(name))).toEqual([]);
+  });
+
   test('G22 G25 a ferret is refused 403 forbidden, whatever its standing', () => {
-    const error = refusedWith(() => ownerOnly(ferretStanding('F1' as FerretId), ACT));
+    const error = refusedWith(() => claimOwnerOnly(ferretStanding('F1' as FerretId), ACT));
     expect(error).toMatchObject({ status: 403, code: 'forbidden', message: `a ferret cannot ${ACT}; the owner does` });
   });
 
   test('G22 G25 the warden and an admin token with a ferret behind it are agents too', () => {
-    expect(refusedWith(() => ownerOnly(wardenStanding('W1' as FerretId), ACT))).toMatchObject({ status: 403 });
+    expect(refusedWith(() => claimOwnerOnly(wardenStanding('W1' as FerretId), ACT))).toMatchObject({ status: 403 });
     const admin = { ...ownerStanding(), actor: 'ferret:F1' };
-    expect(refusedWith(() => ownerOnly(admin, ACT))).toMatchObject({ status: 403, code: 'forbidden' });
+    expect(refusedWith(() => claimOwnerOnly(admin, ACT))).toMatchObject({ status: 403, code: 'forbidden' });
   });
 
   test('G22 G25 a governed device without a fresh passkey proof is asked for one with the demand fleet.configure', () => {
-    const answer = ownerOnly(governedDevice(false), ACT);
+    const answer = claimOwnerOnly(governedDevice(false), ACT);
     expect(answer?.status).toBe(403);
     expect(JSON.parse(answer?.body ?? '{}')).toEqual({
       error: `to ${ACT} from this device, confirm with a passkey`,
@@ -47,12 +53,12 @@ describe('ownerOnly: putting new code on the machine is the owner’s act', () =
   });
 
   test('G22 G25 a governed device holding a fresh passkey proof may go on', () => {
-    expect(ownerOnly(governedDevice(true), ACT)).toBeUndefined();
+    expect(claimOwnerOnly(governedDevice(true), ACT)).toBeUndefined();
   });
 
   test('G22 G25 the owner at the machine (ungoverned) goes on with no passkey', () => {
-    expect(ownerOnly(ownerStanding('cli'), ACT)).toBeUndefined();
-    expect(ownerOnly(ownerStanding('ui'), ACT)).toBeUndefined();
+    expect(claimOwnerOnly(ownerStanding('cli'), ACT)).toBeUndefined();
+    expect(claimOwnerOnly(ownerStanding('ui'), ACT)).toBeUndefined();
   });
 });
 
@@ -85,7 +91,12 @@ describe('claimOwnerOnly: one fresh proof admits one act', () => {
   });
 
   test('G22 G25 a governed device whose claim is answered false (no proved device) is refused: fail closed', () => {
-    expect(claimOwnerOnly(governedDevice(true), ACT)?.status).toBe(403);
+    expect(
+      claimOwnerOnly(
+        governedDevice(true, () => false),
+        ACT,
+      )?.status,
+    ).toBe(403);
   });
 
   test('G22 G25 the owner at the machine claims nothing, and a ferret is refused before any claim', () => {

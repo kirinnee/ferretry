@@ -87,7 +87,7 @@
       "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
       "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
       "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
-      "The fast switch needs Runtimes' account picker to fill the new optional `fast` on each ChosenFerretAccount model (from runtime-models.ts); until it does, no model is known to lack fast mode and the daemon is the one that refuses it"
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
     ],
     "conversation": [
       "conversation app half: C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app) and C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel) have landed; the chat and transcript screen and the queue, compact-at, questions, search and links bodies are still the one-line Pending surface until C3 and C4 land",

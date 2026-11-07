@@ -52,8 +52,12 @@ export interface SecurityDocumentPort {
 export interface SecurityCaller {
   readonly hostLocal: boolean;
   readonly actor: string;
-  /** Whether this caller proved a passkey for THIS change and has not spent it. Never read from a body. */
-  readonly freshPasskey?: boolean;
+  /**
+   * TAKES this caller's fresh passkey proof, atomically (Gate's `claimFreshStepUp`): of concurrent acts on one proof
+   * exactly one is answered `true`. Absent for a caller with no proved device, which holds none. Called only by a remote
+   * widen, inside the patch queue and before the write; never read from a body and never a snapshot of admission.
+   */
+  readonly claimFreshPasskey?: () => boolean;
 }
 
 export interface SecuritySettingsChange {
@@ -62,7 +66,7 @@ export interface SecuritySettingsChange {
 }
 
 export type SecurityPatchOutcome =
-  | { readonly ok: true; readonly change: SecuritySettingsChange; readonly spentPasskey: boolean }
+  | { readonly ok: true; readonly change: SecuritySettingsChange }
   | { readonly ok: false; readonly refusal: 'widen-remote'; readonly fields: readonly SecuritySettingField[] }
   | { readonly ok: false; readonly refusal: 'passkey-required'; readonly fields: readonly SecuritySettingField[] }
   | { readonly ok: false; readonly refusal: 'unavailable' };
@@ -145,7 +149,10 @@ export class SecuritySettingsService {
     if (remoteWiden) {
       // Judged before any passkey is asked: a widen no passkey could buy must not ask for one first (G116).
       if (!widened.every(widensWithPasskey)) return { ok: false, refusal: 'widen-remote', fields: widened };
-      if (caller.freshPasskey !== true) return { ok: false, refusal: 'passkey-required', fields: widened };
+      // CLAIMED here, in the queue and before the write, never read from the admission snapshot: of two requests
+      // admitted on ONE proof (two widens, or a widen and a config loosening) exactly one takes it. No restore: a write
+      // that then fails has used the proof up, and the person confirms again.
+      if (caller.claimFreshPasskey?.() !== true) return { ok: false, refusal: 'passkey-required', fields: widened };
     }
     const changes = SECURITY_SETTING_FIELDS.filter(field => current[field] !== next[field]).map(
       field => `security.${field}=${String(current[field])}->${String(next[field])}`,
@@ -158,6 +165,6 @@ export class SecuritySettingsService {
       actor: caller.actor,
       changes,
     });
-    return { ok: true, change: { view: this.view(caller), devicesExpiring: 0 }, spentPasskey: remoteWiden };
+    return { ok: true, change: { view: this.view(caller), devicesExpiring: 0 } };
   }
 }
