@@ -9,7 +9,7 @@ import {
   type PlainApiResponse,
 } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
-import { SHELL_CODES, ShellAddRequestSchema, ShellNameSchema } from '../../contract/index.ts';
+import { SHELL_CODES, ShellAddRequestSchema, ShellNameSchema, ShellRelockRequestSchema } from '../../contract/index.ts';
 import type { Outcome, ShellsService } from './service.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -73,9 +73,14 @@ export function shellsRoutes(service: ShellsService) {
         ),
       );
     },
-    'POST /v1/shells/:name/relock': named(async name =>
-      answer(await service.relock(name), preview => jsonResponse(preview)),
-    ),
+    'POST /v1/shells/:name/relock': async (call: CallContext) => {
+      const name = nameOf(call);
+      if (name === undefined) return unknown();
+      const request = await bodyOf(call.request, ShellRelockRequestSchema);
+      return answer(await service.relock(name, request), preview =>
+        jsonResponse(preview, preview.held === undefined ? 200 : 202),
+      );
+    },
     'POST /v1/shells/:name/build': named(async name =>
       answer(await service.build(name), result => jsonResponse(result)),
     ),

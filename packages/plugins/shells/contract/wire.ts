@@ -34,6 +34,8 @@ export const ShellItemSchema = z
     /** A package list builds on this nixpkgs; absent means the one Ferretry pinned at install. */
     nixpkgs: PinnedNixpkgsSchema.optional(),
     floating: z.boolean().default(false),
+    /** Effective only after the config door obtains owner approval for these bytes. */
+    approvedHash: NarHashSchema.optional(),
   })
   .refine(item => (item.flake === undefined) !== (item.packages === undefined), {
     message: 'a shell is a flake reference or a package list, not both and not neither',
@@ -95,12 +97,18 @@ export type NixFacts = z.infer<typeof NixFactsSchema>;
 export const ShellAddRequestSchema = z.strictObject({ name: ShellNameSchema, item: ShellItemSchema });
 export type ShellAddRequest = z.infer<typeof ShellAddRequestSchema>;
 
+/** Must match preview exactly. This request does not itself grant owner approval. */
+export const ShellRelockRequestSchema = z.strictObject({ expectedHash: NarHashSchema });
+export type ShellRelockRequest = z.infer<typeof ShellRelockRequestSchema>;
+
 /** What resolving shows the owner before the yes: the locked reference and hash, and whether it differs from the last lock. */
 export const ShellPreviewSchema = z.strictObject({
   name: ShellNameSchema,
   lock: ShellLockSchema,
   /** Present when a lock already exists and the resolved hash differs: the owner must say yes again. */
   changedFrom: NarHashSchema.optional(),
+  /** Candidate only: confirm the held config edit, then retry relock. The active lock stays in effect. */
+  held: z.array(z.string()).optional(),
 });
 export type ShellPreview = z.infer<typeof ShellPreviewSchema>;
 

@@ -53,3 +53,23 @@ describe('layouts contract', () => {
     expect(LayoutSchema.safeParse(bad).success).toBe(false);
   });
 });
+
+test('the theme contract refuses unknown names and values outside the app token grammar', () => {
+  const theme = { id: 'dusk', label: 'Dusk', base: 'neo' };
+  for (const mode of ['light', 'dark']) {
+    for (const tokens of [
+      { accent: 'red' },
+      { unknown: '#123456' },
+      { accent: '#123456; color: red' },
+      { 'font-body': 'url(evil)' },
+      { 'flow-1': 'calc(1px)' },
+    ])
+      expect(ThemeSchema.safeParse({ ...theme, [mode]: tokens }).success).toBe(false);
+    expect(
+      ThemeSchema.safeParse({
+        ...theme,
+        [mode]: { accent: '#123456', 'font-body': "'System UI', sans-serif", 'flow-1': '1.25rem' },
+      }).success,
+    ).toBe(true);
+  }
+});

@@ -22,6 +22,7 @@ import {
   type Theme,
   type ThemeId,
   type ThemeList,
+  ThemeSchema,
 } from '../../contract/index.ts';
 import type { ConfigDoor, DoorResult } from './config-door.ts';
 import { applyOverrides, resolveCurrent, setPaths } from './overrides.ts';
@@ -148,9 +149,16 @@ export function createLayoutsService(config: ConfigPort, door: ConfigDoor | unde
       const target = themes().get(id);
       if (target === undefined)
         return refuse({ kind: 'unknown', code: LAYOUT_CODES.themeUnknown, sentence: `there is no theme called ${id}` });
+      const checked = ThemeSchema.safeParse(target);
+      if (!checked.success)
+        return refuse({
+          kind: 'invalid',
+          code: LAYOUT_CODES.invalid,
+          issues: checked.error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message })),
+        });
       if (door === undefined) return refuse(unavailable);
       const refusal = await written(door.write(LAYOUTS_SELECTION, undefined, { patch: { theme: id } }));
-      return refusal === undefined ? done(target) : refuse(refusal);
+      return refusal === undefined ? done(checked.data) : refuse(refusal);
     },
 
     async reset() {

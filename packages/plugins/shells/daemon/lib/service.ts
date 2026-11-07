@@ -24,6 +24,7 @@ import {
   type ShellLock,
   type ShellName,
   type ShellPreview,
+  type ShellRelockRequest,
   type ShellSummary,
   ShellBuilt,
   ShellsChanged,
@@ -74,7 +75,7 @@ export interface ShellsService {
   nix(): Promise<NixFacts>;
   preview(request: ShellAddRequest): Promise<Outcome<ShellPreview>>;
   add(request: ShellAddRequest): Promise<Outcome<Added>>;
-  relock(name: ShellName): Promise<Outcome<ShellPreview>>;
+  relock(name: ShellName, request: ShellRelockRequest): Promise<Outcome<ShellPreview>>;
   build(name: ShellName): Promise<Outcome<ShellBuildResult>>;
   remove(name: ShellName): Promise<Outcome<ShellName>>;
   /** What a launch on this runtime gets: its shell, or why it has none. Never throws. */
@@ -260,25 +261,43 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
       if (!nixReady.ok) return nixReady;
       const resolved = await resolve(request.name, request.item);
       if (!resolved.ok) return resolved;
-      const written = await door.write(SHELLS_CONFIG, request.name, Bun.YAML.stringify(resolved.value.pinned, null, 2));
+      const written = await door.write(
+        SHELLS_CONFIG,
+        request.name,
+        Bun.YAML.stringify(
+          {
+            ...resolved.value.pinned,
+            approvedHash: narHashOf(resolved.value.lock),
+          },
+          null,
+          2,
+        ),
+      );
       if (written.kind === 'refused')
         return refuse(
           422,
           SHELL_CODES.invalid,
           written.issues.map(issue => issue.message).join('; ') || 'the shell did not check',
         );
-      await state.write(SHELLS_LOCKS, resolved.value.lock, request.name);
+      if (written.kind === 'applied') await state.write(SHELLS_LOCKS, resolved.value.lock, request.name);
       events.publish(ShellsChanged, { name: request.name });
       return done({ lock: resolved.value.lock, held: written.kind === 'held' ? written.sentences : undefined });
     },
 
-    async relock(name) {
+    async relock(name, request) {
       const item = items().get(name);
       if (item === undefined) return refuse(404, SHELL_CODES.unknown, `there is no shell called ${name}`);
       const nixReady = await needNix();
       if (!nixReady.ok) return nixReady;
       const resolved = await resolve(name, item);
       if (!resolved.ok) return resolved;
+      const hash = narHashOf(resolved.value.lock);
+      if (hash !== request.expectedHash)
+        return refuse(
+          409,
+          SHELL_CODES.hashChanged,
+          `${name} changed since preview. Preview it again; nothing was changed.`,
+        );
       const before = await lockOfName(name);
       const moved = changedFrom(before, resolved.value.lock);
       // A pinned source cannot move: a different hash means the address now names other bytes, so nothing is written.
@@ -288,6 +307,30 @@ export function createShellsService(deps: ShellsDeps): ShellsService {
           SHELL_CODES.hashChanged,
           `${name} is pinned to ${moved} but its address now resolves to ${narHashOf(resolved.value.lock)}. Nothing was changed.`,
         );
+      // Only effective config authorizes a different payload. A CLI --yes cannot bypass the owner door.
+      if ((before === undefined || moved !== undefined) && item.approvedHash !== hash) {
+        if (door === undefined) return unavailable();
+        const written = await door.write(
+          SHELLS_CONFIG,
+          name,
+          Bun.YAML.stringify({ ...item, approvedHash: hash }, null, 2),
+        );
+        if (written.kind === 'refused')
+          return refuse(
+            422,
+            SHELL_CODES.invalid,
+            written.issues.map(issue => issue.message).join('; ') || written.reason,
+          );
+        if (written.kind === 'held')
+          return done({
+            name,
+            lock: resolved.value.lock,
+            ...(moved === undefined ? {} : { changedFrom: moved }),
+            held: written.sentences,
+          });
+        if (items().get(name)?.approvedHash !== hash)
+          return refuse(409, SHELL_CODES.hashChanged, 'the approved configuration changed; preview and relock again');
+      }
       await state.write(SHELLS_LOCKS, resolved.value.lock, name);
       events.publish(ShellsChanged, { name });
       return done({ name, lock: resolved.value.lock, ...(moved === undefined ? {} : { changedFrom: moved }) });

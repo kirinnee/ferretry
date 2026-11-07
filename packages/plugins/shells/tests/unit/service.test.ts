@@ -80,11 +80,12 @@ describe('adding a shell', () => {
     expect(h.nix.asked).toEqual([]);
   });
 
-  test('a shell that is new is held for the owner: the lock is kept and the sentences come back', async () => {
+  test('a shell that is new is held for the owner without activating its lock', async () => {
     const h = withWeb({ hold: ['a new shell will build x'] });
     const result = await h.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
     expect(result.ok && result.value.held).toEqual(['a new shell will build x']);
     expect(result.ok && result.value.lock.name).toBe('web');
+    expect(h.state.files.has('locks/web.json')).toBe(false);
   });
 
   test('a name already taken is a conflict; no nix is a conflict that says what to do; no door is 503', async () => {
@@ -132,7 +133,7 @@ describe('relock', () => {
     const h = withWeb();
     await h.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
     setMetadata(h, flakeFacts(REV_A, HASH_B));
-    const result = await h.service.relock('web');
+    const result = await h.service.relock('web', { expectedHash: HASH_B });
     expect(!result.ok && result.refusal).toMatchObject({ status: 409, code: SHELL_CODES.hashChanged });
     const lock = h.state.files.get('locks/web.json') as { source: { narHash: string } };
     expect(lock.source.narHash).toBe(HASH_A);
@@ -141,15 +142,15 @@ describe('relock', () => {
   test('a floating shell takes the new hash on relock and says what it changed from', async () => {
     const h = shellsHarness({ initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true } } });
     h.nix.metadata.set('github:me/shells', flakeFacts(REV_A, HASH_A));
-    await h.service.relock('web');
+    await h.service.relock('web', { expectedHash: HASH_A });
     h.nix.metadata.set('github:me/shells', flakeFacts(REV_B, HASH_B));
-    const result = await h.service.relock('web');
+    const result = await h.service.relock('web', { expectedHash: HASH_B });
     expect(result.ok && result.value.changedFrom).toBe(HASH_A);
     expect((h.state.files.get('locks/web.json') as { source: { narHash: string } }).source.narHash).toBe(HASH_B);
   });
 
   test('an unknown shell is 404', async () => {
-    const result = await shellsHarness().service.relock('nope');
+    const result = await shellsHarness().service.relock('nope', { expectedHash: HASH_A });
     expect(!result.ok && result.refusal.status).toBe(404);
   });
 });
@@ -262,4 +263,93 @@ describe('launch parts (Q18: a ferret enters a shell only when its runtime names
     expect(failedBuild[0]).toMatchObject({ kind: 'instruction' });
     expect(JSON.stringify(failedBuild)).not.toContain('boom');
   });
+});
+
+for (const yes of [false, true]) {
+  test(`a branch advancing after CLI preview never installs or builds the unpreviewed hash (--yes=${yes})`, async () => {
+    const { default: cli } = await import('../../cli/index.ts');
+    const { default: manifest } = await import('../../manifest.ts');
+    const h = shellsHarness({
+      initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true, approvedHash: HASH_A } },
+    });
+    h.nix.metadata.set('github:me/shells', flakeFacts());
+    await h.service.relock('web', { expectedHash: HASH_A });
+    const client: import('@ferretry/kernel/manifest').PluginClient = {
+      async call(route, init) {
+        if (route === 'GET /v1/shells/:name') return (await h.service.get('web')) as never;
+        if (route === 'POST /v1/shells/preview') {
+          const preview = await h.service.preview(init?.body as import('../../contract/index.ts').ShellAddRequest);
+          h.nix.metadata.set('github:me/shells', flakeFacts(REV_B, HASH_B));
+          if (!preview.ok) throw Error(preview.refusal.sentence);
+          return preview.value as never;
+        }
+        if (route === 'POST /v1/shells/:name/relock') {
+          const result = await h.service.relock(
+            'web',
+            init?.body as import('../../contract/index.ts').ShellRelockRequest,
+          );
+          if (!result.ok) throw Error(result.refusal.sentence);
+          return result.value as never;
+        }
+        throw Error(route);
+      },
+      subscribe: () => () => {},
+    };
+    const half = cli.build?.({ manifest, client, io: { out() {}, err() {}, isTty: false } });
+    await expect(half!.verbs['shell relock']!({ args: ['web'], options: { yes } })).rejects.toThrow(
+      'changed since preview',
+    );
+    expect(h.tree.calls).toEqual([]);
+    expect(ShellLockSchema.parse(h.state.files.get('locks/web.json')).source).toMatchObject({ narHash: HASH_A });
+    const builds: readonly string[][] = [];
+    h.nix.devEnv = async args => {
+      (builds as string[][]).push([...args]);
+      return ok({ PATH: '/p' });
+    };
+    await h.service.build('web');
+    expect(builds[0]?.at(-1)).toBe(`${flakeFacts().url}#web`);
+  });
+}
+
+test('a direct relock keeps the active lock through owner hold and activates only the exact approved hash', async () => {
+  const h = shellsHarness({
+    initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true, approvedHash: HASH_A } },
+    hold: [`the shell will execute content ${HASH_B}`],
+  });
+  h.nix.metadata.set('github:me/shells', flakeFacts());
+  await h.service.relock('web', { expectedHash: HASH_A });
+  h.published.length = 0;
+  h.nix.metadata.set('github:me/shells', flakeFacts(REV_B, HASH_B));
+  for (let i = 0; i < 2; i++) {
+    const held = await h.service.relock('web', { expectedHash: HASH_B });
+    expect(held.ok && held.value.held).toEqual([`the shell will execute content ${HASH_B}`]);
+    expect(ShellLockSchema.parse(h.state.files.get('locks/web.json')).source).toMatchObject({ narHash: HASH_A });
+  }
+  expect(h.published).toEqual([]);
+  const pending = ShellItemSchema.parse(Bun.YAML.parse(h.tree.calls.at(-1)!.text!));
+  expect(pending.approvedHash).toBe(HASH_B);
+  // The config port changes only when the owner confirms the held edit; a CLI request cannot set it.
+  h.tree.documents.set('shells/web', pending);
+  h.nix.metadata.set('github:me/shells', flakeFacts(REV_A, HASH_A));
+  expect((await h.service.relock('web', { expectedHash: HASH_B })).ok).toBe(false);
+  expect(ShellLockSchema.parse(h.state.files.get('locks/web.json')).source).toMatchObject({ narHash: HASH_A });
+  h.nix.metadata.set('github:me/shells', flakeFacts(REV_B, HASH_B));
+  expect((await h.service.relock('web', { expectedHash: HASH_B })).ok).toBe(true);
+  expect(ShellLockSchema.parse(h.state.files.get('locks/web.json')).source).toMatchObject({ narHash: HASH_B });
+  expect(h.tree.calls).toHaveLength(2);
+});
+
+test('a new resolution cannot become active while held, or without the config approval door', async () => {
+  for (const options of [{ hold: ['approve the resolved hash'] }, { noDoor: true }]) {
+    const h = shellsHarness({
+      ...options,
+      initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true } },
+    });
+    h.nix.metadata.set('github:me/shells', flakeFacts());
+    const result = await h.service.relock('web', { expectedHash: HASH_A });
+    if ('noDoor' in options) expect(!result.ok && result.refusal.code).toBe(SHELL_CODES.noConfigDoor);
+    else expect(result.ok && result.value.held).toEqual(options.hold);
+    expect(h.state.files.has('locks/web.json')).toBe(false);
+    expect((await h.service.build('web')).ok).toBe(false);
+  }
 });

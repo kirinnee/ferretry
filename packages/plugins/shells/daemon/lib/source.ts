@@ -6,7 +6,13 @@
  */
 import { createHash } from 'node:crypto';
 import { err, ok, type Instant, type Result } from '@ferretry/std';
-import type { NarHash, PinnedNixpkgs, ShellItem, ShellLock } from '../../contract/index.ts';
+import {
+  NarHashSchema,
+  type NarHash,
+  type PinnedNixpkgs,
+  type ShellItem,
+  type ShellLock,
+} from '../../contract/index.ts';
 
 const REV = /(?:^|[/@?&=])[0-9a-f]{40}(?:$|[/?&#])/u;
 
@@ -30,21 +36,40 @@ export interface FlakeFacts {
   readonly narHash: NarHash;
 }
 
-export function parseFlakeMetadata(text: string): Result<FlakeFacts, string> {
+/** Identity from metadata, before a missing hash is supplied by nix flake prefetch. */
+export function parseFlakeMetadataSource(
+  text: string,
+): Result<{ url: string; rev: string; narHash?: unknown }, string> {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
     return err('nix did not answer in JSON');
   }
+  if (raw === null || typeof raw !== 'object') return err('nix described no flake');
   const doc = raw as { url?: unknown; locked?: { rev?: unknown; narHash?: unknown } };
   const rev = doc.locked?.rev;
   const narHash = doc.locked?.narHash;
   if (typeof doc.url !== 'string' || doc.url === '') return err('nix named no locked address for it');
-  if (typeof rev !== 'string' || rev === '') return err('it has no revision, so it cannot be pinned');
-  if (typeof narHash !== 'string' || !/^sha256-[A-Za-z0-9+/]{43}=$/u.test(narHash))
-    return err('nix gave no content hash for it');
-  return ok({ url: doc.url, rev, narHash: narHash as NarHash });
+  if (typeof rev !== 'string' || !/^[0-9a-f]{40}$/u.test(rev) || !isLockedFlakeRef(doc.url))
+    return err('it has no revision, so it cannot be pinned');
+  return ok({ url: doc.url, rev, ...(narHash === undefined ? {} : { narHash }) });
+}
+
+export function parseFlakeMetadata(text: string, prefetchedHash?: unknown): Result<FlakeFacts, string> {
+  const source = parseFlakeMetadataSource(text);
+  if (!source.ok) return source;
+  const hash = NarHashSchema.safeParse(source.value.narHash ?? prefetchedHash);
+  if (!hash.success) return err('nix gave no content hash for it');
+  // A later build must fetch exactly these bytes, including when metadata omitted the hash from its URL.
+  let url: URL;
+  try {
+    url = new URL(source.value.url);
+  } catch {
+    return err('nix named no locked address for it');
+  }
+  url.searchParams.set('narHash', hash.data);
+  return ok({ url: url.toString(), rev: source.value.rev, narHash: hash.data });
 }
 
 /** Environment variables a shell must not carry into a ferret: they describe the build sandbox, not the tools. */

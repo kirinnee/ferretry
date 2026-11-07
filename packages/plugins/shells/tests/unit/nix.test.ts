@@ -63,3 +63,55 @@ describe('nix over the spawn port', () => {
     expect((await missing.tool.devEnv([])).ok).toBe(false);
   });
 });
+
+const determinateMetadata = await Bun.file(
+  new URL('../fixtures/determinate-git-metadata.json', import.meta.url),
+).text();
+
+test('real Determinate Git metadata without narHash prefetches the resolved revision and pins the returned hash', async () => {
+  const doc = JSON.parse(determinateMetadata);
+  const hash = 'sha256-3niVhq1s0yt4PCQ/vnnVMv/RA0yXMf/eBWWJQmQiZfQ=';
+  const { tool, calls } = spawnWith(args =>
+    args.includes('metadata')
+      ? out(determinateMetadata)
+      : out(JSON.stringify({ hash, locked: { ...doc.locked, narHash: hash }, storePath: '/nix/store/fixture-source' })),
+  );
+  const result = await tool.flakeMetadata(doc.originalUrl);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.value.rev).toBe(doc.locked.rev);
+  expect(result.value.narHash).toBe(hash);
+  const url = new URL(result.value.url);
+  expect(url.searchParams.get('rev')).toBe(doc.locked.rev);
+  expect(url.searchParams.get('narHash')).toBe(hash);
+  expect(calls).toHaveLength(2);
+  expect(calls[1]?.args).toEqual([
+    '--extra-experimental-features',
+    'nix-command flakes',
+    'flake',
+    'prefetch',
+    '--json',
+    doc.url,
+  ]);
+});
+
+test('prefetch failures, absent hashes and invalid hashes never make a usable flake', async () => {
+  for (const response of [
+    out('', 1, 'fetch failed'),
+    out('not json'),
+    out('{}'),
+    out('{"hash":"md5-no"}'),
+    out('null'),
+  ]) {
+    const { tool } = spawnWith(args => (args.includes('metadata') ? out(determinateMetadata) : response));
+    expect((await tool.flakeMetadata('git+file:///fixture')).ok).toBe(false);
+  }
+});
+
+test('prefetch cannot replace invalid metadata hashes or invent a missing revision', async () => {
+  for (const locked of [{ narHash: 'md5-no', rev: JSON.parse(determinateMetadata).locked.rev }, {}]) {
+    const { tool, calls } = spawnWith(() => out(JSON.stringify({ ...JSON.parse(determinateMetadata), locked })));
+    expect((await tool.flakeMetadata('git+file:///fixture')).ok).toBe(false);
+    expect(calls).toHaveLength(1);
+  }
+});

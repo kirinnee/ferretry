@@ -152,7 +152,9 @@ describe('shell routes', () => {
     const { r } = setup();
     await r['POST /v1/shells'](call(web));
     expect(json(await r['POST /v1/shells/:name/build'](call(undefined, { name: 'web' }))).outcome).toBe('built');
-    expect(json(await r['POST /v1/shells/:name/relock'](call(undefined, { name: 'web' }))).name).toBe('web');
+    expect(json(await r['POST /v1/shells/:name/relock'](call({ expectedHash: HASH_A }, { name: 'web' }))).name).toBe(
+      'web',
+    );
     expect(json(await r['GET /v1/shells/:name'](call(undefined, { name: 'web' }))).summary.build).toBe('built');
     expect(json(await r['DELETE /v1/shells/:name'](call(undefined, { name: 'web' })))).toEqual({
       name: 'web',
@@ -161,4 +163,12 @@ describe('shell routes', () => {
     for (const name of ['web', '..%2Fx', 'Bad Name'])
       expect((await r['GET /v1/shells/:name'](call(undefined, { name }))).status).toBe(404);
   });
+});
+
+test('relock refuses a direct request with no preview hash or a malformed hash', async () => {
+  const routes = shellsRoutes(shellsHarness().service);
+  for (const body of [{}, { expectedHash: 'anything' }, { expectedHash: HASH_A, approved: true }])
+    await expect(routes['POST /v1/shells/:name/relock'](call(body, { name: 'web' }))).rejects.toMatchObject({
+      status: 422,
+    });
 });

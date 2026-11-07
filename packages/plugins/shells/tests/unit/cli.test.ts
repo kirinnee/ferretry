@@ -109,7 +109,11 @@ describe('fy shell', () => {
       'POST /v1/shells/:name/relock': moved,
     });
     await second.run('shell relock', ['web'], { yes: true });
-    expect(second.sent.at(-1)).toEqual({ route: 'POST /v1/shells/:name/relock', params: { name: 'web' } });
+    expect(second.sent.at(-1)).toEqual({
+      route: 'POST /v1/shells/:name/relock',
+      params: { name: 'web' },
+      body: { expectedHash: HASH_B },
+    });
 
     const same = harness({
       'GET /v1/shells/:name': { item },
@@ -148,4 +152,16 @@ describe('fy shell', () => {
     for (const verb of ['shell show', 'shell relock', 'shell build', 'shell rm']) expect(await run(verb)).toBe(2);
     expect(sent).toEqual([]);
   });
+});
+
+test('relock reports a held candidate as waiting for owner confirmation', async () => {
+  const h = harness({
+    'GET /v1/shells/:name': { item: { flake: 'github:me/shells#web', floating: true } },
+    'POST /v1/shells/preview': { name: 'web', lock },
+    'POST /v1/shells/:name/relock': { name: 'web', lock, held: ['approve these bytes'] },
+  });
+  await h.run('shell relock', ['web'], { yes: true });
+  expect(h.out[0]).toContain('waiting for owner confirmation');
+  expect(h.out.join(' ')).toContain('run relock again');
+  expect(h.sent.at(-1)?.body).toEqual({ expectedHash: HASH_A });
 });

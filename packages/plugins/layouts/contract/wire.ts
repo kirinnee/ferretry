@@ -85,19 +85,101 @@ export const THEME_FAMILY_IDS = [
   'ma',
 ] as const;
 
-const TokenValuesSchema = z.record(z.string().max(40), z.string().max(160));
+export const COLOUR_TOKENS = [
+  'bg',
+  'fg',
+  'fg-soft',
+  'faint',
+  'accent',
+  'accent-fg',
+  'accent-soft',
+  'accent-strong',
+  'accent-border',
+  'border',
+  'border-soft',
+  'border-strong',
+  'card-bg',
+  'card-border',
+  'bar-bg',
+  'chrome-fg',
+  'bubble-bg',
+  'bubble-fg',
+  'bubble-border',
+  'code-bg',
+  'code-fg',
+  'code-border',
+  'err',
+  'err-bg',
+  'err-border',
+  'focus-color',
+  'divider-color',
+] as const;
+
+export const TYPE_TOKENS = [
+  'font-body',
+  'font-ui',
+  'font-prose',
+  'font-mono',
+  'font-display',
+  'text-2xs',
+  'text-xs',
+  'text-sm',
+  'text-base',
+  'text-md',
+  'text-lg',
+  'text-display',
+] as const;
+
+export const SPACING_TOKENS = [
+  'card-radius',
+  'bubble-radius',
+  'border-width',
+  'control-h',
+  'control-h-sm',
+  'flow-1',
+  'flow-2',
+  'flow-3',
+  'flow-4',
+  'flow-5',
+] as const;
+
+export type ThemeToken =
+  | (typeof COLOUR_TOKENS)[number]
+  | (typeof TYPE_TOKENS)[number]
+  | (typeof SPACING_TOKENS)[number];
+
+const COLOUR_VALUE =
+  /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab)\([0-9.,%\s/a-z-]{1,60}\)|transparent|currentColor)$/u;
+const LENGTH_VALUE = /^-?\d{1,4}(\.\d{1,3})?(px|rem|em|%)?$/u;
+/** Font stacks: quoted or bare family names separated by commas. No parentheses, no semicolons, no braces. */
+const FONT_VALUE = /^[A-Za-z0-9 ,'"-]{1,160}$/u;
+
+function valueSchema(token: ThemeToken): z.ZodType<string> {
+  if ((COLOUR_TOKENS as readonly string[]).includes(token)) return z.string().regex(COLOUR_VALUE);
+  if (token.startsWith('font-')) return z.string().regex(FONT_VALUE);
+  return z.string().regex(LENGTH_VALUE);
+}
+
+export const ALL_TOKENS: readonly ThemeToken[] = [...COLOUR_TOKENS, ...TYPE_TOKENS, ...SPACING_TOKENS];
+
+export const TokensSchema = z.strictObject(
+  Object.fromEntries(ALL_TOKENS.map(token => [token, valueSchema(token).optional()])) as Record<
+    ThemeToken,
+    z.ZodOptional<z.ZodType<string>>
+  >,
+);
 
 /**
  * `themes/<name>.yaml`: a built-in family plus colour, type and spacing tokens laid over it, light and dark apart.
- * The token NAMES and the value grammar are the app shell's (`theme/tokens.ts`), which refuses a theme that names a
- * token it does not read; the daemon passes them through.
+ * This contract owns the token names and value grammar; both daemon and app refuse names the stylesheet does not
+ * read and values that could close a declaration, load a resource, or smuggle an expression.
  */
 export const ThemeSchema = z.strictObject({
   id: ThemeIdSchema,
   label: z.string().min(1).max(60),
   base: z.enum(THEME_FAMILY_IDS),
-  light: TokenValuesSchema.default({}),
-  dark: TokenValuesSchema.default({}),
+  light: TokensSchema.default({}),
+  dark: TokensSchema.default({}),
 });
 export type Theme = z.infer<typeof ThemeSchema>;
 

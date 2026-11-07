@@ -115,8 +115,23 @@ export default implementCli(manifest, {
             );
             return OK;
           }
-          const locked = await client.call<ShellPreview>('POST /v1/shells/:name/relock', pathOf(name));
-          print(locked, [`${name} is locked:`, ...lockLines(locked.lock)], invocation);
+          const source = preview.lock.source;
+          const expectedHash = source.kind === 'flake' ? source.narHash : source.nixpkgs.narHash;
+          const locked = await client.call<ShellPreview>('POST /v1/shells/:name/relock', {
+            ...pathOf(name),
+            body: { expectedHash },
+          });
+          print(
+            locked,
+            [
+              locked.held === undefined ? `${name} is locked:` : `${name} is waiting for owner confirmation:`,
+              ...lockLines(locked.lock),
+              ...(locked.held === undefined
+                ? []
+                : [...locked.held, 'confirm the held config edit, then run relock again']),
+            ],
+            invocation,
+          );
           return OK;
         },
 

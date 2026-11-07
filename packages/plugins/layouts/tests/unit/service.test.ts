@@ -139,3 +139,18 @@ describe('layouts service', () => {
     expect(!result.ok && result.refusal.kind).toBe('invalid');
   });
 });
+
+test('selecting a saved theme the app cannot read is refused before changing the selection', async () => {
+  for (const light of [{ accent: 'red' }, { unknown: '#123456' }, { accent: '#123456; color: red' }]) {
+    const tree = configTree();
+    // Even if a port hands the service an unchecked item, selection still checks the wire contract.
+    const port: import('@ferretry/kernel/contract').ConfigPort = {
+      ...tree.port,
+      collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', base: 'neo', light, dark: {} }]]) as never,
+    };
+    const service = createLayoutsService(port, tree.door);
+    const result = await service.useTheme('dusk');
+    expect(!result.ok && result.refusal.kind).toBe('invalid');
+    expect(tree.calls).toEqual([]);
+  }
+});
