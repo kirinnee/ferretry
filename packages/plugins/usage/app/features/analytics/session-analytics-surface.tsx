@@ -19,7 +19,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useOptionalRouter } from '@ferretry/app';
 import { RouteLink } from '@ferretry/app/ui';
 
-import { type DaemonConnection, type DaemonSessionScope, daemonInsightsQueryPath, type UsageClient } from '../../shell.ts';
+import {
+  type DaemonConnection,
+  type DaemonSessionScope,
+  daemonInsightsQueryPath,
+  type UsageClient,
+} from '../../shell.ts';
 import { fetchAnalytics, fetchSessionAnalytics } from './analytics-api.ts';
 import { CostSplit, UnpricedChip } from './analytics-cost-rows.tsx';
 import type { AnalyticsRequest } from './analytics-custom-query.tsx';

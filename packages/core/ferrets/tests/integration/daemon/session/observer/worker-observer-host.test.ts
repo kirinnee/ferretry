@@ -9,7 +9,10 @@ import { InlineObserverHost } from '../../../../../daemon/adapters/session/obser
 import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
 import { countWorkerChildren } from '../../../../../daemon/adapters/session/observer/worker-children.ts';
 import { WorkerObserverHost } from '../../../../../daemon/adapters/session/observer/worker-observer-host.ts';
-import { type ObserverWorker, WorkerSupervisor } from '../../../../../daemon/adapters/session/observer/worker-supervisor.ts';
+import {
+  type ObserverWorker,
+  WorkerSupervisor,
+} from '../../../../../daemon/adapters/session/observer/worker-supervisor.ts';
 import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { type ObserverPatch, SessionObserver } from '../../../../../daemon/lib/session/observer/observer.ts';

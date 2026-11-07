@@ -5,12 +5,7 @@
  *
  * Pure. A window the provider did not measure stays absent, never 0%.
  */
-import type {
-  AccountUsage,
-  LoginUsage,
-  LoginUsageWindow,
-  ProviderQuotaReading,
-} from '../../../../contract/index.ts';
+import type { AccountUsage, LoginUsage, LoginUsageWindow, ProviderQuotaReading } from '../../../../contract/index.ts';
 
 const windowNamed = (reading: ProviderQuotaReading, label: '5h' | 'week') =>
   reading.windows.find(window => window.label === label);
@@ -27,10 +22,7 @@ function credentialWindow(reading: ProviderQuotaReading, label: '5h' | 'week'): 
  * A credential row's usage with its provider reading laid in: the reading itself, and — when the
  * row's own windows were never measured — the reading's 5-hour and weekly windows in their place.
  */
-export function withProviderQuota(
-  usage: LoginUsage,
-  reading: ProviderQuotaReading | undefined,
-): LoginUsage {
+export function withProviderQuota(usage: LoginUsage, reading: ProviderQuotaReading | undefined): LoginUsage {
   if (reading === undefined) return usage;
   if (usage.source !== undefined) return { ...usage, provider: reading };
   return {

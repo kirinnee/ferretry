@@ -27,7 +27,7 @@ import {
   type StepUpRequiredBody,
 } from '../boundary.ts';
 import { isAgentCaller } from '../http.ts';
-import { parseBody } from '../../adapters/body.ts';
+import { parseBody } from '../body.ts';
 import type { CapabilityDemand } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { type ApiResponse, decodeParameter } from '@ferretry/kernel/contract';

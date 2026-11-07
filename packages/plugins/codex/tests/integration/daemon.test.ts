@@ -31,7 +31,12 @@ describe('codex daemon half', () => {
     const response = await host.request('GET', '/v1/codex/update', { as: owner() });
 
     expect(response.status).toBe(200);
-    const view = response.json<{ harness: string; location: { state: string }; installed: unknown; available: boolean }>();
+    const view = response.json<{
+      harness: string;
+      location: { state: string };
+      installed: unknown;
+      available: boolean;
+    }>();
     expect(view.harness).toBe('codex');
     expect(view.location.state).toBe('absent');
     expect(view.installed).toBeNull();

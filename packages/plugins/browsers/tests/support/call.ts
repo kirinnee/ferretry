@@ -44,7 +44,9 @@ export function callOf(options: {
       path: options.path,
       query: new URLSearchParams() as never,
       headers: new Map([['content-type', 'application/json']]) as never,
-      arrival: (kind === 'device' ? { kind: 'carried', carrier: 'relay' } : { kind: 'local', privileged: false }) as never,
+      arrival: (kind === 'device'
+        ? { kind: 'carried', carrier: 'relay' }
+        : { kind: 'local', privileged: false }) as never,
       text: async () => text,
     },
     params: options.params ?? {},

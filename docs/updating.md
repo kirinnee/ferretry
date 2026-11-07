@@ -309,16 +309,16 @@ around either. The agent hands the person the command instead:
 
 ## Surface
 
-| surface                                | what                                                     |
-| -------------------------------------- | -------------------------------------------------------- |
-| `fy daemon status`                     | adds the install method and, when known, the update line |
-| `fy update [--check] [--yes] …` | check, or apply the update for this install method       |
-| `fy daemon restart [--when-idle]`      | restart now (ferrets keep running), or once all are idle |
-| `fy daemon install`                    | on a `nix-shell` daemon, offers the nix profile install  |
-| `fy setup [--check] [--json]`          | reports the update and its command; never applies it     |
-| `GET /v1/daemon/update`                | the `DaemonUpdateView`                                   |
-| `POST /v1/daemon/update`               | start an update (`now` / `when-idle`)                    |
-| `PATCH /v1/daemon/update/settings`     | turn automatic install on or off                         |
+| surface                            | what                                                     |
+| ---------------------------------- | -------------------------------------------------------- |
+| `fy daemon status`                 | adds the install method and, when known, the update line |
+| `fy update [--check] [--yes] …`    | check, or apply the update for this install method       |
+| `fy daemon restart [--when-idle]`  | restart now (ferrets keep running), or once all are idle |
+| `fy daemon install`                | on a `nix-shell` daemon, offers the nix profile install  |
+| `fy setup [--check] [--json]`      | reports the update and its command; never applies it     |
+| `GET /v1/daemon/update`            | the `DaemonUpdateView`                                   |
+| `POST /v1/daemon/update`           | start an update (`now` / `when-idle`)                    |
+| `PATCH /v1/daemon/update/settings` | turn automatic install on or off                         |
 
 ## Declared GAPs
 

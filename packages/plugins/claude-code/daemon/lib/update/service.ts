@@ -7,7 +7,15 @@ import {
   type HarnessUpdateStartRequest,
 } from '../../../contract/index.ts';
 import { readManagerTail } from './manager-tail.ts';
-import type { ClaudeLocation, FactsSource, LatestSource, LocationSource, Probe, RunPort, UpdateClock } from './ports.ts';
+import type {
+  ClaudeLocation,
+  FactsSource,
+  LatestSource,
+  LocationSource,
+  Probe,
+  RunPort,
+  UpdateClock,
+} from './ports.ts';
 import {
   CLAUDE_CODE_LABEL,
   type HarnessInstalledVersion,
@@ -232,12 +240,13 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
     const cached = this.#probed;
     const now = this.#options.clock.now();
     const running = this.#job?.state === 'running';
-    if (cached !== undefined && cached.path === path && (running || (!fresh && now - cached.at < HARNESS_PROBE_REUSE_MS)))
+    if (
+      cached !== undefined &&
+      cached.path === path &&
+      (running || (!fresh && now - cached.at < HARNESS_PROBE_REUSE_MS))
+    )
       return cached;
-    const [installed, facts] = await Promise.all([
-      this.#options.probe.version(path),
-      this.#options.facts.facts(path),
-    ]);
+    const [installed, facts] = await Promise.all([this.#options.probe.version(path), this.#options.facts.facts(path)]);
     const probed: Probed = { path, at: now, installed, method: classifyInstall(facts) };
     this.#probed = probed;
     return probed;

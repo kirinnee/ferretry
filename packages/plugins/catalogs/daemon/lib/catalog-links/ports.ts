@@ -4,7 +4,7 @@
  */
 import type { CatalogItemSource, CatalogLinkKind } from '../boundary.ts';
 import type { AuditEntry } from '../audit.ts';
-import type { LinkStatus, LinkStoreRefusalCode } from '../../adapters/relay.ts';
+import type { LinkStatus, LinkStoreRefusalCode } from '../relay-wire/index.ts';
 import type { LinkSubject } from '../shared-catalogs/service.ts';
 import type { LinksDocument } from './document.ts';
 

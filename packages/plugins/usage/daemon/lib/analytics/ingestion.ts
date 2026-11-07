@@ -35,10 +35,7 @@ export type AnalyticsIngestCandidate = Omit<
 /** Every session the daemon holds durable documents for, parsed but unjudged. */
 /** A session's transcript, read and folded off the event loop: the fold alone comes back. */
 export interface AnalyticsTranscriptFoldSource {
-  foldFor(
-    sessionId: string,
-    aliasGroups: readonly AnalyticsModelAliasGroup[],
-  ): Promise<AnalyticsTranscriptFold>;
+  foldFor(sessionId: string, aliasGroups: readonly AnalyticsModelAliasGroup[]): Promise<AnalyticsTranscriptFold>;
 }
 
 export interface AnalyticsIngestCandidateSource {

@@ -1,7 +1,12 @@
 import type { FetchPort, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import type { HarnessConfig } from '../../contract/index.ts';
-import { passesThroughHomeManagerPath, parseNixProfileList, nixStorePaths, symlinkHops } from '../lib/update/nix-facts.ts';
+import {
+  passesThroughHomeManagerPath,
+  parseNixProfileList,
+  nixStorePaths,
+  symlinkHops,
+} from '../lib/update/nix-facts.ts';
 import type {
   ClaudeLocation,
   FactsSource,
@@ -63,7 +68,10 @@ export function spawnRun(spawn: SpawnPort, env: Readonly<Record<string, string>>
       if (result.exitCode === null) return { kind: 'timed-out', tail } satisfies RunResult;
       return { kind: 'exited', code: result.exitCode, tail } satisfies RunResult;
     } catch (error) {
-      return { kind: 'not-started', reason: error instanceof Error ? error.message : String(error) } satisfies RunResult;
+      return {
+        kind: 'not-started',
+        reason: error instanceof Error ? error.message : String(error),
+      } satisfies RunResult;
     }
   };
 }
@@ -108,7 +116,10 @@ export function locationSource(
   host: ReturnType<typeof hostFacts>,
 ): LocationSource {
   const starts = async (path: string): Promise<boolean> => {
-    const run = await spawnRun(spawn, PROBE_ENVIRONMENT)({ program: path, args: ['--version'], timeoutMs: PROBE_TIMEOUT_MS });
+    const run = await spawnRun(
+      spawn,
+      PROBE_ENVIRONMENT,
+    )({ program: path, args: ['--version'], timeoutMs: PROBE_TIMEOUT_MS });
     return run.kind === 'exited' && run.code === 0;
   };
   return {
@@ -144,7 +155,8 @@ export function locationSource(
           return { outcome: 'located', path, rule: 'search directory', declaredBy: `${key} searchPaths[${index}]` };
       }
       const onPath = (await fact(spawn, 'which', ['claude']))?.trim();
-      if (onPath !== undefined && onPath !== '') return { outcome: 'located', path: onPath, rule: 'inherited environment', declaredBy: 'PATH' };
+      if (onPath !== undefined && onPath !== '')
+        return { outcome: 'located', path: onPath, rule: 'inherited environment', declaredBy: 'PATH' };
       searched.push('PATH');
       return { outcome: 'absent', searched };
     },

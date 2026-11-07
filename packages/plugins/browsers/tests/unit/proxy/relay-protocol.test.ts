@@ -1,6 +1,19 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { badRequest, basicProxyAuthorization, connectHead, forwardedHead, gatewayFailure, headEnd, parseAuthority, parsePlainTarget, parseRequestHead, proxyUnreachable, responseStatus, socks5 } from '../../../daemon/proxy/relay-protocol.ts';
+import {
+  badRequest,
+  basicProxyAuthorization,
+  connectHead,
+  forwardedHead,
+  gatewayFailure,
+  headEnd,
+  parseAuthority,
+  parsePlainTarget,
+  parseRequestHead,
+  proxyUnreachable,
+  responseStatus,
+  socks5,
+} from '../../../daemon/proxy/relay-protocol.ts';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 

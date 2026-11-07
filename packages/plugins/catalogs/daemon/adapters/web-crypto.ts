@@ -13,8 +13,19 @@
  * the public half; that is noted where it happens.
  */
 
-import type { DaemonIdentity, EphemeralKeyPair, PrivateKeyHandle, SessionCrypto } from './index.ts';
-import { AEAD_TAG_BYTES, concatBytes, daemonIdFromPublicKey, isAllZero, SHARED_SECRET_BYTES } from './index.ts';
+import type {
+  DaemonIdentity,
+  EphemeralKeyPair,
+  PrivateKeyHandle,
+  SessionCrypto,
+} from '../lib/relay-wire/kernel-wire/index.ts';
+import {
+  AEAD_TAG_BYTES,
+  concatBytes,
+  daemonIdFromPublicKey,
+  isAllZero,
+  SHARED_SECRET_BYTES,
+} from '../lib/relay-wire/kernel-wire/index.ts';
 
 /** The fixed prefix of an Ed25519 SubjectPublicKeyInfo. The remaining 32 bytes are the key. */
 const ED25519_SPKI_PREFIX = new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]);

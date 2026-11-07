@@ -5,7 +5,7 @@ import {
   PASSKEY_CHALLENGE_TTL_SECONDS,
   type MemberJoinProof,
 } from '../../../daemon/lib/boundary.ts';
-import { toBase64Url } from '../../../daemon/adapters/relay.ts';
+import { toBase64Url } from '../../../daemon/lib/relay-wire/index.ts';
 import should from 'should';
 import {
   type JoinProofDeps,

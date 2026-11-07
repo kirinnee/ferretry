@@ -18,13 +18,7 @@ function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIde
   const service = new BrowserSessionService(
     {
       get: async id =>
-        known.has(id)
-          ? id === 's1'
-            ? { name: 'Hadi' }
-            : id === 's2'
-              ? { name: 'Docs' }
-              : {}
-          : undefined,
+        known.has(id) ? (id === 's1' ? { name: 'Hadi' } : id === 's2' ? { name: 'Docs' } : {}) : undefined,
     },
     {
       launch: async () => {

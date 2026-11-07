@@ -140,7 +140,6 @@ describe('the state-backed managed-worktree registry', () => {
     should((actual as WorktreeError).code).equal('registry_damaged');
     should((actual as WorktreeError).message).containEql('damaged');
   });
-
 });
 
 describe('the managed-worktree document', () => {

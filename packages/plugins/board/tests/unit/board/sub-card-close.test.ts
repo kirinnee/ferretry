@@ -244,7 +244,7 @@ describe('closing a helper whose ferret ended', () => {
       lastTouchedAt: null,
     },
     suggestedLane: null,
-    
+
     openAsks: [],
     blockedBy: [],
     blocks: [],

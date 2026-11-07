@@ -115,7 +115,10 @@ export class FerretRegistry {
 
   put(record: FerretRecord): void {
     this.records.set(record.id, record);
-    this.summaries.set(record.id, summaryOf(record, this.details.get(record.id), this.waits.get(record.id), this.finished.get(record.id)));
+    this.summaries.set(
+      record.id,
+      summaryOf(record, this.details.get(record.id), this.waits.get(record.id), this.finished.get(record.id)),
+    );
     this.moved += 1;
     this.changed({ ferret: record.id, state: record.state });
   }

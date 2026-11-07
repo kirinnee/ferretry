@@ -198,7 +198,6 @@ describe('chatChip', () => {
     expect(chip).toMatchObject({ kind: 'card', activity, tone });
   });
 
-
   it('shows only the id while the board is being read, and closed once it was read without the card', () => {
     expect(chatChip(focus, null, undefined, 'loading')).toMatchObject({
       kind: 'card',

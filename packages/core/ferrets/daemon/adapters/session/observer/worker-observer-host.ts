@@ -1,7 +1,11 @@
 import type { ClockPort } from '../../../lib/ports.ts';
 import type { SessionObserverHost } from '../../../lib/session/observer/host.ts';
 import { lookAtPaneProcesses } from '../../../lib/session/observer/liveness.ts';
-import { INITIAL_OBSERVER_STATE, type ObserverPatch, type SessionObserver } from '../../../lib/session/observer/observer.ts';
+import {
+  INITIAL_OBSERVER_STATE,
+  type ObserverPatch,
+  type SessionObserver,
+} from '../../../lib/session/observer/observer.ts';
 import type { SessionBinding, TranscriptStamp, WorkerLiveness } from '../../../lib/session/observer/protocol.ts';
 import type { TurnStateChange } from '../../../lib/session/observer/turn.ts';
 import type { AnswerLedger } from '../../../lib/session/peers/question.ts';

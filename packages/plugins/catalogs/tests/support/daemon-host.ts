@@ -59,13 +59,13 @@ import { CatalogItems, type CatalogMcpProvider, type McpSourceServer } from '../
 import catalogsDaemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
 
-import type { CatalogSigningIdentity } from '../../daemon/adapters/signatures.ts';
+import type { CatalogSigningIdentity } from '../../daemon/lib/relay-wire/signatures.ts';
 import {
   catalogLinkSignedBytes,
   catalogManifestSignedBytes,
   catalogVersionsSignedBytes,
 } from '../../contract/wire/index.ts';
-import { WebCryptoSessionCrypto as CatalogWireCrypto, toBase64Url } from '../../worker/kernel-wire/index.ts';
+import { WebCryptoSessionCrypto as CatalogWireCrypto, toBase64Url } from '../../worker/src/kernel-wire/index.ts';
 
 export const kernelCrypto = new session.WebCryptoSessionCrypto();
 const wireCrypto = new CatalogWireCrypto();

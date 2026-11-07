@@ -2,7 +2,6 @@ import {
   AnalyticsPricingCurrencySchema,
   AnalyticsPricingProviderSchema,
   AnalyticsPricingSourceSchema,
-
 } from '../../../contract/index.ts';
 import type { SqliteHandle } from '@ferretry/kernel/contract';
 import { z } from 'zod';
@@ -17,7 +16,12 @@ import {
   type OpenedAnalyticsIndexStore,
 } from '../../lib/analytics/store.ts';
 import { NO_ANALYTICS_WRITES } from '../../lib/analytics/store-writes.ts';
-import type { AnalyticsPricingCurrency, AnalyticsPricingProvider, AnalyticsPricingRateUnit, AnalyticsPricingSource } from '../../../contract/index.ts';
+import type {
+  AnalyticsPricingCurrency,
+  AnalyticsPricingProvider,
+  AnalyticsPricingRateUnit,
+  AnalyticsPricingSource,
+} from '../../../contract/index.ts';
 import type { AnalyticsPricingUnknownReason, AnalyticsUsagePricingSnapshot } from '../../lib/analytics/pricing.ts';
 import type { AnalyticsUsageRefusal } from '../../lib/analytics/turn-fold.ts';
 import { applyAnalyticsWrites, COLUMNS } from './sqlite-analytics-statements.ts';
@@ -357,7 +361,9 @@ class SqliteAnalyticsStore implements AnalyticsIndexStore {
 
 function tableNames(database: SqliteHandle): readonly string[] {
   return database
-    .query<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
     .map(row => row.name);
 }
 

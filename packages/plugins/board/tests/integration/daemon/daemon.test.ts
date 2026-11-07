@@ -62,7 +62,9 @@ describe('board daemon half', () => {
     expect(first.isError).not.toBe(true);
     expect(second.isError).not.toBe(true);
     const read = await host.request('GET', `/v1/board/cards/${id}`, { headers: as('owner') });
-    expect(read.json<{ card: { progress?: { now: string; doneSoFar: string; next: string } } }>().card.progress).toEqual({
+    expect(
+      read.json<{ card: { progress?: { now: string; doneSoFar: string; next: string } } }>().card.progress,
+    ).toEqual({
       now: 'writing it',
       doneSoFar: 'wrote it',
       next: 'test it',
@@ -116,7 +118,10 @@ describe('board daemon half', () => {
     expect(open[0]?.kind).toBe('choice');
 
     // Another write of the same card, still at the gate, asks nothing new.
-    await host.request('POST', `/v1/board/cards/${made.id}`, { body: { action: 'note', text: 'still here' }, headers: as('owner') });
+    await host.request('POST', `/v1/board/cards/${made.id}`, {
+      body: { action: 'note', text: 'still here' },
+      headers: as('owner'),
+    });
     await host.settle();
     expect(await asks.open({ source: sourceKey('card') })).toHaveLength(1);
 
@@ -130,7 +135,10 @@ describe('board daemon half', () => {
     const { asks, host, apply } = await boot();
     const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
-      await host.request('POST', `/v1/board/cards/${made.id}`, { body: { action: 'move', to, reason: 'for the test' }, headers: as('owner') });
+      await host.request('POST', `/v1/board/cards/${made.id}`, {
+        body: { action: 'move', to, reason: 'for the test' },
+        headers: as('owner'),
+      });
     await move('doing');
     await move('to-test');
     await host.settle();
@@ -165,7 +173,10 @@ describe('board daemon half', () => {
     const { asks, host, apply } = await boot();
     const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
-      await host.request('POST', `/v1/board/cards/${made.id}`, { body: { action: 'move', to, reason: 'for the test' }, headers: as('owner') });
+      await host.request('POST', `/v1/board/cards/${made.id}`, {
+        body: { action: 'move', to, reason: 'for the test' },
+        headers: as('owner'),
+      });
     await move('doing');
     await move('to-test');
     await host.settle();

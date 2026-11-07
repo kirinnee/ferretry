@@ -30,7 +30,7 @@ import {
   UpdateCatalogRequestSchema,
 } from '../boundary.ts';
 import { isAgentCaller } from '../http.ts';
-import { parseBody } from '../../adapters/body.ts';
+import { parseBody } from '../body.ts';
 import type { CapabilityDemand } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { type ApiResponse, decodeParameter, queryValue } from '@ferretry/kernel/contract';

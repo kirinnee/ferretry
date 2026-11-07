@@ -6,7 +6,7 @@ import {
   type ConnectionsApi,
 } from '@ferretry/plugin-connections/contract';
 import type { UsesHandle } from '@ferretry/kernel/manifest';
-import type { CatalogSigningIdentity } from './signatures.ts';
+import type { CatalogSigningIdentity } from '../lib/relay-wire/signatures.ts';
 
 /** The kernel's public identity, plus the link-store request signer the kernel has not published yet. */
 export type CatalogKernel = KernelPorts & {
