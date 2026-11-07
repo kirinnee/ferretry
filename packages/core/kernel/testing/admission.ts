@@ -99,7 +99,7 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
       const caller = callerOf(input.request);
       if (caller.kind !== 'member')
         return refuse(403, 'Member routes are for members.', 'forbidden') as AdmissionDecision<MemberStanding>;
-      return { outcome: 'admitted', standing: { caller } as MemberStanding };
+      return { outcome: 'admitted', standing: { caller } as unknown as MemberStanding };
     },
     readmit: (request, descriptor) => decide(request, descriptor).outcome === 'admitted',
   };
