@@ -539,7 +539,7 @@ describe('the session layer: requests', () => {
     expect(client.end).toBeUndefined();
   });
 
-  test('R514 a handler that throws is answered 500 and the session goes on', async () => {
+  test('a handler that throws is answered 500 and the session goes on', async () => {
     const fx = await fixture();
     fx.dispatch = async () => {
       throw new Error('boom');
@@ -692,7 +692,7 @@ describe('the session layer: streams', () => {
     expect(client.last('stream-close')).toBeUndefined();
   });
 
-  test('R565 a stream frame whose permit changed is dropped unsent and the session ends', async () => {
+  test('a stream frame whose permit changed (§7.3) is dropped unsent and the session ends', async () => {
     const fx = await fixture();
     const { handler } = streamFixture(fx);
     const client = await streaming(fx);
