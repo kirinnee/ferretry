@@ -14,3 +14,4 @@ export { ensureDom, interact, type Mounted, mount, must, pressKey } from './dom.
 export { render, run, runAsync, runUntil } from './react.ts';
 export { settleUntil } from './settle.ts';
 export { RouterProvider } from './router.tsx';
+export { manualScheduler } from './live-scheduler.ts';
