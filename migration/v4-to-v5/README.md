@@ -118,7 +118,9 @@ Packs (`src/steps/packs.ts`) folds `config/pack.yaml` and `config/models-guide.y
 flat `state/packs/runs/<id>.<file>` names (`run.json` with `job.session` → `job.ferret`, the inventory's harness
 `claude` → `claude-code`), keeps the one undo as `state/packs/replaced.json` (the replaced PROMPT, where v4 kept the
 whole file) and each session's `pack` switch as `state/packs/switches.json`. `config/routing.json` has no v5 home and
-is listed, its accounts named by runtime name (M7); a builder's `draft.json`, Jev's spend ledger and the
+is listed, its accounts named by runtime name (M7); the runtimes it excluded become one line at the end of the routing
+prompt when the home has a prompt of its own (lead decision 2026-11-07), and are only listed otherwise, because a prompt
+holding just that line would replace the one v5 renders from the model catalogs; a builder's `draft.json`, Jev's spend ledger and the
 routing-migration backups are not carried.
 
 Projects keep every id exactly; v4's bare array gains the `{format: 1, projects}` envelope. Warden carries its sweep
@@ -147,7 +149,7 @@ with what v4 enforced and any widening fails the step. Carriers → `connections
 `webrtc`; an owner's `enabled: false` stays false; two relays switched on fail, since v5 dials one). `harness` paths →
 both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. A catalog link store
 turned off or a shorter member unlock waits for a Catalogs schema (`pending`); `secretEnvironment`, `usage.url`, CORS,
-`publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` leaves the step pending until Packs declares a routing config.
+`publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` belongs to the Packs step.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
@@ -198,8 +200,9 @@ under their `ferret` names, `perHarness.claude` becomes `claude-code` and `maxSe
 `maxFerretsPerRun`; a Global lesson's `target.path`/`applied.path` (v4's asset file) becomes v5's
 `Global lessons document`. v4 read these files leniently, so the step carries what v4 read and counts what it dropped;
 a miner's raw `observations.json` and finished runs' digests are listed in `notCarried`. v5 gives the Global document to
-every ferret's launch, where v4 gave it only to ferrets whose profile included `instructions/lessons`; the Settings
-step still carries that component as an ordinary instruction item.
+every ferret's launch, where v4 gave it only to ferrets whose profile included `instructions/lessons`; so the Settings
+step drops that component and removes the layer from every profile (lead decision 2026-11-07), and no ferret gets the
+rules twice.
 
 ## Tests
 

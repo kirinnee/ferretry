@@ -145,11 +145,17 @@ function refuseRawSecrets(document: Document, label: string): void {
 // ── packs.yaml ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /** `pack.yaml` (top level) and `models-guide.yaml` (as `routing`) → one `packs.yaml`, comments and key order kept. */
-async function planConfig(ctx: StepContext, plan: Plan, resolve: Resolve): Promise<void> {
+async function planConfig(
+  ctx: StepContext,
+  plan: Plan,
+  resolve: Resolve,
+  excluded: readonly string[],
+): Promise<boolean> {
   const home = ctx.v4.home;
   const packKind = await kind(home, join(home, V4_PACK_YAML));
   const guideKind = await kind(home, join(home, V4_MODELS_GUIDE_YAML));
-  if (packKind === 'absent' && guideKind === 'absent') return;
+  if (packKind === 'absent' && guideKind === 'absent') return false;
+  let appended = false;
   const document =
     packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(home, V4_PACK_YAML));
   if (packKind !== 'absent') {
@@ -188,6 +194,8 @@ async function planConfig(ctx: StepContext, plan: Plan, resolve: Resolve): Promi
       const via = pairOf(suggested, 'via')?.value;
       if (isScalar(via) && typeof via.value === 'string') via.value = resolve(via.value);
     }
+    appended = appendExcluded(routing, excluded);
+    if (appended) count(plan, EXCLUDED_LINE_KEPT);
     if (routing.items.length > 0) {
       const key = new Scalar('routing');
       const comment = [guide.commentBefore, routing.commentBefore].filter(text => text != null && text !== '');
@@ -197,7 +205,7 @@ async function planConfig(ctx: StepContext, plan: Plan, resolve: Resolve): Promi
       count(plan, 'routing prompt (from models-guide.yaml)', pairOf(routing, 'prompt') === undefined ? 0 : 1);
     }
   }
-  if (map.items.length === 0) return;
+  if (map.items.length === 0) return false;
   const text = document.toString({ lineWidth: 0 });
   const problem = v5ConfigProblem(PACKS_TARGET, undefined, text);
   if (problem !== undefined)
@@ -217,6 +225,25 @@ async function planConfig(ctx: StepContext, plan: Plan, resolve: Resolve): Promi
       `config/packs.yaml would not mean what ${V4_PACK_YAML} meant; nothing was written (a converter defect: report it)`,
     );
   plan.writes.push(async () => await ctx.v5.config(PACKS_TARGET, undefined, text));
+  return appended;
+}
+
+const EXCLUDED_LINE_KEPT = "routing prompt line naming the runtimes v4's routing.json excluded";
+/** The one line added to the routing prompt (lead decision 2026-11-07, option b): names only, never a reason. */
+const excludedLine = (names: readonly string[]): string =>
+  `Never start a helper on these runtimes (v4's routing catalog excluded them): ${names.join(', ')}.`;
+
+/**
+ * Appends {@link excludedLine} to the guide's own `prompt`. With no prompt nothing is added: v5 then renders one from
+ * the model catalogs, and a prompt holding only this line would replace that whole rendered prompt.
+ */
+function appendExcluded(routing: YAMLMap, excluded: readonly string[]): boolean {
+  if (excluded.length === 0) return false;
+  const prompt = pairOf(routing, 'prompt')?.value;
+  if (!isScalar(prompt) || typeof prompt.value !== 'string' || prompt.value.trim() === '') return false;
+  prompt.value = `${prompt.value.trimEnd()}\n\n${excludedLine(excluded)}`;
+  prompt.type = Scalar.BLOCK_LITERAL;
+  return true;
 }
 
 // ── replaced.json ────────────────────────────────────────────────────────────────────────────────────────────
@@ -463,46 +490,60 @@ async function planSwitches(ctx: StepContext, plan: Plan): Promise<void> {
 
 // ── not carried ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** `config/routing.json`: no v5 home. Named by runtime NAME (M7), never by value. */
-async function planRouting(ctx: StepContext, plan: Plan, names: ReadonlyMap<string, string>): Promise<void> {
+/** What `config/routing.json` says, by runtime NAME (M7): `undefined` when absent, `null` when it does not parse. */
+async function readRouting(ctx: StepContext, names: ReadonlyMap<string, string>) {
   let decoded: unknown;
   try {
     decoded = await readV4Json(ctx.v4.home, join(ctx.v4.home, V4_ROUTING_JSON));
   } catch {
     decoded = null;
   }
-  if (decoded === undefined) return;
+  if (decoded === undefined) return undefined;
   const parsed = V4RoutingCatalog.safeParse(decoded);
-  if (!parsed.success) {
+  if (!parsed.success) return null;
+  const accounts = parsed.data.accounts ?? [];
+  const nameOf = (id: string): string | undefined => names.get(id);
+  const unknown = accounts.filter(account => nameOf(account.accountId) === undefined).length;
+  const list = (filter: (account: (typeof accounts)[number]) => boolean): string[] =>
+    accounts
+      .filter(account => filter(account) && nameOf(account.accountId) !== undefined)
+      .map(account => nameOf(account.accountId) as string)
+      .sort();
+  return {
+    models: parsed.data.models.length,
+    accounts: accounts.length,
+    unknown,
+    excluded: list(account => account.excludedReason !== undefined),
+    preferred: list(account => account.preferredSpend === true),
+  };
+}
+type Routing = Awaited<ReturnType<typeof readRouting>>;
+
+/** `config/routing.json`: no v5 home. Named by runtime NAME (M7), never by value. */
+function planRouting(plan: Plan, routing: Routing, appended: boolean): void {
+  if (routing === undefined) return;
+  if (routing === null) {
     plan.dropped.push({
       what: V4_ROUTING_JSON,
       why: 'it does not read as a v4 routing catalog, so v4 refused to recommend from it; v5 has no routing catalog',
     });
     return;
   }
-  const accounts = parsed.data.accounts ?? [];
-  const nameOf = (id: string): string | undefined => names.get(id);
-  const unknown = accounts.filter(account => nameOf(account.accountId) === undefined).length;
-  const list = (filter: (account: (typeof accounts)[number]) => boolean): string =>
-    accounts
-      .filter(account => filter(account) && nameOf(account.accountId) !== undefined)
-      .map(account => nameOf(account.accountId) as string)
-      .sort()
-      .join(', ');
+  const { models, accounts, unknown, excluded, preferred } = routing;
   plan.dropped.push({
-    what: `${V4_ROUTING_JSON} (${String(parsed.data.models.length)} model(s), ${String(accounts.length)} account(s)${unknown > 0 ? `, ${String(unknown)} naming no v4 runtime` : ''})`,
+    what: `${V4_ROUTING_JSON} (${String(models)} model(s), ${String(accounts)} account(s)${unknown > 0 ? `, ${String(unknown)} naming no v4 runtime` : ''})`,
     why: 'v5 has no routing catalog (§9.2: routing.json is gone): `fy recommend` lists the models usable now and Pack mode picks by the routing prompt (packs.yaml routing.prompt), so the model scores, floors, weights, cost penalties and per-account model options have no v5 field',
   });
-  const excluded = list(account => account.excludedReason !== undefined);
-  if (excluded !== '')
+  if (excluded.length > 0)
     plan.dropped.push({
-      what: `${V4_ROUTING_JSON} excluded runtimes: ${excluded}`,
-      why: 'v4’s recommender never suggested them; v5 lists any ready runtime, so switch it off (`disabled:` in its runtime file) or say so in the routing prompt',
+      what: `${V4_ROUTING_JSON} excluded runtimes: ${excluded.join(', ')}`,
+      why: appended
+        ? 'v4’s recommender never suggested them and v5 has no exclusion list, so one line naming them was added to the end of the routing prompt (packs.yaml routing.prompt); to stop them outright, switch each off (`disabled:` in its runtime file)'
+        : 'v4’s recommender never suggested them; v5 has no exclusion list, and this home has no routing prompt of its own to add a line to (v5 renders one from the model catalogs), so switch each off (`disabled:` in its runtime file) or write a routing prompt that says so',
     });
-  const preferred = list(account => account.preferredSpend === true);
-  if (preferred !== '')
+  if (preferred.length > 0)
     plan.dropped.push({
-      what: `${V4_ROUTING_JSON} preferred-spend runtimes: ${preferred}`,
+      what: `${V4_ROUTING_JSON} preferred-spend runtimes: ${preferred.join(', ')}`,
       why: 'v5 has no spend preference; say it in the routing prompt',
     });
 }
@@ -537,7 +578,8 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
       : (runtimes.find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const names = new Map(runtimes.map(([name, entry]) => [entry.id, name]));
   const plan: Plan = { kept: new Map(), dropped: [], notes: [], writes: [], drafts: 0, running: 0 };
-  await planConfig(ctx, plan, resolve);
+  const routing = await readRouting(ctx, names);
+  const appended = await planConfig(ctx, plan, resolve, routing?.excluded ?? []);
   await planReplaced(ctx, plan);
   await planRuns(ctx, plan, resolve);
   if (plan.drafts > 0)
@@ -550,7 +592,7 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
       `${String(plan.running)} clean-up run(s) were still running in v4: v5 settles each as failed once its ferret has finished, because a v4 builder wrote its rewrite to draft.json, which v5 does not read`,
     );
   await planSwitches(ctx, plan);
-  await planRouting(ctx, plan, names);
+  planRouting(plan, routing, appended);
   await planLeftovers(ctx, plan);
   return plan;
 }
