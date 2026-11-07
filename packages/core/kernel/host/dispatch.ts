@@ -242,18 +242,23 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
+    let executed = false;
     const response = await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call)),
+      run(this.bindings, found.route, () => {
+        executed = true;
+        return handle(call);
+      }),
     );
-    this.recorded({
-      table: 'route',
-      descriptor: found.route,
-      request,
-      params: found.params,
-      decision,
-      status: response.status,
-      response,
-    });
+    if (executed)
+      this.recorded({
+        table: 'route',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
     return response;
   }
 
@@ -307,18 +312,23 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as MemberCallContext;
+    let executed = false;
     const response = await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call)),
+      run(this.bindings, found.route, () => {
+        executed = true;
+        return handle(call);
+      }),
     );
-    this.recorded({
-      table: 'member',
-      descriptor: found.route,
-      request,
-      params: found.params,
-      decision,
-      status: response.status,
-      response,
-    });
+    if (executed)
+      this.recorded({
+        table: 'member',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
     return response;
   }
 
