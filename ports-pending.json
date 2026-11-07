@@ -27,7 +27,7 @@
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)",
-      "GAP(runtimes): ended Codex sessions leave their app-server pair running until Runtimes subscribes to ferrets.changed and runs afterSessionEnded / codexLaunchFailure (packages/plugins/runtimes/daemon/lib/service/codex-runtime.ts)"
+      "GAP(kernel): Runtimes hears ferrets.changed and runs afterSessionEnded / codexLaunchFailure for an ended Codex ferret, but the host offers no process port (list, read, signal) or dead-pane read, so RuntimesAssembly.ended stays unwired and an ended Codex session still leaves its app-server pair running"
     ],
     "warden": [
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",

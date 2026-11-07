@@ -111,6 +111,15 @@ export const RuntimesDefaultChanged = defineEvent(
   z.strictObject({ defaultRuntime: z.string().nullable() }),
 );
 
+/**
+ * A Codex ferret never started, and the pane it died in said why (it could not reach the network). `message` is the
+ * sentence the owner reads; it is fixed text of Ferretry's, never pane text.
+ */
+export const RuntimesLaunchFailed = defineEvent(
+  'runtimes.launch-failed',
+  z.strictObject({ ferret: z.string().min(1), runtime: z.string().min(1), message: z.string().min(1) }),
+);
+
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
 const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;

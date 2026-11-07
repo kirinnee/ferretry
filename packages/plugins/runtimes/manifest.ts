@@ -1,7 +1,7 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { UsagePort } from '@ferretry/plugin-usage/contract';
-import { MOVE_ACCOUNT_SLOT, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
+import { FerretsChanged, MOVE_ACCOUNT_SLOT, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
@@ -14,6 +14,7 @@ import {
   RUNTIMES_WORDS,
   RuntimesChanged,
   RuntimesDefaultChanged,
+  RuntimesLaunchFailed,
   RuntimesPort,
 } from './contract/index.ts';
 
@@ -235,7 +236,9 @@ export default definePlugin({
   data: {
     config: [RUNTIMES_CONFIG, RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS],
     readModels: RUNTIMES_READ_MODELS,
-    publishes: [RuntimesChanged, RuntimesDefaultChanged],
+    publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],
+    // An ended Codex ferret's runtime has its app-server pair stopped, and a Codex that could not start offline says so.
+    subscribes: [FerretsChanged],
     // `items` stays empty: it lists items this package SHIPS. Runtimes are items the owner (or a catalog) installs.
   },
 
