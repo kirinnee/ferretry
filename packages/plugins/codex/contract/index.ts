@@ -97,6 +97,22 @@ export const CODEX_DISCOVERY = defineState({
   schema: DiscoverySchema,
 });
 
+/** Per-ferret rollout provenance: baseline plus an explicitly resumed native conversation id. */
+export const CodexRolloutBindingSchema = z.strictObject({
+  format: z.literal(1),
+  home: z.string(),
+  baseline: z.array(z.string()),
+  native: z.string().optional(),
+});
+export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;
+export const CODEX_ROLLOUTS = defineState({
+  name: 'rollouts',
+  path: 'rollouts/*.json',
+  store: 'json',
+  format: 1,
+  schema: CodexRolloutBindingSchema,
+});
+
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** Today's `machineLoosening` rule for the permission mode, kept word for word. */

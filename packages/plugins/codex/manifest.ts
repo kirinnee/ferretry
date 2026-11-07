@@ -5,6 +5,7 @@ import {
   CODEX_CONFIG,
   CODEX_DISCOVERY,
   CODEX_READ_MODELS,
+  CODEX_ROLLOUTS,
   CODEX_SETTINGS,
   CodexPort,
   CodexUpdateFinished,
@@ -68,7 +69,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [CODEX_AGENT_HOMES, CODEX_DISCOVERY],
+    state: [CODEX_AGENT_HOMES, CODEX_DISCOVERY, CODEX_ROLLOUTS],
     config: [CODEX_CONFIG, CODEX_SETTINGS],
     readModels: CODEX_READ_MODELS,
     publishes: [CodexUpdateFinished],
@@ -84,7 +85,21 @@ export default definePlugin({
   permissions: {
     roots: ['agent-homes', 'harness-history'],
     network: ['registry.npmjs.org'],
-    spawn: ['codex', 'npm', 'pnpm', 'bun', 'volta', 'brew', 'nix'],
+    spawn: [
+      'codex',
+      'npm',
+      'pnpm',
+      'bun',
+      'volta',
+      'brew',
+      'nix',
+      'which',
+      'test',
+      'realpath',
+      'readlink',
+      'printenv',
+      'uname',
+    ],
     secrets: [],
   },
 });

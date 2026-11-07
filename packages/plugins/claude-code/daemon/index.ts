@@ -1,12 +1,120 @@
-import { skeletonDaemon } from '@ferretry/kernel/manifest';
+import type { ConfigFileDef } from '@ferretry/kernel/contract';
+import { implementDaemon } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
+import {
+  CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_DISCOVERY,
+  ClaudeCodeUpdateFinished,
+  type Discovery,
+  type HarnessConfig,
+  type HarnessCliView,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { ClaudeHarness } from './adapters/claude-harness.ts';
+import { PaneDirectory, TmuxPane } from './adapters/tmux-pane.ts';
+import { factsSource, hostFacts, locationSource, npmLatest, probe, spawnRun } from './adapters/update-ports.ts';
+import { DialogAnswerService } from './lib/dialog/service.ts';
+import { PermissionAnswerService } from './lib/permission/service.ts';
+import { dialogRoute, permissionRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
+import { HarnessUpdateService } from './lib/update/service.ts';
+
+/** The product name the verification link is built from. */
+const PRODUCT = 'ferretry';
+
+const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
+
+/** What discovery last found, from a view (never the harness's sign-in files). */
+const discoveryOf = (view: HarnessCliView, checkedAt: Discovery['checkedAt']): Discovery => ({
+  format: 1,
+  checkedAt,
+  location: view.location,
+  installed: view.installed,
+  method: view.method,
+});
 
 /**
- * Skeleton daemon half (§10.3): listed in ports-pending.json until the port lands.
- *
- * GAP (until then): `approvedProjectServers` is written and tested (`lib/project-approvals.ts`) but not served — a
- * skeleton provides nothing, so MCP's optional use of this port is unbound and MCP binds no project server (fail
- * closed). The port binds it as `new ClaudeProjectApprovals(ferret => kernel.roots.root('agent-homes',
- * { subfolder: ferret }))`: this plugin's own home root, never MCP's.
+ * Claude Code's daemon half: the harness it provides to Ferrets, the update view others may read, and the three
+ * governed answers (the update, the permission prompt, the harness dialog). It needs nothing; it reaches the
+ * runner a ferret runs in only through the one Ferrets hands it at a start.
  */
-export default skeletonDaemon(manifest);
+export default implementDaemon(manifest, {
+  build: ({ kernel }) => {
+    const host = hostFacts(kernel.spawn);
+    const location = locationSource(kernel.spawn, () => kernel.config.file(configFile), host);
+    const inner = new HarnessUpdateService({
+      product: PRODUCT,
+      location,
+      facts: factsSource(kernel.spawn, host),
+      probe: probe(kernel.spawn),
+      latest: npmLatest(kernel.fetch, `${PRODUCT} (claude-code plugin)`),
+      run: spawnRun(kernel.spawn),
+      clock: { now: () => kernel.clock.nowMs() },
+      checks: true,
+    });
+    // An update that ends is announced after its write.
+    const update = {
+      view: () => inner.view(),
+      settled: () => inner.settled(),
+      start: async (request: Parameters<HarnessUpdateService['start']>[0]) => {
+        const view = await inner.start(request);
+        void inner.settled().then(async () => {
+          const job = (await inner.view()).job;
+          if (job?.state === 'finished')
+            kernel.events.publish(ClaudeCodeUpdateFinished, {
+              outcome: job.report.outcome,
+              finishedAt: job.report.finishedAt,
+            });
+        });
+        return view;
+      },
+    };
+
+    const panes = new PaneDirectory();
+    const pane = new TmuxPane(kernel.spawn, panes);
+    const sleep = async (ms: number): Promise<void> => await kernel.clock.sleep(milliseconds(ms));
+    const permission = new PermissionAnswerService(pane, sleep);
+    const dialog = new DialogAnswerService(pane, sleep);
+
+    const harness = new ClaudeHarness({
+      roots: kernel.roots,
+      config: kernel.config,
+      spawn: kernel.spawn,
+      clock: kernel.clock,
+      redaction: kernel.redaction,
+      location,
+      probe: probe(kernel.spawn),
+      update,
+      panes,
+      permission,
+      dialog,
+      newConversationId: () => crypto.randomUUID(),
+      historyHome: async () => {
+        const directory = await host.home();
+        return directory.startsWith('/') ? `${directory.replace(/\/+$/u, '')}/.claude` : '';
+      },
+    });
+
+    return {
+      routes: {
+        'GET /v1/claude-code/update': updateViewRoute(update),
+        'POST /v1/claude-code/update': updateStartRoute(update),
+        'POST /v1/ferrets/:ferretId/permission': permissionRoute(permission),
+        'POST /v1/ferrets/:ferretId/dialog': dialogRoute(dialog),
+      },
+      provides: {
+        claudeCode: {
+          view: async () => {
+            const view = await update.view();
+            await kernel.state.write(CLAUDE_CODE_DISCOVERY, discoveryOf(view, kernel.clock.now()));
+            return view;
+          },
+          discovery: async () => {
+            const read = await kernel.state.read(CLAUDE_CODE_DISCOVERY);
+            return read.ok ? read.value : undefined;
+          },
+        },
+      },
+      hooks: { 'harnesses:claude-code': harness },
+    };
+  },
+});
