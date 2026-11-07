@@ -104,7 +104,25 @@ export const ShellPreviewSchema = z.strictObject({
 });
 export type ShellPreview = z.infer<typeof ShellPreviewSchema>;
 
-export const ShellAddedSchema = z.strictObject({ name: ShellNameSchema, lock: ShellLockSchema });
+/** `GET /v1/shells/:name`: the item, what it was locked to (if it was), and its summary. */
+export const ShellDetailSchema = z.strictObject({
+  name: ShellNameSchema,
+  item: ShellItemSchema,
+  lock: ShellLockSchema.optional(),
+  summary: ShellSummarySchema,
+});
+export type ShellDetail = z.infer<typeof ShellDetailSchema>;
+
+/**
+ * `POST /v1/shells`: what was pinned. `held` is present while the owner's yes is still to come: a new shell will run
+ * a nix build, so its item waits in the held list until it is confirmed (§3.2).
+ */
+export const ShellAddedSchema = z.strictObject({
+  name: ShellNameSchema,
+  lock: ShellLockSchema,
+  held: z.array(z.string()).optional(),
+});
+export type ShellAdded = z.infer<typeof ShellAddedSchema>;
 export const ShellRemovedSchema = z.strictObject({ name: ShellNameSchema, removed: z.literal(true) });
 
 export const ShellBuildResultSchema = z.strictObject({
@@ -123,6 +141,10 @@ export const SHELL_CODES = {
   unlocked: 'shell_unlocked',
   hashChanged: 'shell_hash_changed',
   buildFailed: 'shell_build_failed',
+  exists: 'shell_exists',
+  invalid: 'shell_invalid',
+  /** The daemon has no door to write `config/` with, so it can show shells but not change them. */
+  noConfigDoor: 'shell_config_unavailable',
 } as const;
 
 /** `state/shells/cache/<narHash>/`: a built shell's environment; dropped and rebuilt freely. */
