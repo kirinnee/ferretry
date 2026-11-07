@@ -55,7 +55,7 @@ describe('the secret directory', () => {
     should(listed.map(secret => secret.name)).deepEqual(['ALPHA', 'ZETA']);
   });
 
-  it('should answer a summary carrying no value', async () => {
+  it('S2 S6 answer a summary carrying no value', async () => {
     // Act
     const summary = await directory().put('TOKEN', TOKEN);
 
@@ -172,7 +172,7 @@ describe('the redactor', () => {
     should(await redactor.redactData({ a: TOKEN })).deepEqual({ a: '[redacted:TOKEN]' });
   });
 
-  it('should let a damaged vault refuse, because text it cannot scrub must not be served', async () => {
+  it('S19 let a damaged vault refuse, because text it cannot scrub must not be served', async () => {
     // Arrange
     const redactor = new SecretRedactor(
       new SecretVault(
@@ -209,7 +209,7 @@ class CountedDocuments extends MemorySecretDocuments {
 }
 
 describe('a batch of redactions', () => {
-  it('should open the vault ONCE for every string in the batch', async () => {
+  it('S20 open the vault ONCE for every string in the batch', async () => {
     // Arrange
     const documents = new CountedDocuments();
     await directory(documents).put('TOKEN', TOKEN);
@@ -245,7 +245,7 @@ describe('a batch of redactions', () => {
     should(batched[0]).equal('a [redacted:TOKEN] b [redacted:SHORT] c');
   });
 
-  it('should revoke the scrub when the batch ends, so plaintext outlives no call', async () => {
+  it('S20 revoke the scrub when the batch ends, so plaintext outlives no call', async () => {
     // Arrange
     const documents = new MemorySecretDocuments();
     await directory(documents).put('TOKEN', TOKEN);
@@ -298,7 +298,7 @@ describe('a batch of redactions', () => {
 });
 
 describe('the management view', () => {
-  it('should report a ready store with its references resolved', async () => {
+  it('S65 report a ready store with its references resolved', async () => {
     // Arrange
     const documents = new MemorySecretDocuments();
     await directory(documents).put('TOKEN', TOKEN);
@@ -324,7 +324,7 @@ describe('the management view', () => {
     should((await secretListView(directory(), NO_REFERENCES)).references).deepEqual([]);
   });
 
-  it('should report a damaged store as damaged, never as empty', async () => {
+  it('S141 report a damaged store as damaged, never as empty', async () => {
     // Arrange
     const failing = new MemorySecretDocuments(new SecretStoreError('key_missing', 'gone'));
 
@@ -475,7 +475,7 @@ describe('SecretDirectory, changes taking turns', () => {
   });
 
   describe('storing only the names that are missing', () => {
-    it('should store the missing names and leave a held one exactly as it was, timestamps included', async () => {
+    it('S36 S150 store the missing names and leave a held one exactly as it was, timestamps included', async () => {
       // Arrange
       const documents = new MemorySecretDocuments();
       const secrets = directory(documents);
@@ -545,7 +545,7 @@ describe('SecretDirectory, changes taking turns', () => {
       should(batch.stored).deepEqual([]);
     });
 
-    it('should refuse the whole batch, writing nothing, when the missing names would pass the limit', async () => {
+    it('S150 refuse the whole batch, writing nothing, when the missing names would pass the limit', async () => {
       // Arrange
       const documents = new MemorySecretDocuments();
       const full = directory(documents);

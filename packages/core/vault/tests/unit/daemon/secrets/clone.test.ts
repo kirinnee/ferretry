@@ -129,7 +129,7 @@ async function pair(clock = new Clock()) {
 }
 
 describe('copying secrets between machines', () => {
-  it('should open an import signed by the target and carrying only public facts', async () => {
+  it('S153 open an import signed by the target and carrying only public facts', async () => {
     // Arrange
     const { target } = await pair();
 
@@ -151,7 +151,7 @@ describe('copying secrets between machines', () => {
     ]);
   });
 
-  it('should copy the chosen values into the target, and only those', async () => {
+  it('S160 copy the chosen values into the target, and only those', async () => {
     // Arrange
     const { source, target } = await pair();
     const offer = await target.imports.open();
@@ -195,7 +195,7 @@ describe('copying secrets between machines', () => {
       return { target, offer, bundle, values, clock };
     }
 
-    it('should never write it: every held entry stays byte for byte as it was, and the answer says they were kept', async () => {
+    it('S142 S148 never write it: every held entry stays byte for byte as it was, and the answer says they were kept', async () => {
       // Arrange
       const { target, offer, bundle, values } = await held();
       const document = JSON.stringify(await target.documents.read());
@@ -239,7 +239,7 @@ describe('copying secrets between machines', () => {
       should((await new SecretVault(target.documents, new FakeSecretCipher()).values()).get('API_KEY')).equal(OLD_API);
     });
 
-    it('should keep a name that is created after the copy began and before it was filed, and not say it was filed', async () => {
+    it('S150 keep a name that is created after the copy began and before it was filed, and not say it was filed', async () => {
       // Arrange — the key does not exist when the copy is opened; somebody sets it just before the filing turn
       const clock = new Clock();
       const { source, target } = await pair(clock);
@@ -299,7 +299,7 @@ describe('copying secrets between machines', () => {
     });
   });
 
-  it('should refuse a replayed bundle: an import is accepted once', async () => {
+  it('S155 S161 refuse a replayed bundle: an import is accepted once', async () => {
     // Arrange
     const { source, target } = await pair();
     const offer = await target.imports.open();
@@ -313,7 +313,7 @@ describe('copying secrets between machines', () => {
     should(replayed).equal('import_spent');
   });
 
-  it('should refuse a tampered bundle, and spend the import on the attempt', async () => {
+  it('S155 refuse a tampered bundle, and spend the import on the attempt', async () => {
     // Arrange
     const { source, target } = await pair();
     const offer = await target.imports.open();
@@ -331,7 +331,7 @@ describe('copying secrets between machines', () => {
     should(await target.directory.list()).deepEqual([]);
   });
 
-  it('should refuse a bundle whose authenticated header was edited', async () => {
+  it('S155 refuse a bundle whose authenticated header was edited', async () => {
     for (const edit of [
       (bundle: SealedSecretBundle) => ({ ...bundle, names: named('DB_PASSWORD') }),
       (bundle: SealedSecretBundle) => ({ ...bundle, sourceDaemonId: strangerIdentity.daemonId }),
@@ -352,7 +352,7 @@ describe('copying secrets between machines', () => {
     }
   });
 
-  it('should refuse a bundle sealed to another key (the wrong import)', async () => {
+  it('S161 refuse a bundle sealed to another key (the wrong import)', async () => {
     // Arrange
     const { source, target } = await pair();
     const first = await target.imports.open();
@@ -368,7 +368,7 @@ describe('copying secrets between machines', () => {
     should(forFirst).equal('import_spent');
   });
 
-  it('should refuse a bundle for another machine', async () => {
+  it('S161 refuse a bundle for another machine', async () => {
     // Arrange
     const { source, target, clock } = await pair();
     const elsewhere = machine(strangerIdentity, clock);
@@ -383,7 +383,7 @@ describe('copying secrets between machines', () => {
     should(answer).equal('bundle_invalid');
   });
 
-  it('should refuse a bundle that arrives after its import expired', async () => {
+  it('S155 S161 refuse a bundle that arrives after its import expired', async () => {
     // Arrange
     const { source, target, clock } = await pair();
     const offer = await target.imports.open();
@@ -398,7 +398,7 @@ describe('copying secrets between machines', () => {
     should(await target.directory.list()).deepEqual([]);
   });
 
-  it('should call an import it never opened, or swept after expiry, unknown', async () => {
+  it('S153 call an import it never opened, or swept after expiry, unknown', async () => {
     // Arrange
     const { source, target, clock } = await pair();
     const offer = await target.imports.open();
@@ -428,7 +428,7 @@ describe('copying secrets between machines', () => {
     should(await refusal(target.imports.complete(first.importId, {} as SealedSecretBundle))).equal('import_unknown');
   });
 
-  it('should refuse to copy a machine to itself, at either end', async () => {
+  it('S154 refuse to copy a machine to itself, at either end', async () => {
     // Arrange
     const { source, clock } = await pair();
     const offer = await source.imports.open();
@@ -447,7 +447,7 @@ describe('copying secrets between machines', () => {
     should(atTarget).equal('same_machine');
   });
 
-  it('should refuse an offer not signed by the machine it names', async () => {
+  it('S154 refuse an offer not signed by the machine it names', async () => {
     // Arrange
     const { source, target } = await pair();
     const offer = await target.imports.open();
@@ -483,7 +483,7 @@ describe('copying secrets between machines', () => {
     should(answer).equal('offer_invalid');
   });
 
-  it('should refuse an expired offer, and one claiming a longer life than any import has', async () => {
+  it('S154 refuse an expired offer, and one claiming a longer life than any import has', async () => {
     // Arrange
     const { source, target, clock } = await pair();
     const offer = await target.imports.open();
@@ -531,7 +531,7 @@ describe('copying secrets between machines', () => {
     should(answer).equal('offer_invalid');
   });
 
-  it('should refuse a bundle that carries a sign-in token, even one a careless source sealed', async () => {
+  it('S144 S146 refuse a bundle that carries a sign-in token, even one a careless source sealed', async () => {
     // Arrange — the source is forced past the type that keeps a sign-in out of a bundle.
     const { source, target } = await pair();
     const token = 'MCP_LINEAR_0123456789ABCDEF_ACCESS';
@@ -589,7 +589,7 @@ describe('copying secrets between machines', () => {
     should(await target.directory.list()).deepEqual([]);
   });
 
-  it('should copy nothing when the target would be past its limit', async () => {
+  it('S150 copy nothing when the target would be past its limit', async () => {
     // Arrange
     const { source, target } = await pair();
     for (let index = 0; index < MAX_SECRETS_PER_DAEMON; index += 1) await target.directory.put(`HELD_${index}`, VALUE);

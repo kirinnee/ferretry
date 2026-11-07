@@ -58,7 +58,7 @@ describe('the outbound provider authorizer', () => {
     ]);
   });
 
-  it('should refuse a host off the allowlist, plain HTTP or embedded userinfo before opening the vault', async () => {
+  it('S167 refuse a host off the allowlist, plain HTTP or embedded userinfo before opening the vault', async () => {
     // Arrange
     const { vault, transport, authorizer } = holder();
 

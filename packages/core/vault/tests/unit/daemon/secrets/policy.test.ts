@@ -22,7 +22,7 @@ function values(entries: Record<string, string> = { TOKEN }): ReadonlyMap<string
 }
 
 describe('expanding a reference', () => {
-  it('should substitute the value a reference names', () => {
+  it('S62 substitute the value a reference names', () => {
     // Arrange / Act
     const expanded = expandSecretReferences('Bearer ${secret:TOKEN}', values());
 
@@ -34,7 +34,7 @@ describe('expanding a reference', () => {
     should(expandSecretReferences('plain text', values())).equal('plain text');
   });
 
-  it('should refuse rather than substitute an empty string', () => {
+  it('S64 refuse rather than substitute an empty string', () => {
     // Arrange / Act / Assert — the whole point: an empty substitution is a 401 twenty minutes later
     // with nothing to point at.
     should(() => expandSecretReferences('Bearer ${secret:MISSING}', values())).throw(/MISSING/u);
@@ -92,7 +92,7 @@ describe('earning a recipe', () => {
     PLAIN: 'no reference here',
   };
 
-  it('should give a caller only the recipes whose secrets it asked for', () => {
+  it('S63 give a caller only the recipes whose secrets it asked for', () => {
     should(earnedRecipes(RECIPES, ['STAGING_KEY'])).deepEqual({
       STAGING_AUTH: 'Bearer ${secret:STAGING_KEY}',
       PLAIN: 'no reference here',
@@ -114,7 +114,7 @@ describe('earning a recipe', () => {
 });
 
 describe('configured references', () => {
-  it('should name each reference with the entry it came from', () => {
+  it('S65 name each reference with the entry it came from', () => {
     should(configuredReferences({ AUTH: 'Bearer ${secret:TOKEN}' })).deepEqual([
       { name: 'TOKEN', origin: 'config/daemon.json → secretEnvironment.AUTH' },
     ]);
@@ -130,7 +130,7 @@ describe('configured references', () => {
 });
 
 describe('redaction', () => {
-  it('should mask a value wherever it appears', () => {
+  it('S18 mask a value wherever it appears', () => {
     should(redactSecretValues(`before ${TOKEN} after ${TOKEN}`, values())).equal(
       'before [redacted:TOKEN] after [redacted:TOKEN]',
     );

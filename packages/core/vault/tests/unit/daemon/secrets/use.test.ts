@@ -37,7 +37,7 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe('use without read', () => {
-  it('should put the value in the CHILD environment and nowhere else', async () => {
+  it('S3 S5 put the value in the CHILD environment and nowhere else', async () => {
     // Arrange
     const runner = new EchoSecretChildRunner(ENVS, () => 'done');
     const service = useService(await vaultHolding({ TOKEN }), runner);
@@ -51,7 +51,7 @@ describe('use without read', () => {
     should(result.outcome).equal('exited');
   });
 
-  it('should scrub the value out of a command whose whole purpose is to print it', async () => {
+  it('S14 S27 scrub the value out of a command whose whole purpose is to print it', async () => {
     // Arrange — this is the attack a person will actually try: `-- sh -c 'echo $TOKEN'`.
     const runner = new EchoSecretChildRunner(ENVS, env => `${env.TOKEN ?? ''}\n`);
     const service = useService(await vaultHolding({ TOKEN }), runner);
@@ -64,7 +64,7 @@ describe('use without read', () => {
     should(result.stdout).not.containEql(TOKEN);
   });
 
-  it('should scrub stderr as well as stdout', async () => {
+  it('S14 scrub stderr as well as stdout', async () => {
     // Arrange
     const runner: SecretChildRunner = {
       run: async (spec: SecretChildSpec): Promise<SecretChildOutcome> => ({
@@ -85,7 +85,7 @@ describe('use without read', () => {
     should(result.exitCode).equal(1);
   });
 
-  it('should scrub a secret the caller did NOT name, if the child printed it anyway', async () => {
+  it('S27 scrub a secret the caller did NOT name, if the child printed it anyway', async () => {
     // Arrange — redaction masks every value this daemon holds, not only the injected ones, because a
     // value can reach a child's output by a path nobody predicted.
     const runner = new EchoSecretChildRunner(ENVS, () => `leaked ${TOKEN}`);
@@ -98,7 +98,7 @@ describe('use without read', () => {
     should(result.stdout).equal('leaked [redacted:TOKEN]');
   });
 
-  it('should refuse a named secret this daemon does not hold, before spawning anything', async () => {
+  it('S64 refuse a named secret this daemon does not hold, before spawning anything', async () => {
     // Arrange
     const runner = new EchoSecretChildRunner(ENVS);
     const service = useService(await vaultHolding({}), runner);
@@ -141,7 +141,7 @@ describe('use without read', () => {
     should(runner.opened).deepEqual({ TOKEN, AUTH: `Bearer ${TOKEN}` });
   });
 
-  it('should withhold a recipe naming a secret the caller did not ask for', async () => {
+  it('S63 withhold a recipe naming a secret the caller did not ask for', async () => {
     // Arrange
     const runner = new EchoSecretChildRunner(ENVS, () => '');
     const service = useService(await vaultHolding({ TOKEN, OTHER: 'pw-abcdefghij' }), runner, {
