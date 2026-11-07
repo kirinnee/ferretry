@@ -1,0 +1,258 @@
+/* Attention uses rails and part gutters rather than nested cards. The two
+   independent tone families retain the original panel's scanability at 390px. */
+.kt-attn {
+  --attn-tone: var(--muted);
+  --attn-tone-bg: var(--surface-2);
+  --attn-tone-border: var(--border-soft);
+}
+
+.kt-attn[data-kind='permission'] {
+  --attn-tone: var(--warn);
+  --attn-tone-bg: var(--warn-bg);
+  --attn-tone-border: var(--warn-border);
+}
+.kt-attn[data-kind='multiple-choice'] {
+  --attn-tone: var(--accent);
+  --attn-tone-bg: var(--accent-soft);
+  --attn-tone-border: color-mix(in srgb, var(--accent) 38%, var(--surface));
+}
+.kt-attn[data-kind='answer-review'] {
+  --attn-tone: var(--ok);
+  --attn-tone-bg: var(--ok-bg);
+  --attn-tone-border: var(--ok-border);
+}
+.kt-attn[data-kind='open-question'] {
+  --attn-tone: var(--pend);
+  --attn-tone-bg: var(--pend-bg);
+  --attn-tone-border: var(--pend-border);
+}
+.kt-attn[data-kind='task'] {
+  --attn-tone: var(--ok);
+  --attn-tone-bg: var(--ok-bg);
+  --attn-tone-border: var(--ok-border);
+}
+.kt-attn[data-kind='unknown'] {
+  --attn-tone: var(--err);
+  --attn-tone-bg: var(--err-bg);
+  --attn-tone-border: var(--err-border);
+}
+
+.kt-attn-rail {
+  box-shadow: inset var(--stroke) 0 0 0 color-mix(in srgb, var(--attn-tone) 55%, transparent);
+}
+.kt-attn-rail[data-oldest='true'] {
+  box-shadow: inset var(--stroke-heavy) 0 0 0 var(--attn-tone);
+}
+.kt-attn-ink {
+  color: var(--attn-tone);
+}
+.kt-attn-chip {
+  border: var(--stroke) solid var(--attn-tone-border);
+  border-radius: var(--radius-badge);
+  background: var(--attn-tone-bg);
+  color: var(--attn-tone);
+}
+
+.kt-attn-part {
+  --attn-part-ink: var(--faint);
+}
+.kt-attn-part[data-part='why'] {
+  --attn-part-ink: var(--warn);
+}
+.kt-attn-part[data-part='context'] {
+  --attn-part-ink: var(--muted);
+}
+.kt-attn-part[data-part='action'] {
+  --attn-part-ink: var(--accent);
+}
+.kt-attn-part-ink {
+  color: var(--attn-part-ink);
+}
+.kt-attn-part-rail {
+  border-left: var(--divider-width) solid color-mix(in srgb, var(--attn-part-ink) 34%, transparent);
+}
+.kt-attn-prose {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kt-attn-option {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  align-items: flex-start;
+  gap: var(--gap-xs);
+  border: var(--stroke-control) solid var(--attn-tone-border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 8px var(--pad-cell-x);
+  text-align: left;
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  text-transform: none;
+}
+.kt-attn-option:hover:not(:disabled) {
+  border-color: var(--attn-tone);
+  background: var(--attn-tone-bg);
+}
+.kt-attn-option__body {
+  min-width: 0;
+  flex: 1;
+}
+.kt-attn-option__label {
+  display: block;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.kt-attn-option__hint {
+  display: block;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.kt-attn-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--gap-xs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 0 var(--pad-cell-x) 0 0;
+  text-align: left;
+  color: var(--attn-part-ink);
+}
+.kt-attn-toggle:hover {
+  background: var(--surface-2);
+}
+.kt-attn-chevron {
+  flex: none;
+  transition: transform 120ms ease;
+}
+.kt-attn-toggle[aria-expanded='true'] .kt-attn-chevron {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kt-attn-chevron {
+    transition: none;
+  }
+}
+
+/* Every finite answer owns its own swipe surface. This scales from two
+   permission choices to twelve named options without inventing a direction
+   convention that can represent only two of them. */
+.kt-attn-swipe-shell {
+  --swipe-tone: var(--accent);
+  --swipe-bg: var(--accent-soft);
+  --agenda-swipe: 0px;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background: var(--swipe-bg);
+}
+.kt-attn-swipe-shell[data-tone='affirmative'] {
+  --swipe-tone: var(--ok);
+  --swipe-bg: var(--ok-bg);
+}
+.kt-attn-swipe-shell[data-tone='negative'] {
+  --swipe-tone: var(--err);
+  --swipe-bg: var(--err-bg);
+}
+.kt-attn-swipe-reveal {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: 116px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--pad-cell-x);
+  color: var(--swipe-tone);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.kt-attn-swipe-action {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  gap: var(--gap-sm);
+  border: var(--stroke-control) solid color-mix(in srgb, var(--swipe-tone) 35%, var(--border));
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 8px var(--pad-cell-x);
+  text-align: left;
+  color: var(--fg);
+  touch-action: pan-y;
+  transform: translateX(var(--agenda-swipe));
+  transition:
+    transform 150ms ease-out,
+    border-color 120ms ease,
+    background 120ms ease;
+  user-select: none;
+}
+.kt-attn-swipe-action:hover:not(:disabled),
+.kt-attn-swipe-action:focus-visible {
+  border-color: var(--swipe-tone);
+  background: color-mix(in srgb, var(--swipe-bg) 58%, var(--surface));
+}
+.kt-attn-swipe-action:disabled {
+  opacity: 0.62;
+}
+.kt-attn-swipe-action__mark {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke) solid color-mix(in srgb, var(--swipe-tone) 38%, var(--border));
+  border-radius: var(--radius-dot);
+  background: var(--swipe-bg);
+  color: var(--swipe-tone);
+}
+.kt-attn-swipe-action__body {
+  min-width: 0;
+  flex: 1;
+}
+.kt-attn-swipe-action__label,
+.kt-attn-swipe-action__description,
+.kt-attn-swipe-action__hint {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.kt-attn-swipe-action__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.kt-attn-swipe-action__description {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.kt-attn-swipe-action__hint {
+  margin-top: 3px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Reduced motion removes the MOVEMENT, never the gesture: the swipe still
+   submits, it simply stops dragging the card across the screen. Taking the
+   action away instead would delete a reader's only one-handed path. */
+@media (prefers-reduced-motion: reduce) {
+  .kt-attn-swipe-action {
+    transform: none;
+    transition: none;
+  }
+}
