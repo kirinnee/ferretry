@@ -135,7 +135,8 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
       // The composer's reference menus (lead decision Q6): each prefix's owner provides its entries through `reference.catalog`.
-      route('GET /v1/ferrets/:ferretId/references', { ...FERRET, ...READ, ...SECRETS }),
+      // Ungoverned itself, but each provider's own demand (files, terminals, pages) is asked of the caller before it answers.
+      route('GET /v1/ferrets/:ferretId/references', { ...FERRET, ...READ, ...SECRETS, consultsGrants: true }),
       // R267 / G162: an image handle never changes for an append-only transcript, so no `noStore`.
       route('GET /v1/ferrets/:ferretId/transcript-images/:handle', {
         minimum: 'operator',

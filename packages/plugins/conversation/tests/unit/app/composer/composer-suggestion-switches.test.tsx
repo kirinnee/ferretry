@@ -184,6 +184,31 @@ describe('composer suggestion switches', () => {
     expect(skillReads(calls)).toEqual([]);
   });
 
+  test('a Codex ferret’s menu inserts $name, because the composer is told the ferret’s harness', () => {
+    const { client } = recordingClient();
+    const asked = (harness?: 'codex' | 'claude') => {
+      const view = mounted(
+        withClient(
+          <Composer
+            api={api}
+            referenceCatalogs={catalogsOf({ '/': SKILLS, $: SKILLS })}
+            daemon={daemon}
+            ferretId="ferret-a"
+            suggestions={ALL_ON}
+            {...(harness === undefined ? {} : { harness })}
+          />,
+          client,
+        ),
+      );
+      type(view, '/sum');
+      return JSON.stringify(view.toJSON());
+    };
+    expect(asked('codex')).toContain('Codex');
+    expect(asked('codex')).toContain('$summary');
+    expect(asked('claude')).not.toContain('$summary');
+    expect(asked()).not.toContain('$summary');
+  });
+
   test('waits for the host’s in-flight read instead of racing it with a second request', async () => {
     const { client, calls } = recordingClient();
     // The state a reader meets on the first message of every ferret: the page

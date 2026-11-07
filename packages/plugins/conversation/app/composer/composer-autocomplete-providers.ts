@@ -21,7 +21,13 @@
  */
 
 import { formatReference, parseReferenceToken, type Reference } from '@ferretry/app';
-import type { ReferenceCatalogEntry, ReferenceCatalogPrefix, WorkHit, WorkKind } from '../../contract/index.ts';
+import {
+  REFERENCE_CATALOG_FILE_MAX_ENTRIES,
+  type ReferenceCatalogEntry,
+  type ReferenceCatalogPrefix,
+  type WorkHit,
+  type WorkKind,
+} from '../../contract/index.ts';
 import {
   COMPOSER_REFERENCE_TIERS,
   type ComposerAutocompleteCandidate,
@@ -33,6 +39,7 @@ import {
   DEFAULT_COMPOSER_SUGGESTIONS,
 } from './composer-autocomplete.ts';
 import { type ComposerReferenceCatalogReader, readReferenceCatalog } from './composer-reference-catalogs.ts';
+import { assertClientDaemon } from './seam-attachments.ts';
 import { isWorkSearchWords, WORK_SEARCH_DEBOUNCE_MS, workProjectLabel } from './seam-attachments.ts';
 import { type DaemonConnection, type DaemonFerretScope, daemonFerretKey, type WorkSearchPort } from './seam.ts';
 
@@ -169,6 +176,8 @@ const catalogSource = (options: ComposerAutocompleteProvidersOptions): CatalogSo
       const cached = cache.get(key);
       if (cached !== undefined) return cached;
       if (client === undefined) return NO_ENTRIES;
+      // A catalog read goes through ONE daemon's client: a scope naming another daemon would list that ferret's files here.
+      assertClientDaemon(client, scope, 'reference catalog');
       let shared = inFlight.get(key);
       if (shared === undefined) {
         // The read is fenced by its OWN controller: a menu closing mid-read does not cancel the sibling that shares it.
@@ -372,8 +381,8 @@ const UNREPRESENTABLE_FILE_REFERENCE_REASON =
 const FILE_REFERENCE_QUERY_TOO_LONG_NOTICE =
   'File reference queries are limited to 4,096 characters; shorten the path before searching.';
 const DIRECTORY_REFERENCE_PROBE = 'ferretry-reference-probe';
-/** The most entries one catalog answer carries (`REFERENCE_CATALOG_MAX_ENTRIES`). */
-const FILE_LISTING_BOUND = 200;
+/** The most files one directory answer carries: today's bound (`REFERENCE_CATALOG_FILE_MAX_ENTRIES`). */
+const FILE_LISTING_BOUND = REFERENCE_CATALOG_FILE_MAX_ENTRIES;
 
 const selectorNumber = (value: string): number | null => {
   if (!/^[1-9][0-9]*$/u.test(value)) return null;
@@ -513,7 +522,7 @@ const filesProvider = (scope: DaemonFerretScope, source: CatalogSource): Compose
       : 'Optional: add :LINE or :START-END before accepting the file.';
     const bounded =
       entries.length >= FILE_LISTING_BOUND
-        ? `${FILE_LISTING_BOUND} entries shown — enter a directory or refine this segment.`
+        ? `${FILE_LISTING_BOUND.toLocaleString('en-US')} entries shown — enter a directory or refine this segment.`
         : undefined;
     const notice = [bounded, lineHelp].filter(Boolean).join(' ');
     return {

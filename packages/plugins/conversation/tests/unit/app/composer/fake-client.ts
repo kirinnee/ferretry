@@ -1,6 +1,6 @@
 /**
  * A fake of the half's generated client that records every call by route key and answers from a function. It names no
- * daemon: only the shell can record which daemon a client is for, so the scope-mismatch refusals are not driven here.
+ * daemon until a test names one with `noteClientDaemon` (`@ferretry/app/testing`), as the shell does for its clients.
  */
 import { DaemonCallError } from '@ferretry/app';
 import type { ConversationCaller } from '../../../../app/composer/seam.ts';

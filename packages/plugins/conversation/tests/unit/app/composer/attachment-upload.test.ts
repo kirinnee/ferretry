@@ -6,6 +6,7 @@ import {
   validateAttachmentFile,
 } from '../../../../app/composer/attachments.ts';
 import { DaemonCallError, daemonConnection, daemonFerretScope } from '../../../../app/composer/seam.ts';
+import { noteClientDaemon } from '@ferretry/app/testing';
 import { fakeClient, refusal } from './fake-client.ts';
 
 const daemon = daemonConnection('up');
@@ -46,6 +47,15 @@ describe('uploadAttachment', () => {
       message: 'too big',
       code: 'attachment_too_large',
     });
+  });
+
+  test('refuses a scope from another daemon', async () => {
+    const { client, calls } = fakeClient(() => attachment);
+    noteClientDaemon(client, 'up');
+    const other = daemonFerretScope(daemonConnection('other'), 's');
+    await expect(uploadAttachment(client, other, file)).rejects.toThrow('attachment scope must belong');
+    expect(calls).toEqual([]);
+    await expect(uploadAttachment(client, scope, file)).resolves.toBeDefined();
   });
 
   test('refuses an answer that names no attachment', async () => {
