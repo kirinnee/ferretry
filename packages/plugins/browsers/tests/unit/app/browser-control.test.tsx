@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { render, run, runAsync } from '@ferretry/app/testing';
 import { PageChanged } from '../../../contract/index.ts';
-import {
-  type BrowserControl,
-  type ControlPoll,
-  type ControlTimer,
-  useBrowserControl,
-} from '../../../app/hooks/use-browser-control.ts';
+import { type BrowserControl, type ControlTimer, useBrowserControl } from '../../../app/hooks/use-browser-control.ts';
 import {
   askedFor,
   drivingAgentName,
@@ -15,8 +10,9 @@ import {
   takeoverFor,
   withControlView,
 } from '../../../app/lib/browser-control.ts';
-import type { SurfaceControlView } from '../../../app/lib/wire/control.ts';
+import type { SurfaceControlView } from '../../../contract/wire/control.ts';
 import { browserDaemon, recordingClient } from '../../support/app/client.ts';
+import { handPoll } from '../../support/app/poll.ts';
 import { daemonSessionScope } from '../../support/app/scope.ts';
 
 const READ = 'GET /v1/sessions/:sessionId/surfaces/browser/control';
@@ -92,7 +88,7 @@ interface Harness {
   control: () => BrowserControl;
   readonly calls: ReturnType<typeof recordingClient>['calls'];
   readonly heard: ReturnType<typeof recordingClient>['heard'];
-  readonly polls: (() => void)[];
+  readonly poll: ReturnType<typeof handPoll>;
   readonly timers: { callback: () => void; delayMs: number }[];
   readonly unmount: () => void;
 }
@@ -100,19 +96,19 @@ interface Harness {
 const harness = async (answer: (route: string) => unknown, clock = { now: T0 }): Promise<Harness> => {
   const recorded = recordingClient(route => answer(route));
   const daemon = browserDaemon(recorded.client);
-  const polls: (() => void)[] = [];
+  const poll = handPoll();
   const timers: { callback: () => void; delayMs: number }[] = [];
-  const poll: ControlPoll = callback => {
-    polls.push(callback);
-    return () => undefined;
-  };
   const timer: ControlTimer = (callback, delayMs) => {
     timers.push({ callback, delayMs });
     return () => undefined;
   };
   let latest: BrowserControl | undefined;
   const Probe = () => {
-    latest = useBrowserControl(daemonSessionScope(daemon, 'session-a'), daemon, { poll, timer, now: () => clock.now });
+    latest = useBrowserControl(daemonSessionScope(daemon, 'session-a'), daemon, {
+      pollEnvironment: poll.environment,
+      timer,
+      now: () => clock.now,
+    });
     return null;
   };
   let renderer!: ReturnType<typeof render>;
@@ -124,7 +120,7 @@ const harness = async (answer: (route: string) => unknown, clock = { now: T0 }):
     control: () => latest as BrowserControl,
     calls: recorded.calls,
     heard: recorded.heard,
-    polls,
+    poll,
     timers,
     unmount: () => run(() => renderer.unmount()),
   };
@@ -141,20 +137,61 @@ describe('the browser control hook', () => {
     h.unmount();
   });
 
-  it('reads again on this session’s page change and on the safety-net poll, not on another ferret’s', async () => {
+  it('reads again on this session’s page change and on the poll, not on another ferret’s', async () => {
     const h = await harness(() => view());
     const reads = () => h.calls.filter(call => call.route === READ).length;
     expect(reads()).toBe(1);
     await runAsync(async () =>
       h.heard.emit(PageChanged, { ferret: 'session-b', page: 'p1', change: 'opened' } as never),
     );
+    h.poll.advance(1_000);
     expect(reads()).toBe(1);
     await runAsync(async () =>
       h.heard.emit(PageChanged, { ferret: 'session-a', page: 'p1', change: 'opened' } as never),
     );
+    h.poll.advance(1_000);
     expect(reads()).toBe(2);
-    await runAsync(async () => h.polls.at(-1)?.());
-    expect(reads()).toBe(3);
+    h.unmount();
+  });
+
+  it('SF3 reads on an agent driving a page, so the “typing here” chip shows at once', async () => {
+    const h = await harness(() => view());
+    const reads = () => h.calls.filter(call => call.route === READ).length;
+    await runAsync(async () =>
+      h.heard.emit(PageChanged, { ferret: 'session-a', page: 'p1', change: 'driving' } as never),
+    );
+    h.poll.advance(1_000);
+    expect(reads()).toBe(2);
+    h.unmount();
+  });
+
+  it('SF3 polls every ten seconds with no feed, every two minutes while it is live, and never while hidden', async () => {
+    const h = await harness(() => view());
+    const reads = () => h.calls.filter(call => call.route === READ).length;
+    h.poll.advance(30_000);
+    expect(reads()).toBe(4);
+    await runAsync(async () => h.heard.live(true));
+    h.poll.advance(10_000);
+    const afterLive = reads();
+    h.poll.advance(120_000);
+    expect(reads()).toBe(afterLive + 1);
+    h.poll.hide();
+    h.poll.advance(240_000);
+    expect(reads()).toBe(afterLive + 1);
+    await runAsync(async () => h.poll.show());
+    expect(reads()).toBe(afterLive + 2);
+    h.unmount();
+  });
+
+  it('SF3 settles a burst of page changes into one read', async () => {
+    const h = await harness(() => view());
+    const reads = () => h.calls.filter(call => call.route === READ).length;
+    await runAsync(async () => {
+      for (const change of ['opened', 'driving', 'asked'] as const)
+        h.heard.emit(PageChanged, { ferret: 'session-a', page: 'p1', change } as never);
+    });
+    h.poll.advance(1_000);
+    expect(reads()).toBe(2);
     h.unmount();
   });
 

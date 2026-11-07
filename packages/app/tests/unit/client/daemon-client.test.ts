@@ -117,6 +117,24 @@ describe('the guard', () => {
       client.forPackage('board').socket('GET /v1/board/stream', {}, { onFrame: () => {}, onClose: () => {} }),
     ).toThrow('paused');
   });
+
+  test('a socket hears when the daemon accepts the stream, and the close code the stream ended with', async () => {
+    const { transport, client } = daemon(inventoryOf(compiled));
+    await client.start();
+    const heard: string[] = [];
+    client.forPackage('board').socket(
+      'GET /v1/board/stream',
+      {},
+      {
+        onOpen: () => heard.push('open'),
+        onFrame: () => {},
+        onClose: (reason, code) => heard.push(`close ${reason} ${String(code)}`),
+      },
+    );
+    transport.sockets[0]?.listeners.onOpen?.();
+    transport.sockets[0]?.listeners.onClose('invalid input', 1008);
+    expect(heard).toEqual(['open', 'close invalid input 1008']);
+  });
 });
 
 describe('events', () => {

@@ -1,11 +1,7 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { SurfaceNameSchema } from '../../../contract/index.ts';
-
-/** What the owner is asked to do when a surface is handed to them: a short plain sentence, never a secret. */
-const AGENT_TOOL_MAX_ASK_CHARS = 280;
-const AskOwnerMessageSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_ASK_CHARS);
-const AGENT_TOOL_MAX_URL_CHARS = 2_048;
+import { SurfaceNameSchema } from '../wire.ts';
+import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from './limits.ts';
 
 /**
  * Who is driving, has taken over, was handed or was asked to take each page (today's `surface.*` views of

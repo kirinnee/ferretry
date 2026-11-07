@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import type { BrowserAction, BrowserStatus } from '../../../../app/lib/wire/browser.ts';
+import type { BrowserAction, BrowserStatus } from '../../../../contract/wire/browser.ts';
 import { paneState } from '../../../support/app/browser-pane-state.ts';
 import { type ComponentType, useCallback, useEffect, useState } from 'react';
 import type { InAppBrowserFrameProps } from '../../../../app/features/browser/in-app-browser.tsx';

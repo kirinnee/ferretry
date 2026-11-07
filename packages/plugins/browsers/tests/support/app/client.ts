@@ -24,13 +24,24 @@ export interface Heard {
   /** Delivers an event to everyone listening for it. */
   readonly emit: <Payload>(event: EventDef<string, Payload>, payload: Payload) => void;
   readonly listening: () => number;
+  /** Says whether the event feed is live, to everyone watching it. */
+  readonly live: (live: boolean) => void;
 }
 
 /** Answers each call from `reply`; a reply that is an `Error` is thrown, as the shell throws a refusal. */
 export function recordingClient(reply: (route: string, init: Init | undefined) => unknown | Promise<unknown>) {
   const calls: RecordedCall[] = [];
   const listeners = new Map<string, Set<(payload: never) => void>>();
+  const liveListeners = new Set<(live: boolean) => void>();
+  let feedLive = false;
   const client: PluginClient = {
+    feed: {
+      isLive: () => feedLive,
+      subscribeLive: listener => {
+        liveListeners.add(listener);
+        return () => void liveListeners.delete(listener);
+      },
+    },
     call: async <Answer>(route: string, init?: Init): Promise<Answer> => {
       calls.push(init === undefined ? { route } : { route, init });
       const answer = await reply(route, init);
@@ -49,6 +60,11 @@ export function recordingClient(reply: (route: string, init: Init | undefined) =
       for (const listener of [...(listeners.get(event.name) ?? [])]) (listener as (payload: unknown) => void)(payload);
     },
     listening: () => [...listeners.values()].reduce((sum, set) => sum + set.size, 0),
+    live: live => {
+      if (live === feedLive) return;
+      feedLive = live;
+      for (const listener of [...liveListeners]) listener(live);
+    },
   };
   return { calls, client, heard };
 }
@@ -68,7 +84,7 @@ export function socketClient(reply: (route: string, init: Init | undefined) => u
   const base = recordingClient(reply);
   const opened: { key: string; params: Readonly<Record<string, string>> }[] = [];
   const sent: (string | Uint8Array)[] = [];
-  const closes: number[] = [];
+  const closes: { readonly code?: number; readonly reason?: string }[] = [];
   let listeners: SocketListeners | undefined;
   const client: PluginClient & {
     socket(key: string, params: Readonly<Record<string, string>>, given: SocketListeners): TransportSocket;
@@ -77,7 +93,7 @@ export function socketClient(reply: (route: string, init: Init | undefined) => u
     socket: (key, params, given): TransportSocket => {
       opened.push({ key, params });
       listeners = given;
-      return { send: frame => sent.push(frame), close: () => closes.push(1) };
+      return { send: frame => sent.push(frame), close: (code, reason) => closes.push({ code, reason }) };
     },
   };
   return {
@@ -88,8 +104,10 @@ export function socketClient(reply: (route: string, init: Init | undefined) => u
     closes,
     /** The daemon's side of the open socket. */
     daemon: {
+      /** The daemon accepted the stream. */
+      open: () => listeners?.onOpen?.(),
       frame: (frame: string | Uint8Array) => listeners?.onFrame(frame),
-      close: (reason: string) => listeners?.onClose(reason),
+      close: (reason: string, code?: number) => listeners?.onClose(reason, code),
     },
   };
 }

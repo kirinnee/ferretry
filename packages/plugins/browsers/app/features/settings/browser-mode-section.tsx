@@ -1,7 +1,6 @@
-import { Button } from '@ferretry/app/ui';
+import { Button, RadioChoices, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { BrowserMode } from '../../../contract/index.ts';
-import { RadioChoices, SetupNote, SetupSection } from './setup-ui.tsx';
 
 /** "Browser mode" (docs/browser-mode.md): each choice's words. */
 const BROWSER_MODE_WORDS: Readonly<Record<BrowserMode, { readonly title: string; readonly detail: string }>> = {
@@ -16,8 +15,17 @@ const BROWSER_MODE_WORDS: Readonly<Record<BrowserMode, { readonly title: string;
   },
 };
 
-/** What saving a change answered: it took, or one sentence on why it did not. */
-export type SaveOutcome = { readonly kind: 'saved' } | { readonly kind: 'refused'; readonly sentence: string };
+/** The sentence for a change the daemon holds until the owner confirms it (it loosens what this machine allows). */
+export const HELD_CHANGE_SENTENCE = 'Saved, but not in effect until you confirm it.';
+
+/**
+ * What saving a change answered: it took, the daemon holds it until the owner confirms it (the earlier setting stays in
+ * effect), or one sentence on why it did not.
+ */
+export type SaveOutcome =
+  | { readonly kind: 'saved' }
+  | { readonly kind: 'pending'; readonly sentence: string }
+  | { readonly kind: 'refused'; readonly sentence: string };
 
 export function BrowserModeSection({
   mode,
@@ -57,6 +65,11 @@ export function BrowserModeSection({
       </p>
       {outcome?.kind === 'refused' ? (
         <SetupNote live tone="warn" name="browser-mode-refusal">
+          {outcome.sentence}
+        </SetupNote>
+      ) : null}
+      {outcome?.kind === 'pending' ? (
+        <SetupNote live tone="warn" name="browser-mode-held">
           {outcome.sentence}
         </SetupNote>
       ) : null}

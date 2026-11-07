@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as browser from '../../../../daemon/pages/wire/browser.ts';
+import * as browser from '../../../../contract/wire/browser.ts';
 import type {
   BrowserAction,
   BrowserActionResult,
@@ -14,7 +14,7 @@ import type {
   BrowserScreencastFrame,
   BrowserStatus,
   BrowserViewport,
-} from '../../../../daemon/pages/wire/browser.ts';
+} from '../../../../contract/wire/browser.ts';
 import type { BrowserProxySetting, BrowserProxyStatus } from '../../../../contract/index.ts';
 import { INSTANT, LATER_INSTANT } from '../../../support/fixtures.ts';
 import {

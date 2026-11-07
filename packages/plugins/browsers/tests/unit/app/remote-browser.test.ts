@@ -20,8 +20,8 @@ import {
   remoteViewportForContainer,
   runRemoteBrowserAction,
 } from '../../../app/lib/remote-browser.ts';
-import type { BrowserStatus } from '../../../app/lib/wire/browser.ts';
-import { encodeBrowserStreamChunks } from '../../../app/lib/wire/stream.ts';
+import type { BrowserStatus } from '../../../contract/wire/browser.ts';
+import { encodeBrowserStreamChunks } from '../../../contract/wire/stream.ts';
 import { browserDaemon, daemonConnection, recordingClient, refusal, socketClient } from '../../support/app/client.ts';
 import { daemonSessionScope } from '../../support/app/scope.ts';
 
@@ -111,6 +111,7 @@ describe('remote browser transport', () => {
     const socket = remoteBrowserSocketFactory(daemon, scope);
     const events = recordEvents(socket);
     expect(sockets.opened).toEqual([{ key: STREAM, params: { sessionId: 'same/session' } }]);
+    sockets.daemon.open();
     expect(socket.readyState).toBe(1);
 
     // A frame cut into chunks arrives as one whole envelope; text from the daemon is ignored.
@@ -138,6 +139,7 @@ describe('remote browser transport', () => {
     const daemon = browserDaemon(sockets.client);
     const socket = remoteBrowserSocketFactory(daemon, daemonSessionScope(daemon, 'same/session'));
     const long = JSON.stringify({ kind: 'insertText', text: 'é'.repeat(5_000) });
+    sockets.daemon.open();
     socket.send('{"kind":"insertText","text":"hi"}');
     socket.send(long);
     expect(sockets.sent).toEqual(['{"kind":"insertText","text":"hi"}', long]);
@@ -164,6 +166,47 @@ describe('remote browser transport', () => {
     expect(events.closes).toHaveLength(1);
   });
 
+  it('SF1 is not open, and reports no input as delivered, until the daemon accepts the stream', () => {
+    const sockets = socketClient();
+    const daemon = browserDaemon(sockets.client);
+    const socket = remoteBrowserSocketFactory(daemon, daemonSessionScope(daemon, 'same/session'));
+    const events = recordEvents(socket);
+    expect(socket.readyState).toBe(0);
+    socket.send('{"kind":"insertText","text":"early"}');
+    expect(sockets.sent).toEqual([]);
+    expect(events.types).toEqual([]);
+    sockets.daemon.open();
+    expect(socket.readyState).toBe(1);
+    expect(events.types).toEqual(['open']);
+    socket.send('{"kind":"insertText","text":"late"}');
+    expect(sockets.sent).toEqual(['{"kind":"insertText","text":"late"}']);
+  });
+
+  it('SF1 passes the daemon’s close code through: 1008 stops with its reason, 1013 may be asked again', () => {
+    const closeWith = (code: number, reason: string) => {
+      const sockets = socketClient();
+      const daemon = browserDaemon(sockets.client);
+      const socket = remoteBrowserSocketFactory(daemon, daemonSessionScope(daemon, 'same/session'));
+      const events = recordEvents(socket);
+      sockets.daemon.open();
+      sockets.daemon.close(reason, code);
+      return events;
+    };
+    expect(closeWith(1008, 'invalid browser input').closes).toEqual([{ code: 1008, reason: 'invalid browser input' }]);
+    expect(closeWith(1013, 'browser viewer fell behind').closes).toEqual([
+      { code: 1013, reason: 'browser viewer fell behind' },
+    ]);
+  });
+
+  it('SF1 keeps the viewer’s own close code and reason on its way to the daemon', () => {
+    const sockets = socketClient();
+    const daemon = browserDaemon(sockets.client);
+    const socket = remoteBrowserSocketFactory(daemon, daemonSessionScope(daemon, 'same/session'));
+    sockets.daemon.open();
+    socket.close(1001, 'page hidden');
+    expect(sockets.closes).toEqual([{ code: 1001, reason: 'page hidden' }]);
+  });
+
   it('tells a refusal it may retry from one it may not, and a carrier that failed from both', () => {
     const closeFor = (reason: string) => {
       const sockets = socketClient();
@@ -174,7 +217,7 @@ describe('remote browser transport', () => {
       return events;
     };
     const forbidden = closeFor('the daemon refused this stream: 403');
-    expect(forbidden.types).toEqual(['open', 'error', 'close']);
+    expect(forbidden.types).toEqual(['error', 'close']);
     expect(forbidden.closes[0]?.code).toBe(1008);
     expect(closeFor('the daemon refused this stream: 401').closes[0]?.code).toBe(1008);
     expect(closeFor('the daemon refused this stream: 409').closes[0]?.code).toBe(1011);

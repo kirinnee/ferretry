@@ -11,7 +11,7 @@ import { createElement, type FunctionComponent, Suspense } from 'react';
 import type { PanelProps, RendererProps, SettingsProps } from '@ferretry/kernel/manifest';
 import app from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
-import type { BrowserAction, BrowserStatus } from '../../../app/lib/wire/browser.ts';
+import type { BrowserAction, BrowserStatus } from '../../../contract/wire/browser.ts';
 import { InAppBrowserSheet, InAppBrowserSurface } from '../../../app/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../../../app/features/browser/in-app-browser-model.ts';
 import { RemoteBrowserPageTabs } from '../../../app/features/browser/remote-browser-chrome.tsx';

@@ -14,7 +14,7 @@
  * An unread status says so rather than claiming the browser is empty.
  */
 
-import type { BrowserPageSummary, BrowserStatus } from '../../lib/wire/browser.ts';
+import type { BrowserPageSummary, BrowserStatus } from '../../../contract/wire/browser.ts';
 import { EyeOff, Globe2, Plus, X } from 'lucide-react';
 import { remotePageLabel } from '../../lib/remote-browser.ts';
 /** An agent acting on a page right now, by the name a person calls it. */

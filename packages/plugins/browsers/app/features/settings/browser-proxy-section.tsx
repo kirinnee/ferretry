@@ -1,10 +1,9 @@
-import { Button } from '@ferretry/app/ui';
+import { Button, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
 import { type CallClient, listSecretNames, putSecret, reasonOf } from '../../lib/clients.ts';
 import type { SaveOutcome } from './browser-mode-section.tsx';
-import { SetupNote, SetupSection } from './setup-ui.tsx';
 import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
 import { BrowserProxyCredential } from './browser-proxy-credential.tsx';
@@ -184,7 +183,8 @@ export function BrowserProxySection({
       const result = await save(setting);
       setSaving(false);
       setSaveOutcome(result);
-      if (result.kind === 'refused') return;
+      // A held setting is not the saved one yet, so there is nothing saved to try.
+      if (result.kind !== 'saved') return;
       if (setting !== null) await runTest({});
     })();
   };
@@ -330,6 +330,11 @@ export function BrowserProxySection({
         <div className="flex min-w-0 flex-col gap-2" data-browser-proxy-save-panel="">
           {saveOutcome?.kind === 'refused' ? (
             <SetupNote live tone="warn" name="browser-proxy-save-refusal">
+              {saveOutcome.sentence}
+            </SetupNote>
+          ) : null}
+          {saveOutcome?.kind === 'pending' ? (
+            <SetupNote live tone="warn" name="browser-proxy-held">
               {saveOutcome.sentence}
             </SetupNote>
           ) : null}

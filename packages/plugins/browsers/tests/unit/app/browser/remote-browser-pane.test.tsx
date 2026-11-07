@@ -4,7 +4,7 @@ import type {
   BrowserActionResult,
   BrowserInputEvent,
   BrowserStatus,
-} from '../../../../app/lib/wire/browser.ts';
+} from '../../../../contract/wire/browser.ts';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   type RemoteBrowserDelay,

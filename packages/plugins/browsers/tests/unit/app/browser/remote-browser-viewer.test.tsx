@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { BrowserInputEvent, BrowserStatus } from '../../../../app/lib/wire/browser.ts';
-import { encodeBrowserStreamChunks } from '../../../../app/lib/wire/stream.ts';
+import type { BrowserInputEvent, BrowserStatus } from '../../../../contract/wire/browser.ts';
+import { encodeBrowserStreamChunks } from '../../../../contract/wire/stream.ts';
 import type { ReactNode } from 'react';
 import { useLayoutEffect } from 'react';
 import type { TestRendererOptions } from 'react-test-renderer';

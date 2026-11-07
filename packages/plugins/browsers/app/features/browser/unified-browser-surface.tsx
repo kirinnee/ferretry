@@ -41,7 +41,7 @@
  * published pane view and the pixels behind it are credentialed and do not.
  */
 
-import type { BrowserAction } from '../../lib/wire/browser.ts';
+import type { BrowserAction } from '../../../contract/wire/browser.ts';
 import {
   ArrowLeft,
   ArrowRight,

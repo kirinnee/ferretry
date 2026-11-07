@@ -8,8 +8,12 @@ import {
   type BrowserPageSummary,
   type BrowserStatus,
   BrowserStatusSchema,
-} from './wire/browser.ts';
-import { assembleBrowserStream, type BrowserStreamAssembly, EMPTY_BROWSER_STREAM_ASSEMBLY } from './wire/stream.ts';
+} from '../../contract/wire/browser.ts';
+import {
+  assembleBrowserStream,
+  type BrowserStreamAssembly,
+  EMPTY_BROWSER_STREAM_ASSEMBLY,
+} from '../../contract/wire/stream.ts';
 import { type BrowserDaemon, type BrowserSessionScope, canOpenSocket } from './scope.ts';
 
 /**
@@ -154,7 +158,7 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
   readonly #listeners = new Map<string, ((event: Event) => void)[]>();
   /** What happened before anyone listened for it: the socket opens inside the factory, the viewer listens after. */
   readonly #unheard = new Map<string, Event[]>();
-  #handle: { send(frame: string): void; close(): void } | undefined;
+  #handle: { send(frame: string): void; close(code?: number, reason?: string): void } | undefined;
   #assembly: BrowserStreamAssembly = EMPTY_BROWSER_STREAM_ASSEMBLY;
 
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void {
@@ -177,12 +181,10 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
   close(code = 1000, reason = 'viewer detached'): void {
     if (this.readyState === SOCKET_CLOSED) return;
     this.readyState = SOCKET_CLOSED;
-    void code;
-    void reason;
-    this.#handle?.close();
+    this.#handle?.close(code, reason);
   }
 
-  attach(handle: { send(frame: string): void; close(): void }): void {
+  attach(handle: { send(frame: string): void; close(code?: number, reason?: string): void }): void {
     this.#handle = handle;
     if (this.readyState === SOCKET_CLOSED) handle.close();
   }
@@ -212,8 +214,16 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
     }
   }
 
-  /** The shell's socket reports a close as a sentence; a daemon refusal carries its status in it. */
-  ended(reason: string): void {
+  /**
+   * The stream ended. A stream the daemon (or the carrier) closed carries its close code, passed through as it came:
+   * `1008` stops the viewer with its reason, `1013` or `1011` lets it ask again. A stream that never opened has no
+   * code, only a sentence, and a daemon refusal carries its status in it.
+   */
+  ended(reason: string, code?: number): void {
+    if (code !== undefined) {
+      this.#ended(code, reason);
+      return;
+    }
     const refused = REFUSED_STREAM.exec(reason);
     if (refused !== null) {
       this.#emit('error', new Event('error'));
@@ -256,11 +266,11 @@ export const remoteBrowserSocketFactory: RemoteBrowserSocketFactory = (daemon, s
   try {
     socket.attach(
       daemon.client.socket(SESSION_BROWSER_ROUTES.stream, sessionParams(scope), {
+        onOpen: () => socket.opened(),
         onFrame: frame => socket.receive(frame),
-        onClose: reason => socket.ended(reason),
+        onClose: (reason, code) => socket.ended(reason, code),
       }),
     );
-    socket.opened();
   } catch (caught) {
     socket.failed(caught instanceof Error ? caught.message : 'the display stream did not open');
   }

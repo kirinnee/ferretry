@@ -11,7 +11,7 @@
  * A lower-ranked fact never hides a higher one; it waits in the menu.
  */
 
-import type { BrowserChallenge, BrowserStatus } from '../../lib/wire/browser.ts';
+import type { BrowserChallenge, BrowserStatus } from '../../../contract/wire/browser.ts';
 
 import { remoteBrowserPage, type RemoteBrowserConnection } from './remote-browser-chrome.tsx';
 import type { BrowserEngine } from './unified-browser-model.ts';

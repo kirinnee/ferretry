@@ -15,7 +15,7 @@
  * pane is the same from a phone away from home as on the LAN.
  */
 
-import type { BrowserAction, BrowserStatus } from '../../lib/wire/browser.ts';
+import type { BrowserAction, BrowserStatus } from '../../../contract/wire/browser.ts';
 import { Monitor } from 'lucide-react';
 import type {
   FormEvent,

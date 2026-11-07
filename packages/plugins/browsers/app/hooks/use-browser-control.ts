@@ -5,8 +5,9 @@
  * reads that for one session and answers per page:
  *
  *   READ     `GET /v1/sessions/:sessionId/surfaces/browser/control` when the panel opens, again on every
- *            `browsers.page-changed` event of the session, and every {@link BROWSER_CONTROL_POLL_MS} as the safety
- *            net. That read is what makes a takeover survive a reload: the daemon keeps it and the page asks.
+ *            `browsers.page-changed` event of the session (the agent driving included), and every
+ *            {@link PAGE_POLL_MS} while there is no live feed or {@link PAGE_LIVE_POLL_MS} as the safety net while
+ *            there is, never while the tab is hidden (`startFeedAwarePoll`). That read is what makes a takeover survive a reload: the daemon keeps it and the page asks.
  *   LAPSE    a driving marker carries `until` and is shown only while `now < until`; a timer re-renders the moment
  *            the next one lapses, because no event says so.
  *   CONTROL  Take over / Hand back post `{ action, key }` to the same route; its answer is the whole view and
@@ -17,8 +18,9 @@
  * control the daemon would refuse is worse than none.
  */
 
+import { type FeedAwarePollEnvironment, startFeedAwarePoll } from '@ferretry/app';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PageChanged, SurfaceControlRequestSchema } from '../../contract/index.ts';
+import { SurfaceControlRequestSchema } from '../../contract/index.ts';
 import {
   askedFor,
   drivingAgentName,
@@ -27,25 +29,25 @@ import {
   takeoverFor,
   withControlView,
 } from '../lib/browser-control.ts';
+import { PAGE_LIVE_POLL_MS, PAGE_POLL_MS, pageChangeFeed } from '../lib/page-feed.ts';
 import type { BrowserDaemon, BrowserSessionScope } from '../lib/scope.ts';
-import { type SurfaceControlView, SurfaceControlViewSchema } from '../lib/wire/control.ts';
+import { type SurfaceControlView, SurfaceControlViewSchema } from '../../contract/wire/control.ts';
 
 export const BROWSER_CONTROL_ROUTES = {
   read: 'GET /v1/sessions/:sessionId/surfaces/browser/control',
   act: 'POST /v1/sessions/:sessionId/surfaces/browser/control',
 } as const;
 
-/** The safety-net re-read; changes arrive as `browsers.page-changed` events. */
-export const BROWSER_CONTROL_POLL_MS = 30_000;
-
 /** A one-shot timer, injectable so a suite drives the lapse without waiting for it. */
 export type ControlTimer = (callback: () => void, delayMs: number) => () => void;
-/** A repeat, injectable for the same reason. */
-export type ControlPoll = (callback: () => void, intervalMs: number) => () => void;
 
 export interface BrowserControlDependencies {
+  /** The cadence while no live feed says what changed. */
   readonly pollMs?: number;
-  readonly poll?: ControlPoll;
+  /** The safety-net cadence while the feed is live. */
+  readonly livePollMs?: number;
+  /** The poll's timers and the tab's visibility; the browser's when absent. */
+  readonly pollEnvironment?: FeedAwarePollEnvironment;
   readonly now?: () => number;
   readonly timer?: ControlTimer;
 }
@@ -66,10 +68,6 @@ const defaultTimer: ControlTimer = (callback, delayMs) => {
   const handle = setTimeout(callback, delayMs);
   return () => clearTimeout(handle);
 };
-const defaultPoll: ControlPoll = (callback, intervalMs) => {
-  const handle = setInterval(callback, intervalMs);
-  return () => clearInterval(handle);
-};
 
 const failureOf = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
@@ -82,8 +80,9 @@ export function useBrowserControl(
   const [failure, setFailure] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [, setLapses] = useState(0);
-  const pollMs = dependencies?.pollMs ?? BROWSER_CONTROL_POLL_MS;
-  const poll = dependencies?.poll ?? defaultPoll;
+  const pollMs = dependencies?.pollMs ?? PAGE_POLL_MS;
+  const livePollMs = dependencies?.livePollMs ?? PAGE_LIVE_POLL_MS;
+  const pollEnvironment = dependencies?.pollEnvironment;
   const now = dependencies?.now ?? Date.now;
   const timer = dependencies?.timer ?? defaultTimer;
   /** Bumped on every re-scope, so an answer for the previous session is dropped, not shown. */
@@ -106,16 +105,15 @@ export function useBrowserControl(
           // Unread or refused (no grant) proves nothing, and stays unread: no marker, no control.
         });
     };
-    read();
-    const cancelPoll = poll(read, pollMs);
-    const cancelEvents = daemon.client.subscribe(PageChanged, change => {
-      if (change.ferret === scope.sessionId) read();
+    return startFeedAwarePoll({
+      read,
+      everyMs: pollMs,
+      liveEveryMs: livePollMs,
+      relevant: () => true,
+      feed: pageChangeFeed(daemon.client, scope.sessionId),
+      ...(pollEnvironment === undefined ? {} : { environment: pollEnvironment }),
     });
-    return () => {
-      cancelPoll();
-      cancelEvents();
-    };
-  }, [daemon, scope.sessionId, poll, pollMs]);
+  }, [daemon, scope.sessionId, pollMs, livePollMs, pollEnvironment]);
 
   // Re-render when the next driving marker lapses, since nothing else will say so.
   const lapse = nextDrivingLapse(view, now());

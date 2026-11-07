@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { Instant } from '@ferretry/std';
 import type { ReactTestInstance } from 'react-test-renderer';
-import type { BrowserAction, BrowserStatus } from '../../../../app/lib/wire/browser.ts';
+import type { BrowserAction, BrowserStatus } from '../../../../contract/wire/browser.ts';
 
 import {
   RemoteBrowserControls,

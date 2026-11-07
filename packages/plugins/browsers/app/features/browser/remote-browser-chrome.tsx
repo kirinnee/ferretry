@@ -25,7 +25,12 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import type { BrowserAction, BrowserPageSummary, BrowserProxyStatus, BrowserStatus } from '../../lib/wire/browser.ts';
+import type {
+  BrowserAction,
+  BrowserPageSummary,
+  BrowserProxyStatus,
+  BrowserStatus,
+} from '../../../contract/wire/browser.ts';
 
 import { remotePageLabel, type RemoteViewportMode } from '../../lib/remote-browser.ts';
 import { Badge, Button } from '@ferretry/app/ui';

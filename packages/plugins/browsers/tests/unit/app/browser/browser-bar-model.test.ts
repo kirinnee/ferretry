@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { BrowserStatus } from '../../../../app/lib/wire/browser.ts';
+import type { BrowserStatus } from '../../../../contract/wire/browser.ts';
 import {
   browserChip,
   compactAddress,

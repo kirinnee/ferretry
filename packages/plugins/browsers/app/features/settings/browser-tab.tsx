@@ -19,10 +19,10 @@ import {
   readBrowsersConfig,
   writeBrowsersConfig,
 } from '../../lib/browsers-config.ts';
-import { BrowserModeSection, type SaveOutcome } from './browser-mode-section.tsx';
+import { BrowserModeSection, HELD_CHANGE_SENTENCE, type SaveOutcome } from './browser-mode-section.tsx';
 import { BrowserProxySection } from './browser-proxy-section.tsx';
 import { BrowserStateLine } from './browser-state-line.tsx';
-import { SetupNote, SetupSection } from './setup-ui.tsx';
+import { SetupNote, SetupSection } from '@ferretry/app/ui';
 
 /** Honest about the one thing the browser changes about itself. */
 export const BROWSER_USER_AGENT_WORDS =
@@ -56,13 +56,15 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
     async (change: BrowsersChange): Promise<SaveOutcome> => {
       if (reading.kind !== 'shown')
         return { kind: 'refused', sentence: 'This machine’s browser settings are not loaded.' };
+      let written: 'applied' | 'pending';
       try {
-        await writeBrowsersConfig(client, reading.document, change);
+        written = await writeBrowsersConfig(client, reading.document, change);
       } catch (caught) {
         return { kind: 'refused', sentence: reasonOf(caught) };
       }
+      // What is in effect is the daemon's to say, so the file is read again rather than guessed.
       load();
-      return { kind: 'saved' };
+      return written === 'pending' ? { kind: 'pending', sentence: HELD_CHANGE_SENTENCE } : { kind: 'saved' };
     },
     [client, reading, load],
   );

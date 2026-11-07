@@ -8,7 +8,7 @@
  * that merely embeds a widget can be.
  */
 
-import type { BrowserChallenge, BrowserChallengeProvider, BrowserStatus } from '../../lib/wire/browser.ts';
+import type { BrowserChallenge, BrowserChallengeProvider, BrowserStatus } from '../../../contract/wire/browser.ts';
 import { ShieldAlert } from 'lucide-react';
 
 /** Who is asking, in the words a person knows them by. `other` names nobody. */

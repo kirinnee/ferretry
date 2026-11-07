@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { BrowserStatus } from '../../../../app/lib/wire/browser.ts';
+import type { BrowserStatus } from '../../../../contract/wire/browser.ts';
 import { BrowserChallengeBanner, shownChallenge } from '../../../../app/features/browser/browser-challenge-banner.tsx';
 import { render } from '@ferretry/app/testing';
 

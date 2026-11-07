@@ -1,6 +1,6 @@
+import { SetupNote } from '@ferretry/app/ui';
 import type { z } from 'zod';
 import type { BrowserProxyErrorClassSchema, BrowserProxyTestResult } from '../../../contract/index.ts';
-import { SetupNote } from './setup-ui.tsx';
 
 type BrowserProxyErrorClass = z.infer<typeof BrowserProxyErrorClassSchema>;
 

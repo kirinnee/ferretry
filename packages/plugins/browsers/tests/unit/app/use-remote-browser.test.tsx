@@ -9,7 +9,7 @@ import {
   useRemoteBrowser,
 } from '../../../app/hooks/use-remote-browser.ts';
 import type { BrowserDaemon as DaemonConnection } from '../../../app/lib/scope.ts';
-import type { BrowserAction, BrowserActionResult, BrowserStatus } from '../../../app/lib/wire/browser.ts';
+import type { BrowserAction, BrowserActionResult, BrowserStatus } from '../../../contract/wire/browser.ts';
 import { daemonConnection } from '../../support/app/client.ts';
 import { daemonSessionScope } from '../../support/app/scope.ts';
 

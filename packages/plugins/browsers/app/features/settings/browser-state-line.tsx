@@ -1,9 +1,8 @@
-import { Button } from '@ferretry/app/ui';
+import { Button, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { BrowserStateView, LOOPBACK_FIREWALL_STATES } from '../../../contract/index.ts';
 import type { CallClient } from '../../lib/clients.ts';
 import { readBrowserState } from './browser-proxy-api.ts';
-import { SetupNote, SetupSection } from './setup-ui.tsx';
 
 /** The one sentence the status line shows: whether the shared browser runs, and how its traffic leaves. */
 export const browserStateSentence = (view: BrowserStateView, savedProxy: boolean): string => {

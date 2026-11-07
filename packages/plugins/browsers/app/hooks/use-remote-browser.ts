@@ -14,7 +14,7 @@
  * and invalidates every request already in flight.
  */
 
-import type { BrowserAction, BrowserActionResult, BrowserStatus } from '../lib/wire/browser.ts';
+import type { BrowserAction, BrowserActionResult, BrowserStatus } from '../../contract/wire/browser.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { type BrowserDaemon, type BrowserSessionScope, sameBrowserDaemon } from '../lib/scope.ts';

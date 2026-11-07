@@ -7,7 +7,7 @@
  * preserving the same session id, and a stale viewer must never remain live.
  */
 
-import type { BrowserInputEvent, BrowserStatus } from '../../lib/wire/browser.ts';
+import type { BrowserInputEvent, BrowserStatus } from '../../../contract/wire/browser.ts';
 import type {
   ClipboardEvent as ReactClipboardEvent,
   KeyboardEvent as ReactKeyboardEvent,

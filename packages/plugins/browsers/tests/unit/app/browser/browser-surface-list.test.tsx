@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { BrowserPageSummary, BrowserStatus } from '../../../../app/lib/wire/browser.ts';
+import type { BrowserPageSummary, BrowserStatus } from '../../../../contract/wire/browser.ts';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
   BrowserSurfaceList,

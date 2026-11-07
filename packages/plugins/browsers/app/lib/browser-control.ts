@@ -15,7 +15,7 @@
  * when the record carries one.
  */
 
-import type { SurfaceControlView, SurfaceDriving } from './wire/control.ts';
+import type { SurfaceControlView, SurfaceDriving } from '../../contract/wire/control.ts';
 
 const addresses = (record: { readonly id: string; readonly name?: string }, key: string): boolean =>
   record.id === key || record.name === key;

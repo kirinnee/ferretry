@@ -128,6 +128,28 @@ describe('the Browser tab', () => {
     await view.unmount();
   });
 
+  it('SF2 says a held mode change is saved but not in effect until the owner confirms it', async () => {
+    const { view } = await tab({ put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' } });
+    await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
+    await click(view.container.querySelector('[data-browser-mode-save]'), 'Save browser mode');
+    expect(text(view.container, '[data-setup-note="browser-mode-held"]')).toBe(
+      'Saved, but not in effect until you confirm it.',
+    );
+    expect(view.container.querySelector('[data-setup-note="browser-mode-refusal"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('SF2 says a held proxy change is not in effect, and does not test a proxy that is not saved yet', async () => {
+    const { calls, view } = await tab({ put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' } });
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    await click(view.container.querySelector('[data-browser-proxy-save]'), 'Save and test');
+    expect(text(view.container, '[data-setup-note="browser-proxy-held"]')).toBe(
+      'Saved, but not in effect until you confirm it.',
+    );
+    expect(calls.some(call => call.route === PROXY_TEST)).toBe(false);
+    await view.unmount();
+  });
+
   it('saves a proxy as the file’s setting and then tests the saved one, never carrying a credential value', async () => {
     const { calls, view } = await tab({
       test: {

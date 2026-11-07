@@ -3,8 +3,9 @@
  * `%browser:` references, and for bringing a page's tab into the person's view.
  *
  * One read of `GET /v1/sessions/:sessionId/browser` through the daemon's client, again on every
- * `browsers.page-changed` event of the session — or every {@link SESSION_BROWSER_POLL_MS} as the safety net. The
- * status lists every page that belongs to the session — the agent's and the person's, popups included — and nothing
+ * `browsers.page-changed` event of the session — or every {@link PAGE_POLL_MS} while there is no live feed and every
+ * {@link PAGE_LIVE_POLL_MS} as the safety net while there is, and never while the tab is hidden
+ * (`startFeedAwarePoll`, today's feed-aware poll). The status lists every page that belongs to the session — the agent's and the person's, popups included — and nothing
  * of any other session's.
  *
  * NULL IS "NOT READ". A device without the `browser` grant, a daemon that cannot answer, or a page that
@@ -15,27 +16,20 @@
  * memoised on it — the transcript's reference surface above all — does not rebuild on every poll.
  */
 
+import { type FeedAwarePollEnvironment, startFeedAwarePoll } from '@ferretry/app';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PageChanged } from '../../../contract/index.ts';
+import { PAGE_LIVE_POLL_MS, PAGE_POLL_MS, pageChangeFeed } from '../../lib/page-feed.ts';
 import { fetchRemoteBrowserStatus, runRemoteBrowserAction } from '../../lib/remote-browser.ts';
 import type { BrowserDaemon, BrowserSessionScope } from '../../lib/scope.ts';
-import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '../../lib/wire/browser.ts';
-
-/** The safety-net re-read, for a page closed or moved without an event. */
-export const SESSION_BROWSER_POLL_MS = 30_000;
-
-/** Cancellable repeat, injectable so tests drive the poll instead of waiting. */
-export type SessionBrowserScheduler = (callback: () => void, intervalMs: number) => () => void;
-
-const defaultScheduler: SessionBrowserScheduler = (callback, intervalMs) => {
-  const timer = setInterval(callback, intervalMs);
-  return () => clearInterval(timer);
-};
+import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '../../../contract/wire/browser.ts';
 
 export interface SessionBrowserDependencies {
+  /** The cadence while no live feed says what changed. */
   readonly pollMs?: number;
-  /** The poll's timer; the browser's when absent. */
-  readonly schedule?: SessionBrowserScheduler;
+  /** The safety-net cadence while the feed is live. */
+  readonly livePollMs?: number;
+  /** The poll's timers and the tab's visibility; the browser's when absent. */
+  readonly pollEnvironment?: FeedAwarePollEnvironment;
 }
 
 export interface SessionBrowser {
@@ -86,8 +80,9 @@ export function useSessionBrowser(
   dependencies?: SessionBrowserDependencies,
 ): SessionBrowser {
   const [status, setStatus] = useState<BrowserStatus | null>(null);
-  const pollMs = dependencies?.pollMs ?? SESSION_BROWSER_POLL_MS;
-  const schedule = dependencies?.schedule ?? defaultScheduler;
+  const pollMs = dependencies?.pollMs ?? PAGE_POLL_MS;
+  const livePollMs = dependencies?.livePollMs ?? PAGE_LIVE_POLL_MS;
+  const pollEnvironment = dependencies?.pollEnvironment;
   const epoch = useRef(0);
 
   const read = useCallback(
@@ -107,16 +102,15 @@ export function useSessionBrowser(
     epoch.current += 1;
     const mine = epoch.current;
     setStatus(null);
-    read(mine);
-    const cancelPoll = schedule(() => read(mine), pollMs);
-    const cancelEvents = daemon.client.subscribe(PageChanged, change => {
-      if (change.ferret === scope.sessionId) read(mine);
+    return startFeedAwarePoll({
+      read: () => read(mine),
+      everyMs: pollMs,
+      liveEveryMs: livePollMs,
+      relevant: () => true,
+      feed: pageChangeFeed(daemon.client, scope.sessionId),
+      ...(pollEnvironment === undefined ? {} : { environment: pollEnvironment }),
     });
-    return () => {
-      cancelPoll();
-      cancelEvents();
-    };
-  }, [read, daemon, scope.sessionId, pollMs, schedule]);
+  }, [read, daemon, scope.sessionId, pollMs, livePollMs, pollEnvironment]);
 
   const act = useCallback(
     async (action: BrowserAction): Promise<BrowserStatus | null> => {

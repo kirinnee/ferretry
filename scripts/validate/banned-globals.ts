@@ -6,7 +6,7 @@
  * `child_process`. Tests are exempt (they drive the test host's ports).
  *
  * A browser APP half (`<plugin>/app/**`) runs in the browser, not under the kernel (DECISIONS-2 #4): it has no clock
- * port, so timers, `Date.now` and `new Date()` are allowed there. It is still refused `fetch`, `process`, `Bun`,
+ * port, so `setTimeout`, `setInterval`, `Date.now` and `new Date()` are allowed there (`setImmediate` is not a browser API). It is still refused `fetch`, `process`, `Bun`,
  * `fs` and `child_process`: it reaches its daemon only through the one client it is handed.
  */
 import { relative, sep } from 'node:path';
@@ -26,7 +26,7 @@ const BANNED_MEMBERS = new Map<string, string>([
   ['os.homedir', 'use a declared root'],
 ]);
 /** What a browser app half may use: the page's own clock and timers (DECISIONS-2 #4). */
-const BROWSER_ALLOWED = new Set(['Date.now', 'new Date()', 'setTimeout', 'setInterval', 'setImmediate']);
+const BROWSER_ALLOWED = new Set(['Date.now', 'new Date()', 'setTimeout', 'setInterval']);
 const BANNED_CALLS = new Map<string, string>([
   ['setTimeout', 'use kernel.clock.after'],
   ['setInterval', 'use kernel.clock.every or a job'],

@@ -3,15 +3,16 @@ import { render, run, runAsync } from '@ferretry/app/testing';
 import { PageChanged } from '../../../../contract/index.ts';
 import {
   browserPageForKey,
-  SESSION_BROWSER_POLL_MS,
   type SessionBrowser,
   type SessionBrowserDependencies,
   sessionBrowserIdentity,
   useSessionBrowser,
 } from '../../../../app/features/browser/use-session-browser.ts';
 import type { BrowserSessionScope } from '../../../../app/lib/scope.ts';
-import type { BrowserPageSummary, BrowserStatus } from '../../../../app/lib/wire/browser.ts';
+import type { BrowserPageSummary, BrowserStatus } from '../../../../contract/wire/browser.ts';
+import { PAGE_LIVE_POLL_MS, PAGE_POLL_MS } from '../../../../app/lib/page-feed.ts';
 import { browserDaemon, recordingClient, refusal } from '../../../support/app/client.ts';
+import { handPoll } from '../../../support/app/poll.ts';
 import { daemonSessionScope } from '../../../support/app/scope.ts';
 
 const STATUS = 'GET /v1/sessions/:sessionId/browser';
@@ -187,34 +188,68 @@ describe('useSessionBrowser', () => {
     renderer.unmount();
   });
 
-  test('should re-read on this session’s page-changed events only, with the timer as the safety net', async () => {
-    // Arrange — a timer the test fires by hand.
-    const timers: { readonly ms: number; readonly fire: () => void }[] = [];
-    const schedule = (callback: () => void, ms: number): (() => void) => {
-      const entry = { ms, fire: callback };
-      timers.push(entry);
-      return () => void timers.splice(timers.indexOf(entry), 1);
-    };
+  test('should re-read on this session’s page-changed events only, one read for a burst, with the poll as the safety net', async () => {
+    // Arrange — timers the test moves by hand.
+    const hand = handPoll();
     const { daemon, calls, heard } = fakeDaemon(() => running([page('PAGE1')]));
-    const { renderer } = mount(daemon, { schedule });
+    const { renderer } = mount(daemon, { pollEnvironment: hand.environment });
     await settle();
-    expect(timers.map(timer => timer.ms)).toEqual([SESSION_BROWSER_POLL_MS]);
+    expect(hand.pending()).toEqual([PAGE_POLL_MS]);
     const initial = calls.length;
 
-    // Act — another ferret's page reads nothing; this one's reads once; the timer reads once.
+    // Act — another ferret's page reads nothing; a burst of this one's reads once; the poll reads once.
     run(() => heard.emit(PageChanged, { ferret: 'sess-2', page: 'PAGE9', change: 'opened' }));
+    hand.advance(1_000);
     await settle();
     expect(calls.length).toBe(initial);
-    run(() => heard.emit(PageChanged, { ferret: 'sess-1', page: 'PAGE1', change: 'opened' }));
+    run(() => {
+      heard.emit(PageChanged, { ferret: 'sess-1', page: 'PAGE1', change: 'opened' });
+      heard.emit(PageChanged, { ferret: 'sess-1', page: 'PAGE1', change: 'driving' });
+    });
+    hand.advance(1_000);
     await settle();
-    run(() => timers[0]?.fire());
+    expect(calls.length).toBe(initial + 1);
+    hand.advance(PAGE_POLL_MS);
     await settle();
 
     // Assert
     expect(calls.length).toBe(initial + 2);
     run(() => renderer.unmount());
     expect(heard.listening()).toBe(0);
-    expect(timers).toHaveLength(0);
+    expect(hand.pending()).toEqual([]);
+  });
+
+  test('SF3 should poll every ten seconds with no live feed, every two minutes while it is live, and never while hidden', async () => {
+    // Arrange
+    const hand = handPoll();
+    const { daemon, calls, heard } = fakeDaemon(() => running([page('PAGE1')]));
+    const { renderer } = mount(daemon, { pollEnvironment: hand.environment });
+    await settle();
+
+    // Act + Assert — no feed: a read every ten seconds.
+    hand.advance(PAGE_POLL_MS * 3);
+    await settle();
+    expect(calls.length).toBe(4);
+
+    // The feed goes live: the next timer, once re-armed, waits two minutes.
+    run(() => heard.live(true));
+    const live = calls.length;
+    hand.advance(PAGE_LIVE_POLL_MS - 1_000);
+    await settle();
+    expect(calls.length).toBe(live);
+    hand.advance(1_000);
+    await settle();
+    expect(calls.length).toBe(live + 1);
+
+    // Hidden: nothing, then one read when it is shown.
+    hand.hide();
+    hand.advance(PAGE_LIVE_POLL_MS * 3);
+    await settle();
+    expect(calls.length).toBe(live + 1);
+    run(() => hand.show());
+    await settle();
+    expect(calls.length).toBe(live + 2);
+    renderer.unmount();
   });
 });
 

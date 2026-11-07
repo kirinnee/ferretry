@@ -1,9 +1,10 @@
 /**
- * The small pieces the Browser tab draws with: a section, a note, and a set of choices that looks like one. Plain
- * Studio tokens, so a theme restyles them with the rest of Settings.
+ * The small pieces a Settings tab draws with: a section, a note, and a set of choices that looks like one (today's
+ * `fleet/setup/setup-ui`, shared so no settings port copies it again). Plain Studio tokens, so a theme restyles them
+ * with the rest of Settings.
  */
 
-import { cn } from '@ferretry/app/ui';
+import { cn } from './lib/class-names.ts';
 import { Check } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 
