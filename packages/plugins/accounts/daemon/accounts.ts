@@ -4,6 +4,7 @@
  * `account_hint` tool and the `accounts` port. Half b (rules, plans, recipes, phone approval, secure copy) is
  * `./rules.ts`, built after this one and handed {@link AccountsCore}.
  */
+import { ferretOf, isFerretCall } from '@ferretry/core-gate/contract';
 import { ApiError, type ConfigFileDef, type StateFileDef } from '@ferretry/kernel/contract';
 import type { DaemonContext, ToolHandler } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
@@ -13,6 +14,7 @@ import { accountHintSummary, placeHosts } from '../contract/routes/index.ts';
 import { machineName } from './adapters/host.ts';
 import { KernelAccountDefaultsWriter } from './adapters/kernel-defaults-writer.ts';
 import { StateAccountIndexStore } from './adapters/state-account-index-store.ts';
+import { ferretPlace, ownerHome, pageUrlOf, realpath } from './adapters/pending-reads.ts';
 import { MemoryCipher, vaultSealedStore } from './adapters/vault-sealed.ts';
 import { LOGIN_SECRETS } from '../contract/routes/sealed.ts';
 import { AccountDefaults } from './lib/account-defaults.ts';
@@ -85,13 +87,19 @@ export function buildAccounts(
   const accounts = logins.accounts;
   const choice = new SessionSignInContext({
     defaults: async () => inEffect() ?? {},
-    // No Projects or Ferrets port names a session's board or folder yet: every session reads as Unfiled with no
-    // recorded folder, so only the site lines order a card (the next rule, never a lost card).
-    projectOf: async () => 'unfiled',
+    // I184: where the calling ferret works, from Ferrets (TODO(contract), `pending-reads.ts`). Until Ferrets says, a
+    // session reads as Unfiled with no folder, so only the site lines order a card (the next rule, never a lost card).
+    // No Projects port names a project yet, so a project line matches by its board id alone.
+    projectOf: async ferret => (await ferretPlace(ctx.uses.ferrets, ferret))?.project ?? 'unfiled',
     projects: async () => [],
-    sessions: { read: async () => null },
-    realpath: async () => undefined,
-    home: '/',
+    sessions: {
+      read: async ferret => {
+        const folder = (await ferretPlace(ctx.uses.ferrets, ferret))?.folder;
+        return folder === undefined ? null : { cwd: folder };
+      },
+    },
+    realpath,
+    home: ownerHome(),
   });
   const seeds = new TwoFactorSeedStages({
     accounts,
@@ -125,11 +133,17 @@ export function buildAccounts(
     ...(seeds === undefined ? {} : { seeds }),
   });
 
-  /** `account_hint`: the summary only, never a value (S13, I131). A page by name needs Browsers' page address. */
+  /** `account_hint`: the summary only, never a value (S13, I131). A page by name is read for its address (Browsers). */
   const accountHintTool: ToolHandler = async (call, input) => {
     const parsed = AccountHintInputSchema.safeParse(input ?? {});
     if (!parsed.success) return { text: 'Name a site as a host like github.com, or a URL.', isError: true };
-    if (parsed.data.site === undefined)
+    const ferret = isFerretCall(call) ? ferretOf(call) : undefined;
+    const site =
+      parsed.data.site ??
+      (parsed.data.name === undefined || ferret === undefined
+        ? undefined
+        : await pageUrlOf(ctx.uses.browsers, ferret, parsed.data.name));
+    if (site === undefined)
       return {
         text:
           parsed.data.name === undefined
@@ -141,8 +155,8 @@ export function buildAccounts(
       const recipesNow = recipes();
       const hint = await accountHint(
         { accounts, choice, ...(recipesNow === undefined ? {} : { recipes: recipesNow }) },
-        parsed.data.site,
-        call.credential?.tokenClass === 'ferret' ? call.credential.ferret : undefined,
+        site,
+        ferret,
       );
       return { text: accountHintSummary(hint.site, hint.hints) };
     } catch (error) {

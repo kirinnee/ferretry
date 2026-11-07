@@ -1,5 +1,7 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
 import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
+import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
+import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
@@ -45,7 +47,11 @@ export default definePlugin({
   /** `sealed`: the passwords and 2FA seeds, in Accounts' own sealed document (`login-secrets.json`). */
   needs: { vault: VaultPort, asks: AsksPort, sealed: SealedDocumentsPort },
   /** Optional: a revoked or expired device's standing sign-in rules are suspended (P124, S119). */
-  uses: { access: AccessPort },
+  /**
+   * `browsers`: the address of a page a ferret names (`account_hint` by page). `ferrets`: where a ferret works, which
+   * orders its sign-in cards (I184). Both optional: without them, today's behaviour without the read.
+   */
+  uses: { access: AccessPort, browsers: BrowsersPort, ferrets: FerretsPort },
   provides: { accounts: AccountsPort },
 
   actions: {

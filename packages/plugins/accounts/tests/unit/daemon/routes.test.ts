@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
-import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { ApiRequest, ApiResponse, CallContext, FerretId } from '@ferretry/kernel/contract';
 import { device, ferret, owner, testArrival, testHost } from '@ferretry/kernel/testing';
@@ -20,9 +20,11 @@ import { CountingSealed, daemonOver, FakeSecretCipher, MemoryLoginIndex, SEED } 
  * table directly with Gate's test standings.
  */
 
-const host = async () =>
+const host = async (uses?: Readonly<Record<string, unknown>>, gate?: StandInAdmission) =>
   await testHost({
     plugins: [accounts],
+    ...(uses === undefined ? {} : { uses }),
+    ...(gate === undefined ? {} : { gate }),
     fakes: { vault: new FakeVault(), asks: new FakeAsks(), sealed: new FakeSealedDocuments() },
   });
 
@@ -91,6 +93,33 @@ describe('the account routes through the kernel', () => {
     should(tool.text).not.match(/seal|totp|recipe:/iu);
     // A page by name needs Browsers' page address, which its port does not carry yet: refused in words.
     should((await h.tool('account_hint', { name: 'app' }, { as: ferret('F1') })).isError).be.true();
+  });
+
+  it('S13 I131 should read a page by name for its address, from the pages the calling ferret holds', async () => {
+    // TODO(contract): `url` on `BrowserPageRef` (DECISIONS-1 item 12); the fake carries it as the porter will.
+    const pagesOf = async (ferretId: string) =>
+      ferretId === 'F1'
+        ? [
+            { id: 'p1', name: 'app', url: 'https://github.com/login' },
+            { id: 'p2', name: 'bare' },
+          ]
+        : [];
+    // Gate's stand-in carries the ferret's credential, as the real Gate does (the kernel's carries only the caller).
+    let who: 'owner' | FerretId = 'owner';
+    const gate = new StandInAdmission(() => (who === 'owner' ? ownerStanding() : ferretStanding(who)));
+    const h = await host({ browsers: { state: async () => ({}), pagesOf } }, gate);
+    await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub', username: 'kirin' } });
+    await h.request('POST', '/v1/accounts/GITHUB/sign-ins', {
+      body: { place: { kind: 'site', domains: ['github.com'], match: ['github.com'] } },
+    });
+    who = 'F1' as FerretId;
+    const byName = await h.tool('account_hint', { name: 'app' }, { as: ferret('F1') });
+    should(byName.isError ?? false).be.false();
+    should(byName.text).containEql('(GITHUB)');
+    // A page with no address, and another ferret's page, are refused in the same words as no page at all.
+    should((await h.tool('account_hint', { name: 'bare' }, { as: ferret('F1') })).isError).be.true();
+    who = 'F2' as FerretId;
+    should((await h.tool('account_hint', { name: 'app' }, { as: ferret('F2') })).isError).be.true();
   });
 
   it('S80 should refuse a ferret choosing a default before the body, and a line no sign-in could use', async () => {

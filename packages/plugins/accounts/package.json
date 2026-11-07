@@ -25,7 +25,8 @@
     "@ferretry/plugin-access": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "@ferretry/plugin-browsers": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

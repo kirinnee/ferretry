@@ -124,6 +124,7 @@
         "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-access": "workspace:*",
+        "@ferretry/plugin-browsers": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
         "zod": "4.4.3",
