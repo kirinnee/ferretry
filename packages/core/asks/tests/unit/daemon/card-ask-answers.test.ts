@@ -52,6 +52,7 @@ const answer = (choice: string, extra: Partial<GateAnswer> = {}): GateAnswer => 
   actor: { kind: 'human' },
   caller: { kind: 'owner' },
   holder: 'phone',
+  gate: true,
   ...extra,
 });
 

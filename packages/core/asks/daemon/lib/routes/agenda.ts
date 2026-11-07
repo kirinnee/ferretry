@@ -244,6 +244,7 @@ async function apply(
           note: request.note,
           actor,
           cardAsk: request.cardAsk,
+          gate: request.gate,
           askVersion: request.askVersion,
           ...(context.credential?.tokenClass === 'device'
             ? { holder: String(context.credential.principal.holder) }
@@ -260,6 +261,7 @@ async function apply(
           note: request.note,
           actor,
           cardAsk: request.cardAsk,
+          gate: request.gate,
           askVersion: request.askVersion,
           attachments: request.attachments,
         })

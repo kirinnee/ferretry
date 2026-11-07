@@ -18,7 +18,7 @@ export function sourceAnswers(
   now: () => string,
 ) {
   return async (answer: SourceAnswer) => {
-    if (answer.cardAsk !== undefined) return undefined;
+    if (answer.cardAsk !== undefined || answer.gate === true) return undefined;
     const listed = await agenda.list(answer.sessionId);
     if (!listed.ok) return undefined;
     const item = [...listed.value.items, ...listed.value.resolved].find(each => each.id === answer.id);

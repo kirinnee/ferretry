@@ -10,7 +10,7 @@ import type {
 } from '../../contract/index.ts';
 import type { AgendaService } from '../lib/agenda/index.ts';
 import { cardAskReference, openCardAsks } from '../lib/protocol/agenda-card-asks.ts';
-import { gateChoice } from '../lib/protocol/agenda-gate.ts';
+import { gateChoice, gateReopenOption } from '../lib/protocol/agenda-gate.ts';
 import type { AgendaResponse } from '../lib/protocol/agenda.ts';
 import type { AgendaGatePort, GateAnswer, GateAnswerOutcome } from '../lib/routes/agenda-gates.ts';
 
@@ -49,6 +49,8 @@ export function cardAskAnswers(
   return {
     isGate: async (sessionId, id) => (await askOn(sessionId, id)) !== undefined,
     answer: async (answer: GateAnswer): Promise<GateAnswerOutcome> => {
+      // Only an explicitly addressed card answer acts on its source. Plain words answer the item's own question.
+      if (answer.cardAsk === undefined && answer.gate !== true) return { handled: false };
       const ask = await askOn(answer.sessionId, answer.id, answer.cardAsk);
       if (ask === undefined) return { handled: false };
       if (answer.actor.kind !== 'human')
@@ -59,18 +61,31 @@ export function cardAskAnswers(
       const denied = answer.permitted?.();
       if (denied !== undefined) return refused('forbidden', denied);
       const response = answer.response;
+      const note = answer.note?.trim() ?? '';
+      const text = [response.kind === 'other' ? response.answer.trim() : '', note]
+        .filter(part => part !== '')
+        .join('\n\n');
+      if (response.kind !== 'multiple-choice' && response.kind !== 'other')
+        return refused('invalid', `${answer.id} asks you to choose one of its options`);
+      if (response.kind === 'other' && gateReopenOption(ask.gate) === undefined)
+        return refused('invalid', `${answer.id} is answered with one of its options`);
       const choice = response.kind === 'multiple-choice' ? gateChoice(ask.gate, response.choice) : undefined;
       if (choice?.kind === 'unknown')
         return refused(
           'invalid',
           `${answer.id} has no option ${response.kind === 'multiple-choice' ? response.choice : ''}`,
         );
+      if (
+        (response.kind === 'other' || (choice?.kind === 'option' && choice.option.outcome === 'reopen-with-agenda')) &&
+        text === ''
+      )
+        return refused('invalid', 'say what is not good so the ferret can fix it');
+      if (text.length > 2_048) return refused('invalid', 'keep your answer within 2048 characters');
       const spec = source();
       if (spec === 'unavailable' || spec.apply === undefined)
         return refused('not-moved', `the board cannot move the card right now, so ${answer.id} stays open`);
       const reference = cardAskReference(ask);
       const at = now();
-      const note = answer.note?.trim() ?? '';
       const receipt = createHash('sha256')
         .update(JSON.stringify([answer.sessionId, answer.id, reference, response, note]))
         .digest('hex');
@@ -82,7 +97,7 @@ export function cardAskAnswers(
         entry: reference as EntryId,
         effect: effectOf(response),
         ...(response.kind === 'multiple-choice' ? { choice: response.choice } : {}),
-        ...(note === '' ? {} : { text: note.slice(0, 2_048) }),
+        ...(text === '' ? {} : { text }),
         by: answer.holder === undefined ? { kind: 'host' } : { kind: 'device', holder: answer.holder },
         at: at as AskAnswer['at'],
       };

@@ -50,6 +50,7 @@ export interface GateAnswer {
   /** The paired device that answered, by its holder id; absent for the owner at the machine. */
   readonly holder?: string | undefined;
   readonly cardAsk?: string | undefined;
+  readonly gate?: true | undefined;
   readonly askVersion?: number | undefined;
   /** Whether this human may move the card at all, asked only once the answer is known to be to a card ask. */
   readonly permitted?: () => string | undefined;
@@ -143,6 +144,7 @@ export async function answerGate(
     readonly note?: string | undefined;
     readonly actor: AgendaActor;
     readonly cardAsk?: string | undefined;
+    readonly gate?: true | undefined;
     readonly askVersion?: number | undefined;
     readonly attachments?: BoardReopenAttachments | undefined;
   },
