@@ -69,6 +69,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
     const service = createConfigFiles({ home, defs: declarations, fs, clock, log, binary });
     return {
       port: plugin => service.port(plugin),
+      writer: () => service.writer(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
     };

@@ -81,7 +81,8 @@ export function createIdentitySigner(
       };
     },
     signCatalog: async (request: CatalogSignRequest): Promise<SignedCatalogSignature> => {
-      if (!isCatalogSignatureKind(request.kind)) throw new TypeError('the catalog signature kind must be manifest, versions or link');
+      if (!isCatalogSignatureKind(request.kind))
+        throw new TypeError('the catalog signature kind must be manifest, versions or link');
       if (!(request.canonical instanceof Uint8Array)) throw new TypeError('the canonical document must be bytes');
       const signature = await key.sign(catalogSignedBytes(request.kind, await sha256(request.canonical)));
       return { daemonId: key.daemonId, publicKey: toBase64Url(key.publicKeySpki), signature: toBase64Url(signature) };

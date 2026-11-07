@@ -34,7 +34,10 @@ import type {
   Clock,
   ConfigCollectionDef,
   ConfigFileDef,
+  ConfigFileStatus,
+  ConfigFilesWriter,
   ConfigPort,
+  ConfigWriteOutcome,
   Log,
   StatePort,
 } from '../../contract/index.ts';
@@ -178,6 +181,40 @@ export interface ConfigFiles {
   directories(): Promise<readonly string[]>;
   /** Writes every def's JSON Schema into `config/.schema/`, each only when it changed. */
   publishSchemas(): Promise<void>;
+  /** The writer over every declared file, as Gate receives it (`kernel.configFiles`). */
+  writer(): ConfigFilesWriter;
+}
+
+/** A write result as the contract says it: never thrown, `conflict` on its own. */
+export function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
+  if (result.kind === 'applied') return { kind: 'written', etag: result.etag, loosened: result.loosened };
+  if (result.kind === 'held') return { kind: 'held', etag: result.etag, id: result.id, sentences: result.sentences };
+  if (result.reason === 'conflict') return { kind: 'conflict' };
+  return {
+    kind: 'refused',
+    reason: result.reason,
+    issues: result.issues.map(issue => ({
+      path: issue.path,
+      ...(issue.line === undefined ? {} : { line: issue.line }),
+      message: issue.message,
+    })),
+  };
+}
+
+/** An entry's state as the contract names it. */
+function statusOf(evaluated: EvaluatedConfig | undefined): ConfigFileStatus {
+  if (evaluated === undefined) return { state: 'absent', inEffect: false, sentences: [] };
+  const inEffect = evaluated.inEffect !== undefined;
+  switch (evaluated.state) {
+    case 'ok':
+      return { state: 'valid', inEffect, sentences: [] };
+    case 'pending':
+      return { state: 'held', inEffect, sentences: evaluated.held?.sentences ?? [] };
+    case 'invalid':
+      return { state: 'invalid', inEffect, sentences: evaluated.issues.map(issue => issue.message) };
+    default:
+      return { state: 'absent', inEffect, sentences: [] };
+  }
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -465,6 +502,20 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         set.add(listener);
         return () => void set.delete(listener);
       },
+      fileState(def, name): ConfigFileStatus {
+        own(def);
+        const declaration = declared(pluginId, def as ConfigDef) as ConfigDeclaration;
+        const slot = slotFor(declaration, name);
+        return statusOf(slot === undefined ? undefined : settled.get(slot.path)?.evaluated);
+      },
+      // A plugin's own write takes Gate's path with no confirmation: a loosening is held for the owner.
+      write: async (def, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+        writeOutcome(
+          await write(pluginId, def as ConfigDef, writeOptions.name, edit, {
+            confirmedLoosening: false,
+            ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+          }),
+        ),
     };
   };
 
@@ -693,5 +744,38 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     status,
     startWatching,
     publishSchemas,
+    writer: (): ConfigFilesWriter => ({
+      declarations: () => declarations.map(({ plugin, def }) => ({ plugin, def })),
+      read: async target => {
+        const view = await read(target.plugin, target.def as ConfigDef, target.name);
+        if (view === undefined) return undefined;
+        const declaration = declared(target.plugin, target.def as ConfigDef) as ConfigDeclaration;
+        const slot = slotFor(declaration, target.name) as Slot;
+        return {
+          path: view.path,
+          exists: view.exists,
+          text: view.text,
+          etag: view.etag,
+          status: statusOf(settled.get(slot.path)?.evaluated),
+        };
+      },
+      write: async (target, edit, writeOptions = {}) =>
+        writeOutcome(await write(target.plugin, target.def as ConfigDef, target.name, edit, writeOptions)),
+      remove: async (target, writeOptions = {}) => {
+        if (writeOptions.ifMatch !== undefined) {
+          const view = await read(target.plugin, target.def as ConfigDef, target.name);
+          if (view !== undefined && view.etag !== writeOptions.ifMatch) return { kind: 'conflict' };
+        }
+        const removed = await remove(target.plugin, target.def as ConfigDef, target.name, writeOptions);
+        if (removed.kind === 'applied')
+          return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
+        if (removed.kind === 'held')
+          return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
+        return { kind: 'refused', reason: removed.reason, issues: [] };
+      },
+      held: () => heldOf(settled),
+      confirm,
+      discard,
+    }),
   };
 }
