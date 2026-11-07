@@ -57,6 +57,10 @@
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
       "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
+    ],
+    "codex": [
+      "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
+      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
     ]
   },
   "pendingHalves": {
