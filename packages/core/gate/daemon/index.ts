@@ -1,10 +1,4 @@
-import {
-  type ApiResponse,
-  type CallContext,
-  type ConfigFileDef,
-  errorResponse,
-  type StateFileDef,
-} from '@ferretry/kernel/contract';
+import { type ApiResponse, type CallContext, type ConfigFileDef, errorResponse } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import {
@@ -13,8 +7,8 @@ import {
   AuditLogFile,
   Bearers,
   Credentials,
+  type CapabilityName,
   type CredentialProvider,
-  DEFAULT_GATE_CONFIG,
   type DeviceHolderStanding,
   type FerretBearerDirectory,
   type GateApi,
@@ -27,7 +21,9 @@ import {
 } from '../contract/index.ts';
 import manifest, { AuditKeptFile, AuditKeptRotatedFile, AuditRotatedFile, GrantAuditFile } from '../manifest.ts';
 import { StateGrantHistory } from './adapters/grants/state-grant-history.ts';
-import { type GrantAuditEntry, GrantService } from './lib/grants/service.ts';
+import { type ConfigFilesReader, grantsNamedIn, grantsProvenFrom } from './lib/grants/provenance.ts';
+import { GrantService } from './lib/grants/service.ts';
+import { type ConfigFileStatus, type GateConfigSource, policyInEffect } from './lib/policy/in-effect.ts';
 import { StateAuditJournal } from './adapters/audit/state-audit-journal.ts';
 import { StateTokens } from './adapters/tokens/state-tokens.ts';
 import { GateAdmission } from './lib/api/admission.ts';
@@ -51,23 +47,56 @@ export default implementDaemon(manifest, {
     const log = kernel.log.child('gate');
 
     // ─── tokens: loaded before anything is served; until then every bearer is refused (fail closed) ─────────────
+    // ONE load, shared: the eager load and the start job await the same promise, so two loads can never mint twice
+    // and leave the accepted token different from the persisted one (today awaits one credential load). A failed
+    // load is forgotten, so the start job tries again.
     let tokens: GateTokens | undefined;
-    const loadTokens = async (): Promise<void> => {
-      tokens ??= await new StateTokens(kernel.state, { admin: AdminTokenFile, warden: WardenTokenFile }).load();
+    const tokenStore = new StateTokens(kernel.state, { admin: AdminTokenFile, warden: WardenTokenFile });
+    let loading: Promise<void> | undefined;
+    const loadTokens = (): Promise<void> => {
+      loading ??= tokenStore.load().then(
+        loaded => {
+          tokens = loaded;
+        },
+        (error: unknown) => {
+          loading = undefined;
+          throw error;
+        },
+      );
+      return loading;
     };
     loadTokens().catch(error => log.error('the daemon tokens could not be loaded', { reason: String(error) }));
     kernel.jobs.add({ id: 'gate.tokens', schedule: { onceAfterStart: true }, run: loadTokens });
 
-    // ─── policy: `gate.yaml` in effect; a missing file is the product default (G6, G152) ─────────────────────────
-    const policy = (): GateConfig | undefined => {
+    // ─── policy: `gate.yaml` in effect; only a missing file is the product default (G6, G152), damage is
+    // undetermined (G153, G154). `fileState` is the kernel seam (rebuild/port-kernel) that tells the two apart.
+    const configPort = kernel.config as typeof kernel.config & {
+      fileState?: (def: ConfigFileDef<GateConfig>) => ConfigFileStatus;
+    };
+    const fileState = configPort.fileState;
+    const policySource: GateConfigSource = {
+      file: () => kernel.config.file(GateConfigFile as ConfigFileDef<GateConfig>),
+      ...(fileState === undefined
+        ? {}
+        : { fileState: () => fileState.call(configPort, GateConfigFile as ConfigFileDef<GateConfig>) }),
+    };
+    const policy = (): GateConfig | undefined => policyInEffect(policySource);
+    // ─── provenance (G155): which capabilities `gate.yaml` NAMES, read from its raw text ───────────────────────
+    const configFiles = (kernel as { readonly configFiles?: ConfigFilesReader }).configFiles;
+    let namedGrants: readonly CapabilityName[] | undefined;
+    const readProvenance = async (): Promise<void> => {
+      if (configFiles === undefined) return;
       try {
-        return kernel.config.file(GateConfigFile as ConfigFileDef<GateConfig>) ?? DEFAULT_GATE_CONFIG;
+        const read = await configFiles.read({ plugin: manifest.id, def: GateConfigFile });
+        namedGrants = read?.exists === true && read.text !== undefined ? grantsNamedIn(Bun.YAML.parse(read.text)) : [];
       } catch {
-        return undefined;
+        namedGrants = undefined;
       }
     };
+    void readProvenance();
     let generation = 0;
     kernel.config.watch(GateConfigFile as ConfigFileDef<GateConfig>, () => {
+      void readProvenance();
       generation += 1;
       kernel.events.publish(GatePolicyChanged, { generation });
     });
@@ -141,19 +170,13 @@ export default implementDaemon(manifest, {
     const grants = new GrantService({
       document: {
         read: () => policy()?.grants,
-        written: () => {
-          try {
-            return kernel.config.file(GateConfigFile as ConfigFileDef<GateConfig>) !== undefined;
-          } catch {
-            return false;
-          }
-        },
+        written: () => namedGrants ?? grantsProvenFrom(policy()?.grants),
         // GAP: the kernel-bound config writer (lead-approved) has not landed. Nothing is applied.
         write: async () => {
           throw new GateConfigWriteUnavailable();
         },
       },
-      history: new StateGrantHistory(kernel.state, GrantAuditFile as never as StateFileDef<string, GrantAuditEntry>),
+      history: new StateGrantHistory(kernel.state, GrantAuditFile),
       clock: { now: () => kernel.clock.now() },
       clientName: CLIENT_NAME,
     });
@@ -193,7 +216,6 @@ class GateConfigWriteUnavailable extends Error {
     this.name = 'GateConfigWriteUnavailable';
   }
 }
-
 
 const configWriteUnavailable = () =>
   errorResponse(
