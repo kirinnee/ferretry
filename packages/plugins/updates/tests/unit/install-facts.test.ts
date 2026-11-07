@@ -27,7 +27,22 @@ describe('the host install facts', () => {
     });
     should(classifyInstallMethod(facts)).deepEqual({ kind: 'nix-profile', element: 'ferretry' });
     // A store path is never a system package, so dpkg and rpm are not asked.
-    should(asked).deepEqual(['nix profile list --json']);
+    should(asked.filter(command => !command.startsWith('readlink '))).deepEqual(['nix profile list --json']);
+  });
+
+  it('follows the launched link through the bounded readlink, not the file system', async () => {
+    const profile = JSON.stringify({ version: 3, elements: { ferretry: { storePaths: [STORE] } } });
+    const asked: string[] = [];
+    const link = `${HOME}/.nix-profile/bin/fyd`;
+    const run: FactCommand = async argv => {
+      asked.push(argv.join(' '));
+      if (argv[0] === 'readlink')
+        return argv[1] === link ? { code: 0, stdout: `${STORE}/bin/fyd\n` } : { code: 1, stdout: '' };
+      return { code: 0, stdout: profile };
+    };
+    const facts = await new HostInstallFacts(fakeHost(), run).facts();
+    should(asked).containEql(`readlink ${link}`);
+    should(facts.nixProfileElement).equal('ferretry');
   });
 
   it('answers no element when nix is missing, fails, or prints something else', async () => {
@@ -72,17 +87,5 @@ describe('the host install facts', () => {
       runner({}),
     ).facts();
     should(facts.compiled).be.false();
-  });
-
-  it('keeps the path when it cannot be resolved', async () => {
-    const facts = await new HostInstallFacts(
-      fakeHost({
-        realpath: async () => {
-          throw new Error('ENOENT');
-        },
-      }),
-      runner({}),
-    ).facts();
-    should(facts.resolvedPath).equal(`${STORE}/bin/fyd`);
   });
 });
