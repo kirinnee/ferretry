@@ -27,7 +27,7 @@ export function sourceAnswers(
     if (obligation === undefined || (BUILT_IN_SOURCES as readonly string[]).includes(obligation.source))
       return undefined;
     if (answer.actor.kind !== 'human') throw new ApiError(403, 'only the owner answers this question', 'forbidden');
-    const denied = answer.permitted?.();
+    const denied = obligation.source === 'card' ? answer.permitted?.() : undefined;
     if (denied !== undefined) throw new ApiError(403, denied, 'forbidden');
     const receipt = createHash('sha256')
       .update(

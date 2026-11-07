@@ -36,7 +36,7 @@ import {
   lintAgendaWriting,
 } from '../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
-import { type AgendaGatePort, answerGate, refuseGateDismissal } from './agenda-gates.ts';
+import { type AgendaGatePort, answerGate, cardAnswerPermission, refuseGateDismissal } from './agenda-gates.ts';
 import type { SourceAnswer } from './agenda-gates.ts';
 import type { AgendaMutation } from '../agenda/index.ts';
 
@@ -235,6 +235,13 @@ async function apply(
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
+  if (
+    request.action === 'resolve' &&
+    request.attachments !== undefined &&
+    request.cardAsk === undefined &&
+    request.gate !== true
+  )
+    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
   const sourced =
     request.action === 'resolve' && sources !== undefined
       ? await sources({
@@ -245,6 +252,7 @@ async function apply(
           actor,
           cardAsk: request.cardAsk,
           gate: request.gate,
+          permitted: () => cardAnswerPermission(context),
           askVersion: request.askVersion,
           ...(context.credential?.tokenClass === 'device'
             ? { holder: String(context.credential.principal.holder) }

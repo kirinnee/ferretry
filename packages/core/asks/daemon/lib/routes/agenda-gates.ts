@@ -116,6 +116,9 @@ const refusedDevice = (context: RouteContext): ApiError | undefined => {
   );
 };
 
+/** Generic card-source obligations require the same board standing as attached card questions. */
+export const cardAnswerPermission = (context: RouteContext): string | undefined => refusedDevice(context)?.message;
+
 /**
  * The owner's Not needed on a gate item leaves the card where it is, quietly — so only a caller who could answer the
  * item may say it: a device needs the board's `fleet` grant, as an answer does. Throws the refusal.
