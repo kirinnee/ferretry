@@ -98,7 +98,7 @@ export const conversationStep: Step = {
     'state/sessions/<sid>/channel/{queue,sends,answers,inbox,outbox}.jsonl',
     'state/sessions/<sid>/question-asked.json',
     'state/sessions/<sid>/config.json (transcript.identity adopted → links)',
-    'state/shared-drafts/<sid>.json, <sid>.items/<agendaId>.json',
+    'state/shared-drafts/<sid>.json, <sid>.items/<askId>.json',
     'state/attachments/<daemonId>/<sid>/<attachmentId>/manifest.json (original never opened)',
     'state/renders/<shard>/<id>.json',
   ],
@@ -110,10 +110,6 @@ export const conversationStep: Step = {
     {
       what: 'per-ferret pins.json and state/agent-pins.json',
       why: 'M5 gives pins to Conversation, but neither rebuild/5.0 nor the Conversation port declares a pins file',
-    },
-    {
-      what: 'agenda reply drafts (state/shared-drafts/<sid>.items/)',
-      why: 'their slots are v4 agenda ids; they can be keyed only after the Asks step’s M6 old-to-new id map exists (read and checked here)',
     },
     {
       what: 'channel/queued-<sendId>.md and .by.json',
@@ -205,33 +201,38 @@ export const conversationStep: Step = {
 
         // The chat draft, through v5's own snapshot schema.
         const chat = await readJson(reader, join(draftsFolder, `${config.id}.json`), V4SharedDraft);
-        if (chat !== undefined) {
-          if (chat.sessionId !== config.id || chat.slot !== undefined)
-            throw new V4InputError(
-              'shared draft names another session or slot',
-              `state/shared-drafts/${config.id}.json`,
-            );
-          const { sessionId, slot: _slot, ...rest } = chat;
-          const document = DraftsDocumentSchema.parse({
-            chat: DraftSnapshotSchema.parse({ ...rest, ferret: sessionId }),
-            items: {},
-          });
-          await ctx.v5.json({ path: v5DraftsFile(config.id), format: 1, schema: DraftsDocumentSchema }, document);
-          counts.chatDrafts++;
-        }
-        // Agenda reply drafts: read and checked only (they wait for the M6 ask id map).
+        if (chat !== undefined && (chat.sessionId !== config.id || chat.slot !== undefined))
+          throw new V4InputError('shared draft names another session or slot', `state/shared-drafts/${config.id}.json`);
+        // Agenda reply drafts, keyed by the ask id. v5 Asks numbers asks per ferret exactly as v4 did (the agenda
+        // files are carried with their ids), so `A<n>` on this ferret's board is the same ask in v5.
+        const items: Record<string, z.input<typeof DraftSnapshotSchema>> = {};
         const itemsFolder = join(draftsFolder, `${config.id}.items`);
         for (const item of await names(reader, itemsFolder)) {
           if (item.folder || !item.name.endsWith('.json')) continue;
           const slot = item.name.slice(0, -'.json'.length);
           if (!V4AgendaId.safeParse(slot).success) continue;
           const draft = await readJson(reader, join(itemsFolder, item.name), V4SharedDraft);
-          if (draft !== undefined && (draft.sessionId !== config.id || draft.slot !== slot))
+          if (draft === undefined) continue;
+          if (draft.sessionId !== config.id || draft.slot !== slot)
             throw new V4InputError(
               'agenda draft names another session or slot',
               `state/shared-drafts/${config.id}.items/${item.name}`,
             );
+          const { sessionId, ...rest } = draft;
+          items[slot] = DraftSnapshotSchema.parse({ ...rest, ferret: sessionId });
           counts.itemDrafts++;
+        }
+        if (chat !== undefined || Object.keys(items).length > 0) {
+          const document = DraftsDocumentSchema.parse({
+            ...(chat === undefined
+              ? {}
+              : (({ sessionId, slot: _slot, ...rest }) => ({
+                  chat: DraftSnapshotSchema.parse({ ...rest, ferret: sessionId }),
+                }))(chat)),
+            items,
+          });
+          await ctx.v5.json({ path: v5DraftsFile(config.id), format: 1, schema: DraftsDocumentSchema }, document);
+          if (chat !== undefined) counts.chatDrafts++;
         }
 
         // Links: a kept (adopted) conversation is read where its harness keeps it.
@@ -308,12 +309,13 @@ export const conversationStep: Step = {
         { what: 'message-token keys moved unopened', count: sealed.length },
         { what: 'turn files copied byte for byte', count: counts.turnFiles },
         { what: 'chat drafts', count: counts.chatDrafts },
+        { what: 'agenda reply drafts', count: counts.itemDrafts },
         { what: 'conversation links', count: counts.links },
       ];
       const read =
         `queue messages ${counts.queued}, sends ${counts.sends}, answer receipts ${counts.answers}, ` +
         `inbox lines ${counts.inbox}, outbox lines ${counts.outbox}, open questions ${counts.questions}, ` +
-        `attachments ${counts.attachments}, renders ${counts.renders}, agenda reply drafts ${counts.itemDrafts}`;
+        `attachments ${counts.attachments}, renders ${counts.renders}`;
       return {
         ...base,
         status: 'pending',
