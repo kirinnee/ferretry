@@ -228,10 +228,10 @@ export class AccessRuntime {
             proof,
             deviceRotateMessage(transcriptHash, deviceId, deviceKey),
           ),
-        rotate: async ({ deviceId, deviceKey, appSession }) => {
+        rotate: async ({ deviceId, deviceKey, transcriptHash }) => {
           if (pairing === undefined || !(await pairing.rotateDeviceKey(deviceId, deviceKey))) return false;
           // Every OTHER session the device holds lapses (4441) and reopens on the new key (R251).
-          this.#connections.lapseDevice(deviceId, appSession ?? '');
+          this.#connections.lapseDevice(deviceId, Buffer.from(transcriptHash).toString('hex'));
           await securityAudit.record({
             kind: 'device.key-rotated',
             actor: `device:${deviceId}`,

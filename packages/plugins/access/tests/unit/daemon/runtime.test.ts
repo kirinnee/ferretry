@@ -192,11 +192,11 @@ async function revoke(w: World, deviceId: string): Promise<number> {
   return response.status;
 }
 
-function watcher(session: string) {
+function watcher(session: string, appSession = session) {
   const seen = { revoked: 0, lapsed: 0, regranted: 0 };
   const watch: HolderWatch = {
     session: session as SessionId,
-    appSession: session,
+    appSession,
     revoked: () => {
       seen.revoked += 1;
     },
@@ -622,11 +622,11 @@ test('R251 runtime unlock rotation rewrites the key, lapses other sessions, spar
   const p = await prepared();
   p.w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_CONFIG.security, idleExpiryDays: 90 } };
   await p.w.clock.advance(31 * DAY_MS);
-  const carrying = watcher('carrying-session');
-  const other = watcher('other-session');
+  const transcriptHash = new Uint8Array(32).fill(7);
+  const carrying = watcher(Buffer.from(transcriptHash).toString('hex'), 'page-with-two-sessions');
+  const other = watcher('other-session', 'page-with-two-sessions');
   p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, carrying.watch);
   p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, other.watch);
-  const transcriptHash = new Uint8Array(32).fill(7);
   const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
   const deviceKey = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
   const proof = toBase64Url(
