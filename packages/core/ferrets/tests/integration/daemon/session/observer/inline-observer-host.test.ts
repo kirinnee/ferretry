@@ -24,7 +24,7 @@ import type { TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/t
 import type { LivenessTarget } from '../../../../../daemon/lib/session/peers/warden.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import { INERT_PANE_WORK, INERT_QUESTIONS, testTurnWatcher } from '../../../../support/daemon/observer-peers.ts';
-import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
+import { FerretStateFile } from '../../../../../contract/index.ts';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
@@ -65,7 +65,7 @@ async function openStorage() {
 async function plantUnparsedState(subject: World, id: SessionId): Promise<string> {
   await subject.storage.writeState(id, { id, status: 'running', turn: 1 });
   const planted = JSON.stringify({ format: 1, id, status: 'not-a-status' });
-  subject.folder.plant(SessionStateFiles, planted, id);
+  subject.folder.plant(FerretStateFile, planted, id);
   for (const listener of subject.listeners) listener(id, { id, status: 'not-a-status' });
   return planted;
 }
@@ -366,7 +366,7 @@ describe('InlineObserverHost — questions', () => {
 
     // Assert
     should(await subject.storage.readState(A)).deepEqual({ id: A, status: 'running', turn: 1 });
-    should(subject.folder.raw(SessionStateFiles, B)).equal(planted);
+    should(subject.folder.raw(FerretStateFile, B)).equal(planted);
   });
 
   it('should refresh what it was told from the document a question look read', async () => {

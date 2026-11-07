@@ -1,12 +1,10 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import { type Pin, PIN_SCHEMA_VERSION, PinSchema, type PinSnapshot } from '../../lib/protocol/pins.ts';
+import { FerretPinsDocumentSchema } from '../../../contract/index.ts';
+import { type Pin, PIN_SCHEMA_VERSION, type PinSnapshot } from '../../lib/protocol/pins.ts';
 import { normalizedPins, type PinClock, type PinRepository, type PinSessionDirectory } from '../../lib/pins/index.ts';
-import { z } from 'zod';
 
 /** The body of one ferret's `<ferret>/pins.json`; the kernel store stamps and checks its `format`. */
 export type FerretPinFile = { readonly pins: readonly Pin[] };
-
-const FerretPinFileSchema = z.object({ pins: z.array(PinSchema) });
 
 /**
  * One ferret's note and message pins in `state/ferrets/<ferret>/pins.json`, through the kernel store. Every change
@@ -42,7 +40,7 @@ export class StatePinRepository implements PinRepository {
 
   private parse(value: unknown): readonly Pin[] {
     if (value === undefined) return [];
-    const result = FerretPinFileSchema.safeParse(value);
+    const result = FerretPinsDocumentSchema.safeParse(value);
     return result.success ? normalizedPins(result.data.pins) : [];
   }
 }

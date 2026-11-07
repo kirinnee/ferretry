@@ -2,6 +2,7 @@ import { AskSources, AsksChanged, AsksPort } from '@ferretry/core-asks/contract'
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
+import type { ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, route, tool } from '@ferretry/kernel/manifest';
 import {
   ChildEnvironmentPort,
@@ -17,6 +18,7 @@ import {
   SealedDocumentsPort,
   SecretResolverPort,
   SecretsChanged,
+  VaultConfigFile,
   VaultFile,
   VaultKeyFile,
   VaultPort,
@@ -183,6 +185,8 @@ export default definePlugin({
     secretResolver: SecretResolverPort,
   },
   data: {
+    // biome-ignore lint/suspicious/noExplicitAny: the leaf cast Gate, Asks and Ferrets use for a typed config def
+    config: [VaultConfigFile as ConfigDef<any>],
     state: [VaultFile, VaultKeyFile, HoldsFile, InputRequestFiles],
     publishes: [SecretsChanged, HoldsChanged],
     subscribes: [AsksChanged, FerretsChanged],

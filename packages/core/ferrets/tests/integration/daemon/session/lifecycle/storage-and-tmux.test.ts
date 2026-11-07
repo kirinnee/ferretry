@@ -40,7 +40,7 @@ import {
 } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
-import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
+import { FerretStateFile } from '../../../../../contract/index.ts';
 import { createSessionRecord, transitionSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { SessionLifecycleService } from '../../../../../daemon/lib/session/lifecycle/service.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
@@ -177,7 +177,7 @@ describe('StorageSessionLifecycleRepository', () => {
         cwd: '/workspace/project',
         mode: 'auto',
         prompt: 'Publish me later',
-        sessionCapabilityHash: capabilityHash,
+        capabilityHash: capabilityHash,
       },
       { id, cwd: '/workspace/project', at: NOW, settings: defaultSessionLifecycleSettings },
     );
@@ -194,7 +194,7 @@ describe('StorageSessionLifecycleRepository', () => {
 
     // Publishing keeps the exact hash agreement and appends one create event, never two.
     await subject.write(created.record, created.event);
-    should((await subject.read(id))?.config.sessionCapabilityHash).equal(capabilityHash);
+    should((await subject.read(id))?.config.capabilityHash).equal(capabilityHash);
     should(storage.listSessions().map(session => session.id)).deepEqual([id]);
     should(await journal(storage, id)).deepEqual(['session.created']);
     await storage.close();
@@ -297,7 +297,7 @@ describe('StorageSessionLifecycleRepository', () => {
     // The store refuses to write a status the protocol does not name, so the document is laid on disk as a foreign
     // file would be; reading it names the damage rather than guessing a status.
     folder.plant(
-      SessionStateFiles,
+      FerretStateFile,
       JSON.stringify({ format: 1, id: held.config.id, status: 'not-a-status', turn: 0 }),
       held.config.id,
     );
@@ -887,14 +887,14 @@ describe('the composed session lifecycle', () => {
     should(await environment.read(id)).not.have.property('FY_SESSION_ID');
     // The hash is durable on the record — it is what the task-board domain keys grants on — and the
     // capability itself appears nowhere any reader of the session document can reach.
-    should(running.config.sessionCapabilityHash).equal(
+    should(running.config.capabilityHash).equal(
       createHash('sha256')
         .update(capability ?? '', 'utf8')
         .digest('hex'),
     );
     const document = JSON.stringify(await storage.readConfig(id));
     should(document).not.containEql(capability);
-    should(document).containEql(running.config.sessionCapabilityHash);
+    should(document).containEql(running.config.capabilityHash);
     // Only the owning daemon may read the one copy of the plaintext.
     should((await stat(environment.file(id))).mode & 0o777).equal(0o600);
     await storage.close();

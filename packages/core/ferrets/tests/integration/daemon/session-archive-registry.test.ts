@@ -12,10 +12,9 @@ import { describe, it } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { ArchiveFile } from '../../../contract/index.ts';
+import { ArchiveFile, FerretStateFile } from '../../../contract/index.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import { parseSessionId, type SessionId } from '../../../daemon/lib/session-id.ts';
-import { SessionStateFiles } from '../../../daemon/lib/state.ts';
 import { archiveRegistryValue } from '../../../daemon/lib/storage/archive-registry.ts';
 import { RecordingLog, SESSION_STORE_FILES, sessionState } from '../../support/daemon/storage.ts';
 
@@ -39,7 +38,7 @@ async function archivedStorage(archivedIds: readonly string[], live: readonly st
     archiveRegistryValue(new Map(ids.map(id => [id, { archivedAt: NOW, indexed: indexed(id) }]))),
   );
   for (const name of [...archivedIds, ...live])
-    await state.write(SessionStateFiles, sessionState(name, { status: 'completed' }) as never, name);
+    await state.write(FerretStateFile, sessionState(name, { status: 'completed' }) as never, name);
   const storage = new DaemonStorage(state, { now: () => NOW }, new RecordingLog());
   for (const name of live) await storage.syncSession(parseSessionId(name));
   await storage.loadArchive();

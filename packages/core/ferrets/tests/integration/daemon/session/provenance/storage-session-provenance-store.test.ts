@@ -4,8 +4,8 @@ import should from 'should';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { InvalidStateDocumentError } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { StorageSessionProvenanceStore } from '../../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
-import { SessionConfigFiles } from '../../../../../daemon/lib/state.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { FerretConfigFile } from '../../../../../contract/index.ts';
 
 /**
  * The spawn stamp's durable round trip, over a real state home.
@@ -127,7 +127,7 @@ describe('spawn provenance storage', () => {
     const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-first-stamp');
     const planted = JSON.stringify({ format: 1, 0: 'not', 1: 'a', 2: 'configuration' });
-    folder.plant(SessionConfigFiles, planted, id);
+    folder.plant(FerretConfigFile, planted, id);
     const store = new StorageSessionProvenanceStore(storage);
 
     // Act
@@ -137,7 +137,7 @@ describe('spawn provenance storage', () => {
 
     // Assert
     should(refused).be.instanceOf(InvalidStateDocumentError);
-    should(folder.raw(SessionConfigFiles, id)).equal(planted);
+    should(folder.raw(FerretConfigFile, id)).equal(planted);
     should((await store.read(id)).provenance).be.undefined();
     await storage.close();
   });
@@ -159,7 +159,7 @@ describe('spawn provenance storage', () => {
     const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-damaged');
     folder.plant(
-      SessionConfigFiles,
+      FerretConfigFile,
       JSON.stringify({
         format: 1,
         ...sessionConfig(id),
@@ -180,7 +180,7 @@ describe('spawn provenance storage', () => {
     const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-torn');
     await storage.writeConfig(id, sessionConfig(id));
-    folder.plant(SessionConfigFiles, '{"id": "20260806-torn"', id);
+    folder.plant(FerretConfigFile, '{"id": "20260806-torn"', id);
 
     // Act + Assert: a torn document is no stamp, so a fresh resolution runs. Raising here would fail
     // a revive over a record the next relaunch would rewrite anyway.

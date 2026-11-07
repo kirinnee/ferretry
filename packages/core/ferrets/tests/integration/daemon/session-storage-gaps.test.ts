@@ -2,13 +2,12 @@ import { describe, it } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { FerretHistoryFiles, FerretIndexFile } from '../../../contract/index.ts';
+import { FerretHistoryFiles, FerretIndexFile, FerretConfigFile, FerretStateFile } from '../../../contract/index.ts';
 import { ListedSessionIndex } from '../../../daemon/adapters/storage/listed-session-index.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import { StateSqliteIndex } from '../../../daemon/adapters/storage/sqlite-index.ts';
 import type { SessionIndex } from '../../../daemon/lib/ports.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
 import { RecordingLog, SESSION_STORE_FILES, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
 
 /** Misbehaves on cue, at the exact read where a concurrent writer would land. */
@@ -137,7 +136,7 @@ describe('session storage — names that are not sessions', () => {
     const kept = parseSessionId('kept-session');
     const broken = parseSessionId('broken-read');
     await opened.storage.writeState(kept, sessionState(kept));
-    await opened.raw.write(SessionStateFiles, sessionState(broken) as never, broken);
+    await opened.raw.write(FerretStateFile, sessionState(broken) as never, broken);
     opened.disturbance.unreadable.add(broken);
 
     // Act
@@ -157,7 +156,7 @@ describe('session storage — names that are not sessions', () => {
     const opened = await openStorage();
     const id = parseSessionId('reduced-to-nothing');
     await opened.storage.writeConfig(id, sessionConfig(id, { name: 'gone soon' }));
-    await opened.raw.remove(SessionConfigFiles, id);
+    await opened.raw.remove(FerretConfigFile, id);
 
     // Act
     const replay = await opened.storage.replay(id);
@@ -172,7 +171,7 @@ describe('session storage — names that are not sessions', () => {
     const opened = await openStorage();
     const id = parseSessionId('damaged-state');
     await opened.storage.append(id, 'first', {});
-    opened.folder.plant(SessionStateFiles, '{ torn', id);
+    opened.folder.plant(FerretStateFile, '{ torn', id);
 
     // Act
     const result = await opened.storage.rebuildIndex();
@@ -207,7 +206,7 @@ describe('session storage — a journal that grew outside the index', () => {
     const opened = await openStorage();
     const id = parseSessionId('vanishing-session');
     await opened.storage.writeConfig(id, sessionConfig(id, { name: 'vanishing' }));
-    await opened.raw.remove(SessionConfigFiles, id);
+    await opened.raw.remove(FerretConfigFile, id);
 
     // Act
     const result = await opened.storage.reconcile();
@@ -241,7 +240,7 @@ describe('session storage — a session that never had a journal', () => {
     // Arrange
     const opened = await openStorage();
     const id = parseSessionId('eventless');
-    await opened.raw.write(SessionStateFiles, sessionState(id) as never, id);
+    await opened.raw.write(FerretStateFile, sessionState(id) as never, id);
     await opened.storage.rebuildIndex();
 
     // Act

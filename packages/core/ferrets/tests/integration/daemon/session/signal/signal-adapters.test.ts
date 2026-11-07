@@ -10,7 +10,7 @@ import {
   StorageSignalRepository,
 } from '../../../../../daemon/adapters/session/signal/index.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../../../daemon/lib/state.ts';
+import { FerretConfigFile, FerretStateFile } from '../../../../../contract/index.ts';
 import { memoryStorage, sessionConfig } from '../../../../support/daemon/storage.ts';
 
 /**
@@ -36,7 +36,7 @@ async function openStorage(instant = NOW) {
  */
 function plantDocument(
   folder: MemoryStateFolder,
-  file: typeof SessionConfigFiles | typeof SessionStateFiles,
+  file: typeof FerretConfigFile | typeof FerretStateFile,
   id: SessionId,
   document: Record<string, unknown>,
 ): void {
@@ -167,7 +167,7 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config());
-    plantDocument(opened.folder, SessionStateFiles, ID, {
+    plantDocument(opened.folder, FerretStateFile, ID, {
       id: 'session-1',
       status: 'running',
       turn: 0,
@@ -186,7 +186,7 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     const subject = new StorageSignalRepository(opened.storage, clock);
-    plantDocument(opened.folder, SessionConfigFiles, PEER, config({ id: 'session-2', mode: 'batch' }));
+    plantDocument(opened.folder, FerretConfigFile, PEER, config({ id: 'session-2', mode: 'batch' }));
     await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
@@ -204,7 +204,7 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config());
-    plantDocument(opened.folder, SessionStateFiles, ID, { id: 'session-1', turn: 0, status: 'finished' });
+    plantDocument(opened.folder, FerretStateFile, ID, { id: 'session-1', turn: 0, status: 'finished' });
 
     // Act
     const actual = await new StorageSignalRepository(opened.storage, clock).read(ID);
@@ -315,7 +315,7 @@ describe('the storage signal repository', () => {
     // guessed target would report a session state nothing on disk supports.
     // Arrange
     const { opened } = await openStorage();
-    plantDocument(opened.folder, SessionConfigFiles, ID, config({ mode: 'batch' }));
+    plantDocument(opened.folder, FerretConfigFile, ID, config({ mode: 'batch' }));
     await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
 
     // Act

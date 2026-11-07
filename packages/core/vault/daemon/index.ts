@@ -18,8 +18,10 @@ import {
   type SecretUseRefusal,
   type SecretUseResult,
   type VaultApi,
+  VaultConfigFile,
 } from '../contract/index.ts';
 import { KernelOutboundTransport } from './adapters/secrets/kernel-outbound-transport.ts';
+import { ConfigSecretRecipes } from './adapters/secrets/config-secret-recipes.ts';
 import { KernelSealedDocuments } from './adapters/secrets/kernel-sealed-documents.ts';
 import { kernelSealedFiles } from './adapters/secrets/kernel-sealed-files.ts';
 import { KernelSecretChildRunner } from './adapters/secrets/kernel-secret-child-runner.ts';
@@ -56,9 +58,8 @@ import { VaultRedaction } from './lib/secrets/read-scope.ts';
 import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
-import { NO_RECIPES, SecretUseError, SecretUseService } from './lib/secrets/use.ts';
+import { SecretUseError, SecretUseService } from './lib/secrets/use.ts';
 import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
-import { NO_REFERENCES } from './lib/secrets/view.ts';
 
 /**
  * The machine's own identity, for copying secrets between machines. GAP (for the lead): the kernel holds the
@@ -118,14 +119,16 @@ export default implementDaemon(manifest, {
       return state === 'stopped' || state === 'gone';
     };
     const inputs = buildInputs(ctx, { values, quarantine, redact, secretStore, ferretEnded });
-    // GAP (for the lead): today's operator `secretEnvironment` recipes and the reference sources (recipes, fleet
-    // accounts) were composed here from Accounts' and Logins' code; until those ports offer them, a use gets exactly
-    // the secrets it named and the listing shows no configured references.
+    // The operator's `secretEnvironment` recipes are `config/vault.yaml` (`VaultConfigFile`), read on every use so an
+    // edit lands without a restart; the one adapter is both the recipe source and the listing's references, so the two
+    // never disagree. GAP (for the lead): the fleet accounts' references (Accounts' and Logins' code) are not offered
+    // by those ports yet, so the listing shows the recipes' only.
+    const recipes = new ConfigSecretRecipes(() => kernel.config.file(VaultConfigFile)?.secretEnvironment ?? {});
     const uses = new SecretUseService(
       vault,
       new KernelSecretChildRunner(kernel.spawn, kernel.clock),
       environments,
-      NO_RECIPES,
+      recipes,
       masks,
     );
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
@@ -285,7 +288,7 @@ export default implementDaemon(manifest, {
 
     return {
       routes: {
-        ...secretRouteHandlers({ directory, references: NO_REFERENCES, uses, imports, exports, changed }),
+        ...secretRouteHandlers({ directory, references: recipes, uses, imports, exports, changed }),
         ...inputs.routes,
       },
       tools: { ...inputs.tools },

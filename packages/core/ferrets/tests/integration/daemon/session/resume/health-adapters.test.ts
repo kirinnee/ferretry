@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
-import { FerretHistoryFiles } from '../../../../../contract/index.ts';
+import { FerretHistoryFiles, FerretStateFile } from '../../../../../contract/index.ts';
 import { FileSelfRestartStampStore } from '../../../../../daemon/adapters/session/resume/file-self-restart-stamp-store.ts';
 import { FileSessionHealthEventSink } from '../../../../../daemon/adapters/session/resume/file-health-event-sink.ts';
 import { StorageConsistencyPass } from '../../../../../daemon/adapters/session/resume/storage-consistency-pass.ts';
@@ -14,7 +14,6 @@ import { UnmountedSupervisionRepair } from '../../../../../daemon/adapters/sessi
 import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
 import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
-import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
 import { MEMORY_PATHS, MemoryFileSystem } from '../../../../support/daemon/memory-file-system.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
 import { waitForValue } from '../../support/wait-for.ts';
@@ -397,7 +396,7 @@ describe('storage consistency pass', () => {
       sessionState('torn-state', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }),
     );
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    opened.folder.plant(SessionStateFiles, '{"id": "torn-state"', id);
+    opened.folder.plant(FerretStateFile, '{"id": "torn-state"', id);
     const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act

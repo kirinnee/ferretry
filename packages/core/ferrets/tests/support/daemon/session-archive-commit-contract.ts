@@ -1,14 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
-import { ArchiveFile, FerretHistoryFiles } from '../../../contract/index.ts';
+import { ArchiveFile, FerretHistoryFiles, FerretConfigFile, FerretStateFile } from '../../../contract/index.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import { KeyedSerialExecutor } from '../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { createFoundationPaths } from '../../../daemon/lib/paths.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
 import { RecordingLog } from './storage.ts';
 
 const NOW = '2026-11-06T12:00:00.000Z';
@@ -27,7 +26,7 @@ export const ended = (parent?: string): Doc => ({
 function documentsPort(docs: Map<string, Doc>, beforePersist: () => void | Promise<void>): StatePort {
   let registry: unknown;
   const kindOf = (file: StateFileDef): 'config' | 'state' | undefined =>
-    file === SessionConfigFiles ? 'config' : file === SessionStateFiles ? 'state' : undefined;
+    file === FerretConfigFile ? 'config' : file === FerretStateFile ? 'state' : undefined;
   return {
     read: async (file, name) => {
       if (file === ArchiveFile) return ok(registry as never);

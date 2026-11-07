@@ -1,61 +1,23 @@
 import { z } from 'zod';
-import { PositiveIntegerSchema } from '@ferretry/std';
+import { MAX_PIN_NOTE_LENGTH, PinBlockKindSchema, PinPreviewSchema, PinSchema } from '../../../contract/pins.ts';
+
+/**
+ * The pin documents' stored shapes are the contract's (`contract/pins.ts`); this module keeps the daemon's own
+ * limits, snapshot and request vocabulary, and re-exports the moved names so its readers are unchanged.
+ */
+export {
+  MAX_PIN_NOTE_LENGTH,
+  MAX_PIN_PREVIEW_LENGTH,
+  type Pin,
+  type PinBlockKind,
+  type PinBy,
+} from '../../../contract/pins.ts';
 
 /** An ISO instant as the wire spells it (today's `InstantSchema`: kept as written, not re-branded). */
 const InstantSchema = z.iso.datetime({ offset: true });
 
 export const PIN_SCHEMA_VERSION = 1 as const;
 export const MAX_PINS_PER_SESSION = 20;
-export const MAX_PIN_NOTE_LENGTH = 500;
-export const MAX_PIN_PREVIEW_LENGTH = 200;
-
-export const PinBySchema = z.enum(['human', 'agent']);
-export type PinBy = z.infer<typeof PinBySchema>;
-
-export const PinBlockKindSchema = z.enum(['user', 'assistant', 'thinking', 'tools', 'system', 'notice']);
-export type PinBlockKind = z.infer<typeof PinBlockKindSchema>;
-
-const PinPreviewSchema = z
-  .string()
-  .max(MAX_PIN_PREVIEW_LENGTH)
-  .regex(/^[^\r\n]*$/u, 'preview must be a single line');
-
-const PinIdentityShape = {
-  id: z.uuid(),
-  at: PositiveIntegerSchema,
-};
-
-const PinProvenanceSchema = z.discriminatedUnion('by', [
-  z.object({ by: z.literal('human'), createdBy: z.null(), createdByName: z.null() }),
-  z.object({ by: z.literal('agent'), createdBy: z.string().min(1), createdByName: z.string().nullable() }),
-]);
-
-export const MessagePinSchema = z.intersection(
-  z.object({
-    ...PinIdentityShape,
-    kind: z.literal('message'),
-    blockId: z.string().min(1),
-    blockKind: PinBlockKindSchema,
-    preview: PinPreviewSchema,
-    ts: InstantSchema.optional(),
-  }),
-  PinProvenanceSchema,
-);
-export type MessagePin = z.infer<typeof MessagePinSchema>;
-
-export const NotePinSchema = z.intersection(
-  z.object({
-    ...PinIdentityShape,
-    kind: z.literal('note'),
-    text: z.string().min(1).max(MAX_PIN_NOTE_LENGTH),
-    source: z.object({ blockId: z.string().min(1) }).optional(),
-  }),
-  PinProvenanceSchema,
-);
-export type NotePin = z.infer<typeof NotePinSchema>;
-
-export const PinSchema = z.union([MessagePinSchema, NotePinSchema]);
-export type Pin = z.infer<typeof PinSchema>;
 
 export const PinSnapshotSchema = z
   .object({
