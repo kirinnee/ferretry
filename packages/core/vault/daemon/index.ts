@@ -197,9 +197,9 @@ export default implementDaemon(manifest, {
           else if (state !== undefined) ferretStates.set(ferret, state);
           if (await ferretEnded(ferret as FerretId)) await inputs.service.sessionEnded(ferret);
         },
-        'asks.changed': async ({ askId, state }) => {
+        'asks.changed': async ({ ferret, askId, state }) => {
           if (state !== 'closed') return;
-          const ask = await ctx.needs.asks.get(askId);
+          const ask = await ctx.needs.asks.get({ ferret, id: askId });
           if (ask?.source !== INPUT_ASK_SOURCE || ask.state !== 'closed' || ask.ferret === undefined) return;
           // As today, only the request's current pending card is ended; our own final-card close is a no-op.
           await inputs.service.cardDismissed(ask.ferret, askId as string as AgendaId);
