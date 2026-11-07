@@ -93,6 +93,64 @@ export interface CarrierLink {
 export interface CarrierPeer {
   /** The peer's own address on a direct socket: the rate-limit identity. Absent: the session id is (R264). */
   readonly address?: string;
+  /**
+   * Called once by the kernel when a session mode accepted the holder's proof over this session's transcript
+   * (a device's or a member's key): the moment the link stops being an unproven one. A direct carrier releases
+   * its unproven slot here (today's direct mount: 16 unproven, 2 per remote peer, the oldest evicted). Never
+   * called for a pairing or join session, nor for a refused proof.
+   */
+  readonly proved?: () => void;
+}
+
+/** A rendezvous challenge to answer (relay protocol §5, R46): the host the carrier dialled and its nonce. */
+export interface RelayClaimRequest {
+  /** The rendezvous host, exactly as the daemon's configured relay URL spells it (the carrier checks the match). */
+  readonly host: string;
+  /** The challenge nonce as it travelled: 32 bytes, unpadded base64url. */
+  readonly nonce: string;
+}
+
+/** A signed claim, in its wire spelling. */
+export interface SignedRelayClaim {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  /** Ed25519 over the R46 transcript, base64url. */
+  readonly signature: string;
+}
+
+/** A hosted-tunnel provisioning request to sign (relay protocol §15). */
+export interface TunnelSignRequest {
+  readonly action: 'provision' | 'release';
+  /** The hosted service's host, as the daemon's discovered origin spells it. */
+  readonly host: string;
+  /** The service's challenge nonce: 32 bytes, unpadded base64url. */
+  readonly nonce: string;
+  /** The loopback port the tunnel forwards to (a provision); signed either way. */
+  readonly originPort?: number;
+}
+
+/** A signed tunnel request, in its wire spelling. */
+export interface SignedTunnelSignature {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  /** The nonce signed, base64url. */
+  readonly nonce: string;
+  readonly signature: string;
+}
+
+/**
+ * The daemon identity as a carrier may use it: two signatures over transcripts the KERNEL builds, and nothing
+ * else. There is no key export and no "sign these bytes": a carrier can only obtain a claim for a rendezvous
+ * challenge or a tunnel request, each with its own label, so neither can be replayed as the other or as a
+ * handshake signature. Refuses (throws `TypeError`) a malformed nonce, an empty host or a bad port.
+ */
+export interface IdentitySigner {
+  /** R46: `ferretry-relay-claim-v1` ‖ LP(protocol) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce). */
+  sign(request: RelayClaimRequest): Promise<SignedRelayClaim>;
+  /** `ferretry-tunnel-{provision,release}-v1` ‖ LP(protocol) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(port|""). */
+  signTunnel(request: TunnelSignRequest): Promise<SignedTunnelSignature>;
 }
 
 /**
@@ -101,6 +159,8 @@ export interface CarrierPeer {
  */
 export interface SessionLayer {
   open(carrier: CarrierKey, peer?: CarrierPeer): CarrierLink;
+  /** The daemon identity's claim and tunnel signer, shared by every carrier; the key never leaves the kernel. */
+  readonly signer: IdentitySigner;
 }
 
 /**

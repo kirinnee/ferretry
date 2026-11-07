@@ -857,3 +857,53 @@ describe('the session layer: report', () => {
     expect(report.sessions).toBe(0);
   });
 });
+
+describe('the session layer: the carrier peer is told when it proved', () => {
+  test('proved() is called once after a valid device proof, never for an unknown holder or a pairing', async () => {
+    const fx = await fixture();
+    let provedCalls = 0;
+    const peer = { address: '192.0.2.20', proved: () => (provedCalls += 1) };
+    const { client } = await serving(fx, 'direct', peer);
+    expect(client.last('authenticated')).toBeDefined();
+    expect(provedCalls).toBe(1);
+    await client.send(req(1));
+    await client.pump();
+    expect(provedCalls).toBe(1);
+
+    let refused = 0;
+    const stranger = await pairedDevice(fx.device, 'S');
+    fx.device.keys.delete(stranger.deviceId);
+    const unknown = TestClient.open(fx, 'direct', { address: '192.0.2.21', proved: () => (refused += 1) });
+    await unknown.handshake(fx.daemonId);
+    await unknown.auth(stranger);
+    expect(unknown.end?.code).toBe(4403);
+    expect(refused).toBe(0);
+  });
+
+  test('a carrier whose proved() throws keeps its proved session', async () => {
+    const fx = await fixture();
+    const device = await pairedDevice(fx.device);
+    let calls = 0;
+    const client = TestClient.open(fx, 'direct', {
+      proved: () => {
+        calls += 1;
+        throw new Error('carrier bug');
+      },
+    });
+    await client.handshake(fx.daemonId);
+    await client.auth(device);
+    expect(calls).toBe(1);
+    expect(client.last('authenticated')).toBeDefined();
+    expect(client.end).toBeUndefined();
+  });
+});
+
+describe('the session layer: the identity signer it offers carriers', () => {
+  test('signs a rendezvous claim for the daemon identity and names that identity', async () => {
+    const fx = await fixture();
+    const nonce = toBase64Url(relayCrypto.randomBytes(32));
+    const signed = await fx.layer.signer.sign({ host: 'relay.example.test', nonce });
+    expect(signed.daemonId).toBe(fx.daemonId);
+    expect(Object.keys(fx.layer.signer).sort()).toEqual(['sign', 'signTunnel']);
+  });
+});
