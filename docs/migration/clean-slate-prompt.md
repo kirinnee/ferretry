@@ -122,11 +122,15 @@ noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `
    - Carried: each OAuth MCP server's sign-in record, refresh token and registered client secret.
    - Not carried: the **access tokens**. They lived in the old `state/secrets.json`, which this runbook never carries
      (its values are retyped, step 6).
-   - **Global sign-ins renew at the next launch that uses them.** That launch spends the carried refresh token for a
-     new access token before the ferret starts. A server whose provider refuses the refresh shows "needs sign-in"
-     until the owner signs in to it again; the launch still starts.
-   - **A project server's sign-in renews only at a launch in that project's own root folder**, until the project's
-     roots are known here. From a worktree or a subfolder it shows as not signed in.
+   - **Sign-ins renew at the next launch that uses them, as today.** That covers a global server, and a project
+     server from the project's root, a subfolder of it or a worktree kept inside it, once the project is registered
+     again (main step 4). That launch spends the carried refresh token for a new access token before the ferret
+     starts. A server whose provider refuses the refresh shows "needs sign-in" until the owner signs in to it
+     again; the launch still starts. A sign-out during a launch never stops it.
+   - **Not yet on 5.0:**
+     - A project server's token is renewed, but not handed to the ferret until the Claude Code harness is ported,
+       because that harness is what says whether the runtime declined the server.
+     - A managed worktree outside the project folder still counts as a project of its own.
 4. After the main step 4 (Settings) adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)
