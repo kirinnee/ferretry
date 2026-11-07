@@ -193,7 +193,8 @@ export default definePlugin({
   doctor: ['logins-store'],
 
   permissions: {
-    roots: [],
+    // Logins' own sign-in stores (§7.7): the kernel gives this internal root to Logins alone.
+    roots: ['credentials'],
     // Fixed hosts: the two usage reads and the built-in presets' test hosts. A login's OWN gateway host (custom
     // endpoints, Azure resources) is a user value; the kernel's network allowlist cannot name it yet (GAP).
     network: [

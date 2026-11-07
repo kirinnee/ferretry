@@ -1,17 +1,17 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { ChildHandle, FencedPath } from '@ferretry/kernel/contract';
+import type { ChildHandle, RootName, RootsPort } from '@ferretry/kernel/contract';
 import type { LoginKind } from '@ferretry/core-ferrets/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
-import { lexicalInRoot, nodeFs, resolveInRoot } from '@ferretry/kernel/host';
+import { nodeFs, rootsPortFor } from '@ferretry/kernel/host';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, standInAdmission, testHost } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import { LoginsPort, type LoginId } from '../../../contract/index.ts';
-import { OwnedLoginStore, type OwnedLoginRoot } from '../../../daemon/adapters/credentials/owned-store.ts';
+import { OwnedLoginStore } from '../../../daemon/adapters/credentials/owned-store.ts';
 import { AnthropicUsageProbe } from '../../../daemon/adapters/credentials/anthropic-usage-probe.ts';
 import { CodexUsageProbe } from '../../../daemon/adapters/credentials/codex-usage-probe.ts';
 import { buildLoginsDaemon } from '../../../daemon/index.ts';
@@ -44,56 +44,40 @@ afterEach(async () => {
   await Promise.all(tempHomes.splice(0).map(home => rm(home, { recursive: true, force: true })));
 });
 
-/** Only a temporary FY_HOME. Use the kernel's actual lexical/link/device checks around the injected seam. */
-async function fixture(plugin = 'logins') {
+/**
+ * Only a temporary FY_HOME, opened through the kernel's REAL roots port (`rootsPortFor` over the host filesystem): the
+ * same base placement, link/device fences and per-call checks the daemon gives Logins. `base: false` is a fresh home.
+ */
+async function fixture(options: { readonly base?: boolean } = {}) {
   const fyHome = await mkdtemp(join(tmpdir(), 'logins-owned-'));
   tempHomes.push(fyHome);
-  const base = join(fyHome, 'state', plugin, 'credentials');
-  await mkdir(base, { recursive: true, mode: 0o700 });
-  const fs = nodeFs(() => 'fixture');
-  const checkedPaths: FencedPath[] = [];
-  const checked = async (path: FencedPath): Promise<FencedPath> => {
-    checkedPaths.push(path);
-    const result = await resolveInRoot(fs, fyHome, base, false, path);
-    if (!result.ok) throw new Error(`owned root refused: ${result.error}`);
-    return result.value;
-  };
-  const root: OwnedLoginRoot = {
-    resolve: path => lexicalInRoot(fyHome, base, false, path),
-    readText: async path => readFile(await checked(path), 'utf8'),
-    stat: async path => {
-      const info = await fs.lstat(await checked(path));
-      if (info === undefined) return undefined;
-      if (info.kind !== 'file' && info.kind !== 'directory') throw new Error('not a file or directory');
-      return { kind: info.kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs), mode: 0o600, links: 1 };
-    },
-    ensurePrivateDirectory: async path => mkdir(await checked(path), { recursive: true, mode: 0o700 }).then(() => {}),
-    isSymbolicLink: async path => {
-      await checked(path);
-      return await lstat(path).then(
-        info => info.isSymbolicLink(),
-        error => {
-          if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
-          throw error;
-        },
-      );
-    },
-    stamp: async path => {
-      await checked(path);
-      try {
-        const info = await stat(path, { bigint: true });
-        return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
-      } catch {
-        return undefined;
-      }
-    },
-  };
+  const base = join(fyHome, 'state', 'logins', 'credentials');
+  if (options.base !== false) await mkdir(base, { recursive: true, mode: 0o700 });
+  const roots = (plugin = 'logins', declared: readonly RootName[] = ['credentials']): RootsPort =>
+    rootsPortFor(
+      nodeFs(() => 'fixture'),
+      { home: fyHome, plugin, worktrees: `${fyHome}-worktrees` },
+      declared,
+      () => undefined,
+    );
+  const root = roots().root('credentials');
   const put = async (path: string, value: unknown) => {
     const target = join(base, path);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     await writeFile(target, JSON.stringify(value), { mode: 0o600 });
   };
-  return { fyHome, base, root, put, checkedPaths };
+  return { fyHome, base, root, roots, put };
+}
+
+/** The actual default composition, with the kernel's real roots port in place of the test host's in-memory one. */
+function composed(roots: RootsPort) {
+  const daemon = buildLoginsDaemon();
+  return implementDaemon(daemon.manifest, {
+    build: context => {
+      if (daemon.build === undefined) throw new Error('missing build');
+      return daemon.build({ ...context, kernel: { ...context.kernel, roots } });
+    },
+  });
 }
 
 const jwt = (claims: unknown) => `fixture.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.fixture`;
@@ -116,37 +100,95 @@ const config = {
     host: { harness: 'claude-code', store: 'host' },
   },
 };
+const claudeOnly = () => new Map([['claude', { harness: 'claude-code' as const, store: 'ferretry' as const }]]);
 
-test('S175 owned store refuses another plugin’s fenced root before credential operations', async () => {
-  const f = await fixture('another-plugin');
-  await f.put('claude/.credentials.json', claude());
-  const file = f.root.resolve('claude/.credentials.json');
-  if (!file.ok) throw new Error('fixture file refused');
-  // This is a usable root with the real kernel fence checks, not an escaping or dishonest handle.
-  expect((await f.root.stat(file.value))?.kind).toBe('file');
-  f.checkedPaths.length = 0;
-  expect(() => new OwnedLoginStore(f.root, f.fyHome, () => NOW)).toThrow(
-    'the root is not the owned login credentials subtree',
-  );
-  expect(f.checkedPaths).toEqual([]);
+/** A refused store: nothing read is ready, sign-in cannot prepare its folder, and the refusal is the kernel's. */
+async function expectRefused(store: OwnedLoginStore, refusal: string) {
+  const catalog = store.catalog(claudeOnly);
+  const entry = await catalog.entry('claude');
+  if (
+    entry.resolution.store === 'environment' ||
+    'unavailable' in entry.resolution ||
+    entry.resolution.harness !== 'claude'
+  )
+    throw new Error('no store');
+  const inspection = await store.inspectStored(entry.resolution);
+  expect(inspection.reading.state).toBe('unreadable');
+  expect(JSON.stringify(inspection).includes(TOKEN)).toBe(false);
+  const target = catalog.signInTarget(entry);
+  if (target.kind !== 'store') throw new Error('owned target refused');
+  await expect(target.prepare()).rejects.toThrow(`root refused: ${refusal}`);
+}
+
+test('S175 the credentials root is Logins’ alone: another plugin cannot open it, and Logins never reads another plugin’s store', async () => {
+  const f = await fixture();
+  // Another subsystem declaring the same internal root gets nothing (the kernel's owner table, §7.7).
+  expect(() => f.roots('another-plugin').root('credentials')).toThrow('root refused: not_declared');
+  // A sign-in planted in another plugin's credentials folder is outside Logins' root: the login reads as never signed in.
+  const foreign = join(f.fyHome, 'state/another-plugin/credentials/claude');
+  await mkdir(foreign, { recursive: true, mode: 0o700 });
+  await writeFile(join(foreign, '.credentials.json'), JSON.stringify(claude()), { mode: 0o600 });
+  const store = new OwnedLoginStore(f.root, () => NOW);
+  const entry = await store.catalog(claudeOnly).entry('claude');
+  if (
+    entry.resolution.store === 'environment' ||
+    'unavailable' in entry.resolution ||
+    entry.resolution.harness !== 'claude'
+  )
+    throw new Error('no store');
+  expect(entry.resolution.credentialFile).toBe(join(f.base, 'claude/.credentials.json'));
+  expect((await store.inspectStored(entry.resolution)).reading.state).toBe('missing');
+  // And a path naming that folder is refused by the root itself, whatever spelling reaches it.
+  expect(f.root.resolve('../../another-plugin/credentials/claude/.credentials.json').ok).toBe(false);
+  expect(f.root.resolve(join(foreign, '.credentials.json')).ok).toBe(false);
 });
 
-test('S175 owned store requires an independent kernel home before accepting an injected root', async () => {
+test('S175 the kernel, not a caller, places the credentials base under its own absolute home', async () => {
   const f = await fixture();
-  expect(() => new OwnedLoginStore(f.root, undefined, () => NOW)).toThrow('the kernel home is required');
-  expect(f.checkedPaths).toEqual([]);
+  const base = f.root.resolve('');
+  expect(base.ok ? String(base.value) : undefined).toBe(f.base);
+  // There is no home argument left to forge: the kernel's roots port refuses a relative home outright.
+  expect(() =>
+    rootsPortFor(
+      nodeFs(() => 'fixture'),
+      { home: 'relative-home', plugin: 'logins', worktrees: '/w' },
+      ['credentials'],
+      () => undefined,
+    ),
+  ).toThrow('the home must be an absolute path');
+  expect(() => new OwnedLoginStore(f.root, () => NOW)).not.toThrow();
 });
 
 test('S175 owned store refuses a credentials root linked into another plugin’s subtree', async () => {
   const f = await fixture();
   const foreign = join(f.fyHome, 'state/another-plugin/credentials');
-  await mkdir(foreign, { recursive: true, mode: 0o700 });
+  await mkdir(join(foreign, 'claude'), { recursive: true, mode: 0o700 });
+  await writeFile(join(foreign, 'claude/.credentials.json'), JSON.stringify(claude()), { mode: 0o600 });
   await rm(f.base, { recursive: true });
   await symlink(foreign, f.base);
-  expect(() => new OwnedLoginStore(f.root, f.fyHome, () => NOW)).toThrow(
-    'the root is not the owned login credentials subtree',
-  );
-  expect(f.checkedPaths).toEqual([]);
+  await expectRefused(new OwnedLoginStore(f.root, () => NOW), 'link_escape');
+  // Nothing was made through the link in the other plugin's folder.
+  expect((await lstat(join(foreign, 'claude')).then(info => info.isDirectory())) && true).toBe(true);
+  await expect(lstat(join(foreign, 'claude/sign-in'))).rejects.toThrow();
+});
+
+test('S175 owned store refuses a missing credentials base and creates nothing (fresh home: the kernel makes the base)', async () => {
+  const f = await fixture({ base: false });
+  await expectRefused(new OwnedLoginStore(f.root, () => NOW), 'outside');
+  await expect(lstat(f.base)).rejects.toThrow();
+});
+
+test('S175 owned store refuses an inaccessible credentials base', async () => {
+  if (process.getuid?.() === 0) return; // root ignores the permission bits this case relies on
+  const f = await fixture();
+  await f.put('claude/.credentials.json', claude());
+  const parent = dirname(f.base);
+  await chmod(parent, 0o000);
+  try {
+    await expectRefused(new OwnedLoginStore(f.root, () => NOW), 'outside');
+  } finally {
+    await chmod(parent, 0o700);
+  }
 });
 
 test('S175 owned store metadata reaches the actual daemon list: status, email, plan and private sign-in paths', async () => {
@@ -155,7 +197,7 @@ test('S175 owned store metadata reaches the actual daemon list: status, email, p
   await f.put('claude/sign-in/.claude.json', { oauthAccount: { emailAddress: ' claude@example.test ' } });
   await f.put('codex/auth.json', codex());
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
+    plugins: [composed(f.roots())],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -173,7 +215,7 @@ test('S175 owned store metadata reaches the actual daemon list: status, email, p
     expect(wire.includes(TOKEN) || wire.includes(REFRESH)).toBe(false);
     expect(wire).not.toMatch(/fingerprint|access_token|refresh_token|accessToken|refreshToken/u);
 
-    const store = new OwnedLoginStore(f.root, f.fyHome, () => NOW);
+    const store = new OwnedLoginStore(f.root, () => NOW);
     const catalog = store.catalog(() => new Map([['new', { harness: 'claude-code', store: 'ferretry' }]]));
     const target = catalog.signInTarget(await catalog.entry('new'));
     expect(target.kind).toBe('store');
@@ -195,7 +237,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
   await f.put('claude/.credentials.json', claude(NOW - 1));
   await f.put('codex/auth.json', codex(NOW + 60_000));
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
+    plugins: [composed(f.roots())],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -204,7 +246,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
     const list = await host.provided(LoginsPort).list();
     expect(list.logins.find(login => login.id === 'claude')?.status.word).toBe('refresh_due');
     expect(list.logins.find(login => login.id === 'codex')?.status.word).toBe('refresh_due');
-    const store = new OwnedLoginStore(f.root, f.fyHome, () => NOW);
+    const store = new OwnedLoginStore(f.root, () => NOW);
     const catalog = store.catalog(() => new Map([['claude', { harness: 'claude-code', store: 'ferretry' }]]));
     const entry = await catalog.entry('claude');
     if (entry.resolution.store === 'environment' || 'unavailable' in entry.resolution) throw new Error('no store');
@@ -226,7 +268,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
 
 test('S175 owned store refuses host paths, traversal, Claude links and links escaping the owned root', async () => {
   const f = await fixture();
-  const store = new OwnedLoginStore(f.root, f.fyHome, () => NOW);
+  const store = new OwnedLoginStore(f.root, () => NOW);
   const catalog = store.catalog(
     () =>
       new Map([
@@ -269,7 +311,7 @@ test('S175 owned store refuses host paths, traversal, Claude links and links esc
   });
   await expect(
     ports.refresh.refresh({ accountId: 'codex', kind: 'codex', home: join(f.base, 'codex') }, async () => true),
-  ).rejects.toThrow('owned root refused');
+  ).rejects.toThrow('root refused: link_escape');
   expect(refreshed).toBe(false);
   const failed = new OwnedLoginStore(
     {
@@ -278,7 +320,6 @@ test('S175 owned store refuses host paths, traversal, Claude links and links esc
         throw new Error(TOKEN);
       },
     },
-    f.fyHome,
     () => NOW,
   );
   // Use an ordinary owned file so the read, rather than the link check, is what fails.
@@ -293,7 +334,7 @@ test('S178 actual daemon Check now makes only the free provider read; values and
   await f.put('claude/.credentials.json', claude());
   const requests: { url: string; method: string }[] = [];
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
+    plugins: [composed(f.roots())],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -322,7 +363,7 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
   await f.put('codex/auth.json', codex(NOW - 1));
   await f.put('claude/.credentials.json', claude());
   await f.put('claude/usage.json', { version: 1, source: 'claude-statusline', at: NOW, fiveHour: { usedPercent: 24 } });
-  const daemon = buildLoginsDaemon(f.root, f.fyHome);
+  const daemon = composed(f.roots());
   const starts: { program: string; args: readonly string[]; env: unknown }[] = [];
   let launchKind: LoginKind | undefined;
   const wired = implementDaemon(daemon.manifest, {
@@ -436,7 +477,7 @@ const sharingCases: readonly { name: string; browsers?: BrowsersApi; automatic?:
 for (const scenario of sharingCases) {
   test(`${scenario.name} in real composition selects the safe Codex fallback and explicit-choice sentence`, async () => {
     const f = await fixture();
-    const daemon = buildLoginsDaemon(f.root, f.fyHome);
+    const daemon = composed(f.roots());
     const calls: string[][] = [];
     let launchKind: LoginKind | undefined;
     const wired = implementDaemon(daemon.manifest, {
@@ -533,7 +574,7 @@ for (const scenario of sharingCases) {
 test('external entrypoints still refuse missing governance after private launch orchestration is wired', async () => {
   const f = await fixture();
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
+    plugins: [composed(f.roots())],
     fakes: { vault: emptyVault() },
     config,
   });

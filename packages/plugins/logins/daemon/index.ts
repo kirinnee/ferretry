@@ -15,20 +15,15 @@ import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-p
 import { deliverCodexCallback } from './adapters/harness-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from './adapters/harness-login/login-child.ts';
 import { systemPortHolders } from './adapters/harness-login/port-holders.ts';
-import { OwnedLoginStore, type OwnedLoginRoot } from './adapters/credentials/owned-store.ts';
+import { OwnedLoginStore } from './adapters/credentials/owned-store.ts';
 import { AnthropicUsageProbe, quotaFetch } from './adapters/credentials/anthropic-usage-probe.ts';
 import { CodexUsageProbe } from './adapters/credentials/codex-usage-probe.ts';
 import { codexTokenRefresh } from './adapters/credentials/token-refresh.ts';
 import { parseModelCatalog } from './lib/catalog/catalog.ts';
 import { suggestedOllamaModel } from './lib/local-models/ollama.ts';
 import { LocalModelsService } from './lib/local-models/service.ts';
-import {
-  CREDENTIAL_LIST_FRESH_MS,
-  FleetCredentialCatalog,
-  FleetCredentialsService,
-} from './lib/credentials/credentials-service.ts';
+import { CREDENTIAL_LIST_FRESH_MS, FleetCredentialsService } from './lib/credentials/credentials-service.ts';
 import { CredentialStatusService } from './lib/credentials/credential-status.ts';
-import { unreadableStatusPorts, UNOPENABLE_INSPECTION } from './lib/credentials/store-ports.ts';
 import { HarnessLoginService } from './lib/harness-login/service.ts';
 import { loginKinds } from './lib/kinds.ts';
 import { ModelCatalogService } from './lib/models/service.ts';
@@ -49,11 +44,11 @@ import type { HarnessKind } from './lib/shared/harness.ts';
 const PROGRAMS: Readonly<Record<HarnessKind, string>> = { claude: 'claude', codex: 'codex' };
 
 /**
- * Composition seam pending the kernel's approved internal credentials root; it grants no host-home access.
- * Only daemon composition may supply kernelHome alongside ownedRoot, never config, routes or caller input.
- * The kernel porter will wire both; an injected root without the kernel-known home is refused.
+ * The owned login stores live in the kernel's `credentials` internal root (§7.7), declared in the manifest and given
+ * to Logins alone: its base is `<home>/state/logins/credentials`, and a linked, foreign or missing base is refused on
+ * every call. Nothing here, in config, a route or a caller names that folder.
  */
-export function buildLoginsDaemon(ownedRoot?: OwnedLoginRoot, kernelHome?: string) {
+export function buildLoginsDaemon() {
   return implementDaemon(manifest, {
     build({ needs, uses, kernel }) {
       const { clock, config, events, jobs, lifecycle, log, state } = kernel;
@@ -118,29 +113,21 @@ export function buildLoginsDaemon(ownedRoot?: OwnedLoginRoot, kernelHome?: strin
       });
 
       // ── logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
-      const store =
-        ownedRoot === undefined ? undefined : new OwnedLoginStore(ownedRoot, kernelHome, () => clock.nowMs());
-      const catalog =
-        store?.catalog(files) ??
-        new FleetCredentialCatalog({
-          logins: files,
-          paths: undefined,
-          inspect: async () => UNOPENABLE_INSPECTION,
-          ensureDirectory: async () => undefined,
-        });
-      const fetch = quotaFetch(kernel.fetch, clock);
+      const store = new OwnedLoginStore(kernel.roots.root('credentials'), () => clock.nowMs());
+      const catalog = store.catalog(files);
+      const quota = quotaFetch(kernel.fetch, clock);
       const status = new CredentialStatusService(
-        store?.statusPorts({
-          anthropic: new AnthropicUsageProbe({ fetch }),
-          codex: new CodexUsageProbe({ fetch, now: () => clock.nowMs() }),
+        store.statusPorts({
+          anthropic: new AnthropicUsageProbe({ fetch: quota }),
+          codex: new CodexUsageProbe({ fetch: quota, now: () => clock.nowMs() }),
           refresh: codexTokenRefresh(kernel.spawn, clock),
           usageIntervalMs: 60_000,
-        }) ?? unreadableStatusPorts(() => clock.nowMs(), 60_000),
+        }),
       );
       const credentials = new FleetCredentialsService({
         catalog,
         status,
-        email: async source => await store?.email(source),
+        email: async source => await store.email(source),
         machineName: () => 'this machine',
         locate: harness => PROGRAMS[harness],
         run: async spec => {

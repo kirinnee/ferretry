@@ -2,12 +2,12 @@
  * The file-store branch of today's PlatformFleetCredentialStore and credential-facts readers, restricted to
  * Logins' own state/logins/credentials root. Material exists only inside these adapters for one read/probe.
  *
- * The kernel does not yet expose this internal root. This seam grants no filesystem access by itself; composition
- * must supply the declared root, including its link/device checks, private mkdir and metadata-only file stamp.
+ * Every filesystem operation goes through the kernel's `credentials` internal root (§7.7): the kernel gives that root
+ * to Logins alone, places its base at `<home>/state/logins/credentials`, refuses a base reached through a link, and
+ * re-checks links and device files on every call. This adapter holds no filesystem authority of its own.
  */
-import { realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative } from 'node:path';
-import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import { dirname, relative } from 'node:path';
+import type { FencedPath, RootHandle, RootLstat } from '@ferretry/kernel/contract';
 import type { LoginFile } from '../../../contract/index.ts';
 import { FleetCredentialCatalog, type CredentialEmailSource } from '../../lib/credentials/credentials-service.ts';
 import {
@@ -25,14 +25,26 @@ import { credentialFingerprint } from './credential-classifier.ts';
 import type { AnthropicUsageProbe } from './anthropic-usage-probe.ts';
 import type { CodexUsageProbe } from './codex-usage-probe.ts';
 
-/** Only the owned credentials subtree. No host-home or keychain authority is accepted here. */
-export interface OwnedLoginRoot extends Pick<RootHandle, 'resolve' | 'readText' | 'stat'> {
-  /** The same recursive mkdir(0700) as today's ensurePrivateDirectory, checked against this root. */
-  ensurePrivateDirectory(path: FencedPath): Promise<void>;
-  /** Today's credentialFileStamp (link and target inode/size/change/modified times), not material. */
-  stamp(path: FencedPath): Promise<string | undefined>;
-  /** lstat, before a Claude store read: Claude credentials must never be linked. */
-  isSymbolicLink(path: FencedPath): Promise<boolean>;
+/** The calls this store makes on the kernel's `credentials` root. No host-home or keychain authority exists here. */
+export type OwnedLoginRoot = Pick<RootHandle, 'resolve' | 'readText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'>;
+
+const describe = (info: Pick<RootLstat, 'kind' | 'size' | 'modified' | 'mode' | 'links'>): string =>
+  `${info.kind}:${info.size}:${String(info.modified)}:${info.mode}:${info.links}`;
+
+/**
+ * Today's credentialFileStamp (the link, and what it points at), not material: a metadata-only cache key for the
+ * Claude account email, through the root's own lstat/stat. `undefined` (nothing is kept) when either look fails.
+ */
+async function stampOf(root: OwnedLoginRoot, path: FencedPath): Promise<string | undefined> {
+  try {
+    const link = await root.lstat(path);
+    if (link === undefined) return 'absent';
+    if (link.kind !== 'symlink') return describe(link);
+    const target = await root.stat(path);
+    return `${describe(link)}>${target === undefined ? 'dangling' : describe(target)}`;
+  } catch {
+    return undefined;
+  }
 }
 
 const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
@@ -52,25 +64,16 @@ export class OwnedLoginStore {
   readonly #base: string;
   readonly #emails = new Map<string, { readonly stamp: string; readonly email: string | undefined }>();
 
+  /**
+   * `root` is `kernel.roots.root('credentials')`, and nothing else: the kernel binds that name to Logins and its base to
+   * `<home>/state/logins/credentials`, and refuses a linked, foreign or missing base on every call (§7.7).
+   */
   constructor(
     private readonly root: OwnedLoginRoot,
-    kernelHome: string | undefined,
     private readonly now: () => number,
   ) {
-    // Only daemon composition may supply the kernel-known home, never config, routes or caller input.
-    // Keep it independent of the injected root; the kernel porter will wire both together later.
-    if (kernelHome === undefined || !isAbsolute(kernelHome)) throw new Error('the kernel home is required');
     const base = root.resolve('');
     if (!base.ok) throw new Error('the owned login root could not be resolved');
-    let owned = false;
-    try {
-      owned =
-        isAbsolute(base.value) &&
-        realpathSync(base.value) === join(realpathSync(kernelHome), 'state', 'logins', 'credentials');
-    } catch {
-      // Refuse an unreachable home/root without exposing a filesystem error or its path.
-    }
-    if (!owned) throw new Error('the root is not the owned login credentials subtree');
     this.#base = base.value;
   }
 
@@ -125,7 +128,7 @@ export class OwnedLoginStore {
     const location = `the file ${path}`;
     let material: CredentialMaterial;
     try {
-      if (resolution.harness === 'claude' && (await this.root.isSymbolicLink(path))) {
+      if (resolution.harness === 'claude' && (await this.root.lstat(path))?.kind === 'symlink') {
         material = {
           outcome: 'unreadable',
           reason:
@@ -176,7 +179,7 @@ export class OwnedLoginStore {
       return facts?.codex?.state === 'tokens' ? facts.codex.email : undefined;
     }
     const path = this.#path(source.accountFile);
-    const stamp = await this.root.stamp(path);
+    const stamp = await stampOf(this.root, path);
     const kept = this.#emails.get(path);
     if (stamp !== undefined && kept?.stamp === stamp) return kept.email;
     let email: string | undefined;
