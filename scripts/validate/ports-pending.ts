@@ -29,7 +29,12 @@ export function readPending(root: string): PortsPending {
   return parsePending(readFileSync(file, 'utf8'), 'ports-pending.json');
 }
 
+/** The base list: a git ref's committed `ports-pending.json`, or `file:<path>` (tests, and a release compare). */
 function readBase(root: string, ref: string): PortsPending | undefined {
+  if (ref.startsWith('file:')) {
+    const file = ref.slice(5);
+    return existsSync(file) ? parsePending(readFileSync(file, 'utf8'), file) : undefined;
+  }
   const shown = spawnSync('git', ['show', `${ref}:ports-pending.json`], { cwd: root, encoding: 'utf8' });
   if (shown.status !== 0) return undefined;
   return parsePending(shown.stdout, `${ref}:ports-pending.json`);

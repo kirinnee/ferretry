@@ -11,6 +11,14 @@ import { loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 
 export const BANNED_WORDS = /legacy|deprecat|migrat|retired|compat(?!ib)/i;
 
+/**
+ * Exported constants whose TEXT may name these words, by `file#name`, each with the lead's reason. Only the string
+ * inside that one declaration is exempt; identifiers and every other string in the file are still read.
+ */
+export const ALLOWED: ReadonlyMap<string, string> = new Map([
+  ['packages/core/kernel/contract/home.ts#CARRY_OVER_PROMPT', 'names the carry-over runbook path (docs/migration/); lead decision 2026-11-07'],
+]);
+
 export function compatIn(file: string, where = file): Finding[] {
   const findings: Finding[] = [];
   const parsed = parseFile(file);
@@ -23,7 +31,11 @@ export function compatIn(file: string, where = file): Finding[] {
     seen.add(at);
     findings.push({ check: 'no-compat', where: `${where}:${parsed.line(start)}`, message: `"${text.length > 60 ? `${text.slice(0, 57)}…` : text}" carries "${match[0]}"` });
   };
-  walk(parsed.program, node => {
+  walk(parsed.program, (node, parents) => {
+    const allowed = parents.some(
+      p => p.type === 'VariableDeclarator' && ALLOWED.has(`${where}#${(p.id as { name?: string } | undefined)?.name ?? ''}`),
+    );
+    if (allowed && node.type !== 'Identifier') return;
     if (node.type === 'Identifier' || node.type === 'PrivateIdentifier') add(node.start, node.name as string);
     else if (node.type === 'Literal' && typeof node.value === 'string') add(node.start, node.value);
     else if (node.type === 'TemplateElement') add(node.start, (node.value as { raw: string }).raw);

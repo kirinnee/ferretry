@@ -6,6 +6,7 @@
  * hash of every package that renders or calls it. Strongly connected consumers share one fold.
  */
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import type { Manifest } from '../../../packages/core/kernel/manifest/index.ts';
 import type { StartGraph } from './graph.ts';
 import type { ImportEdge } from './imports.ts';
@@ -40,8 +41,8 @@ type ToJsonSchema = (schema: unknown, options: Record<string, unknown>) => unkno
 
 /** zod's `toJSONSchema`, from the copy the kernel resolves (the workspace uses Bun's isolated linker). */
 export async function loadToJsonSchema(ws: Workspace): Promise<ToJsonSchema> {
-  const kernel = ws.byId('kernel');
-  const from = kernel?.dir ?? ws.root;
+  // A fixture workspace has no node_modules; the SDK's own kernel always resolves zod.
+  const from = ws.byId('kernel')?.dir ?? join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'kernel');
   const zodPath = Bun.resolveSync('zod', from);
   const zod = (await import(zodPath)) as { z?: { toJSONSchema: ToJsonSchema }; toJSONSchema?: ToJsonSchema };
   const fn = zod.toJSONSchema ?? zod.z?.toJSONSchema;
@@ -76,7 +77,7 @@ export function toStableJson(value: unknown, toJsonSchema: ToJsonSchema, depth =
 
 /** The published surface of one package, as stable JSON (the canonical hash input). */
 export async function surfaceOf(
-  ws: Workspace,
+  _ws: Workspace,
   subsystem: LoadedSubsystem,
   toJsonSchema: ToJsonSchema,
 ): Promise<Json> {

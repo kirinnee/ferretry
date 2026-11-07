@@ -110,7 +110,7 @@ export function parity(
   for (const [key, { change }] of changes) {
     const inToday = todayBy.has(key);
     const inNext = nextBy.has(key);
-    const stale = (change === 'removed' && inNext) || (change === 'added' && (inToday || !inNext)) || (change === 'changed' && !(inToday && inNext));
+    const stale = (change === 'removed' && (inNext || !inToday)) || (change === 'added' && (inToday || !inNext)) || (change === 'changed' && !(inToday && inNext));
     if (stale) findings.push({ check, where: key.replace('\t', ' '), message: `recorded as ${change} but that no longer holds; remove the line` });
   }
   return { findings, unresolved };

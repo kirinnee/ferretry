@@ -1,23 +1,48 @@
 /**
- * `guarantees` and `guarantee-owner` (§3.9, §7.9), reading `docs/rebuild/guarantees.tsv` (built from Appendix D by
- * `scripts/gen/guarantees-table.ts`).
+ * `guarantees` and `guarantee-owner` (§3.9, §7.9), reading the one guarantees table, `docs/rebuild/guarantees.tsv`
+ * (written from Appendix D by `scripts/rebuild/guarantees.ts`; columns id · status · owner · with · enforcer · doc ·
+ * test).
  *
  * `guarantees` fails when a kept row (or the kept half of a split row) has no test whose name STARTS with its id
  * (`test('G11 person route refuses …')`; `.skip` and `.todo` do not count), or when a REMOVED row still has a test (its
- * code remains). Rows owned by a package still in `ports-pending.json`, and `deferred` rows whose owner left the
- * release scope, are skipped unless `--strict`. Whether the test PASSES is the test run's job, not this check's.
+ * code remains). Rows owned by a package still in `ports-pending.json`, or cut from the release (`deferred.json`),
+ * are skipped unless `--strict`. Whether the test PASSES is the test run's job, not this check's.
  *
  * `guarantee-owner` fails when a row's tests all live outside its owner's suite, or when an identifier the row's
  * enforcer names (in backticks) resolves to no symbol in the owner package or a contract it consumes. Owners that are
- * not subsystems: `repo` (scripts/), `fy` (packages/cli), `app` (packages/app).
+ * not subsystems: `repo-tooling` (scripts/), `fy-shell` (packages/cli), `app-shell` (packages/app).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
-import { GUARANTEES_TSV, type GuaranteeRow, parseTsv } from '../gen/guarantees-table.ts';
 import type { Workspace } from '../gen/lib/workspace.ts';
 import { contractPath, loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 import { readPending } from './ports-pending.ts';
+
+export const GUARANTEES_TSV = 'docs/rebuild/guarantees.tsv';
+const HEADER = 'id\tstatus\towner\twith\tenforcer\tdoc\ttest';
+
+export interface GuaranteeRow {
+  readonly id: string;
+  readonly status: 'kept' | 'split' | 'removed';
+  readonly owner: string;
+  readonly with: readonly string[];
+  readonly enforcer: string;
+  readonly doc: string;
+  readonly test: string;
+}
+
+export function parseTsv(text: string): GuaranteeRow[] {
+  const [header, ...lines] = text.trimEnd().split('\n');
+  if (header !== HEADER) throw new Error(`${GUARANTEES_TSV}: header is not "${HEADER.replaceAll('\t', ' ')}"`);
+  const dash = (value: string | undefined): string => (value === undefined || value === '-' ? '' : value);
+  return lines.map(line => {
+    const [id = '', status = '', owner = '', withs = '', enforcer = '', doc = '', test = ''] = line.split('\t');
+    if (status !== 'kept' && status !== 'split' && status !== 'removed')
+      throw new Error(`${GUARANTEES_TSV}: ${id} has status "${status}"`);
+    return { id, status, owner: dash(owner), with: dash(withs) === '' ? [] : withs.split(','), enforcer: dash(enforcer), doc, test: dash(test) };
+  });
+}
 
 const TEST_NAME = /\b(?:test|it)(\.(?:only|skip|todo|failing|serial|concurrent|if\([^)]*\)))?\(\s*(['"`])([A-Z]+[0-9]+[a-z]?)(?=[\s'"`:.,])/g;
 
@@ -46,35 +71,36 @@ export function testIds(root: string, ws: Workspace): Map<string, string[]> {
 
 export function readRows(root: string): GuaranteeRow[] | Finding {
   const file = join(root, GUARANTEES_TSV);
-  if (!existsSync(file)) return { check: 'guarantees', where: GUARANTEES_TSV, message: 'missing; run `bun scripts/gen/guarantees-table.ts`' };
+  if (!existsSync(file)) return { check: 'guarantees', where: GUARANTEES_TSV, message: 'missing; it is written by `bun scripts/rebuild/guarantees.ts`' };
   return parseTsv(readFileSync(file, 'utf8'));
 }
 
-function releaseScope(root: string): ReadonlySet<string> | undefined {
-  const file = join(root, 'release.json');
+/** Packages cut from the release (`deferred.json`, created by the first cut, §10.6). */
+function releaseCut(root: string): ReadonlySet<string> | undefined {
+  const file = join(root, 'deferred.json');
   if (!existsSync(file)) return undefined;
-  return new Set((JSON.parse(readFileSync(file, 'utf8')) as { scope?: string[] }).scope ?? []);
+  return new Set((JSON.parse(readFileSync(file, 'utf8')) as { deferred?: string[] }).deferred ?? []);
 }
 
 /** The folder whose tests count as an owner's suite. */
 export function ownerFolder(ws: Workspace, owner: string): string | undefined {
-  if (owner === 'repo') return 'scripts';
-  if (owner === 'fy') return ws.byName('fy')?.rel ?? 'packages/cli';
-  if (owner === 'app') return ws.byName('@ferretry/app')?.rel ?? 'packages/app';
+  if (owner === 'repo-tooling') return 'scripts';
+  if (owner === 'fy-shell') return ws.byName('fy')?.rel ?? 'packages/cli';
+  if (owner === 'app-shell') return ws.byName('@ferretry/app')?.rel ?? 'packages/app';
   return ws.byId(owner)?.rel;
 }
 
-export function skipped(row: GuaranteeRow, pending: ReadonlySet<string>, scope: ReadonlySet<string> | undefined, strict: boolean): boolean {
+export function skipped(row: GuaranteeRow, pending: ReadonlySet<string>, cut: ReadonlySet<string> | undefined, strict: boolean): boolean {
   if (strict) return false;
   if (pending.has(row.owner)) return true;
-  return row.deferred !== '' && scope !== undefined && !scope.has(row.owner);
+  return cut !== undefined && cut.has(row.owner);
 }
 
 export function guaranteeFindings(
   rows: readonly GuaranteeRow[],
   tests: ReadonlyMap<string, readonly string[]>,
   pending: ReadonlySet<string>,
-  scope: ReadonlySet<string> | undefined,
+  cut: ReadonlySet<string> | undefined,
   strict: boolean,
 ): Finding[] {
   const findings: Finding[] = [];
@@ -84,7 +110,7 @@ export function guaranteeFindings(
       if (has) findings.push({ check: 'guarantees', where: row.id, message: `REMOVED row still has a test (${tests.get(row.id)?.join(', ')}); its code remains` });
       continue;
     }
-    if (skipped(row, pending, scope, strict)) continue;
+    if (skipped(row, pending, cut, strict)) continue;
     if (!has) findings.push({ check: 'guarantees', where: row.id, message: `${row.status} row owned by ${row.owner || '?'} has no test named "${row.id} …"` });
   }
   return findings;
@@ -95,12 +121,12 @@ export function enforcerSymbols(enforcer: string): string[] {
   const out: string[] = [];
   for (const match of enforcer.matchAll(/`([^`]+)`/g)) {
     const token = (match[1] as string).replace(/\(\)$/, '');
-    if (/^[A-Za-z_$][\w$]{3,}$/.test(token) && !out.includes(token)) out.push(token);
+    if (/^[A-Za-z_$][\w$]{2,}[A-Za-z0-9$]$/.test(token) && !out.includes(token)) out.push(token);
   }
   return out;
 }
 
-async function ownerFindings(root: string, ws: Workspace, rows: readonly GuaranteeRow[], tests: ReadonlyMap<string, readonly string[]>, pending: ReadonlySet<string>, scope: ReadonlySet<string> | undefined, strict: boolean, consumed: ReadonlyMap<string, ReadonlySet<string>>): Promise<Finding[]> {
+async function ownerFindings(root: string, ws: Workspace, rows: readonly GuaranteeRow[], tests: ReadonlyMap<string, readonly string[]>, pending: ReadonlySet<string>, cut: ReadonlySet<string> | undefined, strict: boolean, consumed: ReadonlyMap<string, ReadonlySet<string>>): Promise<Finding[]> {
   const check = 'guarantee-owner';
   const findings: Finding[] = [];
   const sourceCache = new Map<string, string>();
@@ -123,7 +149,7 @@ async function ownerFindings(root: string, ws: Workspace, rows: readonly Guarant
     return text;
   };
   for (const row of rows) {
-    if (row.status === 'removed' || skipped(row, pending, scope, strict)) continue;
+    if (row.status === 'removed' || skipped(row, pending, cut, strict)) continue;
     const files = tests.get(row.id) ?? [];
     if (files.length === 0) continue; // `guarantees` reports it
     const folder = ownerFolder(ws, row.owner);
@@ -151,7 +177,7 @@ export const check: Check = {
     const ws = loadWorkspace(ctx.root);
     const pending = new Set(readPending(ctx.root).pending);
     const relevant = ctx.packageId === undefined ? rows : rows.filter(row => row.owner === ctx.packageId);
-    return guaranteeFindings(relevant, testIds(ctx.root, ws), pending, releaseScope(ctx.root), ctx.strict === true);
+    return guaranteeFindings(relevant, testIds(ctx.root, ws), pending, releaseCut(ctx.root), ctx.strict === true);
   },
 };
 
@@ -164,7 +190,7 @@ export const ownerCheck: Check = {
     const model = await ctx.model();
     const pending = new Set(readPending(ctx.root).pending);
     const relevant = ctx.packageId === undefined ? rows : rows.filter(row => row.owner === ctx.packageId);
-    return ownerFindings(ctx.root, model.ws, relevant, testIds(ctx.root, model.ws), pending, releaseScope(ctx.root), ctx.strict === true, model.consumed);
+    return ownerFindings(ctx.root, model.ws, relevant, testIds(ctx.root, model.ws), pending, releaseCut(ctx.root), ctx.strict === true, model.consumed);
   },
 };
 

@@ -84,12 +84,21 @@ export async function buildModel(root: string): Promise<Model> {
   const consumed = consumedBy(graph, edges);
   const toJsonSchema = await loadToJsonSchema(ws);
   const canonical = new Map<string, string>();
-  for (const subsystem of loaded)
-    canonical.set(subsystem.id, sha256(canonicalJson(await surfaceOf(ws, subsystem, toJsonSchema))));
+  const hashFailures: string[] = [];
+  for (const subsystem of loaded) {
+    try {
+      canonical.set(subsystem.id, sha256(canonicalJson(await surfaceOf(ws, subsystem, toJsonSchema))));
+    } catch (error) {
+      // A contract that does not load has no hash anyone can match: its clients stay paused (§9.6).
+      const message = error instanceof Error ? error.message : String(error);
+      hashFailures.push(`${subsystem.pkg.rel}: contract failed to load: ${message}`);
+      canonical.set(subsystem.id, sha256(`unloadable\n${message}`));
+    }
+  }
   return {
     ws,
     loaded,
-    failures: [...failures, ...parseFailures],
+    failures: [...failures, ...parseFailures, ...hashFailures],
     graph,
     edges,
     consumed,
@@ -163,6 +172,69 @@ function halfRegistry(
   ].join('\n');
 }
 
+/**
+ * `packages/cli/src/generated/commands.ts` in the `fy` shell's shape (`packages/cli/src/lib/registry.ts`):
+ * `registry: CommandRegistry = { plugins: [{ id, manifest, contract, load() }] }`. Manifests are imported statically;
+ * each CLI half loads lazily, so a verb loads only the plugin it runs.
+ */
+function commandsRegistry(model: Model): string {
+  const out = join(model.ws.root, GENERATED.commands);
+  const imports: string[] = [];
+  const entries: string[] = [];
+  for (const id of startOrder(model)) {
+    const pkg = model.ws.byId(id);
+    const cli = pkg === undefined ? undefined : halfPath(pkg, 'cli');
+    if (pkg?.manifestPath === undefined || cli === undefined) continue;
+    const name = ident('manifest', id);
+    imports.push(`import ${name} from '${importPath(out, pkg.manifestPath)}';`);
+    entries.push(
+      `    { id: ${JSON.stringify(id)}, manifest: ${name}, contract: ${JSON.stringify(model.hashes.get(id)?.effective ?? 'unhashed')}, load: async () => (await import('${importPath(out, cli)}')).default },`,
+    );
+  }
+  return [
+    HEADER,
+    "import type { CommandRegistry } from '../lib/registry.ts';",
+    ...imports,
+    '',
+    '/** Every subsystem with a CLI half, in start order (§7.5). */',
+    `export const registry: CommandRegistry = {\n  plugins: [\n${entries.join('\n')}\n  ],\n};`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * `packages/app/src/generated/surfaces.ts` in the app shell's shape (`packages/app/src/surfaces/registry.ts`):
+ * `generated: GeneratedSurfaces = { appVersion, surfaces: [{ id, title, core, contract, consumes, manifest, app? }] }`.
+ * The kernel has no app half, so its entry carries no `app`.
+ */
+function surfacesRegistry(model: Model): string {
+  const out = join(model.ws.root, GENERATED.surfaces);
+  const imports: string[] = [];
+  const entries: string[] = [];
+  for (const id of startOrder(model)) {
+    const pkg = model.ws.byId(id);
+    if (pkg?.manifestPath === undefined) continue;
+    const manifest = ident('manifest', id);
+    imports.push(`import ${manifest} from '${importPath(out, pkg.manifestPath)}';`);
+    const app = halfPath(pkg, 'app');
+    const appName = ident('app', id);
+    if (app !== undefined) imports.push(`import ${appName} from '${importPath(out, app)}';`);
+    entries.push(
+      `    { id: ${JSON.stringify(id)}, title: ${manifest}.title, core: ${manifest}.core, contract: ${JSON.stringify(model.hashes.get(id)?.effective ?? 'unhashed')}, consumes: ${JSON.stringify([...(model.consumed.get(id) ?? [])].sort())}, manifest: ${manifest}${app === undefined ? '' : `, app: ${appName}`} },`,
+    );
+  }
+  const version = (JSON.parse(readFileSync(join(model.ws.root, 'package.json'), 'utf8')) as { version?: string }).version ?? '0.0.0';
+  return [
+    HEADER,
+    "import type { GeneratedSurfaces } from '../surfaces/registry.ts';",
+    ...imports,
+    '',
+    '/** Every subsystem, in start order, with its effective contract hash and what it consumes (§9.6). */',
+    `export const generated: GeneratedSurfaces = {\n  appVersion: ${JSON.stringify(version)},\n  surfaces: [\n${entries.join('\n')}\n  ],\n};`,
+    '',
+  ].join('\n');
+}
+
 function glossary(model: Model): string {
   const words = model.loaded
     .flatMap(s => (s.manifest.words ?? []).map(word => ({ plugin: s.id, ...word })))
@@ -223,8 +295,8 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map([
     [GENERATED.plugins, halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations')],
     [GENERATED.glossary, glossary(model)],
-    [GENERATED.commands, halfRegistry(model, GENERATED.commands, 'cli', 'CliImplementation', 'cliImplementations')],
-    [GENERATED.surfaces, halfRegistry(model, GENERATED.surfaces, 'app', 'AppImplementation', 'appImplementations')],
+    [GENERATED.commands, commandsRegistry(model)],
+    [GENERATED.surfaces, surfacesRegistry(model)],
     [GENERATED.hooks, hooksMarkdown(model)],
     [GENERATED.hashes, hashesJson(model)],
   ]);
