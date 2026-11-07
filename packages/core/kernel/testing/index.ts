@@ -36,7 +36,6 @@ export {
   type TestHostOptions,
   type TestResponse,
   testHost,
-  TEST_IDENTITY,
 } from './host.ts';
 export { COMPARED, type DescriptorRow, type ParityResult, type Table, parity, rowsOf } from './parity.ts';
 export { RouteTable, compareRouteSpecificity, orderRoutesBySpecificity } from './router.ts';

@@ -59,6 +59,7 @@ import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
+import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
@@ -232,6 +233,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
   });
   const websockets = adapters.websocket ?? noWebSockets();
+  const sessionSigner = createIdentitySigner(identity);
 
   const implementations = new Map<string, DaemonImplementation>();
   for (const implementation of options.implementations)
@@ -354,6 +356,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
     websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets),
     identity: identityPort,
+    signer: signerFor(manifest.id, sessionSigner),
     act,
     ids: { mint: prefix => ids.mint(prefix) },
     redaction,

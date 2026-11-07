@@ -22,6 +22,12 @@ export interface SessionPrincipal {
   readonly session: SessionId;
   /** The access lease (15 min from proof, renewed; R241). */
   readonly leaseUntil: Instant;
+  /**
+   * The page-lifetime id the verified credential named (the same value as {@link HolderWatch.appSession}), stamped
+   * ONLY by the session layer from the credential the mode verified. Read it here, never from a body, a header or
+   * SDP (R684). Absent where no session credential named one.
+   */
+  readonly appSession?: string;
 }
 
 declare const localArrivalBrand: unique symbol;
@@ -140,6 +146,37 @@ export interface SignedTunnelSignature {
   readonly signature: string;
 }
 
+/** A shared-catalog document to sign (docs/catalogs.md): its kind and its canonical (RFC 8785) JSON bytes. */
+export interface CatalogSignRequest {
+  readonly kind: 'manifest' | 'versions' | 'link';
+  readonly canonical: Uint8Array;
+}
+
+/** A catalog signature, in its wire spelling (today's `spki` / `sig`). */
+export interface SignedCatalogSignature {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  /** Ed25519 over `label ‖ 0x00 ‖ SHA-256(canonical)`, base64url. */
+  readonly signature: string;
+}
+
+/** A secret-import offer to sign (Vault): the fields the target publishes; the kernel adds its own id and key. */
+export interface SecretOfferSignRequest {
+  readonly v: number;
+  readonly importId: string;
+  /** The import's one-time X25519 public key, base64url. */
+  readonly publicKey: string;
+  readonly expiresAt: string;
+}
+
+/** What the kernel adds to an offer: the daemon id, the identity key (SPKI, base64url) and the signature. */
+export interface SignedSecretOffer {
+  readonly daemonId: string;
+  readonly identityKey: string;
+  readonly signature: string;
+}
+
 /**
  * The daemon identity as a carrier may use it: two signatures over transcripts the KERNEL builds, and nothing
  * else. There is no key export and no "sign these bytes": a carrier can only obtain a claim for a rendezvous
@@ -151,6 +188,10 @@ export interface IdentitySigner {
   sign(request: RelayClaimRequest): Promise<SignedRelayClaim>;
   /** `ferretry-tunnel-{provision,release}-v1` ‖ LP(protocol) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(port|""). */
   signTunnel(request: TunnelSignRequest): Promise<SignedTunnelSignature>;
+  /** `ferretry-catalog-{manifest,versions,link}-v1` ‖ 0x00 ‖ SHA-256(canonical): today's catalog signatures. */
+  signCatalog(request: CatalogSignRequest): Promise<SignedCatalogSignature>;
+  /** LP(`ferretry-secret-import-offer-v1`) ‖ LP(v) ‖ LP(importId) ‖ LP(daemonId) ‖ LP(identityKey) ‖ LP(publicKey) ‖ LP(expiresAt). */
+  signSecretOffer(request: SecretOfferSignRequest): Promise<SignedSecretOffer>;
 }
 
 /**

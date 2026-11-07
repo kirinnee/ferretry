@@ -904,6 +904,31 @@ describe('the session layer: the identity signer it offers carriers', () => {
     const nonce = toBase64Url(relayCrypto.randomBytes(32));
     const signed = await fx.layer.signer.sign({ host: 'relay.example.test', nonce });
     expect(signed.daemonId).toBe(fx.daemonId);
-    expect(Object.keys(fx.layer.signer).sort()).toEqual(['sign', 'signTunnel']);
+    expect(Object.keys(fx.layer.signer).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
+  });
+});
+
+describe('the session layer: appSession on the principal (R684)', () => {
+  test('a request whose body or header claims another appSession still carries the credential’s one', async () => {
+    const fx = await fixture();
+    const { client, device } = await serving(fx);
+    const forged = toBase64Url(relayCrypto.randomBytes(16));
+    await client.send(
+      req(1, { method: 'POST', headers: { 'x-app-session': forged }, body: JSON.stringify({ appSession: forged }) }),
+    );
+    await client.pump();
+    expect(fx.requests[0]?.principal?.appSession).toBe(device.appSession);
+    expect(fx.requests[0]?.principal?.appSession).not.toBe(forged);
+  });
+
+  test('a request on a session with no verified credential has no principal and so no appSession', async () => {
+    const fx = await fixture();
+    const device = await pairedDevice(fx.device);
+    fx.device.keys.delete(device.deviceId);
+    const client = TestClient.open(fx);
+    await client.handshake(fx.daemonId);
+    await client.auth(device);
+    expect(client.end?.code).toBe(4403);
+    expect(fx.requests).toHaveLength(0);
   });
 });

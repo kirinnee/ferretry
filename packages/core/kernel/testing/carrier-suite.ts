@@ -50,6 +50,8 @@ export class RecordingSessionLayer implements SessionLayer {
     this.signer = {
       sign: async request => await (await signer).sign(request),
       signTunnel: async request => await (await signer).signTunnel(request),
+      signCatalog: async request => await (await signer).signCatalog(request),
+      signSecretOffer: async request => await (await signer).signSecretOffer(request),
     };
   }
 

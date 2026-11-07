@@ -3,6 +3,7 @@ import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
+import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
 
 /**
@@ -24,6 +25,11 @@ export interface KernelPorts {
   readonly websocket: WebSocketPort;
   /** Who this daemon is, read-only: its id and name, never its key. */
   readonly identity: IdentityPort;
+  /**
+   * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
+   * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
+   */
+  readonly signer: IdentitySigner;
   readonly act: ActRunner;
   readonly ids: IdsPort;
   readonly redaction: Redaction;

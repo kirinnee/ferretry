@@ -8,6 +8,7 @@
  * The relay's §5 control messages are Connections' (`relay/src/lib/control.ts` placement); their constants are here.
  */
 export * from './host/session/wire/binary.ts';
+export * from './host/session/wire/catalog-signature.ts';
 export * from './host/session/wire/claim.ts';
 export * from './host/session/wire/constants.ts';
 export * from './host/session/wire/crypto.ts';
@@ -15,6 +16,7 @@ export * from './host/session/wire/flow.ts';
 export * from './host/session/wire/frames.ts';
 export * from './host/session/wire/identity.ts';
 export * from './host/session/wire/proofs.ts';
+export * from './host/session/wire/secret-offer.ts';
 export * from './host/session/wire/tunnel-request.ts';
 export * from './host/session/wire/vocabulary.ts';
 export { WebCryptoSessionCrypto } from './host/session/adapters/web-crypto.ts';

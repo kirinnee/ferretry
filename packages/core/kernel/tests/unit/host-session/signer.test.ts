@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { createIdentitySigner } from '../../../host/session/signer.ts';
+import { createIdentitySigner, SIGNER_USERS, signerFor } from '../../../host/session/signer.ts';
 import {
+  catalogSignedBytes,
   claimTranscript,
   concatBytes,
   decodeClaim,
@@ -10,6 +11,8 @@ import {
   toBase64Url,
   tunnelTranscript,
   utf8Bytes,
+  verifyCatalogSignature,
+  verifySecretOfferSignature,
   verifyRendezvousClaim,
   verifyTunnelRequest,
 } from '../../../host/session/wire/index.ts';
@@ -68,9 +71,9 @@ describe('identity signer: the rendezvous claim', () => {
     expect(signed).toBe(0);
   });
 
-  it('offers no way to read the key: the signer has exactly sign and signTunnel', async () => {
+  it('offers no way to read the key: the signer has exactly its fixed-label methods', async () => {
     const signer = createIdentitySigner(await newDaemonIdentity());
-    expect(Object.keys(signer).sort()).toEqual(['sign', 'signTunnel']);
+    expect(Object.keys(signer).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
     expect(Object.isFrozen(signer)).toBe(true);
   });
 });
@@ -149,5 +152,97 @@ describe('identity signer: tunnel requests', () => {
     await expect(signer.signTunnel({ action: 'provision', host, nonce, originPort: 0 })).rejects.toThrow(TypeError);
     await expect(signer.signTunnel({ action: 'provision', host, nonce, originPort: 1.5 })).rejects.toThrow(TypeError);
     await expect(signer.signTunnel({ action: 'release', host, nonce: 'AAAA' })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('identity signer: catalog signatures', () => {
+  const canonical = utf8Bytes('{"catalogId":"cat_x","publisher":"fy_daemon_x"}');
+
+  it('signs today’s layout, label ‖ 0x00 ‖ SHA-256(canonical), and verifies with verifyCatalogSignature', async () => {
+    const identity = await newDaemonIdentity();
+    const signed = await createIdentitySigner(identity).signCatalog({ kind: 'manifest', canonical });
+    const digest = await relayCrypto.sha256(canonical);
+    const expected = concatBytes([utf8Bytes('ferretry-catalog-manifest-v1'), new Uint8Array([0]), digest]);
+    expect(catalogSignedBytes('manifest', digest)).toEqual(expected);
+    const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
+    expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
+    expect(signed).toMatchObject({ daemonId: identity.daemonId, publicKey: toBase64Url(identity.publicKeySpki) });
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'manifest', canonical, signed.signature)).toBe(true);
+  });
+
+  it('a manifest signature does not verify as versions, as a link, as other bytes, nor as a claim', async () => {
+    const identity = await newDaemonIdentity();
+    const signed = await createIdentitySigner(identity).signCatalog({ kind: 'manifest', canonical });
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'versions', canonical, signed.signature)).toBe(false);
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'link', canonical, signed.signature)).toBe(false);
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'manifest', utf8Bytes('{}'), signed.signature)).toBe(false);
+    const nonce = (await relayCrypto.sha256(canonical)).slice(0, NONCE_BYTES);
+    const claim = decodeClaim(signed.publicKey, signed.signature)!;
+    expect(
+      (await verifyRendezvousClaim(relayCrypto, { daemonId: identity.daemonId, relayHost: host, challenge: nonce }, claim)).ok,
+    ).toBe(false);
+  });
+
+  it('refuses an unknown kind or a canonical that is not bytes', async () => {
+    const signer = createIdentitySigner(await newDaemonIdentity());
+    await expect(signer.signCatalog({ kind: 'offer' as 'link', canonical })).rejects.toThrow(TypeError);
+    await expect(signer.signCatalog({ kind: 'link', canonical: '{}' as unknown as Uint8Array })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('kernel.signer: each signature is offered only to the plugin that needs it', () => {
+  it('Connections may sign claims and tunnel requests; Catalogs may sign catalogs; nobody else signs anything', async () => {
+    const signer = createIdentitySigner(await newDaemonIdentity());
+    const nonce = nonceText();
+    expect(Object.keys(SIGNER_USERS).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
+    const connections = signerFor('connections', signer);
+    expect((await connections.sign({ host, nonce })).signature.length).toBeGreaterThan(0);
+    await expect(connections.signCatalog({ kind: 'manifest', canonical: utf8Bytes('{}') })).rejects.toThrow(TypeError);
+    const catalogs = signerFor('catalogs', signer);
+    expect((await catalogs.signCatalog({ kind: 'versions', canonical: utf8Bytes('{}') })).signature.length).toBeGreaterThan(0);
+    await expect(catalogs.sign({ host, nonce })).rejects.toThrow(TypeError);
+    const board = signerFor('board', signer);
+    await expect(board.sign({ host, nonce })).rejects.toThrow('board may not ask the daemon identity for that signature.');
+    await expect(board.signTunnel({ action: 'release', host, nonce })).rejects.toThrow(TypeError);
+    await expect(board.signCatalog({ kind: 'link', canonical: utf8Bytes('{}') })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('identity signer: secret-import offers (Vault)', () => {
+  const request = { v: 1, importId: 'imp_abc', publicKey: toBase64Url(new Uint8Array(32).fill(7)), expiresAt: '2026-11-07T10:00:00.000Z' };
+
+  it('signs today’s offerSignedBytes: every field length-prefixed, the label first', async () => {
+    const identity = await newDaemonIdentity();
+    const signed = await createIdentitySigner(identity).signSecretOffer(request);
+    expect(signed.daemonId).toBe(identity.daemonId);
+    expect(signed.identityKey).toBe(toBase64Url(identity.publicKeySpki));
+    const expected = concatBytes(
+      [
+        'ferretry-secret-import-offer-v1',
+        '1',
+        request.importId,
+        identity.daemonId,
+        signed.identityKey,
+        request.publicKey,
+        request.expiresAt,
+      ].map(field => lengthPrefixed(utf8Bytes(field))),
+    );
+    const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
+    expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
+    const offer = { ...request, ...signed };
+    expect(await verifySecretOfferSignature(relayCrypto, offer)).toBe(true);
+    expect(await verifySecretOfferSignature(relayCrypto, { ...offer, expiresAt: '2026-11-08T10:00:00.000Z' })).toBe(false);
+    const other = await newDaemonIdentity();
+    expect(await verifySecretOfferSignature(relayCrypto, { ...offer, daemonId: other.daemonId })).toBe(false);
+  });
+
+  it('an offer signature verifies as no catalog signature and no claim; only Vault may ask for one', async () => {
+    const identity = await newDaemonIdentity();
+    const signer = createIdentitySigner(identity);
+    const signed = await signer.signSecretOffer(request);
+    expect(await verifyCatalogSignature(relayCrypto, signed.identityKey, 'manifest', utf8Bytes('{}'), signed.signature)).toBe(false);
+    await expect(signerFor('connections', signer).signSecretOffer(request)).rejects.toThrow(TypeError);
+    expect((await signerFor('vault', signer).signSecretOffer(request)).signature).toBe(signed.signature);
+    await expect(signer.signSecretOffer({ ...request, importId: '' })).rejects.toThrow(TypeError);
   });
 });

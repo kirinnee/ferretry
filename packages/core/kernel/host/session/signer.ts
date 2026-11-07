@@ -9,16 +9,22 @@
  */
 
 import type {
+  CatalogSignRequest,
   IdentitySigner,
+  SecretOfferSignRequest,
+  SignedSecretOffer,
   RelayClaimRequest,
+  SignedCatalogSignature,
   SignedRelayClaim,
   SignedTunnelSignature,
   TunnelSignRequest,
 } from '../../contract/session.ts';
 import { fromBase64UrlFixed, toBase64Url } from './wire/binary.ts';
+import { catalogSignedBytes, isCatalogSignatureKind } from './wire/catalog-signature.ts';
 import { encodeClaim, signRendezvousClaim } from './wire/claim.ts';
 import { NONCE_BYTES } from './wire/constants.ts';
 import type { DaemonSigningKey } from './wire/crypto.ts';
+import { secretOfferSignedBytes } from './wire/secret-offer.ts';
 import { tunnelTranscript } from './wire/tunnel-request.ts';
 
 function nonceBytes(nonce: string): Uint8Array {
@@ -32,8 +38,17 @@ function host(value: string): string {
   return value;
 }
 
-/** The signer over the identity key. The key's private half stays inside `key.sign`. */
-export function createIdentitySigner(key: DaemonSigningKey): IdentitySigner {
+const webCryptoSha256 = async (bytes: Uint8Array): Promise<Uint8Array> =>
+  new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)));
+
+/**
+ * The signer over the identity key. The key's private half stays inside `key.sign`; every signature it makes has a
+ * fixed, kernel-owned label, and there is no `sign(bytes)`.
+ */
+export function createIdentitySigner(
+  key: DaemonSigningKey,
+  sha256: (bytes: Uint8Array) => Promise<Uint8Array> = webCryptoSha256,
+): IdentitySigner {
   return Object.freeze({
     sign: async (request: RelayClaimRequest): Promise<SignedRelayClaim> => {
       const context = { daemonId: key.daemonId, relayHost: host(request.host), challenge: nonceBytes(request.nonce) };
@@ -65,5 +80,53 @@ export function createIdentitySigner(key: DaemonSigningKey): IdentitySigner {
         signature: toBase64Url(signature),
       };
     },
+    signCatalog: async (request: CatalogSignRequest): Promise<SignedCatalogSignature> => {
+      if (!isCatalogSignatureKind(request.kind)) throw new TypeError('the catalog signature kind must be manifest, versions or link');
+      if (!(request.canonical instanceof Uint8Array)) throw new TypeError('the canonical document must be bytes');
+      const signature = await key.sign(catalogSignedBytes(request.kind, await sha256(request.canonical)));
+      return { daemonId: key.daemonId, publicKey: toBase64Url(key.publicKeySpki), signature: toBase64Url(signature) };
+    },
+    signSecretOffer: async (request: SecretOfferSignRequest): Promise<SignedSecretOffer> => {
+      for (const field of [request.importId, request.publicKey, request.expiresAt])
+        if (typeof field !== 'string' || field === '') throw new TypeError('every offer field must be named');
+      if (!Number.isInteger(request.v)) throw new TypeError('the offer version must be a whole number');
+      const identityKey = toBase64Url(key.publicKeySpki);
+      const fields = {
+        v: request.v,
+        importId: request.importId,
+        daemonId: key.daemonId,
+        identityKey,
+        publicKey: request.publicKey,
+        expiresAt: request.expiresAt,
+      };
+      const signature = await key.sign(secretOfferSignedBytes(fields));
+      return { daemonId: key.daemonId, identityKey, signature: toBase64Url(signature) };
+    },
+  });
+}
+
+/**
+ * Which plugins may ask for which signature through `kernel.signer` (a security path, like a hook's takers): the
+ * carriers' claim and tunnel signatures are Connections', catalog signatures are Catalogs'. Any other caller is
+ * refused before the key is touched.
+ */
+export const SIGNER_USERS = Object.freeze({
+  sign: ['connections'],
+  signTunnel: ['connections'],
+  signCatalog: ['catalogs'],
+  signSecretOffer: ['vault'],
+} as const satisfies Record<keyof IdentitySigner, readonly string[]>);
+
+/** The signer as one plugin receives it: each method refuses (`TypeError`) unless {@link SIGNER_USERS} names it. */
+export function signerFor(plugin: string, signer: IdentitySigner): IdentitySigner {
+  const allowed = (method: keyof IdentitySigner): void => {
+    if (!(SIGNER_USERS[method] as readonly string[]).includes(plugin))
+      throw new TypeError(`${plugin} may not ask the daemon identity for that signature.`);
+  };
+  return Object.freeze<IdentitySigner>({
+    sign: async request => (allowed('sign'), await signer.sign(request)),
+    signTunnel: async request => (allowed('signTunnel'), await signer.signTunnel(request)),
+    signCatalog: async request => (allowed('signCatalog'), await signer.signCatalog(request)),
+    signSecretOffer: async request => (allowed('signSecretOffer'), await signer.signSecretOffer(request)),
   });
 }

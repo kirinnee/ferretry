@@ -708,7 +708,7 @@ class SealedSession implements CarrierLink {
       mode: modeKey,
       proof,
       appSession,
-      principal: { kind, holder: holder.holder, session: sessionId, leaseUntil: instant(0) },
+      principal: { kind, holder: holder.holder, session: sessionId, leaseUntil: instant(0), appSession },
     };
     const watch: HolderWatch = {
       session: sessionId,
