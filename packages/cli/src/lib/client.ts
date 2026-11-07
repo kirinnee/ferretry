@@ -6,8 +6,14 @@
  *    the owning plugin are present, on and carry this fy's contract hashes. A block re-reads once, so a daemon that
  *    restarted on a new build is not judged by its old inventory. The held inventory is dropped when the daemon
  *    restarts (its run record names another process), when `kernel.plugins-changed` is heard, and before a request
- *    is sent again after the daemon was away: nothing resumes before the fresh check;
+ *    is sent again after the daemon was away. A guarded resend therefore waits for a fresh inventory check; that
+ *    read, like every attempt of every request, goes through the transport's own per-attempt address check;
  * 3. sends, and turns an HTTP refusal into a final `DaemonRefusal` (S54).
+ *
+ * What holds for the credential (S57) is the transport's, not this client's: the HTTP transport reads the daemon's
+ * address again on EVERY attempt, a resend after a restart included, and asks its locality and own-listener check
+ * about exactly that address before the request (and its credential) goes out. A refusal there is final. The
+ * remaining window is the moment between that check and the connect, which no user-space client can close.
  */
 import { type PluginInventory, PluginsChanged } from '@ferretry/kernel/contract';
 import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
