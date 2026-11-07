@@ -103,7 +103,7 @@ describe('one derivation of a project server’s subject', () => {
         accounts: async () => ACCOUNTS,
         folders,
         documents,
-        secrets: { values: async () => new Map() },
+        secrets: { held: async () => new Set() },
         renewal: { refreshForLaunch: async names => void renewed.push(...names) },
         localScope: NO_LOCAL_SCOPE,
       });
