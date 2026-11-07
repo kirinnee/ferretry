@@ -37,19 +37,19 @@ import {
   scopeFits,
 } from '../account/scope.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
-import { type HarnessKind } from '../manifest.ts';
-import { type ProviderPreset } from '../presets/schema.ts';
+import type { HarnessKind } from '../manifest.ts';
+import type { ProviderPreset } from '../presets/schema.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { skillSourceReference } from '../account/adapt.ts';
 import { slugName } from '../account/document.ts';
-import {
-  type AccountChange as WireAccountChange,
-  type AgentControl,
-  type CatalogInstallChange as WireCatalogInstallChange,
-  type ComponentInput as WireComponentInput,
-  type EnvInput,
-  type RunningSession,
-  type SettingsEntriesInput,
+import type {
+  AccountChange as WireAccountChange,
+  AgentControl,
+  CatalogInstallChange as WireCatalogInstallChange,
+  ComponentInput as WireComponentInput,
+  EnvInput,
+  RunningSession,
+  SettingsEntriesInput,
 } from '../../../contract/index.ts';
 import {
   componentUsage,

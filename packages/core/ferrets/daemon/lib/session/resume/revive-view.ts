@@ -1,5 +1,5 @@
 import { reviveRuling } from '../../protocol/session-revive.ts';
-import { type SessionView } from '../../protocol/session.ts';
+import type { SessionView } from '../../protocol/session.ts';
 import type { SessionDirectorySubsystem } from '../directory/subsystem.ts';
 import { createViewMemo } from '../directory/view-memo.ts';
 

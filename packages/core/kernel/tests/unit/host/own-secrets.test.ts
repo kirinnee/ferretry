@@ -12,14 +12,19 @@ import { definePlugin, implementDaemon, route } from '../../../manifest/index.ts
 import { testHost } from '../../../testing/index.ts';
 
 const scoped = { minimum: 'authenticated', caller: 'any', audit: { skip: 'test' }, guard: { none: 'test' } } as const;
-const Proxy = z.strictObject({ url: z.string(), password: z.string().optional() });
+const ProxySchema = z.strictObject({ url: z.string(), password: z.string().optional() });
 const BrowsersProxy = defineConfig({
   file: 'browsers/proxy.yaml',
-  schema: Proxy,
+  schema: ProxySchema,
   axis: 'configure',
   loosens: () => [],
 });
-const OtherProxy = defineConfig({ file: 'other/proxy.yaml', schema: Proxy, axis: 'configure', loosens: () => [] });
+const OtherProxy = defineConfig({
+  file: 'other/proxy.yaml',
+  schema: ProxySchema,
+  axis: 'configure',
+  loosens: () => [],
+});
 
 const browsersManifest = definePlugin({
   id: 'browsers',

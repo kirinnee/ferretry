@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import {
-  BROWSER_PROXY_SCHEMES,
+  type BROWSER_PROXY_SCHEMES,
   BrowserActorKindSchema,
   BROWSER_MAX_PAGE_ID_LENGTH,
   BrowserPageStateSchema,
   BrowserProfileKindSchema,
-  BrowserProxySettingSchema,
+  type BrowserProxySettingSchema,
   BrowserProxyStatusSchema,
   SurfaceNameSchema,
 } from '../wire.ts';

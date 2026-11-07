@@ -5,13 +5,13 @@ import {
   FerretWaitingSchema,
 } from '../../../../contract/index.ts';
 import { DEFAULT_COMPLETION_SUMMARY } from '../../../lib/session/signal/policy.ts';
-import {
-  type DeclaredWait,
-  type SignalArtifacts,
-  type SignalRepository,
-  type SignalTarget,
-  type SignalTerminal,
-  type SignalTransition,
+import type {
+  DeclaredWait,
+  SignalArtifacts,
+  SignalRepository,
+  SignalTarget,
+  SignalTerminal,
+  SignalTransition,
 } from '../../../lib/session/signal/types.ts';
 import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
 import type { SessionStatus } from '../../../lib/protocol/session-base.ts';

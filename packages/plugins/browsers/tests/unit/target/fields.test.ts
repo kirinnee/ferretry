@@ -26,7 +26,7 @@ import {
   type BrowserInputClearJob,
   type BrowserInputFacts,
 } from '../../../daemon/target/lib/contracts.ts';
-import { type FakeElement, FakeFrame, FakeSession, FakeWorld, PAGE_URL } from '../../support/page-world.ts';
+import { type FakeElement, FakeFrame, type FakeSession, FakeWorld, PAGE_URL } from '../../support/page-world.ts';
 
 const SECRET = 'Tr0ub4dor&3-the-secret-value';
 

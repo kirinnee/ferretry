@@ -191,7 +191,12 @@ describe('kernel.act: observed and the fresh read before decide (lead H, I)', ()
       decide: () => 'allow',
     };
     const act = createActRunner(() => holds, new MintedIdRegistry(() => 'x'));
-    expect(await act(target, 'read', async () => ((ran = true), { kind: 'content' }))).toEqual({
+    expect(
+      await act(target, 'read', async () => {
+        ran = true;
+        return { kind: 'content' };
+      }),
+    ).toEqual({
       ok: false,
       error: { refused: 'holds_unavailable' },
     });

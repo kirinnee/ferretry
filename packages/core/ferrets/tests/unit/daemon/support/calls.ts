@@ -1,5 +1,5 @@
 import type { CallContext } from '@ferretry/kernel/contract';
-import { type FerretSummary } from '../../../../contract/index.ts';
+import type { FerretSummary } from '../../../../contract/index.ts';
 import { ferretId, T0 } from '../../../../contract/testing/index.ts';
 
 /** A call as a handler sees it: the path parameters and a request whose body is `body`. Gate's standing is not here. */

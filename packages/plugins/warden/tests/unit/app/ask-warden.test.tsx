@@ -268,6 +268,7 @@ describe('askWardenContribution', () => {
     expect(entry.label).toBe('Ask the Warden to investigate now…');
     if (entry.kind !== 'form') throw new Error('expected a form');
     expect(entry.title).toBe('Ask the Warden to investigate hadi');
+    // biome-ignore lint/complexity/noUselessFragments: `render` answers a ReactNode and `mount` takes an element
     view = await mount(<>{entry.render(hostFor(rec))}</>);
     await settle();
     await submit(view.container);

@@ -1,6 +1,6 @@
 import type { CopyElementPart } from '../../../contract/routes/index.ts';
 import type { SecretChildRunner } from '../local-ports.ts';
-import { type BrowserElementTarget } from '../vault-inputs.ts';
+import type { BrowserElementTarget } from '../vault-inputs.ts';
 
 /**
  * THE SEAMS THE SECURE-COPY SERVICE STANDS ON (docs/secure-copy.md).

@@ -3,7 +3,7 @@ import {
   FyEventStreamFrameSchema,
   type FyEventStreamIdleScope,
 } from '../../protocol/session.ts';
-import { type SessionLiveActivity } from '../../protocol/session-live.ts';
+import type { SessionLiveActivity } from '../../protocol/session-live.ts';
 import type { SocketDownstream, SocketFrame, SocketHandler } from '@ferretry/kernel/contract';
 import { sameLiveReading } from '../live/policy.ts';
 import { journalEventToFyEvent, type StoredSessionEvent } from '../peers/reads.ts';
