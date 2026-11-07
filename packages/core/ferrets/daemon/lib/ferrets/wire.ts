@@ -32,7 +32,8 @@ const StartIdentitySchema = z.strictObject({
   harnessConversation: z.string().min(1).max(256).optional(),
   runtime: RuntimeNameSchema.optional(),
   login: LoginNameSchema.optional(),
-  folder: z.string().min(1).max(4_096),
+  /** Optional on the wire so a start without one is refused with today's sentence, not a schema issue list. */
+  folder: z.string().min(1).max(4_096).optional(),
   prompt: z.string().max(200_000).optional(),
 });
 
@@ -72,12 +73,20 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return parsed.data;
 };
 
+/** Today's sentence for a start that names no folder. */
+export const START_NEEDS_FOLDER = 'a start must name the absolute working directory to run in';
+
 const OPTION_KEYS: ReadonlySet<string> = new Set(Object.keys(StartOptionsSchema.shape));
 
 export const parseStartBody = (value: unknown): Omit<StartRequest, 'by'> => {
   const identity: Record<string, unknown> = {};
   const options: Record<string, unknown> = {};
-  for (const [key, field] of Object.entries(parse(StartBodySchema, value)))
+  const body = parse(StartBodySchema, value);
+  // Today's `start`: a start with no working directory would run the agent wherever the daemon happens to be, which is
+  // never what a caller meant (400 `invalid_request`).
+  if (body.folder === undefined)
+    throw new ApiError(400, START_NEEDS_FOLDER, 'invalid_request');
+  for (const [key, field] of Object.entries(body))
     if (field !== undefined) (OPTION_KEYS.has(key) ? options : identity)[key] = field;
   return {
     ...(identity as Omit<StartRequest, 'by' | 'options'>),

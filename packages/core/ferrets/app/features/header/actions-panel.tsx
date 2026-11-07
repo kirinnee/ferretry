@@ -7,7 +7,8 @@
  * the screen as the alert line below.
  */
 
-import { useOptionalRouter } from '@ferretry/app';
+import { PanelSlot, useOptionalRouter } from '@ferretry/app';
+import { ACTIONS_ROW_SLOT, type ActionsRowSlotProps } from '@ferretry/core-ferrets/contract';
 import { Play } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { displayCallsign } from '../../lib/callsign.ts';
@@ -27,6 +28,7 @@ import {
   stopFerret,
 } from './ferret-operations.ts';
 import { daemonOfRoute, movePath } from './header-paths.ts';
+import { useOfferedRows } from './offered-rows.ts';
 import { RenameForm } from './rename-form.tsx';
 import { type FerretActionContribution, type FerretActionFormHost, ferretActionSections } from './registry.ts';
 import { reviveOffer } from './revive-offer.ts';
@@ -58,6 +60,7 @@ export function ActionsPanel({ client, subject, canControl = true, contributions
   const ferret = read.kind === 'ready' ? read.ferret : null;
   const refusal = useRestartRefusal(() => void reload(), subject ?? '');
   const clipboard = useMemo(() => browserClipboardWriter(), []);
+  const offered = useOfferedRows();
 
   const fail = useCallback((sentence: string, detail?: string): void => {
     setAlert({ sentence, ...(detail === undefined ? {} : { detail }) });
@@ -117,7 +120,7 @@ export function ActionsPanel({ client, subject, canControl = true, contributions
       />
     ),
   };
-  const sections = ferretActionSections([...CORE_FERRET_ACTIONS, ...contributions], context);
+  const sections = ferretActionSections([...CORE_FERRET_ACTIONS, ...contributions, ...offered.contributions], context);
   const resumable = reviveOffer(ferret, canControl).offered;
 
   const onFailure = (sentence: string, detail?: string): void => fail(sentence, detail);
@@ -147,6 +150,13 @@ export function ActionsPanel({ client, subject, canControl = true, contributions
           {compact ? null : <span>Resume</span>}
         </button>
       ) : null}
+      {daemon === undefined ? null : (
+        <PanelSlot
+          daemon={daemon}
+          props={{ ferret: ferret.id, name, canControl, offer: offered.offer } satisfies ActionsRowSlotProps}
+          slot={ACTIONS_ROW_SLOT}
+        />
+      )}
       <ActionsMenu
         compact={compact}
         form={form}

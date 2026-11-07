@@ -1,4 +1,10 @@
-import type { ChosenFerretAccount, NewFerretAccountSlotProps } from '@ferretry/core-ferrets/contract';
+import { PanelSlot } from '@ferretry/app';
+import {
+  type ChosenFerretAccount,
+  NEW_FERRET_PROJECT_SLOT,
+  type NewFerretAccountSlotProps,
+  type NewFerretProjectSlotProps,
+} from '@ferretry/core-ferrets/contract';
 import { type ComponentType, type ReactNode, useEffect, useState } from 'react';
 import { ModelSelect } from '../../components/model-select.tsx';
 import type { LiveFerretsClient } from '../../lib/client.ts';
@@ -245,6 +251,12 @@ export function NewFerretPage({
               }
               read={folders}
               value={draft.folder}
+            />
+            {/* Registered projects are Projects': its picker fills the folder field through the slot Ferrets offers. */}
+            <PanelSlot
+              daemon={daemon}
+              props={{ value: draft.folder, onPick: folder => update('folder', folder) } satisfies NewFerretProjectSlotProps}
+              slot={NEW_FERRET_PROJECT_SLOT}
             />
           </FerretField>
 

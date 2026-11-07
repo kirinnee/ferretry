@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  FERRET_SLOTS,
+  FERRET_ACCOUNT_SLOTS,
   isMoveAccountSlotProps,
   isNewFerretAccountSlotProps,
   MOVE_ACCOUNT_SLOT,
@@ -21,7 +21,7 @@ describe('the slots Ferrets offers', () => {
   it('names the new-ferret and move account slots in `<plugin>.<name>` form', () => {
     expect(NEW_FERRET_ACCOUNT_SLOT).toBe('ferrets.new-ferret-account');
     expect(MOVE_ACCOUNT_SLOT).toBe('ferrets.move-account');
-    expect([...FERRET_SLOTS]).toEqual([NEW_FERRET_ACCOUNT_SLOT, MOVE_ACCOUNT_SLOT]);
+    expect([...FERRET_ACCOUNT_SLOTS]).toEqual([NEW_FERRET_ACCOUNT_SLOT, MOVE_ACCOUNT_SLOT]);
   });
 
   it('a panel accepts the props a page hands it and refuses anything short of them', () => {

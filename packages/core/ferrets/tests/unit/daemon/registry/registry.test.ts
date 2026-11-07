@@ -95,3 +95,14 @@ describe('the conditional fleet list', () => {
     expect(moved.headers.get('etag')).not.toBe(first.headers.get('etag'));
   });
 });
+
+describe('the summary carries what the ferret was launched with', () => {
+  test('model, effort and fast come from its details; a ferret without them shows none', () => {
+    const registry = new FerretRegistry([record('a'), record('b')]);
+    registry.putDetails('a' as FerretId, { options: { model: 'opus', effort: 'high', fast: true } });
+    expect(registry.summary('a' as FerretId)).toMatchObject({ model: 'opus', effort: 'high', fast: true });
+    const bare = registry.summary('b' as FerretId);
+    expect(bare?.effort).toBeUndefined();
+    expect(bare?.fast).toBeUndefined();
+  });
+});

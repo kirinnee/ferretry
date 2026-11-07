@@ -187,6 +187,10 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   label: z.string().min(1).optional(),
   transcript: TranscriptViewSchema.optional(),
   model: z.string().min(1).optional(),
+  /** The startup reasoning choice it was launched with (opaque: the runtime validated it). */
+  effort: z.string().min(1).optional(),
+  /** Whether it was launched in the harness's fast mode. */
+  fast: z.boolean().optional(),
   card: FerretCardIdSchema.optional(),
   title: FerretTitleSchema.optional(),
   pinnedAt: InstantSchema.optional(),

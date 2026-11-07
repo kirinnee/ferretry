@@ -48,7 +48,7 @@ import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService } from './lib/ferrets/service.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
-import type { SessionId } from './lib/session-id.ts';
+import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
 import { DEFAULT_CALLSIGN_POOL, suggestCallsigns } from './lib/names/index.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
@@ -86,7 +86,7 @@ import {
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
-import { fleetEventsAccept, HistoryEventSource } from './modules/fleet-events.ts';
+import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 
@@ -633,6 +633,19 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     throw new ApiError(status, failure.reason, failure.code);
   };
 
+  // Today's `findSession` also found archived ferrets, whose journals are untouched, so their streams replay.
+  const eventsAccept = fleetEventsAccept(
+    eventSource,
+    { after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }) },
+    followableFerret({
+      live: id => registry.get(id as FerretId) !== undefined,
+      archived: id => {
+        const session = tryParseSessionId(id);
+        return session !== undefined && sessionStore.findSession(session) !== undefined;
+      },
+    }),
+  );
+
   return {
     provides: { ferrets: ferretsPort(service), workFolders },
     hooks: {
@@ -648,11 +661,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       },
     },
     sockets: {
-      'GET /v1/events': fleetEventsAccept(
-        eventSource,
-        { after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }) },
-        id => registry.get(id as FerretId) !== undefined,
-      ),
+      'GET /v1/events': async call => {
+        // The archive is read once at open; a stream asked for before that must not 404 an archived ferret.
+        await storeLoaded.catch(() => undefined);
+        return await eventsAccept(call);
+      },
     },
     routes: {
       ...worktrees.routes,

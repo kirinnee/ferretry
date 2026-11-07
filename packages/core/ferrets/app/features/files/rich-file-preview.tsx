@@ -26,6 +26,7 @@ import { StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import { type FilesScope, scopeKey } from './scope.ts';
 import { ExternalLink as ExternalAnchor } from './seams.tsx';
+import { ImageViewer } from '../../ui.ts';
 
 const CSV_PREVIEW_BYTES = 512 * 1024;
 const CSV_PREVIEW_ROWS = 400;
@@ -173,6 +174,8 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
   const key = kind === null ? null : `preview:${scopeKey(scope)}:${path}`;
   const preview = useFsResource(key, signal => fsApi.preview(scope, path, signal));
   const [url, setUrl] = useState<string | null>(null);
+  // A raster picture opens in the shared full-screen viewer (the same one the chat draws with).
+  const [viewing, setViewing] = useState(false);
   // The revision this preview's bytes were fetched against. Seeded from the
   // mounting revision so the first read is not immediately re-run.
   const fetchedFor = useRef(revision);
@@ -304,8 +307,27 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
           title={`PDF preview of ${filename}`}
         />
       )}
-      {(kind === 'raster' || kind === 'svg') && (
-        <img className="kt-rich-file-image" src={url} alt={`Preview of ${filename}`} />
+      {kind === 'svg' && <img className="kt-rich-file-image" src={url} alt={`Preview of ${filename}`} />}
+      {kind === 'raster' && (
+        <>
+          <button
+            type="button"
+            className="kt-rich-file-image-open"
+            data-rich-file-open-image=""
+            aria-label={`Open ${filename} full screen`}
+            onClick={() => setViewing(true)}
+          >
+            <img className="kt-rich-file-image" src={url} alt={`Preview of ${filename}`} />
+          </button>
+          {viewing && (
+            <ImageViewer
+              images={[{ key: path, src: url, failed: false, alt: `Preview of ${filename}`, filename }]}
+              index={0}
+              onIndexChange={() => undefined}
+              onClose={() => setViewing(false)}
+            />
+          )}
+        </>
       )}
       <PreviewActions href={url} filename={filename} canOpen={kind === 'pdf' || kind === 'raster'} />
     </div>
