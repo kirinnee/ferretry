@@ -7,9 +7,7 @@ import {
   applyCardAsk,
   type CardAskOperation,
   type CardAskOutcome,
-  LEGACY_REPLAY_MS,
   sealCardAsks,
-  withCardAsks,
 } from '../../../../daemon/lib/agenda/card-asks.ts';
 
 const T0 = Date.parse('2026-11-03T08:00:00.000Z');
@@ -406,64 +404,6 @@ describe('the seal across the Warden’s nudge and the stored form', () => {
     should(store(item)).eql(item);
     should(sealCardAsks(item)).eql(item);
     should((item.history ?? []).length).be.below(lines.length + 1);
-  });
-});
-
-describe('the mirror an older app draws, and when it changed', () => {
-  const ask = (cardId: string, extra = {}) => ({ gate: gate(cardId), at: at(0), ...extra });
-
-  it('stamps a mirror that goes to nothing, and keeps the stamp when the next ask appears', () => {
-    // Arrange — F2's ask is shown
-    const shown = withCardAsks(thread(), [ask('F2')], at(0));
-    should(shown.gateAttachedChangedAt).be.undefined();
-
-    // Act — it is answered elsewhere, so nothing is shown; then F3's ask appears a minute later
-    const none = withCardAsks(shown, [ask('F2', { answer })], at(1));
-    const next = withCardAsks(none, [ask('F2', { answer }), ask('F3')], at(2));
-
-    // Assert
-    should(none.gateAttached).be.undefined();
-    should(none.gateAttachedChangedAt).equal(at(1));
-    should(next.gateAttached?.cardId).equal('F3');
-    should(next.gateAttachedChangedAt).equal(at(1));
-  });
-
-  it('drops a stamp that is older than the replay window when an ask appears', () => {
-    // Arrange
-    const stamped = thread({ gateAttachedChangedAt: at(0) });
-
-    // Act
-    const fresh = withCardAsks(stamped, [ask('F3')], at(1));
-    const stale = withCardAsks(stamped, [ask('F3')], new Date(Date.parse(at(0)) + LEGACY_REPLAY_MS).toISOString());
-    const unclocked = withCardAsks(stamped, [ask('F3')]);
-
-    // Assert
-    should(fresh.gateAttachedChangedAt).equal(at(0));
-    should(stale.gateAttachedChangedAt).be.undefined();
-    should(unclocked.gateAttachedChangedAt).equal(at(0));
-  });
-
-  it('stamps nothing on an agenda that was never mirrored', () => {
-    // Act
-    const appeared = withCardAsks(thread(), [ask('F2')], at(1));
-    const nothing = withCardAsks(thread(), [], at(1));
-
-    // Assert
-    should(appeared.gateAttachedChangedAt).be.undefined();
-    should(nothing.gateAttachedChangedAt).be.undefined();
-  });
-
-  it('keeps a fresh stamp when the shown ask stays the same, and stamps the ask that took another’s place', () => {
-    // Arrange
-    const shown = withCardAsks(thread(), [ask('F2'), ask('F3')], at(0));
-
-    // Act
-    const replaced = withCardAsks(shown, [ask('F3')], at(1));
-    const same = withCardAsks(replaced, [ask('F3', { howToTest: 'try it' })], at(2));
-
-    // Assert
-    should(replaced.gateAttachedChangedAt).equal(at(1));
-    should(same.gateAttachedChangedAt).equal(at(1));
   });
 });
 

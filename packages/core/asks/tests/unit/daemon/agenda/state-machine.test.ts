@@ -42,9 +42,7 @@ import {
   emptyAgendaLedger,
   isActiveAgenda,
   isWardenEscalationAgenda,
-  liftGateItems,
   MAX_AGENT_AGENDA_PER_SESSION,
-  parkOwnerReplies,
   parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
@@ -2462,95 +2460,6 @@ describe('Agenda state machine reply', () => {
   });
 });
 
-describe('Agenda ledger migration: an owner reply an earlier daemon left on the ferret’s turn', () => {
-  const legacyReply = (): AgendaLedger => {
-    const created = raised();
-    const entry = activeEntry(created.ledger);
-    return {
-      ...created.ledger,
-      entries: [{ ...entry, item: { ...entry.item, waitingOn: 'ferret', askedAt: SECOND, waitingFor: 'discussion' } }],
-    };
-  };
-
-  it('should park it as replied at the instant of the reply when the board is read', () => {
-    // Act
-    const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(legacyReply())), SESSION_ID);
-
-    // Assert
-    const snapshot = agendaSnapshot(parsed as AgendaLedger);
-    should(snapshot.resolved).have.length(0);
-    should(snapshot.items).have.length(1);
-    should(snapshot.items[0]).containDeep({ id: 'A1', parked: { reason: 'replied', at: SECOND } });
-    should(snapshot.items[0]?.history?.map(entry => entry.kind)).deepEqual(['replied']);
-    should(snapshot.items[0]?.waitingOn).be.undefined();
-    should(snapshot.items[0]?.askedAt).be.undefined();
-    should(snapshot.items[0]?.waitingFor).be.undefined();
-  });
-
-  it('should park only the replied item on a board that also holds an ordinary open one', () => {
-    // Arrange
-    const withSecond = succeeded(
-      applyAgendaCommand(legacyReply(), raiseCommand(AGENT, { subject: 'Rotate the signing key?' }, SECOND)),
-    );
-
-    // Act
-    const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(withSecond.ledger)), SESSION_ID);
-
-    // Assert
-    const snapshot = agendaSnapshot(parsed as AgendaLedger);
-    should(snapshot.items.map(item => [item.id, item.parked?.reason])).deepEqual([
-      ['A1', 'replied'],
-      ['A2', undefined],
-    ]);
-    should(snapshot.resolved).have.length(0);
-  });
-
-  it('should be idempotent: reading it again changes nothing', () => {
-    // Arrange
-    const once = parseAgendaLedger(JSON.parse(JSON.stringify(legacyReply())), SESSION_ID) as AgendaLedger;
-
-    // Act
-    const twice = parseAgendaLedger(JSON.parse(JSON.stringify(once)), SESSION_ID);
-
-    // Assert
-    should(twice).deepEqual(once);
-  });
-
-  it('should leave a requested discussion and a request for information on the ferret’s turn', () => {
-    // Arrange
-    const discussing = succeeded(
-      applyAgendaCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
-    );
-    const asked = succeeded(
-      applyAgendaCommand(raised().ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: SECOND }),
-    );
-
-    // Act
-    const parsedDiscussion = parseAgendaLedger(JSON.parse(JSON.stringify(discussing.ledger)), SESSION_ID);
-    const parsedInfo = parseAgendaLedger(JSON.parse(JSON.stringify(asked.ledger)), SESSION_ID);
-
-    // Assert
-    should(agendaSnapshot(parsedDiscussion as AgendaLedger).items[0]).containDeep({ waitingFor: 'discussion' });
-    should(agendaSnapshot(parsedInfo as AgendaLedger).items[0]).containDeep({ waitingOn: 'ferret', infoRequests: 1 });
-  });
-
-  it('should leave an item born in discussion, with no wait before its first reply, alone', () => {
-    // Arrange
-    const created = raised();
-    const entry = activeEntry(created.ledger);
-    const born = {
-      ...created.ledger,
-      entries: [{ ...entry, item: { ...entry.item, waitingOn: 'ferret', askedAt: FIRST, waitingFor: 'discussion' } }],
-    };
-
-    // Act
-    const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(born)), SESSION_ID);
-
-    // Assert
-    should(agendaSnapshot(parsed as AgendaLedger).items).have.length(1);
-  });
-});
-
 describe('Agenda state machine: the ferret’s edit hands the item back', () => {
   const reply = (ledger: AgendaLedger) =>
     applyAgendaCommand(ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND });
@@ -3770,160 +3679,6 @@ describe('Agenda state machine: a ferret’s edit or surface of a parked item', 
   });
 });
 
-describe('Agenda ledger migration: the replies earlier daemons left open or closed', () => {
-  const template = (id: AgendaId, origin: 'agent' | 'human') => {
-    const entry = activeEntry(raised(origin === 'agent' ? AGENT : HUMAN).ledger);
-    return { origin: entry.origin, item: { ...entry.item, id, subject: `Item ${id}` } };
-  };
-  const open = (id: AgendaId, origin: 'agent' | 'human' = 'human'): AgendaEntry => ({
-    lifecycle: 'active',
-    ...template(id, origin),
-  });
-  const closedReply = (id: AgendaId, resolvedAt: string, origin: 'agent' | 'human' = 'human'): AgendaEntry => {
-    const { origin: entryOrigin, item } = template(id, origin);
-    return {
-      lifecycle: 'addressed',
-      origin: entryOrigin,
-      item: {
-        ...item,
-        resolvedAt,
-        resolutionNote: 'Use eu-west-1',
-        disposition: 'replied',
-        resolvedBy: 'human',
-        resolvedBySession: null,
-        resolvedByName: null,
-        history: [{ at: resolvedAt, kind: 'replied', note: 'Use eu-west-1' }],
-      },
-    } as AgendaEntry;
-  };
-  const board = (entries: AgendaEntry[]): AgendaLedger => ({
-    sessionId: SESSION_ID,
-    nextId: 100,
-    entries,
-    updatedAt: THIRD,
-  });
-  const parse = (ledger: AgendaLedger) =>
-    parseAgendaLedger(JSON.parse(JSON.stringify(ledger)), SESSION_ID) as AgendaLedger;
-  const ids = (entries: readonly AgendaEntry[]) => entries.map(entry => entry.item.id);
-
-  it('should reopen an item closed as replied, parked as replied at its close, with its history kept', () => {
-    // Act
-    const parsed = parse(board([closedReply('A1', SECOND)]));
-
-    // Assert
-    const snapshot = agendaSnapshot(parsed);
-    should(snapshot.resolved).have.length(0);
-    should(snapshot.items).have.length(1);
-    should(snapshot.items[0]).containDeep({ id: 'A1', parked: { reason: 'replied', at: SECOND } });
-    should(snapshot.items[0]?.history).deepEqual([{ at: SECOND, kind: 'replied', note: 'Use eu-west-1' }]);
-    should(snapshot.items[0]).not.have.property('resolvedAt');
-    should(snapshot.items[0]).not.have.property('disposition');
-  });
-
-  it('should leave items closed any other way closed', () => {
-    // Arrange
-    const done = succeeded(
-      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
-    );
-
-    // Act
-    const parsed = parse(done.ledger);
-
-    // Assert
-    should(agendaSnapshot(parsed).items).have.length(0);
-    should(agendaSnapshot(parsed).resolved.map(item => item.id)).deepEqual(['A1']);
-  });
-
-  it('should reopen the newest first and only while the board has room', () => {
-    // Arrange
-    const filled = Array.from({ length: MAX_AGENDA_PER_SESSION - 1 }, (_, index) => open(`A${index + 1}` as AgendaId));
-    const entries = [...filled, closedReply('A20', FIRST), closedReply('A22', THIRD), closedReply('A21', SECOND)];
-
-    // Act
-    const parsed = parse(board(entries));
-
-    // Assert
-    should(ids(parsed.entries.filter(isActiveAgenda))).containEql('A22');
-    should(parsed.entries.filter(isActiveAgenda)).have.length(MAX_AGENDA_PER_SESSION);
-    should(ids(parsed.entries.filter(entry => entry.lifecycle === 'addressed')))
-      .containDeep(['A20', 'A21'])
-      .and.have.length(2);
-  });
-
-  it('should keep a closed reply of a ferret closed once the agent cap is reached, but reopen a person’s', () => {
-    // Arrange
-    const agents = Array.from({ length: MAX_AGENT_AGENDA_PER_SESSION }, (_, index) =>
-      open(`A${index + 1}` as AgendaId, 'agent'),
-    );
-    const entries = [...agents, closedReply('A30', THIRD, 'agent'), closedReply('A31', SECOND, 'human')];
-
-    // Act
-    const parsed = parse(board(entries));
-
-    // Assert
-    should(ids(parsed.entries.filter(entry => entry.lifecycle === 'addressed'))).deepEqual(['A30']);
-    should(ids(parsed.entries.filter(isActiveAgenda))).containEql('A31');
-  });
-
-  it('should count a reopened ferret item towards the agent cap', () => {
-    // Arrange
-    const agents = Array.from({ length: MAX_AGENT_AGENDA_PER_SESSION - 1 }, (_, index) =>
-      open(`A${index + 1}` as AgendaId, 'agent'),
-    );
-    const entries = [...agents, closedReply('A30', THIRD, 'agent'), closedReply('A31', SECOND, 'agent')];
-
-    // Act
-    const parsed = parse(board(entries));
-
-    // Assert
-    should(ids(parsed.entries.filter(entry => entry.lifecycle === 'addressed'))).deepEqual(['A31']);
-    should(ids(parsed.entries.filter(isActiveAgenda))).containEql('A30');
-  });
-
-  it('should park a reply left on the ferret’s turn and reopen a closed one in the same read', () => {
-    // Arrange
-    const stranded = open('A1', 'agent');
-    if (stranded.lifecycle !== 'active') throw new Error('expected an open entry');
-    const left: AgendaEntry = {
-      ...stranded,
-      item: { ...stranded.item, waitingOn: 'ferret', askedAt: SECOND, waitingFor: 'discussion' },
-    };
-
-    // Act
-    const parsed = parse(board([left, closedReply('A2', THIRD)]));
-
-    // Assert
-    const items = agendaSnapshot(parsed).items;
-    should(items.map(item => [item.id, item.parked])).deepEqual([
-      ['A1', { reason: 'replied', at: SECOND }],
-      ['A2', { reason: 'replied', at: THIRD }],
-    ]);
-  });
-
-  it('should be idempotent, and return a board with nothing to move as it came', () => {
-    // Arrange
-    const once = parse(board([closedReply('A1', SECOND), open('A2')]));
-    const plain = board([open('A1')]);
-
-    // Act + Assert
-    should(parse(once)).deepEqual(once);
-    should(parkOwnerReplies(plain)).equal(plain);
-  });
-
-  it('should leave a closed reply closed when it no longer reads as an item', () => {
-    // Arrange
-    const reply = closedReply('A1', SECOND);
-    if (reply.lifecycle !== 'addressed') throw new Error('expected a closed entry');
-    const broken: AgendaEntry = { ...reply, item: { ...reply.item, subject: '' } };
-
-    // Act
-    const parked = parkOwnerReplies(board([broken]));
-
-    // Assert
-    should(parked.entries.map(entry => entry.lifecycle)).deepEqual(['addressed']);
-  });
-});
-
 describe('Agenda state machine offer to close', () => {
   it('should store the offer on an item that names a card', () => {
     // Act
@@ -4569,7 +4324,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       answer: { at: SECOND, response: { kind: 'multiple-choice', choice: 'Done' }, receipt },
     });
 
-  it('puts a new ask on an agenda, mirrors it as gateAttached and wakes the agenda into Needs you at the test stage', () => {
+  it('puts a new ask on an agenda and wakes the agenda into Needs you at the test stage', () => {
     // Arrange
     const { ledger } = raised();
     const snoozed = succeeded(
@@ -4583,7 +4338,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     should(woke.change).equal('woke');
     should(openCardAsks(woke.item!)).have.length(1);
     should(woke.item?.cardAsks?.[0]).containDeep({ gate: GATE, at: SECOND, howToTest: 'Open the app.' });
-    should(woke.item?.gateAttached).deepEqual(GATE);
     should(woke.item?.waitingSince).equal(SECOND);
     should(agendaState(woke.item!).state).equal('needs-you');
     should(woke.item?.stage).equal('test');
@@ -4597,7 +4351,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
     should(same.changed).be.false();
     should(renamed.change).equal('refreshed');
-    should(renamed.item?.gateAttached?.laneName).equal('Ready to try');
     should(renamed.item?.cardAsks).have.length(1);
   });
 
@@ -4607,7 +4360,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     const gone = succeeded(ask(first.ledger, { kind: 'withdraw', reference: gateReference(GATE) }));
 
     should(gone.item?.cardAsks).be.undefined();
-    should(gone.item?.gateAttached).be.undefined();
   });
 
   it('records the answer and rests the agenda on its ferret; the same receipt again is unchanged, another is refused', () => {
@@ -4620,7 +4372,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     should(answered.change).equal('answered');
     should(openCardAsks(answered.item!)).have.length(0);
     should(answered.item?.cardAsks?.[0]?.answer?.receipt).equal(RECEIPT);
-    should(answered.item?.gateAttached).be.undefined();
     should(agendaState(answered.item!).state).equal('resting');
     should(isActiveAgenda(activeEntry(answered.ledger))).be.true();
     should(replay.changed).be.false();
@@ -4633,22 +4384,18 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     const one = succeeded(answer(both.ledger));
 
     should(openCardAsks(one.item!).map(each => each.gate.entry)).deepEqual([2]);
-    should(one.item?.gateAttached).deepEqual(NEXT);
     should(agendaState(one.item!).state).equal('needs-you');
   });
 
   it('mirrors the next ask once the owner says Not yet to the first, stamping the change for an older app', () => {
     // Arrange — two open asks, the first shown
     const both = attach(attach(raised().ledger).ledger, NEXT);
-    should(both.item?.gateAttached).deepEqual(GATE);
 
     // Act — Not yet on the first
     const deferred = succeeded(ask(both.ledger, { kind: 'not-yet', reference: gateReference(GATE) }));
 
     // Assert — the mirror moves on to the ask still waiting; the change is stamped, so a screen that still draws the
     // first one is not read as answering the second for two minutes
-    should(deferred.item?.gateAttached).deepEqual(NEXT);
-    should(deferred.item?.gateAttachedChangedAt).equal(SECOND);
     should(openCardAsks(deferred.item!).map(each => each.gate.entry)).deepEqual([1, 2]);
   });
 
@@ -4913,62 +4660,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(agendaState(done.item!).state).equal('resting');
       });
 
-      it.each([1, 2])(
-        'keeps an answered own question answered when the card agenda is carried to another ferret (ask version %d)',
-        version => {
-          // Arrange — the ferret rewrites the generated ask into a question of its own (re-asked once for version 2), the
-          // card ask arrives, the owner replies in words
-          const wording = { subject: FOCUS.subject, ask: { kind: 'open-question' as const } };
-          const edit = (ledger: AgendaLedger, patch: Record<string, unknown>, at: string) =>
-            succeeded(applyAgendaCommand(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at } as never));
-          const asked = edit(raised(DAEMON, CARD_AGENDA).ledger, wording, SECOND);
-          const reasked = version === 1 ? asked : edit(asked.ledger, { kind: FOCUS.kind }, THIRD);
-          should(reasked.item?.askVersion ?? 1).equal(version);
-          const replied = ownerReplies(attachAt(reasked.ledger, GATE, FOURTH).ledger, FIFTH);
-          should(agendaState(replied.item!).state).equal('needs-you');
-          should(replied.item?.ownAskRepliedTo).be.a.String();
-
-          // Act — the daemon carries the item to another agenda, as the home migration does, then the card ask is answered
-          const carried = raised(
-            DAEMON,
-            { ...CARD_AGENDA, subject: replied.item!.subject, carried: replied.item! },
-            LATER,
-          );
-          const done = doneAt(carried.ledger, GATE, LATER);
-
-          // Assert — the carried item keeps both the record and the version it was taken at, and the answered question stays answered
-          should(carried.item?.ownAskRepliedTo).equal(replied.item?.ownAskRepliedTo);
-          should(carried.item?.askVersion).equal(replied.item?.askVersion);
-          should(openCardAsks(done.item!)).have.length(0);
-          should(agendaState(done.item!).state).equal('resting');
-        },
-      );
-
-      it('asks a carried question afresh when the arriving request words it differently', () => {
-        // Arrange
-        const edit = succeeded(
-          applyAgendaCommand(raised(DAEMON, CARD_AGENDA).ledger, {
-            action: 'edit',
-            actor: AGENT,
-            id: 'A1',
-            patch: { subject: FOCUS.subject, ask: FOCUS.ask },
-            at: SECOND,
-          } as never),
-        );
-        const replied = ownerReplies(attachAt(edit.ledger, GATE, THIRD).ledger, FOURTH);
-
-        // Act — the carried raise says something else
-        const carried = raised(
-          DAEMON,
-          { ...CARD_AGENDA, subject: 'Should the badge also announce itself?', carried: replied.item! },
-          LATER,
-        );
-        const done = doneAt(carried.ledger, GATE, LATER);
-
-        // Assert
-        should(agendaState(done.item!).state).equal('needs-you');
-      });
-
       it('keeps a question the ferret rewrote after the owner’s reply in Needs you after the card ask’s Good', () => {
         // Arrange — the owner answered the first question; the ferret then asks something else
         const replied = ownerReplies(attachAt(raised(AGENT, FOCUS).ledger, GATE, SECOND).ledger, THIRD);
@@ -5007,18 +4698,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       should(restated.item?.generatedSubject).equal('Try it: the badge.');
       should(raised(AGENT, REPEATS).item?.generatedSubject).be.undefined();
       should(raised(DAEMON, { source: 'task', sourceRef: 'reopen:F1' }).item?.generatedSubject).be.undefined();
-    });
-
-    it('carries what the agenda it replaces held, never the subject it arrives with', () => {
-      const kept = raised(DAEMON, {
-        ...CARD_AGENDA,
-        subject: 'Should the badge also change keyboard focus?',
-        carried: { waitingSince: FIRST, generatedSubject: CARD_AGENDA.subject },
-      });
-      const legacy = raised(DAEMON, { ...CARD_AGENDA, carried: { waitingSince: FIRST } });
-
-      should(kept.item?.generatedSubject).equal(CARD_AGENDA.subject);
-      should(legacy.item?.generatedSubject).be.undefined();
     });
 
     it('keeps an agent-raised subject-only question in Needs you after Good, and the owner’s reply parks it', () => {
@@ -5331,151 +5010,6 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       applyAgendaCommandToSession(null, SESSION_ID, raiseCommand(AGENT, { cardAsks: [{ gate: GATE, at: FIRST }] })),
     );
     should(result.error.code).equal('forbidden');
-  });
-});
-
-describe('liftGateItems (docs/agenda.md § Card asks: the migration)', () => {
-  const GATE = {
-    cardId: 'F1',
-    laneId: 'tested',
-    laneName: 'Released · to test',
-    entry: 1,
-    projectId: 'p1',
-    options: [
-      { id: 'o0', label: 'Done', outcome: 'close' as const },
-      { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' as const },
-    ],
-  };
-  const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
-  const reread = (ledger: AgendaLedger): AgendaLedger => {
-    const parsed = parseAgendaLedger(JSON.parse(agendaLedgerDocument(ledger)), SESSION_ID);
-    if (parsed === null) throw new Error('ledger did not read back');
-    return parsed;
-  };
-  const gateItem = (from: AgendaLedger | null, gate = GATE, at = FIRST) =>
-    succeeded(
-      applyAgendaCommandToSession(
-        from,
-        SESSION_ID,
-        raiseCommand(
-          SYSTEM,
-          {
-            source: 'task',
-            sourceRef: gateReference(gate),
-            subject: 'Try it: F1',
-            body: 'Open the app and add a card.',
-            gate,
-            task: { id: 'F1' },
-          } as never,
-          at,
-        ),
-      ),
-    );
-
-  it('turns a lone gate item into its card’s agenda in place, keeping the steps as the ask’s howToTest', () => {
-    // Arrange
-    const legacy = gateItem(null).ledger;
-
-    // Act
-    const lifted = reread(legacy);
-
-    // Assert
-    const item = activeEntry(lifted).item;
-    should(item.id).equal('A1');
-    should(item.gate).be.undefined();
-    should(item.sourceRef).equal(cardAgendaReference('F1'));
-    should(item.ask).deepEqual({ kind: 'open-question' });
-    should(item.cardAsks).have.length(1);
-    should(item.cardAsks?.[0]).containDeep({ gate: GATE, howToTest: 'Open the app and add a card.' });
-    should(item.gateAttached).deepEqual(GATE);
-    should(item.stage).equal('test');
-    should(agendaState(item).state).equal('needs-you');
-  });
-
-  it('is idempotent: reading the lifted ledger again changes nothing', () => {
-    const once = reread(gateItem(null).ledger);
-
-    should(reread(once)).deepEqual(once);
-  });
-
-  it('moves a gate item’s ask onto the card’s open thread and closes the gate item, saying where it went', () => {
-    const thread = raised(AGENT, { task: { id: 'F1' } } as never);
-    const legacy = gateItem(thread.ledger, GATE, SECOND).ledger;
-
-    const lifted = reread(legacy);
-
-    const open = lifted.entries.filter(isActiveAgenda);
-    should(open.map(entry => entry.item.id)).deepEqual(['A1']);
-    should(open[0]?.item.cardAsks?.[0]?.gate).deepEqual(GATE);
-    const closed = lifted.entries.find(entry => entry.lifecycle !== 'active' && entry.item.id === 'A2');
-    should(closed).not.be.undefined();
-    should(JSON.stringify(closed)).match(/its card's ask is now on !A1/u);
-    should(reread(lifted)).deepEqual(lifted);
-  });
-
-  it('merges two gate items of one card into one agenda', () => {
-    const first = gateItem(null).ledger;
-    const legacy = gateItem(first, { ...GATE, entry: 2 }, SECOND).ledger;
-
-    const lifted = reread(legacy);
-
-    const open = lifted.entries.filter(isActiveAgenda);
-    should(open).have.length(1);
-    should(open[0]?.item.cardAsks?.map(each => each.gate.entry).sort()).deepEqual([1, 2]);
-  });
-
-  it('puts a snoozed thread in the owner’s queue when it takes a gate item’s ask that was there', () => {
-    // Arrange — the owner snoozed the thread; the gate item waits on them
-    const thread = raised(AGENT, { task: { id: 'F1' } } as never);
-    const snoozed = succeeded(
-      applyAgendaCommand(thread.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: FIRST } as never),
-    );
-    const legacy = gateItem(snoozed.ledger, GATE, SECOND).ledger;
-
-    // Act
-    const lifted = reread(legacy);
-
-    // Assert
-    const item = activeEntry(lifted).item;
-    should(item.cardAsks).have.length(1);
-    should(item.parked).be.undefined();
-    should(item.waitingSince).equal(SECOND);
-    should(agendaState(item).state).equal('needs-you');
-  });
-
-  it('lifts a bare gateAttached into an open card ask, keeping a Not yet', () => {
-    const thread = raised(AGENT, { task: { id: 'F1' } } as never);
-    const bare = {
-      ...thread.ledger,
-      entries: thread.ledger.entries.map(entry =>
-        entry.lifecycle === 'active'
-          ? {
-              ...entry,
-              item: {
-                ...entry.item,
-                gateAttached: GATE,
-                history: [
-                  ...(entry.item.history ?? []),
-                  { kind: 'gate-answered' as const, at: SECOND, note: gateReference(GATE) },
-                ],
-              },
-            }
-          : entry,
-      ),
-    } as AgendaLedger;
-
-    const lifted = reread(bare);
-
-    const item = activeEntry(lifted).item;
-    should(item.cardAsks).have.length(1);
-    should(item.cardAsks?.[0]?.notYet).deepEqual({ at: SECOND });
-    should(item.gateAttached).deepEqual(GATE);
-  });
-
-  it('leaves a ledger with no gate item exactly as it was', () => {
-    const { ledger } = raised();
-
-    should(liftGateItems(ledger)).equal(ledger);
   });
 });
 

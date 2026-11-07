@@ -15,14 +15,13 @@ import {
   hasOpenCardAsk,
   isGeneratedCardAgendaAsk,
   itemAsksOwnQuestion,
-  mirroredCardAsk,
   openCardAsks,
   ownAskDigest,
   ownCardAsk,
   parseCardAgendaReference,
   repliedToOwnAsk,
 } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
-import { canonicalJson } from '../../src/lib/canonical-json.ts';
+import { canonicalJson } from '@ferretry/std';
 import { type AgendaQueueSource, needsYouQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
 
 const AT = '2026-11-03T09:00:00.000Z';
@@ -54,18 +53,18 @@ describe('the card agenda reference', () => {
 });
 
 describe('open card asks', () => {
-  it('should keep the unanswered ones, oldest first, and mirror the first for an older app', () => {
+  it('should keep the unanswered ones, oldest first, and ask the first of them first', () => {
     const item = { cardAsks: [answered('F1'), open('F2'), open('F3')] };
 
     should(openCardAsks(item).map(ask => ask.gate.cardId)).deepEqual(['F2', 'F3']);
     should(hasOpenCardAsk(item)).be.true();
-    should(mirroredCardAsk(item)?.gate.cardId).equal('F2');
+    should(askedCardAsks(item)[0]?.gate.cardId).equal('F2');
     should(hasOpenCardAsk({ cardAsks: [answered('F1')] })).be.false();
     should(hasOpenCardAsk({})).be.false();
-    should(mirroredCardAsk({})).be.undefined();
+    should(askedCardAsks({})[0]).be.undefined();
   });
 
-  it('should ask a Not yet after every ask still waiting, so the mirror and an unnamed answer reach the next one', () => {
+  it('should ask a Not yet after every ask still waiting, so the next one is asked first', () => {
     // Arrange — two approvals, F12 then F13; the owner said Not yet to F12
     const deferred = (cardId: string, at: string): AgendaCardAsk => ({ ...open(cardId), notYet: { at } });
     const item = { cardAsks: [deferred('F12', LATER), open('F13')] };
@@ -75,11 +74,11 @@ describe('open card asks', () => {
 
     // Assert
     should(order).deepEqual(['F13', 'F12']);
-    should(mirroredCardAsk(item)?.gate.cardId).equal('F13');
+    should(askedCardAsks(item)[0]?.gate.cardId).equal('F13');
   });
 
   it('should ask the Not yet set aside longest ago first, so a second Not yet moves on rather than re-trapping', () => {
-    // Arrange — both set aside: F13 after F12, then F12 again (an older app answering what it is shown)
+    // Arrange — both set aside: F13 after F12, then F12 again
     const deferred = (cardId: string, at: string): AgendaCardAsk => ({ ...open(cardId), notYet: { at } });
     const both = { cardAsks: [deferred('F12', AT), deferred('F13', LATER)] };
     const again = { cardAsks: [deferred('F12', '2026-11-03T11:00:00.000Z'), deferred('F13', LATER)] };
@@ -87,7 +86,7 @@ describe('open card asks', () => {
 
     // Act / Assert — the one set aside longest ago comes first; a tie keeps the order the asks were put on
     should(askedCardAsks(both).map(ask => ask.gate.cardId)).deepEqual(['F12', 'F13']);
-    should(mirroredCardAsk(again)?.gate.cardId).equal('F13');
+    should(askedCardAsks(again)[0]?.gate.cardId).equal('F13');
     should(askedCardAsks(tied).map(ask => ask.gate.cardId)).deepEqual(['F12', 'F13']);
     should(askedCardAsks({})).deepEqual([]);
   });
@@ -161,7 +160,7 @@ describe('an agenda item’s card asks', () => {
     should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each ask about a card once');
   });
 
-  it('should carry the turn an ask woke the agenda out of, and when the mirror last changed, and read without them', () => {
+  it('should carry the turn an ask woke the agenda out of, and read without it', () => {
     const woke = {
       waitingSince: AT,
       resting: { sub: 'working' as const, at: AT },
@@ -169,11 +168,9 @@ describe('an agenda item’s card asks', () => {
     };
     const withBoth = AgendaItemSchema.safeParse({
       ...item([{ ...open('F412'), woke }]),
-      gateAttachedChangedAt: LATER,
     });
     should(withBoth.success).be.true();
     should(withBoth.data?.cardAsks?.[0]?.woke?.resting?.sub).equal('working');
-    should(withBoth.data?.gateAttachedChangedAt).equal(LATER);
     should(AgendaItemSchema.safeParse(item([open('F412')])).success).be.true();
     should(AgendaItemSchema.safeParse(item([{ ...open('F412'), woke: { waitingSince: 'soon' } }])).success).be.false();
   });

@@ -102,12 +102,11 @@ describe('joining card asks onto an item (the pure half)', () => {
     const into = thread({ cardAsks: [ask('F1', 1), ask('F2', 3)] });
 
     // Act
-    const joined = moved(joinCardAsks(into, [answered('F2', 2), ask('F3', 2)], minute(10), stage));
+    const joined = moved(joinCardAsks(into, [answered('F2', 2), ask('F3', 2)], stage));
 
     // Assert — one F2, the answered one; ordered by when each was put
     should(references(joined)).eql([gateReference(gate('F1')), gateReference(gate('F2')), gateReference(gate('F3'))]);
     should(joined.cardAsks?.[1]?.answer?.receipt).equal('a'.repeat(64));
-    should(joined.gateAttached).eql(gate('F1'));
   });
 
   it('keeps the survivor’s ask on a tie, and a Not yet over an ask nobody looked at', () => {
@@ -116,7 +115,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const into = thread({ cardAsks: [ask('F1', 1, { howToTest: 'mine' }), ask('F2', 1)] });
 
     // Act
-    const joined = moved(joinCardAsks(into, [ask('F1', 0, { howToTest: 'theirs' }), notYet], minute(10), stage));
+    const joined = moved(joinCardAsks(into, [ask('F1', 0, { howToTest: 'theirs' }), notYet], stage));
 
     // Assert
     should(joined.cardAsks?.find(each => each.gate.cardId === 'F1')?.howToTest).equal('mine');
@@ -127,12 +126,7 @@ describe('joining card asks onto an item (the pure half)', () => {
   it('keeps two entries of one card apart: each is its own ask', () => {
     // Act
     const joined = moved(
-      joinCardAsks(
-        thread({ cardAsks: [answered('F1', 1)] }),
-        [{ ...ask('F1', 5), gate: gate('F1', 7) }],
-        minute(10),
-        stage,
-      ),
+      joinCardAsks(thread({ cardAsks: [answered('F1', 1)] }), [{ ...ask('F1', 5), gate: gate('F1', 7) }], stage),
     );
 
     // Assert
@@ -144,7 +138,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const into = thread();
 
     // Act
-    const outcome = joinCardAsks(into, [], minute(10), stage);
+    const outcome = joinCardAsks(into, [], stage);
 
     // Assert
     should(outcome).eql({ kind: 'moved', into });
@@ -157,9 +151,9 @@ describe('joining card asks onto an item (the pure half)', () => {
     const theirs = Array.from({ length: half }, (_, index) => ask(`F${String(index + 100)}`, index));
 
     // Act
-    const full = joinCardAsks(thread({ cardAsks: mine }), theirs, minute(10), stage);
-    const input = joinCardAsks(thread({ kind: 'input' }), [ask('F1', 1)], minute(10), stage);
-    const notice = joinCardAsks(thread({ notice: true }), [ask('F1', 1)], minute(10), stage);
+    const full = joinCardAsks(thread({ cardAsks: mine }), theirs, stage);
+    const input = joinCardAsks(thread({ kind: 'input' }), [ask('F1', 1)], stage);
+    const notice = joinCardAsks(thread({ notice: true }), [ask('F1', 1)], stage);
 
     // Assert
     should(full).match({ kind: 'refused', code: 'full' });
@@ -177,8 +171,8 @@ describe('joining card asks onto an item (the pure half)', () => {
     );
 
     // Act
-    const over = joinCardAsks(thread({ cardAsks: mine }), theirs, minute(10), stage);
-    const at = joinCardAsks(thread({ cardAsks: mine }), exactly, minute(10), stage);
+    const over = joinCardAsks(thread({ cardAsks: mine }), theirs, stage);
+    const at = joinCardAsks(thread({ cardAsks: mine }), exactly, stage);
 
     // Assert
     should(over).match({ kind: 'refused', code: 'full' });
@@ -194,7 +188,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const incoming = ask('F1', 5, { woke: { waitingSince: minute(-30) } });
 
     // Act
-    const joined = moved(joinCardAsks(into, [incoming], minute(10), stage));
+    const joined = moved(joinCardAsks(into, [incoming], stage));
 
     // Assert — the ask's own turn is the survivor's, not the absorbed item's
     should(agendaState(joined).state).equal('needs-you');
@@ -216,8 +210,8 @@ describe('joining card asks onto an item (the pure half)', () => {
     const awake = { ...asking, waitingOn: undefined, askedAt: undefined, waitingFor: undefined, resting: undefined };
 
     // Act
-    const first = moved(joinCardAsks(onTurn, [ask('F2', 5)], minute(10), stage));
-    const second = moved(joinCardAsks(awake as AgendaItem, [ask('F2', 5)], minute(10), stage));
+    const first = moved(joinCardAsks(onTurn, [ask('F2', 5)], stage));
+    const second = moved(joinCardAsks(awake as AgendaItem, [ask('F2', 5)], stage));
 
     // Assert — the first takes the ask's stage and keeps its place; the newcomer to the second remembers the turn the
     // first waiting ask ended, as a second ask put on would, and changes nothing else
@@ -233,17 +227,14 @@ describe('joining card asks onto an item (the pure half)', () => {
     const card = resting({ raisedBy: 'daemon', source: 'task', sourceRef: cardAgendaReference('F1') });
 
     // Act
-    const waiting = moved(
-      joinCardAsks(card, [ask('F1', 5, { woke: { waitingSince: minute(-1) } })], minute(10), stage),
-    );
-    const quiet = moved(joinCardAsks(resting(), [answered('F1', 5)], minute(10), stage));
+    const waiting = moved(joinCardAsks(card, [ask('F1', 5, { woke: { waitingSince: minute(-1) } })], stage));
+    const quiet = moved(joinCardAsks(resting(), [answered('F1', 5)], stage));
 
     // Assert
     should(waiting.cardAsks?.[0]?.woke).be.undefined();
     should(agendaState(waiting).state).equal('needs-you');
     should(agendaState(quiet).state).equal('resting');
     should(quiet.cardAsks).have.length(1);
-    should(quiet.gateAttached).be.undefined();
   });
 });
 
@@ -277,7 +268,6 @@ describe('leaving card asks behind (the pure half)', () => {
     // Assert
     should(gone.map(cardAskReference)).eql([gateReference(gate('F1'))]);
     should(left.cardAsks).be.undefined();
-    should(left.gateAttached).be.undefined();
     should(agendaState(left)).match({ state: 'resting', sub: 'working' });
     should(left.waitingSince).equal(minute(-5));
   });
@@ -318,12 +308,10 @@ describe('leaving card asks behind (the pure half)', () => {
     should(results[0]?.left.cardAsks?.map(cardAskReference)).eql([gateReference(gate('F2'))]);
   });
 
-  it('strips every ask, its mirror, its stamp and the seal off an item whose asks went elsewhere', () => {
+  it('strips every ask and the seal off an item whose asks went elsewhere', () => {
     // Arrange
     const item = thread({
       cardAsks: [ask('F1', 1)],
-      gateAttached: gate('F1'),
-      gateAttachedChangedAt: minute(1),
       cardAsksSeal: '0'.repeat(32),
     });
 
@@ -428,12 +416,10 @@ describe('a merge carries card asks', () => {
 
     // Assert
     should(references(kept)).eql([gateReference(gate('F1')), gateReference(gate('F2'))]);
-    should(kept.gateAttached).eql(gate('F1'));
     should(agendaState(kept).state).equal('needs-you');
     should(lifecycleOf(merged.ledger, 'A2')).equal('addressed');
     should(closed.mergedInto).equal('A1');
     should(closed.cardAsks).be.undefined();
-    should(closed.gateAttached).be.undefined();
   });
 
   it('never doubles an ask for the same card and entry: the one the owner answered is the one kept', () => {
@@ -449,7 +435,6 @@ describe('a merge carries card asks', () => {
     // Assert
     should(references(kept)).eql([gateReference(gate('F1')), gateReference(gate('F2'))]);
     should(kept.cardAsks?.[0]?.answer?.receipt).equal('b'.repeat(64));
-    should(kept.gateAttached).eql(gate('F2'));
   });
 
   it('wakes a resting item that takes an ask still waiting on the owner', () => {
@@ -534,9 +519,7 @@ describe('a split carries a moved card’s asks', () => {
 
     // Assert
     should(references(parent)).eql([gateReference(gate('F1'))]);
-    should(parent.gateAttached).eql(gate('F1'));
     should(references(child)).eql([gateReference(gate('F2'))]);
-    should(child.gateAttached).eql(gate('F2'));
     should(child.splitFrom).equal('A1');
     should(child.stage).equal('test');
     should(agendaState(child).state).equal('needs-you');

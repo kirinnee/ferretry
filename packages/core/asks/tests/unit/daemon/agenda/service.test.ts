@@ -698,9 +698,7 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
     const withdrawn = await service.cardAsk(SESSION, 'A1', { kind: 'withdraw', reference: gateReference(gate) });
 
     should(attached.ok && attached.item?.cardAsks?.map(ask => ask.gate)).deepEqual([gate]);
-    should(attached.ok && attached.item?.gateAttached).deepEqual(gate);
     should(withdrawn.ok && withdrawn.item?.cardAsks).be.undefined();
-    should(withdrawn.ok && withdrawn.item?.gateAttached).be.undefined();
   });
 
   it('records the owner’s Not yet on a card ask, as history the thread keeps', async () => {
