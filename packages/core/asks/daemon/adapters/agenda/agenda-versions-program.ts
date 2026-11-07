@@ -29,7 +29,7 @@ export interface AgendaVersionsScope {
   postMessage(message: AgendaVersionsResponse): void;
 }
 
-/** The worker owns all SQLite opens, legacy parsing and commits. Serial requests also serialize imports. */
+/** The worker owns all SQLite opens and commits. Serial requests also serialize them. */
 export function serveAgendaVersions(
   scope: AgendaVersionsScope,
   create: (directory: string) => Required<AgendaVersionStore> = directory =>

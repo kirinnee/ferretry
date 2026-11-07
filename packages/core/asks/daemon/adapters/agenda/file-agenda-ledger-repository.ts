@@ -103,9 +103,8 @@ type IdentifiedAgendaFiles = AgendaFileStore &
   Required<Pick<AgendaFileStore, 'identity' | 'readIdentified'>> &
   Pick<FileAgendaFileStore, 'file'>;
 
-/** One session's agenda as last parsed: which file, how it stood, and what it said. */
+/** One session's agenda as last parsed: how the file stood, and what it said. */
 interface CachedLedger {
-  readonly name: string;
   readonly identity: string;
   /** The digest of the text it was parsed from. */
   readonly digest: string;
@@ -122,8 +121,7 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
 }
 
 /**
- * Durable per-session agenda storage, as `agenda.json` (a board written before the rename is read from
- * `attention.json` until the migration moves it, and every write goes to `agenda.json`). The owning daemon process supplies one
+ * Durable per-session agenda storage, as `agenda.json`. The owning daemon process supplies one
  * instance, so the keyed queue serializes every read-modify-write transition.
  *
  * A PARSED COPY IS KEPT PER SESSION, against the identity of the file it was read from. A board read opens
@@ -140,11 +138,9 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly files: IdentifiedAgendaFiles;
   readonly changeOutbox?: FileAgendaChangeOutbox;
 
-  /** `ready` settles when the agenda files migration has finished; no read or write goes to disk before it. */
   constructor(
     sessionDirectory: (sessionId: string) => string,
     private readonly uniqueId: () => string = randomUUID,
-    private readonly ready: Promise<unknown> = Promise.resolve(),
     files?: IdentifiedAgendaFiles,
     /** Where every committed change is kept as a full version; absent, none is. */
     private readonly versions: AgendaVersionStore = NO_AGENDA_VERSIONS,
@@ -168,12 +164,11 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
 
   file(sessionId: string): string {
     this.assertSessionId(sessionId);
-    return this.files.file(sessionId, AGENDA_FILES.ledger.current);
+    return this.files.file(sessionId, AGENDA_FILES.ledger);
   }
 
   async read(sessionId: string): Promise<AgendaLedger | null> {
     this.assertSessionId(sessionId);
-    await this.ready;
     return this.serial(sessionId, async () => {
       await this.recoverVersions(sessionId);
       return this.load(sessionId);
@@ -186,32 +181,31 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
 
   /** The agenda as the reader would read it, with the digest of the text it came from. */
   private async loadDigested(sessionId: string): Promise<{ ledger: AgendaLedger; digest: string } | null> {
-    // THE READER'S RULE (`readAgendaFile`): the new name when it exists, else the old one.
-    for (const name of [AGENDA_FILES.ledger.current, AGENDA_FILES.ledger.legacy]) {
-      const now = await this.files.identity(sessionId, name);
-      if (now === undefined) continue;
-      const cached = this.cache.get(sessionId);
-      if (cached !== undefined && cached.name === name && cached.identity === now) {
-        this.cache.delete(sessionId);
-        this.cache.set(sessionId, cached);
-        return cached;
-      }
-      const read = await this.files.readIdentified(sessionId, name);
-      if (read === undefined) continue;
-      const ledger = deepFreezeJson(
-        (await this.parse(sessionId, name, read.text)) as unknown as JsonValue,
-      ) as unknown as AgendaLedger;
+    const name = AGENDA_FILES.ledger;
+    const now = await this.files.identity(sessionId, name);
+    const cached = this.cache.get(sessionId);
+    if (now !== undefined && cached !== undefined && cached.identity === now) {
       this.cache.delete(sessionId);
-      for (const oldest of this.cache.keys()) {
-        if (this.cache.size < AGENDA_CACHE_LIMIT) break;
-        this.cache.delete(oldest);
-      }
-      const found = { name, identity: read.identity, digest: digestOf(read.text), ledger };
-      this.cache.set(sessionId, found);
-      return found;
+      this.cache.set(sessionId, cached);
+      return cached;
     }
+    // No file, or one that went between the look and the read: there is no agenda, and nothing cached for it.
+    const read = now === undefined ? undefined : await this.files.readIdentified(sessionId, name);
+    if (read === undefined) {
+      this.cache.delete(sessionId);
+      return null;
+    }
+    const ledger = deepFreezeJson(
+      (await this.parse(sessionId, name, read.text)) as unknown as JsonValue,
+    ) as unknown as AgendaLedger;
     this.cache.delete(sessionId);
-    return null;
+    for (const oldest of this.cache.keys()) {
+      if (this.cache.size < AGENDA_CACHE_LIMIT) break;
+      this.cache.delete(oldest);
+    }
+    const found = { identity: read.identity, digest: digestOf(read.text), ledger };
+    this.cache.set(sessionId, found);
+    return found;
   }
 
   private async parse(sessionId: string, name: string, text: string): Promise<AgendaLedger> {
@@ -278,16 +272,12 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return Object.keys(recorded).length === 0 ? undefined : recorded;
   }
 
-  /** The text of the agenda file the reader would read, or `undefined` when there is none. */
+  /** The text of the agenda file, or `undefined` when there is none. */
   private async ledgerText(sessionId: string): Promise<string | undefined> {
-    for (const name of [AGENDA_FILES.ledger.current, AGENDA_FILES.ledger.legacy]) {
-      const text = await this.files.read(sessionId, name);
-      if (text !== undefined) return text;
-    }
-    return undefined;
+    return await this.files.read(sessionId, AGENDA_FILES.ledger);
   }
 
-  /** The digest of the agenda file the reader would read, or `null` when there is none. */
+  /** The digest of the agenda file, or `null` when there is none. */
   private async ledgerDigest(sessionId: string): Promise<string | null> {
     const text = await this.ledgerText(sessionId);
     return text === undefined ? null : digestOf(text);
@@ -301,7 +291,6 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   ): Promise<AgendaMutation> {
     this.assertSessionId(sessionId);
     return await this.serial(sessionId, async () => {
-      await this.ready;
       await this.recoverVersions(sessionId);
       const loaded = await this.loadDigested(sessionId);
       let current = loaded?.ledger ?? null;
@@ -517,7 +506,6 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
    */
   async readArchive(sessionId: string): Promise<readonly AgendaArchiveRecord[]> {
     this.assertSessionId(sessionId);
-    await this.ready;
     return await this.serial(sessionId, async () => {
       await this.recoverVersions(sessionId);
       return this.archiveInQueue(sessionId);
@@ -558,7 +546,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   ): Promise<void> {
     try {
       await appendLogRecords(this.files, sessionId, AGENDA_ARCHIVE_FILE, archive, records);
-      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, document);
+      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger, document);
       await this.retained?.(sessionId);
       await landed?.();
       // The ledger now says where history ends (or that a version-2 board has none), so no append is pending.

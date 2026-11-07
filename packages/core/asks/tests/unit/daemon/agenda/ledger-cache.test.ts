@@ -28,7 +28,7 @@ import {
 
 const NOW = '2026-10-31T10:00:00.000Z';
 const SESSION = 'session-1';
-const { current, legacy } = AGENDA_FILES.ledger;
+const current = AGENDA_FILES.ledger;
 
 class MemoryFiles {
   readonly files = new Map<string, { text: string; identity: string }>();
@@ -178,13 +178,7 @@ const request = {
 
 const subject = (versions?: MemoryVersions) => {
   const files = new MemoryFiles();
-  const repository = new FileAgendaLedgerRepository(
-    id => `/state/sessions/${id}`,
-    undefined,
-    undefined,
-    files,
-    versions,
-  );
+  const repository = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files, versions);
   const service = new AgendaService(
     repository,
     { now: () => NOW },
@@ -242,22 +236,6 @@ describe('the agenda repository cache', () => {
     // Assert
     should(listed.ok && listed.value.count).equal(2);
     should((await repository.read(SESSION))?.entries).have.length(2);
-  });
-
-  it('should read the old name when only it exists, and nothing once neither does', async () => {
-    // Arrange
-    const { files, repository, service } = subject();
-    await raise(service);
-    await files.rename(SESSION, current, legacy);
-
-    // Act
-    const fromLegacy = await repository.read(SESSION);
-    await files.remove(SESSION, legacy);
-    const gone = await repository.read(SESSION);
-
-    // Assert
-    should(fromLegacy?.entries).have.length(1);
-    should(gone).be.null();
   });
 
   it('should refuse a damaged agenda every time it is read, never serving the last good copy', async () => {
@@ -483,7 +461,7 @@ describe('the private agenda archive', () => {
     // A crash tore the append of `second`: its mark is down, its bytes only partly, its ledger write never ran.
     files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + text.slice(0, 15));
     files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed) }));
-    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
     ok(await restarted.transact(SESSION, unchanged));
     should(await restarted.readArchive(SESSION)).deepEqual([{ kind: 'owner-history', ...first }]);
     should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(committed + text.slice(0, 15));
@@ -517,7 +495,7 @@ describe('the private agenda archive', () => {
     }
     should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text.split('\n').filter(Boolean)).have.length(2);
 
-    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
     const migrated = ok(await restarted.transact(SESSION, unchanged));
 
     should(migrated.ledger.archive?.count).equal(2);
@@ -606,7 +584,7 @@ describe('the private agenda archive', () => {
       const document = JSON.parse(files.files.get(`${SESSION}/${current}`)?.text ?? '{}') as Record<string, unknown>;
       for (const key of ['archive', 'version']) if (!keep.includes(key)) delete document[key];
       files.put(SESSION, current, JSON.stringify(document));
-      return new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+      return new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
     };
 
     it('should keep the committed history across a downgrade and an upgrade, serving it at once and through the next prune', async () => {
@@ -700,9 +678,7 @@ describe('the private agenda archive', () => {
         should(sidecar(files)).containEql('PHANTOM_FIRST');
 
         const history = await words(repository);
-        const restarted = await words(
-          new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files),
-        );
+        const restarted = await words(new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files));
 
         should(history).not.containEql('PHANTOM_FIRST');
         should(restarted).not.containEql('PHANTOM_FIRST');
@@ -745,7 +721,7 @@ describe('the private agenda archive', () => {
       ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
       // The crash came between the ledger commit and the removal of the mark the append put down at byte 0.
       files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: 0 }));
-      const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+      const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
 
       should(await words(restarted)).containEql('COMMITTED');
       ok(await restarted.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })));
@@ -831,13 +807,7 @@ describe('the private agenda archive', () => {
         // The second record's append never committed: its mark is still down where it began.
         files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + record('UNCOMMITTED_WORDS'));
         files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed) }));
-        const upgraded = new FileAgendaLedgerRepository(
-          id => `/state/sessions/${id}`,
-          undefined,
-          undefined,
-          files,
-          versions,
-        );
+        const upgraded = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files, versions);
 
         // Act
         const read = await upgraded.read(SESSION);
@@ -850,7 +820,6 @@ describe('the private agenda archive', () => {
         const askedBefore = versions?.reads ?? 0;
         const reread = await new FileAgendaLedgerRepository(
           id => `/state/sessions/${id}`,
-          undefined,
           undefined,
           files,
           versions,
@@ -891,13 +860,7 @@ describe('the private agenda archive', () => {
         files.put(SESSION, current, JSON.stringify(document));
         files.put(SESSION, AGENDA_ARCHIVE_FILE, line);
         versions.kept.clear();
-        const reopened = new FileAgendaLedgerRepository(
-          id => `/state/sessions/${id}`,
-          undefined,
-          undefined,
-          files,
-          versions,
-        );
+        const reopened = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files, versions);
         return { reopened, versions };
       };
       const refresh = (ledger: AgendaLedger | null): AgendaMutation => {
@@ -944,7 +907,7 @@ describe('the private agenda archive', () => {
     files.failLedgerWrite = true;
     await should(repository.transact(SESSION, unchanged)).be.rejectedWith('ledger commit failed');
     const appended = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text;
-    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
     const migrated = ok(await restarted.transact(SESSION, unchanged));
     should(migrated.ledger.archivePending).be.undefined();
     should(migrated.ledger.archive?.count).equal(1);

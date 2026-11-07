@@ -1,17 +1,11 @@
-import { AgendaOutboxSchema } from './reply-batch.ts';
-import { agendaLedgerDocument, parseAgendaLedger } from './state-machine.ts';
-
 /** The two documents a ferret's session directory holds for its agenda. */
 export type AgendaFileKind = 'ledger' | 'outbox';
 
-/** What each is called now, and what releases before the agenda rename called it. */
-export const AGENDA_FILES: Readonly<Record<AgendaFileKind, { readonly current: string; readonly legacy: string }>> = {
-  ledger: { current: 'agenda.json', legacy: 'attention.json' },
-  outbox: { current: 'agenda-replies.json', legacy: 'attention-replies.json' },
+/** What each is called. */
+export const AGENDA_FILES: Readonly<Record<AgendaFileKind, string>> = {
+  ledger: 'agenda.json',
+  outbox: 'agenda-replies.json',
 };
-
-/** The name a legacy file keeps once its content lives under the new name; one release keeps it. */
-export const MIGRATED_SUFFIX = '.migrated';
 
 /** The one place a session's agenda files are touched, so a test can stand in for the disk. */
 export interface AgendaFileStore {
@@ -34,184 +28,52 @@ export interface AgendaFileStore {
   ): Promise<{ readonly text: string; readonly identity: string } | undefined>;
 }
 
-/** THE READER'S RULE: the new name when it exists, else the old one. Never both, never a merge. */
-export async function readAgendaFile(
-  store: Pick<AgendaFileStore, 'read'>,
-  sessionId: string,
-  kind: AgendaFileKind,
-): Promise<{ readonly name: string; readonly text: string } | undefined> {
-  const { current, legacy } = AGENDA_FILES[kind];
-  const now = await store.read(sessionId, current);
-  if (now !== undefined) return { name: current, text: now };
-  const before = await store.read(sessionId, legacy);
-  return before === undefined ? undefined : { name: legacy, text: before };
-}
-
-/** What the migration needs to know about a document it can read. */
-interface Understood {
-  /** The text the daemon writes for this document, so a copy reads back byte for byte. */
-  readonly canonical: string;
-  /** How recent it is: compared left to right, the larger side is the newer document. */
-  readonly stamp: readonly [number, number];
-}
-
-function understand(kind: AgendaFileKind, sessionId: string, text: string): Understood | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-  if (kind === 'ledger') {
-    const ledger = parseAgendaLedger(value, sessionId);
-    // The ledger has no `v`: it is written bare. Its own `updatedAt` moves on every change it takes, and
-    // `nextId` moves on every item it raises, which breaks a tie between two writes in the same instant.
-    return ledger === null
-      ? undefined
-      : { canonical: agendaLedgerDocument(ledger), stamp: [Date.parse(ledger.updatedAt), ledger.nextId] };
-  }
-  const parsed = AgendaOutboxSchema.safeParse(value);
-  if (!parsed.success || parsed.data.sessionId !== sessionId) return undefined;
-  const outbox = parsed.data;
-  // The outbox carries no clock of its own, so it is dated by the latest instant any answer in it was
-  // held or sent. An outbox with nothing in it has no date, and an old one never outranks a new one.
-  const instants = [
-    ...outbox.pending.map(each => each.at),
-    ...outbox.sending.flatMap(batch => [
-      ...(batch.sentAt === undefined ? [] : [batch.sentAt]),
-      ...(batch.replies ?? []).map(each => each.at),
-    ]),
-  ].map(Date.parse);
-  return { canonical: `${JSON.stringify(outbox, null, 2)}\n`, stamp: [Math.max(0, ...instants), 0] };
-}
-
-function newer(a: Understood, b: Understood): boolean {
-  return a.stamp[0] === b.stamp[0] ? a.stamp[1] > b.stamp[1] : a.stamp[0] > b.stamp[0];
-}
-
-/** Writes `doc` whole as `name` and reads it back; a copy that does not read back equal is removed. */
-async function copyVerified(
-  store: AgendaFileStore,
-  sessionId: string,
-  kind: AgendaFileKind,
-  name: string,
-  doc: Understood,
-): Promise<boolean> {
-  await store.writeAtomic(sessionId, name, doc.canonical);
-  const back = await store.read(sessionId, name);
-  if (back !== undefined && understand(kind, sessionId, back)?.canonical === doc.canonical) return true;
-  await store.remove(sessionId, name);
-  return false;
-}
-
-/** The fate of one file kind in one session. */
-export type AgendaFileResult = 'nothing' | 'migrated' | 'kept-new' | 'failed';
-
 /**
- * Moves ONE session's ONE file to its new name without losing an item. The new file is written whole and
- * read back equal BEFORE the old one is renamed to `*.migrated`, so a crash at any step leaves a file the
- * reader still understands and the next start finishes. Total: it never rejects.
- *
- * - Only the old file: copied, verified, old renamed.
- * - Both (a crash between the copy and the rename, or a downgrade then an upgrade): the newer document stays
- *   or becomes the new file, and the other is kept as `*.migrated`. A tie keeps the new file.
- * - A file that cannot be read as the document it should be is left exactly where it is, and the session
- *   fails: the reader still reads or sets it aside as it did before, and the next start tries again.
+ * The names a ferret's agenda files carried before the agenda rename (`attention.json`,
+ * `attention-replies.json`). No reader opens them: they exist only so a home that still holds one is
+ * REFUSED at start. Read as empty, such a home would silently lose its agenda, and the next raise would
+ * write a fresh `agenda.json` over the hidden items.
  */
-export async function migrateAgendaFile(
-  store: AgendaFileStore,
-  sessionId: string,
-  kind: AgendaFileKind,
-): Promise<AgendaFileResult> {
-  const { current, legacy } = AGENDA_FILES[kind];
-  try {
-    const old = await store.read(sessionId, legacy);
-    if (old === undefined) return 'nothing';
-    const oldDoc = understand(kind, sessionId, old);
-    if (oldDoc === undefined) return 'failed';
-    const now = await store.read(sessionId, current);
-    if (now === undefined) {
-      if (!(await copyVerified(store, sessionId, kind, current, oldDoc))) return 'failed';
-      await store.rename(sessionId, legacy, `${legacy}${MIGRATED_SUFFIX}`);
-      return 'migrated';
-    }
-    const nowDoc = understand(kind, sessionId, now);
-    if (nowDoc === undefined) return 'failed';
-    if (newer(oldDoc, nowDoc)) {
-      // The new file is set aside first; a copy that fails leaves the old (newer) file in place, which the
-      // reader falls back to and the next start migrates again.
-      await store.rename(sessionId, current, `${current}${MIGRATED_SUFFIX}`);
-      if (!(await copyVerified(store, sessionId, kind, current, oldDoc))) return 'failed';
-      await store.rename(sessionId, legacy, `${legacy}${MIGRATED_SUFFIX}`);
-      return 'migrated';
-    }
-    await store.rename(sessionId, legacy, `${legacy}${MIGRATED_SUFFIX}`);
-    return 'kept-new';
-  } catch {
-    return 'failed';
-  }
+export const PRE_RENAME_AGENDA_FILES: readonly string[] = ['attention.json', 'attention-replies.json'];
+
+/** One directory that may hold agenda files, and the names directly inside it. */
+export interface AgendaDirectoryEntries {
+  readonly path: string;
+  readonly names: readonly string[];
 }
 
-/** Where the migration records that it finished: once, for this daemon's home. */
-export interface AgendaFilesMigrationMarker {
-  ran(): Promise<boolean>;
-  record(at: string, counts: AgendaFilesMigrationCounts): Promise<void>;
+/** Every directory that may hold agenda files — each session directory, however the index lists it, and the machine's. */
+export interface AgendaDirectoryListing {
+  /** One directory read per directory; no file is opened. */
+  list(): Promise<readonly AgendaDirectoryEntries[]>;
 }
 
-export interface AgendaFilesMigrationCounts {
-  readonly sessions: number;
-  readonly migrated: number;
-  readonly keptNew: number;
-  readonly failed: number;
-}
+/** How many offending paths the refusal names before it only counts the rest. */
+const NAMED_PRE_RENAME_PATHS = 5;
 
-export interface AgendaFilesMigrationPorts {
-  readonly marker: AgendaFilesMigrationMarker;
-  readonly files: AgendaFileStore;
-  readonly now: () => string;
-  /** One line with the counts; the migration says nothing else. */
-  readonly log: (line: string) => void;
-}
-
-export interface AgendaFilesMigrationOutcome extends AgendaFilesMigrationCounts {
-  readonly ran: boolean;
-}
-
-/**
- * THE ONE-TIME MOVE OF THE AGENDA'S FILES to their agenda names (docs/notifications.md § Migration): each
- * session's ledger and outbox, in turn.
- *
- * ONCE, AND NEVER IN THE WAY: the marker is written only when every session was handled, so a session that
- * failed keeps its old file (still read) and is tried again next start; a start that finds the marker does
- * no work. It never rejects, so it can never stop the daemon from starting.
- */
-export async function migrateAgendaFiles(
-  sessionIds: readonly string[],
-  ports: AgendaFilesMigrationPorts,
-): Promise<AgendaFilesMigrationOutcome> {
-  const none = { sessions: 0, migrated: 0, keptNew: 0, failed: 0 };
-  try {
-    if (await ports.marker.ran()) return { ran: false, ...none };
-    let migrated = 0;
-    let keptNew = 0;
-    let failed = 0;
-    for (const sessionId of sessionIds) {
-      const results = [
-        await migrateAgendaFile(ports.files, sessionId, 'ledger'),
-        await migrateAgendaFile(ports.files, sessionId, 'outbox'),
-      ];
-      if (results.includes('failed')) failed += 1;
-      else if (results.includes('migrated')) migrated += 1;
-      else if (results.includes('kept-new')) keptNew += 1;
-    }
-    const counts = { sessions: sessionIds.length, migrated, keptNew, failed };
-    ports.log(
-      `agenda files: ${counts.sessions} sessions, ${migrated} migrated, ${keptNew} already current, ${failed} failed${failed === 0 ? '' : ' (retried next start)'}`,
+/** The start refusal for a home that still holds agenda files under their pre-rename names. */
+export class PreRenameAgendaFilesError extends Error {
+  constructor(readonly found: readonly string[]) {
+    const named = found.slice(0, NAMED_PRE_RENAME_PATHS).join(', ');
+    const more = found.length > NAMED_PRE_RENAME_PATHS ? ', …' : '';
+    super(
+      `these sessions still hold agenda files from before the agenda rename: ${named}${more} (${String(found.length)} in all). ` +
+        'Back these directories up first. Then, in each, rename attention.json → agenda.json and ' +
+        'attention-replies.json → agenda-replies.json only where the new name does not exist yet; ' +
+        'where both names exist, merge the old file into the new-named one by hand, then rename the old file to ' +
+        '<name>.migrated so it is ignored. Every Ferretry release from 4.116.0 up to, but excluding, the release ' +
+        'that removed this move attempted it on start, but only for sessions in the index and only while the home ' +
+        'lacked agenda-files-migration.json (written only once no session failed, so failures were retried on ' +
+        'later starts); it never covered the machine agenda. Then start again.',
     );
-    if (failed > 0) return { ran: false, ...counts };
-    await ports.marker.record(ports.now(), counts);
-    return { ran: true, ...counts };
-  } catch {
-    return { ran: false, ...none };
+    this.name = 'PreRenameAgendaFilesError';
   }
+}
+
+/** Refuses (rejects with {@link PreRenameAgendaFilesError}) when any listed directory holds a pre-rename agenda file. */
+export async function refusePreRenameAgendaFiles(listing: AgendaDirectoryListing): Promise<void> {
+  const found = (await listing.list()).flatMap(directory =>
+    PRE_RENAME_AGENDA_FILES.filter(name => directory.names.includes(name)).map(name => `${directory.path}/${name}`),
+  );
+  if (found.length > 0) throw new PreRenameAgendaFilesError(found);
 }
