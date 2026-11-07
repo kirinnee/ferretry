@@ -3,7 +3,8 @@ import type { Duration, Instant, Result } from '@ferretry/std';
 import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
-import type { FerretId } from './ids.ts';
+import type { ApiHeaders } from './http.ts';
+import type { CarrierKey, FerretId } from './ids.ts';
 import type { HeldRoot, PinnedWorkingDirectory, PinOptions } from './pinned.ts';
 import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
@@ -27,6 +28,12 @@ export interface KernelPorts {
   readonly fetch: FetchPort;
   /** WebSocket clients to the hosts the manifest declared in `permissions.network` (`ws:`/`wss:` only). */
   readonly websocket: WebSocketPort;
+  /**
+   * A loopback listener that serves ONE declared socket route and stamps every arrival `carried` (a carrier whose
+   * traffic reaches this host through a local forwarder, like the tunnel's `cloudflared`). Refused unless the manifest
+   * takes that carrier's hook and declares the route.
+   */
+  readonly carrierListener: CarrierListenerPort;
   /** Who this daemon is, read-only: its id and name, never its key. */
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
@@ -684,6 +691,41 @@ export interface WebSocketClient {
  */
 export interface WebSocketPort {
   connect(url: string | URL): WebSocketClient;
+}
+
+// carrier listener ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** What a carrier listener serves: one declared socket route, and how its arrivals are told apart. */
+export interface CarrierListenerSurface {
+  /** The plugin's declared socket, spelled as its manifest spells it: `GET /v1/rendezvous/:daemonId/client`. */
+  readonly socket: string;
+  /**
+   * The rate-limit identity of one arrival, from its headers (the tunnel keys by the address its edge saw). It names
+   * a bucket and nothing else: it can never make an arrival local. Absent: one shared identity for the listener.
+   */
+  readonly peer?: (headers: ApiHeaders) => string;
+}
+
+/** A bound carrier listener. */
+export interface CarrierListenerHandle {
+  /** The ephemeral loopback port (127.0.0.1) the carrier's forwarder is pointed at. */
+  readonly port: number;
+  /** Frees the port. Idempotent; a daemon stop closes every listener still open. */
+  close(): Promise<void>;
+}
+
+/**
+ * A second loopback listener for a carrier that arrives through a local forwarder (§15). A forwarder on this host
+ * makes everything it carries come from a loopback peer, so pointing it at the API listener would make a phone beyond
+ * the far edge indistinguishable from a browser at the machine. This listener is the other wall: it serves only the
+ * declared route (404 to every other path and method; nothing else of the daemon is reachable) and stamps EVERY arrival
+ * `{ kind: 'carried', carrier }`, never local (G15, G16): admission governs it as remote.
+ */
+export interface CarrierListenerPort {
+  open(input: {
+    readonly carrier: CarrierKey;
+    readonly surface: CarrierListenerSurface;
+  }): Promise<CarrierListenerHandle>;
 }
 
 // identity ─────────────────────────────────────────────────────────────────────────────────────────────────────────

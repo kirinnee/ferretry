@@ -3,11 +3,18 @@
  *
  * THE TUNNEL IS OPT-IN and WebRTC is on demand: neither starts a native library or a child at boot unless the
  * operator's `connections.yaml` asked. A tunnelled or WebRTC arrival is NEVER loopback — the arrival each carrier
- * stamps is `{ kind: 'carried' }` (`tunnelListenerSurface`, `webrtcArrival`), which the kernel can never read as
- * local. Nothing here logs a connector token, a tunnel credential, a code or a key: the token goes from a
+ * stamps is `{ kind: 'carried' }` (the kernel's carrier listener, `webrtcArrival`), which the kernel can never read
+ * as local. Nothing here logs a connector token, a tunnel credential, a code or a key: the token goes from a
  * provision straight to the child's environment (`BunConnectorProcesses`).
  */
-import type { Carrier, CarrierStatus, ConfigFileDef, KernelPorts, RouteHandler } from '@ferretry/kernel/contract';
+import type {
+  Carrier,
+  CarrierKey,
+  CarrierStatus,
+  ConfigFileDef,
+  KernelPorts,
+  RouteHandler,
+} from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { FileTunnelHolding } from './adapters/tunnel/file-tunnel-holding.ts';
 import { BunConnectorProcesses } from './adapters/tunnel/bun-connector-process.ts';
@@ -24,36 +31,33 @@ import {
 import manifest from '../manifest.ts';
 import { createConnectionB, verifiedWebRtcDevice } from './connection-b.ts';
 import type { OtherConnections } from './index.ts';
-import type { TunnelListenerHandle } from './lib/tunnel/carrier.ts';
 import type { CloudflaredLocatorPort } from './lib/tunnel/connector.ts';
+import { tunnelPeer } from './lib/tunnel/listener.ts';
 import { tunnelServiceOrigin } from './lib/tunnel/service.ts';
 import type { WebRtcAvailability } from './lib/webrtc/carrier.ts';
 import type { SessionLayer } from '@ferretry/kernel/contract';
 
-/**
- * What the tunnel needs from the machine beyond the kernel's ports: where `cloudflared` is, and a second
- * loopback listener that serves only this daemon's session route with every arrival stamped remote (§15).
- */
+/** What the tunnel needs from the machine beyond the kernel's ports: where `cloudflared` is. */
 export interface TunnelHostPort {
   readonly cloudflared: CloudflaredLocatorPort;
-  openListener(): Promise<TunnelListenerHandle>;
 }
 
-const NO_TUNNEL_HOST_SENTENCE =
-  'this daemon cannot run a tunnel yet: the kernel offers no way to bind the tunnel listener or to find cloudflared';
+const NO_CLOUDFLARED_SENTENCE = 'this daemon cannot run a tunnel yet: the kernel offers no way to find cloudflared';
 
 /**
- * The host the kernel's ports can build today: it says out loud that the tunnel cannot run, instead of binding a
- * listener around the kernel. The tunnel carrier then reports itself `unavailable` with this sentence.
+ * The host the kernel's ports can build today: it says out loud that the tunnel cannot run, instead of looking around
+ * the kernel for a binary. The tunnel carrier then reports itself `unavailable` with this sentence.
  */
 export function kernelTunnelHost(): TunnelHostPort {
-  return {
-    cloudflared: { locate: () => ({ kind: 'absent', reason: NO_TUNNEL_HOST_SENTENCE }) },
-    openListener: async () => {
-      throw new Error(NO_TUNNEL_HOST_SENTENCE);
-    },
-  };
+  return { cloudflared: { locate: () => ({ kind: 'absent', reason: NO_CLOUDFLARED_SENTENCE }) } };
 }
+
+/**
+ * The tunnel's session route: the direct carrier's own declared socket, served on the kernel's carrier listener so a
+ * forwarded arrival is remote and lands nowhere else (§15, G15, G16).
+ */
+const TUNNEL_SOCKET = (manifest.actions.sockets[0] as { readonly key: string }).key;
+const TUNNEL_CARRIER = 'tunnel' as CarrierKey;
 
 const TUNNEL_CARRIER_STATE: Readonly<Record<TunnelState, CarrierStatus['state']>> = {
   off: 'off',
@@ -106,7 +110,12 @@ export function composeOtherConnections(input: ComposeInput): OtherConnections {
         },
       }),
       provisioner: origin => new HostedTunnelProvisioner(origin, { fetcher }),
-      openListener: () => input.host.openListener(),
+      openListener: () =>
+        kernel.carrierListener.open({
+          carrier: TUNNEL_CARRIER,
+          // Rate limits key by the address Cloudflare's edge saw, else one shared bucket.
+          surface: { socket: TUNNEL_SOCKET, peer: tunnelPeer },
+        }),
       // The kernel's spawn port supplies the child's base environment; only the token is added to this child's.
       processes: new BunConnectorProcesses({}, kernel.spawn, kernel.clock),
       scheduler,

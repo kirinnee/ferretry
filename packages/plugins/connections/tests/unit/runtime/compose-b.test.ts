@@ -3,9 +3,10 @@
  * manifest declares — through kernel ports only, with a fake for Cloudflare's hosted service and for the peer.
  */
 import { describe, expect, test } from 'bun:test';
-import type { Carrier } from '@ferretry/kernel/contract';
+import { type Carrier, type CarrierKey, type CarrierListenerPort, headersFrom } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { anonymous, device, owner } from '../../../../../core/kernel/testing/admission.ts';
+import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
 import { TUNNEL_OFF_SENTENCE, TunnelStatusViewSchema } from '../../../contract/index.ts';
 import daemon, { buildConnections, kernelConnectionBindings } from '../../../daemon/index.ts';
@@ -113,35 +114,85 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     await host.stop();
   });
 
-  test('a tunnel with a located cloudflared asks the hosted service and, when it is off, opens no listener', async () => {
-    let listened = 0;
+  /** A tunnel with a located cloudflared, whose hosted service answers `available` (or not) and nothing else. */
+  async function tunnelWorld(serviceAvailable: boolean) {
+    const opened: Parameters<CarrierListenerPort['open']>[0][] = [];
     let asked = 0;
     let half: ReturnType<typeof buildConnections> | undefined;
     const plugin = implementDaemon(manifest, {
       build: ctx =>
         (half = buildConnections(ctx, kernelConnectionBindings(ctx.kernel), undefined, {
           cloudflared: { locate: () => ({ kind: 'found', path: '/bin/cloudflared', via: 'path' }) },
-          openListener: async () => {
-            listened += 1;
-            return { port: 4040, close: async () => {} };
-          },
         })),
     });
     const host = await testHost({
       plugins: [plugin],
       spawn: noWorld.spawn,
-      fetch: () => {
+      fetch: url => {
         asked += 1;
-        return new Response('{}', { status: 404 });
+        return url.pathname === '/v1/tunnel-service'
+          ? Response.json({ version: 1, available: serviceAvailable })
+          : new Response('{}', { status: 404 });
+      },
+      carrierListener: {
+        open: async input => {
+          opened.push(input);
+          return { port: 4040, close: async () => {} };
+        },
       },
       config: { 'connections.yaml': { tunnel: { enabled: true } } },
     });
     const controller = new AbortController();
     await (half!.hooks['carriers:tunnel'] as Carrier).start(new FakeSessions(), controller.signal);
     await host.clock.advance(1);
-    expect(asked).toBeGreaterThan(0);
-    expect(listened).toBe(0);
-    controller.abort();
-    await host.stop();
+    return {
+      opened,
+      asked: () => asked,
+      stop: async () => {
+        controller.abort();
+        await host.stop();
+      },
+    };
+  }
+
+  test('a tunnel with a located cloudflared asks the hosted service and, when it is off, opens no listener', async () => {
+    const world = await tunnelWorld(false);
+    expect(world.asked()).toBeGreaterThan(0);
+    expect(world.opened).toEqual([]);
+    await world.stop();
+  });
+
+  test("G16 R660 the tunnel listener is the KERNEL's: the carrier is tunnel, the route is the declared session socket, peers key by the edge address", async () => {
+    const world = await tunnelWorld(true);
+    expect(world.opened).toHaveLength(1);
+    const [opened] = world.opened;
+    expect(opened?.carrier).toBe('tunnel' as CarrierKey);
+    expect(opened?.surface.socket).toBe('GET /v1/rendezvous/:daemonId/client');
+    expect(manifest.actions.sockets.map(declared => declared.key as string)).toContain(
+      opened?.surface.socket as string,
+    );
+    expect(opened?.surface.peer?.(headersFrom({ 'cf-connecting-ip': '203.0.113.9' }))).toBe('203.0.113.9');
+    expect(opened?.surface.peer?.(headersFrom({}))).toBe('tunnel');
+    await world.stop();
+  });
+
+  test('G15 the real manifest declares what the kernel checks: the tunnel carrier and its session socket may open a listener', async () => {
+    const listener = carrierListenerPort({
+      manifest: manifest as never,
+      dispatcher: () => {
+        throw new Error('no request in this test');
+      },
+      daemonId: 'fy_daemon_manifest_check',
+      onStop: () => {},
+    });
+    const handle = await listener.open({
+      carrier: 'tunnel' as CarrierKey,
+      surface: { socket: 'GET /v1/rendezvous/:daemonId/client' },
+    });
+    expect(handle.port).toBeGreaterThan(0);
+    await handle.close();
+    await expect(
+      listener.open({ carrier: 'tunnel' as CarrierKey, surface: { socket: 'GET /v1/carriers' } }),
+    ).rejects.toThrow(/does not declare the socket/);
   });
 });

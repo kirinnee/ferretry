@@ -1,22 +1,24 @@
 /**
  * The tunnel listener's boundary over the REAL kernel session layer: what an arrival through `cloudflared` is
- * opened as. The listener is production code; the socket route behind it is a fixture of the direct carrier's
- * (Connections A's) — it opens the kernel session on the carrier the ARRIVAL names, as that route does — so a
- * listener that let a tunnel socket reach a `direct` session would show here as a pairing that went through.
+ * opened as. The listener is the KERNEL'S production carrier listener, dialled over a real loopback WebSocket as
+ * `cloudflared` would; the socket route behind it is a fixture of the direct carrier's (Connections A's) — it opens
+ * the kernel session on the carrier the ARRIVAL names, as that route does — so a listener that let a tunnel socket
+ * reach a `direct` session would show here as a pairing that went through.
  */
 
-import { expect, it } from 'bun:test';
+import { afterEach, expect, it } from 'bun:test';
 import {
   type ApiRequest,
+  type CallStanding,
   type CarrierKey,
-  headersFrom,
   isSessionEnd,
-  queryFrom,
   type SocketDownstream,
   type SocketHandler,
 } from '@ferretry/kernel/contract';
-import { owner, testArrival } from '@ferretry/kernel/testing';
-import { tunnelListenerSurface } from '../../../daemon/lib/tunnel/listener.ts';
+import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
+import { Dispatcher } from '../../../../../core/kernel/host/dispatch.ts';
+import { tunnelPeer } from '../../../daemon/lib/tunnel/listener.ts';
+import manifest from '../../../manifest.ts';
 import {
   encodeControlMessage,
   encodeFrame,
@@ -72,30 +74,74 @@ function directSessionRoute(fx: KernelFixture, opened: string[]) {
     };
 }
 
+/** A browser end over a real socket: every round waits for the network as well as for the layer. */
+class NetworkBrowser extends BrowserEnd {
+  override async settled(): Promise<void> {
+    for (let round = 0; round < 3; round += 1) {
+      await Bun.sleep(20);
+      await super.settled();
+    }
+  }
+}
+
+const cleanups: (() => void | Promise<void>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
 async function throughTheTunnel(fx: KernelFixture, opened: string[]) {
-  const path = `/v1/rendezvous/${fx.daemonId}/client`;
   const route = directSessionRoute(fx, opened);
-  const surface = tunnelListenerSurface({
-    sockets: {
-      claims: request => request.path === path,
-      upgrade: async request => ({ outcome: 'accepted', attach: route(request) }),
+  // The kernel's dispatcher over the one declared socket, admitting what the sealed session itself will prove.
+  const declared = manifest.actions.sockets[0] as NonNullable<typeof manifest.actions.sockets>[number];
+  const dispatcher = new Dispatcher(
+    {
+      admission: () => ({
+        admit: () => ({ outcome: 'admitted', standing: {} as unknown as CallStanding, actor: 'owner-tools' }),
+        admitMember: () => {
+          throw new Error('no member call');
+        },
+        readmit: () => true,
+        inventory: (_request, entries) => entries,
+      }),
+      outputGuard: () => undefined,
+      version: '5.0.0',
     },
-    corsOrigins: [],
-  });
+    {
+      routes: [],
+      sockets: [
+        {
+          ...declared,
+          owner: { plugin: 'connections' as never, title: 'Connections', serving: () => ({ kind: 'serving' }) },
+          accept: async call => route(call.request),
+        },
+      ],
+      memberRoutes: [],
+    },
+  );
+  const listener = await carrierListenerPort({
+    manifest: manifest as never,
+    dispatcher: () => dispatcher,
+    daemonId: fx.daemonId,
+    onStop: () => {},
+  }).open({ carrier: 'tunnel' as CarrierKey, surface: { socket: declared.key, peer: tunnelPeer } });
+  cleanups.push(() => listener.close());
   // What `cloudflared` forwards: a loopback upgrade, carrying the address Cloudflare's edge saw.
-  const decision = await surface.sockets.upgrade({
-    method: 'GET',
-    path,
-    query: queryFrom([]),
-    headers: headersFrom({ 'cf-connecting-ip': '203.0.113.9' }),
-    arrival: testArrival(owner()),
-    text: async () => '',
+  const socketClient = new WebSocket(`ws://127.0.0.1:${String(listener.port)}/v1/rendezvous/${fx.daemonId}/client`, {
+    headers: { 'cf-connecting-ip': '203.0.113.9' },
+  } as never);
+  socketClient.binaryType = 'arraybuffer';
+  cleanups.push(() => socketClient.close());
+  const browser = new NetworkBrowser(bytes => socketClient.send(bytes as BufferSource));
+  socketClient.onmessage = event => {
+    if (event.data instanceof ArrayBuffer) browser.receive(new Uint8Array(event.data));
+  };
+  socketClient.onclose = event => {
+    browser.end ??= { code: event.code, reason: event.reason };
+  };
+  await new Promise<void>((resolve, reject) => {
+    socketClient.onopen = () => resolve();
+    socketClient.onerror = () => reject(new Error('the listener refused its own session route'));
   });
-  if (decision.outcome !== 'accepted') throw new Error('the listener refused its own session route');
-  let handler: SocketHandler | undefined;
-  const browser = new BrowserEnd(bytes => handler?.fromClient(bytes));
-  handler = await decision.attach(browser.downstream());
-  await handler.open();
   await browser.settled();
   const ready = browser.controls[0];
   if (ready?.message.t !== 'ready') throw new Error('no ready');
