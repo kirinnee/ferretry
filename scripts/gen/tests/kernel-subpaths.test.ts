@@ -86,4 +86,17 @@ describe('context-imports: the app shell public API', () => {
     expect(refusal(edge('connections', 'app/index.ts', '@ferretry/app/testing'))).toContain('only by tests');
     expect(refusal(edge('connections', 'contract/index.ts', '@ferretry/app'))).toBeDefined();
   });
+
+  test('tests import the public API and /testing only: a private or unknown subpath of the shell is refused', () => {
+    for (const specifier of ['@ferretry/app', '@ferretry/app/ui', '@ferretry/app/worker', '@ferretry/app/testing'])
+      expect(refusal(edge('connections', 'tests/unit/app/x.test.ts', specifier))).toBeUndefined();
+    for (const specifier of [
+      '@ferretry/app/src/main.tsx',
+      '@ferretry/app/src/session/session-client.ts',
+      '@ferretry/app/internal',
+    ])
+      expect(refusal(edge('connections', 'tests/unit/app/x.test.ts', specifier))).toContain(
+        "not the app shell's public API",
+      );
+  });
 });

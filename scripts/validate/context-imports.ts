@@ -60,8 +60,10 @@ export function refusal(edge: ImportEdge): string | undefined {
   // `@ferretry/app/ui` and `@ferretry/app/worker`; its tests may also import the connect fakes in `/testing`.
   if (toPkg.kind === 'shell' && toPkg.name === '@ferretry/app' && edge.specifier.startsWith('@ferretry/app')) {
     const subpath = edge.specifier.slice('@ferretry/app'.length);
-    if (from === 'tests') return undefined;
+    if (from === 'tests' && ['', '/ui', '/worker', '/testing'].includes(subpath)) return undefined;
     if (from === 'app' && ['', '/ui', '/worker'].includes(subpath)) return undefined;
+    if (from === 'tests')
+      return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker and /testing only`;
     return `${edge.specifier} is imported only by app halves (and @ferretry/app/testing only by tests)`;
   }
 
