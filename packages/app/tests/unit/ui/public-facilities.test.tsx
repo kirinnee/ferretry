@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { Button, describeSurfaceOwnership, FY_REQUEST_ID_HEADER } from '../../../src/index.ts';
+import { Button, describeSurfaceOwnership, FY_REQUEST_ID_HEADER, RECONNECTING_GRACE_MS } from '../../../src/index.ts';
 import { CopyButton, Button as UiButton } from '../../../src/ui/index.ts';
 
 test('connect-only users of the public testing entry keep their environment without a DOM', () => {
@@ -58,4 +58,8 @@ test('the public test harness retains connect fakes and the render-tree harness'
   } finally {
     run(() => tree.unmount());
   }
+});
+
+test('the reconnecting grace is one number the app and its halves share', () => {
+  expect(RECONNECTING_GRACE_MS).toBe(1_500);
 });
