@@ -1,6 +1,6 @@
 import { describe, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { Glob } from 'bun';
 import should from 'should';
 
@@ -21,19 +21,19 @@ import should from 'should';
  * about a file somebody adds later.
  */
 
-/** The repository root, and the two places an illustration can be reached from: Conversation's half and the shell's prose kit. */
+/**
+ * The repository root, and every source root a Markdown surface can be reached from: the shell's prose kit and the
+ * app half of every plugin and core feature. Agenda, board and the queue render ChatProse, so a guard that read only
+ * Conversation's half would miss a second execution surface in any of them.
+ */
 const repoRoot = join(import.meta.dir, '../../../../../../..');
-const SOURCE_ROOTS = ['packages/plugins/conversation/app', 'packages/app/src'] as const;
+const APP_SOURCES = ['packages/app/src/**/*.{ts,tsx}', 'packages/{plugins,core}/*/app/**/*.{ts,tsx}'] as const;
 const packageDir = repoRoot;
 const MARKDOWN = 'packages/app/src/prose/markdown.tsx';
 const RENDER = 'packages/plugins/conversation/app/render';
 
 const productionSources = (): readonly string[] =>
-  SOURCE_ROOTS.flatMap(root =>
-    [...new Glob('**/*.{ts,tsx}').scanSync(join(repoRoot, root))].map(path =>
-      relative(repoRoot, join(repoRoot, root, path)),
-    ),
-  ).sort();
+  APP_SOURCES.flatMap(pattern => [...new Glob(pattern).scanSync(repoRoot)]).sort();
 
 const mentioning = (token: string): readonly string[] =>
   productionSources().filter(path => readFileSync(join(packageDir, path), 'utf8').includes(token));
