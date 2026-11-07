@@ -63,7 +63,7 @@ export class TidyService {
       .map(card => ({
         id: card.id,
         title: card.title,
-        project: card.project,
+        project: card.projectId,
         owner: card.owner,
         assignee: card.assignee,
         askedBy: card.askedBy ?? (card.origin === 'human' ? 'person' : 'agent'),

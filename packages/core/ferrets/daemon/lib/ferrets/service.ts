@@ -6,6 +6,7 @@ import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
 import type {
   FerretChangedPayload,
+  FerretStartedPayload,
   FerretId,
   FerretRecord,
   FerretsApi,
@@ -81,6 +82,8 @@ export interface FerretsPorts {
   changed(payload: FerretChangedPayload): void;
   /** A stop of this ferret is being attempted (`ferret.stopping`), before anything in it can fail. */
   stopping?(ferret: FerretId): void;
+  /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
+  started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
   saveDetails?(ferret: FerretId, details: FerretDetails): Promise<void>;
   /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
@@ -224,6 +227,18 @@ export class FerretsService implements FerretsApi {
     };
     return await this.serial.run(id, async () => {
       await this.write(record, undefined, 'started');
+      this.ports.started?.({
+        ferret: id,
+        name,
+        role,
+        ...(request.parent === undefined ? {} : { parent: request.parent }),
+        ...(request.pack === undefined ? {} : { pack: request.pack }),
+        folder: folder.value,
+        by: request.by,
+        ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
+        ...(request.options?.label === undefined ? {} : { label: request.options.label }),
+        ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+      });
       return await this.launch(record, request.prompt, record.harnessConversation);
     });
   }
