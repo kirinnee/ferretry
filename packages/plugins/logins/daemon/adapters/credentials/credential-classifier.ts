@@ -27,6 +27,7 @@
  * test against one previous value, and a shorter string is one less thing to mistake for a token in a
  * log line. It is still never logged.
  */
+import { createHash } from 'node:crypto';
 import type { CredentialMaterial } from '../../lib/shared/identity.ts';
 import type { StoredCredentialResolution } from '../../lib/credentials/credentials.ts';
 
@@ -41,7 +42,7 @@ export const CREDENTIAL_FINGERPRINT_LENGTH = 32;
  * asserting one hard-coded constant, which would prove neither.
  */
 export function credentialFingerprint(blob: string): string {
-  return new Bun.CryptoHasher('sha256').update(blob).digest('hex').slice(0, CREDENTIAL_FINGERPRINT_LENGTH);
+  return createHash('sha256').update(blob).digest('hex').slice(0, CREDENTIAL_FINGERPRINT_LENGTH);
 }
 
 /** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */

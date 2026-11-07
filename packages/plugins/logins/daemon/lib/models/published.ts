@@ -211,14 +211,14 @@ export class PublishedModelCatalogService {
   }
 
   async #refresh(force: boolean): Promise<ModelCatalogRefreshResult> {
-    const { fetch } = this.deps;
+    const hosted = this.deps.fetch;
     const held = await this.#read();
     const version = held.version === undefined ? {} : { version: held.version };
-    if (fetch === undefined) return { outcome: 'disabled' };
+    if (hosted === undefined) return { outcome: 'disabled' };
     const now = this.deps.nowMs();
     const checked = held.checkedAt === undefined ? Number.NaN : Date.parse(held.checkedAt);
     if (!force && now - checked < this.#intervalMs) return { outcome: 'not-due', ...version };
-    const result = await this.#check(fetch, held);
+    const result = await this.#check(hosted, held);
     const checkedAt = new Date(now).toISOString();
     if (result.kind === 'updated') {
       await this.#keep({
@@ -236,7 +236,7 @@ export class PublishedModelCatalogService {
   }
 
   async #check(
-    fetch: ModelCatalogFetchPort,
+    hosted: ModelCatalogFetchPort,
     held: Held,
   ): Promise<
     | {
@@ -253,7 +253,7 @@ export class PublishedModelCatalogService {
       result: { outcome, ...keptVersion, ...(reason === undefined ? {} : { reason }) },
     });
     const read = async (path: string): Promise<Bytes | string> => {
-      const answer = await fetch.get(path);
+      const answer = await hosted.get(path);
       if (answer === undefined) return `the hosted app could not be reached for ${path}`;
       if (answer.status !== 200) return `the hosted app answered ${answer.status} for ${path}`;
       return answer.bytes;

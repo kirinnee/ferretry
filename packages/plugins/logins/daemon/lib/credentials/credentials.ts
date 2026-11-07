@@ -212,6 +212,7 @@ export function resolveCredentialStore(
  */
 export function credentialLaunchEnvironment(resolution: CredentialStoreResolution): Readonly<Record<string, string>> {
   if (resolution.store === 'environment') return resolution.env;
+  if ('unavailable' in resolution) return {};
   if (resolution.harness === 'claude') return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
   return {};
 }

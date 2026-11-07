@@ -41,10 +41,9 @@
  * completely.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { ferretryCredentialDirectory } from '../../lib/credentials/credential-directory.ts';
+import { createHash } from 'node:crypto';
+import type { Clock, FetchPort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import type { CredentialMaterial } from '../../lib/shared/identity.ts';
 import {
   parseStoredUsageBody,
@@ -53,10 +52,7 @@ import {
   usageEndpointHttpVerdict,
 } from '../../lib/credentials/quota.ts';
 import {
-  CREDENTIAL_USAGE_FILE,
   type FleetUsageProbeResult,
-  type PassiveUsageRecord,
-  PassiveUsageRecordSchema,
   type ProviderAuthenticationShape,
   type ProviderResponseCode,
   ProviderResponseCodeSchema,
@@ -509,34 +505,38 @@ function requestFailure(error: unknown, secrets: readonly string[] = []): string
 }
 
 /**
- * The shipped fetch, bounded by a deadline.
+ * The shipped fetch, over the kernel's fetch port and clock, bounded by a deadline.
  *
  * Headers and at most {@link MAX_RESPONSE_BODY_BYTES} response bytes are read before this function
  * returns. The same deadline covers headers AND body, and an oversized body is cancelled with an
  * explicit truncation marker rather than buffered without limit. Nothing is ever SENT: there is no
  * request body here because {@link QuotaRequest} has no field for one.
  */
-export const fetchQuota: QuotaFetch = async request => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), request.timeoutMs);
-  try {
-    const response = await fetch(request.url, {
-      method: request.method,
-      headers: { ...request.headers },
-      signal: controller.signal,
+export const quotaFetch =
+  (fetchPort: FetchPort, clock: Pick<Clock, 'after'>): QuotaFetch =>
+  async request => {
+    const controller = new AbortController();
+    const cancel = clock.after(milliseconds(request.timeoutMs), () => {
+      controller.abort();
     });
-    const body = await readBoundedBody(response.body);
-    return {
-      status: response.status,
-      ok: response.ok,
-      headerNames: [...response.headers.keys()].map(name => name.toLowerCase()).sort(),
-      header: name => response.headers.get(name),
-      body,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-};
+    try {
+      const response = await fetchPort.request(request.url, {
+        method: request.method,
+        headers: { ...request.headers },
+        signal: controller.signal,
+      });
+      const body = await readBoundedBody(response.body);
+      return {
+        status: response.status,
+        ok: response.ok,
+        headerNames: [...response.headers.keys()].map(name => name.toLowerCase()).sort(),
+        header: name => response.headers.get(name),
+        body,
+      };
+    } finally {
+      cancel();
+    }
+  };
 
 /** Consume a response without letting an edge challenge allocate or retain an arbitrary body. */
 async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise<QuotaResponse['body']> {
@@ -583,42 +583,3 @@ async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise
   return { bytes, truncated };
 }
 
-/**
- * The passive usage file of one credential, `<fleet>/credentials/<id>/usage.json` (design §8.1.3).
- *
- * `fy statusline` WRITES it on every Claude turn and the daemon READS it, so the write is atomic —
- * a temp file in the same directory, then a rename — and a reader never sees half a document. The
- * directory is created 0700 when missing, which for a `host` credential is a directory under the
- * fleet and NEVER the person's `~/.claude`. A file that is absent, unreadable or not this schema is
- * "no passive reading", because a reading that cannot be trusted is not one.
- */
-export class FilePassiveUsageStore {
-  constructor(private readonly fleetRoot: string) {}
-
-  path(id: string): string {
-    return `${ferretryCredentialDirectory(this.fleetRoot, id)}/${CREDENTIAL_USAGE_FILE}`;
-  }
-
-  async read(id: string): Promise<PassiveUsageRecord | undefined> {
-    try {
-      const parsed = PassiveUsageRecordSchema.safeParse(JSON.parse(await readFile(this.path(id), 'utf8')) as unknown);
-      return parsed.success ? parsed.data : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  async write(id: string, record: PassiveUsageRecord): Promise<void> {
-    const target = this.path(id);
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-    const temporary = `${target}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, `${JSON.stringify(PassiveUsageRecordSchema.parse(record))}\n`, { mode: 0o600 });
-      await chmod(temporary, 0o600);
-      await rename(temporary, target);
-    } catch (error) {
-      await rm(temporary, { force: true });
-      throw error;
-    }
-  }
-}

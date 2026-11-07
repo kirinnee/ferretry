@@ -4,7 +4,7 @@
  * `lsof` first: macOS ships it, and it names the listener's owner as well as its pid. A Linux host
  * without it falls back to `ss`, which names a pid only for this user's own listeners — the only ones
  * this daemon could stop anyway. `ps` then gives each listener's owner and whole command line, which is
- * what `../../lib/fleet-login/port-holders.ts` decides on. A host with none of these answers
+ * what `../../lib/harness-login/port-holders.ts` decides on. A host with none of these answers
  * `undefined`, and starting over then clears nothing rather than guessing.
  *
  * Every tool is run as an argv ARRAY with no shell, and the paths are injectable so the integration
@@ -12,6 +12,8 @@
  */
 import type { CallbackPortHolder } from '../../lib/harness-login/port-holders.ts';
 import { parseLsofListeners, parsePsLine, parseSsListeners } from '../../lib/harness-login/port-holders.ts';
+import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import type { HarnessLoginPortHolders } from '../../lib/harness-login/ports.ts';
 
 /** How long a stopped program is given to exit before it is killed outright. */
@@ -27,11 +29,14 @@ interface PortHolderTools {
 }
 
 /** Run one tool. `undefined` when it is not installed or could not be started. */
-async function run(argv: readonly string[]): Promise<{ readonly code: number; readonly stdout: string } | undefined> {
+async function run(
+  spawn: SpawnPort,
+  argv: readonly string[],
+): Promise<{ readonly code: number; readonly stdout: string } | undefined> {
   try {
-    const child = Bun.spawn([...argv], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' });
-    const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return { code, stdout };
+    const [program, ...args] = argv as [string, ...string[]];
+    const result = await spawn.run(program, args);
+    return { code: result.exitCode ?? 1, stdout: result.stdout };
   } catch {
     return undefined;
   }
@@ -47,7 +52,11 @@ const signal = (pid: number, name: 'SIGTERM' | 'SIGKILL' | 0): boolean => {
   }
 };
 
-export function systemPortHolders(tools: PortHolderTools = {}): HarnessLoginPortHolders {
+export function systemPortHolders(
+  spawn: SpawnPort,
+  clock: Pick<Clock, 'sleep'>,
+  tools: PortHolderTools = {},
+): HarnessLoginPortHolders {
   const lsof = tools.lsof ?? 'lsof';
   const ss = tools.ss ?? 'ss';
   const ps = tools.ps ?? 'ps';
@@ -60,7 +69,7 @@ export function systemPortHolders(tools: PortHolderTools = {}): HarnessLoginPort
     readonly { readonly pid: number | undefined; readonly name: string; readonly uid?: number }[] | undefined
   > => {
     // `lsof` exits 1 when nothing matched, which is an answer; only a missing tool falls through.
-    const listed = await run([lsof, '-nP', `-iTCP:${String(port)}`, '-sTCP:LISTEN', '-Fpcu']);
+    const listed = await run(spawn, [lsof, '-nP', `-iTCP:${String(port)}`, '-sTCP:LISTEN', '-Fpcu']);
     if (listed !== undefined) {
       return parseLsofListeners(listed.stdout).map(entry => ({
         pid: entry.pid,
@@ -68,7 +77,7 @@ export function systemPortHolders(tools: PortHolderTools = {}): HarnessLoginPort
         ...(entry.uid === undefined ? {} : { uid: entry.uid }),
       }));
     }
-    const table = await run([ss, '-Hltnp', `sport = :${String(port)}`]);
+    const table = await run(spawn, [ss, '-Hltnp', `sport = :${String(port)}`]);
     return table === undefined || table.code !== 0 ? undefined : parseSsListeners(table.stdout);
   };
 
@@ -77,7 +86,7 @@ export function systemPortHolders(tools: PortHolderTools = {}): HarnessLoginPort
     port: number,
     entry: { readonly pid: number | undefined; readonly name: string; readonly uid?: number },
   ): Promise<CallbackPortHolder> => {
-    const listed = entry.pid === undefined ? undefined : await run([ps, '-o', 'uid=,args=', '-p', String(entry.pid)]);
+    const listed = entry.pid === undefined ? undefined : await run(spawn, [ps, '-o', 'uid=,args=', '-p', String(entry.pid)]);
     const line = listed === undefined ? undefined : parsePsLine(listed.stdout);
     return {
       port,
@@ -103,7 +112,7 @@ export function systemPortHolders(tools: PortHolderTools = {}): HarnessLoginPort
       if (!signal(pid, 'SIGTERM')) return false;
       for (let waited = 0; waited < graceMs; waited += STOP_POLL_MS) {
         if (!signal(pid, 0)) return true;
-        await Bun.sleep(STOP_POLL_MS);
+        await clock.sleep(milliseconds(STOP_POLL_MS));
       }
       // Gone between the last look and this one is still gone, so whether this lands does not matter.
       signal(pid, 'SIGKILL');

@@ -6,13 +6,16 @@
  * with the PKCE verifier only it holds and writes its own login. This adapter redeems nothing.
  *
  * - **The host is fixed here.** The seam carries a port, a path and a query, never a host, so nothing a
- *   caller passes can point this anywhere but this machine's loopback address.
+ *   caller passes can point this anywhere but this machine's loopback address (and the kernel's fetch port refuses
+ *   any host the manifest did not declare).
  * - **No redirect is followed.** Codex answers a good callback with a redirect to its own success page;
  *   following it would be a second request nobody asked for.
  * - **Nothing Codex answers is read or returned.** Its page is for a browser. Whether the sign-in worked
  *   is told by how the child exits, which the service already watches.
  * - **The address is not logged.** A failure is reported as a word, never with the URL it was sent to.
  */
+import type { Clock, FetchPort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import type { HarnessLoginCallbackDeliver } from '../../lib/harness-login/ports.ts';
 
 /** How long Codex may take to answer: it redeems the code with the provider before it replies. */
@@ -24,16 +27,24 @@ const DELIVERY_TIMEOUT_MS = 60_000;
  */
 const NOT_WAITING_FOR_THIS: ReadonlySet<number> = new Set([400, 404]);
 
-export const deliverCodexCallback: HarnessLoginCallbackDeliver = async delivery => {
-  try {
-    const response = await fetch(`http://127.0.0.1:${delivery.port}${delivery.path}?${delivery.query}`, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+export function deliverCodexCallback(fetchPort: FetchPort, clock: Pick<Clock, 'after'>): HarnessLoginCallbackDeliver {
+  return async delivery => {
+    const controller = new AbortController();
+    const cancel = clock.after(milliseconds(DELIVERY_TIMEOUT_MS), () => {
+      controller.abort();
     });
-    await response.body?.cancel();
-    return NOT_WAITING_FOR_THIS.has(response.status) ? 'refused' : 'delivered';
-  } catch {
-    // Nothing listening, or no answer in time: nobody can say whether the address arrived.
-    return 'unreachable';
-  }
-};
+    try {
+      const response = await fetchPort.request(`http://127.0.0.1:${delivery.port}${delivery.path}?${delivery.query}`, {
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      await response.body?.cancel();
+      return NOT_WAITING_FOR_THIS.has(response.status) ? 'refused' : 'delivered';
+    } catch {
+      // Nothing listening, or no answer in time: nobody can say whether the address arrived.
+      return 'unreachable';
+    } finally {
+      cancel();
+    }
+  };
+}

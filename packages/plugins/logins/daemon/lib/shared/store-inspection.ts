@@ -59,6 +59,7 @@ function checkWords(check: CredentialStoreCheck, reading: CredentialReading): st
  * stops at the first that answers — so an earlier `present` cannot occur, and the verdict's words are
  * attached to whichever check found the material.
  */
+// read-scoped: none — it names the places a store was looked in and what each held, never text a reader wrote
 export function storeInspectionWords(inspection: CredentialStoreInspection): string {
   if (usableCredentialReading(inspection.reading)) return 'A usable login is stored for this credential.';
   if (inspection.checked.length === 0) return 'No place this login could be stored in was looked at.';

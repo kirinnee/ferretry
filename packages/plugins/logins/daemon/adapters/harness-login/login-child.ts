@@ -16,10 +16,12 @@
  *   a CLI that failed to print one, and a reader that watched only stdout would report "this harness
  *   offered no remotable login" about a harness that offered one.
  *
- * `Bun.spawn` is given the command as an argv ARRAY and no shell. The first element is the absolute
+ * The kernel's spawn port is given the command as an argv ARRAY and no shell. The first element is the absolute
  * wrapper path the manifest publishes; nothing here resolves a name, and there is no `PATH` fallback —
  * see the service for why a daemon started by a service manager must not have one.
  */
+import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import type {
   HarnessLoginChild,
   HarnessLoginChildSpec,
@@ -50,83 +52,66 @@ async function pump(stream: ReadableStream<Uint8Array> | undefined, onLine: (lin
   if (pending !== '') onLine(pending);
 }
 
-/** Launch one harness login child. */
-export const spawnHarnessLoginChild: HarnessLoginSpawn = (spec: HarnessLoginChildSpec): HarnessLoginChild => {
-  // ITS OWN PROCESS GROUP (`detached`), so a kill can reach the whole sign-in. A harness launcher that
-  // spawns the real binary — npm's `codex` is one — is a parent the binary outlives, and the binary is
-  // what holds Codex's `localhost:1455` callback port.
-  const child = Bun.spawn({
-    cmd: [...spec.command],
-    env: spec.environment,
-    detached: true,
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
 
-  // Both pumps are started now and never awaited by the caller: a stream nobody drains fills its pipe
-  // and the child blocks writing to it, which would look exactly like a harness that printed nothing.
-  // A pump that throws is a stream that ended abruptly, which the exit code already reports.
-  const drained = Promise.all([
-    pump(child.stdout as ReadableStream<Uint8Array> | undefined, spec.onLine).catch(() => undefined),
-    pump(child.stderr as ReadableStream<Uint8Array> | undefined, spec.onLine).catch(() => undefined),
-  ]);
+/**
+ * Launch one harness login child through the kernel's spawn port.
+ *
+ * The kernel's child sees the base environment the host names plus `spec.environment`, so nothing of this daemon's own
+ * session reaches a sign-in. The port has no process group: a kill reaches the child it started.
+ */
+export function spawnHarnessLoginChild(spawn: SpawnPort): HarnessLoginSpawn {
+  return (spec: HarnessLoginChildSpec): HarnessLoginChild => {
+    const [program, ...args] = spec.command as [string, ...string[]];
+    const env: Record<string, string> = {};
+    for (const [name, value] of Object.entries(spec.environment)) if (value !== undefined) env[name] = value;
+    const child = spawn.start(program, args, { env });
+    let stopped = false;
 
-  return {
-    write: async value => {
-      try {
-        const writer = child.stdin;
-        if (writer === undefined || writer === null) return false;
-        // ASKED OF THE CHILD, not inferred from the write. A write into the stdin of a child that has
-        // already exited is BUFFERED and reports success — measured, not assumed — so a `try`/`catch`
-        // around it detects nothing and would let the caller answer "accepted" about a value nothing
-        // read. The exit state is the only thing here that knows.
-        if (child.exitCode !== null || child.signalCode !== null) return false;
-        writer.write(value);
-        await writer.flush();
-        return true;
-      } catch {
-        // A child that goes away DURING the write. The race is real and unavoidable, and it is exactly
-        // why the wire has an `unconfirmed` outcome: nobody can say whether the value arrived. Raising
-        // here would be reported as a failure instead, which invites a retry that cannot help.
-        return false;
-      }
-    },
-    kill: (signal = 'SIGTERM') => {
-      // The GROUP first, so nothing the harness started is left holding its port; the child alone if the
-      // group is already gone. Idempotent by contract, and a kill of an exited child is not an error worth
-      // propagating: a cancel that raced the child's own exit has still achieved what it was asked to.
-      try {
-        process.kill(-child.pid, signal);
-      } catch {
+    // Both pumps are started now and never awaited by the caller: a stream nobody drains fills its pipe
+    // and the child blocks writing to it, which would look exactly like a harness that printed nothing.
+    // A pump that throws is a stream that ended abruptly, which the exit code already reports.
+    const drained = Promise.all([
+      pump(child.stdout, spec.onLine).catch(() => undefined),
+      pump(child.stderr, spec.onLine).catch(() => undefined),
+    ]);
+    const exit = child.exited.then(code => {
+      stopped = true;
+      return code ?? 1;
+    });
+
+    return {
+      write: async value => {
+        try {
+          // ASKED OF THE CHILD, not inferred from the write: a write into the stdin of a child that has already
+          // exited is buffered and reports success, so the exit state is the only thing here that knows.
+          if (stopped) return false;
+          child.write(value);
+          return true;
+        } catch {
+          // A child that goes away DURING the write. The race is real and unavoidable, and it is exactly why the
+          // wire has an `unconfirmed` outcome: nobody can say whether the value arrived.
+          return false;
+        }
+      },
+      kill: (signal = 'SIGTERM') => {
         try {
           child.kill(signal);
         } catch {
           // already gone
         }
-      }
-    },
-    // Settled only once BOTH pipes have been read to the end. The exit can be reported before the last
-    // line is: a Codex device login that says device codes are unavailable and exits at once would
-    // otherwise be read as "printed nothing", and the switch to a link would never happen.
-    exited: child.exited.then(async code => {
-      await drained;
-      return code;
-    }),
+      },
+      // Settled only once BOTH pipes have been read to the end. The exit can be reported before the last
+      // line is: a Codex device login that says device codes are unavailable and exits at once would
+      // otherwise be read as "printed nothing", and the switch to a link would never happen.
+      exited: exit.then(async code => {
+        await drained;
+        return code;
+      }),
+    };
   };
-};
+}
 
-/**
- * A one-shot timer that cannot hold this daemon open.
- *
- * `unref` is the whole reason this is an adapter rather than a `setTimeout` at the call site: a pending
- * login window would otherwise keep the event loop alive for its full ten minutes, so a daemon asked to
- * stop would appear to hang on a login nobody was waiting for.
- */
-export const harnessLoginTimer: HarnessLoginTimer = {
-  after: (milliseconds, run) => {
-    const handle = setTimeout(run, milliseconds);
-    handle.unref?.();
-    return () => clearTimeout(handle);
-  },
-};
+/** A one-shot timer on the kernel's clock, so a flow nobody polls still ends and the kernel can stop it. */
+export function harnessLoginTimer(clock: Pick<Clock, 'after'>): HarnessLoginTimer {
+  return { after: (ms, run) => clock.after(milliseconds(ms), run) };
+}

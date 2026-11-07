@@ -29,7 +29,7 @@
  *
  * Pure.
  */
-import defaultInstructions from '../../../data/codex/default-instructions.txt' with { type: 'text' };
+import defaultInstructions from '../../data/codex/default-instructions.txt' with { type: 'text' };
 import type { RuntimeModelEntry, RuntimeModels } from './runtime.ts';
 
 /**

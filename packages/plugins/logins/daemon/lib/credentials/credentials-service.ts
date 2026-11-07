@@ -202,7 +202,7 @@ export class FleetCredentialCatalog {
       harness: 'claude',
       accountFile:
         resolution.ownedDirectory === undefined
-          ? join(this.deps.paths.userHome, CLAUDE_ACCOUNT_FILE)
+          ? join((this.deps.paths as CredentialStorePaths).userHome, CLAUDE_ACCOUNT_FILE)
           : join(resolution.ownedDirectory, CREDENTIAL_SIGN_IN_DIRECTORY, CLAUDE_ACCOUNT_FILE),
     };
   }
