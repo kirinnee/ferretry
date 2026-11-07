@@ -438,6 +438,13 @@ export class AccessRuntime {
       if (pairing.deviceGrants(deviceId) === undefined) return false;
       return (await passkeyStore.list(deviceId)).length > 0;
     },
+    holds: async (deviceId, credentialId) => {
+      const { passkeyStore, pairing } = await this.ready();
+      if (pairing.deviceGrants(deviceId) === undefined) return false;
+      return (await passkeyStore.holder(credentialId)) === deviceId;
+    },
+    verifyStoredProof: async (proof, expectedChallenge) =>
+      await (await this.ready()).stepUp.verifyStoredProof(proof, expectedChallenge),
     buzz: async (message: Buzz) => {
       const { push } = await this.ready();
       const result = await push.notify({

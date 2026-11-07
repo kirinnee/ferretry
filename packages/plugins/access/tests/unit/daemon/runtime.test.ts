@@ -606,6 +606,53 @@ async function signed(p: Awaited<ReturnType<typeof prepared>>, options: { challe
   };
 }
 
+test('Access port holds checks the paired device and the registered credential', async () => {
+  const p = await prepared();
+  expect(await p.w.runtime.port.holds(p.device.deviceId, p.credentialId)).toBe(true);
+  expect(await p.w.runtime.port.holds(p.device.deviceId, 'another-credential')).toBe(false);
+  const another = await paired(p.w);
+  expect(await p.w.runtime.port.holds(another.deviceId, p.credentialId)).toBe(false);
+  await revoke(p.w, p.device.deviceId);
+  expect(await p.w.runtime.port.holds(p.device.deviceId, p.credentialId)).toBe(false);
+});
+
+test('Access port verifies stored proofs offline at the credential own origin without moving its counter', async () => {
+  const p = await prepared();
+  const challenge = new Uint8Array(32).fill(7);
+  const proof = { deviceId: p.device.deviceId, ...(await signed(p, { challenge: toBase64Url(challenge) })) };
+  await p.wired.passkeyStore.updateSignCount(p.device.deviceId, p.credentialId, 99);
+  const stored = await p.wired.passkeyStore.list(p.device.deviceId);
+  const credential = stored[0];
+  if (credential === undefined) throw new Error('expected registered credential');
+  expect(await p.w.runtime.port.verifyStoredProof(proof, challenge)).toBe(true);
+  expect(await p.w.runtime.port.verifyStoredProof(proof, challenge)).toBe(true);
+  expect(await p.wired.passkeyStore.list(p.device.deviceId)).toEqual(stored);
+  expect(await p.w.runtime.port.verifyStoredProof(proof, new Uint8Array(32).fill(8))).toBe(false);
+  const foreignOrigin = await assertion(p.authenticator, {
+    client: clientData('webauthn.get', { challenge: toBase64Url(challenge), origin: 'https://other.example.test' }),
+    auth: { rpId: 'other.example.test' },
+  });
+  expect(
+    await p.w.runtime.port.verifyStoredProof(
+      {
+        ...proof,
+        clientDataJSON: toBase64Url(foreignOrigin.clientDataJSON),
+        authenticatorData: toBase64Url(foreignOrigin.authenticatorData),
+        signature: toBase64Url(foreignOrigin.signature),
+      },
+      challenge,
+    ),
+  ).toBe(false);
+  await p.wired.passkeyStore.forgetDevice(p.device.deviceId);
+  expect(await p.w.runtime.port.verifyStoredProof(proof, challenge)).toBe(false);
+  await p.wired.passkeyStore.add(credential);
+  await revoke(p.w, p.device.deviceId);
+  // A failed passkey purge must not restore authority to an unpaired device.
+  await p.wired.passkeyStore.add(credential);
+  expect(await p.w.runtime.port.holds(p.device.deviceId, p.credentialId)).toBe(false);
+  expect(await p.w.runtime.port.verifyStoredProof(proof, challenge)).toBe(false);
+});
+
 test('a live runtime watch lets a verified add-device proof be claimed once through the provider', async () => {
   const p = await prepared();
   const watch = watcher('same-page-and-session');

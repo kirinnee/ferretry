@@ -5,7 +5,7 @@
 import { defineEvent, defineHook, definePort } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { type PairedDevice, PairedDeviceIdSchema } from './pairing.ts';
-import type { PasskeyAlgorithmId } from './step-up.ts';
+import type { PasskeyAlgorithmId, StoredStepUpProofSchema } from './step-up.ts';
 import type { Buzz } from './wire.ts';
 
 /** A verifier's answer: the facts it proved, or why it refused. Never throws for a bad ceremony. */
@@ -55,6 +55,10 @@ export interface AccessApi {
    * device that holds none). Unknown or revoked devices hold none. Never a credential id or key.
    */
   holdsPasskey(deviceId: string): Promise<boolean>;
+  /** Whether a still-paired device holds this registered credential. No key or credential list is returned. */
+  holds(deviceId: string, credentialId: string): Promise<boolean>;
+  /** Rechecks a kept assertion against its derived challenge and its credential's own origin, without a counter. */
+  verifyStoredProof(proof: z.infer<typeof StoredStepUpProofSchema>, expectedChallenge: Uint8Array): Promise<boolean>;
 }
 
 export const AccessPort = definePort<AccessApi>('access');

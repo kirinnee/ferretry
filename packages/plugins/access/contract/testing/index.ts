@@ -10,6 +10,8 @@ export interface FakeAccessOptions {
   readonly passkeys?: PasskeyVerifier;
   /** The devices that hold a passkey. */
   readonly withPasskeys?: readonly string[];
+  readonly credentials?: readonly { readonly deviceId: string; readonly credentialId: string }[];
+  readonly verifyStoredProof?: AccessApi['verifyStoredProof'];
 }
 
 const refusingVerifier: PasskeyVerifier = {
@@ -26,6 +28,21 @@ export function fakeAccess(options: FakeAccessOptions = {}): AccessApi & { reado
     devices: async () => [...devices],
     passkeys: options.passkeys ?? refusingVerifier,
     holdsPasskey: async deviceId => (options.withPasskeys ?? []).includes(deviceId),
+    holds: async (deviceId, credentialId) =>
+      devices.some(device => device.id === deviceId) &&
+      (options.credentials ?? []).some(
+        credential => credential.deviceId === deviceId && credential.credentialId === credentialId,
+      ),
+    verifyStoredProof: async (proof, challenge) => {
+      if (
+        !devices.some(device => device.id === proof.deviceId) ||
+        !(options.credentials ?? []).some(
+          credential => credential.deviceId === proof.deviceId && credential.credentialId === proof.credentialId,
+        )
+      )
+        return false;
+      return (await options.verifyStoredProof?.(proof, challenge)) ?? false;
+    },
     buzz: async message => {
       buzzes.push(BuzzSchema.parse(message));
       return options.enrolments ?? 0;
@@ -48,6 +65,22 @@ export function accessConformance(name: string, make: () => AccessApi): void {
     });
     test('a device it never paired holds no passkey', async () => {
       expect(await make().holdsPasskey('d_never-paired')).toBe(false);
+    });
+    test('a device it never paired holds no credential and verifies no kept proof', async () => {
+      const access = make();
+      expect(await access.holds('d_never-paired', 'credential')).toBe(false);
+      expect(
+        await access.verifyStoredProof(
+          {
+            deviceId: 'd_never-paired',
+            credentialId: 'credential',
+            clientDataJSON: 'AA',
+            authenticatorData: 'AA',
+            signature: 'AA',
+          },
+          new Uint8Array(32),
+        ),
+      ).toBe(false);
     });
     test('a passkey ceremony with garbage bytes is refused, not thrown', async () => {
       const verdict = await make().passkeys.verifyAssertion({
