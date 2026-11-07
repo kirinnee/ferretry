@@ -513,7 +513,7 @@ call.
 ## The ferret session credential
 
 Every agent pane holds its own credential: 32 random bytes the daemon mints at each pane launch, keeps
-only the SHA-256 of (`sessionCapabilityHash` in the session's `config.json`), and writes into the pane as
+only the SHA-256 of (`capabilityHash` in the session's `config.json`), and writes into the pane as
 `FY_SESSION_TOKEN` — the documented name — and `FY_SESSION_BOARD_CAPABILITY`, the older name, kept for one
 release. It is also a **bearer class** of its own, `session`, beside the admin and warden tokens:
 

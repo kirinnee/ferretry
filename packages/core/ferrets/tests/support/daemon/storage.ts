@@ -5,15 +5,20 @@
  */
 import type { Log, LogFields } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { ArchiveFile, FerretHistoryFiles, FerretIndexFile } from '../../../contract/index.ts';
+import {
+  ArchiveFile,
+  FerretHistoryFiles,
+  FerretIndexFile,
+  FerretConfigFile,
+  FerretStateFile,
+} from '../../../contract/index.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import type { ClockPort, SessionIndex, YieldingSerialExecutor } from '../../../daemon/lib/ports.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
 
 /** Every file the session store reads or writes. */
 export const SESSION_STORE_FILES = [
-  SessionConfigFiles,
-  SessionStateFiles,
+  FerretConfigFile,
+  FerretStateFile,
   FerretHistoryFiles,
   FerretIndexFile,
   ArchiveFile,

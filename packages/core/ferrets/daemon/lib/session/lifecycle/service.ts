@@ -128,7 +128,7 @@ export class SessionLifecycleService {
       // Ids are minted here, so an existing record means a collision, never a client naming a live
       // session — and either way the live session's record must not be reset under it.
       if (await this.ports.repository.read(id)) throw new Error(`session already exists: ${id}`);
-      if (request.sessionCapabilityHash !== undefined && this.ports.credentials === undefined)
+      if (request.capabilityHash !== undefined && this.ports.credentials === undefined)
         throw new Error('a session capability hash requires a lifecycle-issued credential');
       if (this.ports.credentials !== undefined && this.ports.environment === undefined)
         throw new Error('a session credential issuer requires a durable environment store');
@@ -137,7 +137,7 @@ export class SessionLifecycleService {
       const credential = this.ports.credentials?.issue();
       const projectId = await this.projectOf(cwd, request.parent);
       const created = createSessionRecord(
-        { ...request, ...(credential === undefined ? {} : { sessionCapabilityHash: credential.hash }) },
+        { ...request, ...(credential === undefined ? {} : { capabilityHash: credential.hash }) },
         {
           id,
           cwd,
@@ -273,7 +273,7 @@ export class SessionLifecycleService {
       // next launch rotates a fresh one either way.
       await this.ports.rotation?.revoke?.(parsed);
       await this.releaseLeases(parsed);
-      const { sessionCapabilityHash: _revoked, ...config } = stopped.config;
+      const { capabilityHash: _revoked, ...config } = stopped.config;
       return { ...stopped, config };
     });
   }
@@ -300,7 +300,7 @@ export class SessionLifecycleService {
       // The hash goes BEFORE the record is read, so a record this schema cannot read still loses its credential.
       await rotation.cutOff?.(parsed);
       const current = await this.require(parsed);
-      const { sessionCapabilityHash: _revoked, ...config } = current.config;
+      const { capabilityHash: _revoked, ...config } = current.config;
       return { ...current, config };
     });
   }
@@ -331,8 +331,8 @@ export class SessionLifecycleService {
    */
   private async rotated(record: SessionLifecycleRecord): Promise<SessionLifecycleRecord> {
     if (this.ports.rotation === undefined) return record;
-    const sessionCapabilityHash = await this.ports.rotation.rotate(record.config.id);
-    return { ...record, config: { ...record.config, sessionCapabilityHash } };
+    const capabilityHash = await this.ports.rotation.rotate(record.config.id);
+    return { ...record, config: { ...record.config, capabilityHash } };
   }
 
   /**

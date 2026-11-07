@@ -33,17 +33,14 @@ import {
   StartDecide,
   WorkFoldersPort,
   WorktreesFile,
+  AgentPinsFile,
+  FerretConfigFile,
+  FerretDetailsFile,
+  FerretPinsFile,
+  FerretStateFile,
 } from './contract/index.ts';
 import { StartRequestsFile } from './daemon/lib/ferrets/start-requests.ts';
-import {
-  AgentPinsFile,
-  FerretDetailsFiles,
-  FerretPinFiles,
-  FerretSummaryFiles,
-  FerretWaitFiles,
-  SessionConfigFiles,
-  SessionStateFiles,
-} from './daemon/lib/state.ts';
+import { FerretSummaryFiles, FerretWaitFiles } from './daemon/lib/state.ts';
 
 /**
  * Ferrets (§2.2): who each ferret is, its name, parent, pack, token and state. Starting and stopping are done by a
@@ -452,11 +449,11 @@ export default definePlugin({
       LimitsAppliedFile,
       FerretIndexFile,
       StartRequestsFile,
-      SessionConfigFiles,
-      SessionStateFiles,
+      FerretConfigFile,
+      FerretStateFile,
       AgentPinsFile,
-      FerretPinFiles,
-      FerretDetailsFiles,
+      FerretPinsFile,
+      FerretDetailsFile,
       FerretSummaryFiles,
       HandoverFiles,
       TransferPlanFiles,

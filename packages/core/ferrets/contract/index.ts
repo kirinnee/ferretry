@@ -44,3 +44,5 @@ export {
   FerretLiveActivitySchema,
 } from './view/session-live.ts';
 export { type FerretSearchQuery, FerretSearchQuerySchema } from './view/session-search.ts';
+export * from './pins.ts';
+export * from './ferret-files.ts';
