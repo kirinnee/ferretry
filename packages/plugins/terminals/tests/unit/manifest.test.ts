@@ -1,0 +1,48 @@
+import { describe, expect, test } from 'bun:test';
+import { OP_EFFECTS } from '@ferretry/kernel/contract';
+import manifest from '../../manifest.ts';
+
+const routes = manifest.actions.routes;
+const tools = manifest.actions.agentTools;
+
+describe('terminals manifest', () => {
+  test("declares today's terminal, process, console, attach and surface routes and the viewer stream", () => {
+    expect(routes).toHaveLength(16);
+    expect(manifest.actions.sockets.map(socket => socket.key)).toEqual([
+      'GET /v1/sessions/:sessionId/terminals/:terminalId/stream',
+    ]);
+  });
+  test('attaching to a pane must arrive over the privileged local listener', () => {
+    expect(routes.find(route => route.key === 'GET /v1/sessions/:sessionId/attach')?.privilegedOnly).toBe(true);
+  });
+  test('anything that may show pane text is built inside one Redaction.read (guard: secrets)', () => {
+    expect(manifest.actions.sockets[0]?.guard).toBe('secrets');
+    expect(routes.find(route => route.key === 'GET /v1/sessions/:sessionId/processes/:processId/output')?.guard).toBe(
+      'secrets',
+    );
+  });
+  test("declares today's eight terminal tools; every act names an Op, and only a read-effect Op may show text", () => {
+    expect(tools.map(entry => entry.name)).toEqual([
+      'terminal_list',
+      'terminal_open',
+      'terminal_send',
+      'terminal_read',
+      'terminal_wait',
+      'terminal_close',
+      'terminal_ask_owner',
+      'terminal_request_input',
+    ]);
+    for (const entry of tools) {
+      if (entry.op === undefined) continue;
+      const effects: readonly string[] = OP_EFFECTS[entry.op];
+      if (!effects.includes('reads')) expect(entry.guard).not.toBe('secrets');
+      else expect(entry.guard).toBe('secrets');
+    }
+  });
+  test('takes the terminal input target and the tmux runner', () => {
+    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
+      'input.targets:terminal',
+      'runners:tmux',
+    ]);
+  });
+});
