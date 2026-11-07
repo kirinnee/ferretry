@@ -11,7 +11,15 @@ import {
 } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest';
 import { ferret, owner, standInAdmission, type TestHost, testHost } from '@ferretry/kernel/testing';
-import { HoldsFile, InputRequestFiles, InputHoldsPort, InputTargets, OutputGuardPort, RedactionPort, VaultPort } from '../../../contract/index.ts';
+import {
+  HoldsFile,
+  InputRequestFiles,
+  InputHoldsPort,
+  InputTargets,
+  OutputGuardPort,
+  RedactionPort,
+  VaultPort,
+} from '../../../contract/index.ts';
 import { FakeInputTarget } from '../../../contract/testing/index.ts';
 import vault from '../../../daemon/index.ts';
 import { type InputRequest, padInputValue } from '../../../daemon/lib/inputs/wire.ts';
@@ -20,12 +28,17 @@ const FERRET = 'mvv6b4qw-49d0158d' as FerretId;
 const VALUE = 'typed-through-the-real-input-service';
 const TERMINAL = { kind: 'terminal' as TargetKind, key: 'dev' };
 const hosts: TestHost[] = [];
+class AliasedTerminal extends FakeInputTarget {
+  override async observe(...args: Parameters<FakeInputTarget['observe']>) {
+    return { ...(await super.observe(...args)), names: ['dev', '%3'] };
+  }
+}
 afterEach(async () => {
   for (const host of hosts.splice(0)) await host.stop();
 });
 
 async function setup(beforeRestore?: (host: TestHost) => void) {
-  const target = new FakeInputTarget('terminal', 'dev');
+  const target = new AliasedTerminal('terminal', 'dev');
   const built = Promise.withResolvers<void>();
   const send = Promise.withResolvers<void>();
   const fixture = definePlugin({
@@ -109,6 +122,29 @@ async function setup(beforeRestore?: (host: TestHost) => void) {
 }
 
 describe('the composed Vault input half', () => {
+  test('I78 I84 replay retains the original attempt id and releases all terminal aliases together', async () => {
+    const { host, deliver, id } = await setup();
+    expect((await deliver()).status).toBe(200);
+    const restarted = await host.restart();
+    hosts.push(restarted);
+    await restarted.runJob('inputs-restore');
+    const alias = { ...TERMINAL, key: '%3' };
+    expect(restarted.provided(InputHoldsPort).decide(alias, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
+    expect((await restarted.request('POST', `/v1/ferrets/${FERRET}/input-quarantines/dev/end`)).status).toBe(200);
+    expect(restarted.provided(InputHoldsPort).decide(alias, 'read', 'ferret')).toBe('allow');
+    expect(restarted.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toBe('allow');
+    const lines = (host.state('vault').raw(HoldsFile) ?? '')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
+    expect(lines[0]?.hold).toBe(`${id}/1`);
+    expect(new Set(lines.map(line => line.hold)).size).toBe(1);
+    expect(lines.every(line => line.names.join(',') === 'dev,%3')).toBe(true);
+    const twice = await restarted.restart();
+    hosts.push(twice);
+    await twice.runJob('inputs-restore');
+    expect(twice.provided(InputHoldsPort).decide(alias, 'read', 'ferret')).toBe('allow');
+  });
   for (const damage of ['damaged', 'missing'] as const) {
     test(`I82 durable hold evidence survives a ${damage} request record independently`, async () => {
       const { host, deliver, id } = await setup();

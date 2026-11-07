@@ -1,6 +1,7 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import {
   type HoldEvidence,
+  HoldEvidenceSchema,
   HoldsFile,
   type InputRaise,
   InputRequestFiles,
@@ -22,9 +23,8 @@ import {
  * in 5.0 it keeps `state/vault/input-requests/<id>.json` (the request without any value) and `state/vault/holds.jsonl`
  * (hold evidence, never reset, §9.3). Nothing written here has a field for a value, its length or a digest of it.
  *
- * Holds: `holds.jsonl` carries one line per terminal name. Today's per-attempt hold id is `<request>/<n>` and the
- * evidence line keeps the request; the attempt number and `unresolved` have no field in the frozen `HoldEvidenceSchema`
- * (a line without `until` is read as unresolved). That is a declared contract need (`hold`, `unresolved`).
+ * Holds: `holds.jsonl` carries today's original per-attempt hold id, complete alias set and session identity.
+ * Its evidence is self-contained: a request ending or becoming unreadable cannot discard a still-live hold.
  */
 
 /** Which card a request is drawn on: found again through Asks after a restart (`(input, <request id>)`). */
@@ -107,18 +107,20 @@ export class InputStateJournal implements InputJournal {
 
   async quarantine(sessionId: string, event: InputQuarantineEvent): Promise<void> {
     const request = event.hold.split('/')[0];
-    for (const name of event.names) {
-      const line: HoldEvidence = {
-        format: 1,
-        ferret: sessionId,
-        at: event.at as HoldEvidence['at'],
-        target: { kind: 'terminal', key: name },
-        event: event.type === INPUT_QUARANTINE_EVENT_TYPES.started ? 'began' : 'ended',
-        ...(request !== undefined && /^[0-9a-f]{32}$/u.test(request) ? { request } : {}),
-        ...(event.unresolved === true ? {} : { until: event.until as HoldEvidence['until'] }),
-      };
-      await this.state.append(HoldsFile, line);
-    }
+    const [name] = event.names;
+    if (name === undefined) throw new Error('a hold needs at least one surface name');
+    const line: HoldEvidence = HoldEvidenceSchema.parse({
+      format: 1,
+      ferret: sessionId,
+      hold: event.hold,
+      names: event.names,
+      at: event.at as HoldEvidence['at'],
+      target: { kind: 'terminal', key: name },
+      event: event.type === INPUT_QUARANTINE_EVENT_TYPES.started ? 'began' : 'ended',
+      ...(request !== undefined && /^[0-9a-f]{32}$/u.test(request) ? { request } : {}),
+      ...(event.unresolved === true ? { unresolved: true } : { until: event.until as HoldEvidence['until'] }),
+    });
+    await this.state.append(HoldsFile, line);
   }
 
   async quarantines(sessionId: string): Promise<readonly InputQuarantineEvent[]> {
@@ -128,9 +130,9 @@ export class InputStateJournal implements InputJournal {
       events.push({
         type: line.event === 'began' ? INPUT_QUARANTINE_EVENT_TYPES.started : INPUT_QUARANTINE_EVENT_TYPES.ended,
         sessionId,
-        names: [line.target.key],
-        hold: `${line.request}/${line.target.key}`,
-        ...(line.until === undefined ? { unresolved: true as const } : {}),
+        names: line.names,
+        hold: line.hold,
+        ...(line.unresolved === true ? { unresolved: true as const } : {}),
         until: line.until ?? this.now(),
         at: line.at,
       });
