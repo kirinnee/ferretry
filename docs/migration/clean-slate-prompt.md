@@ -18,9 +18,16 @@ the owner's setup across **by hand**, with `fy` commands, and leave the owner a 
 Rules:
 
 - **Never read, print or copy a secret value.** Secret values are retyped by the owner (`fy secret set NAME`). Skip
-  these backup files entirely: `state/secrets.*`, `state/vault.*`, `state/login-secrets.json`,
-  `state/mcp-oauth-secrets.json`, `fleet/credentials/**`, `api-token`, `api-warden-token`, `speed-up-keys.json`,
-  anything named `*.key`.
+  these backup files entirely: `state/secrets.*` (except `state/secrets.key`, below), `state/vault.*`,
+  `state/login-secrets.json`, `fleet/credentials/**`, `api-token`, `api-warden-token`, `speed-up-keys.json`,
+  anything else named `*.key`.
+- **One exception: the MCP sign-ins, three files carried together in step 2c, unopened.** `state/secrets.key` →
+  `state/vault/vault.key`, `state/mcp-oauth.json` → `state/mcp/oauth.json`, `state/mcp-oauth-secrets.json` →
+  `state/mcp/oauth-secrets.json`. All three or none. Your shell moves them; you never read them: no `cat`, `less`,
+  `head`, hash, `diff` or `jq .` to look, and their bytes never reach your output. The key is copied byte for byte; the
+  two documents change only their outer `"v": 1` to `"format": 1`, which is outside what the seal covers, so every
+  ciphertext stays as it was and still opens. This is what the converter (`migration/v4-to-v5`, its Vault and MCP
+  steps) does; it is the real path, and step 2c is the same move by hand.
 - Read the backup only, from your own shell. Ferretry fences it: no ferret tool, file tool, import or install may
   read it, **and that includes your own `fy` commands**. `fy instruction add`, `fy skill add`, `fy mcp add` and
   `fy config write` refuse any path inside the backup (`source_fenced`). So to bring a file across, first copy only
@@ -59,6 +66,51 @@ On the **old** version, while it still runs:
 2. Start the daemon (any `fy` command starts it). It finds no home, creates one and starts empty.
 3. If it refuses to start, stop: tell the owner the message, and move or delete nothing.
 4. Turn automatic updates back on if the owner wants them.
+
+## 2c. Carry the MCP sign-ins: three files together, unopened
+
+Do this **now**, before step 3 and before anything else seals a value: the new daemon mints its own
+`state/vault/vault.key` the first time anything is sealed (a sign-in in step 5, a `fy secret set` in step 6), and an
+old key copied over a new one would orphan whatever was sealed under it. The daemon may keep running: the Vault reads
+its key, and MCP its two files, from disk on every use.
+
+1. Look only at whether the files exist (never at what is in them). If `$OLD/state/mcp-oauth.json` or
+   `$OLD/state/mcp-oauth-secrets.json` is missing, carry nothing and skip to step 3; the owner signs in to each OAuth
+   MCP server again. If `$OLD/state/mcp-oauth-secrets.json` exists but `$OLD/state/secrets.key` does not, carry
+   nothing and tell the owner: those tokens cannot be opened without it.
+2. With `NEW=~/.ferretry` (the home the daemon just made; it has `home.json`), check that none of the three targets
+   exists: `ls "$NEW/state/vault/vault.key" "$NEW/state/mcp/oauth.json" "$NEW/state/mcp/oauth-secrets.json"` must
+   answer "No such file" for all three. If any exists, stop and tell the owner. Never overwrite one.
+3. Run this as one block in your own shell. It prints nothing but a refusal, and a refusal names no content:
+
+   ```sh
+   (
+     set -e
+     umask 077
+     mkdir -p "$NEW/state/vault" "$NEW/state/mcp"
+     cp "$OLD/state/secrets.key" "$NEW/state/vault/vault.key"
+     chmod 600 "$NEW/state/vault/vault.key"
+     jq 'if .v == 1 and .cipher == "AES-256-GCM" then {format: 1} + del(.v) else error("not a version-1 sealed document") end' \
+       "$OLD/state/mcp-oauth-secrets.json" > "$NEW/state/mcp/oauth-secrets.json.tmp"
+     jq 'if .v == 1 then {format: 1} + del(.v) else error("not a version-1 MCP sign-in document") end' \
+       "$OLD/state/mcp-oauth.json" > "$NEW/state/mcp/oauth.json.tmp"
+     chmod 600 "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth.json.tmp"
+     mv "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth-secrets.json"
+     mv "$NEW/state/mcp/oauth.json.tmp" "$NEW/state/mcp/oauth.json"
+   )
+   ```
+
+   `jq` writes straight into the new file; you never see its output. If the block fails, delete the three targets
+   and any `*.tmp` it left (they are your copies, not the backup), carry nothing, and tell the owner the refusal.
+
+4. Tell the owner, in one line each:
+   - Carried: each OAuth MCP server's sign-in record, refresh token and registered client secret.
+   - Not carried: the **access tokens**. They live in the vault document `state/secrets.json`, which this runbook
+     never carries (its values are retyped, step 6). Each server shows "needs sign-in" until MCP mints a new access
+     token from the carried refresh token, which it does at a ferret launch that needs the server once the old token
+     is due to expire (only for a sign-in that had a refresh token and an expiry). To use one sooner, the owner signs
+     in to it again.
+5. After step 4 adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)
 

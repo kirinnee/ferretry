@@ -299,7 +299,7 @@ the fleet's materialiser and the daemon both call. The access token is an ordina
 name in **Settings → Secrets**, it is redacted from transcripts, and no route returns it.
 
 What is not secret — the issuer, the endpoints, the client id, the scope, the expiry — is kept in
-`state/mcp-oauth.json`, which never holds a value from either store.
+`state/mcp/oauth.json`, which never holds a value from either store.
 
 ## How an agent uses the token
 
