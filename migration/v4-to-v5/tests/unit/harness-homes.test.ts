@@ -68,6 +68,22 @@ test('maps a former runtime name and copies the Claude pool without parsing it',
   expect(JSON.stringify(report)).not.toContain('FAKE-');
 });
 
+test('reads the published v4 runtimes harness field and derives its home from ids', async () => {
+  await f.put('fleet/manifest.json', {
+    version: 1,
+    accounts: [],
+    runtimes: [{ id: RUNTIME, name: 'codex-work', harness: 'codex' }],
+  });
+  await f.put('fleet/ids.json', {
+    version: 1,
+    runtimes: { 'codex-work': { id: RUNTIME, formerNames: [], home: 'custom-home' } },
+  });
+  await f.put('fleet/homes/custom-home/user-state', 'FAKE-STATE');
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(await stat(join(f.to, 'state/codex/agent-homes', RUNTIME, 'user-state'))).toBeDefined();
+});
+
 test('missing folders carry zero and dry run does not copy files', async () => {
   expect((await harnessHomesStep.run(f.ctx())).kept.every(item => item.count === 0)).toBe(true);
   await f.put('fleet/shared/claude/history.jsonl', 'FAKE-HISTORY');
