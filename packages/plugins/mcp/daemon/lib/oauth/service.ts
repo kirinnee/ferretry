@@ -796,14 +796,21 @@ export class McpOAuthService {
    * the harness then reports the one server as unauthorised, which is better than an agent that does
    * not start because one of its servers expired. A refresh the provider REJECTS marks the sign-in as
    * needing a new one, which is what the component then says.
+   *
+   * A renewable sign-in whose ACCESS token the store does not hold is due too, whatever its expiry says: a sign-in
+   * carried to a new home brings its record and refresh token but never the access token (the clean-slate runbook's
+   * step 2c), and its first launch is what renews it.
    */
   async refreshForLaunch(names: readonly SecretName[]): Promise<void> {
     try {
       const wanted = new Set(names);
       const document = await this.deps.state.read();
+      const held = new Set((await this.deps.secrets.list()).map(summary => summary.name));
       const due = Object.entries(document.connections)
         .filter(([component, record]) => wanted.has(mcpOAuthSecretNames(component, record.serverUrl).access))
-        .filter(([, record]) => this.due(record))
+        .filter(([component, record]) =>
+          this.due(record, !held.has(mcpOAuthSecretNames(component, record.serverUrl).access)),
+        )
         .map(([component]) => component);
       await Promise.all(due.map(component => this.refreshOnce(component)));
     } catch {
@@ -811,8 +818,11 @@ export class McpOAuthService {
     }
   }
 
-  private due(record: McpOAuthRecord): boolean {
-    if (!record.renewable || record.needsSignIn === true || record.expiresAt === undefined) return false;
+  /** `missing`: the store holds no access token for it, so there is nothing to wait for the expiry of. */
+  private due(record: McpOAuthRecord, missing = false): boolean {
+    if (!record.renewable || record.needsSignIn === true) return false;
+    if (missing) return true;
+    if (record.expiresAt === undefined) return false;
     return Date.parse(record.expiresAt) - this.deps.clock.now() <= MCP_OAUTH_REFRESH_MARGIN_MS;
   }
 
@@ -830,10 +840,12 @@ export class McpOAuthService {
   private async refresh(component: string): Promise<void> {
     // Re-read: an earlier launch may have refreshed it between the survey and now.
     const record = (await this.deps.state.read()).connections[component];
-    if (record === undefined || !this.due(record)) return;
+    if (record === undefined) return;
+    const names = mcpOAuthSecretNames(component, record.serverUrl);
+    const missing = !(await this.deps.secrets.list()).some(summary => summary.name === names.access);
+    if (!this.due(record, missing)) return;
     // Defence in depth: the endpoint on disk is re-checked before a refresh token is sent to it.
     if (!endpointAllowed(record.tokenEndpoint, record.serverUrl)) return await this.markNeedsSignIn(component);
-    const names = mcpOAuthSecretNames(component, record.serverUrl);
     const refreshToken = await this.deps.internal.value(names.refresh);
     if (refreshToken === undefined) return await this.markNeedsSignIn(component);
     const form = new URLSearchParams({

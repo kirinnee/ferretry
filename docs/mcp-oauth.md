@@ -323,6 +323,11 @@ A server marked `auth: oauth` that has never been signed in — or has moved to 
 **refuses the launch** with the missing secret's name, the store's ordinary rule. A blank
 `Authorization` header would fail twenty minutes later with nothing to point at.
 
+The launch names each token by reference, and the store opens the references only as the runtime starts.
+So a **sign-out that races a launch refuses that launch**: the token was there when the launch named it
+and is gone when the store opens it. The refusal names the secret, never its value. The window is short,
+and starting the ferret again works.
+
 ## Refresh: on use only
 
 There is no timer. When a runtime is launched, the launch environment asks the MCP sign-in service to
