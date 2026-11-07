@@ -1,3 +1,4 @@
+import { createContext, createElement, type ReactNode, useContext } from 'react';
 import type { Views } from '../layout/engine.ts';
 import type { RouteTable } from './routes.ts';
 import { useOptionalShell } from '../shell/context.tsx';
@@ -34,10 +35,18 @@ export type ScreenHrefOf = (
 
 const NO_SHELL: ScreenHrefOf = () => undefined;
 
-/** `screenHref` bound to the shell this view is drawn in; outside a shell it answers `undefined`. */
+const ScreenHrefContext = createContext<ScreenHrefOf | null>(null);
+
+/** Supplies the addresses where there is no shell (a harness, a test): the shell's own route table wins when present. */
+export function ScreenHrefProvider({ href, children }: { readonly href: ScreenHrefOf; readonly children: ReactNode }) {
+  return createElement(ScreenHrefContext.Provider, { value: href }, children);
+}
+
+/** `screenHref` bound to the shell this view is drawn in; outside a shell it answers from a provider, else `undefined`. */
 export function useScreenHref(): ScreenHrefOf {
   const shell = useOptionalShell();
-  if (shell === null) return NO_SHELL;
+  const provided = useContext(ScreenHrefContext);
+  if (shell === null) return provided ?? NO_SHELL;
   const { views, routes } = shell;
   return (daemon, plugin, screen, params) => screenHref(views, routes, daemon, plugin, screen, params);
 }

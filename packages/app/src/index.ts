@@ -220,4 +220,4 @@ export { absoluteTime, relativeTime, statusLabel } from './shared/time-labels.ts
 
 // ─── mounting other plugins' views, and addressing screens ────────────────────────────────────────────────────────
 export { RendererView } from './shell/renderer-view.tsx';
-export { type ScreenHrefOf, screenHref, useScreenHref } from './router/screen-href.ts';
+export { ScreenHrefProvider, type ScreenHrefOf, screenHref, useScreenHref } from './router/screen-href.ts';

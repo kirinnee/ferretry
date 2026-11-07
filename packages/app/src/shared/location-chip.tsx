@@ -41,7 +41,7 @@ export function LocationChip({ fix }: { readonly fix: LocationFix }) {
  * installed app) are the Access plugin's device-permissions guide; a host that has it passes its `howToEnable`.
  */
 const GENERIC_STEPS: readonly string[] = [
-  'Open this site’s permissions in your browser (the lock or settings icon by the address bar).',
+  'Open Site settings for this page (the lock or settings icon by the address bar).',
   'Set Location to Allow (or Ask every time).',
   'Come back to Ferretry and try again.',
 ];

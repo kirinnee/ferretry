@@ -38,7 +38,11 @@ export interface StatusMarkView {
   readonly state: {
     readonly status: StatusMarkStatus;
     readonly waiting?:
-      | { readonly peerName?: string | undefined; readonly condition?: string | undefined }
+      | {
+          readonly since?: string | undefined;
+          readonly peerName?: string | undefined;
+          readonly condition?: string | undefined;
+        }
       | null
       | undefined;
     readonly turnState?: string | undefined;
