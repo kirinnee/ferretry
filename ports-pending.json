@@ -33,7 +33,8 @@
     "agenda": ["app"],
     "browsers": ["app"],
     "conversation": ["app"],
-    "terminals": ["app"]
+    "terminals": ["app"],
+    "warden": ["app"]
   },
   "pendingAppPorts": [
     {
@@ -100,6 +101,25 @@
       "plugin": "agenda",
       "path": "packages/plugins/agenda/tests/support/app",
       "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "warden",
+      "path": "packages/plugins/warden/app",
+      "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
     }
-  ]
+  ],
+  "pendingGaps": {
+    "warden": [
+      "liveness monitor (dead_monitor, sus_thinking, sus_subprocess, agent_frozen never fire): Terminals’ port (of, holders) has no look at a ferret’s own pane; needs a Terminals additive pane liveness sample (frame, token counter, transcript size, process tree) per D2 #19",
+      "leftover browsers are never closed: neither Terminals (of, holders) nor Browsers (state, pagesOf) reads a ferret pane’s processes or closes one; needs an additive close of the browsers left under a ferret’s pane (D2 #19)",
+      "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
+      "auto-revive is wired through FerretsApi.resume but inert: needs a death cause on FerretSummary (D2 #19)",
+      "investigators refuse, so nothing is spent: needs Ferrets’ start taking a work folder and reports read back through summary(ferret) (D2 #19, #15)",
+      "restart is stop then resume with today’s refusals checked first: needs a Ferrets additive automatic resume that replaces a live pane (today’s replaceLiveTerminal)",
+      "nudges must carry actor warden (D2 #19); needs Conversation’s additive warden caller",
+      "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
+      "PATCH /v1/warden/config answers 503 plugin_unavailable: needs the kernel config write port (D2 #16)",
+      "orphaned_card, input_stuck and inbox_stuck never occur and a revived ferret is told no card: the board read (Board is not a §2.4 need) and Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0"
+    ]
+  }
 }

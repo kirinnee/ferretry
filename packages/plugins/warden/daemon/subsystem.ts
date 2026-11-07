@@ -68,8 +68,9 @@ export interface WardenSubsystem {
 
 /**
  * THE SEAM THAT KEEPS "NO UNATTENDED SPEND BY SURPRISE": the Jev guard is today's `JevTriageGuard`, but it spends the Jev
- * key only through an outbound authorizer, and Warden does not `need` the Vault (its manifest declares `secrets:
- * ['JEV_API_KEY']` and no Vault port). Until the Vault is wired in, every call answers `secret_missing`, which the guard
+ * key only through an outbound authorizer. GAP(kernel): the key is read through the kernel's `secrets.resolve`
+ * (OwnSecret, D2 #19), which `KernelPorts` does not carry on 5.0; the manifest already declares `secrets:
+ * ['JEV_API_KEY']` and the `api.typesafe.ai` network. Until it does, every call answers `secret_missing`, which the guard
  * turns into `not_set`: no request leaves the machine and nothing is spent.
  */
 const NO_VAULT: OutboundAuthorizerPort = { send: async () => ({ kind: 'secret_missing' }) };

@@ -98,6 +98,19 @@ describe('ports-pending', () => {
     expect(found).toContain('ghost is not a subsystem');
     expect(found).toContain('alpha has no skeleton half left');
   });
+  test('planted: declared gaps that name no subsystem, or give no reason', async () => {
+    const f = ws([{ id: 'beta' }], { pending: ['beta'] });
+    const write = (pendingGaps: unknown) =>
+      f.write('ports-pending.json', JSON.stringify({ format: 1, pending: ['beta'], pendingGaps }));
+    write({ ghost: ['a reason'] });
+    expect(messages(await run(portsPending, f, NO_BASE))).toContain('pendingGaps: ghost is not a subsystem');
+    write({ beta: [] });
+    expect(messages(await run(portsPending, f, NO_BASE))).toContain(
+      'pendingGaps: beta needs a list of non-empty reasons',
+    );
+    write({ beta: ['the move needs Ferrets\u2019 move'] });
+    expect(messages(await run(portsPending, f, NO_BASE))).toBe('');
+  });
   test('a shrinking list of skeletons passes', async () => {
     const f = ws([{ id: 'beta' }], { pending: ['beta'] });
     f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'] }));

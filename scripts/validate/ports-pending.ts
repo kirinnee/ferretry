@@ -2,6 +2,10 @@
  * `ports-pending` (§7.9, spine §7): `ports-pending.json` grows (against the base ref, default `origin/rebuild/5.0`),
  * names an id that is no subsystem, or lists a plugin none of whose halves is a skeleton any more. A port removes its
  * own line in the same branch.
+ *
+ * `pendingGaps` is a ported plugin's declared GAPs, in words: `{ "<id>": ["<what is missing>: <what it needs>", …] }`.
+ * It may name only subsystems, each with at least one non-empty reason; it is what a port that left a half of today's
+ * behaviour waiting on another subsystem says out loud.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,6 +25,27 @@ export function parsePending(text: string, where: string): PortsPending {
   if (!Array.isArray(value.pending) || value.pending.some(id => typeof id !== 'string'))
     throw new Error(`${where}: "pending" is not a list of ids`);
   return { format: 1, pending: value.pending as string[] };
+}
+
+/** The declared GAPs of `ports-pending.json`, or a finding's message when the field is malformed. */
+export function readPendingGaps(root: string): ReadonlyMap<string, readonly string[]> | string {
+  const file = join(root, 'ports-pending.json');
+  if (!existsSync(file)) return new Map();
+  const value = (JSON.parse(readFileSync(file, 'utf8')) as { pendingGaps?: unknown }).pendingGaps;
+  if (value === undefined) return new Map();
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return 'pendingGaps must map subsystem ids to their reasons';
+  const gaps = new Map<string, readonly string[]>();
+  for (const [id, reasons] of Object.entries(value)) {
+    if (
+      !Array.isArray(reasons) ||
+      reasons.length === 0 ||
+      reasons.some(reason => typeof reason !== 'string' || reason.trim() === '')
+    )
+      return `pendingGaps: ${id} needs a list of non-empty reasons`;
+    gaps.set(id, reasons as string[]);
+  }
+  return gaps;
 }
 
 export function readPending(root: string): PortsPending {
@@ -65,6 +90,12 @@ export const check: Check = {
           findings.push({ check, where: 'ports-pending.json', message: `${id} was added; the list may only shrink` });
     }
     const model = await ctx.model();
+    const gaps = readPendingGaps(ctx.root);
+    if (typeof gaps === 'string') findings.push({ check, where: 'ports-pending.json', message: gaps });
+    else
+      for (const id of gaps.keys())
+        if (!model.loaded.some(s => s.id === id))
+          findings.push({ check, where: 'ports-pending.json', message: `pendingGaps: ${id} is not a subsystem` });
     for (const id of current.pending) {
       const subsystem = model.loaded.find(s => s.id === id);
       if (subsystem === undefined) {
