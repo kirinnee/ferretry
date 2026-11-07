@@ -9,7 +9,6 @@
   text-transform: uppercase;
 }
 
-
 /* Premise and context: two soft tinted blocks, each with its label ABOVE its points so the text gets the full width.
    The tints come from the theme's own accent and warn tokens, so both light and dark keep their contrast. No accent bar. */
 .fy-card__situation {
@@ -103,6 +102,9 @@
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--ok-bg, var(--accent-soft));
+}
 
 /* A term: a dotted underline; a tap shows what it means just under it. */
 .fy-terms-layer {
@@ -140,4 +142,3 @@
   color: inherit;
   font-size: inherit;
 }
-

@@ -38,6 +38,7 @@ import {
 import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, errorText, ShellError } from './errors.ts';
+import { pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
 import { buildVerbTable, expandAlias, renderHelp, resolveVerb, type VerbEntry } from './verbs.ts';
@@ -217,6 +218,12 @@ async function runPluginVerb(
     // The client opens lazily: a verb that never calls the daemon never reads a credential.
     client: lazyClient(deps, plugin.id, surfaces, inPane(world.environment)),
     io,
+    // The whole context, for every half (lead ruling): a facility left out fails the verb that needs it in the real binary.
+    clock: world.host.clock,
+    sleep: (delay, signal) => world.host.sleep(delay, signal),
+    readText: path => world.host.readText(path),
+    env: pluginEnvironment(world.environment),
+    ownState: world.host.ownState(plugin.manifest),
   });
   const handler = (built.verbs as Readonly<Record<string, VerbHandler | undefined>>)[entry.line];
   if (handler === undefined)
