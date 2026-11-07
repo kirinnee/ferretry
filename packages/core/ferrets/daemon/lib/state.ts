@@ -1,5 +1,6 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { InstantSchema } from '@ferretry/std';
 import { FerretTitleSchema, FerretWaitingSchema, StartOptionsSchema } from '../../contract/index.ts';
 import { AgentPinFileSchema } from './agent-pins/types.ts';
 import { PinSchema } from './protocol/pins.ts';
@@ -107,6 +108,8 @@ export const FerretWaitFiles = defineState({
   schema: z.strictObject({
     waiting: FerretWaitingSchema.optional(),
     creditSeconds: z.number().int().nonnegative().optional(),
+    /** When the ferret said `signal done` (see `FerretSummary.finishedAt`). */
+    finishedAt: InstantSchema.optional(),
   }),
   mode: 0o600,
   onDamaged: { narrower: 'a damaged waiting.json reads as no declared wait and no credit' },

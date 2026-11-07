@@ -28,6 +28,8 @@ export interface FerretSignalHost {
   creditOf(ferret: FerretId): Promise<number | undefined>;
   /** Writes (or, with no wait, ends) the declared wait and the credit, durably, then tells the registry. */
   saveWaiting(ferret: FerretId, waiting: FerretWaiting | undefined, creditSeconds: number | undefined): Promise<void>;
+  /** Records that the ferret said `signal done`, at this instant. */
+  saveFinished(ferret: FerretId, at: string): Promise<void>;
   /** The ferret's `summary.md`, as the ferret wrote it. */
   writeSummary(ferret: FerretId, text: string): Promise<void>;
   /** One event on the ferret's `history.jsonl`. */
@@ -96,6 +98,8 @@ export class FerretSignalRepository implements SignalRepository {
         FerretWaitingSchema.parse(change.waiting),
         await this.host.creditOf(ferret),
       );
+    else if (change.event === 'session.completed' && change.finishedAt !== undefined)
+      await this.host.saveFinished(ferret, change.finishedAt);
     else if (change.event === 'session.waiting_cleared')
       await this.host.saveWaiting(ferret, undefined, change.waitingCreditSeconds ?? (await this.host.creditOf(ferret)));
     if (change.event !== 'session.waiting_held')

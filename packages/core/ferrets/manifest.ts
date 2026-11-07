@@ -319,6 +319,11 @@ export default definePlugin({
         summary:
           'restart ferrets on the same runtime, keeping the conversation; a busy one waits for its next idle moment',
       }),
+      verb('wait <id>', {
+        summary:
+          'block until a ferret settles; exits 0 finished, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
+      }),
+      verb('instructions', { summary: 'which of its own instruction sections this ferret launched with' }),
       verb('signal <kind> [message...]', {
         summary: 'done | help | waiting | working — the teammate lifecycle signals',
       }),

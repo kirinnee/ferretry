@@ -173,5 +173,10 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   quota: FerretQuotaSchema.optional(),
   /** Present exactly while the ferret has a declared wait (`signal waiting`); `signal working` clears it. */
   waiting: FerretWaitingSchema.optional(),
+  /**
+   * When the ferret said `signal done`, present only while it is stopped on that word: a stopped ferret that did not
+   * say it (the owner stopped it, a launch failed) has none, and a resumed one is no longer finished.
+   */
+  finishedAt: InstantSchema.optional(),
 });
 export type FerretSummary = z.infer<typeof FerretSummarySchema>;

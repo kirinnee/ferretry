@@ -51,6 +51,27 @@ describe('signal done', () => {
     await h.stop();
   });
 
+  test('R-0371 a ferret that said done is finished; one the owner stopped, or that resumed, is not', async () => {
+    const h = await running();
+    const finished = await started(h, { name: 'aniya' });
+    const stopped = await started(h, { name: 'bryn', folder: '/work/b' });
+    await say(h, finished, { kind: 'done', message: 'shipped' });
+    await h.request('POST', `/v1/ferrets/${stopped}/stop`, { body: {} });
+    expect((await summary(h, finished)).finishedAt).toBeString();
+    expect((await summary(h, stopped)).finishedAt).toBeUndefined();
+    // It survives the daemon's restart, and a resume ends it.
+    const again = await h.restart();
+    expect((await summary(again, finished)).finishedAt).toBeString();
+    await again.clock.advance(1_000);
+    await again.request('POST', `/v1/ferrets/${finished}/resume`, { body: {} });
+    expect((await summary(again, finished)).finishedAt).toBeUndefined();
+    // Stopped by the owner after that, it did not finish.
+    await again.clock.advance(1_000);
+    await again.request('POST', `/v1/ferrets/${finished}/stop`, { body: {} });
+    expect((await summary(again, finished)).finishedAt).toBeUndefined();
+    await again.stop();
+  });
+
   test('R-0371 a done with no message still leaves a summary file, never an absence', async () => {
     const h = await running();
     const id = await started(h);

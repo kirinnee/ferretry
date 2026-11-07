@@ -1,6 +1,7 @@
 import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
+import { instructionsReport, renderInstructionsReport } from './lib/instructions/report.ts';
 import { RestartController } from './lib/restart/controller.ts';
 import { SessionCommandError } from './lib/session/errors.ts';
 import { ResumeSessionController } from './lib/session/lifecycle-controllers.ts';
@@ -19,11 +20,24 @@ import { SessionSubtreeController } from './lib/session/subtree-controller.ts';
 import { BulkStopController } from './lib/stop/controller.ts';
 import type { BulkStopSelector } from './lib/stop/types.ts';
 import { choice, count, guarded, joined, list as listOf, on, PLAIN, text, typed, VerbIo } from './lib/verb-io.ts';
+import { WaitController } from './lib/wait/controller.ts';
 import { WorktreeController } from './lib/worktrees/controller.ts';
 import { ClientWorktreeGateway } from './lib/worktrees/gateway.ts';
 
 /** The binary's name, for sentences that name a command. */
 const BINARY = 'fy';
+
+/**
+ * Whether a failed read lost the daemon (as against the daemon answering no): the shell's transport failures carry no
+ * HTTP status. A wait that loses the daemon ends with its own exit code instead of looking like a ferret that ended.
+ */
+function transportFailure(error: unknown): 'unavailable' | 'unresponsive' | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const fields = error as { status?: unknown; exitCode?: unknown; timedOut?: unknown; name: string };
+  if (typeof fields.status === 'number' || typeof fields.exitCode === 'number') return undefined;
+  if (fields.timedOut === true) return 'unresponsive';
+  return /Transport/.test(fields.name) ? 'unavailable' : undefined;
+}
 
 /** Usage sentences a group verb prints when it is typed bare. */
 const STOP_USAGE = [
@@ -66,7 +80,7 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal }) {
+  build({ client, io: terminal, env, clock, sleep }) {
     const api = new ClientSessionApi(client);
     const environment: SessionEnvironment = { cwd: process.cwd() };
 
@@ -239,6 +253,39 @@ export default implementCli(manifest, {
       });
     });
 
+    const wait = verb(async (invocation, _presenter, io) => {
+      const timeout = count(invocation, 'timeout');
+      const interval = count(invocation, 'interval');
+      const marker = text(invocation, 'until-marker');
+      const nowMs = (): number => clock?.nowMs() ?? Date.now();
+      const controller = new WaitController(
+        {
+          get: async reference => await api.get(reference),
+          markerExists: async path => await Bun.file(path).exists(),
+          nowMs,
+          sleep: async milliseconds => {
+            if (sleep !== undefined) await sleep(milliseconds as never);
+            else await new Promise<void>(resolve => setTimeout(resolve, milliseconds));
+          },
+          transport: transportFailure,
+        },
+        io,
+        BINARY,
+      );
+      await controller.wait(first(invocation, 'ferret id'), {
+        ...(on(invocation, 'json') ? { json: true } : {}),
+        ...(timeout === undefined ? {} : { timeout }),
+        ...(interval === undefined ? {} : { interval }),
+        ...(marker === undefined ? {} : { untilMarker: marker }),
+      });
+    });
+
+    const instructions = verb(async (invocation, presenter) => {
+      const report = instructionsReport(env ?? {});
+      if (on(invocation, 'json')) presenter.json(report);
+      else presenter.lines([renderInstructionsReport(report, BINARY)]);
+    });
+
     const revoke = verb(async (invocation, presenter) => {
       await new RevokeCredentialController(api, presenter, BINARY).execute(invocation.args[0] ?? '', json(invocation));
     });
@@ -301,6 +348,8 @@ export default implementCli(manifest, {
         name: names,
         'resume <id> [message...]': resume,
         'restart [ids...]': restart,
+        'wait <id>': wait,
+        instructions,
         'signal <kind> [message...]': signal,
         session: usage(SESSION_USAGE),
         'session revoke-credential <session>': revoke,

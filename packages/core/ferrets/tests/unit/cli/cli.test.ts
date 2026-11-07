@@ -350,3 +350,22 @@ describe('the ferrets cli half', () => {
     expect(await verb('ps').catch((error: unknown) => error)).toBe(refusal);
   });
 });
+
+describe('wait and instructions', () => {
+  test('V-wait reads GET /v1/ferrets/:id until the ferret settles and exits with the way it settled', async () => {
+    const done = sessionView({ id: 'lead', name: 'wren', state: 'stopped', finishedAt: '2026-11-06T09:00:00.000Z' as never });
+    const finished = run({ [FERRET_ROUTES.get]: done });
+    expect(await finished.verb('wait <id>', ['lead'])).toBe(0);
+    expect(finished.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } }]);
+    expect(finished.out).toEqual(['lead is stopped']);
+    const ended = run({ [FERRET_ROUTES.get]: sessionView({ id: 'lead', state: 'stopped' }) });
+    expect(await ended.verb('wait <id>', ['lead'])).toBe(1);
+    expect(ended.err.join('')).toContain('fy wait: the ferret ended as stopped');
+  });
+
+  test('V-instructions answers from the environment the shell handed over, and says so when there is none', async () => {
+    const { verb, out } = run();
+    expect(await verb('instructions')).toBe(0);
+    expect(out.join('\n')).toContain('not running inside a ferret');
+  });
+});

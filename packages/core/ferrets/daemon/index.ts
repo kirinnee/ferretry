@@ -130,7 +130,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // Its declared wait, if it was parked when the daemon last ran.
       const wait = await kernel.state.read(FerretWaitFiles, name);
       if (wait.ok && wait.value?.waiting !== undefined) registry.putWaiting(read.value.id, wait.value.waiting);
-      else if (!wait.ok) log.warn('a ferret waiting file could not be read', { file: wait.error.file });
+      if (wait.ok && wait.value?.finishedAt !== undefined) registry.putFinished(read.value.id, wait.value.finishedAt);
+      if (!wait.ok) log.warn('a ferret waiting file could not be read', { file: wait.error.file });
     }
     const held = await kernel.state.read(FerretTokensFile);
     // An unreadable/missing token document beside existing records cannot prove no owner cut-off was held.
@@ -172,6 +173,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+
+  /** A ferret's `waiting.json`, or an empty one: what it declared, the time credited for it, and when it finished. */
+  const waitDocument = async (ferret: FerretId) => {
+    const read = await kernel.state.read(FerretWaitFiles, ferret);
+    return read.ok && read.value !== undefined ? read.value : {};
+  };
 
   const service = new FerretsService(registry, tokens, {
     ready,
@@ -229,9 +236,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // A stopped ferret holds no declared wait; the credit it banked stays.
     endWait: async ferret => {
       if (registry.waitingOf(ferret) === undefined) return;
-      const kept = await kernel.state.read(FerretWaitFiles, ferret);
-      const creditSeconds = kept.ok ? kept.value?.creditSeconds : undefined;
-      await kernel.state.write(FerretWaitFiles, creditSeconds === undefined ? {} : { creditSeconds }, ferret);
+      const { waiting: _ended, ...kept } = await waitDocument(ferret);
+      await kernel.state.write(FerretWaitFiles, kept, ferret);
       registry.putWaiting(ferret, undefined);
     },
     history: appendHistory,
@@ -384,17 +390,19 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     record: ferret => registry.get(ferret),
     resolve: resolveFerret,
     waitingOf: ferret => registry.waitingOf(ferret),
-    creditOf: async ferret => {
-      const read = await kernel.state.read(FerretWaitFiles, ferret);
-      return read.ok ? read.value?.creditSeconds : undefined;
-    },
+    creditOf: async ferret => (await waitDocument(ferret)).creditSeconds,
     saveWaiting: async (ferret, waiting, creditSeconds) => {
+      const { waiting: _before, creditSeconds: _credit, ...kept } = await waitDocument(ferret);
       await kernel.state.write(
         FerretWaitFiles,
-        { ...(waiting === undefined ? {} : { waiting }), ...(creditSeconds === undefined ? {} : { creditSeconds }) },
+        { ...kept, ...(waiting === undefined ? {} : { waiting }), ...(creditSeconds === undefined ? {} : { creditSeconds }) },
         ferret,
       );
       registry.putWaiting(ferret, waiting);
+    },
+    saveFinished: async (ferret, at) => {
+      await kernel.state.write(FerretWaitFiles, { ...(await waitDocument(ferret)), finishedAt: at as never }, ferret);
+      registry.putFinished(ferret, at);
     },
     writeSummary: async (ferret, text) => {
       await kernel.state.write(FerretSummaryFiles, new TextEncoder().encode(text), ferret);
