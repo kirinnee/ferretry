@@ -852,7 +852,7 @@ The wrapper appends each ferret's own sections to that same value at launch — 
 the lessons teaching, each when its switch is on ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 
 The server's own `initialize` instructions are one line; `lessons_suggest` files a lesson through
-`POST /v1/agent/lessons` ([learning.md](learning.md)); `instructions` answers, from the environment the
+`POST /v1/agent/lessons` ([lessons.md](lessons.md)); `instructions` answers, from the environment the
 server inherited, which of those sections this ferret launched with — the `fy instructions` report
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 

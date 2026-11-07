@@ -15,7 +15,7 @@ const NOT_RECORDED = { skip: 'not recorded today (no rule in the audit table)' }
 
 /**
  * Lessons (§2.3): rules learned when you correct a ferret, given to every ferret after. Today's `learning`
- * (docs/learning.md): the board of suggestions, the owner's verdicts, Apply (a diff preview and an etag write), the
+ * (docs/lessons.md): the board of suggestions, the owner's verdicts, Apply (a diff preview and an etag write), the
  * passive switch and the explicit scan. Routes are today's mounts (`mounts/learning.ts`), descriptor fields copied; the
  * paths follow the route-path rule (`learning` → `lessons`, `sessions` → `ferrets`, `agent` → `lessons/suggest`).
  *
