@@ -7,10 +7,12 @@ import {
   jsonResponse,
   type PlainApiResponse,
 } from '@ferretry/kernel/contract';
+import { isFerretCall, ownerOnly } from '@ferretry/core-gate/contract';
 import type { z } from 'zod';
 import {
   DaemonUpdateSettingsPatchSchema,
   DaemonUpdateStartRequestSchema,
+  type DaemonUpdateView,
   UPDATE_HOST_CODES,
   UPDATES_CONFIG,
 } from '../../contract/index.ts';
@@ -51,9 +53,11 @@ const hostUnavailable = (): PlainApiResponse =>
   );
 
 /**
- * `GET`, `POST` and `PATCH /v1/daemon/update[/settings]` (docs/updating.md). Who may update, and whether a remote
- * device confirms with a passkey, is decided before these run: Gate demands `fleet.configure` of a person and the
- * step-up of the act (an agent cannot update the machine; the owner does).
+ * `GET`, `POST` and `PATCH /v1/daemon/update[/settings]` (docs/updating.md). Gate demands `fleet.configure` of a person
+ * before these run; the handler adds today's {@link ownerOnly} gate (`runtime/mounts/daemon-update.ts`): an agent
+ * cannot update the machine (the owner does), a governed device confirms with a FRESH passkey, and that proof is
+ * spent only once the act has been accepted. Turning automatic install OFF never needs one — the safe direction is
+ * never gated — but a ferret still may not change how the machine updates.
  */
 export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door: ConfigDoor | undefined) {
   return {
@@ -62,16 +66,27 @@ export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door:
 
     'POST /v1/daemon/update': async (call: CallContext) => {
       const request = await bodyOf(call.request, DaemonUpdateStartRequestSchema);
+      const refused = ownerOnly(call, 'update this machine');
+      if (refused !== undefined) return refused;
       if (subsystem === undefined) return hostUnavailable();
+      let view: DaemonUpdateView;
       try {
-        return jsonResponse(await subsystem.start(request), 202);
+        view = await subsystem.start(request);
       } catch (error) {
         return refuse(error);
       }
+      if (call.governance?.governed === true) call.spendFreshStepUp?.();
+      return jsonResponse(view, 202);
     },
 
     'PATCH /v1/daemon/update/settings': async (call: CallContext) => {
       const patch = await bodyOf(call.request, DaemonUpdateSettingsPatchSchema);
+      if (patch.autoInstall) {
+        const refused = ownerOnly(call, 'turn on automatic updates');
+        if (refused !== undefined) return refused;
+      } else if (isFerretCall(call)) {
+        throw new ApiError(403, 'a ferret cannot change how this machine updates; the owner does', 'forbidden');
+      }
       if (subsystem === undefined) return hostUnavailable();
       if (door === undefined)
         return errorResponse(503, 'this daemon cannot change its settings yet', UPDATE_HOST_CODES.configUnavailable);
@@ -80,6 +95,8 @@ export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door:
         return errorResponse(422, `the setting was refused: ${written.reason}`, UPDATE_HOST_CODES.settingRefused, {
           issues: written.issues,
         });
+      // Accepted (applied, or held for the owner's confirmation): the proof that carried the request is spent.
+      if (patch.autoInstall && call.governance?.governed === true) call.spendFreshStepUp?.();
       const view = await subsystem.view();
       return written.kind === 'held' ? jsonResponse({ held: written.sentences, view }, 202) : jsonResponse(view);
     },
