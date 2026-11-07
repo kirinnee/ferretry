@@ -6,6 +6,7 @@ import { appendFileSync } from 'node:fs';
 import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
+import { toolEnvironment } from './adapters/process.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
@@ -71,6 +72,7 @@ async function main(): Promise<number> {
       binary: BINARY,
       release: VERSION,
       childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: homedir() },
+      toolEnv: toolEnvironment(process.env),
     }),
     contractHash: id => registry.contractHashes?.[id]?.effective ?? 'unhashed',
     timings: timings.timings,
