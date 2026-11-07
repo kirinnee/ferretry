@@ -2,10 +2,11 @@
 
 The one-time converter at `migration/v4-to-v5/` (outside the product: `scripts/validate/migration-isolated.sh`) carries a
 stopped v4.291.x home into a new v5 home; the run book is `docs/migration/v4-to-v5-prompt.md` and every v4 file is in
-`docs/migration/v4-formats.md`. One row per conversion step, in the converter's order. "Sealed" files move byte for byte
-and are never opened; "not carried" counts the items the step lists with a reason. Status is from CI's run on a v4 home
-built with the real 4.291.5 release binaries (workflow `Migration v4 to v5`); a step that waits leaves no `home.json`, so
-v5 refuses the folder until every row is converted.
+`docs/migration/v4-formats.md`. One row per conversion step, in the converter's order, written by
+`migration/v4-to-v5/scripts/parity-section.ts`. "Sealed" files move byte for byte and are never opened; "not carried"
+counts the items the step lists with a reason. Status is from CI's run on a v4 home built with the real 4.291.5 release
+binaries (workflow `Migration v4 to v5`); a step that waits leaves no `home.json`, so v5 refuses the folder until every
+row is converted.
 
 | Row               | Step                                                                                                          | v5 owner                                                                                                                                                                                                     | Sealed   | Not carried | Test                                                    | Status                      |
 | ----------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ----------: | ------------------------------------------------------- | --------------------------- |
