@@ -30,6 +30,7 @@ cd "${root_dir}"
 # such a call is a failure, so the list can only shrink honestly. The app shell adds its one wrapper and
 # its service worker here, with their reasons, when it lands.
 declare -A call_allowlist=(
+  ['packages/app/src/connect/directory.ts']='the one public, credential-free GET of the hosted relay directory advertisement (R580), pinned to the build-time directory origin and refusing every other address and method; it never builds a daemon request'
   ['packages/app/src/worker/service-worker.ts']='the service worker fetches this site'"'"'s own signed release files (FetchReleaseNetwork, pinned to its own origin and refusing a cross-origin answer) and passes an unanswered same-origin request through unchanged; it never builds a daemon request'
 )
 
