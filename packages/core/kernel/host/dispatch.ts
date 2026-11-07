@@ -1,4 +1,3 @@
-import type { Actor } from '../contract/act.ts';
 import type { Admission, AdmissionDecision, OutputGuard } from '../contract/bound.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type { ApiRequest, ApiResponse, PlainApiResponse, PublishedApiResponse } from '../contract/http.ts';
@@ -95,7 +94,7 @@ function admit(
   const admission = bindings.admission();
   if (admission === undefined) {
     return servableWithoutAdmission(descriptor)
-      ? { outcome: 'admitted', standing: {} }
+      ? { outcome: 'admitted', standing: {}, actor: DEFAULT_ACTOR }
       : { outcome: 'refused', response: ADMISSION_UNAVAILABLE() };
   }
   try {
@@ -198,8 +197,6 @@ export class Dispatcher {
       readonly sockets: readonly MountedSocket[];
       readonly memberRoutes: readonly MountedMemberRoute[];
     },
-    private readonly actorOf: (request: ApiRequest, table: 'route' | 'socket' | 'tool') => Actor = () =>
-      DEFAULT_ACTOR,
   ) {
     this.routes = new Router(orderRoutesBySpecificity(tables.routes));
     this.sockets = new Router(orderRoutesBySpecificity(tables.sockets));
@@ -237,7 +234,7 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
-    return await runInCall({ actor: this.actorOf(request, 'route') }, () =>
+    return await runInCall({ actor: decision.actor }, () =>
       run(this.bindings, found.route, () => handle(call)),
     );
   }
@@ -264,7 +261,7 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing };
-    return await runInCall({ actor: DEFAULT_ACTOR }, () => run(this.bindings, found.route, () => handle(call)));
+    return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
   }
 
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
@@ -279,7 +276,7 @@ export class Dispatcher {
       return { outcome: 'refused', response: refusal ?? skeletonResponse(found.route.owner.title) };
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     try {
-      const attach = await runInCall({ actor: this.actorOf(request, 'socket') }, () => accept(call));
+      const attach = await runInCall({ actor: decision.actor }, () => accept(call));
       return { outcome: 'accepted', attach };
     } catch (error) {
       return { outcome: 'refused', response: failureResponse(error) };

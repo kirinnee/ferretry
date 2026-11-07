@@ -181,3 +181,18 @@ describe('the final check on a guard: secrets route (§7.3)', () => {
     expect(finalised(throwing).body).toContain(WITHHELD_SENTENCE);
   });
 });
+
+describe('the actor reaches kernel.act from admission (§4.7)', () => {
+  test('a handler runs under the actor Gate stamped', async () => {
+    const { currentActor } = await import('../../../host/call-scope.ts');
+    let seen = '';
+    const route = mounted('/v1/act', {
+      handle: async () => {
+        seen = currentActor();
+        return jsonResponse({});
+      },
+    });
+    await dispatcher([route]).dispatch(request('GET', '/v1/act'));
+    expect(seen).toBe('owner-tools');
+  });
+});

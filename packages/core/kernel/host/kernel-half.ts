@@ -1,3 +1,4 @@
+import type { InventoryEntry } from '../contract/bound.ts';
 import type { ApiRequest } from '../contract/http.ts';
 import { jsonResponse } from '../contract/http.ts';
 import type { Health, PluginInventory } from '../contract/kernel.ts';
@@ -9,17 +10,13 @@ import type kernelManifest from '../plugin.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
 
-export interface InventoryEntry {
-  readonly id: string;
-  readonly on: boolean;
-  readonly contract: string;
-}
+export type { InventoryEntry };
 
 export interface KernelHalfSources {
   readonly version: string;
   inventory(): readonly InventoryEntry[];
-  /** Gate's per-standing projection (§9.6). Absent = only the five core pieces (fail closed). */
-  project?(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+  /** Gate's per-standing projection (§9.6). `undefined` (no Gate, or it threw) = only the five core pieces. */
+  project(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined;
   snapshot(): PostBuildSnapshot;
   liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
 }
@@ -35,9 +32,7 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
     'GET /v1/plugins': async call => {
       const entries = sources.inventory();
       const projected =
-        sources.project === undefined
-          ? entries.filter(entry => (CORE_IDS as readonly string[]).includes(entry.id))
-          : sources.project(call.request, entries);
+        sources.project(call.request, entries) ?? entries.filter(entry => (CORE_IDS as readonly string[]).includes(entry.id));
       return jsonResponse({
         protocol: PROTOCOL,
         plugins: projected.map(entry => ({ id: entry.id, on: entry.on, contract: entry.contract })),

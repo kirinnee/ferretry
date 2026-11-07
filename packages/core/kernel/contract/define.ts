@@ -230,7 +230,8 @@ interface ConfigBase<Shape> {
   readonly schema: z.ZodType<Shape>;
   /** The grant axis a remote editor needs; Gate applies it to `fy config write` and the app's editor. */
   readonly axis: CapabilityAxis;
-  readonly loosens: Loosens<Shape>;
+  /** Method syntax on purpose: bivariant, so a typed `defineConfig` result is a `ConfigDef` (lead decision 4). */
+  loosens(before: Shape | undefined, after: Shape): readonly string[];
   /** Person-only and passkey-checked (`plugins.yaml`, `gate.yaml`). */
   readonly personOnly?: true;
 }

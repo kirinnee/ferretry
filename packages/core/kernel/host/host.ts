@@ -24,7 +24,7 @@ import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import kernelManifest from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { DEFAULT_ACTOR, runInCall } from './call-scope.ts';
+import { runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import {
   admitCall,
@@ -88,7 +88,8 @@ export interface Listening {
 export interface HostOptions {
   readonly home: string;
   readonly version: string;
-  readonly implementations: readonly DaemonImplementation[];
+  // biome-ignore lint/suspicious/noExplicitAny: the generated registry is `DaemonImplementation<any>[]` (each half typed by its own manifest).
+  readonly implementations: readonly DaemonImplementation<any>[];
   readonly adapters: HostAdapters;
   /** `config/plugins.yaml`: on/off per plugin. Core is always on. Default: on. */
   readonly enabled?: (id: string) => boolean;
@@ -308,6 +309,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     spawn: restrictSpawn(manifest.id, manifest.permissions?.spawn ?? [], adapters.spawn),
     fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
     act,
+    ids: { mint: prefix => ids.mint(prefix) },
     redaction,
     snapshot: {
       current: () => {
@@ -426,6 +428,8 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     const status = records.get(manifest.id)?.status;
     return status === 'serving' || status === 'skeleton' || status === 'damaged';
   });
+  // A failed plugin stays mounted so its routes answer `plugin_failed` (§3.4); off and refused ones are not.
+  const mountable = order.filter(manifest => records.get(manifest.id)?.status !== 'refused');
   frozen = buildSnapshot(started, data.accepted as readonly DataPluginManifest[], options.instructionText ?? (() => undefined));
 
   // 6. Mount behind admission, by specificity.
@@ -467,6 +471,15 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const kernelHandlers = kernelRoutes({
     version: options.version,
     inventory,
+    project: (request, entries) => {
+      const admission = bound.admission;
+      if (admission === undefined) return undefined;
+      try {
+        return admission.inventory(request, entries);
+      } catch {
+        return undefined;
+      }
+    },
     snapshot: () => frozen as PostBuildSnapshot,
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
@@ -478,7 +491,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const sockets: MountedSocket[] = [];
   const memberRoutes: MountedMemberRoute[] = [];
   const tools = new Map<string, { readonly decl: ToolDecl; readonly owner: Owner; readonly handle?: ToolHandler }>();
-  for (const manifest of started) {
+  for (const manifest of mountable) {
     const owner = ownerOf(manifest);
     const half = records.get(manifest.id)?.half;
     const handlers =
@@ -523,7 +536,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     const handle = entry.handle;
     const call = { request, params: new Map(), ...decision.standing } as Parameters<ToolHandler>[0];
     try {
-      return await runInCall({ actor: DEFAULT_ACTOR }, () => handle(call, input));
+      return await runInCall({ actor: decision.actor }, () => handle(call, input));
     } catch (error) {
       return { text: error instanceof ApiError ? error.message : 'The tool failed.', isError: true };
     }

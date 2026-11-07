@@ -48,6 +48,8 @@ async function main(): Promise<number> {
       await listenLocal(host, {
         home,
         port,
+        pid: process.pid,
+        version: VERSION,
         write: (path, text) => writeFile(path, text, { mode: 0o600 }),
         chmod: (path, mode) => chmod(path, mode),
         remove: path => rm(path, { force: true }),

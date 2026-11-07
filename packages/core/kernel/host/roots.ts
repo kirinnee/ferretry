@@ -2,7 +2,6 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import { insideFence } from '../contract/home.ts';
-import type { FerretId } from '../contract/ids.ts';
 import type { RootHandle, RootName, RootsPort, RootStat } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 
@@ -17,10 +16,10 @@ export interface RootLayout {
   readonly worktrees: string;
 }
 
+const trim = (path: string): string => (path.length > 1 ? path.replace(/\/+$/, '') : path);
 const join = (base: string, relative: string): string =>
-  relative === '' ? base : `${base.replace(/\/+$/, '')}/${relative.replace(/^\/+/, '')}`;
-
-const inside = (base: string, path: string): boolean => path === base || path.startsWith(`${base.replace(/\/+$/, '')}/`);
+  relative === '' ? trim(base) : `${trim(base)}/${relative.replace(/^\/+/, '')}`;
+const inside = (base: string, path: string): boolean => path === trim(base) || path.startsWith(`${trim(base)}/`);
 
 export class RootError extends Error {
   constructor(readonly refusal: FolderRefusal | 'read_only' | 'not_declared') {
@@ -29,10 +28,24 @@ export class RootError extends Error {
   }
 }
 
+/** The lexical half (synchronous, `RootHandle.resolve`): no `..`, no NUL, inside the root, outside the fence. */
+export function lexicalInRoot(
+  home: string,
+  base: string,
+  ownerRoot: boolean,
+  relative: string,
+): Result<FencedPath, FolderRefusal> {
+  if (relative.includes('\0') || relative.split('/').some(part => part === '..')) return err('outside');
+  const candidate = relative.startsWith('/') ? trim(relative) : join(base, relative);
+  if (!inside(base, candidate)) return err('outside');
+  if (ownerRoot && insideFence(home, candidate)) return err('fenced');
+  return ok(candidate as FencedPath);
+}
+
 /**
- * Resolves a path inside one root (§7.7, §9.3): refuses `..` and NUL, resolves symlinks of the longest existing
- * prefix before checking, refuses a path that resolves outside the root (`link_escape`), a device or other special
- * file, and — for an owner's root — anything inside the fence (the live home and every `-before-` folder).
+ * The full check (§7.7, §9.3), asked again before EVERY read or write so a link swapped in after `resolve` cannot
+ * escape (S41): resolves symlinks along the longest existing prefix, refuses a path that resolves outside the root
+ * (`link_escape`), a device or other special file, and, for an owner's root, anything inside the fence (S40).
  */
 export async function resolveInRoot(
   fs: HostFs,
@@ -41,9 +54,8 @@ export async function resolveInRoot(
   ownerRoot: boolean,
   relative: string,
 ): Promise<Result<FencedPath, FolderRefusal>> {
-  if (relative.includes('\0') || relative.split('/').some(part => part === '..')) return err('outside');
-  const candidate = join(base, relative);
-  if (!inside(base, candidate)) return err('outside');
+  const lexical = lexicalInRoot(home, base, ownerRoot, relative);
+  if (!lexical.ok) return lexical;
   let realBase: string;
   try {
     realBase = await fs.realpath(base);
@@ -51,8 +63,10 @@ export async function resolveInRoot(
     return err('outside');
   }
   if (ownerRoot && insideFence(home, realBase)) return err('fenced');
-  // Resolve the longest existing prefix; the rest is created under it.
-  const parts = candidate.slice(base.replace(/\/+$/, '').length).split('/').filter(part => part !== '');
+  const parts = lexical.value
+    .slice(trim(base).length)
+    .split('/')
+    .filter(part => part !== '');
   let resolved = realBase;
   let index = 0;
   for (; index < parts.length; index += 1) {
@@ -60,7 +74,7 @@ export async function resolveInRoot(
     const info = await fs.lstat(next);
     if (info === undefined) break;
     if (info.kind === 'other') return err('device_file');
-    resolved = info.kind === 'link' ? await fs.realpath(next) : next;
+    resolved = info.kind === 'link' ? await fs.realpath(next).catch(() => next) : next;
     if (!inside(realBase, resolved)) return err('link_escape');
   }
   const full = [resolved, ...parts.slice(index)].join('/');
@@ -69,62 +83,60 @@ export async function resolveInRoot(
   return ok(full as FencedPath);
 }
 
-function handle(
+function rootHandle(
   fs: HostFs,
   home: string,
   name: RootName,
   base: () => string | undefined,
-  limits: { readonly ownerRoot: boolean; readonly readOnly: boolean },
+  check: (path: string) => Result<FencedPath, FolderRefusal> | undefined,
 ): RootHandle {
-  const own = async (path: FencedPath): Promise<FencedPath> => {
+  const ownerRoot = OWNER_ROOTS.has(name);
+  const readOnly = READ_ONLY_ROOTS.has(name);
+  const real = async (path: FencedPath): Promise<FencedPath> => {
     const root = base();
-    if (root === undefined || !inside(root, path) || (limits.ownerRoot && insideFence(home, path)))
-      throw new RootError('outside');
-    return path;
+    if (root === undefined) throw new RootError(name === 'work' ? 'unknown_ferret' : 'outside');
+    const resolved = await resolveInRoot(fs, home, root, ownerRoot, path);
+    if (!resolved.ok) throw new RootError(resolved.error);
+    return resolved.value;
   };
   const writable = (): void => {
-    if (limits.readOnly) throw new RootError('read_only');
+    if (readOnly) throw new RootError('read_only');
   };
   return {
     name,
-    resolve: () => {
-      throw new TypeError('use resolveAsync: resolution reads the filesystem');
+    resolve: relative => {
+      const root = base();
+      if (root === undefined) return err(name === 'work' ? 'unknown_ferret' : 'outside');
+      const lexical = lexicalInRoot(home, root, ownerRoot, relative);
+      if (!lexical.ok) return lexical;
+      return check(lexical.value) ?? lexical;
     },
     readText: async (path, limit) => {
-      const text = await fs.readText(await own(path));
+      const text = await fs.readText(await real(path));
       return limit === undefined ? text : text.slice(0, limit);
     },
     readBytes: async (path, limit) => {
-      const bytes = await fs.readBytes(await own(path));
+      const bytes = await fs.readBytes(await real(path));
       return limit === undefined ? bytes : bytes.slice(0, limit);
     },
     writeText: async (path, text) => {
       writable();
-      await fs.writeAtomic(await own(path), text, 0o600);
+      await fs.writeAtomic(await real(path), text, 0o600);
     },
-    list: async path => await fs.list(await own(path)),
+    list: async path => await fs.list(await real(path)),
     stat: async (path): Promise<RootStat | undefined> => {
-      const info = await fs.lstat(await own(path));
+      const info = await fs.lstat(await real(path));
       if (info === undefined || (info.kind !== 'file' && info.kind !== 'directory')) return undefined;
       return { kind: info.kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
     },
     remove: async path => {
       writable();
-      await fs.remove(await own(path));
+      await fs.remove(await real(path));
     },
   };
 }
 
-/**
- * A root handle whose `resolve` is asynchronous in fact. The leaf's `RootHandle.resolve` is synchronous; resolution
- * has to read the filesystem to follow symlinks, so the host pre-resolves through `resolveAsync` and `resolve`
- * throws. Reported to the lead as a leaf change (make `resolve` return a Promise).
- */
-export interface HostRootHandle extends RootHandle {
-  resolveAsync(relative: string): Promise<Result<FencedPath, FolderRefusal>>;
-}
-
-/** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws at build. */
+/** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws. */
 export function rootsPortFor(
   fs: HostFs,
   layout: RootLayout,
@@ -133,7 +145,7 @@ export function rootsPortFor(
 ): RootsPort {
   const allowed = new Set(declared);
   return {
-    root: (name, scope): HostRootHandle => {
+    root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
       const base = (): string | undefined => {
         switch (name) {
@@ -144,28 +156,18 @@ export function rootsPortFor(
           case 'worktrees':
             return layout.worktrees;
           case 'work':
-            return scope?.ferret === undefined ? undefined : workFolders()?.folderOf(scope.ferret as FerretId);
+            return scope?.ferret === undefined ? undefined : workFolders()?.folderOf(scope.ferret);
           case 'harness-history':
           case 'imports':
-            // The owner-named folder (or the harness's documented history folder), absolute.
-            return scope?.subfolder?.startsWith('/') === true ? scope.subfolder : undefined;
+            // The owner-named folder, or the harness's documented history folder: absolute, given by the caller.
+            return scope?.subfolder?.startsWith('/') === true ? trim(scope.subfolder) : undefined;
         }
       };
-      const ownerRoot = OWNER_ROOTS.has(name);
-      const root = handle(fs, layout.home, name, base, { ownerRoot, readOnly: READ_ONLY_ROOTS.has(name) });
-      return {
-        ...root,
-        resolveAsync: async relative => {
-          const at = base();
-          if (at === undefined) return err(name === 'work' ? 'unknown_ferret' : 'outside');
-          if (name === 'work' && scope?.ferret !== undefined) {
-            const checked = workFolders()?.check(scope.ferret, join(at, relative));
-            if (checked === undefined) return err('unknown_ferret');
-            if (!checked.ok) return checked;
-          }
-          return await resolveInRoot(fs, layout.home, at, ownerRoot, relative);
-        },
+      const check = (path: string): Result<FencedPath, FolderRefusal> | undefined => {
+        if (name !== 'work' || scope?.ferret === undefined) return undefined;
+        return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
+      return rootHandle(fs, layout.home, name, base, check);
     },
   };
 }

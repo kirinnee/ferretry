@@ -18,6 +18,8 @@ export interface GraphPlan {
 }
 
 const isCore = (id: string): boolean => (CORE_IDS as readonly string[]).includes(id);
+/** Kernel first, then core, then plugins: the tie-break of the start order (§7.6). */
+const rank = (id: string): number => (id === 'kernel' ? 0 : isCore(id) ? 1 : 2);
 
 const tokens = (record: Readonly<Record<string, PortToken<unknown>>> | undefined): readonly PortToken<unknown>[] =>
   Object.values(record ?? {});
@@ -120,7 +122,7 @@ export function planGraph(
   while (order.length < live.length) {
     const ready = live
       .filter(manifest => !done.has(manifest.id) && [...(before.get(manifest.id) ?? [])].every(dep => done.has(dep)))
-      .sort((a, b) => (isCore(b.id) ? 1 : 0) - (isCore(a.id) ? 1 : 0) || a.id.localeCompare(b.id));
+      .sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
     const next = ready[0];
     if (next === undefined) break;
     order.push(next);

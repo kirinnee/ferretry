@@ -12,6 +12,7 @@ export * from './kernel.ts';
 export * from './policy.ts';
 export * from './ports.ts';
 export * from './refusals.ts';
+export * from './run.ts';
 export * from './route.ts';
 export * from './session.ts';
 export * from './snapshot.ts';

@@ -1,5 +1,5 @@
 import type { Duration, Instant, Result } from '@ferretry/std';
-import type { ActRunner } from './act.ts';
+import type { ActRunner, OpaqueId } from './act.ts';
 import type { FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
@@ -21,9 +21,17 @@ export interface KernelPorts {
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
   readonly act: ActRunner;
+  readonly ids: IdsPort;
   readonly redaction: Redaction;
   readonly snapshot: SnapshotPort;
   readonly lifecycle: LifecyclePort;
+}
+
+// ids ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The kernel's id factory (§4.7): the only source of an `OpaqueId` a write-only act may hand back. */
+export interface IdsPort {
+  mint(prefix: string): OpaqueId;
 }
 
 // clock ────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -99,7 +107,7 @@ export interface StatePort {
 export interface ConfigPort {
   file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined;
   collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape>;
-  watch(def: ConfigFileDef | ConfigCollectionDef, listener: () => void): Cancel;
+  watch(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: () => void): Cancel;
 }
 
 // roots ────────────────────────────────────────────────────────────────────────────────────────────────────────────

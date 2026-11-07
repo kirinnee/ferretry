@@ -2,6 +2,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type { LocalArrival } from '../contract/session.ts';
+import { DAEMON_RUN_FILE, DAEMON_SOCKET_FILE, type DaemonRun, recordedBindAddress } from '../contract/run.ts';
 import type { SocketHandler } from '../contract/socket.ts';
 import { SOCKET_CLOSES, SOCKET_MAX_FRAME_BYTES, SOCKET_MAX_PENDING_FRAMES } from '../contract/socket.ts';
 import type { Listening, RunningHost } from './host.ts';
@@ -20,25 +21,9 @@ export function isLoopbackPeer(address: string): boolean {
   return bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare);
 }
 
-/** Where the local listener is, recorded in `run/listen.json` so `fy` dials exactly that (P89). */
-export interface RecordedBind {
-  readonly format: 1;
-  readonly socket: string;
-  readonly host: string;
-  readonly port: number;
-}
-
-/**
- * The address a local client dials (P89): the recorded bind, never a public URL; a wildcard bind resolves to loopback
- * at the recorded port. `fy` and `fyd` call this same function.
- */
-export function recordedBindAddress(bind: Pick<RecordedBind, 'host' | 'port'>): string {
-  const host = bind.host === '0.0.0.0' || bind.host === '::' || bind.host === '' ? '127.0.0.1' : bind.host;
-  return `http://${host.includes(':') ? `[${host}]` : host}:${bind.port}`;
-}
-
-export const runSocketPath = (home: string): string => `${home}/run/fyd.sock`;
-export const runBindPath = (home: string): string => `${home}/run/listen.json`;
+export { recordedBindAddress };
+export const runSocketPath = (home: string): string => `${home}/${DAEMON_SOCKET_FILE}`;
+export const runBindPath = (home: string): string => `${home}/${DAEMON_RUN_FILE}`;
 
 class BodyTooLarge extends ApiError {
   constructor(limit: number) {
@@ -188,6 +173,8 @@ export async function listenLocal(
     readonly home: string;
     readonly port: number;
     readonly hostname?: string;
+    readonly pid: number;
+    readonly version: string;
     readonly write: (path: string, text: string) => Promise<void>;
     readonly chmod: (path: string, mode: number) => Promise<void>;
     readonly remove: (path: string) => Promise<void>;
@@ -203,13 +190,21 @@ export async function listenLocal(
     peer => (peer !== undefined && isLoopbackPeer(peer) ? true : 'refuse'),
     { hostname, port: options.port },
   );
-  const bind: RecordedBind = { format: 1, socket: socketPath, host: hostname, port: tcp.port ?? options.port };
+  const bind: DaemonRun = {
+    format: 1,
+    socket: socketPath,
+    host: hostname,
+    port: tcp.port ?? options.port,
+    pid: options.pid,
+    version: options.version,
+  };
   await options.write(runBindPath(options.home), `${JSON.stringify(bind)}\n`);
   return {
     addresses: [socketPath, recordedBindAddress(bind)],
     stop: async () => {
       await Promise.all([unix.stop(true), tcp.stop(true)]);
       await options.remove(socketPath);
+      await options.remove(runBindPath(options.home));
     },
   };
 }

@@ -31,7 +31,8 @@ export type AdmissionInput =
     };
 
 export type AdmissionDecision<Standing extends object = CallStanding> =
-  | { readonly outcome: 'admitted'; readonly standing: Standing }
+  /** `actor` is who an act runs as (§4.7), stamped by Gate from the credential; the kernel carries it to `kernel.act`. */
+  | { readonly outcome: 'admitted'; readonly standing: Standing; readonly actor: Actor }
   | { readonly outcome: 'refused'; readonly response: ApiResponse };
 
 /**
@@ -44,6 +45,19 @@ export interface Admission<Standing extends object = CallStanding, Member extend
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<Member>;
   /** Re-admits an open stream after a provider's `generation()` moved; false closes it (`4401`). */
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean;
+  /**
+   * Projects `GET /v1/plugins` for this caller (§9.6): every package for the owner on the host and a ferret; for a
+   * device, core, Access and each plugin with a route, tool or event its grants admit; core and Warden for the remote
+   * warden. Anything not returned is omitted, so a limited device cannot discover it.
+   */
+  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+}
+
+/** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */
+export interface InventoryEntry {
+  readonly id: string;
+  readonly on: boolean;
+  readonly contract: string;
 }
 
 export const AdmissionPort = defineBoundPort<Admission>('admission', 'gate');
