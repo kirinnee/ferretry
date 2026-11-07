@@ -196,7 +196,7 @@ test('missing session files carry zero and dry run writes nothing', async () => 
 
 test('bad JSON, invalid v5 values and identity mismatches fail without exposing values', async () => {
   for (const extra of [
-    { name: 'SECRET-FAKE-INVALID!' },
+    { createdAt: 'SECRET-FAKE-NOT-AN-INSTANT' },
     { id: 'wrong-id' },
     { sessionCapabilityHash: 'SECRET-FAKE-HASH' },
   ]) {
@@ -213,4 +213,14 @@ test('bad JSON, invalid v5 values and identity mismatches fail without exposing 
 test('refuses a linked state directory without following it', async () => {
   await symlink('/unreadable/fake-credentials', join(f.from, 'state'));
   expect((await ferretsStep.run(f.ctx())).status).toBe('failed');
+});
+
+test('the v5 name is the v4 callsign; the title is the fallback, then the id', async () => {
+  await f.session('called', { name: 'Fake Task Title', teammate: 'fakecall' });
+  await f.session('titled', { name: 'Fake Old Title' });
+  await f.session('odd', { name: 'Fake: title with a colon' });
+  expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
+  expect(String((await record('called')).name)).toBe('fakecall');
+  expect(String((await record('titled')).name)).toBe('Fake Old Title');
+  expect(String((await record('odd')).name)).toBe('odd');
 });
