@@ -30,7 +30,6 @@
  * A PDF AND EVERY REFUSAL ARE A FILE ROW, never a broken player and never the
  * bytes of a file this reader may not open.
  */
-import { outsideFetch } from './outside-fetch.ts';
 import { Download, ExternalLink, FileText, FileWarning } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { ExternalLink as ExternalAnchor } from '@ferretry/app/ui';
@@ -188,7 +187,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
          * point — a host that has not opted in to being read refuses, and the
          * reader gets the link instead of a workaround.
          */
-        response = await outsideFetch(url, {
+        response = await globalThis.fetch(url, {
           credentials: 'omit',
           mode: 'cors',
           referrerPolicy: 'no-referrer',
