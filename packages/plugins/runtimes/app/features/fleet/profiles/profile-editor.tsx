@@ -12,7 +12,7 @@
  *
  * Every edit is a draft until **Save**, which sends the whole list as ONE change the daemon previews
  * and applies (from off the machine, after a passkey). The overrides and the Resolved view are the
- * daemon's own answer for the draft (`POST /v1/fleet/profiles/preview`), asked again on every edit.
+ * daemon's own answer for the draft (`POST /v1/runtimes/profiles/preview`), asked again on every edit.
  * A saved profile also offers **Edit as YAML**: its file, `config/profiles/<name>.yaml`.
  */
 
