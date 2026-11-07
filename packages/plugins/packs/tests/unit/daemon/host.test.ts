@@ -349,7 +349,11 @@ function builtHalf(ferrets: FakeFerrets, files = new Map<string, string>(), reda
   const half = daemon.build?.({
     manifest,
     needs: { ferrets },
-    uses: { runtimes: { current: () => undefined }, usage: { current: () => undefined } },
+    uses: {
+      runtimes: { current: () => undefined },
+      usage: { current: () => undefined },
+      conversation: { current: () => undefined },
+    },
     hooks: {} as never,
     kernel: {
       config: { file: () => undefined },

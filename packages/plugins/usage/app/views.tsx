@@ -16,6 +16,7 @@ import type { PerformanceRecorder } from './lib/performance/recorder.ts';
 import type { DaemonUsageStore } from './lib/usage-store.ts';
 import { type InsightsView, type UsageClient, useDaemonConnection } from './shell.ts';
 import { InsightsFrame } from './shell/insights-frame.tsx';
+import { ComposerQuota } from './shell/composer-quota.tsx';
 import { QuotaReadout } from './shell/quota-readout.tsx';
 
 const noNavigate = (): void => undefined;
@@ -61,6 +62,27 @@ export function QuotaPanel({ store, subject }: { readonly store: DaemonUsageStor
   const quota =
     account === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: account.agent } });
   return createElement(QuotaReadout, { quota, showUnknown: true, className: 'text-meta' });
+}
+
+/**
+ * `composer.tools:composer-quota`: the account's quota on the composer's context row, from the daemon's cached account
+ * feed. It shows the account `subject` names when the feed carries one, and otherwise says "usage unknown": which login a
+ * ferret runs under is Ferrets' to name, and the account nearest its limit is not that ferret's, so it is never drawn as
+ * the composer's own (unknown is not a confident number).
+ */
+export function ComposerQuotaPanel({
+  store,
+  subject,
+}: {
+  readonly store: DaemonUsageStore;
+  readonly subject?: string;
+}) {
+  const connection = useDaemonConnection();
+  const slice = useUsage(store, connection);
+  const named = (slice.feed?.accounts ?? []).find(account => account.agent === subject);
+  const quota =
+    named === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: named.agent } });
+  return createElement(ComposerQuota, { quota });
 }
 
 export function BudgetsTab({ client }: { readonly client: UsageClient }): ReactNode {

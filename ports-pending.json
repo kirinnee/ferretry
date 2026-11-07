@@ -16,7 +16,6 @@
     "agenda",
     "board",
     "warden",
-    "usage",
     "catalogs",
     "mcp",
     "skills",
@@ -104,8 +103,7 @@
       "GAP(app-shell): the kernel's PanelProps carries only subject, so Compact memory at and Hypermedia take canControl as a prop (default true) and cannot yet hide from a view-only device; the daemon still refuses at operator",
       "GAP(links): the harness history lists how many transcripts were skipped and each entry's turns, not today's per-harness skip reasons or recorded event count (the finders describe turns, not events)",
       "GAP(agenda): lead decision Q9 has Agenda offer an agenda.conversation slot that Conversation contributes a panel to; Agenda declares no such slot yet, so nothing is contributed",
-      "GAP(ferrets): Ferrets' displayCallsign, form parts and setup-note UI are copied into Conversation (app/links/callsign.ts, app/compact-at/form-parts.tsx, app/links/link-ui.tsx) because neither its contract nor @ferretry/app exports them",
-      "GAP(packs): the conversation.row slot carries no tool calls, so Packs' Pack card (today reads entry.tools/sent) does not draw; adding masked tool calls to ConversationRowEntry is decided with the Packs slot contribution (its own security look)"
+      "GAP(ferrets): Ferrets' displayCallsign, form parts and setup-note UI are copied into Conversation (app/links/callsign.ts, app/compact-at/form-parts.tsx, app/links/link-ui.tsx) because neither its contract nor @ferretry/app exports them"
     ],
     "accounts": [
       "GAP(access): no passkey ceremony for the app half's widening acts (a paste rule, programs in your own profile ON, a sign-in rule create/resume/renew/widen, task-plan ticks, a machine-staged confirm); each refuses with today's no-passkey words until Access hands over an ask through its contract or the shell offers one (wiring it is one prop per surface)",
@@ -133,16 +131,6 @@
       "plugin": "warden",
       "path": "packages/plugins/warden/app",
       "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
-    },
-    {
-      "plugin": "packs",
-      "path": "packages/plugins/packs/app/components/pack-call.tsx",
-      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
-    },
-    {
-      "plugin": "packs",
-      "path": "packages/plugins/packs/tests/unit/app/pack-call.test.tsx",
-      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
     }
   ]
 }

@@ -8,6 +8,7 @@ import { daemonUsagePort } from './lib/usage-store.ts';
 import { DaemonUsageStore } from './lib/usage-store.ts';
 import {
   BudgetsTab,
+  ComposerQuotaPanel,
   FerretInsightsPanel,
   InsightsScreen,
   ModelPricingTab,
@@ -36,6 +37,8 @@ export default implementApp(manifest, {
       panels: {
         quota: ({ subject }) =>
           createElement(QuotaPanel, { store: usage, ...(subject === undefined ? {} : { subject }) }),
+        'composer-quota': ({ subject }) =>
+          createElement(ComposerQuotaPanel, { store: usage, ...(subject === undefined ? {} : { subject }) }),
         insights: ({ subject }) =>
           createElement(FerretInsightsPanel, { client, ...(subject === undefined ? {} : { subject }) }),
       },

@@ -3,7 +3,11 @@ import { PanelSlot } from '@ferretry/app';
 import { ensureDom, render, run } from '@ferretry/app/testing';
 import { RowSlot, RowSlotProvider, rowSlotEntry } from '../../../../app/chat/row-slots.tsx';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
-import { CONVERSATION_ROW_ACTIONS_SLOT, CONVERSATION_ROW_SLOT } from '../../../../contract/index.ts';
+import {
+  CONVERSATION_ROW_ACTIONS_SLOT,
+  CONVERSATION_ROW_SLOT,
+  ROW_TOOL_TEXT_LIMIT,
+} from '../../../../contract/index.ts';
 
 ensureDom();
 
@@ -100,5 +104,91 @@ describe('the transcript row slots', () => {
     const page = render(<RowSlot entry={delivered} slot={CONVERSATION_ROW_SLOT} />);
     mounted.push(page);
     expect(page.root.findAllByType(PanelSlot)).toHaveLength(0);
+  });
+});
+
+describe('the shell commands a tool row offers a slot', () => {
+  const shellRow = (calls: NonNullable<TranscriptEntry['tools']>, more: object = {}): TranscriptEntry =>
+    ({ id: 'tools:1', kind: 'tool', text: 'ran a tool', tools: calls, ...more }) as unknown as TranscriptEntry;
+
+  test('a Bash call is offered as its command and the text of its answer, and nothing else of the call', () => {
+    const offered = rowSlotEntry(
+      shellRow([
+        {
+          key: 'k1',
+          ts: '2026-11-04T11:00:00.000Z',
+          use: { name: 'Bash', toolUseId: 'use-1', input: { command: 'fy new --auto "go"', description: 'extra' } },
+          result: { text: 'Started nadia', isError: false, images: [{ handle: 'h' }] },
+        },
+      ] as never),
+    );
+    expect(offered?.tools).toEqual([
+      {
+        key: 'k1',
+        name: 'Bash',
+        command: 'fy new --auto "go"',
+        ts: '2026-11-04T11:00:00.000Z',
+        result: { text: 'Started nadia' },
+      },
+    ]);
+  });
+
+  test('a Codex shell call is offered as the script it ran; a failed answer says so', () => {
+    const offered = rowSlotEntry(
+      shellRow([
+        {
+          key: 'k2',
+          use: { name: 'shell', input: { command: ['bash', '-lc', 'fy wait nadia'] } },
+          result: { content: 'Process exited with code 1', isError: true },
+        },
+      ] as never),
+    );
+    expect(offered?.tools).toEqual([
+      {
+        key: 'k2',
+        name: 'shell',
+        command: 'fy wait nadia',
+        result: { text: 'Process exited with code 1', isError: true },
+      },
+    ]);
+  });
+
+  test('another tool’s input never reaches a slot, and a row with no shell call has no tools key', () => {
+    const offered = rowSlotEntry(
+      shellRow([
+        { key: 'w', use: { name: 'Write', input: { file_path: '/a', content: SECRET } }, result: { text: SECRET } },
+        { key: 'r', use: { name: 'Read', input: { file_path: '/b' } } },
+        { key: 'o', use: { name: 'Bash', input: {} }, orphanResult: true },
+        { key: 'n', use: { name: 'Bash', input: { command: 42 } } },
+      ] as never),
+    );
+    expect(offered).toEqual({ id: 'tools:1', kind: 'tool', text: 'ran a tool' });
+    expect(JSON.stringify(offered)).not.toContain(SECRET);
+  });
+
+  test('a send a ferret made offers no tools, and no other row kind does either', () => {
+    const call = { key: 'k', use: { name: 'Bash', input: { command: `fy send x "${SECRET}"` } } };
+    expect(rowSlotEntry(shellRow([call] as never, { sent: { to: 'x' } }))?.tools).toBeUndefined();
+    expect(rowSlotEntry({ id: 'a', kind: 'assistant', text: 't', tools: [call] } as never)?.tools).toBeUndefined();
+  });
+
+  test('an answer longer than the limit is cut', () => {
+    const offered = rowSlotEntry(
+      shellRow([
+        {
+          key: 'k',
+          use: { name: 'Bash', input: { command: 'x' } },
+          result: { text: 'a'.repeat(ROW_TOOL_TEXT_LIMIT + 5) },
+        },
+      ] as never),
+    );
+    expect(offered?.tools?.[0]?.result?.text).toHaveLength(ROW_TOOL_TEXT_LIMIT);
+  });
+
+  test('the tools ride in the slot props for a delivered tool row', () => {
+    const row = shellRow([{ key: 'k', use: { name: 'Bash', input: { command: 'fy new x' } } }] as never);
+    const [slot] = draw(row, CONVERSATION_ROW_SLOT).root.findAllByType(PanelSlot);
+    const offered = slot?.props.props as { entry?: { tools?: unknown[] } } | undefined;
+    expect(offered?.entry?.tools).toEqual([{ key: 'k', name: 'Bash', command: 'fy new x' }]);
   });
 });

@@ -9,6 +9,7 @@ import {
   VOICE_READ_MODELS,
   VoicePort,
 } from './contract/index.ts';
+import { CONVERSATION_ROW_ACTIONS_SLOT, ConversationPort } from '@ferretry/plugin-conversation/contract';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
 
 /**
@@ -30,7 +31,8 @@ export default definePlugin({
   words: [{ word: 'dictate', means: 'speak a message', insteadOf: ['STT'] }],
 
   needs: { vault: VaultPort },
-  uses: { logins: LoginsPort },
+  // Conversation is optional: Read aloud is drawn in its transcript, and with Conversation off there is no transcript.
+  uses: { logins: LoginsPort, conversation: ConversationPort },
   provides: { voice: VoicePort },
 
   actions: {
@@ -68,7 +70,11 @@ export default definePlugin({
   },
 
   ui: {
-    panels: [panel('composer.tools', { id: 'dictation', order: 20 })],
+    panels: [
+      panel('composer.tools', { id: 'dictation', order: 20 }),
+      // "Read aloud" in an assistant message's footer (Conversation's `conversation.row-actions` slot).
+      panel(CONVERSATION_ROW_ACTIONS_SLOT, { id: 'read-aloud', order: 10 }),
+    ],
     settings: [
       settingsTab('voice', { label: 'Voice', order: 60 }),
       settingsTab('speedups', { label: 'Speed-ups', order: 70 }),

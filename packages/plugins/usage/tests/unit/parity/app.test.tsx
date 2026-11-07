@@ -227,6 +227,26 @@ describe('usage parity · Model pricing and the session surface', () => {
     await view.unmount();
   });
 
+  it('the composer quota is a composer.tools panel that shows the account its ferret names, and says unknown otherwise', async () => {
+    expect(manifest.ui.panels.find(entry => entry.id === 'composer-quota')).toMatchObject({ slot: 'composer.tools' });
+    const feedOf = () => ({
+      at: '2026-08-01T09:00:00.000Z',
+      stale: false,
+      accounts: [{ agent: 'claude-auto-work', fiveHourPercent: 42, weeklyPercent: 10, atLimit: false, authOk: true }],
+    });
+    const { half } = halfOver({ 'GET /v1/usage': feedOf });
+    const named = await mount(asElement(half.panels['composer-quota']({ subject: 'claude-auto-work' })));
+    await settle();
+    expect(named.container.textContent).toContain('5h 42%');
+    await named.unmount();
+    // A ferret the feed does not name is NOT given the account nearest its limit: its usage is unknown.
+    const other = await mount(asElement(half.panels['composer-quota']({ subject: 'some-ferret' })));
+    await settle();
+    expect(other.container.textContent).toContain('usage unknown');
+    expect(other.container.textContent).not.toContain('42%');
+    await other.unmount();
+  });
+
   it('S-0228 SessionAnalyticsSurface prices the ferret beside it, then with its children', async () => {
     const { half, client } = halfOver({
       [INSIGHTS]: (call: RecordedCall) =>
