@@ -14,8 +14,16 @@ export function fakeAgenda(options: { readonly agendaOf?: Readonly<Record<string
     note: 'a running ferret takes the change at its next launch',
   });
   return {
-    open: async () => ({ ferrets: [] }),
-    daemonAgenda: async () => ({ asks: [], resolved: [] }),
+    open: async () => ({ sessions: [] }),
+    daemonAgenda: async () => ({
+      v: 1,
+      sessionId: 'machine-agenda',
+      items: [],
+      resolved: [],
+      count: 0,
+      parseErrors: 0,
+      updatedAt: '2026-11-07T12:00:00.000Z',
+    }),
     mode: async ferret => modeOf(ferret),
     setMode: async (ferret, enabled) => {
       modes.set(ferret, enabled);

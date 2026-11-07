@@ -4,14 +4,12 @@
     "gate",
     "vault",
     "ferrets",
-    "asks",
     "access",
     "connections",
     "updates",
     "claude-code",
     "codex",
     "logins",
-    "runtimes",
     "terminals",
     "browsers",
     "accounts",
@@ -29,7 +27,75 @@
     "skills",
     "shells",
     "layouts",
-    "onboarding",
-    "tidy"
+    "tidy",
+    "runtimes",
+    "onboarding"
+  ],
+  "pendingHalves": {
+    "agenda": ["app"],
+    "browsers": ["app"],
+    "terminals": ["app"]
+  },
+  "pendingAppPorts": [
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/app",
+      "reason": "separate app port in flight"
+    },
+    {
+      "plugin": "browsers",
+      "path": "packages/plugins/browsers/app",
+      "reason": "separate app port in flight"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/tests/unit/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/tests/support/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/components/runtime-buttons.tsx",
+      "reason": "Logins roster/health, Usage quota readout and shell daemon picker"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/hooks/use-account-picker.ts",
+      "reason": "Logins account-picker store/catalog and shell roster polling"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/features/fleet/runtimes/runtime-actions.tsx",
+      "reason": "Runtimes reviewed apply-change screens and machine settings"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/tests/unit/app/use-account-picker.test.tsx",
+      "reason": "Logins account-picker store/catalog and shell roster polling"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-actions.test.tsx",
+      "reason": "Runtimes reviewed apply-change screens and machine settings"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/unit/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/support/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    }
   ]
 }
