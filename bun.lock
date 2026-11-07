@@ -365,6 +365,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
