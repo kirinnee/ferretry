@@ -4,8 +4,6 @@ import type { RawDeflatePort } from '../lib/document-extraction.ts';
 /**
  * Node's bounded raw-DEFLATE implementation, kept outside the pure document policy: `maxOutputLength` is what keeps
  * DOCX extraction from being fed a zip bomb.
- *
- * @pending conversation: GAP(attachments): the initial-attachments path (daemon/attachments/lib/initial-attachments.ts) is not composed into the daemon yet
  */
 export class NodeRawDeflate implements RawDeflatePort {
   inflateRaw(input: Uint8Array, maxOutputBytes: number): Uint8Array {
