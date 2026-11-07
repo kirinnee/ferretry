@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { AsksChanged, AskIdSchema } from '@ferretry/core-asks/contract';
+import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeGate, ferretStanding } from '@ferretry/core-gate/contract/testing';
 import {
   type FerretId,
@@ -206,6 +207,48 @@ describe('the composed Vault input half', () => {
       expect(scope.text(VALUE)).not.toContain(VALUE);
     });
     expect([...host.state('vault').files.values()].join('')).not.toContain(VALUE);
+  });
+
+  for (const end of [{ state: 'stopped' }, { gone: true }] as const) {
+    test(`I108 the composed Vault drops a ${'gone' in end ? 'gone' : 'stopped'} ferret's delivered value before its TTL`, async () => {
+      const { host, deliver } = await setup();
+      host.emit(FerretsChanged, { ferret: FERRET, generation: 1, state: 'working' });
+      await host.settle();
+      expect((await deliver()).status).toBe(200);
+      const redaction = host.provided(RedactionPort);
+      const deliveredAt = host.clock.nowMs();
+      await host.runJob('inputs-sweep');
+      expect(await redaction.read(scope => scope.text(VALUE))).not.toContain(VALUE);
+
+      host.emit(FerretsChanged, { ferret: FERRET, generation: 2, ...end });
+      await host.settle();
+      await host.runJob('inputs-sweep');
+      expect(host.clock.nowMs()).toBe(deliveredAt);
+      expect(await redaction.read(scope => scope.text(VALUE))).toBe(VALUE);
+    });
+  }
+
+  test('I108 missing or unreadable ferret state keeps masking until a known end', async () => {
+    const { host, deliver } = await setup();
+    expect((await deliver()).status).toBe(200);
+    const redaction = host.provided(RedactionPort);
+    // No lifecycle evidence, then a notification with no readable status: neither proves an end.
+    await host.runJob('inputs-sweep');
+    expect(await redaction.read(scope => scope.text(VALUE))).not.toContain(VALUE);
+    host.emit(FerretsChanged, { ferret: FERRET, generation: 1 });
+    await host.settle();
+    await host.runJob('inputs-sweep');
+    expect(await redaction.read(scope => scope.text(VALUE))).not.toContain(VALUE);
+    for (const [index, state] of (['starting', 'working', 'idle'] as const).entries()) {
+      host.emit(FerretsChanged, { ferret: FERRET, generation: index + 2, state });
+      await host.settle();
+      await host.runJob('inputs-sweep');
+      expect(await redaction.read(scope => scope.text(VALUE))).not.toContain(VALUE);
+    }
+    host.emit(FerretsChanged, { ferret: FERRET, generation: 5 });
+    await host.settle();
+    await host.runJob('inputs-sweep');
+    expect(await redaction.read(scope => scope.text(VALUE))).not.toContain(VALUE);
   });
 
   test('I74 a real input hold withholds an earlier guarded response; ending it allows a fresh read', async () => {

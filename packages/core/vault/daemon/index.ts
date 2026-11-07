@@ -1,4 +1,5 @@
 import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
+import type { FerretState } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
@@ -85,7 +86,14 @@ export default implementDaemon(manifest, {
     const redaction = new VaultRedaction(maskSources, scrub => masks.scope(scrub));
     const redact = async (text: string): Promise<string> => await masks.redact(text);
     const secretStore = directory;
-    const inputs = buildInputs(ctx, { values, quarantine, redact, secretStore });
+    // Ferrets already needs Vault: lifecycle events carry status without a reverse needs edge (I108).
+    // Unknown or unreadable status keeps masking, as today; only known ends release the typed values.
+    const ferretStates = new Map<string, FerretState | 'gone'>();
+    const ferretEnded = async (ferret: FerretId): Promise<boolean> => {
+      const state = ferretStates.get(ferret);
+      return state === 'stopped' || state === 'gone';
+    };
+    const inputs = buildInputs(ctx, { values, quarantine, redact, secretStore, ferretEnded });
     // GAP (for the lead): today's operator `secretEnvironment` recipes and the reference sources (recipes, fleet
     // accounts) were composed here from Accounts' and Logins' code; until those ports offer them, a use gets exactly
     // the secrets it named and the listing shows no configured references.
@@ -184,6 +192,11 @@ export default implementDaemon(manifest, {
       },
       hooks: { 'ask.sources:input': inputs.askSource },
       subscribers: {
+        'ferrets.changed': async ({ ferret, state, gone }) => {
+          if (gone === true) ferretStates.set(ferret, 'gone');
+          else if (state !== undefined) ferretStates.set(ferret, state);
+          if (await ferretEnded(ferret as FerretId)) await inputs.service.sessionEnded(ferret);
+        },
         'asks.changed': async ({ askId, state }) => {
           if (state !== 'closed') return;
           const ask = await ctx.needs.asks.get(askId);
