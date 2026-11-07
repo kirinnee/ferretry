@@ -3,5 +3,6 @@ export * from './policy.ts';
 export * from './port.ts';
 export * from './wire.ts';
 export * from './words.ts';
+export * from './hosted-directory.ts';
 
 export * from './tunnel-service.ts';
