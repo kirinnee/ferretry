@@ -5,7 +5,7 @@ import {
   planTerminalRedraw,
   type TerminalCapture,
   terminalFullRedraw,
-} from '../../../src/lib/terminal/index.ts';
+} from '../../../../daemon/lib/terminal/index.ts';
 
 const ESC = '\u001b';
 const FULL = `${ESC}[3J${ESC}[2J${ESC}[H`;

@@ -1,4 +1,5 @@
-import type { Harness, HarnessDialog, HarnessDialogKind, HarnessDialogOption } from '@ferretry/protocol';
+import { type Harness } from '../protocol/harness.ts';
+import { type HarnessDialog, type HarnessDialogKind, type HarnessDialogOption } from '../protocol/harness-dialog.ts';
 import { parsePermissionPrompt, promptDigest } from './permission-prompt.ts';
 
 /**

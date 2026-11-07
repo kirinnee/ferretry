@@ -5,7 +5,7 @@ import {
   leadingContinuationBytes,
   PARTIAL_LINE_HOLD_MAX,
   readWindow,
-} from '../../../../src/lib/session/processes/output.ts';
+} from '../../../../../daemon/lib/session/processes/output.ts';
 
 /**
  * BOUNDED, FOLLOWABLE READS OF AN OUTPUT FILE — and the rule that a live read delivers whole lines only,

@@ -1,4 +1,4 @@
-import { SessionConsoleInputRequestSchema, type SessionConsoleInputResult } from '@ferretry/protocol';
+import { SessionConsoleInputRequestSchema, type SessionConsoleInputResult } from '../../protocol/session-processes.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';

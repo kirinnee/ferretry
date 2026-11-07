@@ -1,4 +1,6 @@
+import type { SpawnPort } from '@ferretry/kernel/contract';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
+import type { ControlTimer } from './control-tmux-process.ts';
 import type { TmuxReleaseReading } from '../../lib/tmux/version.ts';
 
 /** Long enough for a loaded host, short enough that a wedged tmux cannot hold a doctor report. */
@@ -6,15 +8,15 @@ const DEFAULT_TIMEOUT_MS = 2_000;
 
 const TIMED_OUT = Symbol('timed out');
 
-async function within<T>(work: Promise<T>, timeoutMs: number): Promise<T | typeof TIMED_OUT> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function within<T>(work: Promise<T>, timeoutMs: number, after: ControlTimer): Promise<T | typeof TIMED_OUT> {
+  let timer: (() => void) | undefined;
   const timeout = new Promise<typeof TIMED_OUT>(resolve => {
-    timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+    timer = after(timeoutMs, () => resolve(TIMED_OUT));
   });
   try {
     return await Promise.race([work, timeout]);
   } finally {
-    clearTimeout(timer);
+    timer?.();
   }
 }
 
@@ -28,8 +30,10 @@ async function within<T>(work: Promise<T>, timeoutMs: number): Promise<T | typeo
  */
 export class TmuxReleaseReader {
   constructor(
+    private readonly spawn: SpawnPort,
     private readonly executable: string,
     private readonly server: TmuxCommandPort,
+    private readonly after: ControlTimer,
     private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
   ) {}
 
@@ -40,8 +44,13 @@ export class TmuxReleaseReader {
 
   private async program(): Promise<string | undefined> {
     try {
-      const child = Bun.spawn([this.executable, '-V'], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' });
-      const answer = await within(Promise.all([new Response(child.stdout).text(), child.exited]), this.timeoutMs);
+      const child = this.spawn.start(this.executable, ['-V']);
+      void new Response(child.stderr).text().catch(() => undefined);
+      const answer = await within(
+        Promise.all([new Response(child.stdout).text(), child.exited]),
+        this.timeoutMs,
+        this.after,
+      );
       if (answer === TIMED_OUT) {
         child.kill('SIGKILL');
         return undefined;
@@ -55,7 +64,11 @@ export class TmuxReleaseReader {
 
   private async serverRelease(): Promise<string | undefined> {
     try {
-      const answer = await within(this.server.execute(['display-message', '-p', '#{version}']), this.timeoutMs);
+      const answer = await within(
+        this.server.execute(['display-message', '-p', '#{version}']),
+        this.timeoutMs,
+        this.after,
+      );
       if (answer === TIMED_OUT || answer.code !== 0) return undefined;
       return answer.stdout.trim() === '' ? undefined : answer.stdout.trim();
     } catch {

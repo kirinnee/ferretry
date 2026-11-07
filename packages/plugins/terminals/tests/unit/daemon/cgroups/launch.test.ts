@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE, type LimitsConfig } from '@ferretry/protocol';
+import { GIBIBYTE, type LimitsConfig } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import {
   type CgroupCommandPort,
@@ -9,7 +9,7 @@ import {
   EnforcementRuntime,
   type EnforcementState,
   type SessionSpawnFacts,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 import { WARDEN_LABEL } from '../../../src/lib/warden/index.ts';
 
 const HOST: CgroupHostFacts = {

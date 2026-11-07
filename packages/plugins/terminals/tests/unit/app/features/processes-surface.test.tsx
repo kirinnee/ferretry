@@ -16,7 +16,7 @@ import {
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
-import { PROCESS_CHANGED_TEXT, PROCESSES_FORBIDDEN_TEXT } from '../../../src/lib/session-processes.ts';
+import { PROCESS_CHANGED_TEXT, PROCESSES_FORBIDDEN_TEXT } from '../../../../app/lib/session-processes.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 import {
   ALL_PROCESSES,
@@ -27,7 +27,7 @@ import {
   processList,
   TERMINAL_ONLY,
   WATCH_TESTS,
-} from '../../support/session-processes.ts';
+} from '../../../support/app/session-processes.ts';
 
 const daemon = daemonConnection({ daemonId: 'proc-daemon', baseUrl: 'https://proc.example.test', deviceId: 'd' });
 const scope = daemonSessionScope(daemon, 'agent-session');

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { hasSubscriptionCrash, parseTmuxVersion } from '../../../src/lib/tmux/version.ts';
+import { hasSubscriptionCrash, parseTmuxVersion } from '../../../../daemon/lib/tmux/version.ts';
 
 describe('tmux release', () => {
   it('should read a release as tmux -V and #{version} print it', () => {

@@ -3,7 +3,7 @@ import {
   type StickyCtrl,
   TerminalKeyBar,
   useStickyCtrl,
-} from '../../../../../src/features/workspace/phone/terminal-key-bar.tsx';
+} from '../../../../../../app/features/workspace/phone/terminal-key-bar.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 
 let mounted: Mounted | null = null;

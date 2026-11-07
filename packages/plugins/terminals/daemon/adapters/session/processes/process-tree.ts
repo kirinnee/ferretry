@@ -1,15 +1,16 @@
-import { lstat, readdir, readFile, readlink } from 'node:fs/promises';
+import { hostPlatform } from '../../host/fs.ts';
+import { lstat, readdir, readFile, readlink } from '../../host/fs.ts';
+import type { SpawnPort } from '@ferretry/kernel/contract';
 import { isAbsolute, join } from 'node:path';
-import { type ProcessIncarnation, procStatStartTicks, psStartSeconds } from '@ferretry/protocol';
-import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
-import { parseElapsed } from '../../../lib/migrate/process-table.ts';
+import { type ProcessIncarnation, procStatStartTicks, psStartSeconds } from '../../../lib/protocol/process-incarnation.ts';
+import { processIncarnationFor } from './process-incarnation.ts';
+import { ProcfsListeningProbe, parseElapsed } from './listening.ts';
 import type {
   ProcessDetailRow,
   ProcessStreamTarget,
   ProcessTreePort,
   ProcessTreeRead,
 } from '../../../lib/session/processes/ports.ts';
-import { BunProcessProbe } from '../../migrate/bun-process-inventory.ts';
 
 /** `USER_HZ`: the unit of `/proc/<pid>/stat`'s times. 100 on every Linux architecture userspace sees. */
 const CLOCK_TICKS_PER_SECOND = 100;
@@ -23,13 +24,13 @@ const CLOCK_TICKS_PER_SECOND = 100;
  * second reader on a pipe or terminal and take output away from its owner.
  */
 export class ProcfsProcessTree implements ProcessTreePort {
-  private readonly listener: BunProcessProbe;
+  private readonly listener: ProcfsListeningProbe;
 
   constructor(
     private readonly procRoot = '/proc',
     private readonly incarnation: ProcessIncarnation = processIncarnationFor('linux'),
   ) {
-    this.listener = new BunProcessProbe(undefined, { procRoot });
+    this.listener = new ProcfsListeningProbe(procRoot);
   }
 
   async tree(rootPid: number): Promise<ProcessTreeRead> {
@@ -156,21 +157,16 @@ const PS_DETAIL_ARGUMENTS = ['-Ao', 'pid=,ppid=,lstart=,state=,time=,rss=,args='
  */
 export class PsProcessTree implements ProcessTreePort {
   constructor(
-    private readonly psExecutable: string,
-    private readonly incarnation: ProcessIncarnation = processIncarnationFor('darwin'),
-  ) {
-    if (!isAbsolute(psExecutable)) throw new Error('the ps executable must be an absolute path');
-  }
+    private readonly spawn: SpawnPort,
+    private readonly psExecutable: string = 'ps',
+    private readonly incarnation: ProcessIncarnation = processIncarnationFor('darwin', spawn),
+  ) {}
 
   async tree(rootPid: number): Promise<ProcessTreeRead> {
     try {
-      const child = Bun.spawn([this.psExecutable, ...PS_DETAIL_ARGUMENTS], {
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'ignore',
-        env: { LC_ALL: 'C', TZ: 'UTC0' },
-      });
-      const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+      const read = await this.spawn.run(this.psExecutable, PS_DETAIL_ARGUMENTS, { env: { LC_ALL: 'C', TZ: 'UTC0' } });
+      const { stdout } = read;
+      const code = read.exitCode;
       if (code !== 0) return { kind: 'unavailable', reason: `ps exited ${code}.` };
       return { kind: 'read', rows: subtreeOf(rootPid, parsePsDetailTable(stdout)) };
     } catch {
@@ -232,7 +228,7 @@ function subtreeOf(rootPid: number, rows: readonly ProcessDetailRow[]): readonly
 }
 
 /** The tree reader for this host: procfs on Linux, `ps` elsewhere. */
-export function processTreeFor(platform: string = process.platform): ProcessTreePort {
+export function processTreeFor(spawn: SpawnPort, platform: string = hostPlatform): ProcessTreePort {
   if (platform === 'linux') return new ProcfsProcessTree();
-  return new PsProcessTree(Bun.which('ps') ?? '/bin/ps');
+  return new PsProcessTree(spawn);
 }

@@ -1,4 +1,4 @@
-import { DEFAULT_LIMITS_CONFIG } from '@ferretry/protocol';
+import { DEFAULT_LIMITS_CONFIG } from '../../../../../daemon/lib/protocol/limits.ts';
 import { StateFileSystem, unmeasuredHostFacts } from '../../../../src/adapters/index.ts';
 import type { DaemonStorage } from '../../../../src/adapters/storage/session-storage.ts';
 import type { ConfigFilesService } from '../../../../src/lib/config-files/index.ts';
@@ -12,7 +12,7 @@ import {
   type TmuxController,
 } from '../../../../src/lib/index.ts';
 import { type BuiltModule, type ModuleLifecycle, lateBound } from '../../../../src/lib/runtime/modules.ts';
-import { type CgroupsNeeds, cgroupsModule } from '../../../../bin/modules/cgroups.ts';
+import { type CgroupsNeeds, cgroupsModule } from '../../../../../daemon/modules/cgroups.ts';
 
 /**
  * THE `cgroups` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).

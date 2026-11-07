@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE, LimitsViewSchema } from '@ferretry/protocol';
+import { GIBIBYTE, LimitsViewSchema } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import {
   buildLimitsView,
@@ -12,7 +12,7 @@ import {
   probeEnforcement,
   REPROBE_INTERVAL_MS,
   type ServiceWeights,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 
 const THIS_BOX: CgroupHostFacts = {
   platform: 'linux',

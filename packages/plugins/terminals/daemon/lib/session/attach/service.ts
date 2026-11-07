@@ -1,4 +1,4 @@
-import type { SessionAttachTarget } from '@ferretry/protocol';
+import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
 import { hasSafeTerminalPaneIdentity, type RegisteredTerminalPane, terminalPaneIdentityMatches } from '../reap.ts';
 import type { RegisteredPaneObserver, TerminalPaneRegistry } from '../reap-service.ts';
 

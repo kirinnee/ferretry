@@ -1,4 +1,5 @@
-import type { TerminalHolder, TerminalHolderStanding } from '@ferretry/protocol';
+import { type TerminalHolder } from '../../../contract/index.ts';
+import type { TerminalHolderStanding } from './standing.ts';
 import type { TerminalOwnerStanding, TerminalRecord } from './contracts.ts';
 
 /**

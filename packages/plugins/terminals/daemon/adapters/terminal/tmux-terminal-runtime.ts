@@ -1,4 +1,4 @@
-import type { TerminalSize } from '@ferretry/protocol';
+import { type TerminalSize } from '../../../contract/index.ts';
 import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
 import type { LoginShellPort } from '../../lib/terminal/login-shell.ts';
 import { decodeTerminalOpener, encodeTerminalOpener } from '../../lib/terminal/ownership.ts';

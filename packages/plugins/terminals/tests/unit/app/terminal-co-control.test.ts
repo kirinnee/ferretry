@@ -8,7 +8,7 @@ import {
   TERMINAL_REOPEN_MAX_MS,
   terminalReopenDelayMs,
   terminalResizeFrame,
-} from '../../src/lib/terminal-co-control.ts';
+} from '../../../app/lib/terminal-co-control.ts';
 
 const AGENT: SurfaceOwnership = { by: 'agent', sessionId: 'mse7wwti' };
 const HUMAN: SurfaceOwnership = { by: 'human', deviceId: 'device-7f3a' };

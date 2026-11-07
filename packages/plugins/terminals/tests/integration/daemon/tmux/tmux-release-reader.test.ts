@@ -3,8 +3,8 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { TmuxReleaseReader } from '../../../src/adapters/tmux/tmux-release-reader.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
+import { TmuxReleaseReader } from '../../../../daemon/adapters/tmux/tmux-release-reader.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /** A server that answers `answer`, recording what it was asked. Never a real tmux server. */
 const server = (answer: () => Promise<TmuxCommandResult>): TmuxCommandPort & { readonly asked: string[][] } => {

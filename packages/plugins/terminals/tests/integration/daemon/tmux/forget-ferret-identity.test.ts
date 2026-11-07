@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { forgetFerretIdentity } from '../../../src/adapters/tmux/forget-ferret-identity.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
+import { forgetFerretIdentity } from '../../../../daemon/adapters/tmux/forget-ferret-identity.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /**
  * A daemon started inside a ferret's pane, or a tmux server an earlier such daemon started, must hand no child

@@ -1,13 +1,4 @@
-import {
-  SESSION_PROCESS_COMMAND_MAX,
-  SESSION_PROCESS_OUTPUT_READ_MAX,
-  type SessionProcess,
-  type SessionProcessExit,
-  type SessionProcessList,
-  type SessionProcessOutput,
-  type SessionProcessOutputAvailability,
-  type SessionProcessStopResult,
-} from '@ferretry/protocol';
+import { SESSION_PROCESS_COMMAND_MAX, SESSION_PROCESS_OUTPUT_READ_MAX, type SessionProcess, type SessionProcessExit, type SessionProcessList, type SessionProcessOutput, type SessionProcessOutputAvailability, type SessionProcessStopResult } from '../../protocol/session-processes.ts';
 import { truncateCommand } from './commands.ts';
 import type { EndedProcess, ProcessHistory } from './history.ts';
 import { cpuPercent, type ProcessEntry, parseProcessId, processEntries, stopOrder } from './model.ts';

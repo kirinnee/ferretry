@@ -15,13 +15,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { BunTmuxProcess, ControlModeTmuxProcess } from '../../../src/adapters/index.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 import {
   PANE_WATCH_FORMAT,
   parsePaneWatch,
   SESSION_WORKER_ATTACH_FLAGS,
-} from '../../../src/lib/tmux/control-protocol.ts';
-import { isTmuxServerAbsent } from '../../../src/lib/tmux/server-absent.ts';
+} from '../../../../daemon/lib/tmux/control-protocol.ts';
+import { isTmuxServerAbsent } from '../../../../daemon/lib/tmux/server-absent.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');

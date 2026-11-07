@@ -1,12 +1,5 @@
 import { describe, it } from 'bun:test';
-import {
-  CloseFinishedTerminalsResponseSchema,
-  CloseTerminalResponseSchema,
-  TerminalHoldersViewSchema,
-  TerminalListViewSchema,
-  type TerminalView,
-  TerminalViewSchema,
-} from '@ferretry/protocol';
+import { CloseFinishedTerminalsResponseSchema, CloseTerminalResponseSchema, TerminalHoldersViewSchema, TerminalListViewSchema, type TerminalView, TerminalViewSchema } from '../../../../../contract/index.ts';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -15,7 +8,7 @@ import {
   TerminalMountError,
   terminalRoutes,
   terminalSocketRoutes,
-} from '../../../../src/lib/runtime/mounts/terminals.ts';
+} from '../../../../../daemon/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, FakeTerminals, GRANTED, human } from './support.ts';
 

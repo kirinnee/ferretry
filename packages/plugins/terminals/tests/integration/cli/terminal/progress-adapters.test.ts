@@ -1,8 +1,8 @@
 import { describe, it, spyOn } from 'bun:test';
 import should from 'should';
-import { canRedraw, chooseProgress, processProgressHost } from '../../../src/adapters/terminal/progress-factory';
-import { ProgressAwareIo } from '../../../src/adapters/terminal/progress-io';
-import { TtyProgress, type TtyProgressHost } from '../../../src/adapters/terminal/tty-progress';
+import { canRedraw, chooseProgress, processProgressHost } from '../../../../cli/adapters/terminal/progress-factory';
+import { ProgressAwareIo } from '../../../../cli/adapters/terminal/progress-io';
+import { TtyProgress, type TtyProgressHost } from '../../../../cli/adapters/terminal/tty-progress';
 import { RecordingProgress } from '../../unit/progress/fixtures';
 import { waitFor } from '../support/wait-for';
 

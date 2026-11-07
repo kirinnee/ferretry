@@ -1,4 +1,4 @@
-import type { LimitsView } from '@ferretry/protocol';
+import { type LimitsView } from '../../protocol/limits.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import type { ModuleContribution } from '../modules.ts';

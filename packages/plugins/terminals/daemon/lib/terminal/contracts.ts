@@ -1,4 +1,5 @@
-import type { SurfaceOpener, TerminalHolderStanding, TerminalSize } from '@ferretry/protocol';
+import { type SurfaceOpener, type TerminalSize } from '../../../contract/index.ts';
+import type { TerminalHolderStanding } from './standing.ts';
 import type { TerminalCapture } from './redraw.ts';
 
 export interface TerminalRecord extends TerminalSize {

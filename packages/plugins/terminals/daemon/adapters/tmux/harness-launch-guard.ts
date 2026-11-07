@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { realpath } from '../host/fs.ts';
 import { isAbsolute, resolve } from 'node:path';
 import {
   GUARDED_HARNESS_NAMES,

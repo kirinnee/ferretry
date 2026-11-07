@@ -1,6 +1,6 @@
-import type { SessionAttachTarget } from '@ferretry/protocol';
-import { ProcessHistory } from '../../../../src/lib/session/processes/history.ts';
-import { readWindow } from '../../../../src/lib/session/processes/output.ts';
+import { type SessionAttachTarget } from '../../../../../daemon/lib/protocol/session-processes.ts';
+import { ProcessHistory } from '../../../../../daemon/lib/session/processes/history.ts';
+import { readWindow } from '../../../../../daemon/lib/session/processes/output.ts';
 import type {
   OutputFilePort,
   OutputFileRead,
@@ -13,8 +13,8 @@ import type {
   ProcessTreeRead,
   SessionPaneProofPort,
   SessionTranscriptTailPort,
-} from '../../../../src/lib/session/processes/ports.ts';
-import { SessionProcessService } from '../../../../src/lib/session/processes/service.ts';
+} from '../../../../../daemon/lib/session/processes/ports.ts';
+import { SessionProcessService } from '../../../../../daemon/lib/session/processes/service.ts';
 import type { TranscriptTailResult } from '../../../../src/lib/session/reads/service.ts';
 import type { TranscriptEvent, TranscriptJsonValue } from '../../../../src/lib/transcript/types.ts';
 

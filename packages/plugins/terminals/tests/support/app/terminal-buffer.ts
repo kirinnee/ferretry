@@ -4,7 +4,7 @@
  * cells) without a canvas.
  */
 
-import type { LinkableBuffer, LinkableCell, LinkableLine } from '../../src/lib/terminal-links.ts';
+import type { LinkableBuffer, LinkableCell, LinkableLine } from '../../../app/lib/terminal-links.ts';
 
 /** One screen row: its text, and whether the emulator marked it a continuation of the row above. */
 export type BufferRow = string | { readonly text: string; readonly wrapped: true };

@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import chalk from 'chalk';
 import type inquirer from 'inquirer';
 import type { Ora } from 'ora';
-import { ConsoleIo } from '../../src/adapters/terminal/console-io';
-import { InquirerPrompt } from '../../src/adapters/terminal/prompt';
-import { OraSpinner } from '../../src/adapters/terminal/spinner';
+import { ConsoleIo } from '../../../cli/adapters/terminal/console-io';
+import { InquirerPrompt } from '../../../cli/adapters/terminal/prompt';
+import { OraSpinner } from '../../../cli/adapters/terminal/spinner';
 
 describe('terminal and system adapters', () => {
   const level = chalk.level;

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type PermissionOptionKind, PermissionRequestSchema } from '@ferretry/protocol';
+import { type PermissionOptionKind, PermissionRequestSchema } from '../../../../daemon/lib/protocol/permission.ts';
 import should from 'should';
 import { paneBlockingPermission, parsePermissionPrompt, permissionAnswerKeys } from '../../../src/lib/index.ts';
 

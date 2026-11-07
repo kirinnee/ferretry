@@ -27,7 +27,7 @@
  * unrecorded rather than as a guess.
  */
 
-import { type SurfaceOpener, SurfaceOpenerSchema } from '@ferretry/protocol';
+import { type SurfaceOpener, SurfaceOpenerSchema } from '../../../contract/index.ts';
 
 /** The authenticated credential, reduced to what ownership depends on. */
 export type TerminalOpenerCredential =

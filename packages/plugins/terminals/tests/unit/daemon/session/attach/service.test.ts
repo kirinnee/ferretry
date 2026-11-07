@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionAttachError, SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
+import { SessionAttachError, SessionAttachService } from '../../../../../daemon/lib/session/attach/index.ts';
 import type { RegisteredPaneObserver, TerminalPaneRegistry } from '../../../../src/lib/session/reap-service.ts';
 import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 

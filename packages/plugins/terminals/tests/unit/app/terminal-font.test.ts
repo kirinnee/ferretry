@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadTerminalFont, terminalFontLoader } from '../../src/components/terminal-font-loader.ts';
-import { TERMINAL_FONT_FACE, terminalFontFamily } from '../../src/lib/terminal-font.ts';
+import { loadTerminalFont, terminalFontLoader } from '../../../app/components/terminal-font-loader.ts';
+import { TERMINAL_FONT_FACE, terminalFontFamily } from '../../../app/lib/terminal-font.ts';
 import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
 import '../support/dom.ts';
 

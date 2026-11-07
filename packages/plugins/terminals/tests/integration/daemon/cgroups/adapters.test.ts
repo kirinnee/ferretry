@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GIBIBYTE } from '@ferretry/protocol';
+import { GIBIBYTE } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import {
   activeScheduler,
@@ -20,9 +20,9 @@ import {
   SpawnCgroupCommands,
   SysfsDiskScheduler,
   unmeasuredHostFacts,
-} from '../../../src/adapters/cgroups/index.ts';
+} from '../../../../daemon/adapters/cgroups/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { ferretSliceName, runCgroupCommand } from '../../../src/lib/cgroups/index.ts';
+import { ferretSliceName, runCgroupCommand } from '../../../../daemon/lib/cgroups/index.ts';
 import {
   createFoundationPaths,
   createSessionPaths,

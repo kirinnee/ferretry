@@ -9,7 +9,7 @@ import {
   paneColumns,
   readPaneSnapshot,
   snapshotUrl,
-} from '../../src/components/terminal-snapshot-model.ts';
+} from '../../../app/components/terminal-snapshot-model.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';

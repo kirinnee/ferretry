@@ -1,13 +1,6 @@
+import { instantFromEpochMs } from '@ferretry/std';
 import { isAbsolute, resolve } from 'node:path';
-import type {
-  CloseFinishedTerminalsResponse,
-  SurfaceOpener,
-  TerminalHolder,
-  TerminalHoldersView,
-  TerminalListView,
-  TerminalSize,
-  TerminalView,
-} from '@ferretry/protocol';
+import { type CloseFinishedTerminalsResponse, type SurfaceOpener, type TerminalHolder, type TerminalHoldersView, type TerminalListView, type TerminalSize, type TerminalView } from '../../../contract/index.ts';
 import { describeCapacity, groupTerminalHolders, isReclaimable } from '../../lib/terminal/holders.ts';
 import type {
   TerminalClock,
@@ -114,9 +107,9 @@ export class ManagedTerminalService {
       // no value, and the wire's "unrecorded" is an ABSENT key.
       ...(record.openedBy === undefined ? {} : { openedBy: record.openedBy }),
       ...(record.name === undefined ? {} : { name: record.name }),
-      createdAt: new Date(record.createdAtMs).toISOString(),
-      lastActivityAt: new Date(record.lastActivityAtMs).toISOString(),
-      idleDeadline: new Date(idleDeadline(record.lastActivityAtMs, 0, this.idleTimeoutMs) ?? 0).toISOString(),
+      createdAt: instantFromEpochMs(record.createdAtMs),
+      lastActivityAt: instantFromEpochMs(record.lastActivityAtMs),
+      idleDeadline: instantFromEpochMs(idleDeadline(record.lastActivityAtMs, 0, this.idleTimeoutMs) ?? 0),
     };
   }
 

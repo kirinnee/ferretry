@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
-import type { CloseFinishedTerminalsResponse, TerminalHoldersView } from '@ferretry/protocol';
+import { type CloseFinishedTerminalsResponse, type TerminalHoldersView } from '../../../../contract/index.ts';
 import should from 'should';
 import { SessionCommandError } from '../../../src/lib/session/errors.ts';
-import { TerminalSlotsController } from '../../../src/lib/terminal-slots/controller.ts';
-import type { ITerminalSlotsGateway } from '../../../src/lib/terminal-slots/ports.ts';
+import { TerminalSlotsController } from '../../../../cli/lib/terminal-slots/controller.ts';
+import type { ITerminalSlotsGateway } from '../../../../cli/lib/terminal-slots/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 
 const HOLDERS: TerminalHoldersView = {

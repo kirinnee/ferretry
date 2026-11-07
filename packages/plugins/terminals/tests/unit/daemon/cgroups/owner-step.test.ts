@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE } from '@ferretry/protocol';
+import { GIBIBYTE } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
-import { buildLimitsView, type CgroupHostFacts, ownerStep } from '../../../src/lib/cgroups/index.ts';
+import { buildLimitsView, type CgroupHostFacts, ownerStep } from '../../../../daemon/lib/cgroups/index.ts';
 
 /** This box: 61 GiB of RAM under a 48 GiB MemoryHigh set by a drop-in on the user slice. */
 const CAPPED: CgroupHostFacts = {

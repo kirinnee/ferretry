@@ -1,23 +1,15 @@
 import { describe, it } from 'bun:test';
-import {
-  type CapabilityGrants,
-  STEP_UP_REQUIRED_CODE,
-  SessionProcessListSchema,
-  type SessionProcessList,
-  SessionProcessOutputSchema,
-  type SessionProcessOutput,
-  SessionProcessStopResultSchema,
-  type SessionProcessStopResult,
-} from '@ferretry/protocol';
+import { type CapabilityGrants, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
+import { SessionProcessListSchema, type SessionProcessList, SessionProcessOutputSchema, type SessionProcessOutput, SessionProcessStopResultSchema, type SessionProcessStopResult } from '../../../../../daemon/lib/protocol/session-processes.ts';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import {
   sessionProcessRoutes,
   type SessionProcessSubsystem,
-} from '../../../../src/lib/runtime/mounts/session-processes.ts';
-import { SessionAttachError, type SessionAttachFailure } from '../../../../src/lib/session/attach/index.ts';
-import { SessionProcessError, type SessionProcessFailure } from '../../../../src/lib/session/processes/service.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-processes.ts';
+import { SessionAttachError, type SessionAttachFailure } from '../../../../../daemon/lib/session/attach/index.ts';
+import { SessionProcessError, type SessionProcessFailure } from '../../../../../daemon/lib/session/processes/service.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, GRANTED, grantSubsystem, human, sessionDirectory, sessionView } from './support.ts';
 

@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from '../host/fs.ts';
 import { basename, dirname, join } from 'node:path';
 import type { DiskSchedulerPort, DiskSchedulerReading } from '../../lib/cgroups/index.ts';
 

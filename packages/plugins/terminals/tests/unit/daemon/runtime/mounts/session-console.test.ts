@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
-import { SessionConsoleInputResultSchema } from '@ferretry/protocol';
+import { SessionConsoleInputResultSchema } from '../../../../../daemon/lib/protocol/session-processes.ts';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import {
   sessionConsoleRoutes,
   type SessionConsoleSubsystem,
-} from '../../../../src/lib/runtime/mounts/session-console-input.ts';
-import { SessionAttachError, type SessionAttachFailure } from '../../../../src/lib/session/attach/index.ts';
-import { TERMINAL_INPUT_CHUNK_BYTES } from '../../../../src/lib/terminal/runtime-policy.ts';
+} from '../../../../../daemon/lib/runtime/mounts/session-console-input.ts';
+import { SessionAttachError, type SessionAttachFailure } from '../../../../../daemon/lib/session/attach/index.ts';
+import { TERMINAL_INPUT_CHUNK_BYTES } from '../../../../../daemon/lib/terminal/runtime-policy.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   ATTACH_PANE,

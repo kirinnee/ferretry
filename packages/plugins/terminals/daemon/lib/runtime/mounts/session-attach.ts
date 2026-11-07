@@ -1,4 +1,4 @@
-import type { SessionAttachTarget } from '@ferretry/protocol';
+import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';

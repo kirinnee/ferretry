@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { isTmuxServerAbsent } from '../../../src/lib/tmux/server-absent.ts';
+import { isTmuxServerAbsent } from '../../../../daemon/lib/tmux/server-absent.ts';
 
 describe('whether tmux refused because no server is running', () => {
   it.each([

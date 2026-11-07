@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE, LimitsViewSchema } from '@ferretry/protocol';
+import { GIBIBYTE, LimitsViewSchema } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import {
   type CgroupHostFacts,
@@ -8,7 +8,7 @@ import {
   FleetMemoryWatcher,
   LimitsService,
   type LimitsServicePorts,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 
 const HOST: CgroupHostFacts = {
   platform: 'linux',

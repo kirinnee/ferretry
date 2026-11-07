@@ -1,4 +1,4 @@
-import type { SessionAttachTarget } from '@ferretry/protocol';
+import { type SessionAttachTarget } from '../../protocol/session-processes.ts';
 import type { TranscriptTailResult } from '../reads/service.ts';
 
 /**

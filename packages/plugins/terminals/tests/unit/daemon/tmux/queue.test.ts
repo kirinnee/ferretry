@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
-import { type DeliveryFrame, needsQueueKey, queuedWhere } from '../../../src/lib/tmux/index.ts';
+import { type DeliveryFrame, needsQueueKey, queuedWhere } from '../../../../daemon/lib/tmux/index.ts';
 
 /**
  * What a frame proves about a message put into a BUSY pane's own queue.

@@ -1,4 +1,4 @@
-import type { SessionProcessExit } from '@ferretry/protocol';
+import { type SessionProcessExit } from '../../protocol/session-processes.ts';
 import type { TranscriptEvent, TranscriptJsonValue } from '../../transcript/types.ts';
 
 /**

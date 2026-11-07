@@ -1,4 +1,4 @@
-import type { TextRange, TextRedactor } from '../secrets/redaction.ts';
+import type { CellGrid, RedactionScope } from '@ferretry/kernel/contract';
 import type { TerminalCapture } from './redraw.ts';
 
 /**
@@ -100,22 +100,17 @@ function cellsOf(line: string): Row {
   return { cells, tail: prefix, stripped };
 }
 
-function redactRows(capture: TerminalCapture, ranges: (text: string) => readonly TextRange[]): TerminalCapture {
+function redactRows(capture: TerminalCapture, mask: (grid: CellGrid) => CellGrid): TerminalCapture {
   const rows = capture.lines.map(line => ({ line, row: cellsOf(line) }));
-  const covered = ranges(rows.map(({ row }) => row.cells.map(cell => cell.char).join('')).join(''));
-  let offset = 0;
-  let next = 0;
-  const lines = rows.map(({ line, row }) => {
+  // The cells' characters, row by row, matched as one run by the read's scope (§7.3): a value wrapped across rows
+  // is masked in each row. A cell the scope changed is a cell a known value covers (the scope answers WHICH cells,
+  // never the value).
+  const grid: CellGrid = { columns: capture.cols, rows: rows.map(({ row }) => row.cells.map(cell => cell.char)) };
+  const masked = mask(grid);
+  const lines = rows.map(({ line, row }, rowIndex) => {
     let touched = row.stripped;
-    const cells = row.cells.map(cell => {
-      const start = offset;
-      offset += cell.char.length;
-      let range = covered[next];
-      while (range !== undefined && range.end <= start) {
-        next += 1;
-        range = covered[next];
-      }
-      if (range === undefined || range.start >= offset)
+    const cells = row.cells.map((cell, cellIndex) => {
+      if ((masked.rows[rowIndex]?.[cellIndex] ?? cell.char) === cell.char)
         return { text: cell.prefix + cell.char, blank: cell.char === ' ' && !cell.painted };
       touched = true;
       return { text: cell.prefix + FILL.repeat(cell.width), blank: false };
@@ -142,6 +137,6 @@ function redactRows(capture: TerminalCapture, ranges: (text: string) => readonly
  * AFTER that: the capture keeps them (a value may end in spaces, and trimmed they could not be found), the viewer
  * does not need them. A redactor that fails fails the capture: nothing unmasked is returned.
  */
-export async function redactCapture(capture: TerminalCapture, redactor: TextRedactor): Promise<TerminalCapture> {
-  return await redactor.batch(scrub => redactRows(capture, text => scrub.cover(text)));
+export function redactCapture(capture: TerminalCapture, scope: RedactionScope): TerminalCapture {
+  return redactRows(capture, grid => scope.cells(grid));
 }

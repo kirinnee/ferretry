@@ -12,7 +12,7 @@ import type {
   TerminalSize,
   TerminalView,
 } from '../../src/lib/index.ts';
-import * as terminal from '../../src/lib/terminal.ts';
+import * as terminal from '../../../daemon/lib/protocol/terminal.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

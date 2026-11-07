@@ -10,9 +10,9 @@
  */
 
 import type { TerminalListView, TerminalView } from '@ferretry/protocol';
-import type { TerminalDeckDependencies } from '../../src/components/session-terminal-deck.tsx';
-import type { LinkableBuffer, TerminalHyperlinkHandler, TerminalLinkProvider } from '../../src/lib/terminal-links.ts';
-import type { TerminalStream, TerminalStreamHandlers } from '../../src/lib/web-terminals.ts';
+import type { TerminalDeckDependencies } from '../../../app/components/session-terminal-deck.tsx';
+import type { LinkableBuffer, TerminalHyperlinkHandler, TerminalLinkProvider } from '../../../app/lib/terminal-links.ts';
+import type { TerminalStream, TerminalStreamHandlers } from '../../../app/lib/web-terminals.ts';
 
 export const terminalView = (id: string, patch: Partial<TerminalView> = {}, sessionId = 'shared'): TerminalView => ({
   id,

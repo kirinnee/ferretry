@@ -1,6 +1,8 @@
-import { constants } from 'node:fs';
-import { access, readFile, stat } from 'node:fs/promises';
-import { userInfo } from 'node:os';
+import type { SpawnPort } from '@ferretry/kernel/contract';
+import { hostEnvironment, hostPlatform } from '../host/fs.ts';
+import { constants } from '../host/fs.ts';
+import { access, readFile, stat } from '../host/fs.ts';
+import { userInfo } from '../host/fs.ts';
 import {
   chooseLoginShell,
   describeShellChoice,
@@ -103,14 +105,18 @@ export class SystemLoginShell implements LoginShellPort {
   }
 }
 
-export async function runProgram(argv: readonly string[]): Promise<string | undefined> {
-  try {
-    const child = Bun.spawn([...argv], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' });
-    const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return code === 0 ? stdout : undefined;
-  } catch {
-    return undefined;
-  }
+/** Runs one directory-service lookup (`dscl`, `getent`) through the kernel's spawn port; any failure is no answer. */
+export function programRunner(spawn: SpawnPort): (argv: readonly string[]) => Promise<string | undefined> {
+  return async argv => {
+    const [program, ...rest] = argv;
+    if (program === undefined) return undefined;
+    try {
+      const result = await spawn.run(program, rest);
+      return result.exitCode === 0 ? result.stdout : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /** The account name, or undefined when this uid has no passwd entry (a container run as an arbitrary uid). */
@@ -122,21 +128,23 @@ export function accountName(read: () => string): string | undefined {
   }
 }
 
-/** The production wiring: this process's account, the real system files, and stderr for the notice. */
+/** The production wiring: this process's account, the real system files, and the daemon's log for the notice. */
 export function systemLoginShell(
   configured: () => Promise<string | undefined>,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
+  spawn: SpawnPort,
+  report: (message: string) => void,
+  environment: Readonly<Record<string, string | undefined>> = hostEnvironment,
 ): SystemLoginShell {
   const username = accountName(() => userInfo().username);
   return new SystemLoginShell({
-    platform: process.platform,
+    platform: hostPlatform,
     uid: process.getuid?.(),
     username,
     environmentShell: environment.SHELL,
     passwdFile: '/etc/passwd',
     shellsFile: '/etc/shells',
     configured,
-    run: runProgram,
-    report: message => process.stderr.write(message),
+    run: programRunner(spawn),
+    report,
   });
 }

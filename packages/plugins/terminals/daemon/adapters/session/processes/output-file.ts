@@ -1,5 +1,6 @@
-import { constants, type Stats } from 'node:fs';
-import { type FileHandle, lstat, open, readlink } from 'node:fs/promises';
+import { hostPlatform } from '../../host/fs.ts';
+import { constants, type Stats } from '../../host/fs.ts';
+import { type FileHandle, lstat, open, readlink } from '../../host/fs.ts';
 import { isAbsolute, join } from 'node:path';
 import type { ConfiguredServersPort } from '../../../lib/migrate/configured-servers.ts';
 import { identifyKnownProcesses } from '../../../lib/migrate/harness-provenance.ts';
@@ -80,7 +81,7 @@ export class HarnessProcessProvenance implements ProcessProvenancePort {
   constructor(
     private readonly binaryName: string,
     private readonly servers: ConfiguredServersPort,
-    private readonly procRoot: string | null = process.platform === 'linux' ? '/proc' : null,
+    private readonly procRoot: string | null = hostPlatform === 'linux' ? '/proc' : null,
   ) {}
 
   async identify(rows: readonly ProcessDetailRow[], rootPid: number) {

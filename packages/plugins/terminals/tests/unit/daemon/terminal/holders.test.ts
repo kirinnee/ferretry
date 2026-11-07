@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
-import type { TerminalHolder } from '@ferretry/protocol';
+import { type TerminalHolder } from '../../../../contract/index.ts';
 import should from 'should';
-import type { TerminalOwnerStanding } from '../../../src/lib/terminal/contracts.ts';
+import type { TerminalOwnerStanding } from '../../../../daemon/lib/terminal/contracts.ts';
 import {
   describeCapacity,
   groupTerminalHolders,
   isReclaimable,
   standingOfSessionStatus,
-} from '../../../src/lib/terminal/holders.ts';
+} from '../../../../daemon/lib/terminal/holders.ts';
 
 const holder = (overrides: Partial<TerminalHolder>): TerminalHolder => ({
   sessionId: 's-1',

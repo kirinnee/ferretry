@@ -1,4 +1,7 @@
-import type { InputEcho } from '@ferretry/protocol';
+import type { InputEchoSchema } from '@ferretry/core-vault/contract';
+import type { z } from 'zod';
+
+type InputEcho = z.infer<typeof InputEchoSchema>;
 
 /** Reads whether a TTY echoes what is typed. `unknown` when it cannot be read; the service treats that as `on`. */
 export interface TerminalModes {

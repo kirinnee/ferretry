@@ -14,7 +14,7 @@ import {
   type TerminalStreamClose,
   type TerminalStreamFrame,
   utf8ByteLength,
-} from '../../../src/lib/terminal/stream-policy.ts';
+} from '../../../../daemon/lib/terminal/stream-policy.ts';
 
 const invalidFrame: TerminalStreamClose = TERMINAL_STREAM_CLOSES.invalidFrame;
 

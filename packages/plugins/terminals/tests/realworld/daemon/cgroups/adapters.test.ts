@@ -1,7 +1,7 @@
 // Realworld: asserts wall-clock speed; the outcome depends on the machine, not the code.
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CGROUP_COMMAND_TIMEOUT_CODE, SpawnCgroupCommands } from '../../../src/adapters/cgroups/index.ts';
+import { CGROUP_COMMAND_TIMEOUT_CODE, SpawnCgroupCommands } from '../../../../daemon/adapters/cgroups/index.ts';
 
 describe('running one host-manager command', () => {
   it('should give up on a manager that never answers, and say so in the manager slot', async () => {

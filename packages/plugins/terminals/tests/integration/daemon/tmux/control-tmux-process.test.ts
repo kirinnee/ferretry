@@ -9,8 +9,8 @@ import {
   type ControlModeOptions,
   ControlModeTmuxProcess,
 } from '../../../src/adapters/index.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
-import type { TmuxControlNotification } from '../../../src/lib/tmux/control-protocol.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
+import type { TmuxControlNotification } from '../../../../daemon/lib/tmux/control-protocol.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');

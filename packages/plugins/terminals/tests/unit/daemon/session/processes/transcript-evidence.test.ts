@@ -5,7 +5,7 @@ import {
   resultFor,
   type TranscriptEvidence,
   transcriptEvidence,
-} from '../../../../src/lib/session/processes/transcript-evidence.ts';
+} from '../../../../../daemon/lib/session/processes/transcript-evidence.ts';
 import type { TranscriptEvent, TranscriptJsonValue } from '../../../../src/lib/transcript/types.ts';
 
 /**

@@ -1,16 +1,4 @@
-import {
-  type CloseFinishedTerminalsResponse,
-  type CloseTerminalResponse,
-  type CreateTerminalRequest,
-  CreateTerminalRequestSchema,
-  RenameTerminalRequestSchema,
-  type SurfaceOpener,
-  type TerminalErrorCode,
-  type TerminalHoldersView,
-  TerminalIdSchema,
-  type TerminalListView,
-  type TerminalView,
-} from '@ferretry/protocol';
+import { type CloseFinishedTerminalsResponse, type CloseTerminalResponse, type CreateTerminalRequest, CreateTerminalRequestSchema, RenameTerminalRequestSchema, type SurfaceOpener, type TerminalErrorCode, type TerminalHoldersView, TerminalIdSchema, type TerminalListView, type TerminalView } from '../../../../contract/index.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';

@@ -13,7 +13,9 @@ import {
   parseControlNotification,
   type TmuxControlNotification,
 } from '../../lib/tmux/control-protocol.ts';
-import { BunTmuxProcess } from './bun-tmux-process.ts';
+
+/** A one-shot timer (`kernel.clock.after`); calling the answer cancels it. */
+export type ControlTimer = (milliseconds: number, fn: () => void) => () => void;
 
 /** The parts of a child process a control client uses: its pipes, a way to end it, and its exit. */
 export interface ControlChild {
@@ -32,9 +34,11 @@ export interface ControlModeOptions {
   readonly replyTimeoutMs?: number;
   /** After a connection could not be made, how long every command keeps its own process. */
   readonly retryAfterMs?: number;
-  readonly nowMs?: () => number;
-  /** Starts the long-lived client. Bun's spawn, unreferenced, unless a test substitutes a child. */
-  readonly spawn?: (argv: readonly string[]) => ControlChild;
+  readonly nowMs: () => number;
+  /** One-shot timers: the kernel's clock (`kernel.clock.after`). */
+  readonly after: ControlTimer;
+  /** Starts the long-lived client (`tmux` and its arguments) through the kernel's spawn port, or a test's child. */
+  readonly spawn: (argv: readonly string[]) => ControlChild;
   /**
    * The ONE session this client attaches to, and how. Absent, it attaches to the first session that is
    * not a terminal, `ignore-size,no-output` — the daemon's shared query client. A session worker names
@@ -59,7 +63,7 @@ interface Pending {
   readonly nonce: string;
   readonly collected: string[];
   readonly settle: (reply: ControlReply | undefined) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  readonly timer: () => void;
 }
 
 type Phase =
@@ -73,14 +77,6 @@ type Phase =
 const randomNonce = (): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 
-function spawnControlChild(argv: readonly string[]): ControlChild {
-  const child = Bun.spawn([...argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
-  // The client must never be what keeps a daemon — or a test runner — from exiting. Its stdin closing
-  // when this process goes makes tmux drop it — but only AFTER the process has gone, which is why a
-  // daemon that is stopping ends its client with `stop` and does not leave this to the exit.
-  child.unref();
-  return child;
-}
 
 /**
  * ONE connected control-mode client: `tmux -C attach-session`, kept for as long as tmux keeps it.
@@ -102,6 +98,7 @@ class ControlConnection {
     private readonly onEnd: (answered: boolean) => void,
     private readonly nonce: () => string,
     private readonly replyTimeoutMs: number,
+    private readonly after: ControlTimer,
   ) {
     void this.read();
   }
@@ -115,7 +112,7 @@ class ControlConnection {
     if (this.ended) return undefined;
     const nonce = this.nonce();
     return await new Promise<ControlReply | undefined>(resolve => {
-      const timer = setTimeout(() => this.end(), this.replyTimeoutMs);
+      const timer = this.after(this.replyTimeoutMs, () => this.end());
       this.pending.push({ nonce, collected: [], settle: resolve, timer });
       try {
         this.child.stdin.write(`${line}\n${controlNonceLine(nonce)}\n`);
@@ -131,7 +128,7 @@ class ControlConnection {
     if (this.ended) return;
     this.ended = true;
     for (const waiting of this.pending.splice(0)) {
-      clearTimeout(waiting.timer);
+      waiting.timer();
       waiting.settle(undefined);
     }
     try {
@@ -198,7 +195,7 @@ class ControlConnection {
       return;
     }
     this.pending.shift();
-    clearTimeout(head.timer);
+    head.timer();
     this.phase = { kind: 'closing', key: progress.closing };
     this.answered = true;
     head.settle(progress.reply);
@@ -256,17 +253,18 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
   constructor(
     private readonly executable: string,
     private readonly socketPath: string,
-    private readonly spawned: TmuxCommandPort = new BunTmuxProcess(executable, socketPath),
-    options: ControlModeOptions = {},
+    private readonly spawned: TmuxCommandPort,
+    options: ControlModeOptions,
   ) {
-    if (!isAbsolute(executable) || !isAbsolute(socketPath))
-      throw new Error('tmux executable and socket path must both be absolute');
+    // The program is named, not located: the kernel's spawn port runs only what the manifest declares.
+    if (executable === '' || !isAbsolute(socketPath)) throw new Error('the tmux socket path must be absolute');
     this.options = {
       nonce: options.nonce ?? randomNonce,
       replyTimeoutMs: options.replyTimeoutMs ?? 15_000,
       retryAfterMs: options.retryAfterMs ?? 10_000,
-      nowMs: options.nowMs ?? (() => Date.now()),
-      spawn: options.spawn ?? spawnControlChild,
+      nowMs: options.nowMs,
+      after: options.after,
+      spawn: options.spawn,
       mutations: options.mutations ?? 'spawn',
       ...(options.attach === undefined ? {} : { attach: options.attach }),
     };
@@ -349,14 +347,14 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     await this.connecting;
     // Each was sent SIGTERM when its connection ended, and `close` has just ended the last one.
     const children = [...this.children];
-    if (await exitedWithin(children, withinMs)) return true;
+    if (await exitedWithin(children, withinMs, this.options.after)) return true;
     for (const child of children)
       try {
         child.kill('SIGKILL');
       } catch {
         // Already gone.
       }
-    await exitedWithin(children, withinMs);
+    await exitedWithin(children, withinMs, this.options.after);
     return false;
   }
 
@@ -425,6 +423,7 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
       },
       this.options.nonce,
       this.options.replyTimeoutMs,
+      this.options.after,
     );
     if (connection.open) {
       this.connection = connection;
@@ -449,16 +448,16 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
 }
 
 /** Whether every one of `children` exited within `withinMs`. */
-async function exitedWithin(children: readonly ControlChild[], withinMs: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function exitedWithin(children: readonly ControlChild[], withinMs: number, after: ControlTimer): Promise<boolean> {
+  let timer: (() => void) | undefined;
   const deadline = new Promise<false>(resolve => {
-    timer = setTimeout(() => resolve(false), withinMs);
+    timer = after(withinMs, () => resolve(false));
   });
   const all = Promise.allSettled(children.map(child => child.exited)).then(() => true as const);
   try {
     return await Promise.race([all, deadline]);
   } finally {
-    clearTimeout(timer);
+    timer?.();
   }
 }
 

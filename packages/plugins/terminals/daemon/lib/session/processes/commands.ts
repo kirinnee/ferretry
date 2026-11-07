@@ -1,4 +1,4 @@
-import type { SessionProcessOutputAvailability } from '@ferretry/protocol';
+import { type SessionProcessOutputAvailability } from '../../protocol/session-processes.ts';
 import type { ProcessStreamTarget } from './ports.ts';
 
 /**

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { TerminalInputPort } from '../../../src/components/session-terminal-deck.tsx';
+import type { TerminalInputPort } from '../../../../app/components/session-terminal-deck.tsx';
 import { consoleKeyInput } from '../../../src/features/workspace/console-keys.ts';
 import {
   CONSOLE_REFRESH_MIN_MS,

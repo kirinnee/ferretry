@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE, resolveLimits } from '@ferretry/protocol';
+import { GIBIBYTE, resolveLimits } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import {
   describeProcess,
@@ -10,7 +10,7 @@ import {
   MemoryKillExitPort,
   THROTTLE_MEMORY_MS,
   type TreeProcess,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 import type { ExitedSessionTransition, SessionExitObservation } from '../../../src/lib/session/health/exit.ts';
 import type { SessionExitPort } from '../../../src/lib/session/health/service.ts';
 

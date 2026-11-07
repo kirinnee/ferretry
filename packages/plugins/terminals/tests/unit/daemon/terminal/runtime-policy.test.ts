@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { hexInputChunks, terminalPaneTarget, terminalTmuxSessionName } from '../../../src/lib/terminal/index.ts';
+import { hexInputChunks, terminalPaneTarget, terminalTmuxSessionName } from '../../../../daemon/lib/terminal/index.ts';
 
 describe('terminal runtime policy', () => {
   it('should create stable bounded tmux session names without trusting display characters', () => {

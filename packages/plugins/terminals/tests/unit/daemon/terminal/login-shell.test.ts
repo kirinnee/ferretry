@@ -8,7 +8,7 @@ import {
   listedShells,
   type LoginShellSource,
   passwdShell,
-} from '../../../src/lib/terminal/login-shell.ts';
+} from '../../../../daemon/lib/terminal/login-shell.ts';
 
 const PASSWD = [
   '# comment',

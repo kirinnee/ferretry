@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { carriesPayload, scriptArguments, scriptLine } from '../../../src/lib/tmux/script.ts';
+import { carriesPayload, scriptArguments, scriptLine } from '../../../../daemon/lib/tmux/script.ts';
 
 describe('which tmux commands travel on stdin', () => {
   it('should send a new-session that sets environment, and every send-keys, on stdin', () => {

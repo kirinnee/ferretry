@@ -1,3 +1,4 @@
+import { readText } from '../host/fs.ts';
 import type { CgroupPlacementPort } from '../../lib/cgroups/index.ts';
 
 /**
@@ -17,6 +18,6 @@ export class ProcCgroupPlacements implements CgroupPlacementPort {
 
   async placement(pid: number): Promise<string> {
     if (!Number.isSafeInteger(pid) || pid < 1) throw new Error(`${pid} is not a process id`);
-    return await Bun.file(`${this.procRoot}/${pid}/cgroup`).text();
+    return await readText(`${this.procRoot}/${pid}/cgroup`);
   }
 }

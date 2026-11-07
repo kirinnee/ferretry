@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE, resolveLimits } from '@ferretry/protocol';
+import { GIBIBYTE, resolveLimits } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import {
   ancestorPaths,
@@ -14,7 +14,7 @@ import {
   parseSwapTotal,
   sessionOfScope,
   userManagerPath,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 
 /** This box: 61 GiB of RAM, a 48 GiB MemoryHigh on the user slice, 32 cores. */
 const THIS_BOX: CgroupHostFacts = {

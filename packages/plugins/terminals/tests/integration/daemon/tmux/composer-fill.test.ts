@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ComposerUnconfirmedError, fillComposer } from '../../../src/adapters/tmux/composer-fill.ts';
-import type { PaneState } from '../../../src/lib/tmux/contracts.ts';
-import type { TmuxController } from '../../../src/lib/tmux/index.ts';
+import { ComposerUnconfirmedError, fillComposer } from '../../../../daemon/adapters/tmux/composer-fill.ts';
+import type { PaneState } from '../../../../daemon/lib/tmux/contracts.ts';
+import type { TmuxController } from '../../../../daemon/lib/tmux/index.ts';
 
 const SESSION = 'fy-session-1';
 const SETTINGS = { composerAttempts: 2, pollMs: 10, windowMs: 300, stalledWindowMs: 300, settleMs: 0 };

@@ -20,7 +20,7 @@
  * ORDERING IS NOT THIS MODULE'S PROBLEM. Every launch already runs inside the session lifecycle's
  * serial executor.
  */
-import { type LimitsConfig, type ResolvedLimits, resolveLimits } from '@ferretry/protocol';
+import { type LimitsConfig, type ResolvedLimits, resolveLimits } from '../protocol/limits.ts';
 import { WARDEN_LABEL } from '../warden/types.ts';
 import { CgroupError, failureText, runCgroupCommand } from './apply.ts';
 import type { EnforcementState } from './enforcement.ts';

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { RegularOutputFile } from '../../../../src/adapters/session/processes/index.ts';
+import { RegularOutputFile } from '../../../../../daemon/adapters/session/processes/index.ts';
 
 let directory: string;
 

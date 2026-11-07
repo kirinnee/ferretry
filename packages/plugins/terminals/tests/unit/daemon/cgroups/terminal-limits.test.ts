@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
-import { GIBIBYTE } from '@ferretry/protocol';
+import { GIBIBYTE } from '../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
-import { TmuxTerminalRuntime } from '../../../src/adapters/terminal/tmux-terminal-runtime.ts';
+import { TmuxTerminalRuntime } from '../../../../daemon/adapters/terminal/tmux-terminal-runtime.ts';
 import {
   type CgroupCommandPort,
   type CgroupHostFacts,
   CgroupLaunchPlanner,
   EnforcementRuntime,
-} from '../../../src/lib/cgroups/index.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
+import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /**
  * A terminal an agent opens is a separate tmux session, outside the harness's scope. These prove it is launched

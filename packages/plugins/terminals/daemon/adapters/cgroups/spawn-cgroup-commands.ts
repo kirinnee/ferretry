@@ -1,3 +1,4 @@
+import type { SpawnPort } from '@ferretry/kernel/contract';
 import type { CgroupCommandPort, CgroupCommandResult } from '../../lib/cgroups/index.ts';
 
 /**
@@ -48,7 +49,8 @@ async function readOrAbandon(
   abandoned: Promise<typeof ABANDONED>,
 ): Promise<string> {
   const text = await Promise.race([new Response(stream).text(), abandoned]);
-  return text === ABANDONED ? '' : text;
+  // Today's `maxBuffer`: a manager that streams cannot grow the heap past the cap.
+  return text === ABANDONED ? '' : text.slice(0, MAX_OUTPUT_BYTES);
 }
 
 export interface SpawnCgroupCommandOptions {
@@ -59,24 +61,23 @@ export interface SpawnCgroupCommandOptions {
 export class SpawnCgroupCommands implements CgroupCommandPort {
   private readonly timeoutMs: number;
 
-  constructor(options: SpawnCgroupCommandOptions = {}) {
+  constructor(
+    private readonly spawn: SpawnPort,
+    private readonly after: (milliseconds: number, fn: () => void) => () => void,
+    options: SpawnCgroupCommandOptions = {},
+  ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_CGROUP_COMMAND_TIMEOUT_MS;
   }
 
   async execute(argv: readonly string[]): Promise<CgroupCommandResult> {
     const [executable, ...rest] = argv;
     if (executable === undefined) throw new Error('a cgroup command needs an executable');
-    const child = Bun.spawn([executable, ...rest], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      maxBuffer: MAX_OUTPUT_BYTES,
-    });
+    const child = this.spawn.start(executable, rest);
     const abandoned = Promise.withResolvers<typeof ABANDONED>();
-    const timer = setTimeout(() => {
+    const timer = this.after(this.timeoutMs, () => {
       child.kill('SIGKILL');
       abandoned.resolve(ABANDONED);
-    }, this.timeoutMs);
+    });
     try {
       const [code, stdout, stderr] = await Promise.all([
         Promise.race([child.exited, abandoned.promise]),
@@ -93,7 +94,7 @@ export class SpawnCgroupCommands implements CgroupCommandPort {
         stderr: `${executable} did not answer within ${this.timeoutMs}ms and was killed; the host manager is not responding`,
       };
     } finally {
-      clearTimeout(timer);
+      timer();
     }
   }
 }

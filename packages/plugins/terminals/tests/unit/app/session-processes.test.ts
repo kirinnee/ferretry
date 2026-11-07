@@ -20,7 +20,7 @@ import {
   processTitle,
   readSessionProcessOutput,
   stopSessionProcess,
-} from '../../src/lib/session-processes.ts';
+} from '../../../app/lib/session-processes.ts';
 import {
   ALL_PROCESSES,
   DEV_SERVER_PARENT,
@@ -30,7 +30,7 @@ import {
   processList,
   TERMINAL_ONLY,
   WATCH_TESTS,
-} from '../support/session-processes.ts';
+} from '../../support/app/session-processes.ts';
 
 const daemon = daemonConnection({ daemonId: 'proc-daemon', baseUrl: 'https://proc.example.test', deviceId: 'd' });
 const scope = daemonSessionScope(daemon, 'agent-session');

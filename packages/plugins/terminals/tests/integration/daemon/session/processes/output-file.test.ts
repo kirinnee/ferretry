@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, open, rm, symlink, truncate, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { RegularOutputFile } from '../../../../src/adapters/session/processes/index.ts';
+import { RegularOutputFile } from '../../../../../daemon/adapters/session/processes/index.ts';
 
 /**
  * THE OUTPUT-FILE READER, over real files, FIFOs and symlinks.

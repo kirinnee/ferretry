@@ -16,7 +16,7 @@
  *
  * Each ferret hears about it once per episode (a note in its own journal), not once per tick.
  */
-import type { ResolvedLimits } from '@ferretry/protocol';
+import { type ResolvedLimits } from '../protocol/limits.ts';
 import { eventsGrowth } from './memory-events.ts';
 import type {
   AppliedCaps,

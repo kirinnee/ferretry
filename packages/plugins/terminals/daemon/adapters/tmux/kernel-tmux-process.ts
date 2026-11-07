@@ -1,15 +1,22 @@
 import { isAbsolute } from 'node:path';
+import type { SpawnPort } from '@ferretry/kernel/contract';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { carriesPayload, scriptArguments, scriptLine } from '../../lib/tmux/script.ts';
 
-/** Bun-backed tmux process adapter. An absolute private socket is mandatory for fleet safety. */
-export class BunTmuxProcess implements TmuxCommandPort {
+/** The program the manifest declares in `permissions.spawn`; the kernel's spawn port runs nothing else. */
+export const TMUX_PROGRAM = 'tmux';
+
+/**
+ * The tmux process adapter, through the kernel's spawn port (today's `BunTmuxProcess`). An absolute private socket
+ * is mandatory for fleet safety.
+ */
+export class KernelTmuxProcess implements TmuxCommandPort {
   constructor(
-    private readonly executable: string,
+    private readonly spawn: SpawnPort,
     private readonly socketPath: string,
+    private readonly executable: string = TMUX_PROGRAM,
   ) {
-    if (!isAbsolute(executable) || !isAbsolute(socketPath))
-      throw new Error('tmux executable and socket path must both be absolute');
+    if (!isAbsolute(socketPath)) throw new Error('the tmux socket path must be absolute');
   }
 
   async execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
@@ -27,28 +34,11 @@ export class BunTmuxProcess implements TmuxCommandPort {
     // with no UTF-8 locale — which is every daemon a service manager or `fy daemon start` launches
     // unless told otherwise — gets every tab and non-ASCII byte in a format's output back as `_`, so
     // a tab-separated answer arrives as one field and every session launch failed on it.
-    const command = [this.executable, '-u', '-S', this.socketPath, ...arguments_];
-    if (stdin === undefined)
-      return await collect(Bun.spawn(command, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }));
+    const command = ['-u', '-S', this.socketPath, ...arguments_];
     // A payload is written to the child rather than passed as an argument: argv is world-readable
-    // through `/proc`, and a turn brief is longer than the argument limit anyway.
-    const child = Bun.spawn(command, { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
-    child.stdin.write(stdin);
-    await child.stdin.end();
-    return await collect(child);
+    // through `/proc`, and a turn brief is longer than the argument limit anyway. Both streams are drained
+    // alongside the exit by the spawn port, so a tmux command that fills a pipe cannot deadlock.
+    const result = await this.spawn.run(this.executable, command, stdin === undefined ? undefined : { stdin });
+    return { code: result.exitCode ?? 1, stdout: result.stdout, stderr: result.stderr };
   }
-}
-
-/** Both streams are drained alongside the exit so a tmux command that fills a pipe cannot deadlock. */
-async function collect(child: {
-  readonly stdout: ReadableStream<Uint8Array>;
-  readonly stderr: ReadableStream<Uint8Array>;
-  readonly exited: Promise<number>;
-}): Promise<TmuxCommandResult> {
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { code, stdout, stderr };
 }

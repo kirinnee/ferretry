@@ -1,4 +1,5 @@
-import { configFilePath, type LimitsConfig, resolveLimits, SessionConfigSchema } from '@ferretry/protocol';
+import { configFilePath, SessionConfigSchema } from '@ferretry/protocol';
+import { type LimitsConfig, resolveLimits } from '../lib/protocol/limits.ts';
 import {
   asActivity,
   CgroupFleetMemory,
@@ -14,7 +15,7 @@ import {
   SysfsDiskScheduler,
 } from '../../src/adapters/index.ts';
 import { DurableTerminalPaneStore, ExactTmuxPaneReaper } from '../../src/adapters/session/lifecycle/index.ts';
-import { processTreeFor } from '../../src/adapters/session/processes/index.ts';
+import { processTreeFor } from '../adapters/session/processes/index.ts';
 import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
 import {
   type BootNoticePort,
@@ -33,7 +34,7 @@ import {
 } from '../../src/lib/index.ts';
 import type { ConfigFilesService } from '../../src/lib/config-files/index.ts';
 import { type DaemonModule, type LateBound, lateBound } from '../../src/lib/runtime/modules.ts';
-import { cgroupsContribution } from '../../src/lib/runtime/mounts/cgroups.ts';
+import { cgroupsContribution } from '../lib/runtime/mounts/cgroups.ts';
 
 /**
  * Ferret resource limits (docs/ferret-limits.md), in two halves that `fyd.ts` constructs at two points.

@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
-import { TerminalViewSchema } from '@ferretry/protocol';
+import { TerminalViewSchema } from '../../../../../contract/index.ts';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { terminalRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
+import { terminalRoutes } from '../../../../../daemon/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, FakeTerminals, GRANTED } from './support.ts';
 

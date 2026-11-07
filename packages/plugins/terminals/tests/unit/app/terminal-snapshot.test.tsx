@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { TerminalSnapshotView } from '../../src/components/terminal-snapshot.tsx';
+import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { interact, mount, must } from '../support/dom.ts';

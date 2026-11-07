@@ -13,7 +13,7 @@ import {
   renameSessionTerminal,
   terminalLimitLabel,
   typeIntoSessionConsole,
-} from '../../src/lib/web-terminals.ts';
+} from '../../../app/lib/web-terminals.ts';
 
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',

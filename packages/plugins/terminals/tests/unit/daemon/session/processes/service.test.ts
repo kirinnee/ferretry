@@ -1,13 +1,8 @@
 import { describe, it } from 'bun:test';
-import {
-  SESSION_PROCESS_COMMAND_MAX,
-  SessionProcessListSchema,
-  SessionProcessOutputSchema,
-  SessionProcessStopResultSchema,
-} from '@ferretry/protocol';
+import { SESSION_PROCESS_COMMAND_MAX, SessionProcessListSchema, SessionProcessOutputSchema, SessionProcessStopResultSchema } from '../../../../../daemon/lib/protocol/session-processes.ts';
 import should from 'should';
-import { SessionProcessError } from '../../../../src/lib/session/processes/service.ts';
-import type { ProcessDetailRow } from '../../../../src/lib/session/processes/ports.ts';
+import { SessionProcessError } from '../../../../../daemon/lib/session/processes/service.ts';
+import type { ProcessDetailRow } from '../../../../../daemon/lib/session/processes/ports.ts';
 import {
   claudeWrapper,
   harnessMessage,

@@ -3,7 +3,7 @@ import {
   applyStickyCtrl,
   controlCharacter,
   terminalKeySequence,
-} from '../../../../../src/features/workspace/phone/terminal-keys.ts';
+} from '../../../../../../app/features/workspace/phone/terminal-keys.ts';
 
 describe('terminalKeySequence', () => {
   it('sends esc, tab and the four arrows', () => {

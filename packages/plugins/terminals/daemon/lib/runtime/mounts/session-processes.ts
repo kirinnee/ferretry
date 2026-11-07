@@ -1,9 +1,4 @@
-import {
-  SessionProcessIdSchema,
-  type SessionProcessList,
-  type SessionProcessOutput,
-  type SessionProcessStopResult,
-} from '@ferretry/protocol';
+import { SessionProcessIdSchema, type SessionProcessList, type SessionProcessOutput, type SessionProcessStopResult } from '../../protocol/session-processes.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';

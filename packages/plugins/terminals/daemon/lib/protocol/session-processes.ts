@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 
 /**
  * A FERRET'S PROCESSES — every subprocess running under its own pane, and what each one is printing.
@@ -166,3 +166,35 @@ export const SessionProcessStopResultSchema = z.strictObject({
   signalled: NonNegativeIntegerSchema,
 });
 export type SessionProcessStopResult = z.infer<typeof SessionProcessStopResultSchema>;
+
+// ─── the attach proof and the Console (today's `protocol/src/lib/session.ts`) ──────────────────────────────────────
+
+export const SessionAttachTargetSchema = z.strictObject({
+  /** The private tmux server owned by the daemon that answered the request. */
+  socketPath: z.string().min(1).regex(/^\//u, 'the tmux socket path must be absolute'),
+  tmuxSession: z.string().min(1),
+  paneId: z.string().regex(/^%(?:0|[1-9][0-9]*)$/u),
+  pid: PositiveIntegerSchema.refine(value => value > 1, 'the pane pid must be greater than one'),
+  /** The pane process's start identity (`ProcessIncarnation`: Linux start ticks, macOS epoch seconds), which distinguishes a reused PID. */
+  processStartTicks: PositiveIntegerSchema,
+});
+export type SessionAttachTarget = z.infer<typeof SessionAttachTargetSchema>;
+
+/**
+ * The most a single Console write may carry, in UTF-16 code units. A keystroke is one to a handful; a
+ * paste is the large case, and a client splits anything longer into ordered writes rather than the
+ * daemon accepting an unbounded body into a tmux argument vector.
+ */
+export const SESSION_CONSOLE_INPUT_MAX = 4_096;
+
+/** Typing into a session's OWN pane — the agent's Claude / Codex CLI — from wherever the reader is. */
+export const SessionConsoleInputRequestSchema = z.strictObject({
+  data: z.string().min(1).max(SESSION_CONSOLE_INPUT_MAX),
+});
+export type SessionConsoleInputRequest = z.infer<typeof SessionConsoleInputRequestSchema>;
+
+/** How many bytes reached the pane: the UTF-8 length of `data`, never the bytes themselves. */
+export const SessionConsoleInputResultSchema = z.strictObject({
+  written: PositiveIntegerSchema,
+});
+export type SessionConsoleInputResult = z.infer<typeof SessionConsoleInputResultSchema>;

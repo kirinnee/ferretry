@@ -12,11 +12,11 @@
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import { browserTerminalDeckDependencies } from '../../src/components/session-terminal-deck.tsx';
+import { browserTerminalDeckDependencies } from '../../../app/components/session-terminal-deck.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { RelayClientSession } from '../../src/lib/relay-session.ts';
-import type { TerminalStreamHandlers } from '../../src/lib/web-terminals.ts';
+import type { TerminalStreamHandlers } from '../../../app/lib/web-terminals.ts';
 import '../support/dom.ts';
 
 const alpha = daemonConnection({

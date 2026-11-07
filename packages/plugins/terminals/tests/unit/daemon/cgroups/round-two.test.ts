@@ -10,17 +10,17 @@ import {
   sameCap,
   sessionOfSlice,
   sliceCgroupPath,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 import { expect, test } from 'bun:test';
-import { GIBIBYTE } from '@ferretry/protocol';
-import { TmuxTerminalRuntime } from '../../../src/adapters/terminal/tmux-terminal-runtime.ts';
+import { GIBIBYTE } from '../../../../daemon/lib/protocol/limits.ts';
+import { TmuxTerminalRuntime } from '../../../../daemon/adapters/terminal/tmux-terminal-runtime.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { CgroupLaunchPlanner } from '../../../src/lib/cgroups/launch.ts';
-import { EnforcementRuntime } from '../../../src/lib/cgroups/runtime.ts';
-import { buildLimitsView } from '../../../src/lib/cgroups/view.ts';
-import { FleetMemoryWatcher } from '../../../src/lib/cgroups/watch.ts';
-import { type TerminalSubsystem, terminalRoutes } from '../../../src/lib/runtime/mounts/terminals.ts';
+import { CgroupLaunchPlanner } from '../../../../daemon/lib/cgroups/launch.ts';
+import { EnforcementRuntime } from '../../../../daemon/lib/cgroups/runtime.ts';
+import { buildLimitsView } from '../../../../daemon/lib/cgroups/view.ts';
+import { FleetMemoryWatcher } from '../../../../daemon/lib/cgroups/watch.ts';
+import { type TerminalSubsystem, terminalRoutes } from '../../../../daemon/lib/runtime/mounts/terminals.ts';
 import { WARDEN_LABEL } from '../../../src/lib/warden/types.ts';
 import { request } from '../api/support.ts';
 

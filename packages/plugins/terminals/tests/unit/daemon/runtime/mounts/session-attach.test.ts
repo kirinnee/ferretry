@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { SessionAttachTargetSchema } from '@ferretry/protocol';
+import { SessionAttachTargetSchema } from '../../../../../daemon/lib/protocol/session-processes.ts';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { sessionAttachRoutes } from '../../../../src/lib/runtime/index.ts';
-import { SessionAttachError, type SessionAttachFailure } from '../../../../src/lib/session/attach/index.ts';
-import type { SessionAttachSubsystem } from '../../../../src/lib/runtime/mounts/session-attach.ts';
+import { SessionAttachError, type SessionAttachFailure } from '../../../../../daemon/lib/session/attach/index.ts';
+import type { SessionAttachSubsystem } from '../../../../../daemon/lib/runtime/mounts/session-attach.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   ATTACH_PANE,

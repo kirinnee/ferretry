@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
-import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../src/components/session-terminal-deck.tsx';
+import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../../app/components/session-terminal-deck.tsx';
 import { RECONNECTING_GRACE_MS } from '../../src/lib/connection-health.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../../src/lib/grants.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
-import { TERMINAL_REOPEN_BASE_MS } from '../../src/lib/terminal-co-control.ts';
-import { TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
+import { TERMINAL_REOPEN_BASE_MS } from '../../../app/lib/terminal-co-control.ts';
+import { TerminalStreamRefused } from '../../../app/lib/web-terminals.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
-import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../support/terminal-deck.ts';
+import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../../support/app/terminal-deck.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',

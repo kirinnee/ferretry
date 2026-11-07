@@ -4,7 +4,7 @@ import should from 'should';
 import {
   StorageTerminalOwnerDirectory,
   type TerminalOwnerStorage,
-} from '../../../src/adapters/terminal/owner-directory.ts';
+} from '../../../../daemon/adapters/terminal/owner-directory.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
 

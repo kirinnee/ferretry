@@ -10,8 +10,8 @@ import {
   PsProcessTree,
   processTreeFor,
   SigtermProcessSignal,
-} from '../../../../src/adapters/session/processes/index.ts';
-import type { ProcessDetailRow } from '../../../../src/lib/session/processes/ports.ts';
+} from '../../../../../daemon/adapters/session/processes/index.ts';
+import type { ProcessDetailRow } from '../../../../../daemon/lib/session/processes/ports.ts';
 import { waitFor, waitForValue } from '../../support/wait-for.ts';
 
 /**

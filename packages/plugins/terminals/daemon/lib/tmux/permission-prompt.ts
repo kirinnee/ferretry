@@ -1,10 +1,5 @@
-import type {
-  Harness,
-  PermissionAction,
-  PermissionOption,
-  PermissionOptionKind,
-  PermissionRequest,
-} from '@ferretry/protocol';
+import { type Harness } from '../protocol/harness.ts';
+import { type PermissionAction, type PermissionOption, type PermissionOptionKind, type PermissionRequest } from '../protocol/permission.ts';
 
 /**
  * THE TOOL-PERMISSION PROMPT A HARNESS IS PARKED ON, read off its visible pane as data.

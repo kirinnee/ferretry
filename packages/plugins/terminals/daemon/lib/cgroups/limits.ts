@@ -10,7 +10,7 @@
  *
  * Pure: no IO, no clock, no globals.
  */
-import type { Cap, ResolvedFerretLimits, ResolvedFleetLimits } from '@ferretry/protocol';
+import { type Cap, type ResolvedFerretLimits, type ResolvedFleetLimits } from '../protocol/limits.ts';
 import type { CgroupHostFacts } from './ports.ts';
 
 const value = (cap: Cap): string => (cap === null ? 'infinity' : String(Math.max(1, Math.floor(cap))));

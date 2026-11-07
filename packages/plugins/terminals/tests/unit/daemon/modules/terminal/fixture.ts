@@ -3,7 +3,7 @@ import {
   terminalModule,
   type TerminalNeeds,
   type TerminalProvides,
-} from '../../../../bin/modules/terminal.ts';
+} from '../../../../../daemon/modules/terminal.ts';
 import type { DaemonStorage } from '../../../../src/adapters/storage/session-storage.ts';
 import {
   QuarantineRegistry,
@@ -15,7 +15,7 @@ import {
   type TextRedactor,
 } from '../../../../src/lib/index.ts';
 import type { BuiltModule, ModuleLifecycle } from '../../../../src/lib/runtime/modules.ts';
-import { terminalsContribution } from '../../../../src/lib/runtime/mounts/terminals.ts';
+import { terminalsContribution } from '../../../../../daemon/lib/runtime/mounts/terminals.ts';
 
 /**
  * THE `terminal` MODULE'S TEST CONSTRUCTION — a per-module fixture fragment (see `../learning/fixture.ts`).

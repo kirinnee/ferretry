@@ -15,8 +15,8 @@ import {
   terminalHyperlinkHandler,
   terminalLinkProvider,
   textInRange,
-} from '../../src/lib/terminal-links.ts';
-import { type BufferRow, terminalBuffer } from '../support/terminal-buffer.ts';
+} from '../../../app/lib/terminal-links.ts';
+import { type BufferRow, terminalBuffer } from '../../support/app/terminal-buffer.ts';
 
 /** Lays text out across rows of `columns` cells, the way a terminal wraps a long line. */
 const wrap = (text: string, columns: number): BufferRow[] => {

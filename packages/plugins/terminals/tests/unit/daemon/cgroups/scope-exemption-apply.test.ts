@@ -21,7 +21,7 @@ import {
   safeUnitPart,
   slicePropertyCommand,
   sliceCgroupPath,
-} from '../../../src/lib/cgroups/index.ts';
+} from '../../../../daemon/lib/cgroups/index.ts';
 import { WARDEN_LABEL } from '../../../src/lib/warden/index.ts';
 
 const runner = (results: readonly { code: number; stdout?: string; stderr?: string }[]): CgroupCommandPort => {

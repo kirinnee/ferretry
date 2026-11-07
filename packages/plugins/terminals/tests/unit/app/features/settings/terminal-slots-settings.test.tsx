@@ -2,11 +2,11 @@ import '../../../support/dom.ts';
 import { describe, expect, it } from 'bun:test';
 import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '@ferretry/protocol';
 import { SETTINGS_LINKS, settingsPaletteEntries } from '../../../../src/features/settings/settings-catalog.ts';
-import type { TerminalSlotsClient } from '../../../../src/features/settings/terminal-slots-api.ts';
+import type { TerminalSlotsClient } from '../../../../../app/features/settings/terminal-slots-api.ts';
 import {
   TerminalSlotsSettings,
   terminalSlotsSettingsTab,
-} from '../../../../src/features/settings/terminal-slots-settings.tsx';
+} from '../../../../../app/features/settings/terminal-slots-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { runAsync } from '../../../support/react.ts';

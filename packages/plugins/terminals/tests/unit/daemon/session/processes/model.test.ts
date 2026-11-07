@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SESSION_PROCESS_COMMAND_MAX } from '@ferretry/protocol';
+import { SESSION_PROCESS_COMMAND_MAX } from '../../../../../daemon/lib/protocol/session-processes.ts';
 import should from 'should';
 import {
   cpuPercent,
@@ -9,8 +9,8 @@ import {
   type ProcessView,
   stateOf,
   stopOrder,
-} from '../../../../src/lib/session/processes/model.ts';
-import type { ProcessDetailRow, ProcessStreamTarget } from '../../../../src/lib/session/processes/ports.ts';
+} from '../../../../../daemon/lib/session/processes/model.ts';
+import type { ProcessDetailRow, ProcessStreamTarget } from '../../../../../daemon/lib/session/processes/ports.ts';
 
 /**
  * A PANE'S PROCESS TREE AS THE TAB LISTS IT, over hand-built process tables.

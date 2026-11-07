@@ -7,7 +7,7 @@ import {
   nextTerminalTitle,
   normalizeTerminalSize,
   normalizeTerminalTitle,
-} from '../../../src/lib/terminal/index.ts';
+} from '../../../../daemon/lib/terminal/index.ts';
 
 describe('terminal policy', () => {
   it('should clamp finite dimensions to protocol bounds and retain valid integers', () => {

@@ -1,5 +1,11 @@
-import { TerminalResizeFrameSchema, type TerminalSize } from '@ferretry/protocol';
-import { MAX_TUNNEL_DATA_BYTES } from '../relay/tunnel.ts';
+import { TerminalResizeFrameSchema, type TerminalSize } from '../../../contract/index.ts';
+
+/**
+ * The session layer's data-record budget (the kernel's `relayDataByteBudget(MAX_PLAINTEXT_BYTES)`, R82/R545): a
+ * 65,492-byte sealed plaintext less the `{"t":"data","bytes":""}` envelope, three bytes per four base64 characters.
+ * Restated here because the kernel's wire constants are not a contract export; the kernel test pins the same number.
+ */
+const MAX_TUNNEL_DATA_BYTES = Math.floor(((65_492 - '{"t":"data","bytes":""}'.length) * 3) / 4);
 
 /**
  * Pure policy for one attached terminal stream.

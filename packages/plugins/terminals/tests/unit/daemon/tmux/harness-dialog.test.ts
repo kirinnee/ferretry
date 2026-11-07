@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type HarnessDialog, type HarnessDialogOption, HarnessDialogSchema } from '@ferretry/protocol';
+import { type HarnessDialog, type HarnessDialogOption, HarnessDialogSchema } from '../../../../daemon/lib/protocol/harness-dialog.ts';
 import should from 'should';
 import { DIALOG_KEYS, dialogCursorMoves, paneBlockingDialog, parseHarnessDialog } from '../../../src/lib/index.ts';
 

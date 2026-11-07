@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile } from '../host/fs.ts';
 import { join } from 'node:path';
 import {
   type CgroupHostFacts,

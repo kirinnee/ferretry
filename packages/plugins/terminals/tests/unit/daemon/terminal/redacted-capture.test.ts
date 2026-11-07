@@ -4,8 +4,8 @@ import { EphemeralAwareRedactor } from '../../../src/lib/input-requests/ephemera
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { coverageOf } from '../../../src/lib/secrets/policy.ts';
 import type { Scrub, TextRedactor } from '../../../src/lib/secrets/redaction.ts';
-import { redactCapture } from '../../../src/lib/terminal/redacted-capture.ts';
-import type { TerminalCapture } from '../../../src/lib/terminal/redraw.ts';
+import { redactCapture } from '../../../../daemon/lib/terminal/redacted-capture.ts';
+import type { TerminalCapture } from '../../../../daemon/lib/terminal/redraw.ts';
 
 const ESC = '\u001b';
 const RESET = `${ESC}[0m`;

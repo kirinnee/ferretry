@@ -1,8 +1,8 @@
-import { lstat, readdir, readFile, readlink, stat } from 'node:fs/promises';
-import { homedir, userInfo } from 'node:os';
+import { lstat, readdir, readFile, readlink, stat } from '../host/fs.ts';
+import { homedir, userInfo } from '../host/fs.ts';
 import { basename } from 'node:path';
-import type { ProfileProgram, ProgramProofPort, ProgramRunner, ProvenProgram } from '../../lib/input-requests/index.ts';
-import { GETPASS_PROGRAMS, parseUids } from '../../lib/input-requests/index.ts';
+import type { ProfileProgram, ProgramProofPort, ProgramRunner, ProvenProgram } from '../../lib/inputs/index.ts';
+import { GETPASS_PROGRAMS, parseUids } from '../../lib/inputs/index.ts';
 import { accountName } from '../terminal/system-login-shell.ts';
 import { ExecutableCodePrograms } from './executable-code-programs.ts';
 import { profileChainOf, profileProgramOf } from './profile-program.ts';

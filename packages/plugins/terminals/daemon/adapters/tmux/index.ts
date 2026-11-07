@@ -1,4 +1,4 @@
-export * from './bun-tmux-process.ts';
+export * from './kernel-tmux-process.ts';
 export * from './composer-fill.ts';
 export * from './control-tmux-process.ts';
 export * from './harness-launch-guard.ts';

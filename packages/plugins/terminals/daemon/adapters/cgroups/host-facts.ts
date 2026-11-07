@@ -1,5 +1,6 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { availableParallelism, totalmem } from 'node:os';
+import { hostPlatform } from '../host/fs.ts';
+import { readdir, readFile } from '../host/fs.ts';
+import { availableParallelism, totalmem } from '../host/fs.ts';
 import { join } from 'node:path';
 import {
   type AncestorCap,
@@ -66,7 +67,7 @@ async function capOrigin(cap: AncestorCap, places: HostFactPlaces): Promise<Cgro
  */
 export async function hostCgroupFacts(
   now: { readonly platform: string; readonly cpus: number; readonly physicalBytes: number } = {
-    platform: process.platform,
+    platform: hostPlatform,
     cpus: availableParallelism(),
     physicalBytes: totalmem(),
   },
@@ -116,7 +117,7 @@ export async function hostCgroupFacts(
 export function unmeasuredHostFacts(): CgroupHostFacts {
   const physicalBytes = Math.max(1, Math.floor(totalmem()));
   return {
-    platform: process.platform,
+    platform: hostPlatform,
     unifiedHierarchy: false,
     cpus: Math.max(1, Math.floor(availableParallelism())),
     physicalBytes,

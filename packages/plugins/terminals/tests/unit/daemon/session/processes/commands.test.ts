@@ -6,7 +6,7 @@ import {
   liveOutputAvailability,
   outputFileOf,
   truncateCommand,
-} from '../../../../src/lib/session/processes/commands.ts';
+} from '../../../../../daemon/lib/session/processes/commands.ts';
 
 /**
  * WHAT A COMMAND LINE SAYS, AND WHERE ITS OUTPUT CAN BE READ — the pure half of the Processes tab.

@@ -10,7 +10,7 @@
  *
  * Pure: no IO, no clock, no globals.
  */
-import { FLEET_RESERVE_BYTES, GIBIBYTE, reserveBytes } from '@ferretry/protocol';
+import { FLEET_RESERVE_BYTES, GIBIBYTE, reserveBytes } from '../protocol/limits.ts';
 import type { CgroupHostFacts } from './ports.ts';
 import { formatBytes } from './view.ts';
 

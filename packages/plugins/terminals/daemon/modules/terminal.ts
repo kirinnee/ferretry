@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
-import { SessionConfigSchema, TERMINAL_MAX_GLOBAL, TERMINAL_MAX_PER_SESSION } from '@ferretry/protocol';
+import { SessionConfigSchema } from '@ferretry/protocol';
+import { TERMINAL_MAX_GLOBAL, TERMINAL_MAX_PER_SESSION } from '../../contract/index.ts';
 import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
 import {
   ManagedTerminalService,
@@ -10,7 +11,7 @@ import {
   TerminalServiceError,
   TerminalStreamBridge,
   type TerminalStreamScheduler,
-} from '../../src/adapters/terminal/index.ts';
+} from '../adapters/terminal/index.ts';
 import {
   type AuditSink,
   type MillisecondClockPort,
@@ -27,8 +28,8 @@ import {
 } from '../../src/lib/index.ts';
 import type { InputRequestService } from '../../src/lib/input-requests/service.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { terminalsContribution } from '../../src/lib/runtime/mounts/terminals.ts';
-import type { SessionPaneProof } from '../../src/lib/session/console/index.ts';
+import { terminalsContribution } from '../lib/runtime/mounts/terminals.ts';
+import type { SessionPaneProof } from '../lib/session/console/index.ts';
 
 /**
  * Independent shell terminals over a session's working directory, and the Console's typing into a session's own pane.

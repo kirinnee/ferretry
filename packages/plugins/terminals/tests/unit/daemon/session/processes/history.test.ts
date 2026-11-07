@@ -5,8 +5,8 @@ import {
   ENDED_PROCESS_RETENTION_MS,
   PROCESS_HISTORY_SESSION_LIMIT,
   ProcessHistory,
-} from '../../../../src/lib/session/processes/history.ts';
-import { type ProcessEntry, processIdOf } from '../../../../src/lib/session/processes/model.ts';
+} from '../../../../../daemon/lib/session/processes/history.ts';
+import { type ProcessEntry, processIdOf } from '../../../../../daemon/lib/session/processes/model.ts';
 
 /**
  * WHAT THE DAEMON REMEMBERS BETWEEN LOOKS — that a command which was there is gone, and its last CPU

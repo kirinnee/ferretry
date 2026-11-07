@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
-import { SessionStatusSchema, type TerminalHolder } from '@ferretry/protocol';
+import { SessionStatusSchema } from '@ferretry/protocol';
+import { type TerminalHolder } from '../../../../contract/index.ts';
 import should from 'should';
 import { ManagedTerminalService, TerminalServiceError } from '../../../src/adapters/index.ts';
-import { standingOfSessionStatus } from '../../../src/lib/terminal/holders.ts';
+import { standingOfSessionStatus } from '../../../../daemon/lib/terminal/holders.ts';
 import type {
   TerminalCapture,
   TerminalOwnerDirectory,

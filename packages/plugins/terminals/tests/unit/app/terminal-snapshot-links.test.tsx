@@ -3,7 +3,7 @@
  * decision as a chat link. The capture's text is untouched, so what is copied is what was captured.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { TerminalSnapshotView } from '../../src/components/terminal-snapshot.tsx';
+import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
 import { LinkBehaviourProvider, type LinkOpener } from '../../src/features/browser/external-link.tsx';
 import type { OpenLinksIn } from '../../src/lib/controls.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';

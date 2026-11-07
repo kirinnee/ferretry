@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type LimitsView, LimitsViewSchema } from '@ferretry/protocol';
+import { type LimitsView, LimitsViewSchema } from '../../../../../daemon/lib/protocol/limits.ts';
 import should from 'should';
 import { cgroupConfigView } from '../../../../../protocol/tests/fixtures.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { cgroupRoutes, type LimitsSubsystem } from '../../../../src/lib/runtime/mounts/cgroups.ts';
+import { cgroupRoutes, type LimitsSubsystem } from '../../../../../daemon/lib/runtime/mounts/cgroups.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, GRANTED, human } from './support.ts';
 
