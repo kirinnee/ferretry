@@ -1,5 +1,9 @@
 import type { FileSystemPort } from '../../../lib/ports.ts';
-import { type CompactionHistory, type CompactionRecord, CompactionRecordSchema } from '../../../lib/session/live/compaction.ts';
+import {
+  type CompactionHistory,
+  type CompactionRecord,
+  CompactionRecordSchema,
+} from '../../../lib/session/live/compaction.ts';
 import type { TranscriptHarness } from '../../../lib/session/peers/transcript.ts';
 import { z } from 'zod';
 

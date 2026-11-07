@@ -53,7 +53,9 @@ export function renderStatus(view: HarnessCliView, binaryName: string): string {
   ];
   const plan = view.plan;
   if (plan?.kind === 'self')
-    lines.push(`  Update:     ${binaryName} harness claude-code update - runs ${plan.steps.map(step => step.command).join(', then ')}`);
+    lines.push(
+      `  Update:     ${binaryName} harness claude-code update - runs ${plan.steps.map(step => step.command).join(', then ')}`,
+    );
   else if (plan?.kind === 'manual')
     lines.push(
       `  Update:     ${plan.explanation}`,

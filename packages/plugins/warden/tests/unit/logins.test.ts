@@ -13,7 +13,8 @@ const fleet = [
   account({ id: INTERACTIVE_ID, agent: 'claude-personal', mode: 'interactive' }),
 ];
 
-const subject = (): FleetWardenAgents => new FleetWardenAgents({ accounts: async () => fleet }, async () => 'claude-default');
+const subject = (): FleetWardenAgents =>
+  new FleetWardenAgents({ accounts: async () => fleet }, async () => 'claude-default');
 
 describe('the logins the Warden can run on', () => {
   it('should be offered by name, never by the manifest id', async () => {

@@ -1,6 +1,10 @@
 /** How a sign-in goes: the method, an SSO provider's name, the provider account it goes via, and (new site) its domains. */
 
-import { type AccountSummary, LOGIN_SSO_NAME_MAX_LENGTH, type LoginMethodKind } from '../../../contract/routes/index.ts';
+import {
+  type AccountSummary,
+  LOGIN_SSO_NAME_MAX_LENGTH,
+  type LoginMethodKind,
+} from '../../../contract/routes/index.ts';
 import type { ReactNode } from 'react';
 import { METHOD_OPTIONS, type SignInDraft } from '../../lib/login-form.ts';
 import { INPUT } from './accounts-parts.tsx';

@@ -42,10 +42,12 @@ class Pane implements CodexPickerDrivePort {
 describe('Codex pane answers', () => {
   test('G31 a permission-style choice is one digit key at a time, each carrying the row it was proved against, and never Enter', async () => {
     const pane = new Pane([{ visible: QUICK }, { visible: LEVELS }, { visible: IDLE, promptReady: true }]);
-    await new CodexModelPickerDriver(pane, { sleep: async () => undefined }, { settleMs: 0, maxObservations: 8 }).drive({
-      model: 'gpt-5.6-codex',
-      effort: 'high',
-    });
+    await new CodexModelPickerDriver(pane, { sleep: async () => undefined }, { settleMs: 0, maxObservations: 8 }).drive(
+      {
+        model: 'gpt-5.6-codex',
+        effort: 'high',
+      },
+    );
 
     expect(pane.keys.map(sent => sent.key)).toEqual(['1', '3']);
     expect(pane.keys.every(sent => /^[1-9]$/u.test(sent.key))).toBe(true);
@@ -56,7 +58,10 @@ describe('Codex pane answers', () => {
   });
 
   test('G32 a dialog is dismissed with Escape only when the pane shows a Codex picker, and never records what was chosen', () => {
-    expect(nextPickerDismissStep({ visiblePane: QUICK, promptReady: false }, 0)).toEqual({ kind: 'send_escape', attempt: 1 });
+    expect(nextPickerDismissStep({ visiblePane: QUICK, promptReady: false }, 0)).toEqual({
+      kind: 'send_escape',
+      attempt: 1,
+    });
     expect(nextPickerDismissStep({ visiblePane: IDLE, promptReady: true }, 0)).toEqual({ kind: 'settled' });
     // An unidentified screen is never keyed; the step carries a sentence, not a choice.
     const unknown = nextPickerDismissStep({ visiblePane: UNKNOWN, promptReady: false }, 0);

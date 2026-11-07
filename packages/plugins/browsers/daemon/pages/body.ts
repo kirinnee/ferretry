@@ -8,7 +8,10 @@ export const MAX_BROWSER_BODY_BYTES = 512 * 1024;
  * Today's `parseBody` (`api/body.ts`), for the browser routes: the body, bounded, parsed against `schema`. The
  * refusals name the failing paths and never echo a submitted value.
  */
-export async function parseBody<Schema extends z.ZodType>(request: ApiRequest, schema: Schema): Promise<z.output<Schema>> {
+export async function parseBody<Schema extends z.ZodType>(
+  request: ApiRequest,
+  schema: Schema,
+): Promise<z.output<Schema>> {
   let text: string;
   try {
     text = await request.text(MAX_BROWSER_BODY_BYTES);

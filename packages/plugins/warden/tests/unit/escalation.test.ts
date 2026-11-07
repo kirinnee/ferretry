@@ -609,7 +609,6 @@ describe('telling a person once per episode', () => {
   });
 });
 
-
 describe('clearing an escalation whose reason has gone', () => {
   const live = board('s1', {
     items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }],

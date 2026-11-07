@@ -73,7 +73,12 @@ describe('client worktree gateway', () => {
     should(actual.path).equal(WORKTREE_PATH);
 
     await should(
-      gateway.remove({ path: WORKTREE_PATH, overrides: ['force_everything' as never], deleteBranch: false, confirmations: [] }),
+      gateway.remove({
+        path: WORKTREE_PATH,
+        overrides: ['force_everything' as never],
+        deleteBranch: false,
+        confirmations: [],
+      }),
     ).be.rejected();
     should(calls).have.length(1);
   });

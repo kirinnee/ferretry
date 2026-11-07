@@ -16,7 +16,12 @@ import {
   resolveBrowserPorts,
 } from '../../../../daemon/proxy/wire/ports.ts';
 import { INSTANT } from '../../../support/fixtures.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
+import {
+  assertCoversEverySchema,
+  assertRejects,
+  assertRoundTrips,
+  type SchemaCase,
+} from '../../../support/schema-cases.ts';
 
 const EXPLICIT = { cdp: 9222, relay: 9223, vnc: 5901 };
 

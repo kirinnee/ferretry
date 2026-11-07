@@ -1,4 +1,25 @@
-import { type CopyMeta, CopyPlanApproveSchema, type CopyPlanList, PASTE_RULE_ERROR_CODES, PASTE_RULE_REFUSAL_WORDS, type PasteRule, type PasteRuleCreate, PasteRuleCreateSchema, type PasteRuleList, PasteRuleSchema, type PasteRuleStageDropped, type PasteRuleStageId, PasteRuleStageIdSchema, type PasteRuleStageList, PasteRuleStageListSchema, PasteRuleStagedSchema, PasteRuleStageViewSchema, PasteRuleSettingsSchema, type PasteRuleSettingsView, taskPlanLineOfCopyItem } from '../../../../contract/routes/index.ts';
+import {
+  type CopyMeta,
+  CopyPlanApproveSchema,
+  type CopyPlanList,
+  PASTE_RULE_ERROR_CODES,
+  PASTE_RULE_REFUSAL_WORDS,
+  type PasteRule,
+  type PasteRuleCreate,
+  PasteRuleCreateSchema,
+  type PasteRuleList,
+  PasteRuleSchema,
+  type PasteRuleStageDropped,
+  type PasteRuleStageId,
+  PasteRuleStageIdSchema,
+  type PasteRuleStageList,
+  PasteRuleStageListSchema,
+  PasteRuleStagedSchema,
+  PasteRuleStageViewSchema,
+  PasteRuleSettingsSchema,
+  type PasteRuleSettingsView,
+  taskPlanLineOfCopyItem,
+} from '../../../../contract/routes/index.ts';
 import { parseBody } from '../../http/body.ts';
 import { ApiError, type ApiResponse, jsonResponse } from '@ferretry/kernel/contract';
 import type { RouteContext } from '../../http/grants.ts';
@@ -210,7 +231,11 @@ export function secureCopyRoutes(
             caller,
             stage,
             widensNow,
-            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.allowProfileTargets, freshSubject(STEP_UP_ACTS.allowProfileTargets, subject)) === true,
+            subject =>
+              context.claimFreshStepUp?.(
+                STEP_UP_ACTS.allowProfileTargets,
+                freshSubject(STEP_UP_ACTS.allowProfileTargets, subject),
+              ) === true,
           );
           return jsonResponse(PasteRuleSettingsSchema.parse(settings));
         } catch (error) {
@@ -285,7 +310,11 @@ export function secureCopyRoutes(
           const rule = await stages.commit(
             caller,
             stage,
-            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approvePasteRule, freshSubject(STEP_UP_ACTS.approvePasteRule, subject)) === true,
+            subject =>
+              context.claimFreshStepUp?.(
+                STEP_UP_ACTS.approvePasteRule,
+                freshSubject(STEP_UP_ACTS.approvePasteRule, subject),
+              ) === true,
           );
           if (request.to.kind === 'secret') spentSecretWrite(context);
           return jsonResponse(PasteRuleSchema.parse(rule), 201);

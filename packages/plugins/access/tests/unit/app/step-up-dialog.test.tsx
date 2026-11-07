@@ -397,7 +397,13 @@ describe('the passkey prompt bound to a task plan, once another request joins it
     expect(gate.snapshot()?.shared).toBeUndefined();
     void gate.require(studio, 'Line 2: sign in once', 'explicit', STEP_UP_ACTS.approveTaskPlan, stage);
     expect(gate.snapshot()?.bound).toBe(true);
-    void gate.require(studio, 'Line 5: paste once', 'explicit', STEP_UP_ACTS.approveTaskPlan, `tps_${'e'.repeat(24)}` as never);
+    void gate.require(
+      studio,
+      'Line 5: paste once',
+      'explicit',
+      STEP_UP_ACTS.approveTaskPlan,
+      `tps_${'e'.repeat(24)}` as never,
+    );
     expect(gate.snapshot()?.bound).toBeUndefined();
     expect(gate.snapshot()?.shared).toBe(true);
   });
