@@ -9,17 +9,23 @@
  * armed for exactly the moment the next credential's active read falls due.
  */
 import { beforeEach, describe, it } from 'bun:test';
-import type { ClaudeStoreResolution, CodexStoreResolution, PassiveUsageRecord } from '@ferretry/fleet';
+import type {
+  FileSubscription,
+  FleetReadingJob as HousekeepingJob,
+  PassiveUsageRecord,
+  StoredCredentialResolution,
+} from '../../../../daemon/lib/fleet-reading/ports.ts';
+
+type ClaudeStoreResolution = Extract<StoredCredentialResolution, { harness: 'claude' }>;
+type CodexStoreResolution = Extract<StoredCredentialResolution, { harness: 'codex' }>;
 import should from 'should';
-import type { FileSubscription } from '../../../src/lib/file-events/hub.ts';
-import type { CredentialSessionRecord } from '../../../src/lib/fleet/credentials-service.ts';
+import type { CredentialSessionRecord } from '../../../../daemon/lib/fleet-reading/ports.ts';
 import {
   FleetReading,
   type FleetReadingPorts,
   type FleetReadingSubject,
 } from '../../../../daemon/lib/fleet-reading/service.ts';
 import { SESSION_ROSTER_MAX_AGE_MS, SessionRoster } from '../../../../daemon/lib/fleet-reading/session-roster.ts';
-import type { HousekeepingJob } from '../../../src/lib/housekeeping/protocol.ts';
 
 const MINUTE = 60_000;
 const NOW = 1_786_000_000_000;
@@ -44,7 +50,6 @@ const codex = (id: string): FleetReadingSubject => ({
   usedBy: ['codex-runtime'],
 });
 const reading = (at: number, usedPercent = 12): PassiveUsageRecord => ({
-  version: 1,
   source: 'claude-statusline',
   at,
   fiveHour: { usedPercent },
@@ -110,7 +115,7 @@ class World {
             return (this.passive.get(job.credential) ?? null) as never;
           }
           if (job.kind === 'usage.passive.codex') return (this.passive.get('cx') ?? null) as never;
-          throw new Error(`no ${job.kind} job may be sent by the reading`);
+          throw new Error(`no ${(job as { kind: string }).kind} job may be sent by the reading`);
         },
       },
       watch: (path, listener): FileSubscription => {

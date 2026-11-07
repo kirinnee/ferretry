@@ -17,7 +17,7 @@
  * daemon — is read at the latest {@link SessionRosterPorts.maxAgeMs} after the last read, so correctness
  * never depends on the stamp moving; only how often the roster is read does.
  */
-import type { CredentialSessionRecord } from '../fleet/credentials-service.ts';
+import type { CredentialSessionRecord } from './ports.ts';
 
 export interface SessionRosterPorts {
   /** Moves whenever a session's runtime or transcript may have changed. Synchronous and cheap. */

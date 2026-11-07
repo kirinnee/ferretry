@@ -1,29 +1,18 @@
-import { PinActionRequestSchema } from '../../protocol/pins.ts';
-import { parseActor, type ApiActor } from '../../api/actor.ts';
-import { callerIsAgent } from '../../api/agent-caller.ts';
-import type { AuthenticatedCredential } from '../../api/authentication.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { ApiError, type ApiResponse, type CallContext, jsonResponse } from '@ferretry/kernel/contract';
 import { PinError, type PinActor, type PinErrorCode, type PinService } from '../../pins/index.ts';
+import { PinActionRequestSchema } from '../../protocol/pins.ts';
 
 /**
- * The pin board's HTTP surface: one session's pins, listed and mutated.
+ * The pin board's HTTP surface: one ferret's pins, listed and mutated (`GET` and `POST` on
+ * `/v1/ferrets/:ferretId/pins`).
  *
- * This is the route table the CLI's `ProtocolPinGateway` already speaks — `GET` and `POST` on
- * `/v1/sessions/:sessionId/pins` — so mounting it is what turns the shipped `fy pin` commands from
- * calls into a 404 into a working capability.
- *
- * Both directions are parsed, never cast. The request body goes through the protocol's own
- * `PinActionRequestSchema`, so a malformed action is refused at the boundary with the failing field
- * named rather than reaching the domain as `any`.
+ * Both directions are parsed, never cast. The request body goes through `PinActionRequestSchema`, so a malformed
+ * action is refused at the boundary with the failing field named rather than reaching the domain as `any`.
  */
 
-/** How each domain failure is reported. A pin error is a client error in every case: the domain only
- *  raises one when the request itself was wrong about the session, the pin, or the caller's right to
- *  touch it. Codes travel with the status so a client can branch without matching on prose. */
+/** How each domain failure is reported. A pin error is a client error in every case: the domain only raises one when
+ *  the request itself was wrong about the ferret, the pin, or the caller's right to touch it. Codes travel with the
+ *  status so a client can branch without matching on prose. */
 const PIN_ERROR_STATUS: Readonly<Record<PinErrorCode, number>> = {
   invalid: 400,
   'too-long': 400,
@@ -31,86 +20,84 @@ const PIN_ERROR_STATUS: Readonly<Record<PinErrorCode, number>> = {
   forbidden: 403,
 };
 
+/** Who the pin board is told is acting: the agent's own ferret, from its token, or nobody (a person). */
+export interface PinCaller {
+  /** Whether the caller is an agent (a ferret's token, the warden, or the admin token with a ferret behind it). */
+  readonly isAgent: boolean;
+  /** The ferret the caller's own credential names, when it names one. */
+  readonly ferret?: string;
+}
+
 /**
- * The pin board's own idea of who is acting, derived from the actor the authorization boundary
- * resolved.
+ * The pin board's own idea of who is acting.
  *
- * Only an in-pane caller (`peer:<session>`) is an agent; the human's CLI and UI are `human`, which is
- * what lets them edit and remove a pin an agent created. Crucially the session id comes from the
- * SERVER-derived actor, so an agent cannot claim to be pinning for a session other than its own by
- * sending a different body — the domain's own "an agent may only pin to its own session" check has
- * something trustworthy to compare against.
+ * Only an agent caller is an agent; the human's CLI and UI are `human`, which is what lets them edit and remove a pin
+ * an agent created. Crucially the ferret id comes from the SERVER-derived credential, so an agent cannot claim to be
+ * pinning for a ferret other than its own by sending a different body. An agent with no ferret to name is refused,
+ * never taken for a person.
  */
-export function pinActor(credential: AuthenticatedCredential | undefined, actor: ApiActor | undefined): PinActor {
-  // WHO is an agent is the one class predicate's answer; WHICH session is the actor's, which for a ferret's own
-  // credential is the credential's session. An agent with no session to name is refused, never taken for a person.
-  if (!callerIsAgent(credential, actor)) return {};
-  const { id } = parseActor(actor ?? '');
+export function pinActor(caller: PinCaller): PinActor {
+  if (!caller.isAgent) return {};
+  const id = caller.ferret;
   if (id === undefined || id.trim() === '')
     throw new ApiError(403, 'an agent pins only from its own session', 'forbidden');
   return { sessionId: id };
 }
 
-/** The path's session id, decoded. `decodeParameter` refuses a traversal or a separator, so a
- *  crafted id can never address a directory outside the session tree. */
-function pathSessionId(context: RouteContext): string {
-  const decoded = decodeParameter(context.params.get('sessionId') ?? '');
-  if (decoded === undefined) throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
-  return decoded;
-}
-
-/** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug still
- *  becomes a 500 instead of being reported as the client's fault. */
+/** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug still becomes a 500. */
 function reraise(error: unknown): never {
   if (error instanceof PinError) throw new ApiError(PIN_ERROR_STATUS[error.code], error.message, error.code);
   throw error;
 }
 
-async function list(pins: PinService, context: RouteContext): Promise<ApiResponse> {
+async function parseAction(call: CallContext) {
+  const text = await call.request.text();
+  let raw: unknown;
   try {
-    return jsonResponse(await pins.list(pathSessionId(context)));
-  } catch (error) {
-    return reraise(error);
+    raw = text.trim() === '' ? {} : JSON.parse(text);
+  } catch {
+    throw new ApiError(400, 'the request body is not JSON', 'invalid_json');
   }
+  const parsed = PinActionRequestSchema.safeParse(raw);
+  if (!parsed.success)
+    throw new ApiError(
+      400,
+      'the request body is not valid',
+      'invalid_request',
+      parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message })),
+    );
+  return parsed.data;
 }
 
-async function apply(pins: PinService, context: RouteContext): Promise<ApiResponse> {
-  const sessionId = pathSessionId(context);
-  const request = await parseBody(context.request, PinActionRequestSchema);
-  const actor = pinActor(context.credential, context.actor);
-  try {
-    if (request.action === 'add') return jsonResponse(await pins.add(sessionId, request, actor));
-    if (request.action === 'edit') return jsonResponse(await pins.edit(sessionId, request.id, request.text, actor));
-    return jsonResponse(await pins.remove(sessionId, request.id, actor));
-  } catch (error) {
-    return reraise(error);
-  }
+export interface PinRouteDeps {
+  readonly pins: PinService;
+  /** The ferret the path names (an id or a name), or a refusal. */
+  ferretOf(call: CallContext): Promise<string>;
+  callerOf(call: CallContext): PinCaller;
 }
 
 /**
- * `admin` scope on both: a warden supervises sessions and has no business curating the human's
- * board, and the route table is where that decision belongs — a route that says nothing is
- * admin-only, so a subsystem cannot become warden-readable by forgetting to think about it.
- *
- * `noStore` because a pin board is live state; a cached board shows a pin the human already removed.
+ * The handlers for `GET` and `POST /v1/ferrets/:ferretId/pins`. `noStore` (in the manifest) because a pin board is
+ * live state; a cached board shows a pin the human already removed.
  */
-export function pinRoutes(pins: PinService): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/pins',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await list(pins, context),
+export function pinRoutes(deps: PinRouteDeps) {
+  return {
+    list: async (call: CallContext): Promise<ApiResponse> => {
+      const ferret = await deps.ferretOf(call);
+      return jsonResponse(await deps.pins.list(ferret).catch(reraise));
     },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/pins',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      handle: async context => await apply(pins, context),
+    apply: async (call: CallContext): Promise<ApiResponse> => {
+      const ferret = await deps.ferretOf(call);
+      const request = await parseAction(call);
+      const actor = pinActor(deps.callerOf(call));
+      try {
+        if (request.action === 'add') return jsonResponse(await deps.pins.add(ferret, request, actor));
+        if (request.action === 'edit')
+          return jsonResponse(await deps.pins.edit(ferret, request.id, request.text, actor));
+        return jsonResponse(await deps.pins.remove(ferret, request.id, actor));
+      } catch (error) {
+        return reraise(error);
+      }
     },
-  ];
+  } as const;
 }

@@ -1,7 +1,7 @@
 import type { ISessionApi } from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
 
-/** Shows one session in detail: `fy status <id>`. */
+/** Shows one ferret in detail: `fy status <id>`. */
 export class SessionStatusController {
   constructor(
     private readonly api: ISessionApi,

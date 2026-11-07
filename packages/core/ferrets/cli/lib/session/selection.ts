@@ -1,32 +1,32 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { FerretSummary } from '../../../contract/index.ts';
 import { TERMINAL_STATUSES } from './display.ts';
 
 export interface SessionFilter {
-  /** Include terminal sessions (completed/failed/stalled/stopped) as well as live ones. */
+  /** Include stopped ferrets as well as live ones. */
   readonly all?: boolean;
-  /** Only sessions started under this exact ownership label. */
-  readonly label?: string;
+  /** Only ferrets in this pack. */
+  readonly pack?: string;
 }
 
-export interface SessionSelection {
-  readonly sessions: readonly SessionView[];
+export interface SessionSelection<View extends FerretSummary = FerretSummary> {
+  readonly sessions: readonly View[];
   /** What to say when the selection is empty — states which filter emptied it. */
   readonly emptyMessage?: string;
 }
 
 /**
- * Applies the `ps` filters and explains an empty result.
- *
- * "Running" means "not in a terminal status", the same semantic the fleet counts use, so a session
- * that is parked or rate-limited still shows without `--all`.
+ * Applies the `ps` filters and explains an empty result. "Running" means "not stopped", the same semantic the fleet
+ * counts use, so a ferret that is idle still shows without `--all`.
  */
-export function selectSessions(views: readonly SessionView[], filter: SessionFilter = {}): SessionSelection {
-  const labelled = filter.label === undefined ? views : views.filter(view => view.config.label === filter.label);
-  const sessions =
-    filter.all === true ? labelled : labelled.filter(view => !TERMINAL_STATUSES.includes(view.state.status));
+export function selectSessions<View extends FerretSummary>(
+  views: readonly View[],
+  filter: SessionFilter = {},
+): SessionSelection<View> {
+  const packed = filter.pack === undefined ? views : views.filter(view => view.pack === filter.pack);
+  const sessions = filter.all === true ? packed : packed.filter(view => !TERMINAL_STATUSES.includes(view.state));
   if (sessions.length > 0) return { sessions };
-  if (filter.label !== undefined && labelled.length === 0)
-    return { sessions, emptyMessage: `no sessions with label "${filter.label}"` };
-  if (labelled.length > 0) return { sessions, emptyMessage: 'no running sessions (use -a to show terminal ones)' };
-  return { sessions, emptyMessage: 'no sessions' };
+  if (filter.pack !== undefined && packed.length === 0)
+    return { sessions, emptyMessage: `no ferrets in pack "${filter.pack}"` };
+  if (packed.length > 0) return { sessions, emptyMessage: 'no running ferrets (use -a to show stopped ones)' };
+  return { sessions, emptyMessage: 'no ferrets' };
 }

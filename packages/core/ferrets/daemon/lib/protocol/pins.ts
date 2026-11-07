@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { InstantSchema, PositiveIntegerSchema } from './common.ts';
+import { PositiveIntegerSchema } from '@ferretry/std';
+
+/** An ISO instant as the wire spells it (today's `InstantSchema`: kept as written, not re-branded). */
+const InstantSchema = z.iso.datetime({ offset: true });
 
 export const PIN_SCHEMA_VERSION = 1 as const;
 export const MAX_PINS_PER_SESSION = 20;

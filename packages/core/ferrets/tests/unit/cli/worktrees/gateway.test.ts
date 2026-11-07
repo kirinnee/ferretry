@@ -1,52 +1,33 @@
 import { describe, it } from 'bun:test';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import should from 'should';
-import type { z } from 'zod';
-import {
-  ProtocolWorktreeGateway,
-  WORKTREE_REMOVE_PATH,
-  WORKTREES_PATH,
-  worktreeRemovalCheckPath,
-} from '../../../../cli/lib/worktrees/gateway';
-import type { WorktreeApiClient } from '../../../../cli/lib/worktrees/ports';
-import { CALLER_CWD, created, decision, listResponse, removed, WORKTREE_PATH } from './fixtures';
+import { ClientWorktreeGateway, WORKTREE_ROUTES } from '../../../../cli/lib/worktrees/gateway.ts';
+import { CALLER_CWD, created, decision, listResponse, removed, WORKTREE_PATH } from './fixtures.ts';
 
 interface Call {
-  path: string;
-  init: RequestInit | undefined;
+  route: string;
+  init: Parameters<PluginClient['call']>[1];
 }
 
-function fakeClient(payload: unknown, calls: Call[] = []): WorktreeApiClient {
+function fakeClient(payload: unknown, calls: Call[] = []): PluginClient {
   return {
-    request: <T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
-      calls.push({ path, init });
-      return Promise.resolve(schema.parse(payload));
+    call: async (route, init) => {
+      calls.push({ route, init });
+      return payload as never;
     },
+    subscribe: () => () => undefined,
   };
 }
 
-describe('worktree routes', () => {
-  it('should carry the path as a query parameter, because a checkout path contains slashes', () => {
-    // Act + Assert
-    should(worktreeRemovalCheckPath(WORKTREE_PATH)).equal('/v1/worktrees/removal?path=%2Fmanaged%2Fferretry-wt-cli6');
-  });
-});
-
-describe('protocol worktree gateway', () => {
-  it('should read the list with a plain GET', async () => {
-    // Arrange
+describe('client worktree gateway', () => {
+  it('V-0502 should read the list with a plain GET', async () => {
     const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(listResponse(), calls));
-
-    // Act
-    const actual = await gateway.list();
-
-    // Assert
-    should(calls[0]).match({ path: WORKTREES_PATH, init: undefined });
+    const actual = await new ClientWorktreeGateway(fakeClient(listResponse(), calls)).list();
+    should(calls).deepEqual([{ route: WORKTREE_ROUTES.list, init: undefined }]);
     should(actual.worktrees).have.length(1);
   });
 
   it('should default an absent sharedWith to an empty list rather than undefined', async () => {
-    // Arrange — the daemon may omit the field entirely
     const payload = {
       worktrees: [
         {
@@ -62,123 +43,61 @@ describe('protocol worktree gateway', () => {
         },
       ],
     };
-    const gateway = new ProtocolWorktreeGateway(fakeClient(payload));
-
-    // Act
-    const actual = await gateway.list();
-
-    // Assert
+    const actual = await new ClientWorktreeGateway(fakeClient(payload)).list();
     should(actual.worktrees[0]?.sharedWith).eql([]);
   });
 
-  it('should read a removal verdict with a plain GET', async () => {
-    // Arrange
+  it('V-0499 should carry the path, and the caller directory beside it, as query parameters', async () => {
     const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(decision(), calls));
-
-    // Act
+    const gateway = new ClientWorktreeGateway(fakeClient(decision(), calls));
     const actual = await gateway.check(WORKTREE_PATH);
-
-    // Assert
-    should(calls[0]?.path).equal(worktreeRemovalCheckPath(WORKTREE_PATH));
+    await gateway.check(WORKTREE_PATH, CALLER_CWD);
+    should(calls).deepEqual([
+      { route: WORKTREE_ROUTES.check, init: { query: { path: WORKTREE_PATH } } },
+      { route: WORKTREE_ROUTES.check, init: { query: { path: WORKTREE_PATH, cwd: CALLER_CWD } } },
+    ]);
     should(actual.removable).be.true();
   });
 
-  it('should post a removal as validated JSON', async () => {
-    // Arrange
+  it('V-0504 should post a removal as validated JSON, and refuse an override the wire does not define', async () => {
     const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(removed(), calls));
-
-    // Act
-    const actual = await gateway.remove({
+    const gateway = new ClientWorktreeGateway(fakeClient(removed(), calls));
+    const request = {
       path: WORKTREE_PATH,
-      overrides: ['discard_worktree_changes'],
+      overrides: ['discard_worktree_changes' as const],
       deleteBranch: true,
-      confirmations: ['delete_unmerged_branch'],
-    });
-
-    // Assert
-    should(calls[0]?.path).equal(WORKTREE_REMOVE_PATH);
-    should(calls[0]?.init?.method).equal('POST');
-    should(JSON.parse(String(calls[0]?.init?.body))).eql({
-      path: WORKTREE_PATH,
-      overrides: ['discard_worktree_changes'],
-      deleteBranch: true,
-      confirmations: ['delete_unmerged_branch'],
-    });
+      confirmations: ['delete_unmerged_branch' as const],
+    };
+    const actual = await gateway.remove(request);
+    should(calls).deepEqual([{ route: WORKTREE_ROUTES.remove, init: { body: request } }]);
     should(actual.path).equal(WORKTREE_PATH);
-  });
 
-  it('should refuse an override the wire contract does not define', async () => {
-    // Arrange
-    const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(removed(), calls));
-
-    // Act + Assert
     await should(
-      gateway.remove({
-        path: WORKTREE_PATH,
-        overrides: ['force_everything' as never],
-        deleteBranch: false,
-        confirmations: [],
-      }),
+      gateway.remove({ path: WORKTREE_PATH, overrides: ['force_everything' as never], deleteBranch: false, confirmations: [] }),
     ).be.rejected();
-    should(calls).be.empty();
+    should(calls).have.length(1);
   });
 
-  it('should fail loudly when the daemon answers with an error envelope', async () => {
-    // Arrange
-    const gateway = new ProtocolWorktreeGateway(fakeClient({ error: 'no managed root configured' }));
-
-    // Act + Assert
-    await should(gateway.list()).be.rejected();
+  it('should fail loudly when the daemon answers something that is not a list', async () => {
+    await should(new ClientWorktreeGateway(fakeClient({ error: 'no managed root configured' })).list()).be.rejected();
   });
 
-  it('should carry the caller directory beside the path, since only the caller knows it', async () => {
-    // Arrange
+  it('V-0500 should post a fork as validated JSON, and refuse a base the wire does not define', async () => {
     const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(decision(), calls));
-
-    // Act
-    await gateway.check(WORKTREE_PATH, CALLER_CWD);
-
-    // Assert
-    should(calls[0]?.path).equal(worktreeRemovalCheckPath(WORKTREE_PATH, CALLER_CWD));
-    should(calls[0]?.path).containEql('cwd=%2Frepos%2Fferretry');
-  });
-
-  it('should post a fork as validated JSON', async () => {
-    // Arrange
-    const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(created(), calls));
-
-    // Act
+    const gateway = new ClientWorktreeGateway(fakeClient(created(), calls));
     const actual = await gateway.create({
       sourcePath: '/repos/ferretry',
       branch: 'feat/new',
       base: { kind: 'default-branch' },
     });
-
-    // Assert
-    should(calls[0]).match({ path: WORKTREES_PATH });
-    should(calls[0]?.init?.method).equal('POST');
-    should(JSON.parse(String(calls[0]?.init?.body))).eql({
-      sourcePath: '/repos/ferretry',
-      branch: 'feat/new',
-      base: { kind: 'default-branch' },
+    should(calls[0]).deepEqual({
+      route: WORKTREE_ROUTES.create,
+      init: { body: { sourcePath: '/repos/ferretry', branch: 'feat/new', base: { kind: 'default-branch' } } },
     });
     should(actual.cwd).equal('/managed/ferretry-new/packages/cli');
-  });
-
-  it('should refuse a base the wire contract does not define', async () => {
-    // Arrange
-    const calls: Call[] = [];
-    const gateway = new ProtocolWorktreeGateway(fakeClient(created(), calls));
-
-    // Act + Assert
     await should(
       gateway.create({ sourcePath: '/repos/ferretry', branch: 'feat/new', base: { kind: 'yesterday' } as never }),
     ).be.rejected();
-    should(calls).be.empty();
+    should(calls).have.length(1);
   });
 });

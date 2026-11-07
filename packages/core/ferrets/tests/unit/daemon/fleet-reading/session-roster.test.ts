@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { CredentialSessionRecord } from '../../../src/lib/fleet/credentials-service.ts';
+import type { CredentialSessionRecord } from '../../../../daemon/lib/fleet-reading/ports.ts';
 import { SESSION_ROSTER_MAX_AGE_MS, SessionRoster } from '../../../../daemon/lib/fleet-reading/session-roster.ts';
 
 const NOW = 1_786_000_000_000;

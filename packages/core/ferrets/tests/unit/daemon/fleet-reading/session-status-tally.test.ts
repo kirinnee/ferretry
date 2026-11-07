@@ -7,7 +7,7 @@
  * read that fails leaves the last tally standing and is tried again by the next caller.
  */
 import { describe, it } from 'bun:test';
-import type { SessionStatus } from '../../../../daemon/lib/protocol/session.ts';
+import type { FerretState as SessionStatus } from '../../../../contract/index.ts';
 import should from 'should';
 import {
   SESSION_STATUS_TALLY_MAX_AGE_MS,
@@ -19,8 +19,8 @@ const NOW = 1_786_000_000_000;
 /** The documents the tally reads, scripted: what they say, the clock, and reads the test can hold or fail. */
 class Storage {
   documents = new Map<string, SessionStatus>([
-    ['s1', 'running'],
-    ['s2', 'waiting'],
+    ['s1', 'working'],
+    ['s2', 'idle'],
     ['s3', 'stopped'],
   ]);
   now = NOW;
@@ -58,14 +58,14 @@ describe('SessionStatusTally', () => {
 
     // Act
     const first = await subject.statuses();
-    storage.documents.set('s4', 'running');
+    storage.documents.set('s4', 'working');
     storage.now = NOW + SESSION_STATUS_TALLY_MAX_AGE_MS - 1;
     const later = await subject.statuses();
 
     // Assert — the document nobody reported is not read until the tally is old.
     should(storage.reads).equal(1);
-    should(sorted(first)).deepEqual(['running', 'stopped', 'waiting']);
-    should(sorted(later)).deepEqual(['running', 'stopped', 'waiting']);
+    should(sorted(first)).deepEqual(['idle', 'stopped', 'working']);
+    should(sorted(later)).deepEqual(['idle', 'stopped', 'working']);
   });
 
   it('should share the read in flight with every caller that asks while it runs', async () => {
@@ -82,7 +82,7 @@ describe('SessionStatusTally', () => {
 
     // Assert
     should(storage.reads).equal(1);
-    for (const answer of answers) should(sorted(answer)).deepEqual(['running', 'stopped', 'waiting']);
+    for (const answer of answers) should(sorted(answer)).deepEqual(['idle', 'stopped', 'working']);
   });
 
   it('should move with every state it hears, with no read', async () => {
@@ -93,13 +93,13 @@ describe('SessionStatusTally', () => {
 
     // Act — one session stops, a new one starts, one is written with no status a reader can count.
     subject.heard('s1', 'stopped');
-    subject.heard('s5', 'running');
+    subject.heard('s5', 'working');
     subject.heard('s2', undefined);
     const heard = await subject.statuses();
 
     // Assert
     should(storage.reads).equal(1);
-    should(sorted(heard)).deepEqual(['running', 'stopped', 'stopped']);
+    should(sorted(heard)).deepEqual(['stopped', 'stopped', 'working']);
   });
 
   it('should ignore what it hears before its first read, which finds every document anyway', async () => {
@@ -108,11 +108,11 @@ describe('SessionStatusTally', () => {
     const subject = storage.tally();
 
     // Act
-    subject.heard('s9', 'running');
+    subject.heard('s9', 'working');
     const first = await subject.statuses();
 
     // Assert — only the documents: the heard session's state is on disk by the time a read runs.
-    should(sorted(first)).deepEqual(['running', 'stopped', 'waiting']);
+    should(sorted(first)).deepEqual(['idle', 'stopped', 'working']);
   });
 
   it('should let a write heard while a read runs beat what that read found', async () => {
@@ -138,7 +138,7 @@ describe('SessionStatusTally', () => {
     const storage = new Storage();
     const subject = storage.tally();
     await subject.statuses();
-    storage.documents.set('s2', 'running');
+    storage.documents.set('s2', 'working');
 
     // Act
     storage.now = NOW + SESSION_STATUS_TALLY_MAX_AGE_MS;
@@ -146,7 +146,7 @@ describe('SessionStatusTally', () => {
 
     // Assert
     should(storage.reads).equal(2);
-    should(sorted(old)).deepEqual(['running', 'running', 'stopped']);
+    should(sorted(old)).deepEqual(['stopped', 'working', 'working']);
   });
 
   it('should answer no statuses when the first read fails, and read again on the next ask', async () => {
@@ -162,7 +162,7 @@ describe('SessionStatusTally', () => {
 
     // Assert
     should(failed).deepEqual([]);
-    should(sorted(recovered)).deepEqual(['running', 'stopped', 'waiting']);
+    should(sorted(recovered)).deepEqual(['idle', 'stopped', 'working']);
     should(storage.reads).equal(2);
   });
 
@@ -171,7 +171,7 @@ describe('SessionStatusTally', () => {
     const storage = new Storage();
     const subject = storage.tally();
     await subject.statuses();
-    subject.heard('s2', 'running');
+    subject.heard('s2', 'working');
 
     // Act
     storage.now = NOW + SESSION_STATUS_TALLY_MAX_AGE_MS;
@@ -181,8 +181,8 @@ describe('SessionStatusTally', () => {
     const fresh = await subject.statuses();
 
     // Assert
-    should(sorted(stale)).deepEqual(['running', 'running', 'stopped']);
-    should(sorted(fresh)).deepEqual(['running', 'stopped', 'waiting']);
+    should(sorted(stale)).deepEqual(['stopped', 'working', 'working']);
+    should(sorted(fresh)).deepEqual(['idle', 'stopped', 'working']);
     should(storage.reads).equal(3);
   });
 });

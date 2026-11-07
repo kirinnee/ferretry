@@ -1,5 +1,7 @@
-import { InstantSchema } from '../protocol/common.ts';
 import { z } from 'zod';
+
+/** An ISO instant, kept as written. */
+const InstantSchema = z.iso.datetime({ offset: true });
 
 /** The most ferrets one owner can keep pinned on a machine; a pin list is a shortcut, not a second roster. */
 export const MAX_AGENT_PINS = 50;
@@ -11,9 +13,8 @@ export const AgentPinSchema = z.strictObject({
 });
 export type AgentPin = z.infer<typeof AgentPinSchema>;
 
-/** The file the pins live in. Versioned so a later shape can be told from this one. */
+/** The body of `state/ferrets/agent-pins.json`: the owner's pins (the kernel store writes and checks its `format: 1`). */
 export const AgentPinFileSchema = z.strictObject({
-  version: z.literal(1),
   pins: z.array(AgentPinSchema),
 });
 

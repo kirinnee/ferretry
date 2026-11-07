@@ -1,4 +1,4 @@
-import type { FileSubscription } from '../file-events/hub.ts';
+import type { FileSubscription } from './ports.ts';
 
 export interface WatchedDocumentPorts<T> {
   /** Hear when the file may have changed (`FileEventHub.subscribe`). */

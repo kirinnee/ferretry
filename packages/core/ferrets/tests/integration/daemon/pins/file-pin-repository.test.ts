@@ -1,120 +1,67 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { defineState } from '@ferretry/kernel/contract';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { createFoundationPaths, resolveStateHome, type FoundationPaths } from '../../../src/lib/index.ts';
-import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { FilePinRepository, FilePinSessionDirectory } from '../../../../daemon/adapters/pins/index.ts';
-import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import { RegistryPinSessionDirectory, StatePinRepository } from '../../../../daemon/adapters/pins/index.ts';
 
 const clock = { now: () => '2026-07-31T00:00:00.000Z' };
 
-async function fixture(): Promise<{
-  readonly home: string;
-  readonly paths: FoundationPaths;
-  readonly repository: FilePinRepository;
-  readonly sessions: FilePinSessionDirectory;
-}> {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-pins-'));
-  const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
-  const files = new StateFileSystem(paths, () => 'unique-id');
-  return {
-    home,
-    paths,
-    repository: new FilePinRepository(paths, files, new KeyedSerialExecutor(), clock),
-    sessions: new FilePinSessionDirectory(paths, files),
-  };
+/** The declaration the contract is to hold for `<ferret>/pins.json` (stood in here until it does). */
+const PinFiles = defineState({ name: 'pins', path: '*/pins.json', store: 'json', format: 1 });
+
+function fixture() {
+  const folder = new MemoryStateFolder();
+  const state = folder.port([PinFiles]);
+  return { folder, repository: new StatePinRepository(state, PinFiles as never, clock) };
 }
 
-describe('FilePinRepository', () => {
-  it('should persist serialized per-session mutations atomically and retain concurrent changes', async () => {
-    // Arrange
-    const subject = await fixture();
-    try {
-      // Act
-      const [first, second] = await Promise.all([
-        subject.repository.mutate('agent-1', current => [
-          {
-            id: '00000000-0000-4000-8000-000000000001',
-            at: 1,
-            kind: 'note' as const,
-            text: 'first',
-            by: 'human' as const,
-            createdBy: null,
-            createdByName: null,
-          },
-          ...current,
-        ]),
-        subject.repository.mutate('agent-1', current => [
-          {
-            id: '00000000-0000-4000-8000-000000000002',
-            at: 2,
-            kind: 'note' as const,
-            text: 'second',
-            by: 'human' as const,
-            createdBy: null,
-            createdByName: null,
-          },
-          ...current,
-        ]),
-      ]);
-      const reread = await subject.repository.snapshot('agent-1');
+const note = (id: string, text: string, at: number) => ({
+  id,
+  at,
+  kind: 'note' as const,
+  text,
+  by: 'human' as const,
+  createdBy: null,
+  createdByName: null,
+});
 
-      // Assert
-      should(first.pins).have.length(1);
-      should(second.pins).have.length(2);
-      should(reread.pins.map(pin => pin.id)).deepEqual([
-        '00000000-0000-4000-8000-000000000002',
-        '00000000-0000-4000-8000-000000000001',
-      ]);
-    } finally {
-      await rm(subject.home, { recursive: true, force: true });
-    }
+describe('StatePinRepository', () => {
+  it('should serialize per-ferret mutations through the store and retain concurrent changes', async () => {
+    const subject = fixture();
+    const [first, second] = await Promise.all([
+      subject.repository.mutate('agent-1', current => [
+        note('00000000-0000-4000-8000-000000000001', 'first', 1),
+        ...current,
+      ]),
+      subject.repository.mutate('agent-1', current => [
+        note('00000000-0000-4000-8000-000000000002', 'second', 2),
+        ...current,
+      ]),
+    ]);
+    const reread = await subject.repository.snapshot('agent-1');
+
+    should(first.pins).have.length(1);
+    should(second.pins).have.length(2);
+    should(reread.pins.map(pin => pin.id)).deepEqual([
+      '00000000-0000-4000-8000-000000000002',
+      '00000000-0000-4000-8000-000000000001',
+    ]);
+    should(JSON.parse(subject.folder.raw(PinFiles, 'agent-1') ?? '{}').format).equal(1);
   });
 
-  it('should degrade absent, corrupt, foreign, and malformed persisted documents to an empty board', async () => {
-    // Arrange
-    const subject = await fixture();
-    const file = join(subject.paths.sessions, 'agent-1', 'pins.json');
-    try {
-      // Act + Assert
-      should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
-      await subject.repository.mutate('agent-1', current => current);
-      await writeFile(file, '{not-json');
-      should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
-      await writeFile(
-        file,
-        JSON.stringify({ v: 1, sessionId: 'other', pins: [], updatedAt: '2026-07-31T00:00:00.000Z' }),
-      );
-      should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
-      await writeFile(
-        file,
-        JSON.stringify({ v: 1, sessionId: 'agent-1', pins: [{ id: 'not-a-uuid' }], updatedAt: 'bad' }),
-      );
-      should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
-    } finally {
-      await rm(subject.home, { recursive: true, force: true });
-    }
+  it('should degrade absent, corrupt and malformed documents to an empty board', async () => {
+    const subject = fixture();
+    should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
+    subject.folder.plant(PinFiles, '{not-json', 'agent-1');
+    should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
+    subject.folder.plant(PinFiles, JSON.stringify({ format: 1, pins: [{ id: 'not-a-uuid' }] }), 'agent-1');
+    should((await subject.repository.snapshot('agent-1')).pins).deepEqual([]);
   });
 
-  it('should recognize only a session bearing its version marker', async () => {
-    // Arrange
-    const subject = await fixture();
-    try {
-      // Act
-      const absent = await subject.sessions.has('agent-1');
-      await subject.repository.mutate('agent-1', current => current);
-      const stillAbsent = await subject.sessions.has('agent-1');
-      await writeFile(join(subject.paths.sessions, 'agent-1', 'session-version'), '1');
-      const present = await subject.sessions.has('agent-1');
-
-      // Assert
-      should(absent).be.false();
-      should(stillAbsent).be.false();
-      should(present).be.true();
-    } finally {
-      await rm(subject.home, { recursive: true, force: true });
-    }
+  it('should recognise only a ferret the registry holds', async () => {
+    const known = new Set(['agent-1']);
+    const sessions = new RegistryPinSessionDirectory(id => known.has(id));
+    should(await sessions.has('agent-1')).be.true();
+    should(await sessions.has('agent-2')).be.false();
   });
 });

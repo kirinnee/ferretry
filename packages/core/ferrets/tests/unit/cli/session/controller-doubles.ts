@@ -1,14 +1,14 @@
+import type { FerretSummary } from '../../../../contract/index.ts';
 import type {
-  AttachmentView,
-  SendRecord,
-  SendRequest,
-  SendResult,
-  SessionView,
+  ISessionApi,
+  ISessionIo,
+  SignalAnswer,
   SignalKind,
   SignalOptions,
-} from '@ferretry/protocol';
-import type { IClock, ISessionApi, ISessionBoard, ISessionFiles, ISessionIo } from '../../../../cli/lib/session/ports.ts';
+  StartBody,
+} from '../../../../cli/lib/session/ports.ts';
 import { SessionPresenter } from '../../../../cli/lib/session/presenter.ts';
+import { sessionView } from './session-fixtures.ts';
 
 /** Captured terminal output, so a test asserts what a user would actually see. */
 export class CapturedIo implements ISessionIo {
@@ -40,187 +40,78 @@ export class CapturedIo implements ISessionIo {
   }
 }
 
-/** A clock frozen at the instant the fixtures were written. */
-const FROZEN_NOW = Date.parse('2026-01-01T00:10:00.000Z');
-const frozenClock: IClock = { nowMs: () => FROZEN_NOW };
-
-/** A stored attachment, as the daemon reports one after an upload. */
-export const attachmentView: AttachmentView = {
-  id: 'att-1',
-  filename: 'shot.png',
-  mime: 'image/png',
-  size: 4,
-  sha256: 'a'.repeat(64),
-  createdAt: '2026-01-01T00:00:00.000Z',
-};
-
 export interface ApiCall {
   readonly method: string;
   readonly args: readonly unknown[];
 }
 
-/** Every daemon call a session command can make, recorded rather than performed. */
+/** Every daemon call a ferret verb can make, recorded rather than performed. */
 export class RecordingApi implements ISessionApi {
   readonly calls: ApiCall[] = [];
 
   constructor(
     private readonly responses: {
-      list?: SessionView[];
-      get?: SessionView | (() => SessionView);
+      list?: FerretSummary[];
+      get?: FerretSummary | ((reference: string) => FerretSummary);
       suggestNames?: string[];
-      start?: SessionView;
-      send?: SendResult;
-      sendStatus?: SendRecord[];
-      /** Thrown by `send` calls, in order, before the stubbed result answers. */
-      sendFailures?: Error[];
-      /** Thrown by `sendStatus` polls, in order, before the stubbed rows answer. */
-      sendStatusFailures?: Error[];
-      answer?: SessionView;
-      interrupt?: SessionView;
-      resume?: SessionView;
-      signal?: SessionView;
-      rename?: SessionView;
-      upload?: AttachmentView;
+      rename?: FerretSummary;
+      signal?: SignalAnswer;
       failWith?: Error;
     } = {},
   ) {}
 
-  private record<T>(method: string, args: readonly unknown[], value: T | undefined): Promise<T> {
+  private record(method: string, ...args: unknown[]): void {
     this.calls.push({ method, args });
-    if (this.responses.failWith !== undefined) return Promise.reject(this.responses.failWith);
-    if (value === undefined) return Promise.reject(new Error(`the test did not stub ${method}`));
-    return Promise.resolve(value);
+    if (this.responses.failWith !== undefined) throw this.responses.failWith;
   }
 
-  list(): Promise<SessionView[]> {
-    return this.record('list', [], this.responses.list);
+  async list(): Promise<readonly FerretSummary[]> {
+    this.record('list');
+    return this.responses.list ?? [];
   }
 
-  get(id: string): Promise<SessionView> {
-    const stub = this.responses.get;
-    return this.record('get', [id], typeof stub === 'function' ? stub() : stub);
+  async get(reference: string): Promise<FerretSummary> {
+    this.record('get', reference);
+    const get = this.responses.get;
+    return typeof get === 'function' ? get(reference) : (get ?? sessionView({ id: reference }));
   }
 
-  suggestNames(count: number): Promise<string[]> {
-    return this.record('suggestNames', [count], this.responses.suggestNames);
+  async suggestNames(count: number): Promise<string[]> {
+    this.record('suggestNames', count);
+    return this.responses.suggestNames ?? [];
   }
 
-  start(...args: Parameters<ISessionApi['start']>): Promise<SessionView> {
-    return this.record('start', args, this.responses.start);
+  async start(body: StartBody): Promise<{ readonly id: string }> {
+    this.record('start', body);
+    return { id: 'ses-1' };
   }
 
-  send(id: string, input: SendRequest): Promise<SendResult> {
-    const failure = this.responses.sendFailures?.shift();
-    if (failure !== undefined) {
-      this.calls.push({ method: 'send', args: [id, input] });
-      return Promise.reject(failure);
-    }
-    return this.record('send', [id, input], this.responses.send);
+  async stop(reference: string, how?: 'now' | 'polite'): Promise<{ readonly id: string; readonly state?: string }> {
+    this.record('stop', reference, how);
+    return { id: reference, state: 'stopped' };
   }
 
-  /** Answers each poll with the next stubbed row, repeating the last. */
-  sendStatus(id: string, sendId: string): Promise<SendRecord> {
-    const failure = this.responses.sendStatusFailures?.shift();
-    if (failure !== undefined) {
-      this.calls.push({ method: 'sendStatus', args: [id, sendId] });
-      return Promise.reject(failure);
-    }
-    const rows = this.responses.sendStatus;
-    return this.record(
-      'sendStatus',
-      [id, sendId],
-      rows === undefined ? undefined : rows.length > 1 ? rows.shift() : rows[0],
-    );
+  async resume(reference: string): Promise<{ readonly id: string }> {
+    this.record('resume', reference);
+    return { id: reference };
   }
 
-  answer(...args: Parameters<ISessionApi['answer']>): Promise<SessionView> {
-    return this.record('answer', args, this.responses.answer);
+  async rename(reference: string, name: string): Promise<FerretSummary> {
+    this.record('rename', reference, name);
+    return this.responses.rename ?? sessionView({ id: reference, name });
   }
 
-  interrupt(id: string): Promise<SessionView> {
-    return this.record('interrupt', [id], this.responses.interrupt);
+  async signal(reference: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SignalAnswer> {
+    this.record('signal', reference, kind, message, options);
+    return this.responses.signal ?? {};
   }
 
-  resume(id: string, message?: string): Promise<SessionView> {
-    return this.record('resume', [id, message], this.responses.resume);
-  }
-
-  signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView> {
-    return this.record('signal', [id, kind, message, options], this.responses.signal);
-  }
-
-  rename(id: string, name?: string, teammate?: string): Promise<SessionView> {
-    return this.record('rename', [id, name, teammate], this.responses.rename);
-  }
-
-  upload(id: string, file: string): Promise<AttachmentView> {
-    return this.record('upload', [id, file], this.responses.upload);
-  }
-
-  /** The methods called, in order — the cheapest way to assert an ordering rule. */
   methods(): string[] {
     return this.calls.map(call => call.method);
   }
 }
 
-/** The board read behind the CARD column, recorded so a test asserts whether `ps` made one. */
-export class RecordingBoard implements ISessionBoard {
-  calls = 0;
-
-  constructor(
-    private readonly lanes: ReadonlyMap<string, string> = new Map(),
-    private readonly failWith?: Error,
-  ) {}
-
-  laneNames(): Promise<ReadonlyMap<string, string>> {
-    this.calls += 1;
-    return this.failWith === undefined ? Promise.resolve(this.lanes) : Promise.reject(this.failWith);
-  }
-}
-
-/** In-memory files, so a controller test never touches a disk. */
-export class FakeFiles implements ISessionFiles {
-  readonly reads: string[] = [];
-
-  constructor(
-    private readonly texts: Readonly<Record<string, string>> = {},
-    private readonly attachments: Readonly<Record<string, { filename: string; mime?: string; base64: string }>> = {},
-  ) {}
-
-  readText(path: string): Promise<string> {
-    this.reads.push(path);
-    const text = this.texts[path];
-    return text === undefined ? Promise.reject(new Error(`cannot read ${path}`)) : Promise.resolve(text);
-  }
-
-  readAttachment(path: string): Promise<{ filename: string; mime?: string; base64: string }> {
-    this.reads.push(path);
-    const attachment = this.attachments[path];
-    return attachment === undefined
-      ? Promise.reject(new Error(`cannot read attachment ${path}`))
-      : Promise.resolve(attachment);
-  }
-}
-
-/** A presenter writing into a captured IO with a frozen clock. */
 export function capturedPresenter(): { io: CapturedIo; presenter: SessionPresenter } {
   const io = new CapturedIo();
-  return { io, presenter: new SessionPresenter(io, frozenClock) };
+  return { io, presenter: new SessionPresenter(io) };
 }
-
-/** A `send --wait` clock that never really waits: each sleep advances it. */
-export class SteppedClock {
-  now = 0;
-  readonly slept: number[] = [];
-
-  nowMs(): number {
-    return this.now;
-  }
-
-  async sleep(milliseconds: number): Promise<void> {
-    this.slept.push(milliseconds);
-    this.now += milliseconds;
-  }
-}
-
-export const WAIT_CLOCK = new SteppedClock();

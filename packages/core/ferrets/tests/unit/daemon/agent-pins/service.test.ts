@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   type AgentPin,
@@ -10,9 +9,10 @@ import {
   MAX_AGENT_PINS,
   withPinned,
 } from '../../../../daemon/lib/agent-pins/index.ts';
-import type { SerialExecutor } from '../../../src/lib/ports.ts';
-import type { SessionDirectorySubsystem } from '../../../../daemon/lib/runtime/mounts/sessions.ts';
-import { sessionView } from '../runtime/mounts/support.ts';
+import type { SerialExecutor } from '../../../../daemon/lib/ports.ts';
+import type { FerretSummary } from '../../../../contract/index.ts';
+import type { FerretReader } from '../../../../daemon/lib/agent-pins/index.ts';
+import { ferretSummary } from '../support/calls.ts';
 import { byPinOrder } from '../../../../daemon/lib/agent-pins/service.ts';
 
 class MemoryPins implements AgentPinRepository {
@@ -52,13 +52,13 @@ function fixture(instants: readonly string[] = ['2026-11-01T10:00:00.000Z', '202
   return { repository, service };
 }
 
-class Roster implements SessionDirectorySubsystem {
-  constructor(private readonly views: readonly SessionView[]) {}
-  async list(): Promise<SessionView[]> {
+class Roster implements FerretReader {
+  constructor(private readonly views: readonly FerretSummary[]) {}
+  async list(): Promise<FerretSummary[]> {
     return [...this.views];
   }
-  async get(reference: string): Promise<SessionView | undefined> {
-    return this.views.find(view => view.config.id === reference || view.config.teammate === reference);
+  async get(reference: string): Promise<FerretSummary | undefined> {
+    return this.views.find(view => view.id === reference || view.name === reference);
   }
 }
 
@@ -137,7 +137,7 @@ describe('withPinned', () => {
     // Arrange
     const { service } = fixture();
     await service.pin('s2');
-    const reader = withPinned(new Roster([sessionView('s1'), sessionView('s2')]), service);
+    const reader = withPinned(new Roster([ferretSummary('s1'), ferretSummary('s2')]), service);
 
     // Act
     const views = await reader.list();
@@ -154,7 +154,7 @@ describe('withPinned', () => {
     // Arrange
     const { service, repository } = fixture();
     repository.failLoad = true;
-    const reader = withPinned(new Roster([sessionView('s1')]), service);
+    const reader = withPinned(new Roster([ferretSummary('s1')]), service);
 
     // Act
     const views = await reader.list();
@@ -169,7 +169,7 @@ describe('AgentPinSubsystem', () => {
   it('should pin by name, answer the view with its pin, and be idempotent both ways', async () => {
     // Arrange
     const { service } = fixture();
-    const roster = withPinned(new Roster([sessionView('s1', { teammate: 'marin' })]), service);
+    const roster = withPinned(new Roster([ferretSummary('s1', { name: 'marin' })]), service);
     const subject = new AgentPinSubsystem(roster, service);
 
     // Act

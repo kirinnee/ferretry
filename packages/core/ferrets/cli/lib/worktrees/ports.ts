@@ -1,17 +1,13 @@
 import type {
   CreatedWorktree,
   CreateWorktreeRequest,
-  IFyApiClient,
   RemovedWorktree,
   WorktreeListResponse,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
-} from '@ferretry/protocol';
+} from '../../../daemon/lib/protocol/worktrees.ts';
 
-/**
- * Presentation port for the worktree commands — the narrowest slice of the shipped `ConsoleIo`
- * adapter this context uses, so the production adapter satisfies it structurally.
- */
+/** Presentation port for the worktree commands. */
 export interface IWorktreeOutput {
   success(message: string): void;
   warn(message: string): void;
@@ -30,6 +26,3 @@ export interface IWorktreeGateway {
   /** Fork a new checkout, and answer with the directory to start work in. */
   create(request: CreateWorktreeRequest): Promise<CreatedWorktree>;
 }
-
-/** The only client capability the worktree gateway consumes. */
-export type WorktreeApiClient = Pick<IFyApiClient, 'request'>;
