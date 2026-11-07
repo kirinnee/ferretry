@@ -2,7 +2,7 @@ import { AsksPort } from '@ferretry/core-asks/contract';
 import { AUDIT_KINDS, audit, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
-import { definePlugin, panel, route, screen, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, screen, socket, verb } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
   AutoResumeFile,
@@ -70,6 +70,15 @@ export default definePlugin({
   needs: { gate: GatePort, vault: VaultPort, asks: AsksPort },
   provides: { ferrets: FerretsPort, workFolders: WorkFoldersPort },
   actions: {
+    // R-0424: the journal stream (a ferret from its cursor, or the fleet's recent tail). Today's descriptor.
+    sockets: [
+      socket('GET /v1/events', {
+        minimum: 'operator',
+        caller: 'any',
+        audit: { skip: 'a live read of the journals records nothing' },
+        guard: 'secrets',
+      }),
+    ],
     // Today's descriptors (packages/daemon/src/lib/runtime/mounts/{sessions,session-control,session-resume,
     // session-rename,session-credential,names,session-filesystem}.ts), paths renamed by the parity table.
     routes: [
