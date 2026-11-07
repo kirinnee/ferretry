@@ -37,7 +37,7 @@ import {
   replaceRecordTotals,
   SlidingWindows,
   sweepOwner,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 
 const MIN = 60_000;

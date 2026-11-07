@@ -5,9 +5,9 @@ import {
   LinkOwnerDurableObject,
   LinkStoreControlDurableObject,
   type LinkStoreRuntime,
-} from '../../../worker/adapters/index.ts';
-import { LINK_BUNDLE_HEADERS, objectFetch } from '../../../worker/adapters/link-store-objects.ts';
-import { DEFAULT_LINK_STORE_LIMITS, dueKey, LINK_STORE_VERSION } from '../../../worker/lib/index.ts';
+} from '../../../worker/src/adapters/index.ts';
+import { LINK_BUNDLE_HEADERS, objectFetch } from '../../../worker/src/adapters/link-store-objects.ts';
+import { DEFAULT_LINK_STORE_LIMITS, dueKey, LINK_STORE_VERSION } from '../../../worker/src/lib/index.ts';
 import { newDaemonIdentity } from '../../support/worker/identities.ts';
 import {
   DAY,
