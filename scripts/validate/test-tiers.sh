@@ -145,11 +145,8 @@ done < <(jq -r 'to_entries[] | select(.key != "schemaVersion") | .value[] | sele
 # A DEFINITION of `freePort` is the probe helper; a stub or a call of the product's own `freePort` adapter
 # member is not.
 guessed='\bfreeLoopbackPort\b|\b(function|const|let)[[:space:]]+freePort\b'
-# The one exemption, as today: this test's stand-in harness must be TOLD its callback port before it starts,
-# because the product's start-over finds the leftover sign-in by the port it holds.
-allowed='packages/plugins/logins/tests/integration/harness-login/start-over.test.ts'
 while IFS=: read -r file line _; do
-  [[ -n ${file} && ${file} != "${allowed}" ]] || continue
+  [[ -n ${file} ]] || continue
   refuse "${file}:${line}: a probe-then-close port helper races the daemon's bind; write \"port\": 0 and read the port the daemon recorded, or bind Bun.serve port 0"
 done < <(rg -n --no-heading -e "${guessed}" --glob '**/tests/**' --glob 'scripts/local/**' packages scripts/local || true)
 

@@ -318,3 +318,42 @@ export class BrowserEnd {
     this.records.push(JSON.parse(session.utf8Text(opened.plaintext) ?? '') as Record<string, unknown>);
   }
 }
+
+/**
+ * A HOSTILE DAEMON for the pin rows (P24, P135, R570): it answers whatever fingerprint the client hello asks for with
+ * a daemon hello correctly signed by ITS OWN identity — the kernel's real `answerClientHandshake`, handed a signing key
+ * that claims the requested id. An honest kernel refuses such a hello before presenting anything, so only this reaches
+ * the browser's own fingerprint check (today's `ScriptedDaemon.spoof`, relay-session.test.ts). Answers the reply frame
+ * to one client handshake frame, or `undefined` for any other frame.
+ */
+export async function impostorDaemon(): Promise<{
+  readonly daemonId: string;
+  answer(bytes: Uint8Array): Promise<Uint8Array | undefined>;
+}> {
+  const key = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as unknown as CryptoKeyPair;
+  const identity = await kernelCrypto.importDaemonIdentity(
+    toPem(await crypto.subtle.exportKey('pkcs8', key.privateKey)),
+  );
+  const signer = session.signingKey(kernelCrypto, identity);
+  return {
+    daemonId: identity.daemonId,
+    answer: async bytes => {
+      const decoded = session.decodeFrame(bytes);
+      if (!decoded.ok || decoded.frame.kind !== session.FRAME_KINDS.handshake) return undefined;
+      const hello = session.decodeClientHello(decoded.frame.payload);
+      if (hello === null) return undefined;
+      const spoofed = { ...signer, daemonId: hello.daemonId };
+      const answered = await session.answerClientHandshake(kernelCrypto, spoofed, decoded.frame.sessionId, hello);
+      if (!answered.ok) return undefined;
+      return session.encodeFrame({
+        kind: session.FRAME_KINDS.handshake,
+        sessionId: decoded.frame.sessionId,
+        sequence: session.HANDSHAKE_FRAME_SEQUENCE,
+        payload: session.encodeHandshakeMessage(answered.hello),
+      });
+    },
+  };
+}

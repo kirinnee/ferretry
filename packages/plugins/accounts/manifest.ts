@@ -1,13 +1,12 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
-import { RedactionSources } from './contract/pending-mask-source.ts';
 import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { RedactionSources, SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
