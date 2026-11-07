@@ -1,11 +1,6 @@
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 
-/**
- * The agenda facts `POST /v1/push/seen` reads (today's `protocol/src/lib/agenda.ts`). Agenda owns them; a plugin
- * contract may not import another's without the lead (spine §4.3), so these are copied until that edge exists.
- */
-const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
 const MAX_AGENDA_PER_SESSION = 20;
 const MAX_AGENDA_RESOLUTIONS = 100;
 
@@ -108,27 +103,9 @@ export const BrowserPushSubscriptionSchema = z.strictObject({
 });
 export type BrowserPushSubscription = z.infer<typeof BrowserPushSubscriptionSchema>;
 
-/**
- * `prefs` is deliberately NOT read or stored any more. Which events a device hears about is a
- * decision this device makes about itself, never one the daemon enforces on its behalf: every
- * daemon sends every event to every live enrolment, and each browser's own local preferences decide
- * what it shows (see the client-side notification filter in
- * `packages/pwa/src/lib/notification-filter.ts`).
- *
- * `prefs` IS STILL NAMED HERE, as the one field this `strictObject` accepts without reading —
- * version skew, not an oversight. The daemon and the PWA upgrade independently, so a browser still
- * running last release's bundle keeps sending the preference bundle this endpoint used to require;
- * refusing that body with the strict rejection every OTHER unexpected field still gets (see
- * `push_device_required` and the mount's own tests) would turn an ordinary rolling deploy into a
- * registration outage. The PWA keeps sending a harmless placeholder for one release for the mirror
- * case — an old, not-yet-upgraded daemon whose schema still REQUIRES `prefs` — see
- * `packages/pwa/src/lib/push-subscriptions.ts`. Remove this field once that compatibility window has
- * passed and every daemon in the field has upgraded past the one that required it.
- */
 export const RegisterPushDeviceRequestSchema = z.strictObject({
   deviceName: PushDeviceNameSchema,
   subscription: BrowserPushSubscriptionSchema,
-  prefs: z.unknown().optional(),
 });
 export type RegisterPushDeviceRequest = z.infer<typeof RegisterPushDeviceRequestSchema>;
 
@@ -261,18 +238,6 @@ export type PushDeliveryResult = z.infer<typeof PushDeliveryResultSchema>;
 
 export const PushErrorCodeSchema = z.enum(['invalid', 'corrupt_store', 'not_found']);
 export type PushErrorCode = z.infer<typeof PushErrorCodeSchema>;
-
-/**
- * `POST /v1/push/seen`: the owner opened an agenda item in the app, so its alerts come down on every OTHER device
- * (docs/notifications.md § When an alert is cleared). Names the item and nothing more; which device asked is the
- * credential's, never the body's.
- */
-export const PushSeenRequestSchema = z.strictObject({
-  /** A board's id as the agenda store accepts one (a session's or the machine agenda's): anything else is a 400 here. */
-  sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u, 'an agenda session id'),
-  agendaId: AgendaIdSchema,
-});
-export type PushSeenRequest = z.infer<typeof PushSeenRequestSchema>;
 
 /**
  * The most tags one `seen` answers: as many as one board can name — the ferret's own, and an item's and its approval's

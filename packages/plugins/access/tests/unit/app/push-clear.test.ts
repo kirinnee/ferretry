@@ -23,7 +23,6 @@ import {
   shownTag,
 } from '../../../app/lib/push-clear.ts';
 import { agendaItemOpenedHandler, machinePushRegistration } from '../../../app/lib/push-seen.ts';
-import { postAgendaItemSeen } from '../../../app/lib/push-subscriptions.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
 const WORK = { daemonId: 'sha256:work/one', label: 'Work laptop' };
@@ -385,7 +384,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
     expect(told).toHaveLength(2);
   });
 
-
   it('should keep what it closed when the machine cannot be told', async () => {
     // Arrange
     const { opened } = world({
@@ -434,49 +432,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
     // Act / Assert
     expect(await opened(connection, 'session-1', 'A3')).toEqual({ closed: 0, told: true });
     expect(told).toEqual(['A3']);
-  });
-});
-
-describe('postAgendaItemSeen', () => {
-  it('should POST the item, and nothing else, to that machine’s /v1/push/seen', async () => {
-    // Arrange
-    const calls: { url: string; init?: RequestInit }[] = [];
-    const connection = daemonConnection({
-      daemonId: 'home',
-      baseUrl: 'https://home.example.test',
-      deviceId: 'token-h',
-    });
-    const fetcher = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      calls.push({ url: String(url), ...(init === undefined ? {} : { init }) });
-      return new Response(JSON.stringify({ cleared: true, tags: ['attention-session-1:A3'] }));
-    };
-
-    // Act
-    const answer = await postAgendaItemSeen(connection, 'session-1', 'A3', fetcher);
-
-    // Assert
-    expect(answer).toEqual({ cleared: true, tags: ['attention-session-1:A3'] });
-    expect(calls[0]?.url).toBe('https://home.example.test/v1/push/seen');
-    expect(calls[0]?.init?.method).toBe('POST');
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ sessionId: 'session-1', agendaId: 'A3' });
-  });
-
-  it('should refuse an id that is not an agenda id before anything is sent', async () => {
-    // Arrange
-    const connection = daemonConnection({
-      daemonId: 'home',
-      baseUrl: 'https://home.example.test',
-      deviceId: 'token-h',
-    });
-    let sent = 0;
-    const fetcher = async (): Promise<Response> => {
-      sent += 1;
-      return new Response('{}');
-    };
-
-    // Act / Assert
-    await expect(postAgendaItemSeen(connection, 'session-1', 'not-an-id', fetcher)).rejects.toThrow();
-    expect(sent).toBe(0);
   });
 });
 

@@ -36,7 +36,6 @@ export {
   isReservedActorPhrase,
   LIMITED_DEVICE_GRANTS,
   type MachineSkippableStepUpAct,
-  ReadCapabilityGrantsSchema,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettings,
   STEP_UP_ACTS,

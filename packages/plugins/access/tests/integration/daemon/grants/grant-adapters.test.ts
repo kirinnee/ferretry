@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
-import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { journalState } from '../../../support/daemon/journal-state.ts';
 import should from 'should';
 import { DevicesFile, GrantAuditFile } from '../../../../contract/index.ts';
 import { JournalGrantAudit } from '../../../../daemon/adapters/grants/index.ts';
@@ -12,8 +13,8 @@ import { JournalGrantAudit } from '../../../../daemon/adapters/grants/index.ts';
 
 /** One in-memory `state/access/`, so what the assertions read is what actually reached a file. */
 function folder() {
-  const files = new MemoryStateFolder();
-  return { files, state: files.port([GrantAuditFile, DevicesFile]) };
+  const { folder: files, state } = journalState();
+  return { files, state };
 }
 
 /** Every line the journal holds, parsed. */
@@ -85,9 +86,8 @@ describe('the grant journal', () => {
     should(read.truncated).be.false();
   });
 
-  it('should refuse a damaged line loudly rather than read the journal as a clean history', async () => {
-    // Silently skipping damage would let a truncated or tampered journal read as a clean history. The kernel's
-    // reader refuses the file; the journal never answers with what survived around the damage.
+  it('should count a damaged line and preserve the surviving history', async () => {
+    // Damage is counted and reported beside the surviving entries, as in today's bounded journal reader.
     // Arrange
     const { files, state } = folder();
     files.plant(
@@ -96,7 +96,10 @@ describe('the grant journal', () => {
     );
 
     // Act + Assert
-    await should(new JournalGrantAudit(state).recent(10)).be.rejected();
+    const read = await new JournalGrantAudit(state).recent(10);
+    should(read.entries).have.length(1);
+    should(read.unreadable).equal(1);
+    should(read.truncated).be.false();
   });
 });
 

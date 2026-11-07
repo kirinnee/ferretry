@@ -12,6 +12,7 @@ import {
   type GateApi,
   type GateConfig,
   LIMITED_DEVICE_GRANTS,
+  STEP_UP_ACTS,
 } from '@ferretry/core-gate/contract';
 import type {
   CarrierKey,
@@ -40,6 +41,13 @@ import { accessConformance } from '../../../contract/testing/index.ts';
 import { toBase64Url } from '../../../daemon/lib/proof/binary.ts';
 import { type AccessHost, AccessRuntime } from '../../../daemon/runtime.ts';
 import { call, jsonBody } from '../../support/daemon/call.ts';
+import {
+  assertion,
+  clientData,
+  CREDENTIAL_ID,
+  es256Authenticator,
+} from '../../support/daemon/passkey-authenticator.ts';
+import { deviceRotateMessage } from '../../../daemon/lib/proof/device-proof.ts';
 
 const DAEMON_ID = `fy_daemon_${'A'.repeat(43)}`;
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -111,7 +119,10 @@ function world(options: { readonly identity?: AccessHost['identity'] } = {}): Wo
 }
 
 async function newDeviceKey(): Promise<string> {
-  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as unknown as CryptoKeyPair;
   return toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
 }
 
@@ -153,7 +164,10 @@ async function redeem(w: World, attempt: Attempt): Promise<ModeRedeemed | 'refus
 }
 
 /** A device paired through the `pair` mode, as a browser would: its id and the key it registered. */
-async function paired(w: World, grants?: 'full' | 'limited'): Promise<{ readonly deviceId: string; readonly key: string }> {
+async function paired(
+  w: World,
+  grants?: 'full' | 'limited',
+): Promise<{ readonly deviceId: string; readonly key: string }> {
   const key = await newDeviceKey();
   const outcome = await redeem(w, { code: await mint(w, grants), deviceKey: key });
   if (outcome === 'refused') throw new Error('the pairing was refused');
@@ -283,9 +297,7 @@ describe('the pair session mode', () => {
       proofs += 1;
       return true;
     };
-    expect(await redeem(w, { code: wrong(code), deviceKey: await newDeviceKey(), prove })).toBe(
-      'refused',
-    );
+    expect(await redeem(w, { code: wrong(code), deviceKey: await newDeviceKey(), prove })).toBe('refused');
     expect(proofs).toBe(1);
     expect(await redeem(w, { code, deviceKey: await newDeviceKey(), prove })).not.toBe('refused');
     expect(proofs).toBe(2);
@@ -296,9 +308,9 @@ describe('the pair session mode', () => {
     const w = world();
     const code = await mint(w);
     for (let index = 0; index < 5; index += 1)
-      expect(await redeem(w, { code, deviceKey: await newDeviceKey(), carrier: 'relay', prove: async () => false })).toBe(
-        'refused',
-      );
+      expect(
+        await redeem(w, { code, deviceKey: await newDeviceKey(), carrier: 'relay', prove: async () => false }),
+      ).toBe('refused');
     // The relay path is closed for this code …
     expect(await redeem(w, { code, deviceKey: await newDeviceKey(), carrier: 'relay' })).toBe('refused');
     // … and the direct five are untouched, so a LAN device still redeems.
@@ -393,7 +405,9 @@ describe('the pair session mode', () => {
     const w = world();
     const { deviceId } = await paired(w, 'limited');
     const standing = w.runtime.credentials.standing(deviceId as HolderId, w.clock.now());
-    expect(standing === 'unknown' || standing === 'revoked' ? standing : standing.grants).toEqual(LIMITED_DEVICE_GRANTS);
+    expect(standing === 'unknown' || standing === 'revoked' ? standing : standing.grants).toEqual(
+      LIMITED_DEVICE_GRANTS,
+    );
   });
 });
 
@@ -503,7 +517,9 @@ describe('the device session mode', () => {
 describe('the credentials:device provider', () => {
   test('G140 before Access has opened its state, every device is `unknown` (undetermined), never served unnarrowed', () => {
     const w = world();
-    expect(w.runtime.credentials.standing('fy_device_id_AAAAAAAAAAAAAAAAAAAAAA' as HolderId, w.clock.now())).toBe('unknown');
+    expect(w.runtime.credentials.standing('fy_device_id_AAAAAAAAAAAAAAAAAAAAAA' as HolderId, w.clock.now())).toBe(
+      'unknown',
+    );
   });
 
   test('P37 a newly paired device is locked: its standing carries no `unlockedUntil` until a passkey unlock', async () => {
@@ -532,8 +548,135 @@ describe('the credentials:device provider', () => {
     const response = await w.runtime.handler('GET /v1/pair/devices')(call({ host: true }));
     expect(response.status).toBe(503);
     expect(jsonBody(response).code).toBe('plugin_failed');
-    expect(w.runtime.credentials.standing('fy_device_id_AAAAAAAAAAAAAAAAAAAAAA' as HolderId, w.clock.now())).toBe('unknown');
+    expect(w.runtime.credentials.standing('fy_device_id_AAAAAAAAAAAAAAAAAAAAAA' as HolderId, w.clock.now())).toBe(
+      'unknown',
+    );
   });
 });
 
 accessConformance('AccessRuntime.port', () => world().runtime.port);
+
+/** A real runtime, real durable passkey store and real WebAuthn verifier; only the authenticator is software. */
+async function prepared() {
+  const w = world();
+  const device = await paired(w);
+  const wired = await w.runtime.ready();
+  const authenticator = await es256Authenticator();
+  const origin = 'https://app.example.test';
+  const credentialId = toBase64Url(CREDENTIAL_ID);
+  await wired.passkeyStore.add({
+    credentialId,
+    deviceId: device.deviceId,
+    algorithm: authenticator.algorithm,
+    publicKeySpki: toBase64Url(authenticator.spki),
+    signCount: 0,
+    origin,
+    createdAt: w.clock.now(),
+  });
+  return { w, device, wired, authenticator, origin, credentialId };
+}
+
+async function signed(p: Awaited<ReturnType<typeof prepared>>, options: { challenge: string }, signCount = 1) {
+  const answer = await assertion(p.authenticator, {
+    client: clientData('webauthn.get', { challenge: options.challenge, origin: p.origin }),
+    auth: { rpId: 'app.example.test', signCount },
+  });
+  return {
+    credentialId: p.credentialId,
+    clientDataJSON: toBase64Url(answer.clientDataJSON),
+    authenticatorData: toBase64Url(answer.authenticatorData),
+    signature: toBase64Url(answer.signature),
+  };
+}
+
+test('a live runtime watch lets a verified add-device proof be claimed once through the provider', async () => {
+  const p = await prepared();
+  const watch = watcher('same-page-and-session');
+  const release = p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, watch.watch);
+  const subject = { deviceId: p.device.deviceId, appSession: watch.watch.appSession };
+  const caller = { device: subject, hostLocal: false };
+  const options = await p.wired.stepUp.stepUpOptions(caller, p.origin, STEP_UP_ACTS.addDevice);
+  if (!options.ok) throw new Error('options refused');
+  expect((await p.wired.stepUp.stepUp(caller, await signed(p, options.value))).ok).toBe(true);
+  expect(p.w.runtime.witness.claimFresh(subject, STEP_UP_ACTS.addDevice)).toBe(true);
+  expect(p.w.runtime.witness.claimFresh(subject, STEP_UP_ACTS.addDevice)).toBe(false);
+  release?.();
+});
+
+test('releasing the runtime watch keeps the reconnect grace then ends its fresh proof', async () => {
+  const p = await prepared();
+  const watch = watcher('page-one');
+  const release = p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, watch.watch);
+  const subject = { deviceId: p.device.deviceId, appSession: watch.watch.appSession };
+  const caller = { device: subject, hostLocal: false };
+  const options = await p.wired.stepUp.stepUpOptions(caller, p.origin, STEP_UP_ACTS.addDevice);
+  if (!options.ok) throw new Error('options refused');
+  expect((await p.wired.stepUp.stepUp(caller, await signed(p, options.value))).ok).toBe(true);
+  release?.();
+  expect(p.w.runtime.witness.freshlyHeld(subject)).toBe(true);
+  await p.w.clock.advance(61_000);
+  expect(p.w.runtime.witness.claimFresh(subject, STEP_UP_ACTS.addDevice)).toBe(false);
+});
+
+test('R251 runtime unlock rotation rewrites the key, lapses other sessions, spares the carrying session and audits', async () => {
+  const p = await prepared();
+  p.w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_CONFIG.security, idleExpiryDays: 90 } };
+  await p.w.clock.advance(31 * DAY_MS);
+  const carrying = watcher('carrying-session');
+  const other = watcher('other-session');
+  p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, carrying.watch);
+  p.w.runtime.deviceMode.watch?.(p.device.deviceId as HolderId, other.watch);
+  const transcriptHash = new Uint8Array(32).fill(7);
+  const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const deviceKey = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
+  const proof = toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        'Ed25519',
+        pair.privateKey,
+        new Uint8Array(deviceRotateMessage(transcriptHash, p.device.deviceId, deviceKey)),
+      ),
+    ),
+  );
+  const caller = {
+    device: { deviceId: p.device.deviceId, appSession: carrying.watch.appSession },
+    hostLocal: false,
+    transcriptHash,
+  };
+  const options = await p.wired.stepUp.unlockOptions(caller, p.origin);
+  if (!options.ok) throw new Error('options refused');
+  const done = await p.wired.stepUp.unlock(caller, {
+    ...(await signed(p, options.value)),
+    rotation: { deviceKey, proof },
+  });
+  expect(done.ok && done.value.keyRotated).toBe(true);
+  expect([carrying.seen.lapsed, other.seen.lapsed]).toEqual([0, 1]);
+  expect((await holderOf(p.w, claim(p.device.deviceId)))?.key).toBe(deviceKey);
+  const records = JSON.parse(p.w.folder.raw(DevicesFile) ?? '{}').devices;
+  expect(records[0].publicKey).toBe(deviceKey);
+  expect(records[0].keyRotatedAt).toBe(p.w.clock.now());
+  expect(p.w.folder.raw(DevicesFile)).not.toContain(p.device.key);
+  const audit = (p.w.folder.raw(GrantAuditFile) ?? '')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line));
+  expect(audit.filter(line => line.kind === 'device.key-rotated')).toEqual([
+    {
+      format: 1,
+      kind: 'device.key-rotated',
+      actor: `device:${p.device.deviceId}`,
+      changes: [`device.key-rotated=${p.device.deviceId}`],
+      at: p.w.clock.now(),
+    },
+  ]);
+});
+
+test('the provider refuses all authority before the runtime opens', async () => {
+  const runtime = world().runtime;
+  const subject = { deviceId: 'unknown', appSession: 'page' };
+  expect(runtime.witness.held(subject)).toBe(false);
+  expect(runtime.witness.freshlyHeld(subject)).toBe(false);
+  expect(runtime.witness.unlockRequired(subject)).toBe(true);
+  expect(runtime.witness.claimFresh(subject, STEP_UP_ACTS.addDevice)).toBe(false);
+  expect(runtime.witness.rotateBy(subject.deviceId)).toBeUndefined();
+});

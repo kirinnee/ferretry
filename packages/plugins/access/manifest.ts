@@ -131,14 +131,6 @@ export default definePlugin({
         audit: { record: AUDIT.securityChanged },
         guard: GUARD_NONE,
       }),
-      route('POST /v1/push/seen', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: USE.fleet,
-        noStore: true,
-        audit: SKIP_UNRECORDED,
-        guard: GUARD_NONE,
-      }),
       route('GET /v1/push/subscriptions', {
         minimum: 'operator',
         caller: 'person',

@@ -1795,7 +1795,9 @@ describe('StepUpService key rotation (B6)', () => {
     should(rotation.verified).eql([
       { transcriptHash: TRANSCRIPT, deviceId: phone.deviceId, deviceKey: NEW_KEY, proof: PROOF },
     ]);
-    should(rotation.rotated).eql([{ deviceId: phone.deviceId, deviceKey: NEW_KEY, transcriptHash: TRANSCRIPT, appSession: phone.appSession }]);
+    should(rotation.rotated).eql([
+      { deviceId: phone.deviceId, deviceKey: NEW_KEY, transcriptHash: TRANSCRIPT, appSession: phone.appSession },
+    ]);
     should(service.held(phone)).be.true();
   });
 
@@ -1942,7 +1944,7 @@ describe('StepUpService key rotation (B6)', () => {
       should(rotation.rotated).have.length(1);
     });
 
-    it('R251 should rotate the key in the unlock, answering keyRotated, with the session’s transcript', async () => {
+    it('should rotate the key in the unlock, answering keyRotated, with the session’s transcript', async () => {
       // Arrange
       const { clock, service, authenticator, rotation } = await unlocking(31);
       await service.unlockOptions(inSession(), ORIGIN);
@@ -1961,7 +1963,9 @@ describe('StepUpService key rotation (B6)', () => {
       should(rotation.verified).eql([
         { transcriptHash: TRANSCRIPT, deviceId: phone.deviceId, deviceKey: NEW_KEY, proof: PROOF },
       ]);
-      should(rotation.rotated).eql([{ deviceId: phone.deviceId, deviceKey: NEW_KEY, transcriptHash: TRANSCRIPT, appSession: phone.appSession }]);
+      should(rotation.rotated).eql([
+        { deviceId: phone.deviceId, deviceKey: NEW_KEY, transcriptHash: TRANSCRIPT, appSession: phone.appSession },
+      ]);
       should(service.unlockRequired(phone)).be.false();
     });
 
@@ -2094,7 +2098,9 @@ describe('StepUpService stored proofs (approve-sign-in-rule: a derived challenge
     const { service, sent } = await steppedUpFor();
 
     // Assert — the exact bytes the authenticator signed, the credential this device holds, nothing else
-    should(service.claimStoredProof(phone, STEP_UP_ACTS.approveSignInRule, `srs_${'f'.repeat(24)}`, DERIVED)).be.undefined();
+    should(
+      service.claimStoredProof(phone, STEP_UP_ACTS.approveSignInRule, `srs_${'f'.repeat(24)}`, DERIVED),
+    ).be.undefined();
     should(
       service.claimStoredProof({ ...phone, appSession: 'tab-two' }, STEP_UP_ACTS.approveSignInRule, STAGE, DERIVED),
     ).be.undefined();
@@ -2295,7 +2301,11 @@ describe('StepUpService stored proofs (approve-sign-in-rule: a derived challenge
     it('should answer the removal without waiting past its bound on a listener that hangs, and report it', async () => {
       // Arrange — one listener that never settles, one that answers at once
       const failures: unknown[] = [];
-      const signal = new PasskeysChangedSignal(after, (error, change) => failures.push([String(error), change.cause]), 20);
+      const signal = new PasskeysChangedSignal(
+        after,
+        (error, change) => failures.push([String(error), change.cause]),
+        20,
+      );
       const { service } = fixture({ passkeysChanged: signal });
       const heard: string[] = [];
       signal.subscribe(() => new Promise<void>(() => undefined));

@@ -8,12 +8,7 @@ import {
   isGovernedCaller,
 } from '../../../../daemon/lib/grants/index.ts';
 import { PushError } from '../../../../daemon/lib/push/index.ts';
-import {
-  type AlertSeenOutcome,
-  type PushAlertSubsystem,
-  type PushSubscriptionSubsystem,
-  pushRoutes,
-} from '../../../../daemon/lib/routes/push.ts';
+import { type PushSubscriptionSubsystem, pushRoutes } from '../../../../daemon/lib/routes/push.ts';
 import {
   type CapabilityGrants,
   type CapabilityGuard,
@@ -33,7 +28,6 @@ import { type CallOverrides, jsonBody, respond } from '../../../support/daemon/c
  * enforce, so those cases assert the descriptor; everything a handler decides on its own — the owning device, the
  * self-enrolment step-up, the cross-device `pairing.use` decision through its `CapabilityGuard` — is asserted here.
  */
-
 
 const AT = '2026-08-05T09:00:00.000Z' as Instant;
 const deviceId = `fy_device_id_${'d'.repeat(22)}`;
@@ -162,11 +156,10 @@ function standing(overrides: CallOverrides): CallOverrides {
  * the same decision the operator's document feeds. `pairing` is permissive by default, so `allow: false`
  * is how a fixture states that the operator switched device management off for remote callers.
  */
-function mount(subject: PushSubscriptionSubsystem, allow = true, alerts?: PushAlertSubsystem, guard?: CapabilityGuard) {
+function mount(subject: PushSubscriptionSubsystem, allow = true, guard?: CapabilityGuard) {
   const routes = pushRoutes(
     subject,
     guard ?? guardOver({ ...DEFAULT_CAPABILITY_GRANTS, pairing: { use: allow, configure: allow } }),
-    alerts,
   );
   return { dispatch: (key: string, overrides: CallOverrides = {}) => respond(routes, key, standing(overrides)) };
 }
@@ -319,7 +312,10 @@ describe('push routes', () => {
     const rejected = mount(new FakePush([], new PushError('invalid', 'the push service discarded it')));
 
     const list = await damaged.dispatch('GET /v1/push/subscriptions', { device: browser });
-    const enrol = await rejected.dispatch('POST /v1/push/subscriptions', { device: browser, body: JSON.stringify(body) });
+    const enrol = await rejected.dispatch('POST /v1/push/subscriptions', {
+      device: browser,
+      body: JSON.stringify(body),
+    });
     const revoke = await damaged.dispatch('DELETE /v1/push/subscriptions/:pushId', {
       device: browser,
       params: { pushId: enrolmentId },
@@ -355,7 +351,6 @@ describe('push routes', () => {
       'GET /v1/push/subscriptions',
       'POST /v1/push/subscriptions',
       'DELETE /v1/push/subscriptions/:pushId',
-      'POST /v1/push/seen',
     ]) {
       should(descriptor(key)?.minimum).equal('operator');
       should(descriptor(key)?.wardenRemedy).be.undefined();
@@ -469,7 +464,7 @@ describe('push routes refusing a cross-device act with nothing to explain', () =
     };
 
     // Act
-    const response = await mount(new FakePush(), true, undefined, silent).dispatch('GET /v1/push/subscriptions');
+    const response = await mount(new FakePush(), true, silent).dispatch('GET /v1/push/subscriptions');
 
     // Assert
     should(response.status).equal(403);
@@ -480,86 +475,6 @@ describe('push routes refusing a cross-device act with nothing to explain', () =
   });
 });
 
-describe('POST /v1/push/seen (the owner opened an item; its alerts come down on their other devices)', () => {
-  class FakeAlerts implements PushAlertSubsystem {
-    readonly calls: Array<readonly [string, string, string | undefined]> = [];
-    constructor(private readonly outcome: AlertSeenOutcome = { found: true, tags: ['attention-session-1:A3'] }) {}
-
-    async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
-      this.calls.push([sessionId, agendaId, exceptDevice]);
-      return this.outcome;
-    }
-  }
-
-  const seenBody = JSON.stringify({ sessionId: 'session-1', agendaId: 'A3' });
-
-  const seenMount = (alerts: PushAlertSubsystem) => mount(new FakePush(), true, alerts);
-
-  it('G167 should skip the device that opened it, read from its credential and never the body, and answer only the tags', async () => {
-    // Arrange
-    deviceGrants = LIMITED_DEVICE_GRANTS;
-    const alerts = new FakeAlerts();
-    const surface = seenMount(alerts);
-
-    // Act
-    const response = await surface.dispatch('POST /v1/push/seen', { device: browser, body: seenBody });
-
-    // Assert
-    should(response.status).equal(200);
-    should(jsonBody(response)).deepEqual({ cleared: true, tags: ['attention-session-1:A3'] });
-    should(alerts.calls).deepEqual([['session-1', 'A3', deviceId]]);
-  });
-
-  it('should skip no device for the owner at the machine, and say when nothing was still up', async () => {
-    // Arrange
-    const alerts = new FakeAlerts({ found: true, tags: [] });
-    const surface = seenMount(alerts);
-
-    // Act
-    const response = await surface.dispatch('POST /v1/push/seen', { host: true, body: seenBody });
-
-    // Assert
-    should(response.status).equal(200);
-    should(jsonBody(response)).deepEqual({ cleared: false, tags: [] });
-    should(alerts.calls).deepEqual([['session-1', 'A3', undefined]]);
-  });
-
-  it('should answer 404 for an item that is not on that board', async () => {
-    // Arrange
-    deviceGrants = LIMITED_DEVICE_GRANTS;
-    const surface = seenMount(new FakeAlerts({ found: false }));
-
-    // Act
-    const response = await surface.dispatch('POST /v1/push/seen', { device: browser, body: seenBody });
-
-    // Assert
-    should(response.status).equal(404);
-    should(jsonBody(response).code).equal('push_not_found');
-  });
-
-  it('G167 should refuse a body that names more than the item, before the clearer is reached', async () => {
-    // Arrange
-    deviceGrants = LIMITED_DEVICE_GRANTS;
-    const alerts = new FakeAlerts();
-    const surface = seenMount(alerts);
-    const bodies = [
-      JSON.stringify({ sessionId: 'session-1', agendaId: 'A3', exceptDevice: otherDeviceId }),
-      JSON.stringify({ sessionId: 'session-1', agendaId: 'not-an-id' }),
-    ];
-
-    // Act
-    const statuses = [];
-    for (const raw of bodies)
-      statuses.push((await surface.dispatch('POST /v1/push/seen', { device: browser, body: raw })).status);
-
-    // Assert
-    should(statuses).deepEqual([400, 400]);
-    should(alerts.calls).deepEqual([]);
-  });
-
-  it('G167 should be fleet.use: the descriptor demands it, so a device the operator narrowed off the fleet is refused by Gate', () => {
-    should(descriptor('POST /v1/push/seen')?.capability).containDeep({ axis: 'use' });
-    should(String(descriptor('POST /v1/push/seen')?.capability?.capability)).equal('fleet');
-    should(descriptor('POST /v1/push/seen')?.caller).equal('person');
-  });
+it('Access does not declare the Agenda-owned push seen route', () => {
+  should(descriptor('POST /v1/push/seen')).be.undefined();
 });

@@ -1,6 +1,6 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { PushKeysFile } from '../../../contract/index.ts';
+import { PushKeysFile, PushKeysFileSchema } from '../../../contract/index.ts';
 import { PushError, type VapidKeyPort } from '../../lib/push/index.ts';
 
 /**
@@ -124,13 +124,19 @@ export class StateVapidKeys implements VapidKeyPort, VapidSigner {
     const document = await this.state.read(PushKeysFile);
     if (!document.ok) throw new PushError('corrupt_store', 'the notification signing key is not a usable P-256 key');
     if (document.value === undefined) return await this.mint();
-    return await this.adopt(document.value.privateKeyJwk);
+    let parsed: z.infer<typeof PushKeysFileSchema>;
+    try {
+      parsed = PushKeysFileSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(document.value)));
+    } catch {
+      throw new PushError('corrupt_store', 'the notification signing key is not a usable P-256 key');
+    }
+    return await this.adopt(parsed.privateKeyJwk);
   }
 
   private async mint(): Promise<VapidIdentity> {
     const pair = await this.generate();
     const jwk = JsonWebKeySchema.parse(await crypto.subtle.exportKey('jwk', pair.privateKey));
-    await this.state.write(PushKeysFile, { format: 1, privateKeyJwk: jwk });
+    await this.state.write(PushKeysFile, new TextEncoder().encode(JSON.stringify({ format: 1, privateKeyJwk: jwk })));
     return await this.adopt(jwk);
   }
 

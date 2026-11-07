@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { CAPABILITY_NAMES, CapabilityGrantsSchema, ReadCapabilityGrantsSchema } from '@ferretry/core-gate/contract';
+import { CAPABILITY_NAMES, CapabilityGrantsSchema } from '@ferretry/core-gate/contract';
 import { PairedDevicesViewSchema } from '../../../contract/index.ts';
 import should from 'should';
 
@@ -24,32 +24,30 @@ const view = (grants: unknown, mayWiden: unknown): unknown => ({
   mayWiden,
 });
 
-describe('how a client reads grants from a daemon on another version', () => {
-  it('G134 should read a capability an older daemon omits as off, so a newer app still opens the device screen', () => {
-    const { sharing: _omitted, ...older } = everyCapability(on);
-    const read = PairedDevicesViewSchema.parse(view(older, older));
-    should(read.devices[0]?.grants.sharing).deepEqual(off);
-    should(read.devices[0]?.grants.fleet).deepEqual(on);
-    should(read.mayWiden.sharing).deepEqual(off);
-    should(read.mayWiden.terminal).deepEqual(on);
+describe('the closed device grant reading', () => {
+  it('G134 refuses a grant set that omits a capability, without filling missing fields', () => {
+    const { sharing: _omitted, ...partial } = everyCapability(on);
+    should(PairedDevicesViewSchema.safeParse(view(partial, everyCapability(on))).success).be.false();
+    should(PairedDevicesViewSchema.safeParse(view(everyCapability(on), partial)).success).be.false();
   });
 
-  it('G134 should drop a capability this build has not heard of, so an older app keeps working against a newer daemon', () => {
-    const newer = { ...everyCapability(on), telepathy: on };
-    const read = PairedDevicesViewSchema.parse(view(newer, newer));
-    should(read.devices[0]?.grants).deepEqual(everyCapability(on));
-    should(read.mayWiden).deepEqual(everyCapability(on));
+  it('G134 refuses unknown capabilities rather than silently dropping their grants', () => {
+    const unknown = { ...everyCapability(on), telepathy: on };
+    should(PairedDevicesViewSchema.safeParse(view(unknown, everyCapability(on))).success).be.false();
+    should(PairedDevicesViewSchema.safeParse(view(everyCapability(on), unknown)).success).be.false();
   });
 
   it('should leave a complete answer exactly as it is', () => {
     const complete = everyCapability(off);
-    should(ReadCapabilityGrantsSchema.parse(complete)).deepEqual(CapabilityGrantsSchema.parse(complete));
+    const read = PairedDevicesViewSchema.parse(view(complete, complete));
+    should(read.devices[0]?.grants).deepEqual(CapabilityGrantsSchema.parse(complete));
+    should(read.mayWiden).deepEqual(complete);
   });
 
   it('should still refuse a capability whose answer is malformed, and a value that is not an object at all', () => {
-    should(() => ReadCapabilityGrantsSchema.parse({ ...everyCapability(on), fleet: { use: true } })).throw();
-    should(() => ReadCapabilityGrantsSchema.parse('open')).throw();
-    should(() => ReadCapabilityGrantsSchema.parse(null)).throw();
-    should(() => ReadCapabilityGrantsSchema.parse([])).throw();
+    should(() => CapabilityGrantsSchema.parse({ ...everyCapability(on), fleet: { use: true } })).throw();
+    should(() => CapabilityGrantsSchema.parse('open')).throw();
+    should(() => CapabilityGrantsSchema.parse(null)).throw();
+    should(() => CapabilityGrantsSchema.parse([])).throw();
   });
 });

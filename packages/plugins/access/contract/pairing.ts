@@ -1,6 +1,6 @@
 import { durationWords, InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { CAPABILITY_NAMES, type CapabilityName, ReadCapabilityGrantsSchema } from '@ferretry/core-gate/contract';
+import { CAPABILITY_NAMES, type CapabilityName, CapabilityGrantsSchema } from '@ferretry/core-gate/contract';
 import { PublishedCarriersSchema, SocketEndpointSchema } from '@ferretry/plugin-connections/contract';
 import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './address.ts';
 
@@ -532,7 +532,7 @@ export const PairedDeviceSchema = z.strictObject({
    * (`docs/grants.md`, "Per-device grants"). A newly paired device holds `FULL_DEVICE_GRANTS`, behind the
    * unlock, unless its code was minted `--limited`. The owner's admin token at the machine is ungoverned.
    */
-  grants: ReadCapabilityGrantsSchema,
+  grants: CapabilityGrantsSchema,
 });
 export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
 
@@ -572,7 +572,7 @@ export const PairedDevicesViewSchema = z.strictObject({
    * so `true` here means "allowed after confirming", never "allowed without". Turning an axis OFF is
    * not listed: it needs only a step-up, on any device, including the caller's own.
    */
-  mayWiden: ReadCapabilityGrantsSchema,
+  mayWiden: CapabilityGrantsSchema,
 });
 export type PairedDevicesView = z.infer<typeof PairedDevicesViewSchema>;
 

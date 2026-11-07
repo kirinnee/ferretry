@@ -136,7 +136,7 @@ export const PushKeysFile = defineState({
   path: 'push-keys.json',
   store: 'secret',
   format: 1,
-  schema: PushKeysFileSchema,
+  schema: z.instanceof(Uint8Array),
   mode: 0o600,
 });
 

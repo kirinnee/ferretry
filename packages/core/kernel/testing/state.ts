@@ -20,6 +20,8 @@ export class SimulatedCrash extends Error {
 export class MemoryStateFolder {
   /** path (with `*` filled) → stored text */
   readonly files = new Map<string, string>();
+  /** path → stored bytes of a `secret` or `opaque` file: kept byte for byte, never parsed or stamped. */
+  readonly bytes = new Map<string, Uint8Array>();
   readonly databases = new Map<string, Database>();
   private crashArmed = false;
   crashed = false;
@@ -35,6 +37,17 @@ export class MemoryStateFolder {
 
   raw(file: StateFileDef, name?: string): string | undefined {
     return this.files.get(pathOf(file, name));
+  }
+
+  /** Sets a `secret` or `opaque` file's bytes. */
+  plantBytes(file: StateFileDef, bytes: Uint8Array, name?: string): void {
+    this.bytes.set(pathOf(file, name), new Uint8Array(bytes));
+  }
+
+  /** A `secret` or `opaque` file's bytes as stored. */
+  rawBytes(file: StateFileDef, name?: string): Uint8Array | undefined {
+    const stored = this.bytes.get(pathOf(file, name));
+    return stored === undefined ? undefined : new Uint8Array(stored);
   }
 
   /** Called after each landed write. */
@@ -108,6 +121,12 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   };
   const read = async <Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> => {
     guard(file);
+    if (file.store === 'secret' || file.store === 'opaque') {
+      const stored = folder.bytes.get(pathOf(file, name));
+      if (stored === undefined)
+        return file.required === true ? err(damage(file, 'missing', 'it is missing')) : ok(undefined);
+      return ok(new Uint8Array(stored) as Shape);
+    }
     const text = folder.files.get(pathOf(file, name));
     if (text === undefined)
       return file.required === true ? err(damage(file, 'missing', 'it is missing')) : ok(undefined);
@@ -115,6 +134,16 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   };
   const write = async <Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> => {
     guard(file);
+    if (file.store === 'secret' || file.store === 'opaque') {
+      if (!(value instanceof Uint8Array) && typeof value !== 'string')
+        throw new TypeError(`state ${file.name}: a ${file.store} file holds bytes`);
+      folder.bytes.set(
+        pathOf(file, name),
+        typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value),
+      );
+      folder.landed();
+      return;
+    }
     if (file.schema !== undefined) file.schema.parse(value);
     folder.files.set(pathOf(file, name), stamp(file, value));
     folder.landed();
@@ -159,6 +188,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     async remove(file, name) {
       guard(file);
       folder.files.delete(pathOf(file, name));
+      folder.bytes.delete(pathOf(file, name));
       folder.landed();
     },
     sqlite(file, name): SqliteHandle {

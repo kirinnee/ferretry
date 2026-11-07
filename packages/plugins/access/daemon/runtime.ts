@@ -82,6 +82,7 @@ import {
   StepUpService,
 } from './lib/step-up/index.ts';
 import type { ApiRoute } from './lib/wire.ts';
+import { type AccessStepUpProvider, stepUpProvider } from './step-up-provider.ts';
 
 /**
  * What Access needs from the host that no kernel or plugin port gives yet (sent to the lead): the daemon identity
@@ -125,7 +126,8 @@ const routeKey = (route: Pick<ApiRoute, 'method' | 'path'>): string => `${route.
 
 export class AccessRuntime {
   readonly #deps: AccessRuntimeDeps;
-  readonly #connections = new LiveDeviceConnections();
+  readonly #stepUpRegistry: StepUpRegistry;
+  readonly #connections: LiveDeviceConnections;
   readonly #verifier: PasskeyVerifier;
   #wired: Promise<Wired> | undefined;
   #current: Wired | undefined;
@@ -135,6 +137,11 @@ export class AccessRuntime {
 
   constructor(deps: AccessRuntimeDeps) {
     this.#deps = deps;
+    this.#stepUpRegistry = new StepUpRegistry(
+      { nowMs: () => deps.kernel.clock.nowMs() },
+      () => this.settings().stepUpWindowMinutes,
+    );
+    this.#connections = new LiveDeviceConnections(this.#stepUpRegistry);
     this.#verifier = passkeyVerifier(new WebCryptoPasskeyCrypto()) as unknown as PasskeyVerifier;
   }
 
@@ -180,10 +187,6 @@ export class AccessRuntime {
       clock: { now: () => clock.now() },
       ids: { next: () => crypto.randomUUID() },
     });
-    const stepUpRegistry = new StepUpRegistry(
-      { nowMs: () => clock.nowMs() },
-      () => this.settings().stepUpWindowMinutes,
-    );
     const passkeysChanged = new PasskeysChangedSignal(
       (ms, fn) => clock.after(milliseconds(ms), fn),
       (error, change) => {
@@ -198,7 +201,7 @@ export class AccessRuntime {
     const stepUp = new StepUpService({
       store: passkeyStore,
       verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
-      registry: stepUpRegistry,
+      registry: this.#stepUpRegistry,
       audit: grantAudit,
       challenges: new ChallengeLedger(),
       random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
@@ -344,9 +347,7 @@ export class AccessRuntime {
         return errorResponse(503, `Access could not open its device grants: ${cause}.`, 'plugin_failed');
       }
       const handle = wired.routes.get(key);
-      // POST /v1/push/seen is answered by Agenda's clearer, which is not ported yet (the lead holds the decision).
-      if (handle === undefined)
-        return errorResponse(503, 'Agenda answers this once it is ported.', 'plugin_unavailable');
+      if (handle === undefined) return errorResponse(404, 'no Access route with that key', 'not_found');
       return await handle(call);
     };
   }
@@ -421,7 +422,8 @@ export class AccessRuntime {
   };
 
   /** `step-up:device`: the passkeys a device may answer with. Verification is Access's own step-up service. */
-  readonly witness: StepUpWitness = {
+  readonly witness: StepUpWitness & AccessStepUpProvider = {
+    ...stepUpProvider(() => this.#current?.stepUp),
     passkeys: () => 'unknown',
     verify: async () => ({ refused: 'not-verified' }),
   };

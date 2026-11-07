@@ -52,7 +52,6 @@ const pushCases: SchemaCase[] = [
   { name: 'notification payload', schema: push.PushNotificationPayloadSchema, value: sessionPayload },
   { name: 'clear payload', schema: push.PushClearPayloadSchema, value: clearPayload },
   { name: 'push payload', schema: push.PushPayloadSchema, value: clearPayload },
-  { name: 'seen request', schema: push.PushSeenRequestSchema, value: { sessionId: 'session-1', agendaId: 'A3' } },
   {
     name: 'seen response',
     schema: push.PushSeenResponseSchema,
@@ -508,29 +507,6 @@ describe('a clear (the owner: "when on 1 device is alr replied or resolved. then
   });
 });
 
-describe('the seen request', () => {
-  it('should name a session and an agenda id, and nothing else', () => {
-    // Act / Assert
-    should(push.PushSeenRequestSchema.safeParse({ sessionId: 'session-1', agendaId: 'A3' }).success).be.true();
-    should(push.PushSeenRequestSchema.safeParse({ sessionId: 'session-1', agendaId: 'A0' }).success).be.false();
-    should(push.PushSeenRequestSchema.safeParse({ sessionId: '', agendaId: 'A3' }).success).be.false();
-    should(
-      push.PushSeenRequestSchema.safeParse({ sessionId: 'session-1', agendaId: 'A3', deviceId: DEVICE_ID }).success,
-    ).be.false();
-    should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [] }).success).be.true();
-    should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [], title: 'Deploy?' }).success).be.false();
-    // As many tags as one board can name, and no more (review round 5).
-    const tags = (count: number) => Array.from({ length: count }, (_, index) => `attention-s:A${index + 1}`);
-    should(push.PUSH_SEEN_MAX_TAGS).equal(241);
-    should(
-      push.PushSeenResponseSchema.safeParse({ cleared: true, tags: tags(push.PUSH_SEEN_MAX_TAGS) }).success,
-    ).be.true();
-    should(
-      push.PushSeenResponseSchema.safeParse({ cleared: true, tags: tags(push.PUSH_SEEN_MAX_TAGS + 1) }).success,
-    ).be.false();
-  });
-});
-
 describe('which push services let a push show nothing (review round 8)', () => {
   it('should classify every allowlisted service, and let only FCM and WNS show nothing', () => {
     // Act / Assert
@@ -557,12 +533,8 @@ describe('agenda push tags', () => {
   });
 });
 
-describe('the seen request names a board the agenda store accepts (review round 1)', () => {
-  it('should refuse a traversal, a space and an over-long id, and accept a session and the machine agenda', () => {
-    // Act / Assert
-    for (const sessionId of ['../x', ' session-1', 'session 1', 'a'.repeat(129)])
-      should(push.PushSeenRequestSchema.safeParse({ sessionId, agendaId: 'A3' }).success).be.false();
-    for (const sessionId of ['session-1', 'machine-agenda', 'a'.repeat(128), 'mw0cb26c-30d27327'])
-      should(push.PushSeenRequestSchema.safeParse({ sessionId, agendaId: 'A3' }).success).be.true();
-  });
+it('rejects removed push registration prefs rather than accepting a discarded field', () => {
+  should(push.RegisterPushDeviceRequestSchema.safeParse(registration).success).be.true();
+  for (const prefs of [{ enabled: true }, null, false, undefined])
+    should(push.RegisterPushDeviceRequestSchema.safeParse({ ...registration, prefs }).success).be.false();
 });

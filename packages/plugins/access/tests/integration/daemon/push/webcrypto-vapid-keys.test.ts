@@ -29,7 +29,7 @@ describe('StateVapidKeys', () => {
     should(PushKeysFile.store).equal('secret');
     // The document holds the signing half, and NOTHING above this adapter can ask for it: the port has
     // no accessor for it, so this assertion is about the file rather than about a reachable value.
-    should(JSON.parse(folder.raw(PushKeysFile) ?? '{}').privateKeyJwk.d).be.a.String();
+    should(JSON.parse(rawSecret(folder) ?? '{}').privateKeyJwk.d).be.a.String();
   });
 
   it('should answer with the same pair on every later open', async () => {
@@ -83,18 +83,18 @@ describe('StateVapidKeys', () => {
 
   it('should refuse a damaged key rather than minting a replacement', async () => {
     const unparsable = fixture();
-    unparsable.folder.plant(PushKeysFile, '{');
+    plantSecret(unparsable.folder, '{');
     const wrongShape = fixture();
-    wrongShape.folder.plant(PushKeysFile, JSON.stringify({ format: 1, privateKeyJwk: { kty: 'RSA' } }));
+    plantSecret(wrongShape.folder, JSON.stringify({ format: 1, privateKeyJwk: { kty: 'RSA' } }));
     const badPoint = fixture();
-    badPoint.folder.plant(
-      PushKeysFile,
+    plantSecret(
+      badPoint.folder,
       JSON.stringify({ format: 1, privateKeyJwk: { kty: 'EC', crv: 'P-256', d: 'x', x: 'short', y: 'short' } }),
     );
     const coordinate = Buffer.alloc(32, 7).toString('base64url');
     const badScalar = fixture();
-    badScalar.folder.plant(
-      PushKeysFile,
+    plantSecret(
+      badScalar.folder,
       JSON.stringify({
         format: 1,
         privateKeyJwk: { kty: 'EC', crv: 'P-256', d: 'not-a-scalar', x: coordinate, y: coordinate },
@@ -110,6 +110,14 @@ describe('StateVapidKeys', () => {
     // the same sense: a signing key this daemon cannot sign with.
     should((await refused(badScalar.keys.publicKey())).code).equal('corrupt_store');
     // Nothing was minted over the damage.
-    should(unparsable.folder.raw(PushKeysFile)).equal('{');
+    should(rawSecret(unparsable.folder)).equal('{');
   });
 });
+
+function plantSecret(folder: MemoryStateFolder, text: string): void {
+  folder.plantBytes(PushKeysFile, new TextEncoder().encode(text));
+}
+function rawSecret(folder: MemoryStateFolder): string | undefined {
+  const bytes = folder.rawBytes(PushKeysFile);
+  return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+}

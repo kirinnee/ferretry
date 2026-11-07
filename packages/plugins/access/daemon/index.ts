@@ -54,7 +54,6 @@ export default implementDaemon(manifest, {
         'POST /v1/passkeys': route('POST /v1/passkeys'),
         'POST /v1/passkeys/options': route('POST /v1/passkeys/options'),
         'POST /v1/passkeys/registration-window': route('POST /v1/passkeys/registration-window'),
-        'POST /v1/push/seen': route('POST /v1/push/seen'),
         'GET /v1/push/subscriptions': route('GET /v1/push/subscriptions'),
         'POST /v1/push/subscriptions': route('POST /v1/push/subscriptions'),
         'DELETE /v1/push/subscriptions/:pushId': route('DELETE /v1/push/subscriptions/:pushId'),

@@ -279,6 +279,21 @@ describe('a pairing that crossed a rendezvous', () => {
     carriers,
   });
 
+  it('R580 Access keeps relay addresses out of the fragment and accepts the discovered relay through its pairing interface', () => {
+    const arrival = pairingSeedFromUrl(
+      'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=7F3K-Q2ND;fp=fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB;relay=wss%3A%2F%2Fattacker.example',
+    );
+    should(Object.keys(arrival).sort()).eql(['code', 'daemonId', 'daemonUrl']);
+    const connection = pairedDaemonConnection(
+      arrival,
+      response([{ kind: 'relay', url: crossed.relayUrl }]),
+      crossed.relayUrl,
+      crossed,
+    );
+    should(connection.carriers).eql([{ ...crossed, operator: 'hosted' }]);
+    should(JSON.stringify(connection)).not.containEql('attacker.example');
+  });
+
   /*
    * §14: "The client refuses a relayed pairing whose published set does not name the rendezvous the
    * exchange itself crossed." Without it this function faces a choice with no good answer — write

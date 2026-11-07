@@ -131,3 +131,4 @@ route	POST /v1/skills/installs/local/runtime	added	moved to the owning plugin's 
 route	GET /v1/skills/installs/local	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/skills/installs/local/project/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/skills/installs/local/runtime/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	POST /v1/push/seen	removed	DECISIONS-1 #4: Agenda owns the seen route; Access keeps push subscriptions.
