@@ -1,5 +1,12 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import { createElement } from 'react';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { codexSettings } from './codex-settings.ts';
+import { CodexSettingsView } from './settings-view.tsx';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+export default implementApp(manifest, {
+  build: ({ client }) => {
+    const settings = codexSettings(client);
+    return { settings: { codex: () => createElement(CodexSettingsView, { settings }) } };
+  },
+});

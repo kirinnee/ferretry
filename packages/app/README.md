@@ -36,7 +36,19 @@ export default provideToShell(implementApp(manifest, { build }), {
 - Only `access` may provide claims and only `connections` carriers (the kernel's `session.modes` / `carriers` takers);
   a skeleton half provides nothing. Neither provider ever gets a client or a transport: the bootstrap read is still the
   first call on every session, and the hash guard still sits in front of every call.
-- Tests drive the shell with `fakeDeviceClaims` and `fakeCarrier` from `@ferretry/app/testing`.
+- Connections' carrier may also name a **control lane** (`control: { paths, dial }`): requests to those paths
+  (`GET`/`PUT /v1/tunnel`) ride a session of their own over the introducing carriers only, never the tunnel or WebRTC,
+  and remember no winner (R634).
+- **`PairingCarriers`** (Connections only, `shell.pairing`): the carriers a pairing walks — direct first, always, then
+  the one discovered rendezvous (R582, R633). `ports.pair(input)` runs that walk over the shell's own sealed `pair`
+  sessions (each leg proves the daemon against the QR's fingerprint before the code is sent) and answers the outcome
+  with the carrier that carried it; with no walk registered it is `pairDirect`.
+- **`ports.directory`**: the hosted relay directory read (R580) — a credential-free `GET` pinned to the build-time
+  directory origin (`__FY_RELAY_DIRECTORY__`, from `FY_RELAY_DIRECTORY_ORIGIN` or Connections' shared default); absent
+  when the build names none.
+- **`daemonOfClient(ctx.client)`**: which daemon a half was built for (lead decision 22) — an id, never a credential.
+- Tests drive the shell with `fakeDeviceClaims` and `fakeCarrier` from `@ferretry/app/testing`, which also exports the
+  real `connector`, `pairOnLeg`, `pairOverCarriers` and `WebCryptoRelayCrypto` for integration fixtures.
 
 ## The shared UI kit
 

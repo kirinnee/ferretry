@@ -97,12 +97,20 @@ export default implementDaemon(manifest, {
         }
       },
       cards: async query => (await service.board(query)).cards,
+      cardsPage: async query => {
+        const page = await service.board(query);
+        return { cards: page.cards, nextCursor: page.nextCursor };
+      },
+      laneSets: world.laneSets,
+      orphanedCards: world.orphanedCards,
+      focusOf: world.focusCard,
       create: async (by, request) => await settle(async () => (await service.create(request, callerOf(by))).card),
       act: async (by, id, request) => await settle(async () => (await acting.act(id, request, callerOf(by))).card),
       progress: async (by, id, parts) =>
         await settle(async () => (await acting.act(id, { action: 'edit', progress: parts }, callerOf(by))).card),
       heldBy: world.heldBy,
       switchOf: async project => await world.switches.read(BoardProjectIdSchema.parse(project)),
+      projectOf: async ferret => await world.lanes.projectOf(ferret),
     };
 
     // ── jobs: the sweep, the gates' reconcile, the GitHub watch ─────────────────────────────────────────────────

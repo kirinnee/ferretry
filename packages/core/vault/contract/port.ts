@@ -79,6 +79,27 @@ export interface VaultApi {
    * (today's `RuleSignInGrants.scriptedOn`): every page on that site counts as scripted from now on.
    */
   scriptedOn?(host: string | undefined): void;
+  /**
+   * An OPEN input card's target key as the DAEMON saw it (never the agent's word), for a 2FA seed set up from that card
+   * (today's `InputRequestService.cardTarget`): Accounts saves it only to an account that signs in there. `undefined`:
+   * no such open card. Additive.
+   */
+  cardTarget?(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined;
+  /**
+   * "USE IT NOW" (today's `InputRequestService.useNow`): the owner just saved a 2FA seed with a passkey from this OPEN
+   * code card, so the Vault types the new key's first code into that card through every check a "Use code from Ferretry"
+   * tap gets, against `observedDigest` (the card as the owner saw it). Whether it was typed; never the code. Additive.
+   */
+  useNow?(
+    requestId: string,
+    use: {
+      readonly account: string;
+      readonly factor: string;
+      readonly observedDigest: string;
+      readonly submit?: boolean;
+      readonly actor: { readonly kind: 'host' } | { readonly kind: 'device'; readonly deviceId: string };
+    },
+  ): Promise<boolean>;
 }
 
 export const VaultPort = definePort<VaultApi>('vault');

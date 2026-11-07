@@ -18,9 +18,13 @@ describe('logins contract', () => {
     expect((await loginsConformance(() => fakeLogins([sampleLogin('work')]))).ok).toBe(true);
   });
 
-  test('the manifest declares eleven routes under /v1/logins and the five login keys', () => {
+  test('the manifest declares eleven routes under /v1/logins or /v1/models and the five login keys', () => {
     expect(manifest.actions.routes).toHaveLength(11);
-    expect(manifest.actions.routes.every(declared => declared.path.startsWith('/v1/logins'))).toBe(true);
+    expect(
+      manifest.actions.routes.every(
+        declared => declared.path.startsWith('/v1/logins') || declared.path.startsWith('/v1/models'),
+      ),
+    ).toBe(true);
     expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual(
       LOGIN_KINDS.map(kind => `logins:${kind}`),
     );

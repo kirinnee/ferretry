@@ -6,6 +6,7 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
 import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
 import { DaemonLayouts } from '../layout/daemon-layout.ts';
+import { noteClientDaemon } from '../connect/daemon-of.ts';
 
 /**
  * THE SHELL'S RUNTIME: one generated client per paired daemon, started on first use; the halves built against it;
@@ -151,7 +152,10 @@ export class ShellRuntime {
 
   #clientFor(daemon: string, packageId: string): ShellPluginClient | undefined {
     const connection = this.#connections.get(daemon);
-    return connection?.kind === 'connected' ? connection.client.forPackage(packageId) : undefined;
+    if (connection?.kind !== 'connected') return undefined;
+    const client = connection.client.forPackage(packageId);
+    noteClientDaemon(client, daemon);
+    return client;
   }
 
   #drop(daemon: string): void {
