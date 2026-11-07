@@ -7,7 +7,7 @@ import {
   RUNS_WHAT_IT_READS_WARNING,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
-} from '@ferretry/protocol';
+} from '../../../../../wire/index.ts';
 import should from 'should';
 import type { CallerGovernance, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

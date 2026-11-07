@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AccountId, SignInRuleStageId } from '@ferretry/protocol';
+import type { AccountId, SignInRuleStageId } from '../../../../wire/index.ts';
 import should from 'should';
 import { connectSignInRules, SignInRuleDevicePurge, SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
 import { PasskeysChangedSignal } from '../../../src/lib/step-up/passkeys-changed.ts';

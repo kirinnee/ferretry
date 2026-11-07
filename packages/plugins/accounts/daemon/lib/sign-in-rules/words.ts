@@ -1,4 +1,4 @@
-import { SIGN_IN_RULE_HONEST_LIMIT } from '@ferretry/protocol';
+import { SIGN_IN_RULE_HONEST_LIMIT } from '../../../wire/index.ts';
 
 export { SIGN_IN_RULE_HONEST_LIMIT };
 

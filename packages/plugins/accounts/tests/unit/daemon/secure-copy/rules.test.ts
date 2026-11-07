@@ -5,7 +5,7 @@ import {
   type PasteRule,
   PasteRuleListSchema,
   type PasteRuleSettings,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';

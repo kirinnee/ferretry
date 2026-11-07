@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { LoginFieldRole, SignInId } from '@ferretry/protocol';
+import type { LoginFieldRole, SignInId } from '../../../../wire/index.ts';
 import should from 'should';
 import {
   FILLS_PER_HOUR_PER_SESSION,

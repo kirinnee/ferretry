@@ -1,4 +1,4 @@
-import type { GrantMissReason, LoginFieldRole, SignInId } from '@ferretry/protocol';
+import type { GrantMissReason, LoginFieldRole, SignInId } from '../../../wire/index.ts';
 import { SECOND_FACTOR_WINDOW_MS } from '../input-requests/login-observer.ts';
 
 /**

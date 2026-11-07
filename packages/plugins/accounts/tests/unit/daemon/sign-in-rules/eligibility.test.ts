@@ -5,7 +5,7 @@ import {
   type LoginObserved,
   type LoginObserverBy,
   type SignInSummary,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
 import { ineligibleBecause, tappedCount, tappedIdentities } from '../../../src/lib/sign-in-rules/index.ts';

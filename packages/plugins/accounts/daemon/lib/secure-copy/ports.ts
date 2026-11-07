@@ -1,4 +1,4 @@
-import type { BrowserElementTarget, CopyElementPart } from '@ferretry/protocol';
+import type { BrowserElementTarget, CopyElementPart } from '../../../wire/index.ts';
 import type { SecretChildRunner } from '../secrets/types.ts';
 
 /**

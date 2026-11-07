@@ -14,7 +14,7 @@ import {
   taskPlanRootBadge,
   taskPlanRootHost,
   taskPlanRootWords,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 
 export { TASK_PLAN_HONEST_LIMIT };
 

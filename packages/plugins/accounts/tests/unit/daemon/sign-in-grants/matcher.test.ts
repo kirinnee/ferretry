@@ -9,7 +9,7 @@ import {
   type SignInId,
   type SignInRuleId,
   type SignInSummary,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
 import {

@@ -40,7 +40,7 @@ import {
   signInRuleNarrowed,
   signInRuleSuspensionWords,
   signInRuleWords,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { OWNER_ONLY_CODE, ownerOnlyWords } from '../api/agent-caller.ts';
 import type { AuditSink } from '../audit/types.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';

@@ -1,4 +1,4 @@
-import { AgendaIdSchema } from '@ferretry/protocol';
+import { AgendaIdSchema } from '../../../wire/index.ts';
 import type { AgendaService } from '../agenda/service.ts';
 import type { AgendaActor } from '../agenda/state-machine.ts';
 import type { SignInRuleSuggestionAgendaPort, SignInRuleSuggestionCard } from './suggestions.ts';

@@ -9,7 +9,7 @@ import {
   signInRuleEffective,
   signInRuleSuspensionOf,
   UNFILED_PROJECT_ID,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import type { SessionProjectFactSource } from '../board-projects/session-projects.ts';
 import type { SignInGrantLedger } from './ledger.ts';
 import { type ScriptedOriginsView, type SignInGrant, scopeCovers, scriptedSince } from './matcher.ts';

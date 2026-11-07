@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SignInRulesDocument } from '@ferretry/protocol';
+import type { SignInRulesDocument } from '../../../../wire/index.ts';
 import should from 'should';
 import { FileSignInRuleStore } from '../../../src/adapters/sign-in-rules/index.ts';
 import { SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';

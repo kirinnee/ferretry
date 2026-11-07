@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleSchema, PasteRuleSettingsSchema } from '@ferretry/protocol';
+import { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleSchema, PasteRuleSettingsSchema } from '../../../wire/index.ts';
 import { z } from 'zod';
 import type { FileSystemPort, PasteRuleDocument, PasteRuleStore } from '../../lib/index.ts';
 

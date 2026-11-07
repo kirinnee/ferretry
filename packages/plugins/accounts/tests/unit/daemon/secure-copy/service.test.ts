@@ -7,7 +7,7 @@ import {
   COPY_STDERR_MAX_CHARS,
   COPY_VALUE_MAX_BYTES,
   type CopyCapture,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import {
   EphemeralValues,

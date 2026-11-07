@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SignInId, SignInRuleSuggestionId } from '@ferretry/protocol';
+import type { SignInId, SignInRuleSuggestionId } from '../../../../wire/index.ts';
 import should from 'should';
 import {
   SignInRuleError,

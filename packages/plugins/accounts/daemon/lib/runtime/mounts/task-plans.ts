@@ -14,7 +14,7 @@ import {
   type TaskPlanStageId,
   TaskPlanStageIdSchema,
   TaskPlanStageViewSchema,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';

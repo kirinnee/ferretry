@@ -1,4 +1,4 @@
-import type { BrowserElementTarget, CopyElementPart } from '@ferretry/protocol';
+import type { BrowserElementTarget, CopyElementPart } from '../../../wire/index.ts';
 import type { BrowserCopyPort } from '../browser/transport/copy-contracts.ts';
 import type { CopyPageGuard, CopyPagePort, CopyPageQueue, CopyPageRead } from './ports.ts';
 

@@ -16,7 +16,7 @@ import {
   type SignInRuleScope,
   TASK_PLAN_TERMINAL_TOOLS,
   type TwoFactorId,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { terminalHides } from '../input-requests/lock.ts';
 import { identityOf } from '../input-requests/login-observer.ts';
 import { codeTargetProblem, type SavedListing } from '../input-requests/saved-logins.ts';

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { type SignInRulesDocument, SignInRulesDocumentSchema } from '@ferretry/protocol';
+import { type SignInRulesDocument, SignInRulesDocumentSchema } from '../../../wire/index.ts';
 import type { FileSystemPort, SignInRuleStore } from '../../lib/index.ts';
 
 /** The file's name in `<state>/accounts/`. */

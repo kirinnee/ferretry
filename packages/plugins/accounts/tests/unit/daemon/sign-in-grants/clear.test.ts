@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { InputTargetFacts } from '@ferretry/protocol';
+import type { InputTargetFacts } from '../../../../wire/index.ts';
 import should from 'should';
 import { clearJobOf } from '../../../src/lib/sign-in-grants/clear.ts';
 

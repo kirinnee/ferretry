@@ -7,7 +7,7 @@ import {
   ruleMissSuspends,
   signInRuleSuspensionOf,
   TASK_PLAN_MISS_AGENT_NOTE,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import type { SignInGrant } from './matcher.ts';
 
 /**

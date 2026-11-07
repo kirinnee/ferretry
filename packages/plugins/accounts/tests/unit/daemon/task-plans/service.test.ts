@@ -15,7 +15,7 @@ import {
   TaskPlanSchema,
   type TaskPlanStageId,
   taskPlanApprovalSubject,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import { namesOnCard } from '../../support/names-on-card.ts';
 import { type AgendaLedger, AgendaService } from '../../../src/lib/agenda/index.ts';

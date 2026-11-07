@@ -5,7 +5,7 @@ import {
   daemonFeatureList,
   type SignInRuleId,
   UNFILED_PROJECT_ID,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { RuleSignInGrants, stampedProjectOf } from '../../../src/lib/sign-in-grants/rules.ts';

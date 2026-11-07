@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { StoredStepUpProof } from '@ferretry/protocol';
+import type { StoredStepUpProof } from '../../../../wire/index.ts';
 import should from 'should';
 import { SignInRuleError, type SignInRulePorts } from '../../../src/lib/sign-in-rules/index.ts';
 import {

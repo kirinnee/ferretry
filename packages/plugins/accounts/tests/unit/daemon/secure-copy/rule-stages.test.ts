@@ -15,7 +15,7 @@ import {
   type PasteRuleStageId,
   pasteRuleApprovalSubject,
   profileTargetsApprovalSubject,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import {
   type PasteRuleCaller,

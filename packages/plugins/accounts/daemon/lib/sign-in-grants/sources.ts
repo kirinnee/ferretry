@@ -1,4 +1,4 @@
-import type { AccountId, AccountKey, GrantMissReason } from '@ferretry/protocol';
+import type { AccountId, AccountKey, GrantMissReason } from '../../../wire/index.ts';
 import type { SignInGrantLedger } from './ledger.ts';
 import type { ScriptedOriginsView, SignInGrant } from './matcher.ts';
 import type { GrantFillAt, GrantVerdict, SignInGrantSource } from './plans.ts';

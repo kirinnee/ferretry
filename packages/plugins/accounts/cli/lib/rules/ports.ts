@@ -8,7 +8,7 @@ import type {
   SignInRuleStaged,
   SignInRuleStageView,
   SignInRuleView,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 
 /** Presentation port for `fy rules`. */
 interface IRulesOutput {

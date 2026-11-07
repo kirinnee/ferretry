@@ -23,7 +23,7 @@ import {
   pasteRuleWords,
   profileTargetsApprovalSubject,
   profileTargetsWords,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import type { PasteRuleCaller, PasteRuleService } from './rules.ts';
 
 /**

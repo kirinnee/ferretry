@@ -13,7 +13,7 @@ import {
   placeKeys,
   placeWords,
   recipeDiff,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import type { AgendaService } from '../agenda/service.ts';
 import type { AgendaActor } from '../agenda/state-machine.ts';
 import type { AuditSink } from '../audit/types.ts';

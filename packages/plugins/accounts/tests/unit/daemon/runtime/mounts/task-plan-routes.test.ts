@@ -6,7 +6,7 @@ import {
   type SignInSummary,
   STEP_UP_REQUIRED_CODE,
   type TaskPlanStageId,
-} from '@ferretry/protocol';
+} from '../../../../../wire/index.ts';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

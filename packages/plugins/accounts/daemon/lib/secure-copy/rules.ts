@@ -9,7 +9,7 @@ import {
   type PasteRule,
   type PasteRuleCreate,
   type PasteRuleSettings,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../input-requests/lock.ts';
 import type { InputPasteRules } from '../input-requests/ports.ts';
 import { SecureCopyError } from './errors.ts';

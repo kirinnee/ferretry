@@ -3,7 +3,7 @@ import {
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULES_SCREEN_PATH,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import type { Command } from 'commander';
 import {
   ACCOUNT_LISTING,

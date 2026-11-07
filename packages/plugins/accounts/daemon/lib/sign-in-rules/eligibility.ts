@@ -8,7 +8,7 @@ import {
   type SignInSummary,
   signInRuleKeysFit,
   signInRuleSurfaceOf,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 
 /**
  * WHO MAY BE PRE-APPROVED (docs/secrets.md, "Standing sign-in rules"): only a password sign-in the OWNER signed in to by

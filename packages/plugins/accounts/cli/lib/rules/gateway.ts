@@ -13,7 +13,7 @@ import {
   SignInRuleStageViewSchema,
   type SignInRuleView,
   SignInRuleViewSchema,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { z } from 'zod';
 import { readDaemonFeatures, updateRefusal } from '../daemon/features.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME } from '../session/connection.ts';

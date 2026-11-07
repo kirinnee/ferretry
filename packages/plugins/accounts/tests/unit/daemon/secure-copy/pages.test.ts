@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { COPY_AFTER_MASK_SECONDS, COPY_DEFAULT_LIFETIME_SECONDS, type CopyCapture } from '@ferretry/protocol';
+import { COPY_AFTER_MASK_SECONDS, COPY_DEFAULT_LIFETIME_SECONDS, type CopyCapture } from '../../../../wire/index.ts';
 import should from 'should';
 import type { BrowserCopyRead } from '../../../src/lib/browser/transport/copy-contracts.ts';
 import {

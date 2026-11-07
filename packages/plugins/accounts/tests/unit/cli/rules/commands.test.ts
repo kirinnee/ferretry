@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_HONEST_LIMIT, SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULES_SCREEN_PATH } from '@ferretry/protocol';
+import { SIGN_IN_RULE_HONEST_LIMIT, SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULES_SCREEN_PATH } from '../../../../wire/index.ts';
 import { Command } from 'commander';
 import should from 'should';
 import { RULES_HELP, registerRulesCommands } from '../../../src/lib/rules/commands';

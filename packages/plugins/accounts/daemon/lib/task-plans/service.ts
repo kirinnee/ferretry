@@ -38,7 +38,7 @@ import {
   taskPlanLinesOfCopyItems,
   taskPlanSelection,
   taskPlanSelectionNeedsPasskey,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import type { AuditSink } from '../audit/types.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../secure-copy/rules.ts';

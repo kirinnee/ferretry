@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_REFUSAL_WORDS, STEP_UP_REQUIRED_CODE, type SignInRuleStageId } from '@ferretry/protocol';
+import { SIGN_IN_RULE_REFUSAL_WORDS, STEP_UP_REQUIRED_CODE, type SignInRuleStageId } from '../../../../../wire/index.ts';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';

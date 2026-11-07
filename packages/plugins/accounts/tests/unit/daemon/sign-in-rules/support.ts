@@ -11,7 +11,7 @@ import type {
   SignInSummary,
   StoredStepUpProof,
   TwoFactorKeySummary,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import type { PasteRuleCaller } from '../../../src/lib/secure-copy/rules.ts';
 import type { RuleListing, SignInRuleProofPort, SignInRuleStore } from '../../../src/lib/sign-in-rules/index.ts';
 import { SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';

@@ -11,7 +11,7 @@ import {
   type SignInRuleSuspension,
   type SignInSummary,
   type TwoFactorKeySummary,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { ineligibleBecause, ruleSurfaceOf, tappedIdentities } from './eligibility.ts';
 
 /**

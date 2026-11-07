@@ -13,7 +13,7 @@ import {
   type SignInRuleSuggestionList,
   type SignInRuleSuggestionView,
   type SignInSummary,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { OWNER_ONLY_CODE, ownerOnlyWords } from '../api/agent-caller.ts';
 import type { AuditSink } from '../audit/types.ts';
 import { proposalTarget } from '../secrets/proposal-target.ts';

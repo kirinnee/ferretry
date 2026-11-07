@@ -11,7 +11,7 @@ import {
   type SignInRuleDraft,
   type SignInRuleRecord,
   type SignInRuleStageId,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import should from 'should';
 import { SignInRuleError, SignInRuleProofMissing } from '../../../src/lib/sign-in-rules/index.ts';
 import {

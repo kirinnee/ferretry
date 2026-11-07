@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_MAX, type SignInId, type SignInRuleStageId } from '@ferretry/protocol';
+import { SIGN_IN_RULE_MAX, type SignInId, type SignInRuleStageId } from '../../../../wire/index.ts';
 import should from 'should';
 import { FINISHED_STAGES_KEPT, SignInRuleError } from '../../../src/lib/sign-in-rules/index.ts';
 import {

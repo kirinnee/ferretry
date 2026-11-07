@@ -21,7 +21,7 @@ import {
   type TaskPlanSelectedLine,
   taskPlanCoversTool,
   taskPlanKeysFitLine,
-} from '@ferretry/protocol';
+} from '../../../wire/index.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 
 /**

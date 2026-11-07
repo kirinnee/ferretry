@@ -25,7 +25,7 @@ import {
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
-} from '@ferretry/protocol';
+} from '../../../../wire/index.ts';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';

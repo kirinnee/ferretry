@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { PasteRule } from '@ferretry/protocol';
+import type { PasteRule } from '../../../../wire/index.ts';
 import should from 'should';
 import { FilePasteRuleStore } from '../../../src/adapters/index.ts';
 import { type AgendaLedger, type AgendaLedgerRepository, AgendaService } from '../../../src/lib/agenda/index.ts';
