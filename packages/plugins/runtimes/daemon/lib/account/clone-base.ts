@@ -20,15 +20,14 @@
  * dropped; a source nothing here links to any more is dropped whole; past {@link CLONE_BASE_SOURCES_LIMIT}
  * sources the one copied longest ago goes. A Replace rewrites the source's record from this copy alone.
  */
-import { type Instant, InstantSchema, NonEmptyStringSchema } from '@ferretry/std';
-import { sha256Hex } from '../foreign.ts';
+import { NonEmptyStringSchema } from '@ferretry/std';
+import { CarriableSecretNameSchema, sha256Hex } from '../foreign.ts';
 import {
   CLONE_SETTINGS_KEYS_LIMIT,
   type CloneBundle,
   type CloneFile,
   type CloneSettingsDoc,
   CloneSettingsDocSchema,
-  CloneableSecretNameSchema,
   type OriginKey,
   OriginKeySchema,
 } from '../../../contract/index.ts';
@@ -36,6 +35,9 @@ import { type CloneDigestKind, cloneItemDigest } from '../clone-digest.ts';
 import { cloneFileOwned, isCanonicalAssetPath } from '../clone-review.ts';
 import { z } from 'zod';
 import { type AccountModel, COMPONENT_KINDS } from './schema.ts';
+
+/** An ISO-8601 instant with an explicit timezone, kept exactly as written (the record is compared, never canonicalised). */
+const InstantSchema = z.iso.datetime({ offset: true });
 
 /** Directly under the fleet directory, beside `setup/import.json`. */
 export const CLONE_BASE_FILE = 'setup/clone-base.json';
@@ -113,7 +115,7 @@ export const CloneBaseSourceSchema = z.strictObject({
   /** `updatedAt` of each API key at the last copy, both sides. Timestamps only: never a value, never a digest of one. */
   keys: z
     .record(
-      CloneableSecretNameSchema,
+      CarriableSecretNameSchema,
       z.strictObject({ sourceUpdatedAt: InstantSchema, targetUpdatedAt: InstantSchema }),
     )
     .optional(),
@@ -395,7 +397,7 @@ const ownedFiles = (item: BundleItem, files: readonly CloneFile[]): CloneFile[] 
 export interface CloneBaseUpdate {
   readonly source: CloneSourceIdentity;
   /** The instant the copy was applied. */
-  readonly at: Instant;
+  readonly at: string;
   /** Start over: the source's record is rewritten from this copy alone. */
   readonly replace: boolean;
   /** What this copy wrote. */

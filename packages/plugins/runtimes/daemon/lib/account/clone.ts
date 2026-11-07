@@ -49,6 +49,8 @@ import { cloudCredentialSentence, parseCloudCredential } from './environment.ts'
 import { type CloneBaseEntry, cloneBaseEntries, cloneOriginKeys } from './clone-base.ts';
 import {
   bundleModel,
+  type CloneBundleDraft,
+  CloneBundleDraftSchema,
   CloneRefusal,
   countComponents,
   environmentCredential,
@@ -134,7 +136,7 @@ const plainReferences = (component: Record<string, unknown>): Record<string, unk
 };
 
 /** The bundle `GET /v1/fleet/export` answers: no credential, no history (L1–L3, §7). */
-export function buildCloneBundle(input: CloneBundleInput): CloneBundle {
+export function buildCloneBundle(input: CloneBundleInput): CloneBundleDraft {
   const { model } = input;
   const used = new Set(Object.values(model.runtimes).map(runtime => runtime.credential));
   const credentials = Object.entries(model.credentials)
@@ -185,7 +187,7 @@ export function buildCloneBundle(input: CloneBundleInput): CloneBundle {
     ...input.notCopied.filter(entry => !files.has(plainAsset(entry.path))).map(entry => ({ ...entry })),
     ...leftOut,
   ];
-  return CloneBundleSchema.parse({
+  return CloneBundleDraftSchema.parse({
     format: CLONE_BUNDLE_FORMAT,
     version: 1,
     machine: input.machine,
@@ -318,7 +320,7 @@ export interface ClonePlan {
   readonly defaultRuntime: CloneDefault;
   /**
    * What this copy leaves as the source's side of each item it wrote, for the "last copied" record
-   * (`./clone-base.ts`). Empty for a bundle without origin keys (version 1). Digests, sizes and paths only.
+   * (`./clone-base.ts`). Digests, sizes and paths only.
    */
   readonly base: readonly CloneBaseEntry[];
   /** Every origin key the source holds, including the items this copy left out. */

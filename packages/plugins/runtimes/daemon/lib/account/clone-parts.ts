@@ -3,7 +3,7 @@
  * share: reading a bundle as a model, where a renamed document lands, and what a path is.
  */
 import { isAbsolute, normalize, relative } from 'node:path';
-import type { CloneBundle, CloneCredential } from '../../../contract/index.ts';
+import { type CloneBundle, CloneBundleSchema, type CloneCredential } from '../../../contract/index.ts';
 import { canonicalAssetReference, expandAssetPath } from '../paths.ts';
 import { harnessKindOfKey } from '../manifest.ts';
 import { freeName } from './import.ts';
@@ -60,8 +60,15 @@ export type MutableComponents = Record<ComponentKind, Record<string, Record<stri
 export const countComponents = (components: AccountModel['components'], kinds: readonly ComponentKind[]): number =>
   kinds.reduce((total, kind) => total + Object.keys(components[kind]).length, 0);
 
+/**
+ * A bundle as the SOURCE builds it, before its daemon id and origin keys are put on: the export mints the keys from
+ * the draft and then ships `{ ...draft, daemon, keys }`.
+ */
+export const CloneBundleDraftSchema = CloneBundleSchema.omit({ daemon: true, keys: true });
+export type CloneBundleDraft = ReturnType<typeof CloneBundleDraftSchema.parse>;
+
 /** The bundle as a model of its own, so a damaged one is refused before anything is renamed. */
-export function bundleModel(bundle: CloneBundle, sourceName: string): AccountModel {
+export function bundleModel(bundle: CloneBundle | CloneBundleDraft, sourceName: string): AccountModel {
   const credentials: Record<string, Credential> = {};
   for (const credential of bundle.credentials) {
     // An environment login keeps its halves, so a runtime on its Codex half still reads as one.

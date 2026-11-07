@@ -2,13 +2,8 @@
  * Origin keys: minted once, remembered, kept through a rename, never taken from a file that cannot be read.
  */
 import { describe, it } from 'bun:test';
-import {
-  CLONE_SKILLS_DIRECTORY,
-  cloneItemDigest,
-  type FleetCloneBundle,
-  FleetCloneBundleSchema,
-  ORIGIN_KEY_PATTERN,
-} from '@ferretry/protocol';
+import { CLONE_SKILLS_DIRECTORY, type CloneBundle, CloneBundleSchema, ORIGIN_KEY_PATTERN } from '../../../contract/index.ts';
+import { cloneItemDigest } from '../../../daemon/lib/clone-digest.ts';
 import should from 'should';
 import { SKILLS_STORE_DIRECTORY } from '../../../daemon/lib/account/adapt.ts';
 import {
@@ -21,13 +16,15 @@ import {
   serializeExportKeys,
 } from '../../../daemon/lib/account/export-keys.ts';
 
-const bundle = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
-  FleetCloneBundleSchema.parse({
+const bundle = (patch: Record<string, unknown> = {}): CloneBundle =>
+  CloneBundleSchema.parse({
     format: 'ferretry-clone',
     version: 1,
     machine: 'studio',
+    daemon: 'daemon-source',
+    keys: {},
     exportedAt: '2026-10-13T09:00:00Z',
-    credentials: [{ id: 'claude-you', harness: 'claude', label: 'you' }],
+    credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you' }],
     components: {
       instructions: { main: { file: 'components/instructions/main.md' } },
       skills: { mine: { items: ['review'] } },
@@ -51,7 +48,7 @@ const randomBytes = (length: number): Uint8Array => {
   return Uint8Array.from({ length }, (_, index) => (drawn * 37 + index * 11) % 256);
 };
 
-const run = (input: Partial<Parameters<typeof assignOriginKeys>[0]> & { bundle: FleetCloneBundle }) =>
+const run = (input: Partial<Parameters<typeof assignOriginKeys>[0]> & { bundle: CloneBundle }) =>
   assignOriginKeys({
     previous: EMPTY_EXPORT_KEYS,
     runtimeIds: { 'claude-default': RUNTIME_ID },
@@ -60,7 +57,7 @@ const run = (input: Partial<Parameters<typeof assignOriginKeys>[0]> & { bundle: 
   });
 
 /** `bundle()` with `instructions/main` renamed, its document moved, its profile following. */
-const renamed = (to: string, content = 'Main.\n'): FleetCloneBundle =>
+const renamed = (to: string, content = 'Main.\n'): CloneBundle =>
   bundle({
     components: {
       instructions: { [to]: { file: `components/instructions/${to}.md` } },
@@ -175,7 +172,7 @@ describe('assignOriginKeys', () => {
   });
 
   it('should not let one vanished item be inherited twice', () => {
-    const twin = (names: readonly string[]): FleetCloneBundle =>
+    const twin = (names: readonly string[]): CloneBundle =>
       bundle({
         components: {
           instructions: Object.fromEntries(names.map(name => [name, { file: `components/instructions/${name}.md` }])),
@@ -193,7 +190,7 @@ describe('assignOriginKeys', () => {
   });
 
   it('should not inherit across kinds', () => {
-    const asMcp = (name: string): FleetCloneBundle =>
+    const asMcp = (name: string): CloneBundle =>
       bundle({
         components: { mcp: { [name]: { command: 'npx' } } },
         profiles: {},

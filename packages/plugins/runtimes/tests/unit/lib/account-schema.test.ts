@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { CONFIG_COMPONENT_KINDS } from '@ferretry/protocol';
+import { COMPONENT_KINDS as CONFIG_COMPONENT_KINDS } from '../../../contract/index.ts';
 import should from 'should';
 import {
   AccountModelSchema,

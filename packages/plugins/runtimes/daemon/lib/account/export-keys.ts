@@ -19,11 +19,8 @@
  * - The file is bookkeeping in STATE and never in the configuration. A file that does not parse is not
  *   an error: its keys are simply minted again.
  */
-import {
-  type CloneBundle,
-  type OriginKey,
-  OriginKeySchema,
-} from '../../../contract/index.ts';
+import { type OriginKey, OriginKeySchema } from '../../../contract/index.ts';
+import type { CloneBundleDraft } from './clone-parts.ts';
 import { type CloneDigestKind, cloneItemDigest } from '../clone-digest.ts';
 import { z } from 'zod';
 
@@ -96,7 +93,7 @@ export function originKeyOfId(id: string): OriginKey | undefined {
 
 export interface OriginKeyInput {
   /** The bundle as built (v1 shape); every digest is taken from it, as the target will take it. */
-  readonly bundle: CloneBundle;
+  readonly bundle: CloneBundleDraft;
   readonly previous: ExportKeys;
   /** Each runtime's id by name (`ids.json`). A runtime with none is given a key that is not kept. */
   readonly runtimeIds: Readonly<Record<string, string>>;
@@ -120,7 +117,7 @@ interface Item {
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const itemsOf = (bundle: CloneBundle): readonly Item[] => [
+const itemsOf = (bundle: CloneBundleDraft): readonly Item[] => [
   ...Object.entries(bundle.components).flatMap(([kind, entries]) =>
     Object.entries(entries).flatMap(([name, value]) =>
       isRecord(value) ? [{ reference: `${kind}/${name}`, kind: kind as CloneDigestKind, value }] : [],

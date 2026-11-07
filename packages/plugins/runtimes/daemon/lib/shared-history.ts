@@ -90,7 +90,6 @@ export interface SharedHistoryPreview {
   readonly refusals: readonly SharedHistoryRefusal[];
 }
 
-
 /** `<fleet>/shared`, the directory every harness pool lives under. */
 export function sharedHistoryPoolRoot(fleetDirectory: string): string {
   return join(fleetDirectory, 'shared');

@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { type FleetCloneBundle, FleetCloneBundleSchema, sha256Hex } from '@ferretry/protocol';
+import { type CloneBundle, CloneBundleSchema } from '../../../contract/index.ts';
+import { sha256Hex } from '../../../daemon/lib/foreign.ts';
 import should from 'should';
 import {
   applyCloneToBase,
@@ -44,7 +45,7 @@ const bundleShape = {
   format: 'ferretry-clone',
   machine: 'studio-mac',
   exportedAt: '2026-10-13T07:00:00.000Z',
-  credentials: [{ id: 'claude-you', harness: 'claude', label: 'you', email: 'person@example.test' }],
+  credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you', email: 'person@example.test' }],
   components: { instructions: { main: { file: 'components/instructions/main.md' } } },
   profiles: { default: { layers: ['instructions/main'] } },
   runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
@@ -52,16 +53,14 @@ const bundleShape = {
   notCopied: [],
 };
 
-const V1 = (): FleetCloneBundle => FleetCloneBundleSchema.parse({ ...bundleShape, version: 1 });
-
 const KEYS = {
   'instructions/main': KEY_A,
   'profile/default': KEY_B,
   'runtime/claude-default': KEY_C,
   'login/claude-you': KEY_D,
 };
-const V2 = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
-  FleetCloneBundleSchema.parse({ ...bundleShape, version: 2, daemon: 'daemon-source', keys: KEYS, ...patch });
+const bundleOf = (patch: Record<string, unknown> = {}): CloneBundle =>
+  CloneBundleSchema.parse({ ...bundleShape, version: 1, daemon: 'daemon-source', keys: KEYS, ...patch });
 
 const emptyTarget = (patch: Record<string, unknown> = {}): AccountModel => parseAccountModel({ version: 2, ...patch });
 
@@ -189,17 +188,8 @@ describe('parseCloneBase', () => {
 });
 
 describe('cloneSourceIdentity', () => {
-  it('should give a version 1 bundle no identity unless the browser verified one', () => {
-    should(cloneSourceIdentity(V1(), undefined, undefined)).be.undefined();
-    should(cloneSourceIdentity(V1(), 'sha256:work', 'Work Mac')).deepEqual({
-      id: 'sha256:work',
-      name: 'Work Mac',
-      verified: 'browser',
-    });
-  });
-
-  it('should file a version 2 bundle under what it said of itself, as unverified, in a namespace of its own', () => {
-    should(cloneSourceIdentity(V2(), undefined, undefined)).deepEqual({
+  it('should file a bundle under what it said of itself, as unverified, in a namespace of its own', () => {
+    should(cloneSourceIdentity(bundleOf(), undefined, undefined)).deepEqual({
       id: `${SELF_REPORTED_PREFIX}daemon-source`,
       name: 'studio-mac',
       verified: 'self',
@@ -208,25 +198,25 @@ describe('cloneSourceIdentity', () => {
   });
 
   it('should prefer the id the browser verified when it agrees with the bundle', () => {
-    should(cloneSourceIdentity(V2(), 'daemon-source', undefined)?.verified).equal('browser');
+    should(cloneSourceIdentity(bundleOf(), 'daemon-source', undefined)?.verified).equal('browser');
   });
 
   it('should refuse a bundle that names another machine than the one picked', () => {
-    const attempt = (): unknown => cloneSourceIdentity(V2(), 'daemon-other', undefined);
+    const attempt = (): unknown => cloneSourceIdentity(bundleOf(), 'daemon-other', undefined);
     should(attempt).throw(CloneSourceMismatch);
     should(attempt).throw('That export says it is from another machine than the one you picked.');
   });
 
   it('should read an oversized self-reported id as no identity, and refuse it beside a verified id', () => {
-    const huge = { ...V2(), daemon: 'd'.repeat(201) } as ReturnType<typeof V2>;
+    const huge = { ...bundleOf(), daemon: 'd'.repeat(201) } as CloneBundle;
     should(cloneSourceIdentity(huge, undefined, undefined)).be.undefined();
     should(() => cloneSourceIdentity(huge, 'daemon-source', undefined)).throw(CloneSourceMismatch);
   });
 
   it('should never file what a bundle says of itself under an id the browser could have verified', () => {
     // Act
-    const reported = cloneSourceIdentity(V2(), undefined, undefined);
-    const verified = cloneSourceIdentity(V2(), 'daemon-source', undefined);
+    const reported = cloneSourceIdentity(bundleOf(), undefined, undefined);
+    const verified = cloneSourceIdentity(bundleOf(), 'daemon-source', undefined);
 
     // Assert
     should(reported?.id).not.equal(verified?.id);
@@ -236,7 +226,7 @@ describe('cloneSourceIdentity', () => {
   it('should say an over-long id is too long, not that the export is from another machine', () => {
     // Arrange
     const huge = 'd'.repeat(201);
-    const bundle = { ...V2(), daemon: huge } as ReturnType<typeof V2>;
+    const bundle = { ...bundleOf(), daemon: huge } as CloneBundle;
 
     // Act + Assert
     should(() => cloneSourceIdentity(bundle, huge, undefined)).throw(CloneSourceMismatch);
@@ -247,7 +237,7 @@ describe('cloneSourceIdentity', () => {
 
   it('should read a self-reported id with no room for its namespace as no identity', () => {
     // Arrange
-    const bundle = { ...V2(), daemon: 'd'.repeat(200) } as ReturnType<typeof V2>;
+    const bundle = { ...bundleOf(), daemon: 'd'.repeat(200) } as CloneBundle;
 
     // Act + Assert
     should(cloneSourceIdentity(bundle, undefined, undefined)).be.undefined();
@@ -265,7 +255,7 @@ describe('cloneSourceIdentity', () => {
     ({ length, verified, identified }) => {
       // Arrange
       const id = 'd'.repeat(length);
-      const bundle = { ...V2(), daemon: id } as ReturnType<typeof V2>;
+      const bundle = { ...bundleOf(), daemon: id } as CloneBundle;
 
       // Act
       const identity = cloneSourceIdentity(bundle, verified === undefined ? undefined : id, undefined);
@@ -279,7 +269,7 @@ describe('cloneSourceIdentity', () => {
   it('should refuse an id of 201 characters beside the same verified id, and give it no identity alone', () => {
     // Arrange
     const id = 'd'.repeat(201);
-    const bundle = { ...V2(), daemon: id } as ReturnType<typeof V2>;
+    const bundle = { ...bundleOf(), daemon: id } as CloneBundle;
 
     // Act + Assert
     should(() => cloneSourceIdentity(bundle, id, undefined)).throw(CloneSourceMismatch);
@@ -287,23 +277,22 @@ describe('cloneSourceIdentity', () => {
   });
 
   it('should cut a display name to 120 characters', () => {
-    should(cloneSourceIdentity(V2(), undefined, 'x'.repeat(300))?.name).have.length(120);
+    should(cloneSourceIdentity(bundleOf(), undefined, 'x'.repeat(300))?.name).have.length(120);
   });
 
   it('should name the machine only for a source filed from its own word, and only when the record can hold it', () => {
-    should(cloneSourceIdentity(V2(), 'daemon-source', 'Studio')?.machine).be.undefined();
-    should(cloneSourceIdentity(V2({ machine: 'm'.repeat(121) }), undefined, undefined)?.machine).be.undefined();
+    should(cloneSourceIdentity(bundleOf(), 'daemon-source', 'Studio')?.machine).be.undefined();
+    should(cloneSourceIdentity(bundleOf({ machine: 'm'.repeat(121) }), undefined, undefined)?.machine).be.undefined();
   });
 });
 
 describe('cloneOriginKeys', () => {
-  it('should take the keys of items the bundle has, and none from a version 1 bundle', () => {
-    should([...cloneOriginKeys(V2())]).deepEqual(Object.entries(KEYS));
-    should(cloneOriginKeys(V1()).size).equal(0);
+  it('should take the keys of items the bundle has', () => {
+    should([...cloneOriginKeys(bundleOf())]).deepEqual(Object.entries(KEYS));
   });
 
   it('should drop a key two items claim, and a key for an item the bundle does not have', () => {
-    const keys = cloneOriginKeys(V2({ keys: { ...KEYS, 'profile/default': KEY_A, 'mcp/ghost': KEY_E } }));
+    const keys = cloneOriginKeys(bundleOf({ keys: { ...KEYS, 'profile/default': KEY_A, 'mcp/ghost': KEY_E } }));
     should(keys.has('instructions/main')).be.false();
     should(keys.has('profile/default')).be.false();
     should(keys.has('mcp/ghost')).be.false();
@@ -319,20 +308,13 @@ describe('planClone stamping and base', () => {
     ...Object.values(model.credentials).map(credential => credential.clonedFromKey),
   ];
 
-  it('should stamp every item a version 2 copy writes with the key the source gave it', () => {
-    const plan = planClone(emptyTarget(), V2(), options());
+  it('should stamp every item a copy writes with the key the source gave it', () => {
+    const plan = planClone(emptyTarget(), bundleOf(), options());
     should(stamps(plan.model).toSorted()).deepEqual([KEY_A, KEY_B, KEY_C, KEY_D]);
   });
 
-  it('should stamp nothing for a version 1 copy, and record nothing', () => {
-    const plan = planClone(emptyTarget(), V1(), options());
-    should(stamps(plan.model).filter(stamp => stamp !== undefined)).deepEqual([]);
-    should(plan.base).deepEqual([]);
-    should(plan.sourceKeys.size).equal(0);
-  });
-
   it('should replace a key the source claimed on its own items with the one the bundle carries', () => {
-    const claimed = V2({
+    const claimed = bundleOf({
       components: { instructions: { main: { file: 'components/instructions/main.md', clonedFromKey: KEY_E } } },
     });
     const model = planClone(emptyTarget(), claimed, options()).model;
@@ -340,7 +322,7 @@ describe('planClone stamping and base', () => {
   });
 
   it('should record the source side of every copied item, computed here, with its documents', () => {
-    const plan = planClone(emptyTarget(), V2(), options());
+    const plan = planClone(emptyTarget(), bundleOf(), options());
     const main = plan.base.find(each => each.key === KEY_A);
     should(main?.kind).equal('instructions');
     should(main?.sourceName).equal('main');
@@ -353,22 +335,22 @@ describe('planClone stamping and base', () => {
   });
 
   it('should record a digest that changes when the source item changes, and not when only its name does', () => {
-    const digestOf = (bundle: FleetCloneBundle): string | undefined =>
+    const digestOf = (bundle: CloneBundle): string | undefined =>
       planClone(emptyTarget(), bundle, options()).base.find(each => each.key === KEY_A)?.digest;
-    const changed = V2({ files: [{ path: 'components/instructions/main.md', content: '# Main, edited' }] });
-    should(digestOf(changed)).not.equal(digestOf(V2()));
-    const sameButOtherMachine = V2({ machine: 'another-name' });
-    should(digestOf(sameButOtherMachine)).equal(digestOf(V2()));
+    const changed = bundleOf({ files: [{ path: 'components/instructions/main.md', content: '# Main, edited' }] });
+    should(digestOf(changed)).not.equal(digestOf(bundleOf()));
+    const sameButOtherMachine = bundleOf({ machine: 'another-name' });
+    should(digestOf(sameButOtherMachine)).equal(digestOf(bundleOf()));
   });
 
   it('should name the login here a source login was matched to', () => {
-    const plan = planClone(emptyTarget(), V2(), options());
+    const plan = planClone(emptyTarget(), bundleOf(), options());
     const login = plan.base.find(each => each.key === KEY_D);
     should(Object.keys(plan.model.credentials)).containEql(login?.login);
   });
 
   it('should leave a skipped component out of what it records, yet keep its key as one the source holds', () => {
-    const plan = planClone(emptyTarget(), V2(), options({ skip: ['instructions/main'] }));
+    const plan = planClone(emptyTarget(), bundleOf(), options({ skip: ['instructions/main'] }));
     should(plan.base.some(each => each.key === KEY_A)).be.false();
     should(plan.sourceKeys.has(KEY_A)).be.true();
   });
@@ -693,7 +675,7 @@ describe('findCloneSources', () => {
 
 describe('linkedKeys', () => {
   it('should read every origin key the setup carries, from components, profiles, runtimes and logins', () => {
-    const plan = planClone(emptyTarget(), V2(), options());
+    const plan = planClone(emptyTarget(), bundleOf(), options());
     should(linkedKeys(plan.model)).deepEqual(new Set([KEY_A, KEY_B, KEY_C, KEY_D]));
     should(linkedKeys(emptyTarget()).size).equal(0);
   });
@@ -793,9 +775,8 @@ describe('serializeCloneBase: a record that always reads back', () => {
 
   it('should give a source whose verified id is __proto__ no identity at all', () => {
     // Act + Assert
-    should(cloneSourceIdentity(V1(), '__proto__', undefined)).be.undefined();
     should(
-      cloneSourceIdentity({ ...V2(), daemon: '__proto__' } as ReturnType<typeof V2>, undefined, undefined)?.id,
+      cloneSourceIdentity({ ...bundleOf(), daemon: '__proto__' } as CloneBundle, undefined, undefined)?.id,
     ).equal(`${SELF_REPORTED_PREFIX}__proto__`);
   });
 });
@@ -888,7 +869,7 @@ describe('applyCloneToBase: a source is only ever its own entry', () => {
 
   it('should keep a browser-verified source whose copy sits beside a copy of the same bundle made from a file', () => {
     // Arrange: a browser copy from "a", then the same bundle copied from a file (it names itself "a" too)
-    const bundle = V2({
+    const bundle = bundleOf({
       daemon: 'a',
       credentials: [],
       profiles: {},
@@ -947,7 +928,7 @@ describe('applyCloneToBase: a source is only ever its own entry', () => {
   describe('two sources copied from a file, sharing a key (#1383 nit 6)', () => {
     /** A components-only bundle from `machine`, copied from a file (no id a browser verified). */
     const fromFile = (machine: string) => {
-      const bundle = V2({
+      const bundle = bundleOf({
         daemon: machine,
         machine,
         credentials: [],
@@ -956,7 +937,7 @@ describe('applyCloneToBase: a source is only ever its own entry', () => {
         keys: { 'instructions/main': KEY_A },
       });
       const identity = cloneSourceIdentity(bundle, undefined, undefined);
-      if (identity === undefined) throw new Error('a version 2 bundle has an identity');
+      if (identity === undefined) throw new Error('a bundle has an identity');
       return { bundle, identity };
     };
     const copy = (previous: CloneBase, model: AccountModel, machine: string, mode: 'alongside' | 'replace') => {

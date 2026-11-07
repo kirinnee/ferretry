@@ -11,8 +11,7 @@ import {
   RUNTIME_STATE_DIRECTORY,
 } from '../../../daemon/lib/account/materialise.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
-import { builtInModelCatalogs } from '../../src/lib/models/catalog.ts';
-import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { builtInModelCatalogs, builtInPresets } from './fixtures/built-ins.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../../daemon/lib/provisioning.ts';
 import { MANAGED_MARKER, shellQuote } from '../../../daemon/lib/wrappers.ts';
 

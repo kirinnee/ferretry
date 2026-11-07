@@ -8,7 +8,6 @@ import {
   MANIFEST_VERSION,
   buildFleetManifest,
   findAccountById,
-  manifestRuntimes,
   selectableModelIds,
   wrapperName,
 } from '../../../daemon/lib/manifest.ts';
@@ -198,6 +197,7 @@ describe('FleetManifestSchema', () => {
     version: MANIFEST_VERSION,
     generatedAt: GENERATED_AT,
     accounts,
+    runtimes: [],
   });
 
   it('should accept two distinct accounts', () => {
@@ -241,7 +241,7 @@ describe('FleetManifestSchema', () => {
 describe('buildFleetManifest', () => {
   it('should stamp the current version and return a parsed manifest', () => {
     // Arrange
-    const input = { generatedAt: GENERATED_AT, accounts: [account()] };
+    const input = { generatedAt: GENERATED_AT, accounts: [account()], runtimes: [] };
 
     // Act
     const actual = buildFleetManifest(input);
@@ -263,6 +263,7 @@ describe('buildFleetManifest', () => {
           models: [{ id: 'model-down', available: false, unavailableReason: 'quota' }],
         }),
       ],
+      runtimes: [],
     };
 
     // Act + Assert
@@ -280,7 +281,7 @@ describe('buildFleetManifest', () => {
     });
 
     // Act
-    const actual = buildFleetManifest({ generatedAt: GENERATED_AT, accounts: [account(), down] });
+    const actual = buildFleetManifest({ generatedAt: GENERATED_AT, accounts: [account(), down], runtimes: [] });
 
     // Assert
     should(actual.accounts.length).equal(2);
@@ -377,16 +378,7 @@ describe('the runtimes a manifest publishes', () => {
     const manifest = buildFleetManifest({ generatedAt: GENERATED_AT, accounts: [account()], runtimes: [runtime()] });
 
     // Assert
-    should(manifestRuntimes(manifest)).deepEqual([runtime()]);
-  });
-
-  it('should read a manifest written before runtimes as publishing none', () => {
-    // Act
-    const manifest = buildFleetManifest({ generatedAt: GENERATED_AT, accounts: [account()] });
-
-    // Assert
-    should(manifest).not.have.property('runtimes');
-    should(manifestRuntimes(manifest)).deepEqual([]);
+    should(manifest.runtimes).deepEqual([runtime()]);
   });
 
   it('should accept a runtime whose profile has no model set', () => {

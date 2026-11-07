@@ -5,6 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { type SecretName, SecretNameSchema } from '@ferretry/core-vault/contract';
+import { CloneableSecretNameSchema } from '../../contract/index.ts';
 
 // ─── hashing (GAP(mcp): `sha256Hex` was in today's `mcp-oauth.ts`; Node's hash gives the same digest) ──────────────
 
@@ -14,6 +15,20 @@ export function sha256Hex(text: string): string {
 }
 
 // ─── MCP sign-in secret names (GAP(mcp): owner is the mcp plugin's daemon/lib; its contract does not carry it) ─────
+
+/** Whether `name` is an MCP sign-in's access token: half of a sign-in whose refresh half cannot travel, so a copy would be dead on arrival. */
+export function isSignInSecretName(name: string): boolean {
+  return /^MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS$/u.test(name);
+}
+
+/**
+ * A secret name a copy can carry: the wire grammar, minus a sign-in's. The contract's name schema leaves the second rule
+ * to the half, so every place a copy parses a name goes through this one.
+ */
+export const CarriableSecretNameSchema = CloneableSecretNameSchema.refine(
+  name => !isSignInSecretName(name),
+  'a sign-in is not copied',
+);
 
 /** The server address, canonical: no fragment, no trailing slash on a bare path. */
 export function mcpOAuthServerKey(serverUrl: string): string {
@@ -116,7 +131,11 @@ export type LaunchInstructionSectionId =
 
 /** What one launch was told: its sections by name and size (never the text), its mode, and whether it may ask. */
 export interface SessionLaunchInstructions {
-  readonly sections: readonly { readonly id: LaunchInstructionSectionId; readonly chars: number; readonly digest?: string }[];
+  readonly sections: readonly {
+    readonly id: LaunchInstructionSectionId;
+    readonly chars: number;
+    readonly digest?: string;
+  }[];
   readonly mode: 'interactive' | 'auto';
   readonly questions: boolean;
 }

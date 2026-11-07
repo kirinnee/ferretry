@@ -39,6 +39,7 @@
  * out. Reading and writing is the setup service's.
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import type { Instant } from '@ferretry/std';
 import {
   CLONE_OUTCOME_CHOICES,
   CLONE_SKILLS_DIRECTORY,
@@ -1087,7 +1088,8 @@ export function reviewCloneUpdate(analysis: CloneAnalysis): CloneReview {
     mode: input.base !== undefined || analysis.items.some(item => item.match !== 'none') ? 'update' : 'first',
     source: {
       name: input.sourceName ?? input.bundle.machine,
-      ...(input.base === undefined ? {} : { lastCopiedAt: input.base.lastCopiedAt }),
+      // The record holds only instants the clock wrote, so each is already in the one canonical spelling.
+      ...(input.base === undefined ? {} : { lastCopiedAt: input.base.lastCopiedAt as Instant }),
       verified: input.source?.verified ?? 'self',
     },
     items,
@@ -1320,7 +1322,9 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     if (picked !== undefined && picked !== 'slot') {
       const existing = target.credentials[picked];
       if (existing === undefined || existing.harness !== harnessKindOfKey(descriptor.harness)) {
-        throw new CloneRefusal(`${picked} isn't a ${harnessKindOfKey(descriptor.harness)} login on ${input.machine}. Pick another one.`);
+        throw new CloneRefusal(
+          `${picked} isn't a ${harnessKindOfKey(descriptor.harness)} login on ${input.machine}. Pick another one.`,
+        );
       }
       here = picked;
     } else if (picked === 'slot') {

@@ -14,7 +14,6 @@
 import { CLONE_FALLBACK_RUNTIME, type CloneBundle } from '../../contract/index.ts';
 import { harnessKindOfKey } from './manifest.ts';
 
-
 /** An agent runtime the copy brings, under the name the SOURCE gave it. */
 export interface CloneAgentRuntime {
   readonly name: string;
@@ -29,7 +28,9 @@ const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
  * A runtime's harness is its own `harness`, else the one its login drives.
  */
 export function cloneAgentRuntimes(bundle: CloneBundle): readonly CloneAgentRuntime[] {
-  const harnesses = new Map(bundle.credentials.map(credential => [credential.id, harnessKindOfKey(credential.harness)]));
+  const harnesses = new Map(
+    bundle.credentials.map(credential => [credential.id, harnessKindOfKey(credential.harness)]),
+  );
   return Object.entries(bundle.runtimes)
     .flatMap(([name, value]): CloneAgentRuntime[] => {
       const runtime = recordOf(value);

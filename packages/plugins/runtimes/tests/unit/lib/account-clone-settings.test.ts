@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import { DEFAULT_WARDEN_CONFIG, sha256Hex } from '@ferretry/protocol';
+import { sha256Hex } from '../../../daemon/lib/foreign.ts';
 import should from 'should';
 import {
-  analyseCloneSettings,
+  analyseCloneSettings as analyse,
   applyControls,
   type CloneSettingsInput,
   controlsDocument,
@@ -11,6 +11,12 @@ import {
 } from '../../../daemon/lib/account/clone-settings.ts';
 import { CloneRefusal } from '../../../daemon/lib/account/clone-parts.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { configText, DEFAULT_WARDEN_CONFIG } from './fixtures/config-text.ts';
+
+const analyseCloneSettings = (
+  inputs: readonly CloneSettingsInput[],
+  base: Parameters<typeof analyse>[1],
+): ReturnType<typeof analyse> => analyse(inputs, base, configText);
 
 const digest = (value: unknown): string => sha256Hex(JSON.stringify(value));
 

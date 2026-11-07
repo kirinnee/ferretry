@@ -42,7 +42,7 @@ describe('FleetApplyFailureError', () => {
       accountCount: 2,
       operationCount: 9,
       manifestPath: '/state/fleet/manifest.json',
-      manifest: { version: 1, generatedAt: '2027-01-15T08:00:00.000Z', accounts: [] },
+      manifest: { version: 1, generatedAt: '2027-01-15T08:00:00.000Z', accounts: [], runtimes: [] },
       prunedWrappers: [],
       sharedHistory: [],
     };

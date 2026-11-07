@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mcpOAuthSecretNames } from '@ferretry/protocol';
+import { mcpOAuthSecretNames } from '../../../daemon/lib/foreign.ts';
 import should from 'should';
 import {
   type AdaptedRuntime,

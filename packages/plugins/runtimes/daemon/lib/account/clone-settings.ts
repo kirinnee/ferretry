@@ -305,7 +305,12 @@ function outcomeOf(
 }
 
 /** The sentences a text's value would loosen against what is in effect, or `undefined` when it cannot be judged. */
-function looseningOf(config: ConfigText, path: FileDoc, effective: unknown, text: string): ReadonlySet<string> | undefined {
+function looseningOf(
+  config: ConfigText,
+  path: FileDoc,
+  effective: unknown,
+  text: string,
+): ReadonlySet<string> | undefined {
   const sentences = config.loosening(path, effective, text);
   return sentences === undefined ? undefined : new Set(sentences);
 }
@@ -387,7 +392,8 @@ const LOOSENING_JUDGED_LIMIT = 256;
 function analyseFile(
   config: ConfigText,
   input: CloneSettingsInput,
-  known: Readonly<Record<string, string>> | undefined): FileAnalysis {
+  known: Readonly<Record<string, string>> | undefined,
+): FileAnalysis {
   let theirs: ReturnType<typeof read>;
   try {
     theirs = read(config, input.path, input.theirs, 'The');

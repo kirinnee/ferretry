@@ -43,7 +43,6 @@ import {
 } from '../../contract/index.ts';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 
-
 /** One thing a component would run or change, in words. */
 export interface CloneRunnableEntry {
   /** What it is: "Starts", "Environment NODE_OPTIONS", "Setting statusLine.command", "Script hooks/a/run.sh". */
@@ -92,7 +91,6 @@ const envEntries = (env: unknown): CloneRunnableEntry[] =>
         .toSorted()
         .map(name => ({ label: `Environment ${name}`, text: asText(env[name]), document: false }))
     : [];
-
 
 interface JsonLeaves {
   readonly leaves: readonly (readonly [readonly string[], unknown])[];

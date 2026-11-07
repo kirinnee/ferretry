@@ -1,16 +1,9 @@
 import { describe, it } from 'bun:test';
-import { secretReference } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
 import should from 'should';
 import { CredentialSchema } from '../../../daemon/lib/account/schema.ts';
-import { findRawSecrets } from '../../src/lib/config-files/secrets.ts';
-import { readConfigText } from '../../src/lib/config-files/yaml-text.ts';
-import {
-  BUILT_IN_PRESET_TEXTS,
-  BuiltInPresetError,
-  builtInPresets,
-  parsePresetText,
-  presetCatalog,
-} from '../../../daemon/lib/presets/catalog.ts';
+import { config } from '@ferretry/kernel/host';
+import { BuiltInPresetError, parsePresetText as parseText, presetCatalog } from '../../../daemon/lib/presets/catalog.ts';
 import { credentialFromPreset, presetDefaultEnv, presetLoginRefusal } from '../../../daemon/lib/presets/login.ts';
 import {
   PresetVariableSchema,
@@ -20,6 +13,12 @@ import {
   presetFromFile,
   presetHarnesses,
 } from '../../../daemon/lib/presets/schema.ts';
+import { BUILT_IN_PRESET_TEXTS, builtInPresets } from './fixtures/built-ins.ts';
+import { configText } from './fixtures/config-text.ts';
+
+const { findRawSecrets, readConfigText } = config;
+const parsePresetText = (id: string, text: string, origin: ProviderPreset['origin']) =>
+  parseText(configText, id, text, origin);
 
 const PRESETS = builtInPresets();
 const preset = (id: string): ProviderPreset => PRESETS.find(entry => entry.id === id) as ProviderPreset;
@@ -185,7 +184,7 @@ describe('ProviderPresetFileSchema', () => {
   });
 
   it('should refuse a Codex provider on a Claude Code preset', () => {
-    // amazon-bedrock is a legacy, single-harness (claude) preset: no halves to route it through.
+    // amazon-bedrock is a single-harness (claude) preset: no halves to route it through.
     const read = readConfigText(BUILT_IN_PRESET_TEXTS['amazon-bedrock'] as string);
     const value = { ...(read.ok ? (read.read.value as object) : {}), codexProvider: { id: 'ollama' } };
     should(ProviderPresetFileSchema.safeParse(value).error?.issues[0]?.message).match(/only to a Codex preset/u);

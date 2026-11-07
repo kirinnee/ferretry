@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { AGENDA_SHAPE_LINE } from '@ferretry/protocol';
+import { AGENDA_SHAPE_LINE } from '../../../daemon/lib/foreign.ts';
 import should from 'should';
 import {
   AGENDA_ENV,

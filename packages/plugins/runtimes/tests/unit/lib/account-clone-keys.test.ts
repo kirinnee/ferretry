@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mcpOAuthSecretNames } from '@ferretry/protocol';
+import { mcpOAuthSecretNames } from '../../../daemon/lib/foreign.ts';
 import should from 'should';
 import { type CloneBase, parseCloneBase, serializeCloneBase } from '../../../daemon/lib/account/clone-base.ts';
 import { classifyCloneKeys, recordCloneKeys } from '../../../daemon/lib/account/clone-keys.ts';

@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
-import { cloneBundleProblem, type FleetCloneBundle, FleetCloneBundleSchema, secretReference } from '@ferretry/protocol';
+import { secretReference } from '@ferretry/core-vault/contract';
+import { type CloneBundle, CloneBundleSchema } from '../../../contract/index.ts';
+import { cloneBundleProblem } from '../../../daemon/lib/clone-review.ts';
 import should from 'should';
 import {
   buildCloneBundle,
@@ -63,13 +65,15 @@ const options = (patch: Partial<CloneOptions> = {}): CloneOptions => ({
 });
 
 /** A hand-written bundle, so a test can damage exactly one field. */
-const bundleWith = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
-  FleetCloneBundleSchema.parse({
+const bundleWith = (patch: Record<string, unknown> = {}): CloneBundle =>
+  CloneBundleSchema.parse({
     format: 'ferretry-clone',
     version: 1,
     machine: 'studio-mac',
+    daemon: 'daemon-source',
+    keys: {},
     exportedAt: EXPORTED_AT,
-    credentials: [{ id: 'claude-you', harness: 'claude', label: 'you', email: 'person@example.test' }],
+    credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you', email: 'person@example.test' }],
     components: { instructions: { main: { file: 'components/instructions/main.md' } } },
     profiles: { default: { layers: ['instructions/main'] } },
     runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
@@ -77,6 +81,10 @@ const bundleWith = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
     notCopied: [],
     ...patch,
   });
+
+/** What the source ships: the bundle its export builds, with the daemon id and origin keys the export puts on. */
+const exported = (input: Parameters<typeof buildCloneBundle>[0]): CloneBundle =>
+  CloneBundleSchema.parse({ ...buildCloneBundle(input), daemon: 'daemon-source', keys: {} });
 
 const refusalOf = (action: () => unknown): CloneRefusal => {
   try {
@@ -136,7 +144,7 @@ describe('cloneSources', () => {
 describe('buildCloneBundle', () => {
   it('should carry only the logins a runtime uses, as descriptors with the email and label that are known', () => {
     // Act
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model: sourceModel(),
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -147,7 +155,7 @@ describe('buildCloneBundle', () => {
 
     // Assert
     should(bundle.credentials).deepEqual([
-      { id: 'claude-you', harness: 'claude', email: 'person@example.test' },
+      { id: 'claude-you', harness: 'claude-code', email: 'person@example.test' },
       { id: 'codex-work', harness: 'codex', label: 'work' },
     ]);
     should(bundle.format).equal('ferretry-clone');
@@ -182,7 +190,7 @@ describe('buildCloneBundle', () => {
     });
 
     // Act
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model,
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -195,12 +203,12 @@ describe('buildCloneBundle', () => {
     should(bundle.credentials).deepEqual([
       {
         id: 'keyed',
-        harness: 'claude',
+        harness: 'claude-code',
         store: 'environment',
         env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
         preset: 'zai-glm',
       },
-      { id: 'signed', harness: 'claude' },
+      { id: 'signed', harness: 'claude-code' },
     ]);
     should(JSON.stringify(bundle)).not.containEql('"ferretry"');
   });
@@ -226,7 +234,7 @@ describe('buildCloneBundle', () => {
     });
 
     // Act
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model,
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -256,7 +264,7 @@ describe('buildCloneBundle', () => {
 
   it('should round-trip through parseCloneBundle', () => {
     // Arrange
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model: sourceModel(),
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -266,10 +274,11 @@ describe('buildCloneBundle', () => {
     });
 
     // Act
-    const actual = parseCloneBundle(JSON.parse(JSON.stringify(bundle)));
+    const shipped = { ...bundle, daemon: 'sha256:studio', keys: {} };
+    const actual = parseCloneBundle(JSON.parse(JSON.stringify(shipped)));
 
     // Assert
-    should(actual).deepEqual(bundle);
+    should(actual).deepEqual(shipped);
   });
 });
 
@@ -292,47 +301,35 @@ describe('parseCloneBundle', () => {
   });
 });
 
-describe('parseCloneBundle versions', () => {
+describe('parseCloneBundle keys', () => {
   const KEY = 'abcdefghijklmnopqrstuvwxyz';
-  const v2 = (patch: Record<string, unknown> = {}): Record<string, unknown> => ({
+  const withKeys = (patch: Record<string, unknown> = {}): Record<string, unknown> => ({
     ...bundleWith(),
-    version: 2,
     daemon: 'sha256:studio',
     keys: { 'instructions/main': KEY, 'profile/default': KEY, 'login/claude-you': KEY },
     ...patch,
   });
 
-  it('should accept a version 1 bundle and a version 2 bundle', () => {
-    should(parseCloneBundle(bundleWith()).version).equal(1);
-    should(parseCloneBundle(v2()).version).equal(2);
-  });
-
-  it('should refuse a version 2 bundle that is missing what version 2 adds, in the usual sentence', () => {
+  it('should refuse a bundle that is missing its daemon or its keys, in the usual sentence', () => {
     for (const damaged of [
-      v2({ keys: undefined }),
-      v2({ daemon: undefined }),
-      v2({ keys: { 'instructions/main': 'x' } }),
+      withKeys({ keys: undefined }),
+      withKeys({ daemon: undefined }),
+      withKeys({ keys: { 'instructions/main': 'x' } }),
     ]) {
       should(refusalOf(() => parseCloneBundle(damaged)).message).containEql('version this machine cannot read');
     }
   });
 
-  it('should plan a version 2 bundle exactly as it plans the version 1 bundle it came from', () => {
-    const fromV1 = planClone(emptyTarget(), bundleWith(), options({ sourceDaemon: 'sha256:studio' }));
-    const fromV2 = planClone(emptyTarget(), parseCloneBundle(v2()), options({ sourceDaemon: 'sha256:studio' }));
-    should(fromV2.model).deepEqual(fromV1.model);
-    should(fromV2.files).deepEqual(fromV1.files);
-  });
-
   it('should strip a clonedFromKey the source claimed, like clonedFrom, and not stamp one yet', () => {
     const bundle = parseCloneBundle(
-      v2({
+      withKeys({
         components: {
           mcp: { notes: { command: 'npx', clonedFrom: 'work-mac', clonedFromDaemon: 'forged', clonedFromKey: KEY } },
         },
         profiles: {},
         runtimes: {},
         files: [],
+        keys: {},
       }),
     );
     const plan = planClone(emptyTarget(), bundle, options({ sourceDaemon: 'sha256:studio' }));
@@ -359,7 +356,7 @@ describe('planClone with compactAt', () => {
         'codex-extra': { credential: 'codex-work', profile: 'default' },
       },
     });
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model: source,
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -381,7 +378,7 @@ describe('planClone with compactAt', () => {
 describe('planClone alongside', () => {
   it('should copy onto an empty machine under the same names, each login an empty slot that keeps its label', () => {
     // Arrange
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model: sourceModel(),
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -807,7 +804,7 @@ describe('planClone alongside', () => {
 
   it('should name a harness the target lacks and still copy its runtimes', () => {
     // Arrange
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model: sourceModel(),
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -858,7 +855,7 @@ describe('planClone alongside', () => {
       credentials: [
         {
           id: 'glm',
-          harness: 'claude',
+          harness: 'claude-code',
           label: 'glm',
           store: 'environment',
           preset: 'zai-glm',
@@ -869,7 +866,7 @@ describe('planClone alongside', () => {
         },
         {
           id: 'bedrock',
-          harness: 'claude',
+          harness: 'claude-code',
           store: 'environment',
           env: { CLAUDE_CODE_USE_BEDROCK: '1' },
           cloudCredential: 'aws-profile:acme',
@@ -923,7 +920,7 @@ describe('planClone alongside', () => {
       credentials: [
         {
           id: 'glm',
-          harness: 'claude',
+          harness: 'claude-code',
           store: 'environment',
           claude: { env: { ANTHROPIC_AUTH_TOKEN: secretReference('S') } },
           codex: {
@@ -984,7 +981,7 @@ describe('planClone alongside', () => {
     // Arrange
     const bundle = bundleWith({
       credentials: [
-        { id: 'claude-you', harness: 'claude' },
+        { id: 'claude-you', harness: 'claude-code' },
         { id: 'codex-idle', harness: 'codex' },
       ],
     });
@@ -1123,8 +1120,8 @@ describe('planClone replace', () => {
 });
 
 describe('describeClone', () => {
-  const fullBundle = (): FleetCloneBundle =>
-    buildCloneBundle({
+  const fullBundle = (): CloneBundle =>
+    exported({
       model: sourceModel(),
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -1177,7 +1174,7 @@ describe('describeClone', () => {
     // Arrange
     const bundle = bundleWith({
       credentials: [
-        { id: 'claude-you', harness: 'claude', email: 'person@example.test' },
+        { id: 'claude-you', harness: 'claude-code', email: 'person@example.test' },
         { id: 'codex-a', harness: 'codex', label: 'work' },
         { id: 'codex-b', harness: 'codex' },
       ],
@@ -1216,7 +1213,7 @@ describe('describeClone', () => {
     });
     const bundle = bundleWith({
       credentials: [
-        { id: 'claude-you', harness: 'claude' },
+        { id: 'claude-you', harness: 'claude-code' },
         { id: 'codex-work', harness: 'codex' },
       ],
       components: {
@@ -1283,7 +1280,7 @@ describe('describeClone', () => {
 });
 
 describe('Clone from a machine that may have been broken into', () => {
-  const hostileBundle = (): FleetCloneBundle =>
+  const hostileBundle = (): CloneBundle =>
     bundleWith({
       components: {
         instructions: { main: { file: 'components/instructions/main.md' } },
@@ -1564,7 +1561,7 @@ describe('Clone writes nothing the review did not list (review H1)', () => {
     });
 
     // Act
-    const bundle = buildCloneBundle({
+    const bundle = exported({
       model,
       machine: 'studio-mac',
       exportedAt: EXPORTED_AT,
@@ -1586,10 +1583,10 @@ describe('Clone writes nothing the review did not list (review H1)', () => {
 });
 
 describe('planClone default runtime for new agents', () => {
-  const agentBundle = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
+  const agentBundle = (patch: Record<string, unknown> = {}): CloneBundle =>
     bundleWith({
       credentials: [
-        { id: 'claude-you', harness: 'claude', label: 'you' },
+        { id: 'claude-you', harness: 'claude-code', label: 'you' },
         { id: 'codex-work', harness: 'codex', label: 'work' },
       ],
       runtimes: {
@@ -1764,8 +1761,8 @@ describe('planClone reuses a login the target already has (L2)', () => {
       },
     });
   const emails = { 'claude-kirin': 'kirin@example.test', 'codex-kirin': 'kirin@example.test' };
-  const claudeBundle = (credential: Record<string, unknown>): FleetCloneBundle =>
-    bundleWith({ credentials: [{ id: 'claude-you', harness: 'claude', ...credential }] });
+  const claudeBundle = (credential: Record<string, unknown>): CloneBundle =>
+    bundleWith({ credentials: [{ id: 'claude-you', harness: 'claude-code', ...credential }] });
 
   it('should match by email, case-insensitively, create no slot and point the runtimes at the login here', () => {
     // Arrange
@@ -1920,7 +1917,7 @@ describe('planClone reuses a login the target already has (L2)', () => {
       credentials: [
         {
           id: 'claude-you',
-          harness: 'claude',
+          harness: 'claude-code',
           label: 'kirin',
           email: 'kirin@example.test',
           store: 'environment',
@@ -1963,8 +1960,8 @@ describe('planClone reuses a login the target already has (L2)', () => {
     // Arrange
     const bundle = bundleWith({
       credentials: [
-        { id: 'claude-you', harness: 'claude', email: 'kirin@example.test' },
-        { id: 'claude-spare', harness: 'claude', label: 'spare' },
+        { id: 'claude-you', harness: 'claude-code', email: 'kirin@example.test' },
+        { id: 'claude-spare', harness: 'claude-code', label: 'spare' },
       ],
       runtimes: {
         'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
@@ -1986,8 +1983,8 @@ describe('planClone reuses a login the target already has (L2)', () => {
     // Arrange
     const bundle = bundleWith({
       credentials: [
-        { id: 'claude-you', harness: 'claude', label: 'one', email: 'kirin@example.test' },
-        { id: 'claude-two', harness: 'claude', label: 'two', email: 'kirin@example.test' },
+        { id: 'claude-you', harness: 'claude-code', label: 'one', email: 'kirin@example.test' },
+        { id: 'claude-two', harness: 'claude-code', label: 'two', email: 'kirin@example.test' },
       ],
       runtimes: {
         'claude-default': { credential: 'claude-you', profile: 'default', agent: false },

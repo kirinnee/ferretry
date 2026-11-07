@@ -27,7 +27,6 @@ import { canonicalJson } from '@ferretry/std';
 import { CLONE_PROVENANCE_FIELDS, CLONE_SKILLS_DIRECTORY, type CloneFile } from '../../contract/index.ts';
 import { sha256Hex } from './foreign.ts';
 
-
 /** What a digest is taken of: a component of one kind, a profile, a runtime or a login descriptor. */
 export type CloneDigestKind =
   | 'instructions'

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type FleetCloneBundle, FleetCloneBundleSchema } from '@ferretry/protocol';
+import { type CloneBundle, CloneBundleSchema } from '../../../contract/index.ts';
 import should from 'should';
 import {
   analyseCloneUpdate,
@@ -41,10 +41,10 @@ interface Side {
   readonly notes?: string;
 }
 
-/** The origin keys a bundle carries (a version 1 bundle carries none). */
-const keysOf = (bundle: FleetCloneBundle): Record<string, string> => (bundle.version === 2 ? bundle.keys : {});
+/** The origin keys a bundle carries. */
+const keysOf = (bundle: CloneBundle): Record<string, string> => bundle.keys;
 
-const bundleOf = (side: Side, extra: Record<string, unknown> = {}): FleetCloneBundle => {
+const bundleOf = (side: Side, extra: Record<string, unknown> = {}): CloneBundle => {
   const instructions: Record<string, unknown> = {};
   const files: { path: string; content: string }[] = [];
   const keys: Record<string, string> = {
@@ -62,14 +62,14 @@ const bundleOf = (side: Side, extra: Record<string, unknown> = {}): FleetCloneBu
     files.push({ path: 'components/instructions/notes.md', content: side.notes });
     keys['instructions/notes'] = KEY_NOTES;
   }
-  return FleetCloneBundleSchema.parse({
+  return CloneBundleSchema.parse({
     format: 'ferretry-clone',
-    version: 2,
+    version: 1,
     daemon: SOURCE.id,
     keys,
     machine: 'studio-mac',
     exportedAt: '2026-10-13T07:00:00.000Z',
-    credentials: [{ id: 'claude-you', harness: 'claude', label: 'you', email: 'person@example.test' }],
+    credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you', email: 'person@example.test' }],
     components: { instructions },
     profiles: { default: { layers: [...(side.main === undefined ? [] : ['instructions/main'])] } },
     runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
@@ -433,7 +433,7 @@ describe('a source the bundle cannot be read from here', () => {
 
 describe('partly carried folders', () => {
   const hooksWith = (script: string, carried: boolean) =>
-    FleetCloneBundleSchema.parse({
+    CloneBundleSchema.parse({
       ...bundleOf({ main: 'A' }),
       components: {
         instructions: { main: { file: MAIN_PATH } },
@@ -732,7 +732,7 @@ describe('what applying an update says', () => {
 describe('skills folders and files', () => {
   const skillsBundle = (files: { path: string; content: string }[], items = ['review']) => {
     const base = bundleOf({ main: 'A' });
-    return FleetCloneBundleSchema.parse({
+    return CloneBundleSchema.parse({
       ...base,
       components: { ...base.components, skills: { pack: { items } } },
       keys: { ...keysOf(base), 'skills/pack': KEY_NOTES },
@@ -808,7 +808,7 @@ describe('profiles and runtimes new here', () => {
         },
       },
     );
-    return FleetCloneBundleSchema.parse({
+    return CloneBundleSchema.parse({
       ...bundle,
       keys: { ...keysOf(bundle), 'profile/second': KEY_NOTES, 'runtime/claude-second': KEY_NOTES.replace(/e/gu, 'f') },
     });
@@ -867,7 +867,7 @@ describe('profiles and runtimes new here', () => {
 
   it('should list a profile the source dropped with the runtimes here that use it', () => {
     const full = bundleOf({ main: 'A' }, { profiles: {}, runtimes: {} });
-    const bundle = FleetCloneBundleSchema.parse({
+    const bundle = CloneBundleSchema.parse({
       ...full,
       keys: Object.fromEntries(
         Object.entries(keysOf(full)).filter(([ref]) => !ref.startsWith('profile/') && !ref.startsWith('runtime/')),
@@ -923,8 +923,8 @@ describe('the review the apply names', () => {
 describe('what else a copy can carry', () => {
   const KEY_A = 'gggggggggggggggggggggggggg';
   const KEY_B = 'hhhhhhhhhhhhhhhhhhhhhhhhhh';
-  const withKeys = (bundle: FleetCloneBundle, keys: Record<string, string>) =>
-    FleetCloneBundleSchema.parse({ ...bundle, keys: { ...keysOf(bundle), ...keys } });
+  const withKeys = (bundle: CloneBundle, keys: Record<string, string>) =>
+    CloneBundleSchema.parse({ ...bundle, keys: { ...keysOf(bundle), ...keys } });
 
   it('should refuse an update that would leave two profiles layering each other', () => {
     const shape = (a: string) => ({
@@ -1031,12 +1031,12 @@ describe('what else a copy can carry', () => {
   });
 
   it('should copy an environment login as its own login and never touch one that exists', () => {
-    const bundle = FleetCloneBundleSchema.parse({
+    const bundle = CloneBundleSchema.parse({
       ...bundleOf({ main: 'A' }),
       credentials: [
         {
           id: 'claude-you',
-          harness: 'claude',
+          harness: 'claude-code',
           store: 'environment',
           env: { ANTHROPIC_API_KEY: '${secret:API_TOKEN}' },
         },
@@ -1098,11 +1098,11 @@ const KEY_A = 'ffffffffffffffffffffffffff';
 const KEY_B = 'gggggggggggggggggggggggggg';
 const KEY_API = 'hhhhhhhhhhhhhhhhhhhhhhhhhh';
 
-/** A version 2 bundle from the source with nothing in it but what the test names. */
-const sourceBundle = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
-  FleetCloneBundleSchema.parse({
+/** A bundle from the source with nothing in it but what the test names. */
+const sourceBundle = (patch: Record<string, unknown> = {}): CloneBundle =>
+  CloneBundleSchema.parse({
     format: 'ferretry-clone',
-    version: 2,
+    version: 1,
     daemon: SOURCE.id,
     keys: {},
     machine: 'studio-mac',
@@ -1118,7 +1118,7 @@ const sourceBundle = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
 
 /** An update of an otherwise empty machine (or `target`) from `bundle`, with no record. */
 const bareInput = (
-  bundle: FleetCloneBundle,
+  bundle: CloneBundle,
   target = parseAccountModel({ version: 2 }),
   targetFiles: { path: string; content: string }[] = [],
   patch: Partial<CloneUpdateInput> = {},
@@ -1613,7 +1613,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
     const chain = (target = owner, direct = true) => {
       const bundle = sourceBundle({
         keys: { 'hooks/c': KEY_A, 'profile/p': KEY_P, 'profile/q': KEY_Q, 'runtime/r': KEY_R },
-        credentials: [{ id: 'api', harness: 'claude' }],
+        credentials: [{ id: 'api', harness: 'claude-code' }],
         components: hookC,
         files: fileC,
         profiles: { p: { layers: ['hooks/c'] }, q: { layers: ['profile/p'] } },
@@ -2006,7 +2006,7 @@ describe('profile and runtime settings an update writes (#F575 finding 4)', () =
   const theirs = (profile: Record<string, unknown>, runtime: Record<string, unknown>) =>
     sourceBundle({
       keys: { 'profile/default': KEY_P, 'runtime/agent': KEY_R, 'login/api': KEY_L },
-      credentials: [{ id: 'api', harness: 'claude', label: 'api' }],
+      credentials: [{ id: 'api', harness: 'claude-code', label: 'api' }],
       profiles: { default: { layers: [], ...profile } },
       runtimes: { agent: { credential: 'api', profile: 'default', agent: true, ...runtime } },
     });
@@ -2097,7 +2097,7 @@ describe('an environment login a copy adds (#F544 finding 3)', () => {
       credentials: [
         {
           id: 'api',
-          harness: 'claude',
+          harness: 'claude-code',
           store: 'environment',
           env: { NODE_OPTIONS: value, ANTHROPIC_API_KEY: '${secret:API_KEY}' },
         },
@@ -2114,7 +2114,7 @@ describe('an environment login a copy adds (#F544 finding 3)', () => {
         outcome: 'slot',
         runnable: {
           entries: [
-            { label: 'Harness', text: 'claude', document: false },
+            { label: 'Harness', text: 'claude-code', document: false },
             { label: 'Environment ANTHROPIC_API_KEY', text: '${secret:API_KEY}', document: false },
             { label: 'Environment NODE_OPTIONS', text: '--trace-warnings', document: false },
           ],
@@ -2195,7 +2195,7 @@ describe('the review binds what an apply acts on (#F544 finding 4)', () => {
 
 describe('items the person left out (#F544 finding 5)', () => {
   const withNew = (theirs: Side) =>
-    FleetCloneBundleSchema.parse({
+    CloneBundleSchema.parse({
       ...bundleOf(theirs),
       keys: { ...keysOf(bundleOf(theirs)), 'mcp/skip-me': KEY_A },
       components: { ...bundleOf(theirs).components, mcp: { 'skip-me': { command: 'not-supposed-to-copy' } } },
@@ -2243,7 +2243,7 @@ describe('items the person left out (#F544 finding 5)', () => {
     ).throw(CloneRefusal, { message: /instructions\/main is left out, but instructions\/main is also set to "take"/u });
 
     // A new profile needs a new component: leaving the component out leaves the profile without it.
-    const bundle = FleetCloneBundleSchema.parse({
+    const bundle = CloneBundleSchema.parse({
       ...withNew({ main: 'A' }),
       keys: { ...keysOf(withNew({ main: 'A' })), 'profile/extra': KEY_B },
       profiles: { ...withNew({ main: 'A' }).profiles, extra: { layers: ['mcp/skip-me'] } },
@@ -2308,7 +2308,7 @@ describe('files a take removes (#F544 finding 6)', () => {
 
 describe('matching a login by email or label after the record and the key (#F544 finding 7)', () => {
   const sourceLogin = (patch: Record<string, unknown> = {}) =>
-    sourceBundle({ credentials: [{ id: 'you', harness: 'claude', label: 'work', ...patch }] });
+    sourceBundle({ credentials: [{ id: 'you', harness: 'claude-code', label: 'work', ...patch }] });
   const heldBy = (credentials: Record<string, Record<string, unknown>>) =>
     parseAccountModel({
       version: 2,
@@ -2317,7 +2317,7 @@ describe('matching a login by email or label after the record and the key (#F544
       ),
     });
   const resolved = (
-    bundle: FleetCloneBundle,
+    bundle: CloneBundle,
     target: ReturnType<typeof parseAccountModel>,
     emails: Record<string, string | undefined> = {},
   ) => resolveCloneLogins(bundle, target, undefined, emails);
@@ -2358,7 +2358,7 @@ describe('matching a login by email or label after the record and the key (#F544
       credentials: [
         {
           id: 'you',
-          harness: 'claude',
+          harness: 'claude-code',
           label: 'work',
           store: 'environment',
           env: { ANTHROPIC_API_KEY: '${secret:API_TOKEN}' },
@@ -2377,7 +2377,7 @@ describe('matching a login by email or label after the record and the key (#F544
   it('should ask the matcher only when the record and the key said nothing', () => {
     const keyed = sourceBundle({
       keys: { 'login/you': KEY_API },
-      credentials: [{ id: 'you', harness: 'claude', label: 'work' }],
+      credentials: [{ id: 'you', harness: 'claude-code', label: 'work' }],
     });
     const linked = heldBy({ linked: { label: 'other', ...FROM, clonedFromKey: KEY_API }, same: { label: 'work' } });
     should([...resolved(keyed, linked).matched]).eql([['you', 'linked']]);
@@ -2386,12 +2386,12 @@ describe('matching a login by email or label after the record and the key (#F544
   describe('through an update', () => {
     const runtimeOn = (login: Record<string, unknown>) =>
       sourceBundle({
-        credentials: [{ id: 'you', harness: 'claude', ...login }],
+        credentials: [{ id: 'you', harness: 'claude-code', ...login }],
         runtimes: { agent: { credential: 'you', profile: 'default', agent: false } },
         profiles: { default: { layers: [] } },
       });
     const update = (
-      bundle: FleetCloneBundle,
+      bundle: CloneBundle,
       target: ReturnType<typeof parseAccountModel>,
       emails: Record<string, string | undefined> = {},
     ): CloneUpdateInput => bareInput(bundle, target, [], { logins: resolved(bundle, target, emails) });
@@ -2485,7 +2485,7 @@ const scaffold = () => ({
 });
 
 /** The source holding `x` at `v`, or not at all. */
-const matrixBundle = (kind: Kind, v: string | undefined): FleetCloneBundle => {
+const matrixBundle = (kind: Kind, v: string | undefined): CloneBundle => {
   const shared = scaffold();
   const x = v === undefined ? undefined : versionOf(kind, v);
   const components: Record<string, Record<string, unknown>> = { instructions: { ...shared.instructions } };
@@ -2498,7 +2498,7 @@ const matrixBundle = (kind: Kind, v: string | undefined): FleetCloneBundle => {
   }
   return sourceBundle({
     keys: { ...SCAFFOLD_KEYS, ...(x === undefined ? {} : { [refOf(kind)]: KEY_X }) },
-    credentials: [{ id: 'claude-you', harness: 'claude', label: 'you' }],
+    credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you' }],
     components,
     profiles,
     runtimes,
