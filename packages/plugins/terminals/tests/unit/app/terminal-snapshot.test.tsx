@@ -1,22 +1,16 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
+import { refusal, scriptedClient } from '../../support/app/client.ts';
 
-const daemon = daemonConnection({
-  daemonId: 'pane-daemon',
-  baseUrl: 'https://pane.example.test',
-  deviceId: 'pane-token',
+// The harness registers its DOM on the first mount; these cases touch `document` before they mount.
+beforeAll(async () => {
+  await (await mount(<div />)).unmount();
 });
-const scope = daemonSessionScope(daemon, 'pane-session');
 
-const second = daemonConnection({
-  daemonId: 'second-daemon',
-  baseUrl: 'https://second.example.test',
-  deviceId: 'second-token',
-});
-const secondScope = daemonSessionScope(second, 'pane-session');
+const { client } = scriptedClient('');
+const scope = { sessionId: 'pane-session' };
+const { client: second } = scriptedClient('');
 
 /** Lets a test say what `document.hidden` is; happy-dom leaves it read-only. */
 const setHidden = (hidden: boolean): void => {
@@ -42,23 +36,23 @@ const scroller = (container: HTMLElement): HTMLElement =>
   must(container.querySelector<HTMLElement>('[data-testid="terminal-snapshot-scroller"]'), 'the snapshot scroller');
 
 describe('terminal snapshot view', () => {
-  it('polls the paired daemon, prints the pane and states the snapshot is cached', async () => {
+  it('polls the daemon, prints the pane and states the snapshot is cached', async () => {
     setHidden(false);
     const asked: string[] = [];
     const view = await mount(
       <TerminalSnapshotView
-        daemon={daemon}
+        client={client}
         scope={scope}
         tmuxSession="ms9u6kfu-16918932"
         now={() => 0}
-        readSnapshot={async (connection, target) => {
-          asked.push(`${connection.daemonId}:${target.sessionId}`);
+        readSnapshot={async target => {
+          asked.push(target.sessionId);
           return '$ bun test\nok';
         }}
       />,
     );
     try {
-      expect(asked).toEqual(['pane-daemon:pane-session']);
+      expect(asked).toEqual(['pane-session']);
       expect(view.container.textContent).toContain('$ bun test');
       expect(view.container.textContent).toContain('tmux: ms9u6kfu-16918932');
       expect(view.container.textContent).toContain('cached · updated <1s ago');
@@ -72,7 +66,7 @@ describe('terminal snapshot view', () => {
     let fail = false;
     const view = await mount(
       <TerminalSnapshotView
-        daemon={daemon}
+        client={client}
         scope={scope}
         tmuxSession="pane"
         now={() => 0}
@@ -98,7 +92,7 @@ describe('terminal snapshot view', () => {
     let reads = 0;
     const view = await mount(
       <TerminalSnapshotView
-        daemon={daemon}
+        client={client}
         scope={scope}
         tmuxSession="pane"
         now={() => 0}
@@ -129,11 +123,11 @@ describe('terminal snapshot view', () => {
     }
   });
 
-  it('drops the previous daemon’s pane the moment the scope changes', async () => {
+  it('drops the previous daemon’s pane the moment the client changes', async () => {
     setHidden(false);
     const view = await mount(
       <TerminalSnapshotView
-        daemon={daemon}
+        client={client}
         scope={scope}
         tmuxSession="pane"
         now={() => 0}
@@ -144,8 +138,8 @@ describe('terminal snapshot view', () => {
       expect(view.container.textContent).toContain('daemon one output');
       await view.render(
         <TerminalSnapshotView
-          daemon={second}
-          scope={secondScope}
+          client={second}
+          scope={scope}
           tmuxSession="pane"
           now={() => 0}
           readSnapshot={async () => new Promise<string>(() => undefined)}
@@ -164,7 +158,7 @@ describe('terminal snapshot view', () => {
     let height = 500;
     const view = await mount(
       <TerminalSnapshotView
-        daemon={daemon}
+        client={client}
         scope={scope}
         tmuxSession="pane"
         now={() => 0}
@@ -229,7 +223,7 @@ describe('terminal snapshot view', () => {
     let clock = 0;
     const view = await mount(
       <TerminalSnapshotView
-        daemon={daemon}
+        client={client}
         scope={scope}
         tmuxSession="pane"
         now={() => clock}
@@ -248,28 +242,43 @@ describe('terminal snapshot view', () => {
     }
   });
 
-  it('reads through the paired daemon by default', async () => {
+  it('reads through the shell client by default', async () => {
     setHidden(false);
-    const original = globalThis.fetch;
-    const seen: string[] = [];
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      seen.push(String(input));
-      return new Response('default reader frame');
-    }) as unknown as typeof fetch;
+    const { calls, client: reading } = scriptedClient('default reader frame');
+    const view = await mount(<TerminalSnapshotView client={reading} scope={scope} tmuxSession="pane" now={() => 0} />);
     try {
-      const view = await mount(<TerminalSnapshotView daemon={daemon} scope={scope} tmuxSession="pane" now={() => 0} />);
-      expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane-session/snapshot?live=false']);
+      expect(calls).toEqual([
+        {
+          route: 'GET /v1/ferrets/:ferretId/snapshot',
+          init: { params: { ferretId: 'pane-session' }, query: { live: 'false' } },
+        },
+      ]);
       expect(view.container.textContent).toContain('default reader frame');
-      await view.unmount();
     } finally {
-      globalThis.fetch = original;
+      await view.unmount();
+    }
+  });
+
+  it('keeps the last good pane when the shell refuses a read', async () => {
+    setHidden(false);
+    const { client: refused } = scriptedClient(refusal(503, 'daemon unreachable'));
+    const view = await mount(<TerminalSnapshotView client={refused} scope={scope} tmuxSession="pane" now={() => 0} />);
+    try {
+      expect(view.container.textContent).toContain('stale');
+      expect(view.container.textContent).toContain('daemon unreachable');
+    } finally {
+      await view.unmount();
     }
   });
 
   describe('on a phone', () => {
     const PANE = `${'x'.repeat(80)}\nshort`;
-    const width = Object.getOwnPropertyDescriptor(window, 'innerWidth');
-    const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    let width: PropertyDescriptor | undefined;
+    let clientWidth: PropertyDescriptor | undefined;
+    beforeAll(() => {
+      width = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+      clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    });
     const asPhone = (): void => {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
       Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 366 });
@@ -289,7 +298,7 @@ describe('terminal snapshot view', () => {
       asPhone();
       try {
         const view = await mount(
-          <TerminalSnapshotView daemon={daemon} scope={scope} live now={() => 0} readSnapshot={async () => PANE} />,
+          <TerminalSnapshotView client={client} scope={scope} live now={() => 0} readSnapshot={async () => PANE} />,
         );
         try {
           // 366px less the pre's 24px of padding, over 80 columns.
@@ -318,7 +327,7 @@ describe('terminal snapshot view', () => {
       Reflect.deleteProperty(globalThis, 'ResizeObserver');
       try {
         const view = await mount(
-          <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
+          <TerminalSnapshotView client={client} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
         );
         try {
           expect(pre(view.container).style.fontSize).toBe('7px');
@@ -334,7 +343,7 @@ describe('terminal snapshot view', () => {
     it('opens at full size on a desktop, where the toggle can still fit it', async () => {
       setHidden(false);
       const view = await mount(
-        <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
+        <TerminalSnapshotView client={client} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
       );
       try {
         expect(pre(view.container).style.fontSize).toBe('');

@@ -1,50 +1,41 @@
 /**
- * Registers and loads the bundled terminal face BEFORE an emulator measures its cells.
+ * Waits for the bundled terminal face BEFORE an emulator measures its cells.
  *
  * ORDER IS THE WHOLE POINT. xterm measures a cell once, when it opens, and again only when its font
  * options change. A face that finishes loading after that measurement is drawn into cells sized for
  * the fallback — the same spaced-out text as no face at all — so the deck awaits this before it
- * constructs the emulator rather than adding the face and hoping.
+ * constructs the emulator rather than hoping.
+ *
+ * The face is the shell's own: `styles/theme-fonts.css` declares the JetBrains Mono files once for the whole
+ * page (the same two woff2 files this loader used to register under its own name), so a plugin neither imports
+ * the shell's assets nor ships a copy. Asking the document to load it is what is left to do here.
  *
  * Loading never fails the terminal: a face that cannot be fetched leaves the theme's own stack, which
  * is what every terminal had before this existed.
  */
 
 import { TERMINAL_FONT_FACE } from '../lib/terminal-font.ts';
-import regularFace from '../../../../app/src/assets/fonts/jetbrains-mono-latin-400-normal.woff2';
-import boldFace from '../../../../app/src/assets/fonts/jetbrains-mono-latin-700-normal.woff2';
 
-/** The two browser facilities this needs, injected so a test can stand in for both. */
+/** The one browser facility this needs, injected so a test can stand in for it. */
 export interface TerminalFontEnvironment {
-  readonly fonts: Pick<FontFaceSet, 'add'> | undefined;
-  readonly createFace: ((family: string, source: string, weight: string) => Pick<FontFace, 'load'>) | undefined;
+  readonly fonts: Pick<FontFaceSet, 'load'> | undefined;
 }
 
 const browserEnvironment = (): TerminalFontEnvironment => ({
   fonts: typeof document === 'undefined' ? undefined : document.fonts,
-  createFace:
-    typeof FontFace === 'undefined'
-      ? undefined
-      : (family, source, weight) => new FontFace(family, `url("${source}")`, { weight, style: 'normal' }),
 });
 
-/** One load per page, however many terminals open: the faces are added to the document once. */
+/** The two weights the emulator draws (regular and bold), at the size it opens with. */
+const FACES = [`400 12.5px "${TERMINAL_FONT_FACE}"`, `700 12.5px "${TERMINAL_FONT_FACE}"`] as const;
+
+/** One load per page, however many terminals open. */
 export function terminalFontLoader(environment: () => TerminalFontEnvironment): () => Promise<void> {
   let loading: Promise<void> | undefined;
   return () => {
     loading ??= (async () => {
-      const { fonts, createFace } = environment();
-      if (fonts === undefined || createFace === undefined) return;
-      const faces = [
-        createFace(TERMINAL_FONT_FACE, regularFace, '400'),
-        createFace(TERMINAL_FONT_FACE, boldFace, '700'),
-      ];
-      await Promise.all(
-        faces.map(async face => {
-          const loaded = await face.load();
-          fonts.add(loaded);
-        }),
-      ).catch(() => undefined);
+      const { fonts } = environment();
+      if (fonts === undefined) return;
+      await Promise.all(FACES.map(async face => await fonts.load(face))).catch(() => undefined);
     })();
     return loading;
   };

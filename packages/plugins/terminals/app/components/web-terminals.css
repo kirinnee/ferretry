@@ -487,3 +487,44 @@
   min-width: 0;
   flex: 1 1 16rem;
 }
+
+/* THE "JUMP TO LATEST" PILL of the pane snapshot (`jump-to-latest.tsx`): the same two rules the Chat transcript uses.
+   It exists only while the pill does, so a pane with nothing to say leaves no band. */
+.fy-jump-latest-shell {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding: var(--flow-2) var(--flow-4);
+}
+.fy-jump-latest {
+  align-items: center;
+  animation: fy-jump-latest-in 140ms ease-out;
+  background: var(--fy-accent);
+  border: var(--stroke-control) solid color-mix(in srgb, var(--fy-accent) 75%, var(--fy-border));
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-panel);
+  box-sizing: border-box;
+  color: var(--accent-fg);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  min-height: var(--target-floor, 0px);
+  padding: 8px 12px;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+@keyframes fy-jump-latest-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-jump-latest {
+    animation: none;
+  }
+}

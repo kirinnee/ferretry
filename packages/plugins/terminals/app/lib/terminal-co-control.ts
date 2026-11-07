@@ -149,3 +149,9 @@ export function describeCoControl(
   // there is no turn to wait for, so there is nothing here to gate on ownership.
   return { mayType: state === 'live', sharing, link: linkWord(state) };
 }
+
+/**
+ * How long a drop stays unsaid before the lamp says `reconnecting`: the connection model's grace (1.5 s), which the
+ * shell does not export to a half. The first reopen comes back well inside it.
+ */
+export const RECONNECTING_GRACE_MS = 1_500;

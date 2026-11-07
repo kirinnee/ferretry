@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  applyOutput,
-  EMPTY_OUTPUT,
-  PROCESS_OUTPUT_HELD_MAX,
-} from '../../../../layouts/app/features/workspace/use-session-processes.ts';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
+import { DaemonCallError } from '@ferretry/app';
 import {
   formatElapsed,
   formatMemory,
@@ -21,6 +14,7 @@ import {
   readSessionProcessOutput,
   stopSessionProcess,
 } from '../../../app/lib/session-processes.ts';
+import { refusal, scriptedClient } from '../../support/app/client.ts';
 import {
   ALL_PROCESSES,
   DEV_SERVER_PARENT,
@@ -32,11 +26,7 @@ import {
   WATCH_TESTS,
 } from '../../support/app/session-processes.ts';
 
-const daemon = daemonConnection({ daemonId: 'proc-daemon', baseUrl: 'https://proc.example.test', deviceId: 'd' });
-const scope = daemonSessionScope(daemon, 'agent-session');
-
-const json = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const scope = { sessionId: 'agent-session' };
 
 describe('grouping the process list', () => {
   const groups = groupProcesses(ALL_PROCESSES);
@@ -117,15 +107,15 @@ describe('words for time and size', () => {
 
 describe('what a failure says', () => {
   it('names the grant when the daemon refuses with 403', () => {
-    expect(processErrorText(new DaemonResponseError(403, 'forbidden'))).toBe(PROCESSES_FORBIDDEN_TEXT);
+    expect(processErrorText(new DaemonCallError(403, 'http_403', 'forbidden'))).toBe(PROCESSES_FORBIDDEN_TEXT);
     expect(PROCESSES_FORBIDDEN_TEXT).toBe(
       'This device can’t see this ferret’s processes. Allow Terminals for it in Settings › Devices.',
     );
   });
 
   it('says nothing was stopped when the process changed under the request', () => {
-    expect(processErrorText(new DaemonResponseError(409, 'changed', 'process_changed'))).toBe(PROCESS_CHANGED_TEXT);
-    expect(processErrorText(new DaemonResponseError(409, 'something else', 'other'))).toBe('something else');
+    expect(processErrorText(new DaemonCallError(409, 'process_changed', 'changed'))).toBe(PROCESS_CHANGED_TEXT);
+    expect(processErrorText(new DaemonCallError(409, 'other', 'something else'))).toBe('something else');
   });
 
   it('passes any other failure’s own message', () => {
@@ -135,104 +125,56 @@ describe('what a failure says', () => {
 });
 
 describe('the client', () => {
-  it('lists, addressing the session’s processes route and parsing the answer', async () => {
-    const calls: { url: string; method: string }[] = [];
-    const list = await listSessionProcesses(daemon, scope, async (url, init) => {
-      calls.push({ url: String(url), method: init?.method ?? 'GET' });
-      return json(ALL_PROCESSES);
-    });
-    expect(calls).toEqual([{ url: 'https://proc.example.test/v1/ferrets/agent-session/processes', method: 'GET' }]);
+  it('lists, addressing the ferret’s processes route by its manifest key and parsing the answer', async () => {
+    const { calls, client } = scriptedClient(ALL_PROCESSES);
+    const list = await listSessionProcesses(client, scope);
+    expect(calls).toEqual([
+      { route: 'GET /v1/ferrets/:ferretId/processes', init: { params: { ferretId: 'agent-session' } } },
+    ]);
     expect(list.processes).toHaveLength(6);
   });
 
-  it('refuses an answer for another session or one that does not parse', async () => {
+  it('refuses an answer for another ferret or one that does not parse', async () => {
     await expect(
-      listSessionProcesses(daemon, scope, async () => json({ ...ALL_PROCESSES, sessionId: 'someone-else' })),
-    ).rejects.toThrow();
-    await expect(listSessionProcesses(daemon, scope, async () => json({ nope: true }))).rejects.toThrow();
+      listSessionProcesses(scriptedClient({ ...ALL_PROCESSES, sessionId: 'someone-else' }).client, scope),
+    ).rejects.toMatchObject({ status: 502 });
+    await expect(listSessionProcesses(scriptedClient({ nope: true }).client, scope)).rejects.toThrow();
   });
 
-  it('turns an error status into a DaemonResponseError carrying the code', async () => {
-    const error = await listSessionProcesses(daemon, scope, async () =>
-      json({ error: 'no', code: 'process_changed' }, 409),
-    ).catch((cause: unknown) => cause);
-    expect(error).toBeInstanceOf(DaemonResponseError);
-    expect((error as DaemonResponseError).status).toBe(409);
-    expect((error as DaemonResponseError).code).toBe('process_changed');
+  it('lets a refusal through carrying its status and code', async () => {
+    const error = await listSessionProcesses(scriptedClient(refusal(409, 'no', 'process_changed')).client, scope).catch(
+      (cause: unknown) => cause,
+    );
+    expect(error).toBeInstanceOf(DaemonCallError);
+    expect((error as DaemonCallError).status).toBe(409);
+    expect((error as DaemonCallError).code).toBe('process_changed');
   });
 
   it('reads the tail first, then everything after the last end', async () => {
-    const urls: string[] = [];
-    const reader = async (url: RequestInfo | URL) => {
-      urls.push(String(url));
-      return json(outputAnswer('100.1', 'hi'));
-    };
-    await readSessionProcessOutput(daemon, scope, '100.1', undefined, reader);
-    await readSessionProcessOutput(daemon, scope, '100.1', 4096, reader);
-    expect(urls).toEqual([
-      'https://proc.example.test/v1/ferrets/agent-session/processes/100.1/output',
-      'https://proc.example.test/v1/ferrets/agent-session/processes/100.1/output?after=4096',
+    const { calls, client } = scriptedClient(outputAnswer('100.1', 'hi'));
+    await readSessionProcessOutput(client, scope, '100.1', undefined);
+    await readSessionProcessOutput(client, scope, '100.1', 4096);
+    expect(calls.map(call => call.init?.query)).toEqual([undefined, { after: '4096' }]);
+    expect(calls[0]?.route).toBe('GET /v1/ferrets/:ferretId/processes/:processId/output');
+    expect(calls[0]?.init?.params).toEqual({ ferretId: 'agent-session', processId: '100.1' });
+  });
+
+  it('stops with a POST route and no body', async () => {
+    const { calls, client } = scriptedClient({ processId: '100.1', signalled: 3 });
+    const result = await stopSessionProcess(client, scope, '100.1');
+    expect(result.signalled).toBe(3);
+    expect(calls).toEqual([
+      {
+        route: 'POST /v1/ferrets/:ferretId/processes/:processId/stop',
+        init: { params: { ferretId: 'agent-session', processId: '100.1' } },
+      },
     ]);
   });
 
-  it('stops with a POST and no body, carrying a request id', async () => {
-    const seen: { url: string; init: RequestInit | undefined }[] = [];
-    const result = await stopSessionProcess(daemon, scope, '100.1', async (url, init) => {
-      seen.push({ url: String(url), init });
-      return json({ processId: '100.1', signalled: 3 });
-    });
-    expect(result.signalled).toBe(3);
-    expect(seen[0]?.url).toBe('https://proc.example.test/v1/ferrets/agent-session/processes/100.1/stop');
-    expect(seen[0]?.init?.method).toBe('POST');
-    expect(seen[0]?.init?.body).toBeUndefined();
-  });
-
   it('refuses a process id that is not one the daemon mints', async () => {
-    await expect(stopSessionProcess(daemon, scope, '../etc', async () => json({}))).rejects.toThrow();
+    const { calls, client } = scriptedClient({});
+    await expect(stopSessionProcess(client, scope, '../etc')).rejects.toThrow();
+    expect(calls).toHaveLength(0);
     expect(DEV_SERVER_PARENT.id).toBe('200.2');
-  });
-});
-
-describe('following output', () => {
-  it('holds the first answer as the tail and asks after its end', () => {
-    const held = applyOutput(
-      EMPTY_OUTPUT,
-      outputAnswer('100.1', 'abc', { start: 100, end: 103, size: 103, skipped: true }),
-    );
-    expect(held).toMatchObject({ text: 'abc', end: 103, skipped: true, complete: false });
-  });
-
-  it('appends what comes after and moves the end', () => {
-    const first = applyOutput(EMPTY_OUTPUT, outputAnswer('100.1', 'abc'));
-    const second = applyOutput(first, outputAnswer('100.1', 'def', { start: 3, end: 6, size: 6 }));
-    expect(second).toMatchObject({ text: 'abcdef', end: 6, skipped: false });
-  });
-
-  it('drops what it holds when the file was replaced', () => {
-    const first = applyOutput(EMPTY_OUTPUT, outputAnswer('100.1', 'abcdef'));
-    const reset = applyOutput(first, outputAnswer('100.1', 'new', { reset: true, end: 3, size: 3 }));
-    expect(reset).toMatchObject({ text: 'new', end: 3 });
-  });
-
-  it('drops what it holds when a gap was skipped, and says so', () => {
-    const first = applyOutput(EMPTY_OUTPUT, outputAnswer('100.1', 'abcdef'));
-    const gap = applyOutput(first, outputAnswer('100.1', 'xyz', { skipped: true, start: 900, end: 903, size: 903 }));
-    expect(gap).toMatchObject({ text: 'xyz', end: 903, skipped: true });
-  });
-
-  it('remembers that the process is done', () => {
-    const first = applyOutput(EMPTY_OUTPUT, outputAnswer('100.1', 'abc'));
-    expect(applyOutput(first, outputAnswer('100.1', '', { start: 3, end: 3, size: 3, complete: true })).complete).toBe(
-      true,
-    );
-  });
-
-  it('keeps no more than the cap and says earlier text was dropped', () => {
-    const big = 'x'.repeat(PROCESS_OUTPUT_HELD_MAX);
-    const first = applyOutput(EMPTY_OUTPUT, outputAnswer('100.1', big));
-    const next = applyOutput(first, outputAnswer('100.1', 'tail', { start: big.length, end: big.length + 4 }));
-    expect(next.text.length).toBe(PROCESS_OUTPUT_HELD_MAX);
-    expect(next.text.endsWith('tail')).toBe(true);
-    expect(next.skipped).toBe(true);
   });
 });

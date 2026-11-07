@@ -10,7 +10,6 @@
     "claude-code",
     "codex",
     "logins",
-    "terminals",
     "browsers",
     "accounts",
     "conversation",
@@ -33,8 +32,7 @@
   ],
   "pendingHalves": {
     "agenda": ["app"],
-    "browsers": ["app"],
-    "terminals": ["app"]
+    "browsers": ["app"]
   },
   "pendingAppPorts": [
     {
@@ -46,21 +44,6 @@
       "plugin": "browsers",
       "path": "packages/plugins/browsers/app",
       "reason": "separate app port in flight"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/unit/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/support/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
     },
     {
       "plugin": "runtimes",

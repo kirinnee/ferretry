@@ -1,57 +1,46 @@
 /**
- * Addresses in the Console's read-only capture are real anchors, opened by the same "Open links in"
- * decision as a chat link. The capture's text is untouched, so what is copied is what was captured.
+ * Addresses in the Console's read-only capture are real anchors, handed to the link host (Settings › "Open links in")
+ * on a click. The capture's text is untouched, so what is copied is what was captured.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
-import { LinkBehaviourProvider, type LinkOpener } from '../../../../browsers/app/features/browser/external-link.tsx';
-import type { OpenLinksIn } from '@ferretry/app';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
+import { describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
+import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
+import type { LinkHost } from '../../../app/lib/link-host.ts';
+import { scriptedClient } from '../../support/app/client.ts';
 
-const daemon = daemonConnection({ daemonId: 'pane-daemon', baseUrl: 'https://pane.example.test', deviceId: 'token' });
-const scope = daemonSessionScope(daemon, 'pane-session');
+const { client } = scriptedClient('');
+const scope = { sessionId: 'pane-session' };
 const CAPTURE = 'Listening on https://app.example.test:8443/dev, docs at (http://docs.example.test/x).\nbye';
 
-const fakeOpener = () => {
-  const tabs: string[] = [];
-  const opener: LinkOpener = {
-    iosStandalone: () => false,
-    handOff: () => {},
-    openTab: href => void tabs.push(href),
-    unlessLeft: () => () => {},
+/** A link host that records what it was asked, and handles the click only when told to. */
+const fakeHost = (handles: boolean) => {
+  const activated: string[] = [];
+  const host: LinkHost = {
+    activate: (click, target) => {
+      activated.push(target.href);
+      if (handles) click.preventDefault();
+      return handles;
+    },
+    open: () => undefined,
   };
-  return { opener, tabs };
+  return { host, activated };
 };
 
-let originalFetch: typeof fetch;
+const snapshot = async (handles: boolean, text = CAPTURE) => {
+  const { host, activated } = fakeHost(handles);
+  const view = await mount(
+    <TerminalSnapshotView client={client} links={host} now={() => 0} readSnapshot={async () => text} scope={scope} />,
+  );
+  return { view, activated };
+};
+
 const stopNavigation = (event: MouseEvent): void => {
   if (event.target instanceof HTMLAnchorElement) event.preventDefault();
-};
-beforeEach(() => {
-  originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response('browser fixture', { status: 200 })) as unknown as typeof fetch;
-  document.addEventListener('click', stopNavigation);
-});
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-  document.removeEventListener('click', stopNavigation);
-});
-
-const snapshot = async (openLinksIn: OpenLinksIn, text = CAPTURE) => {
-  const { opener, tabs } = fakeOpener();
-  const view = await mount(
-    <LinkBehaviourProvider openLinksIn={openLinksIn} opener={opener}>
-      <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => text} />
-    </LinkBehaviourProvider>,
-  );
-  return { view, tabs };
 };
 
 describe('terminal snapshot — links', () => {
   it('draws each address as a new-tab anchor and leaves the rest of the text alone', async () => {
-    const { view } = await snapshot('browser');
+    const { view } = await snapshot(false);
     try {
       const anchors = [...view.container.querySelectorAll<HTMLAnchorElement>('a[data-terminal-link]')];
       expect(anchors.map(anchor => anchor.getAttribute('href'))).toEqual([
@@ -69,8 +58,27 @@ describe('terminal snapshot — links', () => {
     }
   });
 
-  it('leaves an ordinary click to the browser when the setting is Your browser', async () => {
-    const { view, tabs } = await snapshot('browser');
+  it('hands a click to the link host, and leaves it to the browser when the host does not handle it', async () => {
+    document.addEventListener('click', stopNavigation);
+    const { view, activated } = await snapshot(false);
+    try {
+      let prevented = true;
+      view.container.addEventListener('click', event => {
+        prevented = event.defaultPrevented;
+      });
+      await interact(() =>
+        must(view.container.querySelector<HTMLAnchorElement>('a[data-terminal-link]'), 'a link').click(),
+      );
+      expect(activated).toEqual(['https://app.example.test:8443/dev']);
+      expect(prevented).toBe(false);
+    } finally {
+      document.removeEventListener('click', stopNavigation);
+      await view.unmount();
+    }
+  });
+
+  it('lets the host take the click over', async () => {
+    const { view, activated } = await snapshot(true);
     try {
       let prevented = false;
       view.container.addEventListener('click', event => {
@@ -79,48 +87,15 @@ describe('terminal snapshot — links', () => {
       await interact(() =>
         must(view.container.querySelector<HTMLAnchorElement>('a[data-terminal-link]'), 'a link').click(),
       );
-      expect(tabs).toEqual([]);
-      expect(prevented).toBe(false);
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('opens the preview when the setting is the side panel', async () => {
-    const { view, tabs } = await snapshot('panel');
-    try {
-      await interact(() =>
-        must(view.container.querySelector<HTMLAnchorElement>('a[data-terminal-link]'), 'a link').click(),
-      );
-      expect(tabs).toEqual([]);
-      expect(must(document.body.querySelector('[role="dialog"]'), 'the preview').textContent).toContain(
-        'https://app.example.test:8443/dev',
-      );
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('keeps a Cmd-click a new tab even when the setting is the side panel', async () => {
-    const { view } = await snapshot('panel');
-    try {
-      let prevented: boolean | undefined;
-      view.container.addEventListener('click', event => {
-        prevented = event.defaultPrevented;
-      });
-      const link = must(view.container.querySelector<HTMLAnchorElement>('a[data-terminal-link]'), 'a link');
-      await interact(() =>
-        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })),
-      );
-      expect(prevented).toBe(false);
-      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      expect(activated).toHaveLength(1);
+      expect(prevented).toBe(true);
     } finally {
       await view.unmount();
     }
   });
 
   it('draws no anchor for a capture with no address, nor for another scheme', async () => {
-    const { view } = await snapshot('browser', 'javascript:alert(1) file:///etc/passwd data:text/html,x\nplain');
+    const { view } = await snapshot(false, 'javascript:alert(1) file:///etc/passwd data:text/html,x\nplain');
     try {
       expect(view.container.querySelector('a')).toBeNull();
     } finally {

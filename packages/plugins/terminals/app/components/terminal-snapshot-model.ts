@@ -1,19 +1,19 @@
 /**
- * The Terminal tab's pure layer: the daemon-scoped snapshot read and the two
+ * The Terminal tab's pure layer: the ferret-scoped snapshot read and the two
  * freshness strings its header prints.
  *
  * The original (`ui/src/components/TerminalView.tsx`) reached a page-global
- * `api.snapshot(sessionId, false)`. There is no page-global daemon here: a
- * session id reused across two paired daemons must never resolve to whichever
- * one happens to be selected, so the read takes an explicit `(daemon, scope)`
- * pair and refuses a scope that belongs to a different daemon.
+ * `api.snapshot(sessionId, false)`. There is no page-global daemon here: the
+ * read rides the shell's per-daemon client, so a ferret id reused across two
+ * paired daemons can never resolve to whichever one happens to be selected.
  */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { SnapshotScope } from '../lib/protocol/holds.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
+import type { TerminalScope } from '../lib/web-terminals.ts';
+
+/** Conversation owns the route; Terminals reads it, as the Terminal tab always did. */
+const SNAPSHOT_ROUTE = 'GET /v1/ferrets/:ferretId/snapshot';
 
 /**
  * `live=false` is the original's choice and the reason the header says
@@ -22,39 +22,32 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../ru
  *
  * `extent` is the daemon's `scope` query: `screen` asks a live capture for the visible frame only,
  * which is all the activity line reads, instead of the whole scrollback every poll would otherwise
- * carry over the relay. It is omitted for `history`, so the default URL is the one it always was.
+ * carry over the relay. It is omitted for `history`, so the default query is the one it always was.
  */
-export const snapshotUrl = (scope: DaemonSessionScope, live = false, extent: SnapshotScope = 'history'): string =>
-  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/snapshot?live=${live ? 'true' : 'false'}${
-    extent === 'screen' ? '&scope=screen' : ''
-  }`;
+export const snapshotQuery = (live = false, extent: SnapshotScope = 'history'): Readonly<Record<string, string>> => ({
+  live: live ? 'true' : 'false',
+  ...(extent === 'screen' ? { scope: 'screen' } : {}),
+});
 
-const failure = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
-};
+/**
+ * The shell decodes an answer as JSON when it parses and as text when it does not, so a pane that holds nothing
+ * (`undefined`) or only something JSON-shaped (a number) arrives as a non-string; either way it is read back as text.
+ */
+const textOf = (body: unknown): string =>
+  typeof body === 'string' ? body : body === undefined || body === null ? '' : JSON.stringify(body);
 
-/** Reads one pane snapshot from the daemon that owns the session. */
+/** Reads one pane snapshot from the daemon that owns the ferret. */
 export const readPaneSnapshot = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  signal?: AbortSignal,
-  fetcher: DaemonFetch = browserFetch,
+  client: PluginClient,
+  scope: TerminalScope,
   /** Capture the pane now rather than answer with the stored final frame — the activity line's read. */
   live = false,
   /** How much of a live pane to return; `screen` is the visible frame. */
   extent: SnapshotScope = 'history',
-): Promise<string> => {
-  if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
-  const target = daemonRequest(daemon, snapshotUrl(scope, live, extent), { signal });
-  const response = await fetcher(target.url, target.init);
-  if (!response.ok) throw await failure(response);
-  return await response.text();
-};
+): Promise<string> =>
+  textOf(
+    await client.call(SNAPSHOT_ROUTE, { params: { ferretId: scope.sessionId }, query: snapshotQuery(live, extent) }),
+  );
 
 /** How the daemon's unreachability is worded when the last good text is kept. */
 export const describeSnapshotError = (error: unknown): string =>

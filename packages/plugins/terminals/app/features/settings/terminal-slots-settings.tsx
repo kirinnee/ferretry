@@ -8,15 +8,13 @@
  * completed, stopped or been removed are ever closed — a running ferret's are never touched.
  */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '../../../contract/index.ts';
 import { CircleAlert, SquareTerminal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import type { DaemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
 import { Badge, Button } from '@ferretry/app';
-import { closeFinishedTerminals, readTerminalHolders, type TerminalSlotsClient } from './terminal-slots-api.ts';
-
-export type TerminalSlotsClientFactory = (connection: DaemonConnection) => Promise<TerminalSlotsClient>;
+import { closeFinishedTerminals, readTerminalHolders } from './terminal-slots-api.ts';
 
 type Load =
   | { readonly status: 'loading' }
@@ -27,50 +25,37 @@ const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.mes
 const terminals = (count: number): string => `${count} terminal${count === 1 ? '' : 's'}`;
 const isFinished = (holder: TerminalHolder): boolean => holder.standing !== 'live';
 
-export function TerminalSlotsSettings({
-  connection,
-  createClient,
-}: {
-  readonly connection: DaemonConnection;
-  readonly createClient: TerminalSlotsClientFactory;
-}) {
-  const [state, setState] = useState<{ readonly daemonId: string; readonly load: Load }>({
-    daemonId: connection.daemonId,
-    load: { status: 'loading' },
-  });
+export function TerminalSlotsSettings({ client }: { readonly client: PluginClient }) {
+  const [load, setLoad] = useState<Load>({ status: 'loading' });
   const [closing, setClosing] = useState(false);
 
   useEffect(() => {
     let current = true;
-    setState({ daemonId: connection.daemonId, load: { status: 'loading' } });
-    void createClient(connection)
-      .then(async client => await readTerminalHolders(client))
+    setLoad({ status: 'loading' });
+    void readTerminalHolders(client)
       .then(view => {
-        if (current) setState({ daemonId: connection.daemonId, load: { status: 'loaded', view, closed: null } });
+        if (current) setLoad({ status: 'loaded', view, closed: null });
       })
       .catch((cause: unknown) => {
-        if (current) setState({ daemonId: connection.daemonId, load: { status: 'failed', reason: reasonOf(cause) } });
+        if (current) setLoad({ status: 'failed', reason: reasonOf(cause) });
       });
     return () => {
       current = false;
     };
-  }, [connection, createClient]);
+  }, [client]);
 
   const closeFinished = useCallback(() => {
-    const daemonId = connection.daemonId;
     setClosing(true);
-    void createClient(connection)
-      .then(async client => {
-        const result: CloseFinishedTerminalsResponse = await closeFinishedTerminals(client);
-        const view = await readTerminalHolders(client);
-        return { result, view };
-      })
-      .then(({ result, view }) => setState({ daemonId, load: { status: 'loaded', view, closed: result.closed } }))
-      .catch((cause: unknown) => setState({ daemonId, load: { status: 'failed', reason: reasonOf(cause) } }))
+    void (async () => {
+      const result: CloseFinishedTerminalsResponse = await closeFinishedTerminals(client);
+      const view = await readTerminalHolders(client);
+      return { result, view };
+    })()
+      .then(({ result, view }) => setLoad({ status: 'loaded', view, closed: result.closed }))
+      .catch((cause: unknown) => setLoad({ status: 'failed', reason: reasonOf(cause) }))
       .finally(() => setClosing(false));
-  }, [connection, createClient]);
+  }, [client]);
 
-  const load: Load = state.daemonId === connection.daemonId ? state.load : { status: 'loading' };
   if (load.status === 'failed')
     return (
       <section
@@ -143,14 +128,3 @@ export function TerminalSlotsSettings({
     </section>
   );
 }
-
-/** The Settings tab, for the composition root's `daemonSettingsTabs`, bound to the app's client pool. */
-export const terminalSlotsSettingsTab = (createClient: TerminalSlotsClientFactory) =>
-  ({
-    id: 'terminals',
-    label: 'Terminals',
-    description: 'Who holds the machine’s terminal slots, and closing the ones finished ferrets left behind.',
-    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <TerminalSlotsSettings connection={connection} createClient={createClient} />
-    ),
-  }) as const;

@@ -1,33 +1,22 @@
 import type { Instant } from '@ferretry/std';
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 
-import {
-  browserTerminalDeckDependencies,
-  SessionTerminalDeck,
-} from '../../../app/components/session-terminal-deck.tsx';
-import { RECONNECTING_GRACE_MS } from '../../../../connections/app/lib/connection-health.ts';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../../../../access/app/lib/grants.ts';
-import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
-import { TERMINAL_REOPEN_BASE_MS } from '../../../app/lib/terminal-co-control.ts';
-import { TerminalStreamRefused } from '../../../app/lib/web-terminals.ts';
-import '@ferretry/app/testing';
-import { render, run, runAsync } from '@ferretry/app/testing';
+import { DaemonCallError } from '@ferretry/app';
+import { mount as mountDom, render, run, runAsync } from '@ferretry/app/testing';
+import { browserTerminalDeckHost, SessionTerminalDeck } from '../../../app/components/session-terminal-deck.tsx';
+import { grantRefusalNotice } from '../../../app/lib/grant-notice.ts';
+import { RECONNECTING_GRACE_MS, TERMINAL_REOPEN_BASE_MS } from '../../../app/lib/terminal-co-control.ts';
 import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../../support/app/terminal-deck.ts';
 
-const alpha = daemonConnection({
-  daemonId: 'alpha',
-  baseUrl: 'https://alpha.example.test',
-  deviceId: 'alpha-token',
+// The deck reads the document (visibility, theme, full screen) although these cases render without one; the
+// harness registers its DOM on the first mount.
+beforeAll(async () => {
+  await (await mountDom(<div />)).unmount();
 });
-const beta = daemonConnection({
-  daemonId: 'beta',
-  baseUrl: 'https://beta.example.test',
-  deviceId: 'beta-token',
-});
-const scopeAlpha = daemonSessionScope(alpha, 'shared');
-const scopeBeta = daemonSessionScope(beta, 'shared');
+
+/** One ferret on the one daemon this half is built for; `beta` is another deck's ferret of the same id. */
+const scopeAlpha = { sessionId: 'shared' };
+const scopeBeta = { sessionId: 'shared' };
 
 const FIRST = 'a1b2c3d4e5f6';
 const SECOND = '0f0e0d0c0b0a';
@@ -82,7 +71,7 @@ const mount = (element: Parameters<typeof render>[0]): Rendered =>
 describe('SessionTerminalDeck', () => {
   test('lists the daemon own shells as tabs and opens the first one', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     const output = json(page);
@@ -94,7 +83,7 @@ describe('SessionTerminalDeck', () => {
 
   test('says plainly when the session holds no shell rather than showing an empty deck', async () => {
     const deck = fakeDeck(async () => terminalListing([]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(json(page)).toContain('No shell terminals open');
@@ -105,7 +94,6 @@ describe('SessionTerminalDeck', () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     const page = mount(
       <SessionTerminalDeck
-        connection={alpha}
         dependencies={deck.dependencies}
         scope={scopeAlpha}
         surfaceStatus={<i data-status-slot="" />}
@@ -123,7 +111,6 @@ describe('SessionTerminalDeck', () => {
     const deck = fakeDeck(async () => terminalListing([]));
     const page = mount(
       <SessionTerminalDeck
-        connection={alpha}
         dependencies={deck.dependencies}
         scope={scopeAlpha}
         focusTerminalId={FIRST}
@@ -144,7 +131,7 @@ describe('SessionTerminalDeck', () => {
     // session's shells under this one's tabs, and every reference on them would
     // address a terminal this deck is not showing.
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST, {}, 'other')], 'other'));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     const output = json(page);
@@ -157,7 +144,7 @@ describe('SessionTerminalDeck', () => {
     const deck = fakeDeck(async () =>
       terminalListing([terminalView(FIRST, { openedBy: { by: 'agent', sessionId: 'mse7wwti' } })]),
     );
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     const output = json(page);
@@ -168,21 +155,20 @@ describe('SessionTerminalDeck', () => {
 
   test('never tells a reader they are alone in a shell the daemon cannot attribute', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(json(page)).toContain('did not record who opened this shell');
     run(() => page.unmount());
   });
 
-  test('opens a stream bound to this daemon and this session, never a bare session id', async () => {
-    // Two daemons routinely know a session by the same id. A stream URL built
-    // from the id alone would attach one daemon's viewer to another's shell.
+  test('opens a stream for this ferret and this terminal, on the client the half was given', async () => {
+    // Two daemons routinely know a session by the same id; which daemon is the client's, never the id's.
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
-    expect(deck.urls).toEqual([`wss://alpha/v1/ferrets/shared/terminals/${FIRST}/stream?ticket=t`]);
+    expect(deck.attached).toEqual([{ sessionId: 'shared', terminalId: FIRST }]);
     run(() => page.unmount());
   });
 
@@ -190,7 +176,7 @@ describe('SessionTerminalDeck', () => {
     // 1000 is what tells the daemon this viewer left on purpose — and what stops
     // the deck reconnecting to a pane nobody is looking at.
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     run(() => page.unmount());
 
@@ -199,7 +185,7 @@ describe('SessionTerminalDeck', () => {
 
   test('goes live and sizes the pane once the socket opens', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     if (socket === undefined) throw new Error('the deck opened no socket');
@@ -216,7 +202,7 @@ describe('SessionTerminalDeck', () => {
     // 1008 is the daemon judging this client's frames. Saying "reconnecting"
     // would promise a retry that will never be attempted.
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     if (socket === undefined) throw new Error('the deck opened no socket');
@@ -240,13 +226,13 @@ describe('SessionTerminalDeck', () => {
   test('reports a stream the daemon refused outright, and does not retry it', async () => {
     let attempts = 0;
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
-      attach: async (_daemon, _scope, _id, handlers) => {
+      attach: async (_scope, _id, handlers) => {
         attempts += 1;
         handlers.onRefused(403, 'the operator refused this capability');
-        throw new TerminalStreamRefused(403, 'the operator refused this capability');
+        return { write: () => undefined, control: () => undefined, close: () => undefined };
       },
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(attempts).toBe(1);
@@ -276,7 +262,7 @@ describe('SessionTerminalDeck', () => {
         };
       },
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     run(() => page.unmount());
     await runAsync(async () => {
@@ -289,7 +275,7 @@ describe('SessionTerminalDeck', () => {
 
   test('creates, renames and closes a shell through the daemon that owns it', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     clickNamed(page, 'Create terminal');
@@ -317,7 +303,7 @@ describe('SessionTerminalDeck', () => {
   test('does not kill a shell the reader declined to close', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     deck.confirm = false;
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     clickNamed(page, 'Close terminal process');
@@ -329,7 +315,7 @@ describe('SessionTerminalDeck', () => {
 
   test('expands to fill the viewport and comes back, for handover #41', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(json(page)).not.toContain('"data-expanded"');
@@ -344,7 +330,7 @@ describe('SessionTerminalDeck', () => {
     const deck = fakeDeck(async () => {
       throw new Error('daemon unreachable');
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(json(page)).toContain('daemon unreachable');
@@ -352,13 +338,13 @@ describe('SessionTerminalDeck', () => {
   });
 
   test('words a refused listing as the grant refusal it is, not as a bare HTTP status', async () => {
-    const refusal = new DaemonResponseError(403, '', 'grant_not_granted');
-    const explanation = grantRefusalNotice(refusal)?.guidance.explanation ?? '';
+    const refusal = new DaemonCallError(403, 'grant_not_granted', '');
+    const explanation = grantRefusalNotice(refusal)?.explanation ?? '';
     expect(explanation).not.toBe('');
     const deck = fakeDeck(async () => {
       throw refusal;
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(json(page)).toContain(explanation);
@@ -369,7 +355,7 @@ describe('SessionTerminalDeck', () => {
     const listing = async () =>
       terminalListing([terminalView(FIRST, { title: 'first' }), terminalView(SECOND, { title: 'second' })]);
     const first = fakeDeck(listing);
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={first.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={first.dependencies} scope={scopeAlpha} />);
     await settle();
     const tab = page.root.findAll(
       node => node.type === 'button' && String(node.props.title ?? '').startsWith('second'),
@@ -379,13 +365,11 @@ describe('SessionTerminalDeck', () => {
     await settle();
 
     const second = fakeDeck(listing);
-    run(() =>
-      page.update(<SessionTerminalDeck connection={alpha} dependencies={second.dependencies} scope={scopeAlpha} />),
-    );
+    run(() => page.update(<SessionTerminalDeck dependencies={second.dependencies} scope={scopeAlpha} />));
     await settle();
 
-    expect(second.urls.every(url => url.includes(SECOND))).toBe(true);
-    expect(second.urls).not.toHaveLength(0);
+    expect(second.attached.every(item => item.terminalId === SECOND)).toBe(true);
+    expect(second.attached).not.toHaveLength(0);
     run(() => page.unmount());
   });
 
@@ -393,7 +377,7 @@ describe('SessionTerminalDeck', () => {
     const deck = fakeDeck(async () => {
       throw new Error('daemon unreachable');
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     const start = page.root.findAll(
@@ -410,20 +394,16 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
-  test('never carries one daemon shells into another daemon deck', async () => {
-    // The deck is keyed by (daemon, session) at its call site; what this proves
-    // is that it asks the NEW daemon rather than reusing the previous answer.
+  test('never carries one client’s shells into another client’s deck', async () => {
+    // The shell builds a half per daemon; what this proves is that a deck handed another half's dependencies asks
+    // them rather than reusing the previous answer.
     const alphaDeck = fakeDeck(async () => terminalListing([terminalView(FIRST, { title: 'alpha shell' })]));
     const betaDeck = fakeDeck(async () => terminalListing([terminalView(SECOND, { title: 'beta shell' })]));
-    const page = mount(
-      <SessionTerminalDeck connection={alpha} dependencies={alphaDeck.dependencies} scope={scopeAlpha} />,
-    );
+    const page = mount(<SessionTerminalDeck dependencies={alphaDeck.dependencies} scope={scopeAlpha} />);
     await settle();
     expect(json(page)).toContain('alpha shell');
 
-    run(() =>
-      page.update(<SessionTerminalDeck connection={beta} dependencies={betaDeck.dependencies} scope={scopeBeta} />),
-    );
+    run(() => page.update(<SessionTerminalDeck dependencies={betaDeck.dependencies} scope={scopeBeta} />));
     await settle();
 
     const output = json(page);
@@ -444,7 +424,7 @@ describe('SessionTerminalDeck co-control', () => {
       async () => terminalListing([terminalView(FIRST, { openedBy: { by: 'agent', sessionId: 'mse7wwti' } })]),
       { loadXterm: async () => spy.modules },
     );
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     const pane = spy.instances[0];
@@ -465,7 +445,7 @@ describe('SessionTerminalDeck co-control', () => {
   test('paints the daemon output the agent produced, so the reader watches it live', async () => {
     const spy = xtermSpy();
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     const pane = spy.instances[0];
@@ -487,7 +467,7 @@ describe('SessionTerminalDeck co-control', () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
       loadXterm: () => Promise.reject(new Error('chunk failed')),
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(json(page)).toContain('refused');
@@ -503,7 +483,7 @@ describe('SessionTerminalDeck co-control', () => {
         throw new Error('ticket unavailable');
       },
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     expect(attempts).toBe(1);
@@ -523,7 +503,7 @@ describe('SessionTerminalDeck pane wiring', () => {
     // same letters without the modifier.
     const spy = xtermSpy({ selection: 'built ok' });
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const pane = spy.instances[0];
     if (pane === undefined) throw new Error('the deck did not attach a pane');
@@ -541,7 +521,7 @@ describe('SessionTerminalDeck pane wiring', () => {
     // through TextEncoder would turn every byte above 0x7f into two.
     const spy = xtermSpy();
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     const pane = spy.instances[0];
@@ -561,7 +541,7 @@ describe('SessionTerminalDeck pane wiring', () => {
   test('copies the pane selection the reader made', async () => {
     const spy = xtermSpy({ selection: 'built ok' });
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const pane = spy.instances[0];
     if (pane === undefined) throw new Error('the deck did not attach a pane');
@@ -582,7 +562,7 @@ describe('SessionTerminalDeck pane wiring', () => {
         throw new Error('denied');
       },
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const pane = spy.instances[0];
     if (pane === undefined) throw new Error('the deck did not attach a pane');
@@ -597,7 +577,7 @@ describe('SessionTerminalDeck pane wiring', () => {
 
   test('copies nothing when there is no selection to copy', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     clickNamed(page, 'Copy selection');
@@ -610,7 +590,7 @@ describe('SessionTerminalDeck pane wiring', () => {
   test('survives a pane that cannot be measured yet, because a retained tab is exactly that', async () => {
     const spy = xtermSpy({ fitThrows: true });
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     if (socket === undefined) throw new Error('the deck opened no socket');
@@ -628,7 +608,7 @@ describe('SessionTerminalDeck pane wiring', () => {
 
   test('switches tabs to the shell the reader picked', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND, { title: 'logs' })]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     const tab = page.root
@@ -638,7 +618,7 @@ describe('SessionTerminalDeck pane wiring', () => {
     run(() => (tab.props as { onClick: () => void }).onClick());
     await settle();
 
-    expect(deck.urls.at(-1)).toContain(SECOND);
+    expect(deck.attached.at(-1)?.terminalId).toBe(SECOND);
     run(() => page.unmount());
   });
 
@@ -652,7 +632,7 @@ describe('SessionTerminalDeck pane wiring', () => {
       if (attaches > 1) throw new Error('the address did not answer');
       return await firstAttach(...args);
     };
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
     if (socket === undefined) throw new Error('the deck opened no socket');
@@ -671,9 +651,43 @@ describe('SessionTerminalDeck pane wiring', () => {
     run(() => page.unmount());
   });
 
+  test('R141 input typed on a stream that dropped is never replayed on the stream that replaces it', async () => {
+    const spy = xtermSpy();
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const pane = spy.instances[0];
+    if (pane === undefined) throw new Error('the deck did not attach a pane');
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('open');
+      await Promise.resolve();
+    });
+    run(() => pane.type('rm -rf build\r'));
+    expect(deck.sockets[0]?.sent.filter(frame => frame instanceof Uint8Array)).toHaveLength(1);
+
+    // The carrier drops with that keystroke in flight; the deck reopens after its backoff.
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('close', { code: 1006 });
+      await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS + 100));
+    });
+    await settle();
+    expect(deck.sockets).toHaveLength(2);
+    await runAsync(async () => {
+      deck.sockets[1]?.emit('open');
+      await Promise.resolve();
+    });
+
+    // Nothing typed before the drop reaches the new stream: only what the reader types next does.
+    expect(deck.sockets[1]?.sent.filter(frame => frame instanceof Uint8Array)).toEqual([]);
+    run(() => pane.type('ls\r'));
+    const after = deck.sockets[1]?.sent.filter((frame): frame is Uint8Array => frame instanceof Uint8Array) ?? [];
+    expect(after.map(frame => new TextDecoder().decode(frame))).toEqual(['ls\r']);
+    run(() => page.unmount());
+  });
+
   test('never says reconnecting for a drop its first fast reopen recovers', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     await runAsync(async () => {
       deck.sockets[0]?.emit('open');
@@ -702,59 +716,6 @@ describe('SessionTerminalDeck pane wiring', () => {
     run(() => page.unmount());
   });
 
-  test('reopens at once when the daemon is reachable again, keeping the pane it already drew', async () => {
-    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const listeners = new Set<() => void>();
-    const recovered: string[] = [];
-    const dependencies = {
-      ...deck.dependencies,
-      onRecovered: (daemon: typeof alpha, listener: () => void) => {
-        recovered.push(daemon.daemonId);
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    };
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={dependencies} scope={scopeAlpha} />);
-    await settle();
-    // Live: a recovery has nothing to do.
-    await runAsync(async () => {
-      deck.sockets[0]?.emit('open');
-      for (const listener of [...listeners]) listener();
-      await Promise.resolve();
-    });
-    expect(deck.sockets).toHaveLength(1);
-
-    await runAsync(async () => {
-      deck.sockets[0]?.emit('close', { code: 1006 });
-      await Promise.resolve();
-    });
-    // Waiting out the backoff: no second stream yet.
-    expect(deck.sockets).toHaveLength(1);
-
-    // Act — the connection model says the daemon answered again.
-    await runAsync(async () => {
-      for (const listener of [...listeners]) listener();
-      await Promise.resolve();
-    });
-    await settle();
-
-    // Assert — a second stream, opened now rather than after the backoff, for this daemon.
-    expect(deck.sockets).toHaveLength(2);
-    expect(recovered.every(id => id === 'alpha')).toBe(true);
-    run(() => page.unmount());
-    expect(listeners.size).toBe(0);
-  });
-
-  test('carries a recovery port through the browser dependencies only when one is given', () => {
-    const opener = async () => {
-      throw new Error('unused');
-    };
-    const fetcher = async () => new Response(null);
-    expect(browserTerminalDeckDependencies(fetcher, opener).onRecovered).toBeUndefined();
-    const port = () => () => undefined;
-    expect(browserTerminalDeckDependencies(fetcher, opener, port).onRecovered).toBe(port);
-  });
-
   test('reports a create, rename or close the daemon refused', async () => {
     const refuse = async (): Promise<never> => {
       throw new Error('terminal capacity reached');
@@ -764,7 +725,7 @@ describe('SessionTerminalDeck pane wiring', () => {
       rename: refuse,
       close: refuse,
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     clickNamed(page, 'Create terminal');
@@ -791,7 +752,7 @@ describe('SessionTerminalDeck pane wiring', () => {
   test('leaves the expanded view when the reader presses Escape', async () => {
     // A fixed overlay with no keyboard exit traps whoever opened it by accident.
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     clickNamed(page, 'Full screen');
@@ -808,7 +769,7 @@ describe('SessionTerminalDeck pane wiring', () => {
 
   test('keeps plain Escape for the shell and leaves the expanded view on Shift+Escape', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     clickNamed(page, 'Full screen');
     const shell = document.createElement('div');
@@ -832,12 +793,7 @@ describe('SessionTerminalDeck theming', () => {
     const repainted = new Promise<void>(resolve => {
       markRepainted = resolve;
     });
-    const stopWatchingTheme = browserTerminalDeckDependencies(
-      async () => new Response(),
-      async () => {
-        throw new Error('unused');
-      },
-    ).watchTheme(() => {
+    const stopWatchingTheme = browserTerminalDeckHost().watchTheme(() => {
       repaints += 1;
       markRepainted();
     });
@@ -869,7 +825,7 @@ describe('SessionTerminalDeck theming', () => {
         };
       },
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     // A document mutation is observable only after xterm has opened and the
     // canvas has subscribed to it.
     await settle();
@@ -901,19 +857,19 @@ describe('SessionTerminalDeck theming', () => {
     });
     const root = document.documentElement;
     root.style.setProperty('--font-mono', "'Geist Mono', monospace");
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     await terminalOpened;
     const instance = spy.instances[0];
     if (instance === undefined) throw new Error('no emulator was constructed');
-    expect(instance.font().initial).toBe(`'Geist Mono', "Ferretry Terminal Mono", monospace`);
+    expect(instance.font().initial).toBe(`'Geist Mono', "JetBrains Mono", monospace`);
 
     // Another family brings another stack; an unchanged one is not reassigned.
     root.style.setProperty('--font-mono', "'IBM Plex Mono', monospace");
     run(repaint);
-    expect(instance.font().current).toBe(`'IBM Plex Mono', "Ferretry Terminal Mono", monospace`);
+    expect(instance.font().current).toBe(`'IBM Plex Mono', "JetBrains Mono", monospace`);
     run(repaint);
-    expect(instance.font().current).toBe(`'IBM Plex Mono', "Ferretry Terminal Mono", monospace`);
+    expect(instance.font().current).toBe(`'IBM Plex Mono', "JetBrains Mono", monospace`);
     run(() => page.unmount());
     root.style.removeProperty('--font-mono');
   });
@@ -936,12 +892,7 @@ describe('SessionTerminalDeck focused by a side-pane tab', () => {
   test('selects the terminal its tab was opened for, not the first in the listing', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND)]));
     const page = mount(
-      <SessionTerminalDeck
-        connection={alpha}
-        dependencies={deck.dependencies}
-        focusTerminalId={SECOND}
-        scope={scopeAlpha}
-      />,
+      <SessionTerminalDeck dependencies={deck.dependencies} focusTerminalId={SECOND} scope={scopeAlpha} />,
     );
     await settle();
 
@@ -952,12 +903,7 @@ describe('SessionTerminalDeck focused by a side-pane tab', () => {
   test('leaves the selection alone when the requested terminal is not in the listing', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND)]));
     const page = mount(
-      <SessionTerminalDeck
-        connection={alpha}
-        dependencies={deck.dependencies}
-        focusTerminalId="ffffffffffff"
-        scope={scopeAlpha}
-      />,
+      <SessionTerminalDeck dependencies={deck.dependencies} focusTerminalId="ffffffffffff" scope={scopeAlpha} />,
     );
     await settle();
 
@@ -972,13 +918,7 @@ describe('SessionTerminalDeck as one workspace tab', () => {
     let listing = terminalListing([terminalView(FIRST), terminalView(SECOND)]);
     const deck = fakeDeck(async () => listing);
     const page = mount(
-      <SessionTerminalDeck
-        connection={alpha}
-        dependencies={deck.dependencies}
-        focusTerminalId={SECOND}
-        scope={scopeAlpha}
-        solo
-      />,
+      <SessionTerminalDeck dependencies={deck.dependencies} focusTerminalId={SECOND} scope={scopeAlpha} solo />,
     );
     // Before the listing lands there is nothing to prove the shell against.
     expect(json(page)).toContain('Asking the daemon for this terminal');
@@ -1002,7 +942,6 @@ describe('SessionTerminalDeck as one workspace tab', () => {
     const ports: Array<{ write: (data: string) => void; focus: () => void } | null> = [];
     const page = mount(
       <SessionTerminalDeck
-        connection={alpha}
         dependencies={deck.dependencies}
         focusTerminalId={FIRST}
         interceptInput={data => data.toUpperCase()}
@@ -1051,7 +990,6 @@ describe('SessionTerminalDeck on screen', () => {
     const element = (active: boolean) => (
       <SessionTerminalDeck
         active={active}
-        connection={alpha}
         dependencies={deck.dependencies}
         focusTerminalId={FIRST}
         scope={scopeAlpha}
@@ -1074,7 +1012,7 @@ describe('SessionTerminalDeck on screen', () => {
 
   test('R563 detaches while the page is hidden and attaches a fresh stream when it is shown again', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     expect(deck.sockets).toHaveLength(1);
 
@@ -1106,9 +1044,7 @@ describe('SessionTerminalDeck on screen', () => {
     try {
       const spy = xtermSpy();
       const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
-      const page = mount(
-        <SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />,
-      );
+      const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
       await settle();
       const socket = deck.sockets[0];
       if (socket === undefined) throw new Error('the deck opened no socket');
@@ -1132,7 +1068,7 @@ describe('SessionTerminalDeck on screen', () => {
 
   test('tells a reattached stream the size even though the previous stream was told the same', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     const openLatest = async (): Promise<void> => {
       await settle();
       const socket = deck.sockets.at(-1);
@@ -1161,10 +1097,9 @@ describe('SessionTerminalDeck on screen', () => {
 
   test('sends no size for a pane that cannot be measured, because 80x24 would resize the shell for every viewer', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
-    const page = render(
-      <SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />,
-      { createNodeMock: () => ({ clientWidth: 0, clientHeight: 0 }) },
-    );
+    const page = render(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />, {
+      createNodeMock: () => ({ clientWidth: 0, clientHeight: 0 }),
+    });
     await settle();
     const socket = deck.sockets[0];
     if (socket === undefined) throw new Error('the deck opened no socket');
@@ -1199,7 +1134,7 @@ describe('SessionTerminalDeck quarantine', () => {
     let held = [{ key, until }];
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST, { name: 'dev' })]), {
       quarantines: async () => ({ quarantines: held }),
-      endQuarantine: async (_daemon, _scope, ended_key) => {
+      endQuarantine: async (_scope, ended_key) => {
         ended.push(ended_key);
         held = [];
         return { ended: true };
@@ -1208,47 +1143,40 @@ describe('SessionTerminalDeck quarantine', () => {
     return { deck, ended };
   };
 
-  test('offers both choices when the open terminal is quarantined, by its name or its id', async () => {
+  test('offers only ending the hold when the open terminal is held, by its name or its id', async () => {
     for (const key of ['dev', FIRST]) {
       const { deck } = quarantinedDeck(key);
-      const page = mount(
-        <SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />,
-      );
+      const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
       await settle();
-      expect(textButton(page, 'Show anyway')).toBeDefined();
       expect(textButton(page, 'End quarantine')).toBeDefined();
       expect(json(page)).toContain('hidden from the ferret');
+      expect(json(page)).toContain('and from this screen');
       run(() => page.unmount());
     }
   });
 
   test('shows nothing about a quarantine on another terminal, or none at all', async () => {
     const { deck } = quarantinedDeck('someone-else');
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
-    expect(textButton(page, 'Show anyway')).toBeUndefined();
     expect(textButton(page, 'End quarantine')).toBeUndefined();
     run(() => page.unmount());
   });
 
-  test('"Show anyway" reconnects only this viewer with reveal on, and offers it once', async () => {
+  test('G77 a held terminal has no way to be revealed: no button, and the attach carries nothing but the terminal', async () => {
     const { deck } = quarantinedDeck('dev');
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
-    expect(deck.reveals).toEqual([false]);
-
-    run(() => pressText(page, 'Show anyway'));
-    await settle();
-    expect(deck.reveals).toEqual([false, true]);
-    expect(deck.sockets[0]?.closes[0]?.code).toBe(1000);
     expect(textButton(page, 'Show anyway')).toBeUndefined();
-    expect(textButton(page, 'End quarantine')).toBeDefined();
+    expect(json(page)).not.toContain('Show anyway');
+    expect(deck.attached).toEqual([{ sessionId: 'shared', terminalId: FIRST }]);
+    expect(deck.dependencies.attach.length).toBe(3);
     run(() => page.unmount());
   });
 
-  test('"End quarantine" posts the end route for the listed key, then reconnects without reveal', async () => {
+  test('"End quarantine" posts the end route for the listed key, then reconnects', async () => {
     const { deck, ended } = quarantinedDeck('dev');
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
     await runAsync(async () => {
@@ -1257,7 +1185,6 @@ describe('SessionTerminalDeck quarantine', () => {
     });
     await settle();
     expect(ended).toEqual(['dev']);
-    expect(deck.reveals).toEqual([false, false]);
     expect(deck.sockets).toHaveLength(2);
     expect(textButton(page, 'End quarantine')).toBeUndefined();
     run(() => page.unmount());
@@ -1266,9 +1193,9 @@ describe('SessionTerminalDeck quarantine', () => {
   test('says so and keeps the quarantine when the daemon refuses to end it', async () => {
     const { deck } = quarantinedDeck('dev');
     deck.dependencies.endQuarantine = async () => {
-      throw new DaemonResponseError(403, 'only the owner can end a quarantine');
+      throw new DaemonCallError(403, 'http_403', 'only the owner can end a quarantine');
     };
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     await runAsync(async () => {
       pressText(page, 'End quarantine');
@@ -1289,7 +1216,7 @@ describe('SessionTerminalDeck quarantine', () => {
         return { quarantines: [] };
       },
     });
-    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const page = mount(<SessionTerminalDeck dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     expect(reads).toBe(1);
     run(() => page.unmount());
@@ -1297,5 +1224,5 @@ describe('SessionTerminalDeck quarantine', () => {
       await new Promise(resolve => setTimeout(resolve, 5_200));
     });
     expect(reads).toBe(1);
-  });
+  }, 15_000);
 });

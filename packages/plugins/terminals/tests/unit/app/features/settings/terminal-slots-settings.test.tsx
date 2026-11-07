@@ -5,27 +5,11 @@ import type {
   TerminalHolder,
   TerminalHoldersView,
 } from '../../../../../contract/index.ts';
-import { SETTINGS_LINKS, settingsPaletteEntries } from '@ferretry/app';
-import type { TerminalSlotsClient } from '../../../../../app/features/settings/terminal-slots-api.ts';
-import {
-  TerminalSlotsSettings,
-  terminalSlotsSettingsTab,
-} from '../../../../../app/features/settings/terminal-slots-settings.tsx';
-import { daemonConnection } from '../../../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { interact, mount, must } from '@ferretry/app/testing';
-import { runAsync } from '@ferretry/app/testing';
-import { settleUntil } from '@ferretry/app/testing';
-
-const alpha = daemonConnection({
-  daemonId: 'alpha',
-  baseUrl: 'https://alpha.example.test',
-  deviceId: 'fy_device_id_alpha00000000000000000',
-});
-const beta = daemonConnection({
-  daemonId: 'beta',
-  baseUrl: 'https://beta.example.test',
-  deviceId: 'fy_device_id_beta000000000000000000',
-});
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import { interact, mount, must, runAsync, settleUntil } from '@ferretry/app/testing';
+import { TerminalSlotsSettings } from '../../../../../app/features/settings/terminal-slots-settings.tsx';
+import terminalsApp from '../../../../../app/index.ts';
+import manifest from '../../../../../manifest.ts';
 
 const finished: TerminalHolder = {
   sessionId: 's-1',
@@ -39,17 +23,17 @@ const live: TerminalHolder = { sessionId: 's-2', label: 'wren', standing: 'live'
 /** A machine whose reads answer from the list in turn, and whose close answers `closed`. */
 const machine = (reads: (TerminalHoldersView | Error)[], closed: CloseFinishedTerminalsResponse | Error) => {
   const calls: string[] = [];
-  const createClient = async (): Promise<TerminalSlotsClient> =>
-    ({
-      request: (async (path: string, _schema: unknown, init?: RequestInit) => {
-        calls.push(`${init?.method ?? 'GET'} ${path}`);
-        const next = init?.method === 'POST' ? closed : reads.shift();
-        if (next === undefined) throw new Error('no read scripted');
-        if (next instanceof Error) throw next;
-        return next;
-      }) as TerminalSlotsClient['request'],
-    }) satisfies TerminalSlotsClient;
-  return { calls, createClient };
+  const client: PluginClient = {
+    call: (async (route: string) => {
+      calls.push(route);
+      const next = route.startsWith('POST') ? closed : reads.shift();
+      if (next === undefined) throw new Error('no read scripted');
+      if (next instanceof Error) throw next;
+      return next;
+    }) as PluginClient['call'],
+    subscribe: () => () => undefined,
+  };
+  return { calls, client };
 };
 
 const settled = async (container: HTMLElement, selector: string): Promise<void> => {
@@ -66,7 +50,7 @@ describe('TerminalSlotsSettings', () => {
       ],
       { closed: 6, failed: 0, holders: [live] },
     );
-    const shown = await mount(<TerminalSlotsSettings connection={alpha} createClient={daemon.createClient} />);
+    const shown = await mount(<TerminalSlotsSettings client={daemon.client} />);
     await settled(shown.container, '[data-terminal-slots]');
 
     // Act
@@ -95,9 +79,9 @@ describe('TerminalSlotsSettings', () => {
     const none = machine([{ limit: 24, open: 0, holders: [] }], new Error('unreachable'));
 
     // Act
-    const withLive = await mount(<TerminalSlotsSettings connection={alpha} createClient={live1.createClient} />);
+    const withLive = await mount(<TerminalSlotsSettings client={live1.client} />);
     await settled(withLive.container, '[data-terminal-slots]');
-    const empty = await mount(<TerminalSlotsSettings connection={alpha} createClient={none.createClient} />);
+    const empty = await mount(<TerminalSlotsSettings client={none.client} />);
     await settled(empty.container, '[data-terminal-slots]');
 
     // Assert
@@ -118,9 +102,9 @@ describe('TerminalSlotsSettings', () => {
     const silent = machine([new Error('')], new Error('unreachable'));
 
     // Act
-    const first = await mount(<TerminalSlotsSettings connection={alpha} createClient={refused.createClient} />);
+    const first = await mount(<TerminalSlotsSettings client={refused.client} />);
     await settled(first.container, '[data-terminal-slots-failed]');
-    const second = await mount(<TerminalSlotsSettings connection={alpha} createClient={silent.createClient} />);
+    const second = await mount(<TerminalSlotsSettings client={silent.client} />);
     await settled(second.container, '[data-terminal-slots-failed]');
 
     // Assert
@@ -133,23 +117,21 @@ describe('TerminalSlotsSettings', () => {
   it('says so when a non-error is thrown, and when closing fails', async () => {
     // Arrange
     const closing = machine([{ limit: 24, open: 6, holders: [finished] }], new Error('tmux is gone'));
-    const thrown = {
-      createClient: async (): Promise<TerminalSlotsClient> =>
-        ({
-          request: (async () => {
-            throw 'plain';
-          }) as TerminalSlotsClient['request'],
-        }) satisfies TerminalSlotsClient,
+    const thrown: PluginClient = {
+      call: (async () => {
+        throw 'plain';
+      }) as PluginClient['call'],
+      subscribe: () => () => undefined,
     };
 
     // Act
-    const failing = await mount(<TerminalSlotsSettings connection={alpha} createClient={closing.createClient} />);
+    const failing = await mount(<TerminalSlotsSettings client={closing.client} />);
     await settled(failing.container, '[data-terminal-slots]');
     await interact(() =>
       must(failing.container.querySelector<HTMLButtonElement>('[data-terminal-slots-close]'), 'close').click(),
     );
     await settled(failing.container, '[data-terminal-slots-failed]');
-    const plain = await mount(<TerminalSlotsSettings connection={alpha} createClient={thrown.createClient} />);
+    const plain = await mount(<TerminalSlotsSettings client={thrown} />);
     await settled(plain.container, '[data-terminal-slots-failed]');
 
     // Assert
@@ -159,18 +141,18 @@ describe('TerminalSlotsSettings', () => {
     await plain.unmount();
   });
 
-  it('never shows one machine’s terminals under another', async () => {
+  it('shows the new client’s terminals at once when the client changes, never the old one’s', async () => {
     // Arrange
     const first = machine([{ limit: 24, open: 7, holders: [finished] }], new Error('unreachable'));
-    const shown = await mount(<TerminalSlotsSettings connection={alpha} createClient={first.createClient} />);
+    const shown = await mount(<TerminalSlotsSettings client={first.client} />);
     await settled(shown.container, '[data-terminal-slots]');
 
-    // Act — switch machine: the old list goes at once, the new machine's replaces it.
+    // Act — another machine's client: the old list goes at once, the new machine's replaces it.
     const second = machine([{ limit: 8, open: 1, holders: [live] }], new Error('unreachable'));
-    await shown.render(<TerminalSlotsSettings connection={beta} createClient={second.createClient} />);
+    await shown.render(<TerminalSlotsSettings client={second.client} />);
     await settleUntil(
       () => shown.container.querySelector('[data-terminal-slots-summary]')?.textContent?.includes('of 8') === true,
-      'beta list',
+      'second list',
       runAsync,
     );
 
@@ -180,26 +162,19 @@ describe('TerminalSlotsSettings', () => {
     await shown.unmount();
   });
 
-  it('is offered as a Machine panel and in the palette', async () => {
+  it('is the half’s Terminals settings tab, riding the client the shell built', async () => {
     // Arrange
     const daemon = machine([{ limit: 24, open: 0, holders: [] }], new Error('unreachable'));
-    const tab = terminalSlotsSettingsTab(daemon.createClient);
+    const half = terminalsApp.build?.({ manifest, client: daemon.client });
+    const Tab = must(half?.settings?.terminals, 'the terminals settings tab') as () => React.ReactElement;
 
     // Act
-    const shown = await mount(<tab.Surface connection={alpha} />);
+    const shown = await mount(<Tab />);
     await settled(shown.container, '[data-terminal-slots]');
-    const link = must(
-      SETTINGS_LINKS.find(entry => entry.id === 'terminals'),
-      'the terminals palette link',
-    );
 
     // Assert
-    expect(tab.id).toBe('terminals');
-    expect(tab.label).toBe('Terminals');
-    for (const query of ['terminal', 'capacity'])
-      expect(
-        settingsPaletteEntries(alpha.daemonId, query).find(item => item.id === 'setting-link-terminals')?.href,
-      ).toBe(link.href(alpha.daemonId));
+    expect(manifest.ui?.settings?.map(tab => tab.id)).toContain('terminals');
+    expect(daemon.calls).toEqual(['GET /v1/terminals']);
     await shown.unmount();
   });
 });

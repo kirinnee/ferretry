@@ -17,9 +17,11 @@ import '@ferretry/app/testing';
  * pixel proof is the harness's terminal geometry pass; these are the two rules it rests on.
  */
 
-const srcDir = join(dirname(fileURLToPath(import.meta.url)), '../../src');
-const themes = readFileSync(join(srcDir, 'styles/themes.css'), 'utf8');
-const terminals = readFileSync(join(srcDir, 'components/web-terminals.css'), 'utf8');
+const here = dirname(fileURLToPath(import.meta.url));
+const shellStyles = join(here, '../../../../../app/src/styles');
+const themes = readFileSync(join(shellStyles, 'themes.css'), 'utf8');
+const fontFaces = readFileSync(join(shellStyles, 'theme-fonts.css'), 'utf8');
+const terminals = readFileSync(join(here, '../../../app/components/web-terminals.css'), 'utf8');
 
 /** Every `--font-mono` a theme declares, base included. */
 const monoStacks = [...themes.matchAll(/--font-mono:\s*([^;]+);/gu)].map(match => (match[1] as string).trim());
@@ -63,84 +65,41 @@ describe('the emulator’s own typography', () => {
   });
 });
 
-describe('loading the bundled face', () => {
-  const environment = (loaded: string[], added: unknown[], failing = false) => ({
-    fonts: { add: (face: FontFace) => (added.push(face), undefined as never) },
-    createFace: (family: string, source: string, weight: string) => ({
-      load: async () => {
-        if (failing) throw new Error('the font could not be fetched');
-        loaded.push(`${family} ${weight} ${source.split('/').at(-1)}`);
-        return { family, weight } as unknown as FontFace;
-      },
-    }),
-  });
-
-  it('loads the regular and bold faces once, however many terminals ask', async () => {
-    const loaded: string[] = [];
-    const added: unknown[] = [];
-    const load = terminalFontLoader(() => environment(loaded, added));
-    await Promise.all([load(), load()]);
-    await load();
-    expect(loaded).toEqual([
-      `${TERMINAL_FONT_FACE} 400 jetbrains-mono-latin-400-normal.woff2`,
-      `${TERMINAL_FONT_FACE} 700 jetbrains-mono-latin-700-normal.woff2`,
+describe('the bundled face is the shell’s', () => {
+  it('is declared once by the shell’s stylesheet, in both weights the emulator draws', () => {
+    const faces = [...fontFaces.matchAll(/font-family: '([^']+)';[^}]*?font-weight: (\d+) (\d+);/gu)].filter(
+      match => match[1] === TERMINAL_FONT_FACE,
+    );
+    expect(faces.map(face => [face[2], face[3]])).toEqual([
+      ['100', '500'],
+      ['600', '900'],
     ]);
-    expect(added).toHaveLength(2);
-  });
-
-  it('never fails the terminal: no font API, or a face that will not load, leaves the theme stack', async () => {
-    const added: unknown[] = [];
-    await terminalFontLoader(() => ({ fonts: undefined, createFace: undefined }))();
-    await terminalFontLoader(() => environment([], added, true))();
-    expect(added).toEqual([]);
-    // And the page's own loader resolves whatever this DOM offers.
-    await loadTerminalFont();
   });
 });
 
-describe('loading the bundled face in a browser', () => {
-  it('builds each face from the page’s own FontFace and adds the loaded face to the document', async () => {
-    const constructed: Array<{ readonly family: string; readonly source: string; readonly descriptors: unknown }> = [];
-    const added: unknown[] = [];
-    const scope = globalThis as unknown as { FontFace?: unknown };
-    const realFontFace = scope.FontFace;
-    const realFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
-    class FakeFontFace {
-      constructor(
-        readonly family: string,
-        readonly source: string,
-        readonly descriptors: unknown,
-      ) {
-        constructed.push({ family, source, descriptors });
-      }
-      async load(): Promise<FakeFontFace> {
-        return this;
-      }
-    }
-    scope.FontFace = FakeFontFace;
-    Object.defineProperty(document, 'fonts', {
-      configurable: true,
-      value: { add: (face: unknown) => added.push(face) },
-    });
-    try {
-      // A fresh copy of the module: the shipped loader is one load per page and may already have run.
-      const freshModule = '../../src/components/terminal-font-loader.ts?browser-face';
-      const fresh = (await import(freshModule)) as {
-        loadTerminalFont: () => Promise<void>;
-      };
-      await fresh.loadTerminalFont();
-    } finally {
-      scope.FontFace = realFontFace;
-      if (realFonts) Object.defineProperty(document, 'fonts', realFonts);
-      else Reflect.deleteProperty(document, 'fonts');
-    }
+describe('loading the bundled face', () => {
+  const environment = (asked: string[], failing = false) => ({
+    fonts: {
+      load: async (face: string) => {
+        if (failing) throw new Error('the font could not be fetched');
+        asked.push(face);
+        return [];
+      },
+    },
+  });
 
-    expect(constructed.map(face => face.family)).toEqual([TERMINAL_FONT_FACE, TERMINAL_FONT_FACE]);
-    expect(constructed.map(face => face.descriptors)).toEqual([
-      { weight: '400', style: 'normal' },
-      { weight: '700', style: 'normal' },
-    ]);
-    expect(constructed.every(face => /^url\(".+\.woff2"\)$/u.test(face.source))).toBe(true);
-    expect(added).toHaveLength(2);
+  it('asks the document for the regular and bold faces once, however many terminals ask', async () => {
+    const asked: string[] = [];
+    const load = terminalFontLoader(() => environment(asked));
+    await Promise.all([load(), load()]);
+    await load();
+    expect(asked).toEqual([`400 12.5px "${TERMINAL_FONT_FACE}"`, `700 12.5px "${TERMINAL_FONT_FACE}"`]);
+  });
+
+  it('never fails the terminal: no font API, or a face that will not load, leaves the theme stack', async () => {
+    await terminalFontLoader(() => ({ fonts: undefined }))();
+    await terminalFontLoader(() => environment([], true))();
+    // And the page's own loader resolves whatever this DOM offers.
+    await loadTerminalFont();
   });
 });

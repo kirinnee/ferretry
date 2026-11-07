@@ -18,21 +18,20 @@
  * and a scrollbar. And the header is one short row: the terminal glyph and a "live" dot, its words
  * kept for screen readers and the tooltip.
  *
- * What changed for Ferretry: the read is bound to one paired daemon. The
+ * What changed for Ferretry: the read rides the shell's client for the one daemon this half is built for. The
  * original polled a page-global client, which cannot be right when two daemons
  * are paired and both know a session by that id.
  */
 
+import { useLayoutMode } from '@ferretry/app/ui';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLinkBehaviour } from '../../../browsers/app/features/browser/external-link.tsx';
-import { useLayoutMode } from '../../../layouts/app/hooks/use-layout-mode.ts';
-import { useStickToBottom } from '../../../conversation/app/hooks/use-stick-to-bottom.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { type DaemonSessionScope, daemonSessionKey } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { useDaemonFetch } from '@ferretry/app';
+import { browserLinkHost, type LinkHost } from '../lib/link-host.ts';
 import { splitLinkedRuns } from '../lib/terminal-links.ts';
-import { JumpToLatest } from '../../../conversation/app/components/jump-to-latest.tsx';
+import { useStickToBottom } from '../lib/use-stick-to-bottom.ts';
+import type { TerminalScope } from '../lib/web-terminals.ts';
+import { JumpToLatest } from './jump-to-latest.tsx';
 import {
   describeSnapshotError,
   fitFontPx,
@@ -48,11 +47,12 @@ const PANE_PADDING_X_PX = 24;
 const POLL_MS = 3_000;
 
 /** The daemon read, injected so tests and the visual harness never open a socket. */
-export type PaneSnapshotReader = (daemon: DaemonConnection, scope: DaemonSessionScope) => Promise<string>;
+export type PaneSnapshotReader = (scope: TerminalScope) => Promise<string>;
 
 export interface TerminalSnapshotViewProps {
-  daemon: DaemonConnection;
-  scope: DaemonSessionScope;
+  /** This half's client: the one daemon the ferret lives on. */
+  client: PluginClient;
+  scope: TerminalScope;
   /** Optional host-runtime identity. Remote readers deliberately cannot call
    * the loopback-only attach route, so absence is rendered as absence rather
    * than replacing it with the public session id. */
@@ -66,10 +66,12 @@ export interface TerminalSnapshotViewProps {
   fontFamily?: string;
   /** The reader is a live capture rather than the stored frame, so the header says "live", not "cached". */
   live?: boolean;
+  /** Where a link in the capture opens; absent: the reader's browser. */
+  links?: LinkHost;
 }
 
 export const TerminalSnapshotView = ({
-  daemon,
+  client,
   scope,
   tmuxSession,
   now = Date.now,
@@ -77,12 +79,12 @@ export const TerminalSnapshotView = ({
   refreshKey = 0,
   fontFamily,
   live = false,
+  links: injectedLinks,
 }: TerminalSnapshotViewProps) => {
-  // Through the carrier router by default: a paired device has no bearer value of its own to read with.
-  const fetcher = useDaemonFetch();
+  // Through the shell's client by default: a paired device has no bearer value of its own to read with.
   const readSnapshot = useMemo<PaneSnapshotReader>(
-    () => injectedReader ?? ((daemon, scope) => readPaneSnapshot(daemon, scope, undefined, fetcher)),
-    [fetcher, injectedReader],
+    () => injectedReader ?? (given => readPaneSnapshot(client, given)),
+    [client, injectedReader],
   );
   const [text, setText] = useState('');
   // `stale` only ever turns true after a successful snapshot, so the initial
@@ -92,14 +94,16 @@ export const TerminalSnapshotView = ({
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [tick, setTick] = useState(() => now());
 
-  // The whole pane belongs to exactly one (daemon, session): switching either
+  // The whole pane belongs to exactly one (client, ferret): switching either
   // must not leave the previous daemon's text on screen for even one frame.
   // Adjusting during render rather than in an effect is what makes that true —
   // an effect would repaint the old daemon's output once before clearing it.
-  const key = daemonSessionKey(scope);
+  const key = scope.sessionId;
   const [renderedKey, setRenderedKey] = useState(key);
-  if (renderedKey !== key) {
+  const [renderedClient, setRenderedClient] = useState(client);
+  if (renderedKey !== key || renderedClient !== client) {
     setRenderedKey(key);
+    setRenderedClient(client);
     setText('');
     setStale(false);
     setErrorMessage(null);
@@ -118,7 +122,7 @@ export const TerminalSnapshotView = ({
   const poll = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return;
     try {
-      const snapshot = await readSnapshot(daemon, scope);
+      const snapshot = await readSnapshot(scope);
       setText(snapshot);
       setLastUpdatedAt(now());
       setStale(false);
@@ -129,7 +133,7 @@ export const TerminalSnapshotView = ({
       setStale(true);
       setErrorMessage(describeSnapshotError(error));
     }
-  }, [daemon, now, readSnapshot, scope]);
+  }, [now, readSnapshot, scope]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -187,7 +191,7 @@ export const TerminalSnapshotView = ({
   const fontSize = fit ? fitFontPx(paneColumns(text), paneWidth - PANE_PADDING_X_PX) : undefined;
   // Addresses in the capture are real anchors, opened by the one "Open links in" decision. The text
   // is unchanged, so the fit measurement above and the copied selection read exactly what was captured.
-  const links = useLinkBehaviour();
+  const links = useMemo(() => injectedLinks ?? browserLinkHost(), [injectedLinks]);
   const runs = useMemo(() => splitLinkedRuns(text), [text]);
   const preStyle = {
     ...(fontFamily === undefined ? {} : { fontFamily }),
@@ -282,7 +286,6 @@ export const TerminalSnapshotView = ({
                     ),
                   )}
             </pre>
-            {links.sheet}
           </div>
         </div>
         <JumpToLatest onJump={jumpToLatest} shown={jumpShown} />

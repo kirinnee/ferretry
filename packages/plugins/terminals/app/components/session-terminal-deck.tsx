@@ -16,15 +16,13 @@
  * ONE DAEMON, ALWAYS. The original called a page-global `api`, which is wrong the
  * moment two daemons are paired: a session id is minted per daemon and collides
  * freely, so `s1` on a laptop and `s1` on a workstation are different sessions
- * with different terminals. Every call here takes the explicit `(connection,
- * scope)` pair, and the whole deck is remounted by key when either changes —
- * one daemon's shell must never appear under another daemon's session.
+ * with different terminals. The shell builds one half per daemon and hands it that
+ * daemon's own client, so every call here rides it and a shell can never appear
+ * under another daemon's ferret.
  *
- * THE STREAM IS A PORT, NOT A SOCKET. A direct viewer opens a `wss://` socket at the daemon's own
- * address, carrying a short-lived ticket bought over HTTP so the durable device token never enters a
- * URL that outlives it in history or logs. A RELAYED viewer has no such address to open — that is the
- * one the rendezvous exists because this browser cannot reach — so it gets a §14 stream session and no
- * ticket at all. `lib/web-terminals.ts` owns both adapters; this deck asks for four operations.
+ * THE STREAM IS A PORT, NOT A SOCKET: the shell's guarded duplex socket, on whichever carrier it chose.
+ * `lib/web-terminals.ts` owns the adapter; this deck asks for three operations. THE VIEWER SHOWS WHAT THE DAEMON
+ * DRAWS: masked cells, and the daemon's own notice while the terminal is held. There is no "show anyway".
  *
  * XTERM IS LOADED LAZILY. It is the largest dependency in this bundle and most
  * readers never open a shell; a static import would put a terminal emulator in
@@ -32,6 +30,15 @@
  * rather than leaving an empty box.
  */
 
+import {
+  Button,
+  FullscreenToggle,
+  useDocumentVisible,
+  useFullscreen,
+  describeSurfaceOwnership,
+  type SurfaceOwnership,
+} from '@ferretry/app';
+import { KEYBOARD_CAPTURE_ATTRIBUTE } from '@ferretry/app/ui';
 import type { InputQuarantine, InputQuarantineList } from '../lib/protocol/holds.ts';
 import type { TerminalListView, TerminalView } from '../../contract/index.ts';
 import { Check, Clipboard, Pencil, Plus, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react';
@@ -44,18 +51,11 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useLinkBehaviour } from '../../../browsers/app/features/browser/external-link.tsx';
-import { useDocumentVisible } from '@ferretry/app';
-import { useFullscreen } from '@ferretry/app';
-import { RECONNECTING_GRACE_MS } from '../../../connections/app/lib/connection-health.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../../../access/app/lib/grants.ts';
-import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../../../conversation/app/lib/keyboard-capture.ts';
-import type { DaemonFetch } from '../../../runtimes/app/lib/runtime-models.ts';
-import { describeSurfaceOwnership, type SurfaceOwnership } from '@ferretry/app';
+import { grantRefusalNotice } from '../lib/grant-notice.ts';
+import { browserLinkHost, type LinkHost } from '../lib/link-host.ts';
 import {
   describeCoControl,
+  RECONNECTING_GRACE_MS,
   shouldReopenTerminalStream,
   type TerminalLinkState,
   terminalReopenDelayMs,
@@ -69,23 +69,13 @@ import {
   terminalLinkProvider,
 } from '../lib/terminal-links.ts';
 import {
-  browserTerminalStreamAttach,
-  closeSessionTerminal,
-  createSessionTerminal,
-  endSessionQuarantine,
-  listSessionQuarantines,
-  listSessionTerminals,
-  renameSessionTerminal,
-  type TerminalAttachOptions,
+  type TerminalScope,
   type TerminalStream,
   type TerminalStreamHandlers,
-  type TerminalStreamOpener,
-  TerminalStreamRefused,
   terminalLimitLabel,
 } from '../lib/web-terminals.ts';
-import { Button } from '@ferretry/app';
-import { FullscreenToggle } from '@ferretry/app';
 import { loadTerminalFont } from './terminal-font-loader.ts';
+import './web-terminals.css';
 
 type XtermModules = {
   readonly Terminal: typeof import('@xterm/xterm').Terminal;
@@ -100,32 +90,24 @@ type XtermModules = {
  * harness renders a deck with a scripted pane instead of opening a real shell.
  */
 export interface TerminalDeckDependencies {
-  list(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalListView>;
-  create(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalView>;
-  rename(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, title: string): Promise<TerminalView>;
-  close(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<unknown>;
+  list(scope: TerminalScope): Promise<TerminalListView>;
+  create(scope: TerminalScope): Promise<TerminalView>;
+  rename(scope: TerminalScope, id: string, title: string): Promise<TerminalView>;
+  close(scope: TerminalScope, id: string): Promise<unknown>;
   /**
-   * Attaches to one terminal's live stream over whichever carrier is live.
+   * Attaches to one terminal's live stream on the shell's socket.
    *
-   * ONE OPERATION RATHER THAN "BUILD A URL, THEN OPEN A SOCKET", because a relayed terminal has no
-   * URL to build: it is a §14 stream session over a rendezvous, and the daemon's own address is the
-   * one the relay exists because this browser cannot reach it. `web-terminals.ts` owns both adapters
-   * and this deck stops knowing which one it got.
+   * ONE OPERATION RATHER THAN "BUILD A URL, THEN OPEN A SOCKET", because the carrier is the shell's to choose and
+   * this deck stops knowing which one it got. There is no option to ask for more than the daemon draws.
    */
-  attach(
-    daemon: DaemonConnection,
-    scope: DaemonSessionScope,
-    id: string,
-    handlers: TerminalStreamHandlers,
-    options?: TerminalAttachOptions,
-  ): Promise<TerminalStream>;
+  attach(scope: TerminalScope, id: string, handlers: TerminalStreamHandlers): Promise<TerminalStream>;
   /**
-   * The terminals of this session the daemon is keeping from the agent right now (a secret was just
-   * typed into them). Absent means the deck shows no quarantine controls.
+   * The terminals of this ferret the daemon is holding from the agent right now (a secret was just typed into
+   * them; Vault's holds). Absent means the deck shows no hold controls.
    */
-  quarantines?(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<InputQuarantineList>;
+  quarantines?(scope: TerminalScope): Promise<InputQuarantineList>;
   /** Ends one quarantine early, by the key the listing gave. */
-  endQuarantine?(daemon: DaemonConnection, scope: DaemonSessionScope, key: string): Promise<unknown>;
+  endQuarantine?(scope: TerminalScope, key: string): Promise<unknown>;
   loadXterm(): Promise<XtermModules>;
   /** Subscribes to the document theme attributes and returns its cleanup. */
   watchTheme(repaint: () => void): () => void;
@@ -134,44 +116,18 @@ export interface TerminalDeckDependencies {
   /** Confirmation before a hyperlink whose text does not name its target is opened. Injected so a test never blocks. */
   confirmLink(visible: string, href: string): boolean;
   writeClipboard(text: string): Promise<void>;
-  /**
-   * "This daemon is reachable again" (the connection model's `onRecovered`); returns how to stop. A
-   * pane waiting out its reopen backoff reopens at once. Absent means panes wait out the backoff.
-   */
-  onRecovered?(daemon: DaemonConnection, listener: () => void): () => void;
+  /** Where a link the emulator draws opens (Settings › "Open links in"); see `lib/link-host.ts`. */
+  readonly links: LinkHost;
 }
-
-/**
- * The browser's real dependencies, bound to the carrier this daemon's traffic is on.
- *
- * THE FETCHER IS THREADED THROUGH EVERY HTTP CALL. `list`, `create`, `rename` and `close` used to
- * default to `browserFetch` — the raw network — which a paired device cannot use at all now: it holds
- * no bearer value, so every daemon call rides a session the device key opened. The control plane and
- * the stream travel the same carrier as every other daemon call.
- */
-export const browserTerminalDeckDependencies = (
-  fetcher: DaemonFetch,
-  openStream: TerminalStreamOpener,
-  onRecovered?: TerminalDeckDependencies['onRecovered'],
-): TerminalDeckDependencies => ({
-  ...(onRecovered === undefined ? {} : { onRecovered }),
-  list: (daemon, scope) => listSessionTerminals(daemon, scope, fetcher),
-  create: (daemon, scope) => createSessionTerminal(daemon, scope, {}, fetcher),
-  rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
-  close: (daemon, scope, id) => closeSessionTerminal(daemon, scope, id, fetcher),
-  attach: browserTerminalStreamAttach(openStream),
-  quarantines: (daemon, scope) => listSessionQuarantines(daemon, scope, fetcher),
-  endQuarantine: (daemon, scope, key) => endSessionQuarantine(daemon, scope, key, fetcher),
-  ...browserTerminalDeckHost(),
-});
 
 /** The parts of a deck's dependencies that are this browser's, not the daemon's: emulator, theme, dialogs, clipboard. */
 export type TerminalDeckHost = Pick<
   TerminalDeckDependencies,
-  'loadXterm' | 'watchTheme' | 'confirmClose' | 'confirmLink' | 'writeClipboard'
+  'loadXterm' | 'watchTheme' | 'confirmClose' | 'confirmLink' | 'writeClipboard' | 'links'
 >;
 
 export const browserTerminalDeckHost = (): TerminalDeckHost => ({
+  links: browserLinkHost(),
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };
@@ -191,11 +147,10 @@ export const browserTerminalDeckHost = (): TerminalDeckHost => ({
 });
 
 export interface SessionTerminalDeckProps {
-  readonly connection: DaemonConnection;
-  readonly scope: DaemonSessionScope;
+  readonly scope: TerminalScope;
   /** Display only — the daemon derives and enforces the shell's cwd itself. */
   readonly cwd?: string;
-  /** Required: a deck has no network of its own — every call rides the router's sessions. */
+  /** Required: a deck has no network of its own — every call rides the shell's client. */
   readonly dependencies: TerminalDeckDependencies;
   /**
    * The terminal this mount was opened FOR — a `terminal:<id>` side-pane tab
@@ -257,8 +212,7 @@ const quarantineEnd = (until: string): string => {
 
 const failure = (error: unknown): string => {
   const grant = grantRefusalNotice(error);
-  if (grant !== null)
-    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+  if (grant !== null) return grant.detail === '' ? grant.explanation : `${grant.explanation} ${grant.detail}`;
   return error instanceof Error ? error.message : String(error);
 };
 
@@ -323,13 +277,10 @@ const sendResize = (
 };
 
 interface TerminalCanvasProps {
-  readonly connection: DaemonConnection;
-  readonly scope: DaemonSessionScope;
+  readonly scope: TerminalScope;
   readonly terminal: TerminalView;
   readonly active: boolean;
   readonly scrollback: number;
-  /** Ask the daemon to show THIS viewer the pane although it is quarantined. Never persisted. */
-  readonly reveal: boolean;
   /** Bumped to reconnect this viewer's stream without changing anything else, e.g. after a quarantine ends. */
   readonly reconnectVersion: number;
   readonly dependencies: TerminalDeckDependencies;
@@ -347,12 +298,10 @@ interface TerminalCanvasProps {
  * without holding a socket open against the daemon's idle policy.
  */
 function TerminalCanvas({
-  connection,
   scope,
   terminal,
   active,
   scrollback,
-  reveal,
   reconnectVersion,
   dependencies,
   onLink,
@@ -374,11 +323,7 @@ function TerminalCanvas({
   interceptRef.current = interceptInput;
   const onInputPortRef = useRef(onInputPort);
   onInputPortRef.current = onInputPort;
-  // Links open where Settings › "Open links in" says, like every chat link. The hook is read through
-  // a ref: the emulator is built once per (dependencies, scrollback), and the setting changes under it.
-  const links = useLinkBehaviour();
-  const linksRef = useRef(links);
-  linksRef.current = links;
+  // Links open where Settings › "Open links in" says, like every chat link (`dependencies.links`).
   const [readyVersion, setReadyVersion] = useState(0);
   const [reopenVersion, setReopenVersion] = useState(0);
   const attemptRef = useRef(0);
@@ -416,8 +361,8 @@ function TerminalCanvas({
           columns: (): number => screen?.cols ?? 0,
         };
         const linkSink = {
-          open: (click: Parameters<typeof linksRef.current.open>[0], href: string): void =>
-            linksRef.current.open(click, { href, element: host }),
+          open: (click: Parameters<LinkHost['open']>[0], href: string): void =>
+            dependencies.links.open(click, { href, element: host }),
           confirm: (visible: string, href: string): boolean => dependencies.confirmLink(visible, href),
         };
         const xterm = new Terminal({
@@ -554,72 +499,54 @@ function TerminalCanvas({
         terminalReopenDelayMs(attemptRef.current),
       );
     };
-    // THE DAEMON IS BACK: a pane waiting out its backoff reopens now. The emulator is not touched, so
-    // the last frame stays on screen until the new stream paints over it.
-    const stopRecovered = dependencies.onRecovered?.(connection, () => {
-      if (disposed || reopenTimer === undefined) return;
-      clearTimeout(reopenTimer);
-      reopenTimer = undefined;
-      attemptRef.current = 0;
-      setReopenVersion(version => version + 1);
-    });
-
-    // The attach is asynchronous on both carriers — a ticket purchase, or a rendezvous handshake —
-    // so every teardown path has to survive the await: a tab switched away from mid-attach must not
+    // The attach is asynchronous, so every teardown path has to survive the await: a tab switched away from mid-attach must not
     // leave a stream nobody is watching.
     void dependencies
-      .attach(
-        connection,
-        scope,
-        terminal.id,
-        {
-          onOpen: () => {
-            if (disposed) return;
-            attemptRef.current = 0;
-            endQuiet();
-            onLinkRef.current('live');
-            globalThis.requestAnimationFrame(() => {
-              if (disposed || stream === null) return;
-              // An unmeasurable host reports 80x24, which would resize the shell under every other viewer.
-              if (hostRef.current === null || hostRef.current.clientWidth < 1 || hostRef.current.clientHeight < 1)
-                return;
-              try {
-                fit.fit();
-                sendResize(lastResizeRef, stream, xterm.cols, xterm.rows);
-              } catch {
-                // A zero-sized retained pane is fitted by ResizeObserver later.
-              }
-            });
-          },
-          onBytes: bytes => {
-            if (!disposed) xterm.write(bytes);
-          },
-          onClosed: code => {
-            if (disposed) return;
-            // THE STREAM'S OWN CODE, NEVER THE SESSION'S. On a relay the meaningful code arrives in a
-            // sealed `stream-close` record and a `4440` follows it as expected teardown; handing that
-            // `4440` here would read as "retry" against a stream the daemon deliberately ended, and
-            // the reader would watch a shell reopen and die at the backoff cap forever.
-            if (!shouldReopenTerminalStream(code)) {
-              // The daemon has judged this client. Retrying asks it the same
-              // question, so the reader is told instead of watching a loop.
-              endQuiet();
-              onLinkRef.current('refused');
-              return;
+      .attach(scope, terminal.id, {
+        onOpen: () => {
+          if (disposed) return;
+          attemptRef.current = 0;
+          endQuiet();
+          onLinkRef.current('live');
+          globalThis.requestAnimationFrame(() => {
+            if (disposed || stream === null) return;
+            // An unmeasurable host reports 80x24, which would resize the shell under every other viewer.
+            if (hostRef.current === null || hostRef.current.clientWidth < 1 || hostRef.current.clientHeight < 1) return;
+            try {
+              fit.fit();
+              sendResize(lastResizeRef, stream, xterm.cols, xterm.rows);
+            } catch {
+              // A zero-sized retained pane is fitted by ResizeObserver later.
             }
-            retryLater();
-          },
-          onRefused: () => {
-            // §14 gives `stream-refused` a status so "it is gone" can be told from "the daemon broke".
-            // It is final for this attempt, so it reaches the state that says so rather than the retry
-            // that would ask a permanent 403 the same question at fifteen-second intervals forever.
-            if (disposed) return;
+          });
+        },
+        onBytes: bytes => {
+          if (!disposed) xterm.write(bytes);
+        },
+        onClosed: code => {
+          if (disposed) return;
+          // THE STREAM'S OWN CODE, NEVER THE SESSION'S. On a relay the meaningful code arrives in a
+          // sealed `stream-close` record and a `4440` follows it as expected teardown; handing that
+          // `4440` here would read as "retry" against a stream the daemon deliberately ended, and
+          // the reader would watch a shell reopen and die at the backoff cap forever.
+          if (!shouldReopenTerminalStream(code)) {
+            // The daemon has judged this client. Retrying asks it the same
+            // question, so the reader is told instead of watching a loop.
             endQuiet();
             onLinkRef.current('refused');
-          },
+            return;
+          }
+          retryLater();
         },
-        { reveal },
-      )
+        onRefused: () => {
+          // §14 gives `stream-refused` a status so "it is gone" can be told from "the daemon broke".
+          // It is final for this attempt, so it reaches the state that says so rather than the retry
+          // that would ask a permanent 403 the same question at fifteen-second intervals forever.
+          if (disposed) return;
+          endQuiet();
+          onLinkRef.current('refused');
+        },
+      })
       .then(attached => {
         if (disposed) {
           attached.close(1000, 'terminal tab detached');
@@ -628,18 +555,15 @@ function TerminalCanvas({
         stream = attached;
         streamRef.current = attached;
       })
-      .catch(reason => {
+      .catch(() => {
         if (disposed) return;
-        // A refusal has already reported itself through `onRefused` and must not be retried.
-        // Everything else — an unreachable daemon, a refused ticket, a rendezvous that did not
-        // answer — is worth retrying: a device token is still valid across a network change.
-        if (reason instanceof TerminalStreamRefused) return;
+        // A refusal reports itself through `onRefused` and is never retried. Everything else — a paused plugin, an
+        // unreachable daemon — is worth retrying: the device's key is still valid across a network change.
         retryLater();
       });
 
     return () => {
       disposed = true;
-      stopRecovered?.();
       if (reopenTimer !== undefined) clearTimeout(reopenTimer);
       if (streamRef.current === stream) streamRef.current = null;
       // §14 makes a client's leave an explicit sealed record rather than a dropped socket, "so that
@@ -649,7 +573,7 @@ function TerminalCanvas({
       // A reopen inside the quiet window is not a pane going idle: the next run decides what the lamp says.
       if (quietRef.current === undefined) onLinkRef.current('idle');
     };
-  }, [active, connection, dependencies, readyVersion, reopenVersion, reconnectVersion, reveal, scope, terminal.id]);
+  }, [active, dependencies, readyVersion, reopenVersion, reconnectVersion, scope, terminal.id]);
 
   return (
     // `role="application"` is the honest answer to "what IS this element": a
@@ -657,23 +581,19 @@ function TerminalCanvas({
     // screen reader to stop intercepting arrow keys and pass them through, which
     // is the difference between a usable terminal and one where the reader's
     // cursor keys move the reading position instead of the shell's history.
-    <>
-      <div
-        aria-label={`${terminal.title} shell`}
-        className="kt-webterm__xterm"
-        data-terminal-canvas={terminal.id}
-        {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
-        onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => event.stopPropagation()}
-        ref={hostRef}
-        role="application"
-      />
-      {links.sheet}
-    </>
+    <div
+      aria-label={`${terminal.title} shell`}
+      className="kt-webterm__xterm"
+      data-terminal-canvas={terminal.id}
+      {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
+      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => event.stopPropagation()}
+      ref={hostRef}
+      role="application"
+    />
   );
 }
 
 export function SessionTerminalDeck({
-  connection,
   scope,
   cwd,
   dependencies,
@@ -696,12 +616,11 @@ export function SessionTerminalDeck({
   const fullscreen = useFullscreen<HTMLElement>();
   const [error, setError] = useState<string | null>(null);
   const [quarantines, setQuarantines] = useState<readonly InputQuarantine[]>([]);
-  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
   const [reconnectVersion, setReconnectVersion] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
-      const next = await dependencies.list(connection, scope);
+      const next = await dependencies.list(scope);
       // A listing about another session is damaged evidence, not an empty one.
       // Showing it would put another session's shells under this one's tabs.
       if (next.sessionId !== scope.sessionId) {
@@ -718,7 +637,7 @@ export function SessionTerminalDeck({
     } catch (caught) {
       setError(failure(caught));
     }
-  }, [connection, dependencies, scope]);
+  }, [dependencies, scope]);
 
   useEffect(() => {
     void refresh();
@@ -734,14 +653,9 @@ export function SessionTerminalDeck({
     let stopped = false;
     const poll = async (): Promise<void> => {
       try {
-        const next = (await read(connection, scope)).quarantines;
+        const next = (await read(scope)).quarantines;
         if (stopped) return;
         setQuarantines(current => (sameQuarantines(current, next) ? current : next));
-        // A reveal belongs to the quarantine it was asked for; the next one starts hidden again.
-        setRevealed(current => {
-          const kept = new Set([...current].filter(key => next.some(quarantine => quarantine.key === key)));
-          return kept.size === current.size ? current : kept;
-        });
       } catch {
         // The listing's own error banner already reports an unreachable daemon.
       }
@@ -752,7 +666,7 @@ export function SessionTerminalDeck({
       stopped = true;
       clearInterval(timer);
     };
-  }, [connection, dependencies, scope, streaming]);
+  }, [dependencies, scope, streaming]);
 
   const listed = list?.terminals ?? [];
   // A solo body shows its one shell or nothing; it never falls back to whichever shell is first.
@@ -777,27 +691,14 @@ export function SessionTerminalDeck({
   const quarantineOf = (terminal: TerminalView): InputQuarantine | undefined =>
     quarantines.find(item => item.key === terminal.id || item.key === terminal.name);
   const activeQuarantine = active === null ? undefined : quarantineOf(active);
-  const activeRevealed = activeQuarantine !== undefined && revealed.has(activeQuarantine.key);
-
-  const showAnyway = (): void => {
-    if (activeQuarantine === undefined) return;
-    const { key } = activeQuarantine;
-    setRevealed(current => new Set(current).add(key));
-  };
-
   const endQuarantine = async (): Promise<void> => {
     const end = dependencies.endQuarantine;
     if (active === null || activeQuarantine === undefined || end === undefined || busy) return;
     const { key } = activeQuarantine;
     setBusy(true);
     try {
-      await end(connection, scope, key);
+      await end(scope, key);
       setQuarantines(current => current.filter(item => item.key !== key));
-      setRevealed(current => {
-        const rest = new Set(current);
-        rest.delete(key);
-        return rest;
-      });
       setReconnectVersion(version => version + 1);
       setError(null);
     } catch (caught) {
@@ -812,7 +713,7 @@ export function SessionTerminalDeck({
     setBusy(true);
     setError(null);
     try {
-      const terminal = await dependencies.create(connection, scope);
+      const terminal = await dependencies.create(scope);
       setList(current =>
         current === null
           ? current
@@ -841,7 +742,7 @@ export function SessionTerminalDeck({
     if (active === null || renameValue.trim() === '' || busy) return;
     setBusy(true);
     try {
-      const updated = await dependencies.rename(connection, scope, active.id, renameValue.trim());
+      const updated = await dependencies.rename(scope, active.id, renameValue.trim());
       setList(
         current =>
           current && {
@@ -865,7 +766,7 @@ export function SessionTerminalDeck({
     const fallbackId = terminals[index + 1]?.id ?? terminals[index - 1]?.id ?? null;
     setBusy(true);
     try {
-      await dependencies.close(connection, scope, active.id);
+      await dependencies.close(scope, active.id);
       setList(
         current =>
           current && {
@@ -1071,21 +972,9 @@ export function SessionTerminalDeck({
           {activeQuarantine === undefined ? null : (
             <div className="kt-webterm__quarantine" data-quarantine="" role="status">
               <span id={`web-terminal-quarantine-${activeQuarantine.key}`}>
-                {activeRevealed
-                  ? `This terminal is hidden from the ferret until ${quarantineEnd(activeQuarantine.until)}. It is shown to you on this screen only.`
-                  : `A secret was just typed here, so this terminal is hidden from the ferret and from this screen until ${quarantineEnd(activeQuarantine.until)}.`}
+                A secret was just typed here, so this terminal is hidden from the ferret and from this screen until{' '}
+                {quarantineEnd(activeQuarantine.until)}.
               </span>
-              {activeRevealed ? null : (
-                <Button
-                  aria-describedby={`web-terminal-quarantine-${activeQuarantine.key}`}
-                  onClick={showAnyway}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Show anyway
-                </Button>
-              )}
               <Button
                 aria-describedby={`web-terminal-quarantine-${activeQuarantine.key}`}
                 disabled={busy}
@@ -1111,7 +1000,6 @@ export function SessionTerminalDeck({
               >
                 <TerminalCanvas
                   active={streaming && terminal.id === activeId}
-                  connection={connection}
                   dependencies={dependencies}
                   interceptInput={interceptInput}
                   onInputPort={onInputPort}
@@ -1126,7 +1014,6 @@ export function SessionTerminalDeck({
                     )
                   }
                   reconnectVersion={reconnectVersion}
-                  reveal={revealed.has(quarantineOf(terminal)?.key ?? '')}
                   scope={scope}
                   scrollback={list?.limits.scrollbackLines ?? 5_000}
                   terminal={terminal}

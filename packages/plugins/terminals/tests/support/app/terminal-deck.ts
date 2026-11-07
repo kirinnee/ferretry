@@ -52,10 +52,10 @@ export interface FakeDeck {
   readonly renamed: { id: string; title: string }[];
   readonly closed: string[];
   readonly copied: string[];
-  /** Stream URLs the deck resolved, so a test can prove daemon binding. */
-  readonly urls: string[];
-  /** The `reveal` choice of every attach, so a test can prove a viewer asked to see a quarantined pane. */
-  readonly reveals: boolean[];
+  /** The ferret and terminal of every attach, so a test can prove which stream the deck asked for. */
+  readonly attached: { readonly sessionId: string; readonly terminalId: string }[];
+  /** Every link the emulator asked to open. */
+  readonly opened: string[];
   confirm: boolean;
   /** Every hyperlink the deck asked about, and the answer it is given. */
   readonly linkQuestions: { visible: string; href: string }[];
@@ -76,7 +76,7 @@ class FakeSocket {
   readonly closes: { code: number; reason: string }[] = [];
 
   constructor(
-    readonly url: string,
+    readonly terminalId: string,
     private readonly handlers: TerminalStreamHandlers,
   ) {}
 
@@ -134,8 +134,8 @@ export const fakeDeck = (
     renamed: [],
     closed: [],
     copied: [],
-    urls: [],
-    reveals: [],
+    attached: [],
+    opened: [],
     linkQuestions: [],
     confirmLinks: true,
     confirm: true,
@@ -147,19 +147,17 @@ export const fakeDeck = (
       minted += 1;
       return terminalView(`${minted}${'0'.repeat(11)}`, { title: `Terminal ${minted}` });
     },
-    rename: async (_daemon, _scope, id, title) => {
+    rename: async (_scope, id, title) => {
       deck.renamed.push({ id, title });
       return terminalView(id, { title });
     },
-    close: async (_daemon, _scope, id) => {
+    close: async (_scope, id) => {
       deck.closed.push(id);
       return { closed: true, id };
     },
-    attach: async (daemon, scope, id, handlers, options) => {
-      deck.reveals.push(options?.reveal === true);
-      const url = `wss://${daemon.daemonId}/v1/ferrets/${scope.sessionId}/terminals/${id}/stream?ticket=t`;
-      deck.urls.push(url);
-      const socket = new FakeSocket(url, handlers);
+    attach: async (scope, id, handlers) => {
+      deck.attached.push({ sessionId: scope.sessionId, terminalId: id });
+      const socket = new FakeSocket(id, handlers);
       deck.sockets.push(socket);
       return socket.stream();
     },
@@ -168,6 +166,12 @@ export const fakeDeck = (
     // around it. A test that wants the load to FAIL patches this.
     loadXterm: async () => fakeXterm(),
     watchTheme: () => () => {},
+    links: {
+      activate: () => false,
+      open: (_click, target) => {
+        deck.opened.push(target.href);
+      },
+    },
     confirmClose: () => deck.confirm,
     confirmLink: (visible, href) => {
       deck.linkQuestions.push({ visible, href });

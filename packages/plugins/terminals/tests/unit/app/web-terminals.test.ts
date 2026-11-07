@@ -1,11 +1,7 @@
 import type { Instant } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
 import type { TerminalListView, TerminalView } from '../../../contract/index.ts';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
 import {
-  browserTerminalStreamAttach,
   closeSessionTerminal,
   consoleInputChunks,
   createSessionTerminal,
@@ -13,22 +9,14 @@ import {
   listSessionQuarantines,
   listSessionTerminals,
   renameSessionTerminal,
+  STREAM_DROPPED_CODE,
   terminalLimitLabel,
+  terminalStreamAttach,
   typeIntoSessionConsole,
 } from '../../../app/lib/web-terminals.ts';
+import { refusal, scriptedClient, socketClient } from '../../support/app/client.ts';
 
-const daemonA = daemonConnection({
-  daemonId: 'daemon-a',
-  baseUrl: 'https://a.example.test',
-  deviceId: 'token-a',
-});
-const daemonB = daemonConnection({
-  daemonId: 'daemon-b',
-  baseUrl: 'https://b.example.test',
-  deviceId: 'token-b',
-});
-const scopeA = daemonSessionScope(daemonA, 'shared/session');
-const scopeB = daemonSessionScope(daemonB, 'shared/session');
+const scope = { sessionId: 'shared/session' };
 const TERMINAL_ID = 'a1b2c3d4e5f6';
 
 const terminal = {
@@ -49,108 +37,76 @@ const list = {
   limits: { perSession: 6, global: 24, runningGlobal: 3, idleTimeoutSeconds: 900, scrollbackLines: 5_000 },
 } satisfies TerminalListView;
 
-const response = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
-
-const recorder = (...bodies: readonly unknown[]) => {
-  const calls: { url: string; init?: RequestInit }[] = [];
-  let index = 0;
-  const fetcher = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    calls.push({ url: String(url), init });
-    return response(bodies[Math.min(index++, bodies.length - 1)]);
-  };
-  return { calls, fetcher };
-};
-
 describe('web terminal transport', () => {
-  it('addresses every call to the paired daemon, never the page origin, and carries no credential', async () => {
-    const { calls, fetcher } = recorder(list);
-    expect(await listSessionTerminals(daemonA, scopeA, fetcher)).toEqual(list);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/terminals');
-    const headers = new Headers(calls[0]?.init?.headers);
-    expect(headers.has('authorization')).toBe(false);
-    expect(headers.get(FY_REQUEST_ID_HEADER)).toBeNull();
-    expect(calls[0]?.init?.credentials).toBe('include');
+  it('addresses every call to the ferret by the manifest route key, on the client it was given', async () => {
+    const { calls, client } = scriptedClient(list);
+    expect(await listSessionTerminals(client, scope)).toEqual(list);
+    expect(calls).toEqual([
+      { route: 'GET /v1/ferrets/:ferretId/terminals', init: { params: { ferretId: 'shared/session' } } },
+    ]);
   });
 
-  it('refuses a scope belonging to a different daemon on every operation', async () => {
-    const { fetcher } = recorder(list);
-    const crossed = 'terminal scope must belong to the requested daemon';
-    await expect(listSessionTerminals(daemonA, scopeB, fetcher)).rejects.toThrow(crossed);
-    await expect(createSessionTerminal(daemonA, scopeB, {}, fetcher)).rejects.toThrow(crossed);
-    await expect(renameSessionTerminal(daemonA, scopeB, TERMINAL_ID, 'x', fetcher)).rejects.toThrow(crossed);
-    await expect(closeSessionTerminal(daemonA, scopeB, TERMINAL_ID, fetcher)).rejects.toThrow(crossed);
-  });
-
-  it('stamps a request id and JSON content type on mutations only', async () => {
-    const { calls, fetcher } = recorder(terminal);
-    expect(await createSessionTerminal(daemonA, scopeA, { cols: 100, rows: 30 }, fetcher)).toEqual(terminal);
-    const headers = new Headers(calls[0]?.init?.headers);
-    expect(calls[0]?.init?.method).toBe('POST');
-    expect(headers.get('content-type')).toBe('application/json');
-    expect(headers.get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ cols: 100, rows: 30 });
-  });
-
-  it('sends an empty create body when the caller lets the daemon choose a size', async () => {
-    const { calls, fetcher } = recorder(terminal);
-    await createSessionTerminal(daemonA, scopeA, undefined, fetcher);
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({});
+  it('sends the create request parsed, and an empty body when the caller lets the daemon choose a size', async () => {
+    const { calls, client } = scriptedClient(terminal);
+    expect(await createSessionTerminal(client, scope, { cols: 100, rows: 30 })).toEqual(terminal);
+    await createSessionTerminal(client, scope);
+    expect(calls[0]).toEqual({
+      route: 'POST /v1/ferrets/:ferretId/terminals',
+      init: { params: { ferretId: 'shared/session' }, body: { cols: 100, rows: 30 } },
+    });
+    expect(calls[1]?.init?.body).toEqual({});
   });
 
   it('renames and closes one terminal by its daemon-issued id', async () => {
     const renamed = { ...terminal, title: 'tests' };
-    const { calls, fetcher } = recorder(renamed, { closed: true, id: TERMINAL_ID });
-    expect(await renameSessionTerminal(daemonA, scopeA, TERMINAL_ID, 'tests', fetcher)).toEqual(renamed);
-    expect(calls[0]?.url).toBe(`https://a.example.test/v1/ferrets/shared%2Fsession/terminals/${TERMINAL_ID}`);
-    expect(calls[0]?.init?.method).toBe('PATCH');
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ title: 'tests' });
-    expect(await closeSessionTerminal(daemonA, scopeA, TERMINAL_ID, fetcher)).toEqual({
-      closed: true,
-      id: TERMINAL_ID,
+    const { calls, client } = scriptedClient(renamed, { closed: true, id: TERMINAL_ID });
+    expect(await renameSessionTerminal(client, scope, TERMINAL_ID, 'tests')).toEqual(renamed);
+    expect(calls[0]).toEqual({
+      route: 'PATCH /v1/ferrets/:ferretId/terminals/:terminalId',
+      init: { params: { ferretId: 'shared/session', terminalId: TERMINAL_ID }, body: { title: 'tests' } },
     });
-    expect(calls[1]?.init?.method).toBe('DELETE');
-    expect(calls[1]?.init?.body).toBeUndefined();
+    expect(await closeSessionTerminal(client, scope, TERMINAL_ID)).toEqual({ closed: true, id: TERMINAL_ID });
+    expect(calls[1]).toEqual({
+      route: 'DELETE /v1/ferrets/:ferretId/terminals/:terminalId',
+      init: { params: { ferretId: 'shared/session', terminalId: TERMINAL_ID } },
+    });
   });
 
-  it('rejects a terminal id that is not the daemon-issued shape before it reaches a URL', async () => {
-    const { calls, fetcher } = recorder(terminal);
-    await expect(renameSessionTerminal(daemonA, scopeA, '../../secrets', 'x', fetcher)).rejects.toThrow();
+  it('rejects a terminal id that is not the daemon-issued shape before it reaches a route', async () => {
+    const { calls, client } = scriptedClient(terminal);
+    await expect(renameSessionTerminal(client, scope, '../../secrets', 'x')).rejects.toThrow();
+    await expect(closeSessionTerminal(client, scope, 'not an id')).rejects.toThrow();
     expect(calls).toHaveLength(0);
   });
 
   it('rejects an invalid title rather than letting the daemon decide', async () => {
-    const { calls, fetcher } = recorder(terminal);
-    await expect(renameSessionTerminal(daemonA, scopeA, TERMINAL_ID, '   ', fetcher)).rejects.toThrow();
+    const { calls, client } = scriptedClient(terminal);
+    await expect(renameSessionTerminal(client, scope, TERMINAL_ID, '   ')).rejects.toThrow();
     expect(calls).toHaveLength(0);
   });
 
-  it('refuses a daemon answer describing another session or another terminal', async () => {
+  it('refuses a daemon answer describing another ferret or another terminal', async () => {
     const other = { ...list, sessionId: 'other', terminals: [] };
-    await expect(listSessionTerminals(daemonA, scopeA, async () => response(other))).rejects.toMatchObject({
-      status: 502,
-    });
+    await expect(listSessionTerminals(scriptedClient(other).client, scope)).rejects.toMatchObject({ status: 502 });
     await expect(
-      createSessionTerminal(daemonA, scopeA, {}, async () => response({ ...terminal, sessionId: 'other' })),
+      createSessionTerminal(scriptedClient({ ...terminal, sessionId: 'other' }).client, scope),
     ).rejects.toMatchObject({ status: 502 });
     await expect(
-      closeSessionTerminal(daemonA, scopeA, TERMINAL_ID, async () => response({ closed: true, id: 'ffffffffffff' })),
+      closeSessionTerminal(scriptedClient({ closed: true, id: 'ffffffffffff' }).client, scope, TERMINAL_ID),
     ).rejects.toMatchObject({ status: 502 });
   });
 
   it('rejects a malformed daemon payload whole', async () => {
-    await expect(listSessionTerminals(daemonA, scopeA, async () => response({ nope: true }))).rejects.toThrow();
+    await expect(listSessionTerminals(scriptedClient({ nope: true }).client, scope)).rejects.toThrow();
     await expect(
-      createSessionTerminal(daemonA, scopeA, {}, async () => response({ ...terminal, state: 'exited' })),
+      createSessionTerminal(scriptedClient({ ...terminal, state: 'exited' }).client, scope),
     ).rejects.toThrow();
   });
 
-  it('keeps daemon failure detail, falling back when the body is not JSON', async () => {
+  it('lets a daemon refusal through with its status, code and sentence', async () => {
     await expect(
-      listSessionTerminals(daemonA, scopeA, async () => response({ error: 'no session', code: 'not_found' }, 404)),
+      listSessionTerminals(scriptedClient(refusal(404, 'no session', 'not_found')).client, scope),
     ).rejects.toMatchObject({ status: 404, message: 'no session', code: 'not_found' });
-    await expect(
-      listSessionTerminals(daemonA, scopeA, async () => new Response('nope', { status: 503 })),
-    ).rejects.toMatchObject({ status: 503, message: 'HTTP 503', code: undefined });
   });
 
   it('reports the session and box counts in the original wording', () => {
@@ -159,29 +115,26 @@ describe('web terminal transport', () => {
 });
 
 describe('typing into the Console', () => {
-  it('posts the keys to the session’s own pane on its own daemon, as a mutation', async () => {
-    const { calls, fetcher } = recorder({ written: 3 });
-    expect(await typeIntoSessionConsole(daemonA, scopeA, 'ls\r', fetcher)).toBe(3);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/console/input');
-    expect(calls[0]?.init?.method).toBe('POST');
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ data: 'ls\r' });
-    expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).not.toBeNull();
+  it('posts the keys to the ferret’s own pane by route key', async () => {
+    const { calls, client } = scriptedClient({ written: 3 });
+    expect(await typeIntoSessionConsole(client, scope, 'ls\r')).toBe(3);
+    expect(calls).toEqual([
+      {
+        route: 'POST /v1/ferrets/:ferretId/console/input',
+        init: { params: { ferretId: 'shared/session' }, body: { data: 'ls\r' } },
+      },
+    ]);
   });
 
-  it('R546 sends a long paste as ordered writes and refuses another daemon’s scope', async () => {
-    const { calls, fetcher } = recorder({ written: 4_096 }, { written: 1 });
-    expect(await typeIntoSessionConsole(daemonA, scopeA, 'x'.repeat(4_097), fetcher)).toBe(4_097);
-    expect(calls.map(call => (JSON.parse(String(call.init?.body)) as { data: string }).data.length)).toEqual([
-      4_096, 1,
-    ]);
-    await expect(typeIntoSessionConsole(daemonA, scopeB, 'x', fetcher)).rejects.toThrow(
-      'terminal scope must belong to the requested daemon',
-    );
+  it('R546 sends a long paste as ordered writes', async () => {
+    const { calls, client } = scriptedClient({ written: 4_096 }, { written: 1 });
+    expect(await typeIntoSessionConsole(client, scope, 'x'.repeat(4_097))).toBe(4_097);
+    expect(calls.map(call => ((call.init?.body ?? { data: '' }) as { data: string }).data.length)).toEqual([4_096, 1]);
   });
 
   it('keeps a grant refusal as the daemon said it', async () => {
-    const refused = async () => response({ error: 'unlock this machine first', code: 'unlock_required' }, 401);
-    await expect(typeIntoSessionConsole(daemonA, scopeA, 'x', refused)).rejects.toMatchObject({
+    const refused = scriptedClient(refusal(401, 'unlock this machine first', 'unlock_required')).client;
+    await expect(typeIntoSessionConsole(refused, scope, 'x')).rejects.toMatchObject({
       status: 401,
       code: 'unlock_required',
     });
@@ -194,46 +147,106 @@ describe('typing into the Console', () => {
 });
 
 describe('terminal quarantine transport', () => {
-  it('reads the session quarantines from its own daemon and parses what comes back', async () => {
+  it('reads the ferret’s quarantines (Vault’s holds) and parses what comes back', async () => {
     const quarantines = [{ key: 'dev', until: '2026-10-30T10:02:00.000Z' as Instant }];
-    const { calls, fetcher } = recorder({ quarantines });
-    expect(await listSessionQuarantines(daemonA, scopeA, fetcher)).toEqual({ quarantines });
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/input-quarantines');
-    expect(calls[0]?.init?.method ?? 'GET').toBe('GET');
+    const { calls, client } = scriptedClient({ quarantines });
+    expect(await listSessionQuarantines(client, scope)).toEqual({ quarantines });
+    expect(calls[0]?.route).toBe('GET /v1/ferrets/:ferretId/input-quarantines');
     await expect(
-      listSessionQuarantines(daemonA, scopeA, recorder({ quarantines: [{ key: 'dev' }] }).fetcher),
+      listSessionQuarantines(scriptedClient({ quarantines: [{ key: 'dev' }] }).client, scope),
     ).rejects.toThrow();
-    await expect(listSessionQuarantines(daemonA, scopeB, fetcher)).rejects.toThrow(
-      'terminal scope must belong to the requested daemon',
-    );
   });
 
-  it('ends one quarantine by key as a mutation, and fails when the daemon did not end it', async () => {
-    const { calls, fetcher } = recorder({ ended: true });
-    await endSessionQuarantine(daemonA, scopeA, 'dev', fetcher);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/shared%2Fsession/input-quarantines/dev/end');
-    expect(calls[0]?.init?.method).toBe('POST');
-    expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).not.toBeNull();
-    await expect(endSessionQuarantine(daemonA, scopeA, 'dev', recorder({ ended: false }).fetcher)).rejects.toThrow(
+  it('ends one quarantine by key, and fails when the daemon did not end it', async () => {
+    const { calls, client } = scriptedClient({ ended: true });
+    await endSessionQuarantine(client, scope, 'dev');
+    expect(calls).toEqual([
+      {
+        route: 'POST /v1/ferrets/:ferretId/input-quarantines/:key/end',
+        init: { params: { ferretId: 'shared/session', key: 'dev' } },
+      },
+    ]);
+    await expect(endSessionQuarantine(scriptedClient({ ended: false }).client, scope, 'dev')).rejects.toThrow(
       'daemon did not end the quarantine',
     );
   });
+});
 
-  it('asks the stream for reveal=1 only when a viewer chose to see a quarantined pane', async () => {
-    const seen: { path: string; query?: readonly (readonly [string, string])[] }[] = [];
-    const attach = browserTerminalStreamAttach((async (_daemon: unknown, request: (typeof seen)[number]) => {
-      seen.push(request);
-      return { onStreamClosed: () => undefined, sendStream: () => undefined, closeStream: () => undefined };
-    }) as never);
-    const handlers = {
-      onOpen: () => undefined,
-      onBytes: () => undefined,
-      onClosed: () => undefined,
-      onRefused: () => undefined,
+describe('the viewer stream', () => {
+  const handlers = () => {
+    const seen = { opened: 0, bytes: [] as Uint8Array[], closed: [] as [number, string][], refused: [] as number[] };
+    return {
+      seen,
+      handlers: {
+        onOpen: () => {
+          seen.opened += 1;
+        },
+        onBytes: (bytes: Uint8Array) => void seen.bytes.push(bytes),
+        onClosed: (code: number, reason: string) => void seen.closed.push([code, reason]),
+        onRefused: (status: number) => void seen.refused.push(status),
+      },
     };
-    await attach(daemonA, scopeA, TERMINAL_ID, handlers);
-    await attach(daemonA, scopeA, TERMINAL_ID, handlers, { reveal: true });
-    expect(seen[0]?.query).toBeUndefined();
-    expect(seen[1]?.query).toEqual([['reveal', '1']]);
+  };
+
+  it('opens one guarded socket with the ferret and the terminal and nothing else', async () => {
+    const { client, opened } = socketClient();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, handlers().handlers);
+    expect(opened).toEqual([
+      {
+        key: 'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream',
+        params: { ferretId: 'shared/session', terminalId: TERMINAL_ID },
+      },
+    ]);
+  });
+
+  it('draws only bytes: a text frame is the daemon speaking a shape this stream does not have', async () => {
+    const { client, daemon, sent } = socketClient();
+    const { seen, handlers: given } = handlers();
+    const stream = await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    daemon.frame(new Uint8Array([104, 105]));
+    daemon.frame('{"daemon":"json"}');
+    stream.control('{"type":"resize","cols":80,"rows":24}');
+    stream.write(new Uint8Array([108]));
+    expect(seen.opened).toBe(1);
+    expect(seen.bytes).toEqual([new Uint8Array([104, 105])]);
+    expect(sent).toEqual(['{"type":"resize","cols":80,"rows":24}', new Uint8Array([108])]);
+  });
+
+  it('hands a carrier drop up as the abnormal closure the deck retries with backoff', async () => {
+    const { client, daemon } = socketClient();
+    const { seen, handlers: given } = handlers();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    daemon.close('carrier lost');
+    expect(seen.closed).toEqual([[STREAM_DROPPED_CODE, 'carrier lost']]);
+    expect(seen.refused).toEqual([]);
+  });
+
+  it('tells a refusal from a drop, so the deck does not retry a permanent no', async () => {
+    const { client, daemon } = socketClient();
+    const { seen, handlers: given } = handlers();
+    await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    daemon.close('the daemon refused this stream: 403');
+    expect(seen.refused).toEqual([403]);
+    expect(seen.closed).toEqual([]);
+  });
+
+  it('says nothing after a deliberate leave', async () => {
+    const { client, daemon, closes } = socketClient();
+    const { seen, handlers: given } = handlers();
+    const stream = await terminalStreamAttach(client)(scope, TERMINAL_ID, given);
+    stream.close(1000, 'terminal tab detached');
+    daemon.close('closed');
+    daemon.frame(new Uint8Array([1]));
+    expect(closes).toHaveLength(1);
+    expect(seen.closed).toEqual([]);
+    expect(seen.bytes).toEqual([]);
+  });
+
+  it('refuses a terminal id that is not the daemon-issued shape, and a client with no sockets', async () => {
+    const { client } = socketClient();
+    await expect(terminalStreamAttach(client)(scope, '../x', handlers().handlers)).rejects.toThrow();
+    await expect(
+      terminalStreamAttach(scriptedClient().client)(scope, TERMINAL_ID, handlers().handlers),
+    ).rejects.toThrow('cannot open a terminal stream');
   });
 });

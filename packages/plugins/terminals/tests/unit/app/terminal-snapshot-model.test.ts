@@ -8,89 +8,51 @@ import {
   formatSnapshotClock,
   paneColumns,
   readPaneSnapshot,
-  snapshotUrl,
+  snapshotQuery,
 } from '../../../app/components/terminal-snapshot-model.ts';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
+import { refusal, scriptedClient } from '../../support/app/client.ts';
 
-const daemon = daemonConnection({
-  daemonId: 'pane-daemon',
-  baseUrl: 'https://pane.example.test',
-  deviceId: 'pane-token',
-});
-const scope = daemonSessionScope(daemon, 'pane/session');
+const scope = { sessionId: 'pane/session' };
 
-const other = daemonConnection({
-  daemonId: 'other-daemon',
-  baseUrl: 'https://other.example.test',
-  deviceId: 'other-token',
-});
-
-describe('terminal snapshot url', () => {
-  it('asks for the cached snapshot by default and escapes the session id', () => {
-    expect(snapshotUrl(scope)).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=false');
-    expect(snapshotUrl(scope, true)).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=true');
+describe('terminal snapshot query', () => {
+  it('asks for the cached snapshot by default', () => {
+    expect(snapshotQuery()).toEqual({ live: 'false' });
+    expect(snapshotQuery(true)).toEqual({ live: 'true' });
   });
 
-  it('adds the screen scope only when asked, so the default URL never changes', () => {
-    expect(snapshotUrl(scope, true, 'history')).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=true');
-    expect(snapshotUrl(scope, true, 'screen')).toBe('/v1/ferrets/pane%2Fsession/snapshot?live=true&scope=screen');
+  it('adds the screen scope only when asked, so the default query never changes', () => {
+    expect(snapshotQuery(true, 'history')).toEqual({ live: 'true' });
+    expect(snapshotQuery(true, 'screen')).toEqual({ live: 'true', scope: 'screen' });
   });
 });
 
 describe('reading a pane snapshot', () => {
-  it('returns the daemon text for a scope that belongs to the daemon', async () => {
-    const seen: string[] = [];
-    const text = await readPaneSnapshot(daemon, scope, undefined, async url => {
-      seen.push(String(url));
-      return new Response('$ bun test\nok');
-    });
-    expect(text).toBe('$ bun test\nok');
-    expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane%2Fsession/snapshot?live=false']);
+  it('returns the daemon text, asking by route key for the ferret', async () => {
+    const { calls, client } = scriptedClient('$ bun test\nok');
+    expect(await readPaneSnapshot(client, scope)).toBe('$ bun test\nok');
+    expect(calls).toEqual([
+      {
+        route: 'GET /v1/ferrets/:ferretId/snapshot',
+        init: { params: { ferretId: 'pane/session' }, query: { live: 'false' } },
+      },
+    ]);
   });
 
   it('reads only the visible screen when asked', async () => {
-    const seen: string[] = [];
-    await readPaneSnapshot(
-      daemon,
-      scope,
-      undefined,
-      async url => {
-        seen.push(String(url));
-        return new Response('screen');
-      },
-      true,
-      'screen',
-    );
-    expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane%2Fsession/snapshot?live=true&scope=screen']);
+    const { calls, client } = scriptedClient('screen');
+    await readPaneSnapshot(client, scope, true, 'screen');
+    expect(calls[0]?.init?.query).toEqual({ live: 'true', scope: 'screen' });
   });
 
-  it('refuses a scope belonging to another daemon rather than crossing the pair', async () => {
-    await expect(readPaneSnapshot(other, scope, undefined, async () => new Response(''))).rejects.toThrow(
-      'terminal scope must belong to the requested daemon',
-    );
+  it('reads an empty pane, and a pane the shell decoded as JSON, back as text', async () => {
+    expect(await readPaneSnapshot(scriptedClient(undefined).client, scope)).toBe('');
+    expect(await readPaneSnapshot(scriptedClient(42).client, scope)).toBe('42');
   });
 
-  it('surfaces a structured daemon error', async () => {
-    const failed = readPaneSnapshot(
-      daemon,
-      scope,
-      undefined,
-      async () =>
-        new Response(JSON.stringify({ error: 'no such pane', code: 'gone' }), {
-          status: 404,
-          headers: { 'content-type': 'application/json' },
-        }),
-    );
-    await expect(failed).rejects.toBeInstanceOf(DaemonResponseError);
+  it('surfaces a daemon refusal with its sentence', async () => {
+    const failed = readPaneSnapshot(scriptedClient(refusal(404, 'no such pane', 'gone')).client, scope);
+    await expect(failed).rejects.toMatchObject({ status: 404, code: 'gone' });
     await expect(failed).rejects.toThrow('no such pane');
-  });
-
-  it('falls back to the status line when the daemon body is not a shaped error', async () => {
-    await expect(
-      readPaneSnapshot(daemon, scope, undefined, async () => new Response('boom', { status: 503 })),
-    ).rejects.toThrow('HTTP 503');
   });
 });
 

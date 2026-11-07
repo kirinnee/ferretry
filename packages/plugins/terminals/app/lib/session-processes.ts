@@ -1,11 +1,12 @@
 /**
- * A ferret's processes, read from and stopped on the daemon that owns it (`docs`-free: the wire contract
- * is `@ferretry/protocol` `session-processes.ts`). Every answer is parsed before use, and every call is
- * addressed to one paired daemon — a session id reused across two daemons never resolves to whichever is
- * current.
+ * A ferret's processes, read from and stopped on the daemon that owns it (the wire is `protocol/session-processes.ts`).
+ * Every answer is parsed before use, and every call rides the shell's per-daemon client: a ferret id reused across two
+ * daemons never resolves to whichever is current, because a half is built for one daemon.
  */
 
-import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { DaemonCallError } from '@ferretry/app';
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import { grantRefusalNotice } from './grant-notice.ts';
 import {
   type SessionProcess,
   SessionProcessIdSchema,
@@ -16,11 +17,7 @@ import {
   type SessionProcessStopResult,
   SessionProcessStopResultSchema,
 } from './protocol/session-processes.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
-import { grantRefusalNotice } from '../../../access/app/lib/grants.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
+import type { TerminalScope } from './web-terminals.ts';
 
 /** What a 403 means to the reader: the grant is the answer, in the words the brief fixes. */
 export const PROCESSES_FORBIDDEN_TEXT =
@@ -29,52 +26,25 @@ export const PROCESSES_FORBIDDEN_TEXT =
 /** What a 409 `process_changed` means to the reader. */
 export const PROCESS_CHANGED_TEXT = 'That process already ended or was replaced — nothing was stopped.';
 
-const processesPath = (scope: DaemonSessionScope): string =>
-  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/processes`;
+const PROCESS_ROUTES = {
+  list: 'GET /v1/ferrets/:ferretId/processes',
+  output: 'GET /v1/ferrets/:ferretId/processes/:processId/output',
+  stop: 'POST /v1/ferrets/:ferretId/processes/:processId/stop',
+} as const;
 
-const processPath = (scope: DaemonSessionScope, processId: string): string =>
-  `${processesPath(scope)}/${encodeURIComponent(SessionProcessIdSchema.parse(processId))}`;
+const mismatch = (message: string): DaemonCallError => new DaemonCallError(502, 'daemon_mismatch', message);
 
-const responseError = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
-};
+const processParams = (scope: TerminalScope, processId: string) => ({
+  ferretId: scope.sessionId,
+  processId: SessionProcessIdSchema.parse(processId),
+});
 
-const processJson = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  path: string,
-  init: RequestInit,
-  fetcher: DaemonFetch,
-  signal?: AbortSignal,
-): Promise<unknown> => {
-  if (daemon.daemonId !== scope.daemonId) throw new Error('process scope must belong to the requested daemon');
-  const mutation = (init.method ?? 'GET').toUpperCase() !== 'GET';
-  const request = daemonRequest(daemon, path, {
-    ...init,
-    ...(signal === undefined ? {} : { signal }),
-    headers: mutation ? { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() } : {},
-  });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await responseError(response);
-  return await response.json();
-};
-
-/** Lists the processes under one session's pane. */
-export const listSessionProcesses = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
-  signal?: AbortSignal,
-): Promise<SessionProcessList> => {
+/** Lists the processes under one ferret's pane. */
+export const listSessionProcesses = async (client: PluginClient, scope: TerminalScope): Promise<SessionProcessList> => {
   const list = SessionProcessListSchema.parse(
-    await processJson(daemon, scope, processesPath(scope), { method: 'GET' }, fetcher, signal),
+    await client.call(PROCESS_ROUTES.list, { params: { ferretId: scope.sessionId } }),
   );
-  if (list.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon listed another session');
+  if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;
 };
 
@@ -83,45 +53,37 @@ export const listSessionProcesses = async (
  * `after` is a byte offset the previous answer's `end` supplied, so it is built here as digits only.
  */
 export const readSessionProcessOutput = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
+  client: PluginClient,
+  scope: TerminalScope,
   processId: string,
   after: number | undefined,
-  fetcher: DaemonFetch = browserFetch,
-  signal?: AbortSignal,
 ): Promise<SessionProcessOutput> => {
-  const query = after === undefined ? '' : `?after=${String(Math.max(0, Math.trunc(after)))}`;
   const output = SessionProcessOutputSchema.parse(
-    await processJson(
-      daemon,
-      scope,
-      `${processPath(scope, processId)}/output${query}`,
-      { method: 'GET' },
-      fetcher,
-      signal,
-    ),
+    await client.call(PROCESS_ROUTES.output, {
+      params: processParams(scope, processId),
+      ...(after === undefined ? {} : { query: { after: String(Math.max(0, Math.trunc(after))) } }),
+    }),
   );
-  if (output.processId !== processId) throw new DaemonResponseError(502, 'daemon read another process');
+  if (output.processId !== processId) throw mismatch('daemon read another process');
   return output;
 };
 
 /** Asks the daemon to stop one process and everything it started (SIGTERM). */
 export const stopSessionProcess = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
+  client: PluginClient,
+  scope: TerminalScope,
   processId: string,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<SessionProcessStopResult> => {
   const stopped = SessionProcessStopResultSchema.parse(
-    await processJson(daemon, scope, `${processPath(scope, processId)}/stop`, { method: 'POST' }, fetcher),
+    await client.call(PROCESS_ROUTES.stop, { params: processParams(scope, processId) }),
   );
-  if (stopped.processId !== processId) throw new DaemonResponseError(502, 'daemon stopped another process');
+  if (stopped.processId !== processId) throw mismatch('daemon stopped another process');
   return stopped;
 };
 
 /** A failure, in the words the reader should see: the 403 copy, the changed-process copy, else the daemon's. */
 export const processErrorText = (error: unknown): string => {
-  if (error instanceof DaemonResponseError) {
+  if (error instanceof DaemonCallError) {
     if (error.status === 403) return PROCESSES_FORBIDDEN_TEXT;
     if (error.status === 409 && error.code === 'process_changed') return PROCESS_CHANGED_TEXT;
   }
@@ -131,7 +93,7 @@ export const processErrorText = (error: unknown): string => {
 };
 
 export const isForbidden = (error: unknown): boolean =>
-  (error instanceof DaemonResponseError && error.status === 403) || grantRefusalNotice(error) !== null;
+  (error instanceof DaemonCallError && error.status === 403) || grantRefusalNotice(error) !== null;
 
 /** The command as the agent wrote it when there is one. */
 export const processTitle = (entry: SessionProcess): string => entry.label ?? entry.command;

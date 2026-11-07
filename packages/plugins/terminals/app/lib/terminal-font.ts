@@ -13,8 +13,8 @@
  * bundled monospace face answers instead of whatever the host calls `monospace`.
  */
 
-/** The family name the bundled monospace face is registered under. Not a font anybody has installed. */
-export const TERMINAL_FONT_FACE = 'Ferretry Terminal Mono';
+/** The family the shell bundles and declares (`styles/theme-fonts.css`): the face that cannot be missing. */
+export const TERMINAL_FONT_FACE = 'JetBrains Mono';
 
 /** Splits a CSS `font-family` list on its top-level commas, keeping quoted names whole. */
 function familyNames(stack: string): readonly string[] {
