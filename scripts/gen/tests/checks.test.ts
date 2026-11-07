@@ -4,7 +4,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { contextFor } from '../lib/check.ts';
+import { contextFor, parseArgs } from '../lib/check.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
 import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
@@ -962,6 +962,69 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       'coverage/unit/junit.xml': junit({ name: 'G9 other', file: A }),
     });
     expect(messages(await both(real))).toContain('no passing run');
+  });
+
+  // CI wiring: quick.sh judges the unit reports, integration.sh the integration report, each with its own --tier.
+  describe('--tier: each CI job proves the rows tested in its own tier', () => {
+    const I = 'packages/plugins/alpha/tests/integration/i.test.ts';
+    const tiered = (reports: Record<string, string>) => {
+      const f = planted(row('G1', 'kept') + row('G2', 'kept'), titled('G1 holds'), reports);
+      f.write(I, titled('G2 holds'));
+      return f;
+    };
+
+    test('the unit job does not need an integration-only row in the unit report, and the integration job the reverse', async () => {
+      const f = tiered({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I }),
+      });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+      // Without a tier the unit report alone still leaves the integration row unproven.
+      expect(messages(await run(guarantees, f, { results: ['coverage/unit'] }))).toContain('G2');
+    });
+
+    test('an integration row whose test FAILED fails the integration job, not the unit job', async () => {
+      const f = tiered({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I, status: 'failure' }),
+      });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toContain('FAILING test');
+    });
+
+    test('a unit row that failed still fails the unit job, and an integration job with no report says so', async () => {
+      const f = tiered({ 'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }) });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toContain(
+        'FAILING test',
+      );
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toContain(
+        'no JUnit report',
+      );
+    });
+
+    test('the integration job does not repeat a row with no test at all (the unit job reports that)', async () => {
+      const f = planted(row('G1', 'kept'), titled('G9 other'), {
+        'coverage/int/junit.xml': junit({ name: 'G9 other', file: A }),
+      });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toContain(
+        'no test named',
+      );
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+    });
+
+    test('--tier takes unit or int only', () => {
+      expect(parseArgs(['--tier', 'int']).tier).toBe('int');
+      expect(() => parseArgs(['--tier', 'sit'])).toThrow('--tier is unit or int');
+    });
+  });
+
+  test("the quarantine's junit.rerun.xml counts: a flake rescued by the rerun does not fail the proof", async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/groups/x/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+      'coverage/unit/groups/x/junit.rerun.xml': junit({ name: 'G1 holds', file: A }),
+    });
+    expect(messages(await both(f, { results: ['coverage/unit'] }))).toBe('');
   });
 });
 
