@@ -239,7 +239,10 @@ describe('StorageSessionLifecycleRepository', () => {
     const orphan = parseSessionId('state-only-session');
     const invalid = record('invalid-session');
     await storage.writeState(orphan, { id: orphan, status: 'running', turn: 0 });
-    await storage.writeConfig(invalid.config.id, { ...storedConfig(invalid), command: [] });
+    // The file schema keeps `command` optional and refuses an empty one; the lifecycle's record schema is what refuses
+    // a configuration that has none, so that is the damage a stored document can carry.
+    const { command: _launchArgv, ...withoutCommand } = storedConfig(invalid);
+    await storage.writeConfig(invalid.config.id, withoutCommand);
     await storage.writeState(invalid.config.id, { ...invalid.state, turn: 0 });
 
     // Act + Assert
