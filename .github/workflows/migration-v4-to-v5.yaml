@@ -57,10 +57,11 @@ jobs:
 
       - name: Build one v4 fixture home
         run: |
-          # A folder under the OS temp dir the builder sees (the dev shell sets its own TMPDIR): it refuses anywhere else.
-          out="$(./scripts/ci/in-devshell.sh mktemp -d)"
+          # A folder under /tmp, and the builder is told /tmp is its temp dir: every dev-shell call sets a TMPDIR of its
+          # own that is gone after the call, and the builder refuses any folder outside the OS temp dir.
+          out="$(mktemp -d /tmp/fy-v4-fixture.XXXXXX)"
           echo "FIXTURE_OUT=${out}" >>"${GITHUB_ENV}"
-          ./scripts/ci/in-devshell.sh bun migration/v4-to-v5/fixtures/build-v4-home.ts --out "${out}" --v4-dir "${FY_V4_DIR}"
+          ./scripts/ci/in-devshell.sh env TMPDIR=/tmp bun migration/v4-to-v5/fixtures/build-v4-home.ts --out "${out}" --v4-dir "${FY_V4_DIR}"
 
       - name: Check what the fixture made
         run: |
