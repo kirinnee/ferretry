@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { BearerDigest } from '@ferretry/core-gate/contract';
 import {
   ApiError,
@@ -36,6 +36,7 @@ import { FerretRegistry } from './lib/registry/registry.ts';
 import { isDeniedPath, normalizeRelativePath } from './lib/session/filesystem/path-policy.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
+import { buildWorktrees } from './modules/worktrees.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -125,6 +126,25 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     asks: needs.asks,
   });
 
+  // Managed worktrees (today's worktrees module). The Git/disk IO is the kernel's spawn and root additions on
+  // rebuild/port-kernel; until the host has them there is no managed root and every route says so.
+  const worktrees = buildWorktrees({
+    state: kernel.state,
+    clock: kernel.clock,
+    sessions: async () => {
+      await ready();
+      // A ferret standing in a folder, as today's session directory reported it: stopped ferrets are finished.
+      return registry.list().map(ferret => ({
+        id: ferret.id,
+        cwd: ferret.folder,
+        status: ferret.state === 'stopped' ? ('stopped' as const) : ('running' as const),
+        ...(ferret.state === 'stopped' ? { finishedAt: ferret.stateAt } : {}),
+      }));
+    },
+    terminalRoots: async () => undefined,
+    newId: () => randomUUID(),
+  });
+
   /** The ferret a path names: an exact id, or a name (a live holder wins; two on one footing are refused). */
   const pathFerret = async (call: CallContext): Promise<FerretId> => {
     await ready();
@@ -190,6 +210,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       },
     },
     routes: {
+      ...worktrees.routes,
       'GET /v1/ferrets': async call => {
         await ready();
         return fleetList.answer(registry.list(), headerValue(call.request, 'if-none-match'));
