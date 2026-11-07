@@ -57,8 +57,8 @@ jobs:
 
       - name: Build one v4 fixture home
         run: |
-          # A folder under the OS temp dir: the builder refuses anywhere else.
-          out="$(mktemp -d)"
+          # A folder under the OS temp dir the builder sees (the dev shell sets its own TMPDIR): it refuses anywhere else.
+          out="$(./scripts/ci/in-devshell.sh mktemp -d)"
           echo "FIXTURE_OUT=${out}" >>"${GITHUB_ENV}"
           ./scripts/ci/in-devshell.sh bun migration/v4-to-v5/fixtures/build-v4-home.ts --out "${out}" --v4-dir "${FY_V4_DIR}"
 
