@@ -39,6 +39,18 @@ function service(start: SecurityDocument = { kind: 'defaults' }) {
 
 const host = { hostLocal: true, actor: 'admin-cli' };
 const phone = { hostLocal: false, actor: 'device:phone' };
+
+/** A device holding ONE fresh proof, claimed atomically as Access claims it: of any number of claims exactly one is `true`. */
+function oneProof() {
+  const state = { fresh: true, claims: 0 };
+  const claimFreshPasskey = () => {
+    state.claims += 1;
+    if (!state.fresh) return false;
+    state.fresh = false;
+    return true;
+  };
+  return { state, caller: { ...phone, claimFreshPasskey } };
+}
 const routeOf = (key: string) => manifest.actions.routes.find(route => route.key === key);
 
 describe('security settings', () => {
@@ -102,8 +114,10 @@ describe('security settings', () => {
       refusal: 'passkey-required',
       fields: ['unlockValidityHours'],
     });
-    const outcome = await svc.patch({ unlockValidityHours: 24 }, { ...phone, freshPasskey: true });
-    expect(outcome.ok && outcome.spentPasskey).toBe(true);
+    const proof = oneProof();
+    const outcome = await svc.patch({ unlockValidityHours: 24 }, proof.caller);
+    expect(outcome.ok).toBe(true);
+    expect(proof.state).toEqual({ fresh: false, claims: 1 });
     expect(writes.at(-1)?.unlockValidityHours).toBe(24);
     expect(audits.at(-1)?.changes).toEqual(['security.unlockValidityHours=8->24', PASSKEY_WIDEN_JOURNAL_LINE]);
     expect(audits.at(-1)?.actor).toBe('device:phone');
@@ -114,8 +128,10 @@ describe('security settings', () => {
     const refused = await svc.patch({ unlockValidityHours: 12 }, phone);
     expect(refused).toEqual({ ok: false, refusal: 'passkey-required', fields: ['unlockValidityHours'] });
     expect(writes).toEqual([]);
-    const applied = await svc.patch({ unlockValidityHours: 12 }, { ...phone, freshPasskey: true });
-    expect(applied.ok && applied.spentPasskey).toBe(true);
+    const proof = oneProof();
+    const applied = await svc.patch({ unlockValidityHours: 12 }, proof.caller);
+    expect(applied.ok).toBe(true);
+    expect(proof.state).toEqual({ fresh: false, claims: 1 });
     expect(writes.at(-1)?.unlockValidityHours).toBe(12);
     const changes = audits.at(-1)?.changes ?? [];
     expect(changes).toContain(PASSKEY_WIDEN_JOURNAL_LINE);
@@ -129,8 +145,19 @@ describe('security settings', () => {
       refusal: 'widen-remote',
       fields: ['unlockOnOpen', 'unlockValidityHours'],
     });
-    const atHost = await svc.patch({ unlockValidityHours: 24 }, host);
-    expect(atHost.ok && atHost.spentPasskey).toBe(false);
+    let claims = 0;
+    const atHost = await svc.patch(
+      { unlockValidityHours: 24 },
+      {
+        ...host,
+        claimFreshPasskey: () => {
+          claims += 1;
+          return true;
+        },
+      },
+    );
+    expect(atHost.ok).toBe(true);
+    expect(claims).toBe(0);
   });
 
   test('F-0296 F-0406 a remote tightening applies at once and is what the settings document then reads', async () => {
@@ -138,6 +165,50 @@ describe('security settings', () => {
     const outcome = await svc.patch({ unlockValidityHours: 2 }, phone);
     expect(outcome.ok).toBe(true);
     expect(writes.at(-1)).toEqual({ ...DEFAULT_SECURITY_SETTINGS, unlockValidityHours: 2 });
+  });
+
+  test('G114 G115 two raises admitted on ONE proof: the proof is claimed in the queue, so exactly one raises and the other asks again', async () => {
+    const { svc, writes } = service();
+    const proof = oneProof();
+    const [first, second] = await Promise.all([
+      svc.patch({ unlockValidityHours: 12 }, proof.caller),
+      svc.patch({ unlockValidityHours: 24 }, proof.caller),
+    ]);
+    expect([first.ok, second]).toEqual([
+      true,
+      { ok: false, refusal: 'passkey-required', fields: ['unlockValidityHours'] },
+    ]);
+    expect(writes.map(written => written.unlockValidityHours)).toEqual([12]);
+    expect(proof.state.claims).toBe(2);
+  });
+
+  test('G114 a raise whose write fails has used the proof up: it is claimed before the write, with no restore', async () => {
+    const proof = oneProof();
+    const failing = new SecuritySettingsService({
+      document: {
+        read: () => ({ kind: 'defaults' }),
+        write: async () => {
+          throw new Error('disk full');
+        },
+      },
+      history: {
+        record: async () => undefined,
+        recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
+      },
+      clock: { now: () => '2026-11-07T12:00:00.000Z' },
+      widenCommand: 'fy daemon security set',
+    });
+    await expect(failing.patch({ unlockValidityHours: 24 }, proof.caller)).rejects.toThrow('disk full');
+    expect(proof.state).toEqual({ fresh: false, claims: 1 });
+  });
+
+  test('G112 G114 a refused widen takes nothing: a widen no passkey could buy never claims, and neither does a tightening', async () => {
+    const { svc } = service();
+    const proof = oneProof();
+    expect((await svc.patch({ stepUpWindowMinutes: 30 }, proof.caller)).ok).toBe(false);
+    expect((await svc.patch({ unlockValidityHours: 24, unlockOnOpen: false }, proof.caller)).ok).toBe(false);
+    expect((await svc.patch({ unlockValidityHours: 2 }, proof.caller)).ok).toBe(true);
+    expect(proof.state).toEqual({ fresh: true, claims: 0 });
   });
 
   test('a damaged document is read strictly, and only the machine may replace it', async () => {
