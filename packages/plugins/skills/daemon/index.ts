@@ -18,6 +18,7 @@ import { unavailable } from './lib/installs/ports.ts';
 import { installRoutes } from './install-routes.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts, type SkillFolderResolver } from './lib/launch-parts.ts';
+import { skillReferenceProvider } from './lib/reference-catalog.ts';
 
 /**
  * Skills (§2.3): the inventory of every skill a ferret sees, and the reviewed copy of one skill from this machine.
@@ -131,6 +132,9 @@ export default implementDaemon(manifest, {
       },
       provides: { skills: api },
       hooks: {
+        // The composer's `/` and `$` menus: one provider, because Claude's `/name` and Codex's `$name` are one skill.
+        'reference.catalog:/': skillReferenceProvider(api.forComposer),
+        'reference.catalog:$': skillReferenceProvider(api.forComposer),
         'launch.parts': () => [
           {
             id: 'skills',

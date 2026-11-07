@@ -109,6 +109,8 @@ export interface ConfigWriteOptions {
    * owner, and neither Gate's judge nor anything else confirms it (NN2). The owner's writer never sets it.
    */
   readonly byPlugin?: true;
+  /** A removal only: one that would be held is refused `would_hold`, with the file untouched and nothing held. */
+  readonly refuseIfHeld?: true;
 }
 
 export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
@@ -129,7 +131,8 @@ export type ConfigWriteResult =
 export type ConfigRemoveResult =
   | { readonly kind: 'applied'; readonly loosened: readonly string[] }
   | { readonly kind: 'held'; readonly id: string; readonly sentences: readonly string[] }
-  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' | 'conflict' };
+  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' | 'conflict' }
+  | { readonly kind: 'refused'; readonly reason: 'would_hold'; readonly sentences: readonly string[] };
 
 export interface ConfigFileView {
   readonly path: string;
@@ -577,6 +580,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         await removeOutcome(pluginId, def as ConfigDef, name, {
           judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
           ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+          ...(writeOptions.refuseIfHeld === true ? { refuseIfHeld: true as const } : {}),
         }),
     };
   };
@@ -804,6 +808,9 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         current?.evaluated.inEffect === undefined ? [] : judgeLoosening(def, current.evaluated.value, defaults);
       const confirmed =
         writeOptions.confirmedLoosening === true || (sentences.length > 0 && askJudge(writeOptions, sentences, true));
+      // Asked to refuse rather than hold: decided by this one judgement, before the disk is touched.
+      if (sentences.length > 0 && !confirmed && writeOptions.refuseIfHeld === true)
+        return { kind: 'refused', reason: 'would_hold', sentences };
       if (sentences.length === 0 || confirmed) acknowledgedRemovals.set(slot.path, options.clock.nowMs());
       await fs.remove(`${root}/${slot.path}`);
       await load();
@@ -832,6 +839,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (removed.kind === 'held')
       return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
     if (removed.reason === 'conflict') return { kind: 'conflict' };
+    if (removed.reason === 'would_hold')
+      return { kind: 'refused', reason: 'would_hold', issues: [], sentences: removed.sentences };
     return { kind: 'refused', reason: removed.reason, issues: [] };
   };
 

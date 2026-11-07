@@ -75,6 +75,8 @@ export type MachineSkillsInventory = z.infer<typeof MachineSkillsInventorySchema
 export const FerretSkillsInventorySchema = z.object({
   ferretId: z.string().min(1),
   harness: HarnessKeySchema,
+  /** The folder the ferret works in: what "+ Add skills" uses to pre-select the project the ferret sits in. */
+  folder: z.string().min(1),
   runtime: z.string().min(1).optional(),
   skills: z.array(SkillEntrySchema),
   truncated: z.boolean(),
