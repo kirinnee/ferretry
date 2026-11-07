@@ -235,7 +235,6 @@ describe('handsOnRaise', () => {
       should(handsOnRaise(REQUEST, daemon(cause))).be.false();
       should(handsOnSource(daemon(cause))).be.false();
     }
-    should(handsOnRaise({ ...REQUEST, gate: dummy }, daemon('system'))).be.false();
     should(handsOnRaise({ ...REQUEST, input: dummy }, { kind: 'agent', sessionId: 's', name: null })).be.false();
     should(handsOnSource({ kind: 'human' })).be.false();
   });

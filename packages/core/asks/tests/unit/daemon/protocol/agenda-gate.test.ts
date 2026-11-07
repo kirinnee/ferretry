@@ -3,7 +3,6 @@ import should from 'should';
 import {
   AgendaActionRequestSchema,
   type AgendaGate,
-  AgendaItemSchema,
   agendaAnswerProblems,
   gatesAnsweredOn,
 } from '../../../../daemon/lib/protocol/agenda.ts';
@@ -43,25 +42,6 @@ const plan: AgendaGate = {
 };
 
 const layout = (gate: AgendaGate): string[] => gateAnswers(gate).map(each => `${each.direction}:${each.label}`);
-
-const gateItem = (raisedBy: 'daemon' | 'agent', gate: AgendaGate = verify) => ({
-  id: 'A3',
-  source: 'task',
-  sourceRef: gateReference(gate),
-  subject: 'Try it: open the Board',
-  why: 'F412 reached Released · to test.',
-  waitingSince: AT,
-  howToResolve: 'Choose Done or Not good.',
-  kind: 'choice',
-  title: 'Gate items',
-  ask: { kind: 'multiple-choice', options: gateAskOptions(gate) },
-  answers: gateAnswers(gate),
-  task: { id: gate.cardId },
-  gate,
-  ...(raisedBy === 'daemon'
-    ? { raisedBy, raisedBySession: null, raisedByName: null }
-    : { raisedBy, raisedBySession: 's-1', raisedByName: null }),
-});
 
 describe('gate items', () => {
   describe('references', () => {
@@ -170,50 +150,6 @@ describe('gate items', () => {
     it('finds the reopen option', () => {
       should(gateReopenOption(verify)?.id).equal('not-good');
       should(gateReopenOption(plan)).be.undefined();
-    });
-  });
-
-  describe('the wire', () => {
-    it('reads a daemon gate item', () => {
-      should(AgendaItemSchema.safeParse(gateItem('daemon')).success).be.true();
-      should(AgendaItemSchema.safeParse(gateItem('daemon', plan)).success).be.true();
-    });
-
-    it('refuses a gate on an item a ferret raised', () => {
-      should(AgendaItemSchema.safeParse(gateItem('agent')).success).be.false();
-    });
-
-    it('refuses a gate with unknown keys, no options, or too many', () => {
-      should(AgendaItemSchema.safeParse({ ...gateItem('daemon'), gate: { ...verify, extra: 1 } }).success).be.false();
-      should(
-        AgendaItemSchema.safeParse({ ...gateItem('daemon'), gate: { ...verify, options: [] } }).success,
-      ).be.false();
-      const four = [0, 1, 2, 3].map(index => ({ id: `o${index}`, label: `O${index}`, outcome: 'next' as const }));
-      should(
-        AgendaItemSchema.safeParse({ ...gateItem('daemon'), gate: { ...verify, options: four } }).success,
-      ).be.false();
-      should(
-        AgendaItemSchema.safeParse({
-          ...gateItem('daemon'),
-          gate: { ...verify, options: [{ id: 'x', label: 'X', outcome: 'jump' }] },
-        }).success,
-      ).be.false();
-    });
-
-    it('never lets an agenda add carry a gate', () => {
-      const add = {
-        action: 'add',
-        title: 'Try it',
-        subject: 'Try it: open the Board',
-        why: 'It shipped.',
-        howToResolve: 'Choose.',
-        kind: 'choice',
-        ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
-        premise: 'It shipped.',
-        context: 'On the Mac.',
-        gate: verify,
-      };
-      should(AgendaActionRequestSchema.safeParse(add).success).be.false();
     });
   });
 

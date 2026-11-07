@@ -370,8 +370,7 @@ export class AgendaService {
   }
 
   /**
-   * `now`: the ferret says it is urgent, so an item the owner snoozed wakes too (at most once an hour). `back`: it
-   * needs something new from the owner, so an item they replied to returns to their list; without it that item stays parked.
+   * `now`: the ferret says it is urgent, so an item the owner snoozed wakes too (at most once an hour).
    */
   async edit(
     sessionId: string,
@@ -379,7 +378,6 @@ export class AgendaService {
     patch: EditAgendaPatch,
     actor: AgendaActor,
     now = false,
-    back = false,
   ): Promise<AgendaMutation> {
     return this.apply(sessionId, {
       action: 'edit',
@@ -387,7 +385,6 @@ export class AgendaService {
       id,
       patch,
       ...(now ? { now } : {}),
-      ...(back ? { back } : {}),
       at: this.clock.now(),
     });
   }

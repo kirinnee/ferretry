@@ -994,11 +994,10 @@ export const AgendaRevisionSchema = z.strictObject({
 export type AgendaRevision = z.infer<typeof AgendaRevisionSchema>;
 
 /**
- * How a closed item ended: answered or resolved (`done`), closed unanswered (`dismissed`), or the owner wrote
- * about it and nothing more is needed unless the ferret asks again (`replied`; the ferret reopens it with
- * `surface` or `edit`).
+ * How a closed item ended: answered or resolved (`done`), or closed unanswered (`dismissed`). An item the owner wrote
+ * about RESTS open (`parked: replied`); it never closes as a reply.
  */
-export const AgendaDispositionSchema = z.enum(['done', 'dismissed', 'replied']);
+export const AgendaDispositionSchema = z.enum(['done', 'dismissed']);
 export type AgendaDisposition = z.infer<typeof AgendaDispositionSchema>;
 
 export const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
@@ -1400,12 +1399,6 @@ const AgendaItemBaseShape = {
   signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
-  /**
-   * DEPRECATED: the card gate a standalone gate item asked about. No daemon raises one any more — a card's ask rides
-   * its agenda (`cardAsks`) — and the boot migration turned every open one into its card's agenda. Kept so an item
-   * answered before reads, and its receipt still answers a replay.
-   */
-  gate: AgendaGateSchema.optional(),
   /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
   cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
   /**
@@ -1497,9 +1490,6 @@ export const StoredAgendaItemSchema = z
         message: 'only an info card says a standing rule was suspended',
         path: ['signInRuleSuspended'],
       });
-    }
-    if (value.gate !== undefined && value.raisedBy !== 'daemon') {
-      context.addIssue({ code: 'custom', message: 'only the daemon raises a gate item', path: ['gate'] });
     }
     const asked = (value.cardAsks ?? []).map(ask => `${ask.gate.cardId}:${ask.gate.laneId}:${String(ask.gate.entry)}`);
     if (new Set(asked).size !== asked.length) {
@@ -1965,12 +1955,6 @@ export const AgendaEditRequestSchema = z.strictObject({
     .optional(),
   /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
   now: z.literal(true).optional(),
-  /**
-   * `--back`, RETIRED from the CLI (`fy agenda answer` replaced it) and kept for older ones: the ferret needs
-   * something NEW from the owner, so a RESTING item asks again, fresh, with the whole card refreshed. Without it
-   * (and without a `questionAnswer` or a replaced ask) an edit of a resting item only rewrites the card.
-   */
-  back: z.literal(true).optional(),
 });
 
 export const AgendaActionRequestSchema = z
@@ -2259,14 +2243,8 @@ export const SessionAgendaSummarySchema = z.object({
 });
 export type SessionAgendaSummary = z.infer<typeof SessionAgendaSummarySchema>;
 
-/** The query parameter a conversation link names an agenda item by: `?agenda=A3`. */
-export const AGENDA_LINK_PARAMETER = 'agenda';
-
-/**
- * The older spelling, `?attention=A3`. Delivered pushes and bookmarks carry it for good, so a client keeps
- * reading it; the daemon still WRITES it into pushes until older apps (which read only this one) are gone.
- */
-export const LEGACY_ATTENTION_LINK_PARAMETER = 'attention';
+/** The query parameter a conversation link names an ask by: `?ask=A3` (the one spelling; pushes write it too). */
+export const ASK_LINK_PARAMETER = 'ask';
 
 /**
  * Where a push about a conversation opens, RELATIVE TO THE MACHINE'S OWN PAGES: the daemon names the
@@ -2276,9 +2254,9 @@ export const LEGACY_ATTENTION_LINK_PARAMETER = 'attention';
  */
 export const sessionNotificationPath = (sessionId: string): string => `/session/${encodeURIComponent(sessionId)}`;
 
-/** Where an Agenda notification opens: its conversation, AT the item (`?attention=A3`). */
+/** Where an Agenda notification opens: its conversation, AT the ask (`?ask=A3`). */
 export const agendaNotificationPath = (sessionId: string, id: AgendaId): string =>
-  `${sessionNotificationPath(sessionId)}?${LEGACY_ATTENTION_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  `${sessionNotificationPath(sessionId)}?${ASK_LINK_PARAMETER}=${encodeURIComponent(id)}`;
 
 /**
  * The id the MACHINE AGENDA goes by (docs/agenda.md § The machine agenda): the daemon's own ledger for notices that

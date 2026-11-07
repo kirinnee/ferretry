@@ -37,11 +37,8 @@ const askLinePrefix = (gate: Pick<AgendaGate, 'options' | 'laneName'>): string =
 /**
  * Whether this is the card agenda the daemon opened with its ask still the one it generated: raised by the daemon under
  * a `card-agenda:` reference, an open question with no questions, fields or steps, and its subject still exactly the
- * one the daemon last wrote (`generatedSubject`). A card agenda from before `generatedSubject` is read conservatively by
- * its words: its subject must only REPEAT one of its card asks (`askLineRepeatsCardAsk`: the lane's words and nothing
- * but the card's title or one step), never merely open with "Try it:"; anything more is the item's own question, and
- * the daemon's next restate stamps `generatedSubject` on it. Only then is the item's whole ask its
- * card asks; once a ferret or the owner rewrites the subject, the item asks the owner something of its own. Never read
+ * one the daemon last wrote (`generatedSubject`): every card agenda is born with it. Only then is the item's whole ask
+ * its card asks; once a ferret or the owner rewrites the subject, the item asks the owner something of its own. Never read
  * from the revision tail, which keeps only the newest few. The ONE test the daemon's state machine and the app share.
  */
 export const isGeneratedCardAgendaAsk = (
@@ -57,10 +54,7 @@ export const isGeneratedCardAgendaAsk = (
     return false;
   }
   if (item.ask?.kind !== 'open-question') return false;
-  if (item.generatedSubject !== undefined) return item.subject === item.generatedSubject;
-  // Before `generatedSubject`: the subject only repeats one of the agenda's card asks (answered ones too: the subject was
-  // written when that ask was put, and an answer does not rewrite it). A lane prefix alone never hides a question.
-  return askLineRepeatsCardAsk(item.subject.trim(), item.cardAsks ?? []);
+  return item.generatedSubject !== undefined && item.subject === item.generatedSubject;
 };
 
 /** A line as it is compared: no Markdown marks, one space between words, no closing stop, lower case. */
@@ -220,7 +214,7 @@ export const cardAskStage = (gate: Pick<AgendaGate, 'options'>): Extract<AgendaS
 
 /**
  * Whether an open agenda can carry a card's ask: a ferret's own item, or one the daemon raised on a ferret's behalf (the
- * card's own agenda, a Not good follow-up). Not a notice, a gate item from before card asks, nor an item that is
+ * card's own agenda, a Not good follow-up). Not a notice, nor an item that is
  * something else for the owner to do (an input, a confirmation, a copied plan, a task plan, a 2FA seed, a phone
  * approval, a sign-in rule). The ONE test the engine and the app share.
  */
@@ -228,7 +222,6 @@ export const canCarryCardAsk = (
   item: Pick<
     AgendaItem,
     | 'notice'
-    | 'gate'
     | 'kind'
     | 'confirms'
     | 'copyPlan'
@@ -243,7 +236,6 @@ export const canCarryCardAsk = (
   >,
 ): boolean =>
   item.notice !== true &&
-  item.gate === undefined &&
   item.kind !== 'input' &&
   item.confirms === undefined &&
   item.copyPlan === undefined &&

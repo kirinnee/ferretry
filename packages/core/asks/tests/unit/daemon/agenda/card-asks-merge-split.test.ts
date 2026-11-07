@@ -472,7 +472,7 @@ describe('a merge carries card asks', () => {
     should(result).match({ ok: false, error: { code: 'full' } });
   });
 
-  it('still refuses a gate item from before card asks and a notice', () => {
+  it('still refuses a notice', () => {
     // Arrange
     const ledger = twoThreads([gate('F1')], []);
     const asNotice: AgendaLedger = {
@@ -481,15 +481,9 @@ describe('a merge carries card asks', () => {
         entry.item.id === 'A2' ? { ...entry, item: { ...entry.item, notice: true } } : entry,
       ) as AgendaLedger['entries'],
     };
-    const asGate: AgendaLedger = {
-      ...ledger,
-      entries: ledger.entries.map(entry =>
-        entry.item.id === 'A2' ? { ...entry, item: { ...entry.item, source: 'task', gate: gate('F3') } } : entry,
-      ) as AgendaLedger['entries'],
-    };
 
     // Act
-    const results = [asNotice, asGate].map(each =>
+    const results = [asNotice].map(each =>
       applyAgendaCommand(each, { action: 'merge', actor: HUMAN, id: 'A1', from: 'A2', at: minute(9) }),
     );
 

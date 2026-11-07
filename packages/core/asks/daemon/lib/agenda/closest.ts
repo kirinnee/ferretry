@@ -26,11 +26,7 @@ export interface ClosestAgenda {
 
 /** Whether an open item is a topic a card can belong with: one a ferret raised, open, and not a card of its own kind. */
 const isTopic = (item: AgendaItem): boolean =>
-  item.raisedBy === 'agent' &&
-  item.notice !== true &&
-  item.input === undefined &&
-  item.gate === undefined &&
-  item.confirms === undefined;
+  item.raisedBy === 'agent' && item.notice !== true && item.input === undefined && item.confirms === undefined;
 
 /**
  * The open agenda on `sessionId` that the daemon's related check matched STRONGLY, or nothing: a weak match is not

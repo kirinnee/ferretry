@@ -13,7 +13,6 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   parseAgendaLedger,
-  restsOnAnswer,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
@@ -752,55 +751,6 @@ describe('a blocker and a snooze', () => {
 
     // Assert
     should(result.error.code).equal('rate-limited');
-  });
-});
-
-describe('the gate exemption', () => {
-  it('should keep closing a card’s gate item on the owner’s answer, as before', () => {
-    // Arrange
-    const gate = ok(
-      applyAgendaCommandToSession(null, SESSION_ID, {
-        action: 'raise',
-        actor: SYSTEM,
-        request: {
-          source: 'task',
-          sourceRef: 'gate:F7:tested:1',
-          subject: 'Try it',
-          why: 'It shipped.',
-          howToResolve: 'Choose.',
-          kind: 'choice',
-          ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
-          gate: {
-            cardId: 'F7',
-            laneId: 'tested',
-            laneName: 'Released · to test',
-            entry: 1,
-            projectId: 'p-1',
-            options: [
-              { id: 'done', label: 'Done', outcome: 'close' },
-              { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
-            ],
-          },
-        },
-        at: T0,
-      }),
-    );
-
-    // Act
-    const answered = ok(
-      apply(gate.ledger, {
-        action: 'answer',
-        actor: HUMAN,
-        id: 'A1',
-        response: { kind: 'multiple-choice', choice: 'Done' },
-        at: T1,
-      }),
-    );
-
-    // Assert
-    should(restsOnAnswer(gate.ledger.entries[0] as Parameters<typeof restsOnAnswer>[0])).be.false();
-    should(answered.addressed?.disposition).equal('done');
-    should(agendaSnapshot(answered.ledger).items).be.empty();
   });
 });
 

@@ -274,26 +274,6 @@ describe('the generated card agenda ask', () => {
     should(isGeneratedCardAgendaAsk({ ...daemon, ask: { kind: 'permission' } })).be.false();
   });
 
-  it('should never let a lane prefix alone hide a question on a card agenda from before the generated subject', () => {
-    const { generatedSubject: _generated, ...legacy } = daemon;
-    // The upgrade path: a ferret rewrote it before `generatedSubject` existed, keeping the "Try it:" opening.
-    const rewritten = {
-      ...legacy,
-      subject: 'Try it: the badge counts unread items. Should keyboard focus change too?',
-    };
-    should(isGeneratedCardAgendaAsk(rewritten)).be.false();
-    should(itemAsksOwnQuestion(rewritten, rewritten.cardAsks)).be.true();
-  });
-
-  it('should read a card agenda from before the generated subject by the lane words of one of its card asks', () => {
-    const { generatedSubject: _generated, ...legacy } = daemon;
-    should(isGeneratedCardAgendaAsk(legacy)).be.true();
-    // The answered ask still wrote the subject: Good does not turn it into a question of its own.
-    should(isGeneratedCardAgendaAsk({ ...legacy, cardAsks: [tryIt(answered('F12').answer)] })).be.true();
-    should(isGeneratedCardAgendaAsk({ ...legacy, subject: 'Should the badge also change keyboard focus?' })).be.false();
-    should(isGeneratedCardAgendaAsk({ ...legacy, cardAsks: undefined })).be.false();
-  });
-
   it('should never hold for an item that is not the daemon’s card agenda', () => {
     should(isGeneratedCardAgendaAsk({ ...daemon, raisedBy: 'agent' })).be.false();
     should(isGeneratedCardAgendaAsk({ ...daemon, sourceRef: 'gate:F12:tested:1' })).be.false();

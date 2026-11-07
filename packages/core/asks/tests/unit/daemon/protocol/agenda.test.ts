@@ -126,23 +126,6 @@ describe('the add request: agenda fields, notice, ping and the old surface flag'
   });
 });
 
-describe('the edit request: back', () => {
-  it('should accept back: true, so a ferret can bring a replied item back to the owner', () => {
-    // Act
-    const parsed = AgendaActionRequestSchema.parse({ action: 'edit', id: 'A1', subject: 'Which region?', back: true });
-
-    // Assert
-    should(parsed).containDeep({ action: 'edit', id: 'A1', back: true });
-  });
-
-  it('should refuse back: false, which would mean nothing', () => {
-    // Act + Assert
-    should(
-      AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', subject: 's', back: false }).success,
-    ).be.false();
-  });
-});
-
 describe('the edit request: clear', () => {
   it('should accept one to three distinct-field clears, with or without other changes', () => {
     // Assert

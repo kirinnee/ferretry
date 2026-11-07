@@ -15,7 +15,7 @@
  * Never closed, however alike: a hands-on card, a gate the owner answered, an item the owner has begun a conversation on
  * (they asked for more, or the ferret was told something that never arrived). Those are reported instead.
  */
-import type { AgendaGate, AgendaId, AgendaItem } from '../protocol/agenda.ts';
+import type { AgendaId, AgendaItem } from '../protocol/agenda.ts';
 import { handsOnItem } from './home.ts';
 
 /** One open agenda, with the home of the lineage it belongs to. */
@@ -50,13 +50,6 @@ export interface PossibleDuplicate {
 export interface DuplicateFindings {
   readonly closures: readonly DuplicateClosure[];
   readonly possible: readonly PossibleDuplicate[];
-}
-
-export interface DuplicateFacts {
-  /** Gate references (`gate:<card>:<lane>:<entry>`) the owner answered: their items are never closed. */
-  readonly answeredGates: ReadonlySet<string>;
-  /** The reference of a gate, as {@link answeredGates} spells it. */
-  readonly gateReference: (gate: AgendaGate) => string;
 }
 
 interface Entry {
@@ -98,13 +91,11 @@ const wordsOf = (item: AgendaItem): string =>
 const sameWords = (one: AgendaItem, other: AgendaItem): boolean => wordsOf(one) === wordsOf(other);
 
 /** Why an item may not be closed, or `undefined` when it may. */
-const protectedBecause = (entry: Entry, facts: DuplicateFacts): string | undefined => {
+const protectedBecause = (entry: Entry): string | undefined => {
   const { item } = entry;
   if (handsOnItem(item)) return 'a hands-on card';
   // An agenda that carries a card's ask is the card's one ask: closing it as a duplicate would drop the ask.
   if ((item.cardAsks ?? []).length > 0) return "it carries a card's ask";
-  if (item.gate !== undefined && facts.answeredGates.has(facts.gateReference(item.gate)))
-    return 'a gate the owner answered';
   if (item.history !== undefined || item.infoRequests !== undefined || item.undelivered !== undefined)
     return 'the owner has begun talking about it';
   return undefined;
@@ -113,7 +104,7 @@ const protectedBecause = (entry: Entry, facts: DuplicateFacts): string | undefin
 const closable = (entry: Entry): boolean => entry.item.notice !== true;
 
 /** What to close and what to report, across every open agenda. Pure and total. */
-export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: DuplicateFacts): DuplicateFindings => {
+export const findDuplicates = (agendas: readonly DuplicateAgenda[]): DuplicateFindings => {
   const closures: DuplicateClosure[] = [];
   const possible: PossibleDuplicate[] = [];
   const closed = new Set<string>();
@@ -128,7 +119,7 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: Dupli
     for (const entry of group) {
       if (entry === keep) continue;
       const why =
-        protectedBecause(entry, facts) ??
+        protectedBecause(entry) ??
         (entry.item.raisedBySession === keep.item.raisedBySession ? undefined : 'raised by different sessions') ??
         (kind === 'title' && !sameWords(entry.item, keep.item) ? 'the same title, but a different ask' : undefined);
       if (why === undefined) {
@@ -154,11 +145,11 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: Dupli
     return [...groups.values()];
   };
 
-  // 1. One card, several owner items: its gate item and its agents' threads (a hands-on card is no thread of the card).
+  // 1. One card, several owner items: its agents' threads (a hands-on card is no thread of the card).
   const cardOf = (entry: Entry): string | undefined => {
     const { item } = entry;
     if (item.task === undefined || item.task === null || handsOnItem(item)) return undefined;
-    if (item.gate === undefined && item.raisedBy !== 'agent') return undefined;
+    if (item.raisedBy !== 'agent') return undefined;
     return `${entry.agenda.home}\n${item.task.machineId ?? ''}/${item.task.id}`;
   };
   for (const group of grouped(open(), cardOf)) if (group.length > 1) settle('card', group);
@@ -175,9 +166,7 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: Dupli
   // 3. The same words, raised twice by agents in one lineage.
   const titleOf = (entry: Entry): string | undefined => {
     const title = normalized(entry.item.subject);
-    return title === '' || entry.item.gate !== undefined || handsOnItem(entry.item)
-      ? undefined
-      : `${entry.agenda.home}\n${title}`;
+    return title === '' || handsOnItem(entry.item) ? undefined : `${entry.agenda.home}\n${title}`;
   };
   for (const group of grouped(open(), titleOf)) {
     if (group.length < 2) continue;
