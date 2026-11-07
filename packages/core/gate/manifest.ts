@@ -12,6 +12,7 @@ import {
   GateConfigFile,
   GatePolicyChanged,
   GatePort,
+  GrantAuditEntryViewSchema,
   StepUp,
   WardenTokenFile,
 } from './contract/index.ts';
@@ -46,12 +47,16 @@ export const AuditKeptRotatedFile = defineState({
   mode: 0o600,
 });
 
-/** `state/gate/grant-audit.jsonl` (F-0251): who changed a daemon-wide grant, when. Parsed by the daemon half. */
+/**
+ * `state/gate/grant-audit.jsonl` (F-0251): who changed a daemon-wide grant, when. Each line is checked on its own
+ * against the entry's schema, so one damaged line is counted and the valid ones around it are still read.
+ */
 export const GrantAuditFile = defineState({
   name: 'grant-audit',
   path: 'grant-audit.jsonl',
   store: 'jsonl',
   format: 1,
+  schema: GrantAuditEntryViewSchema,
   mode: 0o600,
 });
 

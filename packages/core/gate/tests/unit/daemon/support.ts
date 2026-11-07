@@ -19,10 +19,16 @@ import {
   FULL_DEVICE_GRANTS,
   type GateConfig,
 } from '../../../contract/index.ts';
-import { FakeDeviceProvider, FakeFerretBearers, holder, T0 } from '../../../contract/testing/index.ts';
+import {
+  FakeDeviceProvider,
+  FakeFerretBearers,
+  FakeStepUpWitness,
+  holder,
+  T0,
+} from '../../../contract/testing/index.ts';
 import { GateAdmission } from '../../../daemon/lib/api/admission.ts';
 import { bearerDigest } from '../../../daemon/lib/api/authentication.ts';
-import { StepUpRegistry } from '../../../daemon/lib/step-up/registry.ts';
+import { FailClosedStepUps } from '../../../daemon/lib/step-up/witness.ts';
 
 /** Fixed, fake tokens: never a real credential. */
 export const ADMIN = 'admin-token-for-tests-0000000000000000000000';
@@ -98,12 +104,15 @@ export interface World {
   readonly devices: FakeDeviceProvider;
   readonly members: FakeDeviceProvider;
   readonly ferrets: FakeFerretBearers;
-  readonly stepUps: StepUpRegistry;
+  /** Access's `step-up:device` value, as a fake with today's answers. */
+  readonly stepUps: FakeStepUpWitness;
   readonly audits: AuditDraft[];
   readonly recorded: AuditDraft[];
   policy: GateConfig | undefined;
   now: Instant;
   devicesOff: boolean;
+  /** No `step-up:device` provider (Access off), or one that throws. */
+  stepUpsOff: boolean | 'throwing';
   /** Enrols a device, unlocked for an hour unless told otherwise. */
   enrol(id: string, grants?: CapabilityGrants, unlocked?: boolean): void;
 }
@@ -124,23 +133,33 @@ export function world(initial: Partial<Pick<World, 'policy'>> = {}): World {
     policy: 'policy' in initial ? initial.policy : DEFAULT_GATE_CONFIG,
     now: T0,
     devicesOff: false,
+    stepUpsOff: false,
     stepUps: undefined as never,
     gate: undefined as never,
     enrol(id, grants = FULL_DEVICE_GRANTS, unlocked = true) {
       devices.enrol(holder(id), grants, unlocked ? addDuration(state.now, minutes(60)) : undefined);
     },
   };
-  const stepUps = new StepUpRegistry(
-    { nowMs: () => epochMs(state.now) },
-    () => state.policy?.security.stepUpWindowMinutes ?? 0,
-  );
+  const stepUps = new FakeStepUpWitness({
+    nowMs: () => epochMs(state.now),
+    settings: () => state.policy?.security,
+    unlockedUntil: deviceId => {
+      const standing = devices.standing(holder(deviceId));
+      return typeof standing === 'object' && standing.unlockedUntil !== undefined
+        ? epochMs(standing.unlockedUntil)
+        : undefined;
+    },
+  });
   const gate = new GateAdmission({
     tokens: () => ({ admin: ADMIN, warden: WARDEN }),
     ferrets: () => ferrets,
     devices: () => (state.devicesOff ? undefined : devices),
     members: () => members as never,
     policy: () => state.policy,
-    stepUps,
+    stepUps: new FailClosedStepUps(() => {
+      if (state.stepUpsOff === 'throwing') throw new Error('the step-up provider failed');
+      return state.stepUpsOff ? undefined : stepUps;
+    }),
     now: () => state.now,
     refused: draft => audits.push(draft),
     recorded: draft => recorded.push(draft),

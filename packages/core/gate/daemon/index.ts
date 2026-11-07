@@ -1,4 +1,4 @@
-import { type ApiResponse, type CallContext, type ConfigFileDef, errorResponse } from '@ferretry/kernel/contract';
+import { ApiError, type ApiResponse, type CallContext, type ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import {
@@ -16,14 +16,16 @@ import {
   GateConfigFile,
   GatePolicyChanged,
   type MemberHolderStanding,
-  type SecuritySettings,
+  securitySettingsOf,
+  StepUp,
   WardenTokenFile,
 } from '../contract/index.ts';
 import manifest, { AuditKeptFile, AuditKeptRotatedFile, AuditRotatedFile, GrantAuditFile } from '../manifest.ts';
 import { StateGrantHistory } from './adapters/grants/state-grant-history.ts';
-import { type ConfigFilesReader, grantsNamedIn, grantsProvenFrom } from './lib/grants/provenance.ts';
+import { GateConfigNotSaved, GateConfigWriter } from './adapters/config/gate-config-writer.ts';
+import { grantsNamedIn } from './lib/grants/provenance.ts';
 import { GrantService } from './lib/grants/service.ts';
-import { type ConfigFileStatus, type GateConfigSource, policyInEffect } from './lib/policy/in-effect.ts';
+import { type GateConfigSource, policyInEffect } from './lib/policy/in-effect.ts';
 import { StateAuditJournal } from './adapters/audit/state-audit-journal.ts';
 import { StateTokens } from './adapters/tokens/state-tokens.ts';
 import { GateAdmission } from './lib/api/admission.ts';
@@ -31,7 +33,7 @@ import type { GateTokens } from './lib/api/authentication.ts';
 import { AUDIT_FOLD_WINDOW_MS, AuditLog } from './lib/audit/service.ts';
 import { gateRoutes, grantRoutes } from './lib/routes.ts';
 import { SecuritySettingsService } from './lib/security/service.ts';
-import { StepUpRegistry } from './lib/step-up/registry.ts';
+import { FailClosedStepUps } from './lib/step-up/witness.ts';
 
 /** The binary's name, for sentences that name a command (two-name model: the shell owns the real value). */
 const CLIENT_NAME = 'fy';
@@ -69,33 +71,30 @@ export default implementDaemon(manifest, {
     kernel.jobs.add({ id: 'gate.tokens', schedule: { onceAfterStart: true }, run: loadTokens });
 
     // ─── policy: `gate.yaml` in effect; only a missing file is the product default (G6, G152), damage is
-    // undetermined (G153, G154). `fileState` is the kernel seam (rebuild/port-kernel) that tells the two apart.
-    const configPort = kernel.config as typeof kernel.config & {
-      fileState?: (def: ConfigFileDef<GateConfig>) => ConfigFileStatus;
-    };
-    const fileState = configPort.fileState;
+    // undetermined (G153, G154): the kernel's `fileState` tells the two apart.
+    const gateFile = GateConfigFile as ConfigFileDef<GateConfig>;
     const policySource: GateConfigSource = {
-      file: () => kernel.config.file(GateConfigFile as ConfigFileDef<GateConfig>),
-      ...(fileState === undefined
-        ? {}
-        : { fileState: () => fileState.call(configPort, GateConfigFile as ConfigFileDef<GateConfig>) }),
+      file: () => kernel.config.file(gateFile),
+      fileState: () => kernel.config.fileState(gateFile),
     };
     const policy = (): GateConfig | undefined => policyInEffect(policySource);
     // ─── provenance (G155): which capabilities `gate.yaml` NAMES, read from its raw text ───────────────────────
-    const configFiles = (kernel as { readonly configFiles?: ConfigFilesReader }).configFiles;
-    let namedGrants: readonly CapabilityName[] | undefined;
+    const configFiles = kernel.configFiles;
+    const target = { plugin: manifest.id, def: gateFile };
+    let namedGrants: readonly CapabilityName[] = [];
     const readProvenance = async (): Promise<void> => {
       if (configFiles === undefined) return;
       try {
-        const read = await configFiles.read({ plugin: manifest.id, def: GateConfigFile });
+        const read = await configFiles.read(target);
         namedGrants = read?.exists === true && read.text !== undefined ? grantsNamedIn(Bun.YAML.parse(read.text)) : [];
       } catch {
-        namedGrants = undefined;
+        // An unreadable file names nothing it can prove: every capability reads as the product's answer.
+        namedGrants = [];
       }
     };
     void readProvenance();
     let generation = 0;
-    kernel.config.watch(GateConfigFile as ConfigFileDef<GateConfig>, () => {
+    kernel.config.watch(gateFile, () => {
       void readProvenance();
       generation += 1;
       kernel.events.publish(GatePolicyChanged, { generation });
@@ -127,10 +126,13 @@ export default implementDaemon(manifest, {
       provided(hooks.provider(Credentials, 'member')) as CredentialProvider<MemberHolderStanding> | undefined;
     const ferrets = (): FerretBearerDirectory | undefined => provided(hooks.provider(Bearers, 'ferret'));
 
-    const stepUps = new StepUpRegistry(
-      { nowMs: () => kernel.clock.nowMs() },
-      () => policy()?.security.stepUpWindowMinutes ?? 0,
-    );
+    // `step-up:device` (Access alone): read live, so a provider that goes away is no step-up at once (fail closed).
+    const stepUps = new FailClosedStepUps(() => provided(hooks.provider(StepUp, 'device')));
+    /** The kind of a config file, for an audit record: the plugin that declares it, never the path or a name in it. */
+    const configKind = (path: string): string | undefined =>
+      configFiles
+        ?.declarations()
+        .find(({ def }) => (def.shape === 'file' ? def.file === path : path.startsWith(`${def.collection}/`)))?.plugin;
 
     const admission = new GateAdmission({
       tokens: () => tokens,
@@ -146,8 +148,10 @@ export default implementDaemon(manifest, {
       recorded: draft => {
         void record(draft);
       },
+      configKind,
       clientName: CLIENT_NAME,
     });
+    const writer = new GateConfigWriter(() => configFiles, target);
 
     const security = new SecuritySettingsService({
       document: {
@@ -155,11 +159,13 @@ export default implementDaemon(manifest, {
           const current = policy();
           return current === undefined
             ? { kind: 'damaged' }
-            : { kind: 'document', settings: current.security as SecuritySettings };
+            : { kind: 'document', settings: securitySettingsOf(current.security) };
         },
-        // GAP: the kernel gives plugins no config write yet (reported to the lead). Nothing is applied.
-        write: async () => {
-          throw new GateConfigWriteUnavailable();
+        // The member unlock is not a `/v1/security` setting: the block is written back with it unchanged.
+        write: async settings => {
+          const current = policy();
+          if (current === undefined) throw new GateConfigNotSaved('gate.yaml could not be read, so nothing was saved');
+          await writer.write('security', { ...settings, memberUnlockDays: current.security.memberUnlockDays });
         },
       },
       audit: record,
@@ -170,11 +176,8 @@ export default implementDaemon(manifest, {
     const grants = new GrantService({
       document: {
         read: () => policy()?.grants,
-        written: () => namedGrants ?? grantsProvenFrom(policy()?.grants),
-        // GAP: the kernel-bound config writer (lead-approved) has not landed. Nothing is applied.
-        write: async () => {
-          throw new GateConfigWriteUnavailable();
-        },
+        written: () => namedGrants,
+        write: async next => await writer.write('grants', next),
       },
       history: new StateGrantHistory(kernel.state, GrantAuditFile),
       clock: { now: () => kernel.clock.now() },
@@ -184,14 +187,14 @@ export default implementDaemon(manifest, {
     const routes = gateRoutes({ audit, security });
     const grantHandlers = grantRoutes(grants);
     const gate: GateApi = { audit: record, policy };
-    /** The seam the kernel-bound config writer replaces: until it lands, a save answers 503 after judging. */
+    /** A save the config writer did not make answers 503 with its sentence; nothing was applied. */
     const savingConfig =
       (handler: (call: CallContext) => Promise<ApiResponse>) =>
       async (call: CallContext): Promise<ApiResponse> => {
         try {
           return await handler(call);
         } catch (error) {
-          if (error instanceof GateConfigWriteUnavailable) return configWriteUnavailable();
+          if (error instanceof GateConfigNotSaved) throw new ApiError(503, error.message, 'config_not_saved');
           throw error;
         }
       };
@@ -209,17 +212,3 @@ export default implementDaemon(manifest, {
     };
   },
 });
-
-class GateConfigWriteUnavailable extends Error {
-  constructor() {
-    super('gate.yaml cannot be written by this build');
-    this.name = 'GateConfigWriteUnavailable';
-  }
-}
-
-const configWriteUnavailable = () =>
-  errorResponse(
-    503,
-    'this build of the daemon cannot save gate.yaml yet; edit config/gate.yaml at the machine instead',
-    'config_write_unavailable',
-  );

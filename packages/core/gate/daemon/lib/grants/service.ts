@@ -1,83 +1,26 @@
 import type { CapabilityDemand } from '@ferretry/kernel/contract';
-import { InstantSchema } from '@ferretry/std';
-import { z } from 'zod';
 import {
   CAPABILITIES,
   CAPABILITY_NAMES,
   type CapabilityGrant,
-  CapabilityGrantSchema,
   type CapabilityGrants,
   type CapabilityName,
-  CapabilityNameSchema,
   type CapabilityPresentation,
-  GrantRefusalSchema,
+  type GrantAuditEntryView,
+  type GrantAuditView,
+  type GrantsPatch,
+  type GrantsView,
 } from '../../../contract/index.ts';
 import { decideCapability, type GrantEvaluation, isGovernedCaller } from '../api/capability.ts';
 
 /**
- * The daemon-wide grant surface, `/v1/grants` and its history (today's `lib/grants/service.ts` view/patch/history
- * and `protocol/src/lib/grants.ts` wire schemas, copied; lead decision: Gate declares `/v1/grants*`). The decision
- * itself is admission's (`decideCapability`); this reports it and changes the document (`gate.yaml` `grants`).
- *
- * The wire schemas live here, not in the frozen contract, because only Gate reads them today; the app's grants panel
- * will need them in the contract (reported to the lead).
+ * The daemon-wide grant surface, `/v1/grants` and its history (today's `lib/grants/service.ts` view/patch/history,
+ * copied; lead decision: Gate declares `/v1/grants*`). The decision itself is admission's (`decideCapability`); this
+ * reports it and changes the document (`gate.yaml` `grants`). The wire schemas are Gate's contract (`grants.ts`).
  */
 
-export const CapabilityGrantViewSchema = z.strictObject({
-  capability: CapabilityNameSchema,
-  use: z.boolean(),
-  configure: z.boolean(),
-  granted: CapabilityGrantSchema,
-  deviceGranted: CapabilityGrantSchema.optional(),
-  useRefusal: GrantRefusalSchema,
-  configureRefusal: GrantRefusalSchema,
-  mayGrant: z.boolean(),
-  origin: z.enum(['default', 'config file']),
-});
-export type CapabilityGrantView = z.infer<typeof CapabilityGrantViewSchema>;
-
-export const GrantsViewSchema = z.strictObject({
-  capabilities: z.array(CapabilityGrantViewSchema).readonly(),
-  governed: z.boolean(),
-  hostLocal: z.boolean(),
-  steppedUp: z.boolean(),
-});
-export type GrantsView = z.infer<typeof GrantsViewSchema>;
-
-/** How many recorded changes one read returns, newest first (G160). */
-export const GRANT_AUDIT_MAX_ENTRIES = 50 as const;
-/** The bytes one read covers, newest first (G160). */
+/** The bytes one read covers, newest first (G160): today's `AUDIT_WINDOW_BYTES`. */
 export const GRANT_AUDIT_MAX_BYTES = 64 * 1024;
-
-export const GrantAuditEntrySchema = z.strictObject({
-  at: InstantSchema,
-  actor: z.string().min(1).max(256),
-  changes: z.array(z.string().min(1).max(96)).readonly(),
-});
-export type GrantAuditEntry = z.infer<typeof GrantAuditEntrySchema>;
-
-export const GrantAuditViewSchema = z.strictObject({
-  entries: z.array(GrantAuditEntrySchema).readonly(),
-  unreadable: z.number().int().nonnegative(),
-  truncated: z.boolean(),
-});
-export type GrantAuditView = z.infer<typeof GrantAuditViewSchema>;
-
-export const GrantsPatchSchema = z
-  .strictObject(
-    Object.fromEntries(
-      CAPABILITY_NAMES.map(name => [
-        name,
-        z.strictObject({ use: z.boolean().optional(), configure: z.boolean().optional() }).optional(),
-      ]),
-    ) as {
-      readonly [K in CapabilityName]: z.ZodOptional<
-        z.ZodObject<{ use: z.ZodOptional<z.ZodBoolean>; configure: z.ZodOptional<z.ZodBoolean> }>
-      >;
-    },
-  )
-  .refine(patch => Object.values(patch).some(value => value !== undefined), 'a grant patch must change something');
-export type GrantsPatch = z.infer<typeof GrantsPatchSchema>;
 
 /** A refusal the grant surface raises, in a taxonomy the route turns into a status (today's `GrantFailure`). */
 export type GrantFailure = 'invalid' | 'forbidden' | 'device-not-granted' | 'step-up-required' | 'unavailable';
@@ -131,7 +74,7 @@ export interface GrantDocumentPort {
 }
 
 export interface GrantHistoryPort {
-  record(entry: GrantAuditEntry): Promise<void>;
+  record(entry: GrantAuditEntryView): Promise<void>;
   recent(limit: number): Promise<GrantAuditView>;
 }
 
@@ -236,7 +179,7 @@ export class GrantService {
     // AFTER the write, so a record can never claim a change that did not reach the document.
     if (changes.length > 0)
       await this.deps.history.record({
-        at: this.deps.clock.now() as GrantAuditEntry['at'],
+        at: this.deps.clock.now() as GrantAuditEntryView['at'],
         actor: presentation.actor,
         changes,
       });

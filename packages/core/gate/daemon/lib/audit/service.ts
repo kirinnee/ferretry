@@ -140,6 +140,7 @@ export class AuditLog {
         event: open.entry.event,
         actor: { kind: open.entry.actor.kind },
         outcome: open.entry.outcome,
+        ...(open.entry.cause === undefined ? {} : { cause: open.entry.cause }),
         detail: { keptAllowanceSpent: true, repeats: open.repeats, ...(subjects === undefined ? {} : { subjects }) },
       },
       at,

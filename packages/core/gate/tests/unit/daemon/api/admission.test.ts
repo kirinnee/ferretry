@@ -1,17 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  type CallContext,
-  type CallStanding,
-  type HolderId,
-  type PolicyRef,
-  type SessionId,
-} from '@ferretry/kernel/contract';
+import { type HolderId, type PolicyRef, type ScopedRoute } from '@ferretry/kernel/contract';
 import { addDuration, minutes } from '@ferretry/std';
 import {
   AUDIT_KINDS,
   cap,
   DEFAULT_GATE_CONFIG,
-  DEFAULT_SECURITY_SETTINGS,
+  DEFAULT_GATE_SECURITY,
   describeGrantRefusal,
   FULL_DEVICE_GRANTS,
   LIMITED_DEVICE_GRANTS,
@@ -41,7 +35,7 @@ const allOff = Object.fromEntries(
   Object.keys(FULL_DEVICE_GRANTS).map(name => [name, { use: false, configure: false }]),
 ) as typeof FULL_DEVICE_GRANTS;
 const narrowed = { ...DEFAULT_GATE_CONFIG, grants: allOff };
-const perAct = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_SECURITY_SETTINGS, stepUpOnActions: true } };
+const perAct = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, stepUpOnActions: true } };
 const person = (fields = {}) => descriptor({ caller: 'person', ...fields });
 
 describe('who is governed', () => {
@@ -55,7 +49,12 @@ describe('who is governed', () => {
 
   test('G3 G138 the host command line is never narrowed by either document', () => {
     const w = world({ policy: narrowed });
-    for (const route of [fleetUse, fleetConfigure, terminalUse, descriptor({ capability: cap('pairing', 'configure') })])
+    for (const route of [
+      fleetUse,
+      fleetConfigure,
+      terminalUse,
+      descriptor({ capability: cap('pairing', 'configure') }),
+    ])
       expect(admit(w, route, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
   });
 
@@ -217,14 +216,14 @@ describe('the unlock and the step-up', () => {
     w.policy = perAct;
     expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
     expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('admitted');
-    w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_SECURITY_SETTINGS, unlockOnOpen: false } };
+    w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, unlockOnOpen: false } };
     expect(admit(w, terminalUse, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
   });
 
   test('G78 G100 a step-up is a memory fact about one device and app session; no device holds none', () => {
     const w = world({ policy: perAct });
     w.enrol('phone');
-    const subject = { holder: holder('phone'), session: 's-phone' as SessionId };
+    const subject = { deviceId: 'phone', appSession: 's-phone' };
     w.stepUps.grant(subject);
     expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('admitted');
     const admin = admit(w, fleetConfigure, { bearer: ADMIN, arrival: carried() }).decision;
@@ -236,7 +235,7 @@ describe('the unlock and the step-up', () => {
   test('G97 a window of 0 admits exactly one act per step-up; the unlock is never spent', () => {
     const w = world({ policy: { ...perAct, security: { ...perAct.security, stepUpWindowMinutes: 0 } } });
     w.enrol('phone');
-    w.stepUps.grant({ holder: holder('phone'), session: 's-phone' as SessionId });
+    w.stepUps.grant({ deviceId: 'phone', appSession: 's-phone' });
     expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('admitted');
     expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
     w.policy = DEFAULT_GATE_CONFIG;
@@ -261,9 +260,12 @@ describe('the unlock and the step-up', () => {
     expect(admit(w, wardenFleet, { bearer: WARDEN, arrival: carried() }).outcome).toBe('401 unauthorized');
     w.policy = { ...DEFAULT_GATE_CONFIG, warden: { remote: true } };
     expect(admit(w, wardenFleet, { bearer: WARDEN, arrival: carried() }).outcome).toBe('admitted');
-    expect(admit(w, descriptor({ minimum: 'authenticated', capability: cap('warden', 'configure') }), { bearer: WARDEN, arrival: carried() }).outcome).toBe(
-      '403 grant_step_up_required',
-    );
+    expect(
+      admit(w, descriptor({ minimum: 'authenticated', capability: cap('warden', 'configure') }), {
+        bearer: WARDEN,
+        arrival: carried(),
+      }).outcome,
+    ).toBe('403 grant_step_up_required');
   });
 
   test('G127 a narrowing route asks its grant and the unlock, never a per-act passkey', () => {
@@ -280,7 +282,7 @@ describe('the unlock and the step-up', () => {
   test('G82 a fresh proof is claimed once, for its own act', () => {
     const w = world();
     w.enrol('phone');
-    const subject = { holder: holder('phone'), session: 's-phone' as SessionId };
+    const subject = { deviceId: 'phone', appSession: 's-phone' };
     w.stepUps.grant(subject, true, STEP_UP_ACTS.addDevice);
     const { decision } = admit(w, fleetUse, { device: 'phone' });
     if (decision.outcome !== 'admitted') throw new Error('expected admitted');
@@ -302,7 +304,7 @@ describe('the unlock and the step-up', () => {
   test('G83 G84 every-caller acts take only a proof bound to their subject; the admin token has none', () => {
     const w = world();
     w.enrol('phone');
-    const subject = { holder: holder('phone'), session: 's-phone' as SessionId };
+    const subject = { deviceId: 'phone', appSession: 's-phone' };
     const stage = 'st_0123456789abcdef01234567' as const;
     w.stepUps.grantBound(subject, STEP_UP_ACTS.addTwoFactorKey, stage);
     const { decision } = admit(w, fleetUse, { device: 'phone' });
@@ -319,7 +321,7 @@ describe('the unlock and the step-up', () => {
   test('G85 a stored proof is claimed only through claimStoredProof, for the challenge it answered', () => {
     const w = world();
     w.enrol('phone');
-    const subject = { holder: holder('phone'), session: 's-phone' as SessionId };
+    const subject = { deviceId: 'phone', appSession: 's-phone' };
     const stage = 'srs_0123456789abcdef01234567' as const;
     const challenge = new Uint8Array([9, 9, 9]);
     const evidence = {
@@ -344,9 +346,9 @@ describe('the grant layer', () => {
   test('G132 the grant layer runs after authentication, the minimum and privilegedOnly', () => {
     const w = world({ policy: narrowed });
     expect(admit(w, fleetUse, { arrival: carried() }).outcome).toBe('401 unauthorized');
-    expect(admit(w, descriptor({ minimum: 'admin-token', capability: cap('fleet', 'use') }), { bearer: WARDEN }).outcome).toBe(
-      '403 forbidden',
-    );
+    expect(
+      admit(w, descriptor({ minimum: 'admin-token', capability: cap('fleet', 'use') }), { bearer: WARDEN }).outcome,
+    ).toBe('403 forbidden');
   });
 
   test('G133 G136 the effective grant is the daemon-wide grant AND the device grant', () => {
@@ -383,6 +385,31 @@ describe('the grant layer', () => {
     expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('401 unauthorized');
   });
 
+  for (const off of [true, 'throwing'] as const)
+    test(`G74 G100 with the step-up provider ${off === true ? 'missing (Access off)' : 'throwing'}, every device must unlock and nobody holds a step-up`, () => {
+      const w = world();
+      w.enrol('phone');
+      w.stepUps.grant({ deviceId: 'phone', appSession: 's-phone' });
+      expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('admitted');
+      w.stepUpsOff = off;
+      // The unlock is the witness's to vouch for: with none, the device is asked to unlock again.
+      expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('401 unlock_required');
+      const exempt = descriptor({ unlockExempt: true });
+      const decision = admit(w, exempt, { device: 'phone' }).decision;
+      if (decision.outcome !== 'admitted') throw new Error('an unlock-exempt route still serves the device');
+      expect(decision.standing.presentation?.stepUp).toBe(false);
+      expect(decision.standing.presentation?.freshStepUp).toBe(false);
+      expect(decision.standing.claimFreshStepUp?.()).toBe(false);
+      // The owner at the machine needs no step-up, so is served whatever Access is doing.
+      expect(admit(w, fleetConfigure, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
+    });
+
+  test('G74 the witness and the device’s own unlock must agree: either one saying locked asks for the unlock', () => {
+    const w = world();
+    w.enrol('phone', FULL_DEVICE_GRANTS, false);
+    expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('401 unlock_required');
+  });
+
   test('G154 an undetermined gate.yaml refuses every governed capability; the owner is still served', () => {
     const w = world({ policy: undefined });
     w.enrol('phone');
@@ -411,7 +438,12 @@ describe('the grant layer', () => {
 describe('warden remedies', () => {
   test('G21 a remedy route refuses a warden while no remedy authorizer is wired (fail closed)', () => {
     const w = world();
-    const leave = descriptor({ minimum: 'authenticated', method: 'POST', path: '/v1/warden/leave', wardenRemedy: remedyRef('leave') });
+    const leave = descriptor({
+      minimum: 'authenticated',
+      method: 'POST',
+      path: '/v1/warden/leave',
+      wardenRemedy: remedyRef('leave'),
+    });
     expect(
       admit(w, leave, { bearer: WARDEN, arrival: local(), headers: { 'x-fy-warden-capability': 'cap-1' } }).outcome,
     ).toBe('403 warden_remedy_unwired');
@@ -431,14 +463,28 @@ describe('members', () => {
     expect(admit(w, fleetUse, { member: 'm1' }).outcome).toBe('403 forbidden');
     const member = w.gate.admitMember({
       table: 'member',
-      descriptor: { method: 'GET', path: '/v1/shared/x', member: 'unlocked', noStore: true, audit: { skip: 't' }, guard: { none: 't' } },
+      descriptor: {
+        method: 'GET',
+        path: '/v1/shared/x',
+        member: 'unlocked',
+        noStore: true,
+        audit: { skip: 't' },
+        guard: { none: 't' },
+      },
       request: call,
       params: new Map(),
     });
     expect(member.outcome).toBe('admitted');
     const gone = w.gate.admitMember({
       table: 'member',
-      descriptor: { method: 'GET', path: '/v1/shared/x', member: 'key', noStore: true, audit: { skip: 't' }, guard: { none: 't' } },
+      descriptor: {
+        method: 'GET',
+        path: '/v1/shared/x',
+        member: 'key',
+        noStore: true,
+        audit: { skip: 't' },
+        guard: { none: 't' },
+      },
       request: request({ member: 'nobody' }),
       params: new Map(),
     });
@@ -457,16 +503,27 @@ describe('audit after the handler', () => {
     });
     const { decision, call } = admit(w, route, { device: 'phone' });
     if (decision.outcome !== 'admitted') throw new Error('expected admitted');
-    const context = { request: call, params: new Map([['deviceId', 'other']]), ...decision.standing } as CallContext<CallStanding>;
-    w.gate.recorded(route, context, 200);
-    w.gate.recorded(descriptor(), context, 200);
+    const told = (on: ScopedRoute, status = 200) =>
+      w.gate.recorded({
+        table: 'route',
+        descriptor: on,
+        request: call,
+        params: new Map([['deviceId', 'other']]),
+        standing: decision.standing,
+        actor: decision.actor,
+        status,
+        response: { status, headers: new Map(), body: '{}' },
+      });
+    told(route);
+    told(descriptor());
+    // Today's rule for this route: the device id is the subject, the status is in the detail.
     expect(w.recorded).toEqual([
       {
         event: AUDIT_KINDS['device.revoked'],
         actor: { kind: 'device', deviceId: 'phone' as HolderId },
         subject: 'other',
         outcome: 'succeeded',
-        detail: { carrier: 'relay' },
+        detail: { status: 200 },
       },
     ]);
   });

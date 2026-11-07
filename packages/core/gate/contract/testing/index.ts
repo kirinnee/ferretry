@@ -29,10 +29,6 @@ import type {
   DeviceHolderStanding,
   FerretBearerDirectory,
   HolderStanding,
-  PasskeyDescriptor,
-  StepUpCeremony,
-  StepUpVerified,
-  StepUpWitness,
 } from '../credentials.ts';
 import { asksStepUpPerAction, DEFAULT_GATE_CONFIG, type GateConfig } from '../gate-config.ts';
 import {
@@ -47,6 +43,14 @@ import {
 } from '../policy.ts';
 import type { GateApi } from '../port.ts';
 import { callerIsAgent, deviceActor, ferretActor, wardenActor } from '../standing.ts';
+
+export {
+  FAKE_PROOF_TTL_MS,
+  FakeStepUpWitness,
+  type FakeStepUpWitnessOptions,
+  type StepUpWitnessSubject,
+  stepUpWitnessConformance,
+} from './step-up.ts';
 
 /** 2026-11-07T12:00:00Z. */
 export const T0: Instant = instantFromEpochMs(1_794_052_800_000);
@@ -91,36 +95,6 @@ export class FakeDeviceProvider implements CredentialProvider<DeviceHolderStandi
     return this.#generation;
   }
 }
-
-/** A witness that verifies an assertion whose signature is `ok-<holder>` for an enrolled holder. Never a real key. */
-export class FakeStepUpWitness implements StepUpWitness {
-  readonly #passkeys = new Map<string, readonly PasskeyDescriptor[]>();
-
-  register(id: HolderId, credentialId = `cred${id.replaceAll(/[^A-Za-z0-9]/gu, '')}`): void {
-    this.#passkeys.set(id, [{ type: 'public-key', id: credentialId }]);
-  }
-  passkeys(id: HolderId): readonly PasskeyDescriptor[] | 'unknown' {
-    return this.#passkeys.get(id) ?? 'unknown';
-  }
-  async verify(
-    ceremony: StepUpCeremony,
-  ): Promise<StepUpVerified | { readonly refused: 'not-verified' | 'no-passkey' }> {
-    const known = this.#passkeys.get(ceremony.holder);
-    if (known === undefined) return { refused: 'no-passkey' };
-    const ownKey = known.some(key => key.id === ceremony.assertion.credentialId);
-    if (!ownKey || ceremony.assertion.signature !== `ok-${ceremony.holder}`.replaceAll(/[^A-Za-z0-9_-]/gu, ''))
-      return { refused: 'not-verified' };
-    return {
-      holder: ceremony.holder,
-      ...(ceremony.act === undefined ? {} : { act: ceremony.act }),
-      ...(ceremony.subject === undefined ? {} : { subject: ceremony.subject }),
-      provedAt: ceremony.now,
-    };
-  }
-}
-
-/** The signature `FakeStepUpWitness` accepts for a holder (base64url-safe). */
-export const fakeSignature = (id: HolderId): string => `ok-${id}`.replaceAll(/[^A-Za-z0-9_-]/gu, '');
 
 /** A ferret bearer directory over digests. */
 export class FakeFerretBearers implements FerretBearerDirectory {
@@ -281,53 +255,6 @@ export function credentialProviderConformance<S extends HolderStanding>(
       const before = subject.provider.generation();
       await subject.narrow(id);
       expect(subject.provider.generation()).toBeGreaterThan(before);
-    });
-  });
-}
-
-export interface StepUpWitnessSubject {
-  readonly witness: StepUpWitness;
-  /** Enrols a holder with one passkey; returns it and an assertion that verifies for it. */
-  enrol(): Promise<{ readonly holder: HolderId; readonly good: StepUpCeremony['assertion'] }>;
-}
-
-/** The `step-up` conformance suite: unknown holders, a bad assertion refused, a good one bound to the act asked. */
-export function stepUpWitnessConformance(
-  name: string,
-  make: () => StepUpWitnessSubject | Promise<StepUpWitnessSubject>,
-): void {
-  const challenge = new Uint8Array([1, 2, 3, 4]);
-  describe(`step-up conformance: ${name}`, () => {
-    test('a holder it never enrolled has no passkeys to offer', async () => {
-      const subject = await make();
-      expect(subject.witness.passkeys(holder('never-enrolled'), 'https://app.example.test')).toBe('unknown');
-    });
-    test('an assertion that does not check out is refused', async () => {
-      const subject = await make();
-      const { holder: id, good } = await subject.enrol();
-      const answer = await subject.witness.verify({
-        holder: id,
-        origin: 'https://app.example.test',
-        challenge,
-        assertion: { ...good, signature: 'forged' },
-        now: T0,
-      });
-      expect('refused' in answer).toBe(true);
-    });
-    test('a verified ceremony is bound to the holder, the act and the subject asked', async () => {
-      const subject = await make();
-      const { holder: id, good } = await subject.enrol();
-      const act = 'add-2fa-key' as never;
-      const answer = await subject.witness.verify({
-        holder: id,
-        origin: 'https://app.example.test',
-        challenge,
-        assertion: good,
-        act,
-        subject: 'st_0123456789abcdef01234567',
-        now: T0,
-      });
-      expect(answer).toMatchObject({ holder: id, act, subject: 'st_0123456789abcdef01234567' });
     });
   });
 }

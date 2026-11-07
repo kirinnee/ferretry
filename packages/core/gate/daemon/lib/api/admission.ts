@@ -8,8 +8,8 @@ import {
   arrivedLocal,
   arrivedOnHost,
   arrivedPrivileged,
-  type CallContext,
   type CallStanding,
+  type ConfigWriteJudgement,
   errorResponse,
   headerValue,
   type InventoryEntry,
@@ -17,6 +17,7 @@ import {
   type MemberStanding,
   type PluginInventory,
   PROTOCOL,
+  type RecordedCall,
   type RouteParameters,
   type ScopedRoute,
   type SessionPrincipal,
@@ -24,7 +25,6 @@ import {
 import type { Instant } from '@ferretry/std';
 import {
   type ApiActor,
-  asksStepUpPerAction,
   type AuditDraft,
   AUDIT_KINDS,
   type CallerGovernance,
@@ -34,10 +34,12 @@ import {
   type CredentialProvider,
   callerIsAgent,
   type DeviceHolderStanding,
+  type EveryCallerStepUpAct,
   type FerretBearerDirectory,
   type GateConfig,
   grantRefusalCode,
   type InventoryViewer,
+  type MachineSkippableStepUpAct,
   type MemberHolderStanding,
   OWNER_ONLY_CODE,
   ownerOnlyWords,
@@ -47,6 +49,8 @@ import {
   STEP_UP_SUBJECTS,
   type StepUpAct,
   type StepUpRequiredBody,
+  type StepUpSubject,
+  type StepUpSubjectOf,
   stepUpKeepsProof,
   stepUpSkippableAtMachine,
   type StoredProofStepUpAct,
@@ -56,10 +60,17 @@ import {
   type WardenRemedyDecision,
   type WardenRemedyGrant,
 } from '../../../contract/index.ts';
-import { routeAuditDraft } from '../audit/policy.ts';
-import type { StepUpRegistry, StepUpSubject } from '../step-up/registry.ts';
+import { recordedCallDraft } from '../audit/recorder.ts';
+import { judgeLooseningWrite } from '../policy/config-judge.ts';
+import type { FailClosedStepUps } from '../step-up/witness.ts';
 import { resolveApiActor } from './actor.ts';
-import { type Authentication, authenticate, bearerToken, type FerretTokenRefusal, type GateTokens } from './authentication.ts';
+import {
+  type Authentication,
+  authenticate,
+  bearerToken,
+  type FerretTokenRefusal,
+  type GateTokens,
+} from './authentication.ts';
 import { type CapabilityGuard, grantGuard, intersectGrants } from './capability.ts';
 
 /** The pane's own ferret id, so an in-pane caller on the admin token is attributed to itself (today's header name). */
@@ -88,12 +99,15 @@ export interface GateAdmissionDeps {
    * route refuses a warden `warden_remedy_unwired` — today's answer for a table served without one.
    */
   readonly remedies?: () => WardenRemedyAuthorizer | undefined;
-  readonly stepUps: StepUpRegistry;
+  /** `step-up:device` (Access), read live and fail closed: no provider holds nothing and must unlock. */
+  readonly stepUps: FailClosedStepUps;
   readonly now: () => Instant;
   /** Told about a refused ferret token (`ferret.credential-refused`). Never throws into the call. */
   readonly refused: (draft: AuditDraft) => void;
   /** Where a descriptor-declared record of an admitted call goes (`recorded`). */
   readonly recorded?: (draft: AuditDraft) => void;
+  /** The kind of a config file named by its path under `config/` (the plugin that declares it), for a record. */
+  readonly configKind?: (path: string) => string | undefined;
   /** The binary's name, for refusal sentences that name a command. */
   readonly clientName: string;
 }
@@ -168,19 +182,24 @@ export class GateAdmission implements Admission {
   }
 
   /**
-   * Told by the dispatcher after each handler of a route whose descriptor says `audit: { record }` (lead decision:
-   * an optional `Admission.recorded`, added by the kernel fill-in). Writes one record from the descriptor, the
-   * standing admission gave and the status — never the body. AN AUDIT WRITE NEVER DECIDES AN OUTCOME: it is fired and
-   * forgotten, and its failure is the audit log's to report.
+   * Told by the kernel once per call after the handler of a descriptor that says `audit: { record }`, with the final
+   * status and the answer as built (today's audited-route decorator, `recorder.ts`). Never the request body. AN AUDIT
+   * WRITE NEVER DECIDES AN OUTCOME: it is fired and forgotten, and its failure is the audit log's to report.
    */
-  recorded(descriptor: ScopedRoute, call: CallContext, status: number | undefined): void {
-    const declared = descriptor.audit;
-    if (!('record' in declared)) return;
+  recorded(call: RecordedCall): void {
     try {
-      this.deps.recorded?.(routeAuditDraft(declared.record, call, status));
+      const draft = recordedCallDraft(call, {
+        ...(this.deps.configKind === undefined ? {} : { configKind: this.deps.configKind }),
+      });
+      if (draft !== undefined) this.deps.recorded?.(draft);
     } catch {
       // The audit log reports its own failures; the answer is already decided.
     }
+  }
+
+  /** A plugin's own loosening config write (`kernel.config.write`/`remove`): today's held-loosening rule. */
+  judgeConfigWrite(input: ConfigWriteJudgement): 'apply' | 'hold' {
+    return judgeLooseningWrite(input);
   }
 
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<MemberStanding> {
@@ -199,7 +218,7 @@ export class GateAdmission implements Admission {
       const until = standing.unlockedUntil;
       if (until === undefined || until <= this.deps.now())
         // R617: a locked member is 403 member_locked (a gone key was 401 above).
-        return refused(errorResponse(403, "unlock this catalog with your passkey first", "member_locked"));
+        return refused(errorResponse(403, 'unlock this catalog with your passkey first', 'member_locked'));
     }
     if (descriptor.catalog === 'path') {
       const catalog = input.params.get('catalogId') ?? input.params.get('catalog');
@@ -370,7 +389,7 @@ export class GateAdmission implements Admission {
     const policy = this.deps.policy();
     const subject: StepUpSubject | undefined =
       authentication.tokenClass === 'device'
-        ? { holder: authentication.principal.holder, session: authentication.principal.session }
+        ? { deviceId: authentication.principal.holder, appSession: authentication.principal.session }
         : undefined;
     const now = this.deps.now();
     const unlocked = device?.unlockedUntil !== undefined && device.unlockedUntil > now;
@@ -381,8 +400,9 @@ export class GateAdmission implements Admission {
       device !== undefined &&
       !onHost &&
       descriptor.unlockExempt !== true &&
-      (policy === undefined || policy.security.unlockOnOpen) &&
-      !unlocked
+      subject !== undefined &&
+      (((policy === undefined || policy.security.unlockOnOpen) && !unlocked) ||
+        this.deps.stepUps.unlockRequired(subject))
     )
       return refused(
         errorResponse(
@@ -392,11 +412,9 @@ export class GateAdmission implements Admission {
         ),
       );
 
-    // The unlock stands in for the step-up unless the owner asked for one per act (G47, G79).
-    const stepUp =
-      subject !== undefined &&
-      ((policy !== undefined && !asksStepUpPerAction(policy.security) && unlocked) ||
-        this.deps.stepUps.held(subject));
+    // The witness answers whether this copy of the app holds a step-up: the unlock stands in for it unless the owner
+    // asked for one per act (G47, G79). The SESSION's proven device, never a header's claim.
+    const stepUp = subject !== undefined && this.deps.stepUps.held(subject);
     const presentation: CapabilityPresentation = {
       // The CARRIER's proof, never a header's. A ferret's own token is on the host too, and is looked up only for a
       // call on the privileged local listener, so grants never govern it.
@@ -430,8 +448,7 @@ export class GateAdmission implements Admission {
         );
       }
       // A step-up the machine wants asked every time is good for this one act (G97): spent at the decision.
-      if (decision.steppedUp === true && subject !== undefined && policy !== undefined && asksStepUpPerAction(policy.security))
-        this.deps.stepUps.spend(subject);
+      if (decision.steppedUp === true && subject !== undefined) this.deps.stepUps.spend(subject);
       governance = this.#guard.governance(presentation);
     } else if (descriptor.consultsGrants === true) {
       governance = this.#guard.governance(presentation);
@@ -447,8 +464,7 @@ export class GateAdmission implements Admission {
       ...(governance === undefined ? {} : { governance }),
       presentation,
       spendStepUp: () => {
-        if (subject !== undefined && policy !== undefined && asksStepUpPerAction(policy.security))
-          this.deps.stepUps.spend(subject);
+        if (subject !== undefined) this.deps.stepUps.spend(subject);
       },
       spendFreshStepUp: () => {
         if (subject !== undefined) this.deps.stepUps.spendFresh(subject);
@@ -465,8 +481,13 @@ export class GateAdmission implements Admission {
     return ((act?: StepUpAct, bound?: string): boolean => {
       if (subject === undefined) return false;
       if (act !== undefined && !stepUpSkippableAtMachine(act))
-        return bound !== undefined && bound !== '' && !stepUpKeepsProof(act) && registry.claimFresh(subject, act, bound);
-      return registry.claimFresh(subject, act);
+        return (
+          bound !== undefined &&
+          bound !== '' &&
+          !stepUpKeepsProof(act) &&
+          registry.claimFresh(subject, act as Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound)
+        );
+      return registry.claimFresh(subject, act as MachineSkippableStepUpAct | undefined);
     }) as ClaimFreshStepUp;
   }
 
@@ -477,7 +498,12 @@ export class GateAdmission implements Admission {
       if (subject === undefined || !stepUpKeepsProof(act)) return undefined;
       const parsed = STEP_UP_SUBJECTS[act as string as 'approve-sign-in-rule'].safeParse(stage);
       if (!parsed.success || !(expectedChallenge instanceof Uint8Array)) return undefined;
-      return registry.claimStoredProof(subject, act, parsed.data, expectedChallenge);
+      return registry.claimStoredProof(
+        subject,
+        act,
+        parsed.data as StepUpSubjectOf<StoredProofStepUpAct>,
+        expectedChallenge,
+      );
     }) as ClaimStoredProof;
   }
 
@@ -572,4 +598,3 @@ function unusable(decision: WardenRemedyDecision, remedy: string): boolean {
     (grant.assignmentStartedAt as string).trim() === ''
   );
 }
-

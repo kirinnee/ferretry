@@ -1,65 +1,37 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import {
-  GRANT_AUDIT_MAX_BYTES,
-  type GrantAuditEntry,
-  GrantAuditEntrySchema,
-  type GrantAuditView,
-  type GrantHistoryPort,
-} from '../../lib/grants/service.ts';
-
-const lineBytes = (entry: unknown): number => new TextEncoder().encode(`${JSON.stringify(entry)}\n`).byteLength;
-
-/**
- * One journal record, or nothing when it is not a grant change this daemon wrote (today's `readAuditLine`): each
- * entry is checked on its own, so one damaged record is COUNTED and the valid ones around it are still shown.
- */
-export function readGrantAuditEntry(value: unknown): GrantAuditEntry | undefined {
-  const parsed = GrantAuditEntrySchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
-}
+import type { GrantAuditEntryView, GrantAuditView } from '../../../contract/index.ts';
+import { GRANT_AUDIT_MAX_BYTES, type GrantHistoryPort } from '../../lib/grants/service.ts';
 
 /**
  * Who changed a grant, when (today's `JournalGrantAudit`, `state/gate/grant-audit.jsonl`, through the kernel's state
- * port). A read covers at most {@link GRANT_AUDIT_MAX_BYTES} of the newest records and at most `limit` of them (G160).
- * A record that is not a grant change is counted unreadable, never skipped silently and never served; a file the
- * kernel could not read at all is counted unreadable rather than shown as empty.
+ * port).
  *
- * GAP (waiting on kernel `StatePort.tail`): the byte window is applied AFTER the kernel has read the whole file;
- * today reads only the last 64 KiB. GAP (waiting on kernel per-line `lines()`): a line that is not JSON at all still
- * makes the kernel refuse the whole file, which reads here as one unreadable record.
+ * IT READS THE TAIL, NOT THE FILE (G160). The journal is append-only and never rotated, so a read covers only the last
+ * {@link GRANT_AUDIT_MAX_BYTES} — the kernel's `tail` reads no more than that from disk, and drops the line the window
+ * opened in the middle of rather than counting it — and returns at most `limit` entries, newest first.
+ *
+ * A LINE IT CANNOT READ IS COUNTED, NOT SKIPPED SILENTLY: each line is checked on its own against the file's schema, so
+ * one damaged record is counted unreadable and the valid ones around it are still shown.
  */
 export class StateGrantHistory implements GrantHistoryPort {
   constructor(
     private readonly state: StatePort,
-    private readonly file: StateFileDef<string, unknown>,
+    private readonly file: StateFileDef<string, GrantAuditEntryView>,
+    private readonly maxBytes: number = GRANT_AUDIT_MAX_BYTES,
   ) {}
 
-  async record(entry: GrantAuditEntry): Promise<void> {
+  async record(entry: GrantAuditEntryView): Promise<void> {
     await this.state.append(this.file, entry);
   }
 
   async recent(limit: number): Promise<GrantAuditView> {
-    const all: unknown[] = [];
-    try {
-      for await (const value of this.state.lines(this.file)) all.push(value);
-    } catch {
-      return { entries: [], unreadable: 1, truncated: all.length > 0 };
-    }
-    // The newest window of the file, as today's 64-KiB tail would see it.
-    const window: unknown[] = [];
-    let bytes = 0;
-    for (const value of all.toReversed()) {
-      bytes += lineBytes(value);
-      if (bytes > GRANT_AUDIT_MAX_BYTES) break;
-      window.push(value);
-    }
-    let unreadable = 0;
-    const entries: GrantAuditEntry[] = [];
-    for (const value of window) {
-      const entry = readGrantAuditEntry(value);
-      if (entry === undefined) unreadable += 1;
-      else entries.push(entry);
-    }
-    return { entries: entries.slice(0, limit), unreadable, truncated: window.length < all.length };
+    const size = (await this.state.version(this.file))?.size ?? 0;
+    if (size === 0) return { entries: [], unreadable: 0, truncated: false };
+    const read = await this.state.tail(this.file, { maxBytes: this.maxBytes });
+    return {
+      entries: read.records.toReversed().slice(0, limit),
+      unreadable: read.unreadable,
+      truncated: size > this.maxBytes,
+    };
   }
 }

@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionId } from '@ferretry/kernel/contract';
 import {
   type CapabilityPresentation,
   cap,
   DEFAULT_CAPABILITY_GRANTS,
   DEFAULT_GATE_CONFIG,
-  DEFAULT_SECURITY_SETTINGS,
+  DEFAULT_GATE_SECURITY,
   FULL_DEVICE_GRANTS,
   GateConfigSchema,
   LIMITED_DEVICE_GRANTS,
@@ -44,14 +43,14 @@ const allOff = Object.fromEntries(
   Object.keys(FULL_DEVICE_GRANTS).map(name => [name, { use: false, configure: false }]),
 ) as typeof FULL_DEVICE_GRANTS;
 const narrowed = { ...DEFAULT_GATE_CONFIG, grants: allOff };
-const perAct = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_SECURITY_SETTINGS, stepUpOnActions: true } };
+const perAct = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, stepUpOnActions: true } };
 const honoured = { ...DEFAULT_GATE_CONFIG, warden: { remote: true } };
 const offFor = (name: keyof typeof FULL_DEVICE_GRANTS) => ({
   ...DEFAULT_GATE_CONFIG,
   grants: { ...DEFAULT_CAPABILITY_GRANTS, [name]: { use: false, configure: false } },
 });
 const person = (fields = {}) => descriptor({ caller: 'person', ...fields });
-const subjectOf = (id: string) => ({ holder: holder(id), session: `s-${id}` as SessionId });
+const subjectOf = (id: string) => ({ deviceId: id, appSession: `s-${id}` });
 const ferretCall = { bearer: FERRET_TOKEN, arrival: local(true) };
 const adminNamingFerret = { bearer: ADMIN, arrival: local(), headers: { [SESSION_ID_HEADER]: FERRET } };
 
@@ -147,7 +146,7 @@ describe('who is governed, and the unlock', () => {
     expect(admit(w, descriptor({ capability: cap('browser', 'use') }), { device: 'phone' }).outcome).toBe(
       '403 grant_step_up_required',
     );
-    w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_SECURITY_SETTINGS, unlockOnOpen: false } };
+    w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, unlockOnOpen: false } };
     expect(admit(w, descriptor({ capability: cap('secrets', 'use') }), { device: 'phone' }).outcome).toBe(
       '403 grant_step_up_required',
     );
@@ -159,7 +158,7 @@ describe('who is governed, and the unlock', () => {
     w.stepUps.grant(subjectOf('phone'));
     expect(standing(w, fleetUse, { device: 'phone' }).presentation?.stepUp).toBe(true);
     // Another app session of the same device holds nothing.
-    w.stepUps.grant({ holder: holder('phone'), session: 'another' as SessionId });
+    w.stepUps.grant({ deviceId: 'phone', appSession: 'another' });
     expect(admit(w, fleetUse, { bearer: ADMIN, arrival: carried() }).outcome).toBe('admitted');
     expect(standing(w, fleetUse, { bearer: ADMIN, arrival: carried() }).presentation?.stepUp).toBe(false);
     expect(standing(w, fleetUse, { bearer: ADMIN, arrival: local() }).presentation?.stepUp).toBe(false);
@@ -528,7 +527,7 @@ describe('the step-up acts', () => {
     w.stepUps.grantBound(subjectOf('phone'), STEP_UP_ACTS.addTwoFactorKey, stage);
     expect(w.stepUps.held(subjectOf('phone'))).toBe(false);
     expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
-    const other = { holder: holder('tablet'), session: 's-tablet' as SessionId };
+    const other = { deviceId: 'tablet', appSession: 's-tablet' };
     w.enrol('tablet');
     w.stepUps.grant(other);
     expect(standing(w, fleetUse, { device: 'tablet' }).claimFreshStepUp?.(STEP_UP_ACTS.addTwoFactorKey, stage)).toBe(
@@ -651,9 +650,7 @@ describe('the rows that only appeared second', () => {
 
   test('G96 there is no operator password: gate.yaml refuses one and Gate keeps no such file', () => {
     expect(GateConfigSchema.safeParse({ operatorPassword: 'x' }).success).toBe(false);
-    expect(GateConfigSchema.safeParse({ security: { ...DEFAULT_SECURITY_SETTINGS, password: 'x' } }).success).toBe(
-      false,
-    );
+    expect(GateConfigSchema.safeParse({ security: { ...DEFAULT_GATE_SECURITY, password: 'x' } }).success).toBe(false);
     expect(manifest.data.state.map(file => file.name).some(name => /password/iu.test(name))).toBe(false);
   });
 

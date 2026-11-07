@@ -76,9 +76,12 @@ export function auditFoldKey(entry: AuditDraft): string | undefined {
 /** How many kept records of ONE kind every caller who is not a person at this machine may write per UTC day. */
 export const AUDIT_KEPT_DAILY_ALLOWANCE = 50;
 
-/** Whether a kept record is exempt from the allowance and may rotate the kept store: a person at the machine. */
+/**
+ * Whether a kept record is exempt from the allowance and may rotate the kept store: a person at the machine. A record
+ * the daemon caused on its own (`cause: 'daemon'`, an idle expiry) is rationed like a remote one.
+ */
 export function isOwnersOwnRecord(entry: AuditDraft): boolean {
-  return entry.actor.kind === 'host';
+  return entry.actor.kind === 'host' && entry.cause !== 'daemon';
 }
 
 /** What stands in for a text field the contract would refuse — never the text itself. */

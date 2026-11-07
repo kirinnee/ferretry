@@ -16,19 +16,15 @@ import {
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
   type CapabilityPresentation,
+  GRANT_AUDIT_MAX_ENTRIES,
+  GrantAuditViewSchema,
   grantRefusalCode,
+  GrantsPatchSchema,
+  GrantsViewSchema,
 } from '../../contract/index.ts';
 import type { AuditReading } from './audit/service.ts';
 import type { SecurityCaller, SecuritySettingsService } from './security/service.ts';
-import {
-  GRANT_AUDIT_MAX_ENTRIES,
-  GrantAuditViewSchema,
-  GrantError,
-  type GrantFailure,
-  GrantsPatchSchema,
-  type GrantService,
-  GrantsViewSchema,
-} from './grants/service.ts';
+import { GrantError, type GrantFailure, type GrantService } from './grants/service.ts';
 
 /** The largest body Gate's own routes accept: a security patch is six fields. */
 export const GATE_BODY_MAX_BYTES = 16 * 1024;

@@ -7,8 +7,14 @@ export const AUDIT_FILE_MAX_BYTES = 1024 * 1024;
 
 /** The four files: each store's live file and its rotated one (`audit.jsonl`, `audit.1.jsonl`, `audit-kept…`). */
 export interface AuditFiles {
-  readonly general: { readonly live: StateFileDef<string, AuditRecord>; readonly rotated: StateFileDef<string, AuditRecord> };
-  readonly kept: { readonly live: StateFileDef<string, AuditRecord>; readonly rotated: StateFileDef<string, AuditRecord> };
+  readonly general: {
+    readonly live: StateFileDef<string, AuditRecord>;
+    readonly rotated: StateFileDef<string, AuditRecord>;
+  };
+  readonly kept: {
+    readonly live: StateFileDef<string, AuditRecord>;
+    readonly rotated: StateFileDef<string, AuditRecord>;
+  };
 }
 
 const lineBytes = (record: AuditRecord): number => new TextEncoder().encode(`${JSON.stringify(record)}\n`).byteLength;
@@ -62,23 +68,28 @@ export class StateAuditJournal implements AuditJournalPort {
     this.#sizes.set(store, 0);
   }
 
+  /** The live file's size on disk, from one `lstat` (the kernel's `version`), remembered between writes. */
   async #size(store: AuditStore): Promise<number> {
     const known = this.#sizes.get(store);
     if (known !== undefined) return known;
-    const live = await this.#read(this.files[store].live);
-    const size = live.records.reduce((total, record) => total + lineBytes(record), 0);
+    const size = (await this.state.version(this.files[store].live))?.size ?? 0;
     this.#sizes.set(store, size);
     return size;
   }
 
-  /** Every record of one file, oldest first; a file the kernel could not read whole is counted unreadable. */
-  async #read(file: StateFileDef<string, AuditRecord>): Promise<{ readonly records: AuditRecord[]; readonly unreadable: number }> {
-    const records: AuditRecord[] = [];
+  /**
+   * Every record of one file, oldest first (today's `FileAuditJournal.parsed`): each line is checked on its own, so a
+   * damaged line is COUNTED and the valid records around it are still read. A file the kernel could not read at all is
+   * one unreadable count rather than an empty history.
+   */
+  async #read(
+    file: StateFileDef<string, AuditRecord>,
+  ): Promise<{ readonly records: AuditRecord[]; readonly unreadable: number }> {
     try {
-      for await (const record of this.state.lines(file)) records.push(record);
-      return { records, unreadable: 0 };
+      const read = await this.state.records(file);
+      return { records: [...read.records], unreadable: read.unreadable };
     } catch {
-      return { records, unreadable: 1 };
+      return { records: [], unreadable: 1 };
     }
   }
 

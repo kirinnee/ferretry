@@ -12,7 +12,7 @@ import { AuditKeptFile, AuditKeptRotatedFile, AuditRotatedFile } from '../../../
 import { StateAuditJournal } from '../../../daemon/adapters/audit/state-audit-journal.ts';
 import { StateTokens } from '../../../daemon/adapters/tokens/state-tokens.ts';
 import { StateGrantHistory } from '../../../daemon/adapters/grants/state-grant-history.ts';
-import type { GrantAuditEntry } from '../../../daemon/lib/grants/service.ts';
+import type { GrantAuditEntryView as GrantAuditEntry } from '../../../contract/index.ts';
 import { GrantAuditFile } from '../../../manifest.ts';
 
 const FILES = [

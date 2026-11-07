@@ -3,19 +3,14 @@ import {
   type CapabilityGrants,
   type CapabilityName,
   type CapabilityPresentation,
-  CAPABILITY_NAMES,
   DEFAULT_CAPABILITY_GRANTS,
-  GateConfigSchema,
+  type GrantAuditEntryView as GrantAuditEntry,
+  GrantsPatchSchema,
   LIMITED_DEVICE_GRANTS,
 } from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
-import { grantsNamedIn, grantsProvenFrom } from '../../../../daemon/lib/grants/provenance.ts';
-import {
-  type GrantAuditEntry,
-  GrantError,
-  GrantService,
-  GrantsPatchSchema,
-} from '../../../../daemon/lib/grants/service.ts';
+import { grantsNamedIn } from '../../../../daemon/lib/grants/provenance.ts';
+import { GrantError, GrantService } from '../../../../daemon/lib/grants/service.ts';
 
 function service(
   start: CapabilityGrants | 'undetermined' = DEFAULT_CAPABILITY_GRANTS,
@@ -139,16 +134,6 @@ describe('the grants surface', () => {
     expect(
       grantsNamedIn({ grants: { fleet: { use: true, configure: true }, pairing: { use: false, configure: false } } }),
     ).toEqual(['fleet', 'pairing']);
-  });
-
-  test('G155 without the raw text, the parsed grants never claim the file for a value it cannot prove', () => {
-    // An empty gate.yaml parses to the product default on every axis: none of it came from the file.
-    expect(grantsProvenFrom(GateConfigSchema.parse({}).grants)).toEqual([]);
-    expect(grantsProvenFrom(undefined)).toEqual([]);
-    // A written grants key narrows what it leaves out, so the file decided every capability.
-    expect(
-      grantsProvenFrom(GateConfigSchema.parse({ grants: { fleet: { use: true, configure: true } } }).grants),
-    ).toEqual(CAPABILITY_NAMES);
   });
 
   test('G154 an undetermined document reports both axes shut and refuses every change', async () => {
