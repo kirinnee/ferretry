@@ -6,7 +6,7 @@ import skills from '../../daemon/index.ts';
 import { installRoutes } from '../../daemon/install-routes.ts';
 import manifest from '../../manifest.ts';
 
-const INSTALL_ROUTES = manifest.actions.routes.filter(route => route.key.includes('/v1/skills/installs/local'));
+const INSTALL_ROUTES = manifest.actions.routes.filter(route => route.key.includes('/v1/skill-installs/local'));
 const demand = (key: string): string => {
   const route = manifest.actions.routes.find(candidate => candidate.key === key);
   return `${String(route?.capability?.capability)}.${route?.capability?.axis}`;
@@ -28,19 +28,19 @@ async function host() {
 
 describe('copying a skill from this machine', () => {
   test('G172 both previews are filesystem.use, so a device without it cannot read another account by naming a runtime', async () => {
-    expect(demand('POST /v1/skills/installs/local/project/preview')).toBe('filesystem.use');
-    expect(demand('POST /v1/skills/installs/local/runtime/preview')).toBe('filesystem.use');
+    expect(demand('POST /v1/skill-installs/local/project/preview')).toBe('filesystem.use');
+    expect(demand('POST /v1/skill-installs/local/runtime/preview')).toBe('filesystem.use');
     const h = await host();
     const caller = { kind: 'device', holder: 'dev_a', capabilities: ['fleet.use', 'fleet.configure'] } as const;
     for (const [path, body] of [
       ['project', PREVIEW_BODY],
       ['runtime', RUNTIME_BODY],
     ] as const)
-      expect((await h.request('POST', `/v1/skills/installs/local/${path}/preview`, { body, as: caller })).status).toBe(
+      expect((await h.request('POST', `/v1/skill-installs/local/${path}/preview`, { body, as: caller })).status).toBe(
         403,
       );
     // With filesystem.use the request is admitted and reaches the inventory, which lists no such skill.
-    const allowed = await h.request('POST', '/v1/skills/installs/local/runtime/preview', {
+    const allowed = await h.request('POST', '/v1/skill-installs/local/runtime/preview', {
       body: RUNTIME_BODY,
       as: { kind: 'device', holder: 'dev_a', capabilities: ['filesystem.use'] },
     });
@@ -49,33 +49,33 @@ describe('copying a skill from this machine', () => {
   });
 
   test('G173 a project apply or remove is filesystem.configure; a runtime apply or remove is fleet.configure', async () => {
-    expect(demand('POST /v1/skills/installs/local/project')).toBe('filesystem.configure');
-    expect(demand('DELETE /v1/skills/installs/local/project/:installId')).toBe('filesystem.configure');
-    expect(demand('POST /v1/skills/installs/local/runtime')).toBe('fleet.configure');
-    expect(demand('DELETE /v1/skills/installs/local/runtime/:installId')).toBe('fleet.configure');
+    expect(demand('POST /v1/skill-installs/local/project')).toBe('filesystem.configure');
+    expect(demand('DELETE /v1/skill-installs/local/project/:installId')).toBe('filesystem.configure');
+    expect(demand('POST /v1/skill-installs/local/runtime')).toBe('fleet.configure');
+    expect(demand('DELETE /v1/skill-installs/local/runtime/:installId')).toBe('fleet.configure');
     const h = await host();
     const previewId = `lsp_${'a'.repeat(22)}`;
     const installId = `lsi_${'a'.repeat(22)}`;
     const fleetOnly = { kind: 'device', holder: 'dev_a', capabilities: ['fleet.configure'] } as const;
     const filesOnly = { kind: 'device', holder: 'dev_a', capabilities: ['filesystem.configure'] } as const;
     expect(
-      (await h.request('POST', '/v1/skills/installs/local/project', { body: { previewId }, as: fleetOnly })).status,
+      (await h.request('POST', '/v1/skill-installs/local/project', { body: { previewId }, as: fleetOnly })).status,
     ).toBe(403);
     expect(
-      (await h.request('DELETE', `/v1/skills/installs/local/project/${installId}`, { as: fleetOnly })).status,
+      (await h.request('DELETE', `/v1/skill-installs/local/project/${installId}`, { as: fleetOnly })).status,
     ).toBe(403);
     expect(
-      (await h.request('POST', '/v1/skills/installs/local/runtime', { body: { previewId }, as: filesOnly })).status,
+      (await h.request('POST', '/v1/skill-installs/local/runtime', { body: { previewId }, as: filesOnly })).status,
     ).toBe(403);
     expect(
-      (await h.request('DELETE', `/v1/skills/installs/local/runtime/${installId}`, { as: filesOnly })).status,
+      (await h.request('DELETE', `/v1/skill-installs/local/runtime/${installId}`, { as: filesOnly })).status,
     ).toBe(403);
     // The matching capability is admitted (and the unknown preview or copy is the answer).
     expect(
-      (await h.request('POST', '/v1/skills/installs/local/project', { body: { previewId }, as: filesOnly })).status,
+      (await h.request('POST', '/v1/skill-installs/local/project', { body: { previewId }, as: filesOnly })).status,
     ).toBe(404);
     expect(
-      (await h.request('DELETE', `/v1/skills/installs/local/runtime/${installId}`, { as: fleetOnly })).status,
+      (await h.request('DELETE', `/v1/skill-installs/local/runtime/${installId}`, { as: fleetOnly })).status,
     ).toBe(404);
   });
 
@@ -111,12 +111,12 @@ describe('copying a skill from this machine', () => {
         ...extra,
       }) as never;
     await expect(
-      handlers['POST /v1/skills/installs/local/project'](
+      handlers['POST /v1/skill-installs/local/project'](
         call({ credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'f1' } }),
       ),
     ).rejects.toMatchObject({ status: 403, code: 'owner_only' });
     // A governed caller without a fresh proof gets the step-up body, not a copy.
-    const governed = await handlers['POST /v1/skills/installs/local/runtime'](
+    const governed = await handlers['POST /v1/skill-installs/local/runtime'](
       call({
         governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) },
         claimFreshStepUp: () => false,
@@ -138,7 +138,7 @@ describe('copying a skill from this machine', () => {
       '/home/me/.claude/skills/demo/other.md',
       '/home/me/.claude/skills/demo/SKILL.md',
     ]) {
-      const response = await h.request('POST', '/v1/skills/installs/local/project/preview', {
+      const response = await h.request('POST', '/v1/skill-installs/local/project/preview', {
         body: { source: { path }, target: PREVIEW_BODY.target },
       });
       expect(response.status).toBe(404);

@@ -134,20 +134,20 @@ const removeHandler =
 
 /** This subsystem's route handlers, keyed as the manifest declares them. */
 export function installRoutes(subsystem: LocalSkillInstallSubsystem): {
-  readonly 'POST /v1/skills/installs/local/project/preview': RouteHandler;
-  readonly 'POST /v1/skills/installs/local/runtime/preview': RouteHandler;
-  readonly 'POST /v1/skills/installs/local/project': RouteHandler;
-  readonly 'POST /v1/skills/installs/local/runtime': RouteHandler;
-  readonly 'GET /v1/skills/installs/local': RouteHandler;
-  readonly 'DELETE /v1/skills/installs/local/project/:installId': RouteHandler;
-  readonly 'DELETE /v1/skills/installs/local/runtime/:installId': RouteHandler;
+  readonly 'POST /v1/skill-installs/local/project/preview': RouteHandler;
+  readonly 'POST /v1/skill-installs/local/runtime/preview': RouteHandler;
+  readonly 'POST /v1/skill-installs/local/project': RouteHandler;
+  readonly 'POST /v1/skill-installs/local/runtime': RouteHandler;
+  readonly 'GET /v1/skill-installs/local': RouteHandler;
+  readonly 'DELETE /v1/skill-installs/local/project/:installId': RouteHandler;
+  readonly 'DELETE /v1/skill-installs/local/runtime/:installId': RouteHandler;
 } {
   return {
-    'POST /v1/skills/installs/local/project/preview': previewHandler('project', subsystem),
-    'POST /v1/skills/installs/local/runtime/preview': previewHandler('runtime', subsystem),
-    'POST /v1/skills/installs/local/project': applyHandler('project', subsystem),
-    'POST /v1/skills/installs/local/runtime': applyHandler('runtime', subsystem),
-    'GET /v1/skills/installs/local': async call => {
+    'POST /v1/skill-installs/local/project/preview': previewHandler('project', subsystem),
+    'POST /v1/skill-installs/local/runtime/preview': previewHandler('runtime', subsystem),
+    'POST /v1/skill-installs/local/project': applyHandler('project', subsystem),
+    'POST /v1/skill-installs/local/runtime': applyHandler('runtime', subsystem),
+    'GET /v1/skill-installs/local': async call => {
       ownerOnly(call, 'lists copied skills');
       // The list answers the project rows only to a caller whose `filesystem.use` is allowed.
       const mayReadProjects = call.governance?.decide(cap('filesystem', 'use')).allowed !== false;
@@ -158,7 +158,7 @@ export function installRoutes(subsystem: LocalSkillInstallSubsystem): {
           : { ...listed, installs: listed.installs.filter(install => install.target.scope !== 'project') };
       });
     },
-    'DELETE /v1/skills/installs/local/project/:installId': removeHandler('project', subsystem),
-    'DELETE /v1/skills/installs/local/runtime/:installId': removeHandler('runtime', subsystem),
+    'DELETE /v1/skill-installs/local/project/:installId': removeHandler('project', subsystem),
+    'DELETE /v1/skill-installs/local/runtime/:installId': removeHandler('runtime', subsystem),
   };
 }

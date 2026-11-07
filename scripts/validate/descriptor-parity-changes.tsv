@@ -1,8 +1,6 @@
 route	DELETE /v1/fleet/login/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/:component	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/flows/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skill-installs/local/project/:installId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skill-installs/local/runtime/:installId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/components	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/credentials	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/export	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
@@ -20,7 +18,6 @@ route	GET /v1/sessions/:sessionId/mcp	removed	session routes renamed /v1/session
 route	GET /v1/sessions/:sessionId/mcp/servers	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/skills	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/skills/inventory	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/skill-installs/local	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/fleet/clone/forget	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/fleet/clone/keys	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/fleet/clone/review	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
@@ -44,10 +41,6 @@ route	POST /v1/sessions/:sessionId/mcp/login/preview	removed	session routes rena
 route	POST /v1/sessions/:sessionId/mcp/project	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/project/preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/permission	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/skill-installs/local/project	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skill-installs/local/project/preview	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skill-installs/local/runtime	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skill-installs/local/runtime/preview	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/claude-code/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/claude-code/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/permission	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -114,10 +107,3 @@ route	POST /v1/shells/:name/build	added	new in 5.0: no table of today's to copy 
 route	DELETE /v1/shells/:name	added	new in 5.0: no table of today's to copy (design §2.3)
 route	GET /v1/ferrets/:ferretId/skills	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/skills/inventory	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/skills/installs/local/project/preview	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skills/installs/local/runtime/preview	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skills/installs/local/project	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skills/installs/local/runtime	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	GET /v1/skills/installs/local	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skills/installs/local/project/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skills/installs/local/runtime/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
