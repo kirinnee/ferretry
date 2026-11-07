@@ -20,13 +20,14 @@ describe('the reads Accounts takes from Browsers, Ferrets, the Board and Project
     should(await workFolderOf(handle(failing) as never, 'F1')).be.undefined();
   });
 
-  it('I184 should read the project from the Board, Unfiled when the Board is off or says nothing, and name it from Projects', async () => {
+  it('I184 should read the project from the Board, nothing when the Board is off or fails, and name it from Projects', async () => {
     const board = { projectOf: async (id: string) => (id === 'F1' ? 'p1' : 'unfiled') };
     should(await boardProjectOf(handle(board) as never, 'F1')).equal('p1');
-    should(await boardProjectOf(handle({}) as never, 'F1')).equal('unfiled');
-    should(await boardProjectOf(handle(undefined) as never, 'F1')).equal('unfiled');
+    should(await boardProjectOf(handle(board) as never, 'F2')).equal('unfiled');
+    should(await boardProjectOf(handle({}) as never, 'F1')).be.undefined();
+    should(await boardProjectOf(handle(undefined) as never, 'F1')).be.undefined();
     const failing = { projectOf: async () => Promise.reject(new Error('down')) };
-    should(await boardProjectOf(handle(failing) as never, 'F1')).equal('unfiled');
+    should(await boardProjectOf(handle(failing) as never, 'F1')).be.undefined();
     const projects = { list: async () => [{ id: 'p1', name: 'App', path: '/work/app' }] };
     should(await registeredProjects(handle(projects) as never)).eql([{ id: 'p1', name: 'App' }]);
     should(await registeredProjects(handle(undefined) as never)).eql([]);

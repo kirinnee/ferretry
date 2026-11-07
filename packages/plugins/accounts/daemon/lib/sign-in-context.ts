@@ -30,15 +30,13 @@ export type SessionChoiceContext = Omit<SignInChoiceContext, 'hint'>;
 export interface SessionSignInContextDeps {
   /** The lines in effect (`AccountDefaults.current`). */
   readonly defaults: () => Promise<AccountDefaultsFile>;
-  /** The board a session works on: its stamped project, else resolved from its folder; `unfiled` when it has none. */
-  readonly projectOf: (sessionId: string) => Promise<BoardProjectId>;
+  /** The board a session works on: its stamped project, else resolved from its folder; `unfiled` when the Board says it has none, `undefined` when the Board cannot say (site lines only). */
+  readonly projectOf: (sessionId: string) => Promise<BoardProjectId | undefined>;
   /** The registered projects, to name the project and tell whether its name is unique. */
   readonly projects: () => Promise<readonly ProjectInfo[]>;
   /** The session's recorded facts (its working directory). */
   readonly sessions: SessionProjectFactSource;
-  /** The real path of a folder (symlinks resolved), or `undefined` when it cannot be resolved. */
-  readonly realpath: (path: string) => Promise<string | undefined>;
-  /** The owner's home folder, which a `~/…` folder line expands against. */
+  /** The owner's home folder as the OS reports it (`kernel.paths.home()`), which a `~/…` folder line expands against. */
   readonly home: string;
 }
 
@@ -71,18 +69,13 @@ export class SessionSignInContext implements SignInChoicePort {
   }
 
   /**
-   * The folder the session was started in, and the real home a `~` line expands against; nothing if either fails.
-   * The recorded folder is already a real path (resolved when the session was created), so it must still BE its own
-   * real path now: a folder a ferret has since swapped for a symlink to another folder resolves elsewhere and
-   * earns no folder default, instead of borrowing that other folder's line.
+   * The folder the session was started in, and the home a `~` line expands against; nothing if it cannot be read.
+   * The folder is Ferrets' REAL path for the ferret (it answers nothing for a folder a ferret has since swapped for a
+   * symlink to another folder), so it earns no folder default instead of borrowing that other folder's line; a `~`
+   * line matches only a folder under the owner's real home.
    */
   private async folderOf(sessionId: string): Promise<Pick<SessionChoiceContext, 'folder' | 'home'>> {
     const facts = await this.deps.sessions.read(sessionId).catch(() => null);
-    if (facts === null) return {};
-    const [folder, home] = await Promise.all([
-      this.deps.realpath(facts.cwd).catch(() => undefined),
-      this.deps.realpath(this.deps.home).catch(() => undefined),
-    ]);
-    return folder === undefined || folder !== facts.cwd ? {} : { folder, home: home ?? this.deps.home };
+    return facts === null ? {} : { folder: facts.cwd, home: this.deps.home };
   }
 }

@@ -141,6 +141,7 @@ interface Placed {
   readonly projects?: unknown;
   readonly vault?: FakeVault;
   readonly config?: Record<string, unknown>;
+  readonly ownerHome?: string;
 }
 
 async function placedHost(placed: Placed, gate?: StandInAdmission) {
@@ -149,6 +150,7 @@ async function placedHost(placed: Placed, gate?: StandInAdmission) {
     ...(gate === undefined ? {} : { gate }),
     clock: fixedClock('2026-11-01T12:00:00.000Z'),
     ...(placed.config === undefined ? {} : { config: placed.config }),
+    ...(placed.ownerHome === undefined ? {} : { ownerHome: placed.ownerHome }),
     uses: {
       access: security,
       ...(placed.ferrets === undefined ? {} : { ferrets: placed.ferrets }),
@@ -421,4 +423,73 @@ it('S102 factor changes are kept secrets.changed records by account and key id, 
   } finally {
     await h.stop();
   }
+});
+
+// ─── round 3: folder lines are the owner's real home's, and a silent Board leaves the site lines alone ─────────
+
+/** Two sign-ins for example.com, then the hint a ferret gets: which account (if any) is the default, and why. */
+async function defaultsFor(placed: Placed, ferretId: string): Promise<{ account: string; by: string }[]> {
+  let who: ReturnType<typeof ownerStanding> = ownerStanding();
+  const h = await placedHost(placed, new StandInAdmission(() => who));
+  try {
+    for (const id of ['ONE', 'TWO']) {
+      expect(
+        (await h.request('PUT', `/v1/accounts/${id}`, { body: { label: id, username: id, password: PASSWORD } }))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await h.request('POST', `/v1/accounts/${id}/sign-ins`, {
+            body: { place: { kind: 'site', domains: ['example.com'], match: ['example.com'] } },
+          })
+        ).status,
+      ).toBe(200);
+    }
+    who = ferretStanding(ferretId as never);
+    const hint = await h.request('GET', '/v1/accounts/hint', { query: { site: 'example.com' }, as: ferret(ferretId) });
+    expect(hint.status).toBe(200);
+    return hint
+      .json<{ hints: { account: { id: string }; default?: { by: string } }[] }>()
+      .hints.flatMap(each => (each.default === undefined ? [] : [{ account: each.account.id, by: each.default.by }]));
+  } finally {
+    await h.stop();
+  }
+}
+
+const workingIn = (folder: string) => ({
+  list: async () => [],
+  get: async () => undefined,
+  workFolder: async () => ({ folder }),
+});
+const unfiled = { projectOf: async () => 'unfiled' };
+
+it('I184 a ~ or ~/dir folder line matches only a folder under the real home, never one outside it', async () => {
+  for (const line of ['~', '~/srv']) {
+    const config = { 'accounts.yaml': { folders: { [line]: { 'example.com': 'TWO' } } } };
+    const placed = { board: unfiled, ownerHome: '/home/owner', config };
+    // Outside the home: no folder default (a "/" stand-in for the home would have matched `/srv`).
+    expect(await defaultsFor({ ...placed, ferrets: workingIn('/srv/scratch') }, 'F1')).toEqual([]);
+    // Under the real home: the line applies.
+    expect(await defaultsFor({ ...placed, ferrets: workingIn('/home/owner/srv/scratch') }, 'F1')).toEqual([
+      { account: 'TWO', by: 'folder' },
+    ]);
+  }
+});
+
+it('I184 an absolute folder line still matches while a ~ line is for the real home', async () => {
+  const config = { 'accounts.yaml': { folders: { '/srv': { 'example.com': 'TWO' } } } };
+  expect(
+    await defaultsFor({ board: unfiled, ferrets: workingIn('/srv/scratch'), ownerHome: '/home/owner', config }, 'F1'),
+  ).toEqual([{ account: 'TWO', by: 'folder' }]);
+});
+
+it('I184 a Board that fails, is off or offers no projectOf gives the site lines alone, never a folder default', async () => {
+  const config = { 'accounts.yaml': { folders: { '/srv': { 'example.com': 'TWO' } } } };
+  const ferrets = workingIn('/srv/scratch');
+  const failing = { projectOf: async () => Promise.reject(new Error('board down')) };
+  for (const board of [failing, {}, undefined]) {
+    expect(await defaultsFor({ ferrets, config, ...(board === undefined ? {} : { board }) }, 'F1')).toEqual([]);
+  }
+  // Only a Board that answers "unfiled" itself lets the folder line apply.
+  expect(await defaultsFor({ ferrets, config, board: unfiled }, 'F1')).toEqual([{ account: 'TWO', by: 'folder' }]);
 });

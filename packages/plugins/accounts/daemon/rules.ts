@@ -14,7 +14,7 @@
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
 import { gateAuditSink } from './adapters/gate-audit.ts';
-import { accountSecurity } from './adapters/pending-security.ts';
+import { accountSecurity } from './adapters/access-security.ts';
 import { randomUUID } from 'node:crypto';
 import type { StateFileDef } from '@ferretry/kernel/contract';
 import { seconds } from '@ferretry/std';

@@ -5,7 +5,6 @@ import type { BoardApi } from '@ferretry/plugin-board/contract';
 import type { BrowserPageRef, BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ProjectsApi } from '@ferretry/plugin-projects/contract';
 import type { ProjectInfo } from '../lib/sign-in-context.ts';
-import { UNFILED_PROJECT_ID } from '../lib/sign-in-context.ts';
 
 /**
  * WHAT ACCOUNTS READS ABOUT WHERE A FERRET WORKS (I184), each from the plugin that owns it and each total: a plugin that
@@ -57,15 +56,15 @@ export async function ownerFerretOf(ferrets: UsesHandle<FerretsApi>): Promise<st
 }
 
 /**
- * The board a ferret works on, from the Board (today's `projectOf(session)`): its project id, or `unfiled` when Board
- * is off, does not say, or the ferret has none.
+ * The board a ferret works on, from the Board (today's `projectOf(session)`): its project id (`unfiled` only when the
+ * Board itself answers it). `undefined` when the Board is off, offers no `projectOf` or the read fails, so the caller
+ * orders by the site lines alone (today's behaviour) and never borrows a folder default.
  */
-export async function boardProjectOf(board: UsesHandle<BoardApi>, ferret: string): Promise<string> {
-  const project = await board
+export async function boardProjectOf(board: UsesHandle<BoardApi>, ferret: string): Promise<string | undefined> {
+  return await board
     .current()
     ?.projectOf?.(ferret as FerretId)
     .catch(() => undefined);
-  return project ?? UNFILED_PROJECT_ID;
 }
 
 /** The registered projects (their ids and names), or none when Projects is off or cannot be read. */
@@ -76,10 +75,3 @@ export async function registeredProjects(projects: UsesHandle<ProjectsApi>): Pro
     .catch(() => undefined);
   return (listed ?? []).map(each => ({ id: each.id, name: each.name }));
 }
-
-/**
- * TODO(contract): `KernelPorts.paths.home()` (daemon halves; kernel `264a2037a`) is not on this base, so the owner's
- * home is unknown here and a `~/…` folder line can never match (it fails CLOSED; project and site lines still apply).
- * `workFolderOf` already answers a verified real path, so there is nothing left to resolve.
- */
-export const ownerHome = (): string => '/';

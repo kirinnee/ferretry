@@ -18,7 +18,6 @@ import { StateAccountIndexStore } from './adapters/state-account-index-store.ts'
 import {
   boardProjectOf,
   ownerFerretOf,
-  ownerHome,
   pageUrlOf,
   registeredProjects,
   workFolderOf,
@@ -34,7 +33,7 @@ import { TwoFactorSeedAgendaAdapter } from './lib/two-factor-agenda.ts';
 import { lateSeedCards, TwoFactorSeedStages } from './lib/two-factor-seeds.ts';
 import { accountHint, accountRoutes, type RecipeMasking } from './routes/accounts.ts';
 
-import { accountSecurity } from './adapters/pending-security.ts';
+import { accountSecurity } from './adapters/access-security.ts';
 
 export type AccountsContext = DaemonContext<typeof manifest>;
 
@@ -108,10 +107,9 @@ export function buildAccounts(
         return folder === undefined ? null : { cwd: folder };
       },
     },
-    // Ferrets answers a folder only while it is still its own real path (a symlink swap answers nothing), so there is
-    // nothing left to resolve here.
-    realpath: async path => path,
-    home: ownerHome(),
+    // Ferrets answers a folder only while it is still its own real path (a symlink swap answers nothing); a `~` line
+    // matches only under the owner's real home (`paths.home()`), so a folder outside it gets no folder default.
+    home: kernel.paths.home(),
   });
   const seeds = new TwoFactorSeedStages({
     accounts,
