@@ -1,4 +1,4 @@
-import type { JsonValue, Result } from '@ferretry/std';
+import type { Duration, Instant, JsonValue, Result } from '@ferretry/std';
 import type {
   ApiOf,
   ContributeHook,
@@ -243,10 +243,31 @@ export interface VerbInvocation {
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
 
+/**
+ * The environment a CLI half may read (lead decision 21): `FY_SESSION_ID` and the names the fy shell allows, and
+ * nothing else; a name the shell does not pass reads `undefined`.
+ */
+export type CliEnvironment = Readonly<Partial<Record<string, string>>>;
+
 export interface CliContext<M extends Manifest> {
   readonly manifest: M;
   readonly client: PluginClient;
   readonly io: TerminalIo;
+  /** The time, for a verb that reports or waits. Optional until the fy shell fills it in. */
+  readonly clock?: { now(): Instant; nowMs(): number };
+  /** Waits, cancellable (a poll loop). */
+  sleep?(delay: Duration, signal?: AbortSignal): Promise<void>;
+  /** `FY_SESSION_ID` and the shell's allowed names only. */
+  readonly env?: CliEnvironment;
+  /** Asks a question at the terminal; `undefined` when there is no terminal to ask at. */
+  prompt?(question: string): Promise<string | undefined>;
+  /** A yes/no at the terminal; `false` when there is no terminal. */
+  confirm?(question: string): Promise<boolean>;
+  /**
+   * Reads a secret typed at the terminal without echoing it (Vault's CLI): the answer goes straight to the caller, is
+   * never logged, never kept, never in a transcript. `undefined` when there is no terminal.
+   */
+  promptHidden?(question: string): Promise<string | undefined>;
 }
 
 /** Answers the exit code. */
