@@ -2,6 +2,7 @@ import { COPY_AFTER_MASK_SECONDS, COPY_MAX_LIFETIME_SECONDS } from './borrowed.t
 import { INPUT_DEFAULT_REDACTION_SECONDS, INPUT_MAX_REDACTION_SECONDS } from '../../../contract/index.ts';
 import { coverageOf, type TextRange } from '../secrets/policy.ts';
 import type { InputClock } from './ports.ts';
+import type { MaskValue, Scrub } from '../secrets/redaction.ts';
 
 /**
  * THE VALUES THE DAEMON HAS JUST TYPED, held in RAM and masked from every read for a window.
@@ -91,6 +92,27 @@ export class EphemeralValues {
       text,
       [...this.held.values()].flat().map(entry => entry.value),
     );
+  }
+
+  /** Add live typed values to the read's single masking pass without exposing a value accessor. */
+  compose(scrub: Scrub): Scrub {
+    const entries = (additional: readonly MaskValue[] = []): readonly MaskValue[] => {
+      this.purge();
+      return [
+        ...additional,
+        ...[...this.held.values()].flat().map(entry => ({
+          name: `input ${entry.label}`,
+          value: entry.value,
+          input: true as const,
+          ...(entry.marker === undefined ? {} : { marker: entry.marker }),
+        })),
+      ];
+    };
+    return {
+      text: (text, cut = false, additional) => scrub.text(text, cut, entries(additional)),
+      data: (value, additional) => scrub.data(value, entries(additional)),
+      cover: (text, additional) => scrub.cover(text, entries(additional)),
+    };
   }
 
   /** Lets go of every value whose window has ended, in every session. */

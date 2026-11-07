@@ -584,6 +584,7 @@ export interface WardenSweepPorts {
   /**
    * The project boards, looked up each time they are read: Board is an optional plugin, so it can be off or not loaded.
    * Absent, or answering `undefined`: no card is reported orphaned, and a resumed ferret is told no card.
+   * Present: every orphaned card (all pages), its lane by name, and a resumed ferret's focus card.
    */
   readonly board?: () => WardenBoardPort | undefined;
   /** The send ledgers. Absent: no sub-ferret is reported overdue. */

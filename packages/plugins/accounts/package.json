@@ -20,9 +20,18 @@
     "@ferretry/core-asks": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-vault": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-access": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "react": "^19.0.0",
+    "@ferretry/plugin-board": "workspace:*",
+    "@ferretry/plugin-browsers": "workspace:*",
+    "@ferretry/plugin-projects": "workspace:*"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0"
+  }
 }

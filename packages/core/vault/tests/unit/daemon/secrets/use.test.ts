@@ -16,6 +16,10 @@ import {
   type SecretRecipes,
 } from '../../../../daemon/lib/secrets/index.ts';
 import { EchoSecretChildRunner, FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
+import { MaskSourceUnavailableError } from '../../../../daemon/lib/secrets/mask-source.ts';
+import { combinedValues, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
+import { EphemeralAwareRedactor } from '../../../../daemon/lib/inputs/ephemeral-redactor.ts';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
 
 const CLOCK = { now: () => '2026-01-01T00:00:00.000Z' } as unknown as Clock;
 /** The Vault's handle table; the echo runner opens each child's environment with it, as the kernel's spawn does. */
@@ -37,6 +41,151 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe('use without read', () => {
+  it('S10 I102 I126 masks an original cut prefix before a contained typed value rewrites it', async () => {
+    const vault = await vaultHolding({ TOKEN: 'prefix-fixture-secret-suffix' });
+    const typed = new EphemeralValues({ now: () => 1 });
+    typed.hold('fixture', 'fixture-secret', '!A0');
+    const masks = new EphemeralAwareRedactor(new SecretRedactor(vault), typed);
+    const runner: SecretChildRunner = {
+      run: async () => ({
+        outcome: 'exited',
+        exitCode: 0,
+        stdout: 'prefix-fixture-secret',
+        stderr: 'prefix-fixture-secret\uFFFD',
+        truncated: true,
+      }),
+    };
+    const result = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks).run(request());
+    should(result.stdout).equal('[redacted]');
+    should(result.stderr).equal('[redacted]');
+  });
+
+  it('S19 I126 refuses before spawning when the masks cannot open, and one snapshot masks the output', async () => {
+    const vault = await vaultHolding({ TOKEN });
+    let spawned = 0;
+    const runner: SecretChildRunner = {
+      run: async () => {
+        spawned += 1;
+        return { outcome: 'exited', exitCode: 0, stdout: `ok ${TOKEN}`, stderr: '', truncated: false };
+      },
+    };
+    let available = false;
+    let opens = 0;
+    const masks = new SecretRedactor({
+      values: async () => {
+        opens += 1;
+        if (!available) throw new MaskSourceUnavailableError();
+        return new Map([['login:test:password', 'saved-login-value']]);
+      },
+    });
+    const service = new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks);
+
+    await service.run(request({ secrets: ['TOKEN'] })).then(
+      () => should.fail('', '', 'unavailable masks must refuse'),
+      (error: unknown) => {
+        should(error).be.instanceof(SecretUseError);
+        should((error as SecretUseError).refusal).equal('masks_unavailable');
+        should(String((error as Error).message)).not.containEql(TOKEN);
+      },
+    );
+    should(spawned).equal(0);
+
+    available = true;
+    opens = 0;
+    const result = await service.run(request({ secrets: ['TOKEN'] }));
+    should(result.stdout).equal('ok [redacted:TOKEN]');
+    should(spawned).equal(1);
+    should(opens).equal(1);
+  });
+
+  it('S10 I126 masks a rotated injected value before a contributed substring rewrites it', async () => {
+    const documents = new MemorySecretDocuments();
+    const cipher = new FakeSecretCipher();
+    const directory = new SecretDirectory(documents, cipher, CLOCK);
+    const vault = new SecretVault(documents, cipher);
+    const original = 'prefix-fixture-secret-suffix';
+    await directory.put('TOKEN', original);
+    const masks = new SecretRedactor(
+      combinedValues(vault, {
+        values: async () => new Map([['login:test:password', 'fixture-secret']]),
+      }),
+    );
+    const runner: SecretChildRunner = {
+      run: async () => {
+        await directory.put('TOKEN', 'replacement-vault-value');
+        return {
+          outcome: 'exited',
+          exitCode: 0,
+          stdout: original,
+          stderr: `${original} replacement-vault-value`,
+          truncated: false,
+        };
+      },
+    };
+    const result = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks).run(
+      request({ secrets: ['TOKEN'] }),
+    );
+    should(result.stdout).equal('[redacted:TOKEN]');
+    should(result.stderr).equal('[redacted:TOKEN] [redacted:TOKEN]');
+  });
+
+  it('S19 I2 a vault that fails after the child keeps its masked output instead of throwing it away', async () => {
+    const documents = new MemorySecretDocuments();
+    const cipher = new FakeSecretCipher();
+    await new SecretDirectory(documents, cipher, CLOCK).put('TOKEN', TOKEN);
+    let broken = false;
+    const vault = new (class extends SecretVault {
+      override async values(): ReturnType<SecretVault['values']> {
+        if (broken) throw new Error('vault unreadable');
+        return super.values();
+      }
+    })(documents, cipher);
+    let spawned = 0;
+    const runner: SecretChildRunner = {
+      run: async () => {
+        spawned += 1;
+        broken = true;
+        return { outcome: 'exited', exitCode: 0, stdout: `out ${TOKEN}`, stderr: '', truncated: false };
+      },
+    };
+    const result = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, new SecretRedactor(vault)).run(
+      request({ secrets: ['TOKEN'] }),
+    );
+    should(spawned).equal(1);
+    should(result.stdout).equal('out [redacted:TOKEN]');
+  });
+
+  it('S10 I126 shared masks cover cut output and preserve the injected vault snapshot across replacement', async () => {
+    const documents = new MemorySecretDocuments();
+    const cipher = new FakeSecretCipher();
+    const directory = new SecretDirectory(documents, cipher, CLOCK);
+    const vault = new SecretVault(documents, cipher);
+    await directory.put('TOKEN', TOKEN);
+    const masks = new SecretRedactor(
+      combinedValues(vault, {
+        values: async () => new Map([['MASK_ONLY', 'login-fixture-value']]),
+      }),
+    );
+    const runner: SecretChildRunner = {
+      run: async spec => {
+        should(ENVS.open(spec.env)).deepEqual({ TOKEN });
+        await directory.put('TOKEN', 'replacement-vault-value');
+        return {
+          outcome: 'exited',
+          exitCode: 0,
+          stdout: `${TOKEN} login-fixture-value`,
+          stderr: 'before login-fixt',
+          truncated: true,
+        };
+      },
+    };
+    const service = new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks);
+    const result = await service.run(request({ secrets: ['TOKEN'] }));
+    should(result.stdout).equal('[redacted:TOKEN] [redacted:MASK_ONLY]');
+    should(result.stderr).equal('before [redacted:MASK_ONLY]');
+    await should(service.run(request({ secrets: ['MASK_ONLY'] }))).be.rejectedWith(UnknownSecretError);
+  });
+
   it('S3 S5 put the value in the CHILD environment and nowhere else', async () => {
     // Arrange
     const runner = new EchoSecretChildRunner(ENVS, () => 'done');

@@ -93,7 +93,7 @@ export default definePlugin({
     app: [
       appAction('permission.answer', {
         on: 'ferret',
-        label: 'Answer permission prompt',
+        label: 'Answer approval prompt',
         calls: 'POST /v1/ferrets/:ferretId/permission',
       }),
       appAction('dialog.answer', {
@@ -130,7 +130,8 @@ export default definePlugin({
   permissions: {
     roots: ['agent-homes', 'harness-history'],
     network: ['registry.npmjs.org'],
-    spawn: ['claude', 'npm', 'pnpm', 'bun', 'volta', 'brew', 'nix'],
+    // tmux: the answers type into the ferret's pane; which, readlink, uname, printenv: the facts the kernel has no port for.
+    spawn: ['claude', 'npm', 'pnpm', 'bun', 'volta', 'brew', 'nix', 'tmux', 'which', 'readlink', 'uname', 'printenv'],
     secrets: [],
   },
 });

@@ -43,7 +43,8 @@ async function setup(beforeRestore?: (host: TestHost) => void) {
   const built = Promise.withResolvers<void>();
   const send = Promise.withResolvers<void>();
   const fixture = definePlugin({
-    id: 'input-test',
+    // InputTargets admits only terminals and browsers as takers, so the fixture stands in for Terminals.
+    id: 'terminals',
     title: 'Input test',
     version: '1.0.0',
     api: 5,

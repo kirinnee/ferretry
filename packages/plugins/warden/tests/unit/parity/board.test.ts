@@ -8,6 +8,7 @@ import { fakeBoard } from '@ferretry/plugin-board/contract/testing';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import daemon from '../../../daemon/index.ts';
+import { lanes, PROJECT } from '../../support/board.ts';
 import { cardView } from '../board-fixtures.ts';
 
 /** `F1`, owned by a ferret no longer on this machine, its assignee `worker` stopped: Board calls it orphaned. */
@@ -25,14 +26,21 @@ class RefusingAsks extends FakeAsks {
 /** The same card, owned by `lead`, a live auto ferret that the Warden may type to. */
 const ownedByLead: CardView = cardView({ owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' });
 
-/** Board's contract fake, answering one orphaned card, recording every read of the cards. */
-function boardWithOrphan(card: CardView = orphaned): { readonly board: BoardApi; readonly reads: number[] } {
+/**
+ * Board's contract fake, answering the orphaned cards given (one by default) in one snapshot, recording every read.
+ * Its lane sets are the classic ones, so a lane reads by name.
+ */
+function boardWithOrphan(card: CardView | readonly CardView[] = orphaned): {
+  readonly board: BoardApi;
+  readonly reads: number[];
+} {
+  const all = Array.isArray(card) ? card : [card as CardView];
   const reads: number[] = [];
   const board: BoardApi = {
     ...fakeBoard(),
-    cards: async () => {
+    orphanedCards: async () => {
       reads.push(reads.length + 1);
-      return [card];
+      return { cards: all, laneSets: [lanes(PROJECT)] };
     },
   };
   return { board, reads };
@@ -126,6 +134,37 @@ describe('Board, an optional use of the Warden', () => {
     expect(typed[0]).toContain('`fy task assign F1 <ferret>`');
     expect(typed[0]).toContain('`fy task drop F1 --reason "<why>"`');
     expect(typed[0]).not.toContain('Ferretry resume');
+  });
+
+  test('the owner’s message names the lane by its name, from Board’s lane sets (“waiting in Implement”)', async () => {
+    // Arrange
+    const { board } = boardWithOrphan(ownedByLead);
+    const { run, typed } = await wardenWith(board, { liveOwner: true });
+
+    // Act
+    await run();
+
+    // Assert
+    expect(typed).toHaveLength(1);
+    expect(typed[0]).toContain('It is waiting in Implement,');
+    expect(typed[0]).not.toContain('waiting in implement');
+  });
+
+  test('more than one page of orphaned cards: every one is flagged, once, from one read', async () => {
+    // Arrange: 1,203 cards, more than two pages of 500
+    const cards = Array.from({ length: 1203 }, (_, each) =>
+      cardView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
+    );
+    const { board, reads } = boardWithOrphan(cards);
+    const { run } = await wardenWith(board);
+
+    // Act
+    const ran = await run();
+
+    // Assert
+    expect(ran.status).toBe(200);
+    expect(reads).toHaveLength(1);
+    expect(kinds(ran.json()).filter(([kind]) => kind === 'orphaned_card')).toHaveLength(1203);
   });
 
   test('a message Conversation refused is told by a notice on the owner’s board, and not typed again', async () => {

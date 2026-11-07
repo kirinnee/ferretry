@@ -558,3 +558,7 @@ Every row below gets a test whose name contains the row id, e.g. `test('G90 …'
 protocol/tests/fixtures/login-index-v1.ts
 protocol/tests/unit/migrate-login-index.test.ts
 ```
+
+### Declared gaps
+
+- **Owner's own card, which ferret (I173):** today's `mostRecentLiveSession` ranked by `lastActivityAt ?? startedAt`; `FerretSummary` has no activity time, so `ownerFerretOf` ranks live ferrets by `stateAt` (newest first, then id). A steadily working ferret can lose to one that went idle later; the card still lands under a live ferret.

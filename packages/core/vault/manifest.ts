@@ -13,6 +13,7 @@ import {
   InputTargets,
   OutputGuardPort,
   RedactionPort,
+  RedactionSources,
   SealedDocumentsPort,
   SecretsChanged,
   VaultFile,
@@ -174,7 +175,7 @@ export default definePlugin({
     subscribes: [AsksChanged, FerretsChanged],
   },
   hooks: {
-    offers: [{ hook: InputTargets }],
+    offers: [{ hook: InputTargets }, { hook: RedactionSources }],
     takes: [{ hook: AskSources, key: 'input', schema: InputAskRefSchema }],
   },
 });

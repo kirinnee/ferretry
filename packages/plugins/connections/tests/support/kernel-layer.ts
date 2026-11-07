@@ -113,7 +113,9 @@ export async function realSessionLayer(): Promise<RealSessionLayer> {
 /** Pulls from the browser's side of `link` until the daemon's handshake frame arrives. */
 async function nextHandshake(link: CarrierLink): Promise<Uint8Array> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
+    // The daemon's handshake answer is real WebCrypto, so a few event-loop turns are not a bound: wait real time too.
     await settle(2);
+    await new Promise(resolve => setTimeout(resolve, 5));
     for (;;) {
       const next = link.outbound.next();
       if (next === undefined) break;

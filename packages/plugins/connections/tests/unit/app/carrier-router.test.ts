@@ -665,6 +665,66 @@ describe('an idle drop keeps the winner (connections-app R2 finding 2)', () => {
   });
 });
 
+describe('a request lost under a session forgets the winner only when the carrier failed it (connections-app R3 nit)', () => {
+  /** Direct is dead, so the relay wins the first read; later reads of `/v1/slow` are never answered by the daemon. */
+  const relayWinner = async () => {
+    const closes: string[] = [];
+    const sockets = new Map<string, BrowserSocket>();
+    const r = await rig(
+      { [DIRECT_HOST]: { kind: 'dead' }, [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+      'auto',
+      null,
+      recording(closes, sockets),
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/first' });
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    const route = r.fx.route;
+    r.fx.route = request => (request.path === '/v1/slow' ? new Promise(() => undefined) : route(request));
+    return { r, transport, sockets };
+  };
+
+  test('an accepted relay winner closed with the daemon’s refusal of the device under a GET keeps its choice', async () => {
+    // Arrange
+    const { r, transport, sockets } = await relayWinner();
+
+    // Act — the relay session ends with `authRejected` while the read waits: the daemon's answer, not the carrier's.
+    const read = transport.request({ method: 'GET', path: '/v1/slow' }).catch((error: unknown) => error);
+    await pause();
+    sockets.get(RELAY_HOST)?.close(RELAY_CLOSE_CODES.authRejected, 'unknown device');
+    const failure = await read;
+
+    // Assert — the read failed, and the winner was not forgotten for a refusal the carrier did not cause.
+    expect(failure).toBeInstanceOf(Error);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    r.fx.layer.close();
+  });
+
+  test('an aborted GET whose carrier then drops keeps the choice: the caller gave up, the carrier lost nothing', async () => {
+    // Arrange
+    const { r, transport, sockets } = await relayWinner();
+    const controller = new AbortController();
+    const gaveUp = new Error('the caller gave up');
+
+    // Act — the caller aborts and the carrier drops in the same turn, before the abort's rejection is observed.
+    const read = transport
+      .request({ method: 'GET', path: '/v1/slow', signal: controller.signal })
+      .catch((error: unknown) => error);
+    await pause();
+    controller.abort(gaveUp);
+    sockets.get(RELAY_HOST)?.onclose?.({ code: 1011, reason: 'carrier dropped' });
+    const failure = await read;
+    await pause();
+
+    // Assert — the read failed with the caller's own reason, and the winner stands.
+    expect(failure).toBe(gaveUp);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    r.fx.layer.close();
+  });
+});
+
 /** Opens like the real rendezvous and says `ready`, then refuses the session for its ceiling (4429) at the hello. */
 const refusesAtHello = (real: BrowserSocket): BrowserSocket => {
   let refused = false;

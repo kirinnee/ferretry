@@ -22,7 +22,11 @@ const DIRECT = 'https://laptop.example.test';
 const RELAY = 'https://relay.example';
 const CODE = 'K7Q2-M9XW';
 
-async function pairingInput(daemonId: string, address = DIRECT): Promise<PairDirectInput> {
+async function pairingInput(
+  daemonId: string,
+  address = DIRECT,
+  save: PairDirectInput['key']['save'] = () => Promise.resolve(),
+): Promise<PairDirectInput> {
   const minted = await shellCrypto.generateDeviceKey();
   return {
     address,
@@ -32,7 +36,7 @@ async function pairingInput(daemonId: string, address = DIRECT): Promise<PairDir
       deviceName: 'phone',
       publicKey: toBase64Url(minted.publicKeySpki),
       key: shellCrypto.deviceKeyHandle(minted.privateKey),
-      save: () => Promise.resolve(),
+      save,
     },
   };
 }
@@ -182,6 +186,78 @@ describe('the walk', () => {
     expect(failure).toBeInstanceOf(RelayPairingRefusedError);
     expect(failure).not.toBeInstanceOf(AmbiguousPairingError);
     expect(run.network.dialled).toHaveLength(1);
+    run.fx.layer.close();
+  });
+});
+
+describe('the device key is kept only when the pairing was answered', () => {
+  test('P28 a walk that carries the pairing on the direct leg saves the key once, after the walk', async () => {
+    const run = await walkOver({ [hostOf(DIRECT)]: { kind: 'carries', carrier: 'direct' } });
+    const saved: string[] = [];
+    const input = await pairingInput(run.fx.daemonId, DIRECT, async () => {
+      saved.push('saved');
+    });
+    const paired = await run.pair(input);
+    expect(paired.via.kind).toBe('direct');
+    expect(saved).toEqual(['saved']);
+    run.fx.layer.close();
+  });
+
+  test('P28 a walk that carries the pairing on the relay leg saves the key once', async () => {
+    const run = await walkOver({
+      [hostOf(DIRECT)]: { kind: 'dead' },
+      [hostOf(RELAY)]: { kind: 'carries', carrier: 'relay' },
+    });
+    const saved: string[] = [];
+    const input = await pairingInput(run.fx.daemonId, DIRECT, async () => {
+      saved.push('saved');
+    });
+    const paired = await run.pair(input);
+    expect(paired.via.kind).toBe('relay');
+    expect(saved).toEqual(['saved']);
+    run.fx.layer.close();
+  });
+
+  test('P28 a refused outcome saves nothing', async () => {
+    const run = await walkOver({ [hostOf(DIRECT)]: { kind: 'carries', carrier: 'direct' } });
+    run.fx.pair.redeem = async attempt => {
+      run.fx.pair.attempts.push(attempt);
+      return 'refused';
+    };
+    const saved: string[] = [];
+    const input = await pairingInput(run.fx.daemonId, DIRECT, async () => {
+      saved.push('saved');
+    });
+    const failure = await run.pair(input).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RelayPairingRefusedError);
+    expect(saved).toEqual([]);
+    run.fx.layer.close();
+  });
+
+  test('P28 an unknown outcome (the session ended before the answer) saves nothing', async () => {
+    const run = await walkOver({ [hostOf(DIRECT)]: { kind: 'carries', carrier: 'direct', dropAfterFrames: 2 } }, null);
+    const saved: string[] = [];
+    const input = await pairingInput(run.fx.daemonId, DIRECT, async () => {
+      saved.push('saved');
+    });
+    const failure = await run.pair(input).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(PairingOutcomeUnknownError);
+    expect(saved).toEqual([]);
+    run.fx.layer.close();
+  });
+
+  test('P28 a save that throws rejects the pairing and never dials another leg', async () => {
+    const run = await walkOver({
+      [hostOf(DIRECT)]: { kind: 'carries', carrier: 'direct' },
+      [hostOf(RELAY)]: { kind: 'carries', carrier: 'relay' },
+    });
+    const input = await pairingInput(run.fx.daemonId, DIRECT, async () => {
+      throw new Error('storage refused');
+    });
+    const failure = await run.pair(input).catch((error: unknown) => error);
+    expect((failure as Error).message).toBe('storage refused');
+    expect(run.network.dialled).toHaveLength(1);
+    expect(run.fx.pair.attempts).toHaveLength(1);
     run.fx.layer.close();
   });
 });
