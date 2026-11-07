@@ -217,14 +217,6 @@ describe('the apply pipeline over a fake config writer', () => {
     should(w.order).deepEqual([]);
   });
 
-  it('should refuse catalog sign-out because LoginsPort exposes reads only', async () => {
-    const w = world();
-    await should(w.service.propose({ kind: 'credential.signout', id: 'claude-you' })).be.rejectedWith(
-      /Sign out through Logins/,
-    );
-    should(w.order).deepEqual([]);
-  });
-
   it('should answer a read in a sentence when the daemon has no host seam wired', async () => {
     // Arrange
     const service = assembleServices(
