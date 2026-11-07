@@ -130,6 +130,8 @@ export class AccessRuntime {
   #wired: Promise<Wired> | undefined;
   #current: Wired | undefined;
   #generation = 0;
+  /** Every device revoked or expired by this run: `revoked` to Gate, never `unknown` (a device id is never reminted). */
+  readonly #revoked = new Set<string>();
 
   constructor(deps: AccessRuntimeDeps) {
     this.#deps = deps;
@@ -211,7 +213,7 @@ export class AccessRuntime {
       machineName: state.daemonName,
       announce: async notice => await push.notify({ payload: notice }),
       settings: () => this.settings(),
-      unlocks: new StateUnlockLedger(kernel.state, state.daemonId),
+      unlocks: this.#unlockWrites(new StateUnlockLedger(kernel.state, state.daemonId)),
       passkeysChanged,
       rotation: {
         keyIssuedAt: deviceId => pairing?.keyIssuedAt(deviceId),
@@ -238,7 +240,7 @@ export class AccessRuntime {
       },
     });
     const advertised = host.advertisement();
-    pairing = new AuditedPairingService(
+    pairing = new AccessPairingService(
       {
         daemonId: state.daemonId,
         daemonName: state.daemonName,
@@ -261,8 +263,18 @@ export class AccessRuntime {
         alert: new PushNewDeviceAlert(push, state.daemonName, sentence => kernel.log.warn(sentence)),
         failures: sentence => kernel.log.warn(sentence),
       },
+      (deviceId, change) => {
+        this.#revoked.add(deviceId);
+        this.#changed(deviceId, change);
+      },
     );
     await stepUp.restore();
+    // Today's boot step: a grant unused for the idle period is removed before anything is served, and said once.
+    const idleExpired = await pairing.expireIdleDevices();
+    if (idleExpired > 0)
+      kernel.log.info(
+        `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for ${this.settings().idleExpiryDays} days ${idleExpired === 1 ? 'was' : 'were'} removed`,
+      );
     const deviceGrants = new DeviceGrantService({
       devices: pairing,
       daemonWide: () => gate.policy()?.grants,
@@ -279,6 +291,16 @@ export class AccessRuntime {
     for (const route of [...pairingRoutes(pairing, deviceGrants), ...pushRoutes(push, guard), ...stepUpRoutes(stepUp)])
       routes.set(routeKey(route), route.handle);
     return { pairing, registry, stepUp, push, routes };
+  }
+
+  /** Every unlock or lock is persisted through the ledger: each one is a standing change Gate must re-admit on. */
+  #unlockWrites(ledger: StateUnlockLedger): StateUnlockLedger {
+    const write = ledger.write.bind(ledger);
+    ledger.write = async unlocks => {
+      this.#generation += 1;
+      await write(unlocks);
+    };
+    return ledger;
   }
 
   #changed(device: string, change: 'paired' | 'revoked' | 'expired' | 'grants'): void {
@@ -362,7 +384,7 @@ export class AccessRuntime {
       const wired = this.#current;
       if (wired === undefined) return 'unknown';
       const grants = wired.pairing.deviceGrants(holder);
-      if (grants === undefined) return 'unknown';
+      if (grants === undefined) return this.#revoked.has(holder) ? 'revoked' : 'unknown';
       const until = wired.stepUp.unlockedUntil(holder);
       return {
         kind: 'device',
@@ -406,6 +428,30 @@ export class AccessRuntime {
       verifyRegistration: async input => await this.#verifier.verifyRegistration(input),
       verifyAssertion: async input => await this.#verifier.verifyAssertion(input),
     };
+  }
+}
+
+/**
+ * The audited pairing service, telling the runtime when a grant is gone: a revocation (a route names its actor) or the
+ * daemon's own idle expiry (no actor). Decided from the registry before and after, so a purge that fails after the
+ * grant was removed — the parent throws then — is still reported as the revocation it was.
+ */
+class AccessPairingService extends AuditedPairingService {
+  constructor(
+    options: ConstructorParameters<typeof AuditedPairingService>[0],
+    audit: ConstructorParameters<typeof AuditedPairingService>[1],
+    private readonly gone: (deviceId: string, change: 'revoked' | 'expired') => void,
+  ) {
+    super(options, audit);
+  }
+
+  override async revokeDevice(id: string, actor?: string): Promise<boolean> {
+    const held = this.deviceGrants(id) !== undefined;
+    try {
+      return await super.revokeDevice(id, actor);
+    } finally {
+      if (held && this.deviceGrants(id) === undefined) this.gone(id, actor === undefined ? 'expired' : 'revoked');
+    }
   }
 }
 
