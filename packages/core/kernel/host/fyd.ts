@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { bootHost } from './host.ts';
 import { listenLocal } from './listener.ts';
+import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
 
 interface GeneratedRegistry {
@@ -42,6 +43,15 @@ async function main(): Promise<number> {
       // the home is not decided yet, or was refused
     }
   });
+  // R247: read once; a value that would lengthen anything refuses the boot, a shortened one is said once.
+  const timings = bootTimings(process.env.FYD_TEST_TIMINGS, line => {
+    process.stderr.write(`fyd: ${line}\n`);
+    sink({ level: 'warn', scope: 'kernel', message: line });
+  });
+  if (!timings.ok) {
+    process.stderr.write(`${timings.sentence}\n`);
+    return 78;
+  }
   const registry = (await import(REGISTRY)) as GeneratedRegistry;
   const outcome = await bootHost({
     home,
@@ -52,6 +62,7 @@ async function main(): Promise<number> {
       childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: homedir() },
     }),
     contractHash: id => registry.contractHashes?.[id]?.effective ?? 'unhashed',
+    timings: timings.timings,
     pid: process.pid,
     listen: async host =>
       await listenLocal(host, {

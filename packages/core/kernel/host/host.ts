@@ -63,6 +63,7 @@ import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
+import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
   effectivePermissions,
   openChildEnvironments,
@@ -174,6 +175,8 @@ export interface HostOptions {
   readonly pid?: number;
   /** `<home>-worktrees` unless given. */
   readonly worktrees?: string;
+  /** `FYD_TEST_TIMINGS` as `fyd` parsed it (R247); absent is the shipped numbers exactly. */
+  readonly timings?: DaemonTimings;
 }
 
 export type PluginStatus = 'serving' | 'skeleton' | 'failed' | 'damaged' | 'off' | 'refused';
@@ -732,6 +735,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       reauthorize: request => dispatcher.reauthorize(request),
     },
     clock,
+    lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
   });
   let stopHost = async (): Promise<void> => undefined;
   const running: RunningHost = {
