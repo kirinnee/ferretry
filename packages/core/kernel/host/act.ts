@@ -15,8 +15,26 @@ import type { InputHolds } from '../contract/bound.ts';
 import { currentActor } from './call-scope.ts';
 
 /**
+ * The only spelling an id prefix may have (§4.7): a short kind such as `page-` or `window-` — lowercase letters and
+ * hyphens, at most 24. No digit, dot, colon, slash, `%`, `?`, `#` or `=`, so a URL, a host, a port, a counter or an
+ * encoded value from the target cannot ride out of a write-only act inside a minted id.
+ */
+export const ID_PREFIX = /^[a-z][a-z-]{0,23}$/;
+
+/**
+ * Refuses an id prefix that is not a short kind ({@link ID_PREFIX}). The message never repeats the prefix, because a
+ * refused prefix may be the target text it tried to carry.
+ */
+export function checkIdPrefix(prefix: unknown): string {
+  if (typeof prefix !== 'string' || !ID_PREFIX.test(prefix))
+    throw new TypeError('an id prefix is a short kind of lowercase letters and hyphens, such as "page-"; refused');
+  return prefix;
+}
+
+/**
  * The kernel's id factory and registry (§4.7): an `OpaqueId` exists only if the kernel minted it, so a write-only
- * act cannot smuggle a URL or title out as an "id". `get` hands back the kernel's own copy.
+ * act cannot smuggle a URL or title out as an "id". The prefix is checked ({@link checkIdPrefix}) before anything is
+ * counted or kept, so a caller cannot put target text into an id either. `get` hands back the kernel's own copy.
  */
 export class MintedIdRegistry implements MintedIds {
   private readonly ids = new Map<string, OpaqueId>();
@@ -25,8 +43,9 @@ export class MintedIdRegistry implements MintedIds {
   constructor(private readonly random: () => string) {}
 
   mint(prefix: string): OpaqueId {
+    const kind = checkIdPrefix(prefix);
     this.counter += 1;
-    const id = `${prefix}${this.counter.toString(36)}${this.random()}` as OpaqueId;
+    const id = `${kind}${this.counter.toString(36)}${this.random()}` as OpaqueId;
     this.ids.set(id, id);
     return id;
   }

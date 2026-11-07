@@ -89,6 +89,57 @@ describe('kernel.act (§4.7)', () => {
     expect(forged).toEqual({ ok: true, value: { status: 'refused', code: 'unminted_id' } });
   });
 
+  test('a write-only act, production registry: a URL-shaped id prefix is refused and never repeated', async () => {
+    const ids = new MintedIdRegistry(() => 'r');
+    const url = 'https://example.test/#U1lOVEhFVElDLVNFQ1JFVA';
+    const act = createActRunner(() => holdsSaying('allow'), ids);
+    // The mint throws inside fn, so nothing is minted, kept or answered with the URL in it.
+    await expect(act(target, 'navigate', async () => ({ status: 'done', ids: [ids.mint(url)] }))).rejects.toThrow(
+      TypeError,
+    );
+    expect(ids.has(`${url}1r`)).toBe(false);
+    let message = '';
+    try {
+      ids.mint(url);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('refused');
+    expect(message).not.toContain('example.test');
+    expect(message).not.toContain('U1lOVEhFVElDLVNFQ1JFVA');
+  });
+
+  test('a write-only act, production registry: only a short kind of lowercase letters and hyphens is a prefix', async () => {
+    const ids = new MintedIdRegistry(() => 'r');
+    const refused: unknown[] = [
+      '',
+      'Page-',
+      'page-8080-',
+      'bank.test',
+      'a:b',
+      'a/b',
+      'a%2F',
+      'a?b',
+      'a#b',
+      'a=b',
+      'page_',
+      ' page',
+      '-page',
+      'a'.repeat(25),
+      42,
+      { toString: () => 'page-' },
+    ];
+    for (const prefix of refused) expect(() => ids.mint(prefix as string)).toThrow(TypeError);
+    const minted = ids.mint('window-');
+    expect(minted.startsWith('window-')).toBe(true);
+    expect(ids.mint('a'.repeat(24)).startsWith('a'.repeat(24))).toBe(true);
+    const act = createActRunner(() => holdsSaying('allow'), ids);
+    expect(await act(target, 'open', async () => ({ status: 'done', ids: [minted] }))).toEqual({
+      ok: true,
+      value: { status: 'done', ids: [minted] },
+    });
+  });
+
   test('acts on one target run one after another; the hold is asked right before each', async () => {
     const log: string[] = [];
     const act = createActRunner(

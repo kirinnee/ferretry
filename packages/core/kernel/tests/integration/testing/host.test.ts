@@ -79,7 +79,14 @@ const demo = implementDaemon(demoManifest, {
     },
     tools: {
       demo_send: async (_call, input) => {
-        const { pane: key, raw } = input as { pane: string; raw?: unknown };
+        const { pane: key, raw, mint } = input as { pane: string; raw?: unknown; mint?: string };
+        if (mint !== undefined) {
+          try {
+            return { text: 'minted', data: { status: 'done', ids: [kernel.ids.mint(mint)] } as never };
+          } catch (error) {
+            return { text: (error as Error).message, isError: true };
+          }
+        }
         const result = await kernel.act(pane(key), 'keys', async () => (raw ?? { status: 'done' }) as never);
         return result.ok
           ? { text: 'sent', data: result.value as never }
@@ -196,6 +203,17 @@ describe('test host', () => {
     expect(await host.tool('demo_send', { pane: 'p1' })).toEqual({ text: 'held', isError: true });
     expect((await host.tool('demo_read', { pane: 'p2' })).text).toBe('token *******');
     expect(host.acts.map(a => a.actor)).toEqual(['ferret', 'ferret', 'ferret', 'ferret', 'ferret', 'ferret']);
+  });
+
+  test('kernel.ids: the test host refuses a URL-shaped prefix exactly as the production registry does', async () => {
+    const host = await testHost({ plugins: [demo] });
+    const url = 'https://example.test/#U1lOVEhFVElDLVNFQ1JFVA';
+    const refused = await host.tool('demo_send', { pane: 'p1', mint: url });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused)).not.toContain('example.test');
+    expect((await host.tool('demo_send', { pane: 'p1', mint: 'page-8080-' })).isError).toBe(true);
+    expect((await host.tool('demo_send', { pane: 'p1', mint: 'window-' })).isError).toBeUndefined();
+    await host.stop();
   });
 
   test('the driven clock runs timers only when advanced', async () => {

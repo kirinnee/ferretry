@@ -36,6 +36,7 @@ import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
+import { checkIdPrefix } from '../host/act.ts';
 import type { DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
 import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
@@ -498,8 +499,14 @@ async function start(world: World): Promise<TestHost> {
         minted: world.minted,
         record: entry => acts.push(entry),
       }),
-      // A fresh key per call: the test registry mints `opaque-N`, whatever the prefix.
-      ids: { mint: () => world.minted.mint({}) },
+      // The production prefix rule first (a URL or other target text is refused, as in the real registry); then a
+      // fresh key per call: the test registry mints `opaque-N`.
+      ids: {
+        mint: prefix => {
+          checkIdPrefix(prefix);
+          return world.minted.mint({});
+        },
+      },
       redaction,
       snapshot: {
         current: () => {
