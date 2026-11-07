@@ -1,0 +1,20 @@
+{
+  "fingerprint": "8f963a05027eb6a9c784bbe2d96ed985f990f667ab015ab6ac5e83e3c88ba3db",
+  "lastModified": 1794021923,
+  "locked": {
+    "lastModified": 1794021923,
+    "ref": "refs/heads/main",
+    "rev": "fcae1995c9d9ab67322ec3cf44c17e05bfde035a",
+    "revCount": 1,
+    "type": "git",
+    "url": "file:///tmp/review-shell-metadata.HJ4Gua"
+  },
+  "locks": { "nodes": { "root": {} }, "root": "root", "version": 7 },
+  "original": { "type": "git", "url": "file:///tmp/review-shell-metadata.HJ4Gua" },
+  "originalUrl": "git+file:///tmp/review-shell-metadata.HJ4Gua",
+  "resolved": { "type": "git", "url": "file:///tmp/review-shell-metadata.HJ4Gua" },
+  "resolvedUrl": "git+file:///tmp/review-shell-metadata.HJ4Gua",
+  "revCount": 1,
+  "revision": "fcae1995c9d9ab67322ec3cf44c17e05bfde035a",
+  "url": "git+file:///tmp/review-shell-metadata.HJ4Gua?ref=refs/heads/main&rev=fcae1995c9d9ab67322ec3cf44c17e05bfde035a"
+}
