@@ -11,11 +11,7 @@ import type { Instant } from '@ferretry/std';
 import type { OutboundAuthorizerPort } from '../stt/ports.ts';
 import { SPEEDUP_CATALOG, SPEEDUP_ORDER, type SpeedupCatalogEntry } from './catalog.ts';
 import type { JevProbeFailureCode, JevProbePort } from './jev-probe.ts';
-import type {
-  SecretNameSource,
-  SpeedupClockPort,
-  SpeedupTestLedgerPort,
-} from './ports.ts';
+import type { SecretNameSource, SpeedupClockPort, SpeedupTestLedgerPort } from './ports.ts';
 
 /**
  * The Speed-ups surface: which keys are set, and a Test that proves one works.

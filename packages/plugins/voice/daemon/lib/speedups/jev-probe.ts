@@ -68,7 +68,9 @@ function readsAsAChoice(payload: unknown): boolean {
   return (unitInterval(triage.confidence) ?? unitInterval(probabilities[triage.choice])) !== undefined;
 }
 
-const OUTCOME_FAILURE: Readonly<Record<Exclude<AuthorizedOutcome['kind'], 'completion' | 'status'>, JevProbeFailureCode>> = {
+const OUTCOME_FAILURE: Readonly<
+  Record<Exclude<AuthorizedOutcome['kind'], 'completion' | 'status'>, JevProbeFailureCode>
+> = {
   secret_missing: 'not_set',
   vault_damaged: 'vault_damaged',
   refused: 'misconfigured',

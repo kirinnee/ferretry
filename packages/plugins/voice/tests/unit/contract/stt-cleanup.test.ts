@@ -36,7 +36,7 @@ import {
 const turnFileInstruction = (file: string): string =>
   `Read the file ${file} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
 const peerBanner = (name: string, sessionId: string): string =>
-    `[message from ferret ${name} (session ${sessionId}) — not from the owner] To reply: fy send ${name} "<reply>"\n`;
+  `[message from ferret ${name} (session ${sessionId}) — not from the owner] To reply: fy send ${name} "<reply>"\n`;
 
 const FENCE = '```';
 

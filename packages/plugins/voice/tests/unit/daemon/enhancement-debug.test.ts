@@ -13,7 +13,7 @@ import {
   type EnhancementHttpRequest,
   type EnhancementReport,
   enhancementErrorView,
-  SttEnhancementError,
+  type SttEnhancementError,
   SttEnhancementService,
   type SttMonotonicClockPort,
 } from '../../../daemon/lib/stt/index.ts';

@@ -24,7 +24,12 @@ export function fakeVoice(options: { readonly keys?: readonly string[] } = {}): 
       const key = PROVIDERS.find(entry => entry.provider === parsed.data.provider)?.secretName;
       if (key === undefined || !keys.has(key))
         throw new SttEnhancementError('secret_missing', 'enhancement provider is not configured');
-      return { text: parsed.data.text, provider: parsed.data.provider, model: parsed.data.model ?? 'fake', latencyMs: 0 };
+      return {
+        text: parsed.data.text,
+        provider: parsed.data.provider,
+        model: parsed.data.model ?? 'fake',
+        latencyMs: 0,
+      };
     },
     speedups: async () => ({
       providers: PROVIDERS.map(entry => ({

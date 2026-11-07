@@ -39,6 +39,8 @@ describe('the speed-up wire', () => {
   test('a view carries no field a value could ride in', async () => {
     const view = await fakeVoice({ keys: ['GROQ_API_KEY'] }).speedups();
     expect(SpeedupsViewSchema.safeParse(view).success).toBe(true);
-    expect(SpeedupsViewSchema.safeParse({ ...view, providers: [{ ...view.providers[0], value: 'x' }] }).success).toBe(false);
+    expect(SpeedupsViewSchema.safeParse({ ...view, providers: [{ ...view.providers[0], value: 'x' }] }).success).toBe(
+      false,
+    );
   });
 });

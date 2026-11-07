@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { MAX_STT_DICTIONARY_ENTRIES, SttEnhancementRequestSchema, type SttEnhancementResult } from '../../../contract/index.ts';
+import {
+  MAX_STT_DICTIONARY_ENTRIES,
+  SttEnhancementRequestSchema,
+  type SttEnhancementResult,
+} from '../../../contract/index.ts';
 import cli from '../../../cli/index.ts';
 import { enhanceRequest, renderEnhancement } from '../../../cli/lib/enhance.ts';
 import manifest from '../../../manifest.ts';
@@ -13,7 +17,11 @@ const result: SttEnhancementResult = {
   latencyMs: 320,
 };
 
-function run(verb: 'voice' | 'voice enhance', args: string[], options: Record<string, string | boolean | string[]> = {}) {
+function run(
+  verb: 'voice' | 'voice enhance',
+  args: string[],
+  options: Record<string, string | boolean | string[]> = {},
+) {
   const calls: { route: string; body: unknown }[] = [];
   const out: string[] = [];
   const err: string[] = [];
@@ -37,7 +45,10 @@ describe('fy voice', () => {
       const { calls, out, done } = run(verb, ['never', 'install', 'at', 'the', 'root'], { model: ' llama ' });
       expect(await done).toBe(0);
       expect(calls).toEqual([
-        { route: 'POST /v1/stt/enhance', body: { text: 'never install at the root', provider: 'groq', model: 'llama' } },
+        {
+          route: 'POST /v1/stt/enhance',
+          body: { text: 'never install at the root', provider: 'groq', model: 'llama' },
+        },
       ]);
       expect(out[0]).toStartWith('Never install at the repository root.');
     }
@@ -51,7 +62,10 @@ describe('fy voice', () => {
   });
 
   test('omits every optional field the caller did not supply', () => {
-    expect(enhanceRequest(['hello'], { model: '  ', context: '  ', term: [] })).toEqual({ text: 'hello', provider: 'groq' });
+    expect(enhanceRequest(['hello'], { model: '  ', context: '  ', term: [] })).toEqual({
+      text: 'hello',
+      provider: 'groq',
+    });
   });
 
   test('collects repeated terms and a trimmed context into the request', async () => {

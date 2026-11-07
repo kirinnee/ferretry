@@ -65,7 +65,10 @@ describe('the dictation route (POST /v1/stt/enhance)', () => {
     const host = await hostOf(vault);
     const response = await host.request('POST', '/v1/stt/enhance', { body: enhance, as: owner() });
     expect(response.status).toBe(200);
-    expect(SttEnhancementResultSchema.parse(response.json())).toMatchObject({ text: 'Hello, world.', provider: 'groq' });
+    expect(SttEnhancementResultSchema.parse(response.json())).toMatchObject({
+      text: 'Hello, world.',
+      provider: 'groq',
+    });
     expect(response.body).not.toContain(GROQ_KEY);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.url).toBe(CLEANUP_PROVIDERS.groq.endpoint);
@@ -261,7 +264,9 @@ describe('Appendix D rows', () => {
     const host = await hostOf(new DamagedVault());
     const view = SpeedupsViewSchema.parse((await host.request('GET', '/v1/speedups', { as: owner() })).json());
     expect(view.vault).toBe('damaged');
-    const test = SpeedupTestResultSchema.parse((await host.request('POST', '/v1/speedups/groq/test', { as: owner() })).json());
+    const test = SpeedupTestResultSchema.parse(
+      (await host.request('POST', '/v1/speedups/groq/test', { as: owner() })).json(),
+    );
     expect(test.code).toBe('vault_damaged');
     expect(test.code).not.toBe('not_set');
     const dictation = await host.request('POST', '/v1/stt/enhance', { body: enhance, as: owner() });

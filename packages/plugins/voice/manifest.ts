@@ -38,7 +38,9 @@ export default definePlugin({
       route('POST /v1/stt/enhance', {
         minimum: 'operator',
         caller: 'any',
-        audit: { skip: 'not recorded today (no rule in lib/audit/routes.ts); the payload is dictated speech and is never logged' },
+        audit: {
+          skip: 'not recorded today (no rule in lib/audit/routes.ts); the payload is dictated speech and is never logged',
+        },
         guard: { none: 'the dictated transcript and its repaired copy; no pane, page or vault text' },
       }),
       route('GET /v1/speedups', {

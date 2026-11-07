@@ -1,4 +1,9 @@
-import type { AuthorizedOutcome, CredentialPlacement, OutboundHttpRequest, SecretName } from '@ferretry/core-vault/contract';
+import type {
+  AuthorizedOutcome,
+  CredentialPlacement,
+  OutboundHttpRequest,
+  SecretName,
+} from '@ferretry/core-vault/contract';
 
 export type { AuthorizedOutcome };
 

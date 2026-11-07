@@ -1,4 +1,8 @@
-import { MAX_STT_DICTIONARY_ENTRIES, type SttEnhancementRequest, type SttEnhancementResult } from '../../contract/index.ts';
+import {
+  MAX_STT_DICTIONARY_ENTRIES,
+  type SttEnhancementRequest,
+  type SttEnhancementResult,
+} from '../../contract/index.ts';
 
 /** Flags that shape an enhancement. */
 export interface EnhanceOptions {
