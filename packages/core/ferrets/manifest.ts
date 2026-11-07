@@ -29,7 +29,7 @@ import {
   WorktreesFile,
 } from './contract/index.ts';
 import { StartRequestsFile } from './daemon/lib/ferrets/start-requests.ts';
-import { SessionConfigFiles, SessionStateFiles } from './daemon/lib/state.ts';
+import { AgentPinsFile, FerretPinFiles, SessionConfigFiles, SessionStateFiles } from './daemon/lib/state.ts';
 
 /**
  * Ferrets (§2.2): who each ferret is, its name, parent, pack, token and state. Starting and stopping are done by a
@@ -90,6 +90,35 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'a start recovery read records nothing, as today' },
         guard: { none: 'one ferret identity record, for the caller that proves it sent the start' },
+      }),
+      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act.
+      route('POST /v1/ferrets/:ferretId/pin', {
+        minimum: 'operator',
+        caller: 'person',
+        noStore: true,
+        audit: { skip: 'a sidebar pin records nothing, as today' },
+        guard: { none: 'one ferret identity record with its pin instant' },
+      }),
+      route('POST /v1/ferrets/:ferretId/unpin', {
+        minimum: 'operator',
+        caller: 'person',
+        noStore: true,
+        audit: { skip: 'a sidebar unpin records nothing, as today' },
+        guard: { none: 'one ferret identity record' },
+      }),
+      route('GET /v1/ferrets/:ferretId/pins', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a pin board read records nothing, as today' },
+        guard: { none: 'the notes and message references a person or the ferret pinned' },
+      }),
+      route('POST /v1/ferrets/:ferretId/pins', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a pin board change records nothing, as today' },
+        guard: { none: 'answers the pin board' },
       }),
       // R-0372
       route('POST /v1/ferrets/:ferretId/stop', {
@@ -272,6 +301,8 @@ export default definePlugin({
       StartRequestsFile,
       SessionConfigFiles,
       SessionStateFiles,
+      AgentPinsFile,
+      FerretPinFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],

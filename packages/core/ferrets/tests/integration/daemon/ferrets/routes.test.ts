@@ -340,3 +340,28 @@ describe('a start retried under its request id, and recovered when both answers 
     expect(unknown.status).toBe(404);
   });
 });
+
+describe('pins', () => {
+  test('the owner pins a ferret by name and the answer carries the instant; an agent may not pin the sidebar', async () => {
+    const h = await host([record('lead'), record('helper', 'lead')]);
+    const pinned = await h.request('POST', '/v1/ferrets/lead/pin');
+    expect(pinned.status).toBe(200);
+    expect(pinned.json<{ id: string; pinnedAt?: string }>()).toMatchObject({ id: 'lead' });
+    expect(pinned.json<{ pinnedAt?: string }>().pinnedAt).toBeString();
+    const unpinned = await h.request('POST', '/v1/ferrets/lead/unpin');
+    expect(unpinned.status).toBe(200);
+    expect(unpinned.json<{ pinnedAt?: string }>().pinnedAt).toBeUndefined();
+    const byAgent = await h.request('POST', '/v1/ferrets/lead/pin', as('helper'));
+    expect(byAgent.status).toBe(403);
+    expect((await h.request('POST', '/v1/ferrets/nobody/pin')).status).toBe(404);
+  });
+
+  test('a note pinned on a ferret’s board is read back from its own pins.json', async () => {
+    const h = await host([record('lead')]);
+    const added = await h.request('POST', '/v1/ferrets/lead/pins', { body: { action: 'add', kind: 'note', text: 'ship it' } });
+    expect(added.status).toBe(200);
+    const board = await h.request('GET', '/v1/ferrets/lead/pins');
+    expect(board.status).toBe(200);
+    expect(board.json<{ pins: { text?: string }[] }>().pins.map(pin => pin.text)).toEqual(['ship it']);
+  });
+});

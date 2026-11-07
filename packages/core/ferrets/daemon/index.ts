@@ -40,6 +40,14 @@ import { buildWorktrees } from './modules/worktrees.ts';
 import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
 import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
+import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
+import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
+import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
+import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
+import { PinService } from './lib/pins/index.ts';
+import { pinRoutes } from './lib/runtime/mounts/pins.ts';
+import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
+import { AgentPinsFile, FerretPinFiles } from './lib/state.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -220,6 +228,45 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   const body = async (call: CallContext): Promise<unknown> => parseJson(await call.request.text());
 
+  // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
+  const pinClock = { now: () => kernel.clock.now() };
+  const agentPins = new AgentPinService(
+    new StateAgentPinRepository(kernel.state, AgentPinsFile),
+    pinClock,
+    new KeyedSerialExecutor(),
+  );
+  const pinnedReader = withPinned(
+    {
+      list: async () => {
+        await ready();
+        return registry.list().map(ferret => registry.summary(ferret.id)).filter(summary => summary !== undefined);
+      },
+      get: async reference => {
+        await ready();
+        const resolution = resolveAgentAddress(
+          reference,
+          registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state })),
+        );
+        return resolution.kind === 'session' ? registry.summary(resolution.id as FerretId) : undefined;
+      },
+    },
+    agentPins,
+  );
+  const sidebarPins = sessionPinRoutes(new AgentPinSubsystem(pinnedReader, agentPins));
+  const noteBoard = pinRoutes({
+    pins: new PinService(
+      new RegistryPinSessionDirectory(ferret => registry.get(ferret as FerretId) !== undefined),
+      new StatePinRepository(kernel.state, FerretPinFiles, pinClock),
+      pinClock,
+      { next: () => randomUUID() },
+    ),
+    ferretOf: pathFerret,
+    callerOf: call => {
+      const own = callerFerret(call);
+      return { isAgent: callerIsAgent(call), ...(own === undefined ? {} : { ferret: own }) };
+    },
+  });
+
   /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
   const payloadDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
   /** Starts under one request id run one at a time, so a retry racing its original cannot start a second ferret. */
@@ -252,6 +299,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     routes: {
       ...worktrees.routes,
       ...fileBrowser,
+      'POST /v1/ferrets/:ferretId/pin': sidebarPins.pin,
+      'POST /v1/ferrets/:ferretId/unpin': sidebarPins.unpin,
+      'GET /v1/ferrets/:ferretId/pins': noteBoard.list,
+      'POST /v1/ferrets/:ferretId/pins': noteBoard.apply,
       'GET /v1/ferrets': async call => {
         await ready();
         return fleetList.answer(registry.list(), headerValue(call.request, 'if-none-match'));
