@@ -18,6 +18,8 @@ export function registeredCodex() {
   const state = new Map<string, unknown>();
   const rootsUsed: { name: string; subfolder?: string }[] = [];
   const commands: RunSpec[] = [];
+  /** Every folder made (or narrowed) private through a root, as the kernel's ensurePrivateDirectory would. */
+  const privateDirectories: string[] = [];
   let permissionMode = 'auto';
   let redactionFails = false;
   let sleepAction: (() => void) | undefined;
@@ -87,6 +89,9 @@ export function registeredCodex() {
             : undefined,
       remove: async path => {
         files.delete(path);
+      },
+      ensurePrivateDirectory: async path => {
+        privateDirectories.push(path);
       },
     };
     return handle as RootHandle;
@@ -162,6 +167,7 @@ export function registeredCodex() {
     reads,
     windows,
     rootsUsed,
+    privateDirectories,
     commands,
     runner,
     spec,

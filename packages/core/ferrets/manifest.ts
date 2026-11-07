@@ -463,7 +463,7 @@ export default definePlugin({
   // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
   // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
   permissions: {
-    roots: ['agent-homes', 'worktrees', 'work', 'harness-history'],
+    roots: ['worktrees', 'work', 'harness-history'],
     spawn: ['ps'],
     hostFacts: true,
   },

@@ -20,8 +20,10 @@ function home() {
   const asked: string[] = [];
   const handle = {
     name: 'agent-homes',
-    resolve: (relative: string) => ok((relative.startsWith('/') ? relative : `${HOME}/${relative}`) as FencedPath),
+    resolve: (relative: string) =>
+      ok((relative.startsWith('/') ? relative : relative === '' ? HOME : `${HOME}/${relative}`) as FencedPath),
     writeText: async (path: FencedPath) => void written.push(path.slice(HOME.length + 1)),
+    ensurePrivateDirectory: async () => undefined,
   } as unknown as RootHandle;
   const roots = { root: (name: string) => (asked.push(name), handle) } as unknown as KernelPorts['roots'];
   return { written, asked, roots };
@@ -53,7 +55,8 @@ describe('codex storage parity', () => {
       parts: [{ kind: 'mcp', name: 'ferretry', config: { command: 'fy' } }],
     } as never);
     expect(written).toEqual(['config.toml']);
-    expect(asked).toEqual(['agent-homes']);
+    // The ferret's own scoped home, and the agent-homes folder that makes it private: no other root.
+    expect([...new Set(asked)]).toEqual(['agent-homes']);
   });
 
   test('F-0028 the settings file Codex reads at launch is named config.toml', () => {

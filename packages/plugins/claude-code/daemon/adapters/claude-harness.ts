@@ -119,6 +119,11 @@ export class ClaudeHarness implements Harness {
     };
   }
 
+  /** `state/claude-code/agent-homes/<ferret>`, resolved through this plugin's own `agent-homes` root (S42). */
+  async homeFor(ferret: FerretId): Promise<FencedPath> {
+    return this.fenced(this.home(ferret).resolve(''));
+  }
+
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
     // GAP (skills): `skill` parts are not materialized. `copyTree` takes only this plugin's own root handles, and no
