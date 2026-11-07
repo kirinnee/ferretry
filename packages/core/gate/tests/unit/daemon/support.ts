@@ -10,6 +10,7 @@ import type {
   SessionId,
   SessionPrincipal,
 } from '@ferretry/kernel/contract';
+import { resolve } from 'node:path';
 import { addDuration, epochMs, type Instant, instantFromEpochMs, minutes } from '@ferretry/std';
 import {
   type AuditDraft,
@@ -29,6 +30,9 @@ import {
 import { GateAdmission } from '../../../daemon/lib/api/admission.ts';
 import { bearerDigest } from '../../../daemon/lib/api/authentication.ts';
 import { FailClosedStepUps } from '../../../daemon/lib/step-up/witness.ts';
+import { loadManifests, loadWorkspace } from '../../../../../../scripts/gen/lib/workspace.ts';
+
+const REPO_ROOT = resolve(import.meta.dir, '../../../../../..');
 
 /** Fixed, fake tokens: never a real credential. */
 export const ADMIN = 'admin-token-for-tests-0000000000000000000000';
@@ -183,3 +187,23 @@ export function admit(w: World, route: ScopedRoute, options: RequestOptions = {}
 }
 
 export const later = (instant: Instant, ms: number): Instant => instantFromEpochMs(epochMs(instant) + ms);
+
+// ─── the routes the shipped manifests declare ─────────────────────────────────────────────────────────────────────
+
+/** Every route, socket and member route a shipped manifest declares, by `METHOD path`, as admission is asked it. */
+async function declaredRoutes(): Promise<ReadonlyMap<string, ScopedRoute>> {
+  const { loaded, failures } = await loadManifests(loadWorkspace(REPO_ROOT));
+  if (failures.length > 0) throw new Error(`a manifest failed to load: ${failures.join('; ')}`);
+  const routes = new Map<string, ScopedRoute>();
+  for (const { manifest } of loaded)
+    for (const declared of [...(manifest.actions?.routes ?? []), ...(manifest.actions?.sockets ?? [])])
+      routes.set(`${declared.method} ${declared.path}`, declared as unknown as ScopedRoute);
+  return routes;
+}
+
+/** One declared route, or a failure naming it: a row test pinned to a route that moved must say so. */
+export async function declaredRoute(key: string): Promise<ScopedRoute> {
+  const found = (await declaredRoutes()).get(key);
+  if (found === undefined) throw new Error(`no manifest declares ${key}`);
+  return found;
+}

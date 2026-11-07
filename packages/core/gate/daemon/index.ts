@@ -94,11 +94,6 @@ export default implementDaemon(manifest, {
     };
     void readProvenance();
     let generation = 0;
-    kernel.config.watch(gateFile, () => {
-      void readProvenance();
-      generation += 1;
-      kernel.events.publish(GatePolicyChanged, { generation });
-    });
 
     // ─── audit ──────────────────────────────────────────────────────────────────────────────────────────────────
     const audit = new AuditLog({
@@ -150,6 +145,13 @@ export default implementDaemon(manifest, {
       },
       configKind,
       clientName: CLIENT_NAME,
+    });
+    // Every policy generation change re-asks the open streams (G149) and is announced.
+    kernel.config.watch(gateFile, () => {
+      void readProvenance();
+      generation += 1;
+      kernel.events.publish(GatePolicyChanged, { generation });
+      admission.policyChanged();
     });
     const writer = new GateConfigWriter(() => configFiles, target);
 

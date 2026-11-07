@@ -15,7 +15,7 @@ import type { AuditDetail } from '../../../contract/index.ts';
  * kernel tells Gate after the handler, so two things today's decorator did BEFORE the handler cannot be done: a
  * device's NAME is not resolved (the record names its id), and today's one rule that chose `detail.action` from the
  * request body (a catalog item version's retirement) keeps its own `detail.action`, today's answer for an unreadable
- * body: the handler has already consumed it. The rule for a route this release no longer serves is not carried.
+ * body: the handler has already consumed it. A rule for a route this release no longer serves is not carried; `audited-routes.test.ts` holds every rule to a declared descriptor, and names the few whose route another piece has yet to declare.
  */
 export interface AuditedRouteRule {
   readonly method: string;
@@ -146,23 +146,23 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     refusedEvent: 'step-up.failed',
     detail: { action: 'unlock' },
   },
-  { method: 'POST', path: '/v1/fleet/proposals', event: 'fleet.configured', detail: { action: 'propose' } },
+  { method: 'POST', path: '/v1/runtimes/proposals', event: 'fleet.configured', detail: { action: 'propose' } },
   {
     method: 'POST',
-    path: '/v1/fleet/clone/forget',
+    path: '/v1/runtimes/clone/forget',
     event: 'fleet.configured',
     detail: { action: 'forget-clone-source' },
   },
   {
     method: 'POST',
-    path: '/v1/fleet/proposals/:proposalId/apply',
+    path: '/v1/runtimes/proposals/:proposalId/apply',
     event: 'fleet.configured',
     subject: 'proposalId',
     detail: { action: 'apply' },
   },
   {
     method: 'POST',
-    path: '/v1/fleet/machine/tools/install',
+    path: '/v1/runtimes/machine/tools/install',
     event: 'fleet.configured',
     detail: { action: 'install-tool' },
   },
@@ -243,42 +243,42 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // Console, counted on the session the same way and never naming which one.
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/processes/:processId/stop',
+    path: '/v1/ferrets/:ferretId/processes/:processId/stop',
     event: 'terminal.input',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { mode: 'process-stop' },
   },
   // Answering a permission prompt is keys into the same pane: counted the same way, never with the choice.
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/permission',
+    path: '/v1/ferrets/:ferretId/permission',
     event: 'terminal.input',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { mode: 'permission' },
   },
   // So is answering a harness dialog.
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/dialog',
+    path: '/v1/ferrets/:ferretId/dialog',
     event: 'terminal.input',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { mode: 'dialog' },
   },
   // Enter on, or an erase of, the person's own draft in the agent's composer — never with the text.
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/composer',
+    path: '/v1/ferrets/:ferretId/composer',
     event: 'terminal.input',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { mode: 'composer' },
   },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
   // A login Test spends that login's key once on the operator's account; the login is the subject.
   {
     method: 'POST',
-    path: '/v1/fleet/credentials/:credentialId/test',
+    path: '/v1/logins/:loginId/test',
     event: 'secrets.used',
-    subject: 'credentialId',
+    subject: 'loginId',
     detail: { action: 'login-test' },
   },
   {
@@ -294,35 +294,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     event: 'secrets.changed',
     subject: 'name',
     detail: { action: 'delete' },
-  },
-  // Saved logins (docs/input-requests.md) are the secret store too: every change is kept, by handle only.
-  {
-    method: 'PUT',
-    path: '/v1/secrets/logins/:id',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-put' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/secrets/logins/:id/rename',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-rename' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-recipe-decide' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/secrets/logins/:id',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-delete' },
   },
   // Accounts and sign-ins (docs/secrets.md) are the same store: every change is kept, by handle or sign-in id only.
   // The default account for a place: the subject is the file, never the place or the account (a place can be a folder).
@@ -678,17 +649,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'memberId',
     responseFields: { catalogId: ['catalogId'] },
   },
-  { method: 'POST', path: '/v1/sessions', event: 'session.opened', detail: { action: 'start' } },
+  { method: 'POST', path: '/v1/ferrets', event: 'session.opened', detail: { action: 'start' } },
   // A person cutting a ferret off: named by the session, never by the credential it held.
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/revoke-credential',
+    path: '/v1/ferrets/:ferretId/revoke-credential',
     event: 'session.credential-revoked',
-    subject: 'sessionId',
+    subject: 'ferretId',
   },
-  // A sub-ferret start goes through the same start (docs/pack-mode.md); its own action keeps it apart from
-  // a plain start, so the two never fold into one record.
-  { method: 'POST', path: '/v1/pack/new', event: 'session.opened', detail: { action: 'sub-ferret' } },
   // Clean up is a short-lived ferret a person started (docs/pack-mode.md § Clean up).
   {
     method: 'POST',
@@ -698,62 +666,62 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   },
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/fork',
+    path: '/v1/ferrets/:ferretId/fork',
     event: 'session.opened',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'fork' },
   },
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/send',
+    path: '/v1/ferrets/:ferretId/send',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'send' },
   },
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/sends/:sendId/retry',
+    path: '/v1/ferrets/:ferretId/sends/:sendId/retry',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'send-retry' },
   },
   // Taking a send back can erase it from the agent's composer, and Enter submits it: both change what
   // the agent is told, so both are recorded as prompting it — never with the text.
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/sends/:sendId/cancel',
+    path: '/v1/ferrets/:ferretId/sends/:sendId/cancel',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'send-cancel' },
   },
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/sends/:sendId/enter',
+    path: '/v1/ferrets/:ferretId/sends/:sendId/enter',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'send-enter' },
   },
   // Rewording or taking back a queued message changes what the agent will be told, so both are recorded
   // as prompting it — never with the text — exactly as a send's own cancel is.
   {
     method: 'PATCH',
-    path: '/v1/sessions/:sessionId/queue/:messageId',
+    path: '/v1/ferrets/:ferretId/queue/:messageId',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'queue-edit' },
   },
   {
     method: 'DELETE',
-    path: '/v1/sessions/:sessionId/queue/:messageId',
+    path: '/v1/ferrets/:ferretId/queue/:messageId',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'queue-cancel' },
   },
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/answer',
+    path: '/v1/ferrets/:ferretId/answer',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'answer' },
   },
   { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },

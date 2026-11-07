@@ -420,9 +420,23 @@ describe('the grant layer', () => {
     expect(admit(w, fleetUse, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
   });
 
-  test('G156 G55 every grant refusal names a command that fixes it', () => {
-    for (const refusal of ['undetermined', 'not-granted', 'device-not-granted'] as const)
-      expect(describeGrantRefusal(cap('terminal', 'use') as never, refusal, 'fy')).toMatch(/`fy |gate\.yaml/u);
+  test('G156 G55 every grant refusal names the command that fixes it, exactly', () => {
+    const say = (axis: 'use' | 'configure', refusal: Parameters<typeof describeGrantRefusal>[1]) =>
+      describeGrantRefusal(cap('terminal', axis) as never, refusal, 'fy');
+    expect(say('use', 'not-granted')).toBe(
+      'the operator of this machine has not granted the UI the use of session terminals. Grant it on the host with `fy daemon config set terminal --use`.',
+    );
+    expect(say('configure', 'not-granted')).toBe(
+      'the operator of this machine has not granted the UI permission to change the settings for session terminals. Grant it on the host with `fy daemon config set terminal --configure`.',
+    );
+    expect(say('use', 'device-not-granted')).toContain('`fy device grant <device> terminal --use`');
+    expect(say('configure', 'device-not-granted')).toContain('`fy device grant <device> terminal --configure`');
+    expect(say('use', 'undetermined')).toContain('`fy config read gate.yaml`');
+    // The binary name is the caller's, never typed here.
+    expect(describeGrantRefusal(cap('terminal', 'use') as never, 'not-granted', 'other')).toContain(
+      '`other daemon config set terminal --use`',
+    );
+    expect(say('use', 'granted')).toBeUndefined();
   });
 
   test('P20 the operator minimum is met by any credential but a warden’s, a paired device included', () => {
@@ -436,7 +450,7 @@ describe('the grant layer', () => {
 });
 
 describe('warden remedies', () => {
-  test('G21 a remedy route refuses a warden while no remedy authorizer is wired (fail closed)', () => {
+  test('a remedy route refuses a warden while no remedy authorizer is wired (fail closed)', () => {
     const w = world();
     const leave = descriptor({
       minimum: 'authenticated',

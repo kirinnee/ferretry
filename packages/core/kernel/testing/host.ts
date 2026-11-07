@@ -31,6 +31,7 @@ import type {
   PortToken,
 } from '../contract/define.ts';
 import { judgeLoosening } from '../contract/define.ts';
+import { SOCKET_CLOSES } from '../contract/socket.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
@@ -329,6 +330,12 @@ async function start(world: World): Promise<TestHost> {
     read: async fn => fn(maskScope(options.secrets ?? [])),
   };
   const admission = options.gate ?? standInAdmission(request => callers.get(request) ?? owner());
+  // Open streams, re-asked at once when the admission says its policy moved (as the real host does).
+  const openStreams = new Set<() => void>();
+  const stopWatching = admission.watch?.(() => {
+    for (const recheck of [...openStreams]) recheck();
+  });
+  if (stopWatching !== undefined) stopHandlers.push(stopWatching);
 
   const built: Built[] = [];
   const bootContexts = new Map<string, DaemonContext<Manifest>>();
@@ -1148,6 +1155,13 @@ async function start(world: World): Promise<TestHost> {
       };
       const handler = await attach(downstream);
       result.handler = handler;
+      const recheck = (): void => {
+        if (result.closed !== undefined || admission.readmit(request, found.route)) return;
+        openStreams.delete(recheck);
+        downstream.close(SOCKET_CLOSES.unauthorized.code, SOCKET_CLOSES.unauthorized.reason);
+        handler.close(SOCKET_CLOSES.unauthorized);
+      };
+      openStreams.add(recheck);
       await handler.open();
       return result;
     },

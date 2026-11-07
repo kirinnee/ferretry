@@ -3,6 +3,7 @@ import type { Actor, CellGrid, HoldDecision, Op, RevealGrant, TargetRef } from '
 import { defineBoundPort } from './define.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 import type { FerretId } from './ids.ts';
+import type { Cancel } from './ports.ts';
 import type { CallStanding, MemberRouteDescriptor, MemberStanding, ScopedRoute } from './route.ts';
 
 /**
@@ -45,6 +46,12 @@ export interface Admission<Standing extends object = CallStanding, Member extend
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<Member>;
   /** Re-admits an open stream after a provider's `generation()` moved; false closes it (`4401`). */
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean;
+  /**
+   * Told-when-it-changes: the listener is called whenever the policy this admission decides from moved (a grant or
+   * security edit), so the host re-asks every open stream at once instead of at its next frame (today's
+   * `recheckAll`). The returned cancel drops the subscription. A throwing listener never reaches the caller.
+   */
+  watch?(listener: () => void): Cancel;
   /**
    * Projects `GET /v1/plugins` for this caller (§9.6): every package for the owner on the host and a ferret; for a
    * device, core, Access and each plugin with a route, tool or event its grants admit; core and Warden for the remote

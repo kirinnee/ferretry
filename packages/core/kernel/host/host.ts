@@ -929,10 +929,31 @@ async function bootLocked(
     lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
   });
   own(() => sessionLayer.close());
+  // The bound admission may tell the host its policy moved (`watch`): every open stream is re-asked at once. The
+  // subscription follows the provider: a different or stopped one drops it.
+  let watched: { readonly admission: Admission; readonly cancel: () => void } | undefined;
+  const followAdmission = (): void => {
+    const current = boundValue(AdmissionPort);
+    if (watched?.admission === current) return;
+    watched?.cancel();
+    watched = undefined;
+    if (current?.watch === undefined) return;
+    try {
+      const cancel = current.watch(() => dispatcher.reauthorizeStreams());
+      watched = { admission: current, cancel };
+    } catch {
+      // A provider that cannot be watched is still re-asked on every serving change and frame.
+    }
+  };
+  own(() => {
+    watched?.cancel();
+    watched = undefined;
+  });
   let carriersChanged = (): void => undefined;
   // One live transition owns every serving projection. Repair is observed only when a state read has verified
   // the restored file; a narrower finding never enters record.damage. Failed builds remain failed.
   const reconcileServing = (): void => {
+    followAdmission();
     let changed = false;
     for (const manifest of order) {
       const record = records.get(manifest.id) as PluginRecord;
@@ -1051,6 +1072,8 @@ async function bootLocked(
         sessionLayer.close();
         for (const cancel of unwatchState) cancel();
         stopWatching?.();
+        watched?.cancel();
+        watched = undefined;
         trace.push('stop:jobs');
         await jobs.stop();
         for (const manifest of [...order].reverse()) {

@@ -168,6 +168,7 @@ type DeviceAnswer =
  */
 export class GateAdmission implements Admission {
   readonly #guard: CapabilityGuard;
+  readonly #listeners = new Set<() => void>();
 
   constructor(private readonly deps: GateAdmissionDeps) {
     this.#guard = grantGuard(() => deps.policy()?.grants, deps.clientName);
@@ -179,6 +180,25 @@ export class GateAdmission implements Admission {
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
+  }
+
+  /** The kernel's watch (G149): told on every policy generation change so open streams are re-asked at once. */
+  watch(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  /** The policy in effect moved: tell every watcher. A watcher that throws never stops the others. */
+  policyChanged(): void {
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener();
+      } catch {
+        // The host's re-ask is its own; a failing listener does not hide the change from the next.
+      }
+    }
   }
 
   /**

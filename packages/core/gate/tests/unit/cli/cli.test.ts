@@ -3,7 +3,7 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import { AUDIT_KINDS, AUDIT_MAX_LIMIT, DEFAULT_SECURITY_SETTINGS } from '../../../contract/index.ts';
 import cli, { parseLimit, parseSettingValue, parseSkip } from '../../../cli/index.ts';
 import manifest from '../../../manifest.ts';
-import { describeActor, renderAudit } from '../../../cli/lib/render.ts';
+import { describeActor, renderAudit, renderGrantChange } from '../../../cli/lib/render.ts';
 
 function run(answer: unknown) {
   const calls: { route: string; init?: unknown }[] = [];
@@ -127,6 +127,13 @@ describe('fy daemon config', () => {
     expect(await verbs['daemon config set <capability>']({ args: ['fleet'], options: { use: false } })).toBe(0);
     expect(calls.map(call => call.route)).toEqual(['GET /v1/grants', 'PATCH /v1/grants']);
     expect(calls[1]?.init).toEqual({ body: { fleet: { use: false } } });
+  });
+});
+
+describe('a change says when it takes effect', () => {
+  test('G159 a change made with the command is in effect now, with no restart, and the report says so', () => {
+    expect(renderGrantChange(['fleet.use=off'], 'fy')).toContain('fleet.use=off — in effect now, no restart needed.');
+    expect(renderGrantChange([], 'fy')).toBe('nothing changed; those grants already read that way');
   });
 });
 
