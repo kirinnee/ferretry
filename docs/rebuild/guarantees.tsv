@@ -167,7 +167,7 @@ G157	kept	gate	-	behaviour as written	grants	G157
 G158	kept	connections	-	behaviour as written	grants	G158
 G159	kept	gate	-	behaviour as written	grants	G159
 G160	kept	gate	-	`GET /v1/grants/audit`, `fy daemon config history`	grants	G160
-G161	kept	gate	-	behaviour as written	grants	G161
+G161	kept	ferrets	gate	`GET /v1/events` socket descriptor (`operator` minimum), `journalEventToFyEvent`	grants	G161
 G162	kept	conversation	claude-code,codex	behaviour as written	grants	G162
 G163	kept	kernel	vault	behaviour as written	grants	G163
 G164	kept	conversation	kernel,vault	behaviour as written	grants	G164

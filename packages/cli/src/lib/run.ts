@@ -3,13 +3,14 @@
  * against the manifests' declarations, opens the guarded client, and hands the plugin's own `cli` half the call.
  */
 import { type Cancel, skeletonSentence } from '@ferretry/kernel/contract';
-import type { VerbHandler } from '@ferretry/kernel/manifest';
+import type { PluginSocket, VerbHandler } from '@ferretry/kernel/manifest';
 import { parseArgs } from './argv.ts';
 import {
   type ClientDeps,
   type FollowingClient,
   pluginClient,
   routeFactsBeforeContact,
+  socketFactsBeforeContact,
   toolFactsBeforeContact,
   type Surfaces,
   surfacesOf,
@@ -275,5 +276,32 @@ function lazyClient(deps: () => Promise<ClientDeps>, id: string, surfaces: Surfa
     },
     subscribe: (event, listener) => follow(event, listener, () => undefined),
     follow,
+    socket: (key, params, listeners, query) => {
+      // Declared and person-only checks come first and throw here, before the connection exists (S59).
+      socketFactsBeforeContact(surfaces, paned, key);
+      let socket: PluginSocket | undefined;
+      let closed = false;
+      // The connection opens now, like a call; a refusal to connect ends the stream with its words.
+      void deps().then(
+        opened => {
+          if (closed) return;
+          try {
+            socket = pluginClient(opened, id).socket(key, params, listeners, query);
+          } catch (error) {
+            listeners.onClose(errorText(error));
+          }
+        },
+        (error: unknown) => {
+          if (!closed) listeners.onClose(errorText(error));
+        },
+      );
+      return {
+        send: frame => socket?.send(frame),
+        close: (code, reason) => {
+          closed = true;
+          socket?.close(code, reason);
+        },
+      };
+    },
   };
 }

@@ -119,6 +119,26 @@ describe('the guard', () => {
     ).toThrow('paused');
   });
 
+  test('a socket carries its query onto the opened path, encoded, and params still fill only the placeholders', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+
+    client
+      .forPackage('board')
+      .socket(
+        'GET /v1/board/stream',
+        {},
+        { onFrame: () => {}, onClose: () => {} },
+        { after: '3', sessionId: 'a b&c=d' },
+      );
+    client.forPackage('board').socket('GET /v1/board/stream', {}, { onFrame: () => {}, onClose: () => {} });
+
+    expect(transport.sockets.map(open => open.path)).toEqual([
+      '/v1/board/stream?after=3&sessionId=a+b%26c%3Dd',
+      '/v1/board/stream',
+    ]);
+  });
+
   test('a socket hears when the daemon accepts the stream, and the close code the stream ended with', async () => {
     const { transport, client } = daemon(inventoryOf(compiled));
     await client.start();

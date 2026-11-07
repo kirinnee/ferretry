@@ -59,7 +59,12 @@ export interface DaemonClientOptions {
 
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
 export interface ShellPluginClient extends PluginClient {
-  socket(key: string, params: Readonly<Record<string, string>>, listeners: SocketListeners): TransportSocket;
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket;
 }
 
 interface Subscription {
@@ -181,7 +186,7 @@ export class DaemonClient {
     return {
       call: (route, init) => this.#call(caller, route, init),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
-      socket: (key, params, listeners) => this.#socket(caller, key, params, listeners),
+      socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
       feed: {
         isLive: () => this.#feedLive,
         subscribeLive: listener => {
@@ -318,6 +323,7 @@ export class DaemonClient {
     key: string,
     params: Readonly<Record<string, string>>,
     listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
   ): TransportSocket {
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
@@ -325,7 +331,9 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};
-    const socket = this.#transport.socket(fillPath(path, params), {
+    const queryString = new URLSearchParams(query ?? {}).toString();
+    const opened = fillPath(path, params);
+    const socket = this.#transport.socket(queryString === '' ? opened : `${opened}?${queryString}`, {
       ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
       onFrame: listeners.onFrame,
       onClose: (reason, code) => {

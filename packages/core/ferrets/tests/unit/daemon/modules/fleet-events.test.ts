@@ -11,6 +11,8 @@ import {
   HistoryEventSource,
 } from '../../../../daemon/modules/fleet-events.ts';
 import { FyEventStreamFrameSchema } from '../../../../daemon/lib/protocol/session.ts';
+import { journalEventToFyEvent } from '../../../../daemon/lib/session/peers/reads.ts';
+import ferretsManifest from '../../../../manifest.ts';
 import { createSessionEvent, encodeSessionEvent } from '../../../../daemon/lib/storage/journal.ts';
 import type { SessionId } from '../../../../daemon/lib/session-id.ts';
 
@@ -35,8 +37,7 @@ function world() {
 
 const call = (query: [string, string][]): CallContext =>
   ({ request: { query: queryFrom(query) }, params: new Map() }) as unknown as CallContext;
-const scope = (query: [string, string][], known = ['wren']) =>
-  eventStreamScope(call(query), id => known.includes(id));
+const scope = (query: [string, string][], known = ['wren']) => eventStreamScope(call(query), id => known.includes(id));
 const refusal = (query: [string, string][]): { status: number; code: string } | undefined => {
   try {
     scope(query);
@@ -197,22 +198,44 @@ describe('R537 the query rules are today’s', () => {
   });
 
   test('one ferret: its own cursor, live and transcript flags, and its refusals', () => {
-    expect(scope([['sessionId', 'wren'], ['after', '4'], ['live', '1'], ['transcript', '1']])).toEqual({
+    expect(
+      scope([
+        ['sessionId', 'wren'],
+        ['after', '4'],
+        ['live', '1'],
+        ['transcript', '1'],
+      ]),
+    ).toEqual({
       kind: 'session',
       sessionId: 'wren',
       after: 4,
       live: true,
       transcript: true,
     });
-    expect(refusal([['sessionId', 'wren'], ['tail', '3']])).toEqual({ status: 400, code: 'tail_needs_fleet' });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['tail', '3'],
+      ]),
+    ).toEqual({ status: 400, code: 'tail_needs_fleet' });
     expect(refusal([['sessionId', 'nobody']])).toEqual({ status: 404, code: 'not-found' });
     expect(refusal([['sessionId', '../etc']])).toEqual({ status: 400, code: 'invalid_session_id' });
-    expect(refusal([['sessionId', 'wren'], ['live', '2']])).toEqual({ status: 400, code: 'invalid_query' });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['live', '2'],
+      ]),
+    ).toEqual({ status: 400, code: 'invalid_query' });
   });
 
   test('an unknown parameter, a repeated one and a token in the URL are refused; a leftover ticket is tolerated', () => {
     expect(refusal([['token', 'abc']])).toEqual({ status: 400, code: 'invalid_query' });
-    expect(refusal([['after', '1'], ['after', '2']])).toEqual({ status: 400, code: 'invalid_query' });
+    expect(
+      refusal([
+        ['after', '1'],
+        ['after', '2'],
+      ]),
+    ).toEqual({ status: 400, code: 'invalid_query' });
     expect(refusal([['after', '-1']])).toEqual({ status: 400, code: 'invalid_query' });
     expect(scope([['ticket', 'old']])).toEqual({ kind: 'fleet' });
   });
@@ -228,7 +251,12 @@ describe('G161 R520 the socket: replay, then the idle proof, then live appends',
       { after: (_ms, action) => (timers.push(action), { cancel: () => undefined }) },
       id => id === 'wren',
     );
-    const attach = await accept(call([['sessionId', 'wren'], ['after', '1']]));
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['after', '1'],
+      ]),
+    );
     const feed = downstream();
     const handler = await attach(feed.port);
     await handler.open();
@@ -253,5 +281,46 @@ describe('G161 R520 the socket: replay, then the idle proof, then live appends',
     await handler.open();
     handler.fromClient('hello');
     expect(feed.closed).toEqual([{ code: 1008, reason: 'event stream is server-only' }]);
+  });
+});
+
+describe('G161 live frames widen nothing', () => {
+  test('G161 the socket descriptor’s minimum is operator: Gate admits a live frame to no wider a caller than the snapshot and log reads', () => {
+    const declared = ferretsManifest.actions?.sockets?.find(entry => entry.key === 'GET /v1/events');
+    expect(declared?.minimum).toBe('operator');
+  });
+
+  test('G161 a live frame carries only the envelope fields a replayed (snapshot) event carries, nothing the journal line did not', async () => {
+    const { append, source } = world();
+    await append('wren', 1);
+    const accept = fleetEventsAccept(source, { after: () => ({ cancel: () => undefined }) }, id => id === 'wren');
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['after', '0'],
+      ]),
+    );
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    // A journal line that somehow carried a field beyond the stored envelope: it must not reach the wire.
+    source.publish({
+      sequence: 2,
+      sessionId: 'wren',
+      time: NOW,
+      type: 'session.turn',
+      data: { n: 2 },
+      token: 'must-not-travel',
+    } as never);
+    const events = feed.frames
+      .map(frame => FyEventStreamFrameSchema.parse(frame))
+      .flatMap(frame => (frame.kind === 'event' ? [frame.event] : []));
+    expect(events).toHaveLength(2);
+    const [replayed, live] = events;
+    expect(Object.keys(live ?? {}).sort()).toEqual(Object.keys(replayed ?? {}).sort());
+    expect(Object.keys(live ?? {}).sort()).toEqual(
+      Object.keys(journalEventToFyEvent({ sequence: 0, sessionId: 'x', time: NOW, type: 't', data: null })).sort(),
+    );
+    expect(JSON.stringify(feed.frames).includes('must-not-travel')).toBe(false);
   });
 });
