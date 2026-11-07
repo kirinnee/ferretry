@@ -652,7 +652,7 @@ export default definePlugin({
   data: {
     state: [
       /** The index only: every value is sealed in the Vault under its sealed name. */
-      defineState({ name: 'accounts', path: 'accounts.json', store: 'json', format: 1 }),
+      defineState({ name: 'accounts', path: 'accounts.json', store: 'json', format: 1, mode: 0o600 }),
       defineState({ name: 'sign-in-rules', path: 'sign-in-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-rules', path: 'copy-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-plans', path: 'copy-plans/*.json', store: 'json', format: 1 }),

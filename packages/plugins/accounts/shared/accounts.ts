@@ -19,6 +19,7 @@ import {
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_MATCH_MAX,
   LOGIN_USERNAME_MAX_LENGTH,
+  type LoginDomain,
   LoginDomainSchema,
   type LoginMatch,
   LoginMatchSchema,
@@ -35,6 +36,7 @@ import {
   type SignInChoiceReason,
   TotpParametersSchema,
   TWO_FACTOR_LABEL_MAX_LENGTH,
+  webHostsOf,
 } from './login-entries.ts';
 import {
   LOGIN_OBSERVED_MAX,
@@ -1443,3 +1445,35 @@ export const AccountProposeCallSchema = z
     path: ['recipe'],
   });
 export type AccountProposeCall = z.infer<typeof AccountProposeCallSchema>;
+
+// ── Places from match keys ("Save as" on a card) ───────────────────────────────────────────────
+
+/** This machine's short name as a terminal place keeps it (`kirin-box.local` → `kirin-box`); `localhost` if none. */
+function shortHostOf(hostName: string): LoginDomain {
+  const host = hostName.trim().toLowerCase().split('.')[0] ?? '';
+  return LoginDomainSchema.safeParse(host).success ? host : 'localhost';
+}
+
+const uniqueKeys = <T>(items: readonly T[]): readonly T[] => [...new Set(items)];
+
+/**
+ * The places some match keys make, primary first: one site for the web hosts (if any), then one terminal place per
+ * `tool@host` key. What a card's "Save as" adds an account's place from (today's `savedLoginPlaces`, copied).
+ */
+export function placesOfMatch(match: readonly string[], hostName: string): readonly Place[] {
+  const host = shortHostOf(hostName);
+  const valid = uniqueKeys(match).filter(key => LoginMatchSchema.safeParse(key).success);
+  const webHosts = webHostsOf(valid);
+  const places: Place[] = [];
+  if (webHosts.length > 0) places.push({ kind: 'site', domains: webHosts, match: webHosts });
+  for (const key of valid) {
+    const at = key.indexOf('@');
+    if (at === -1) continue;
+    const tool = key.slice(0, at);
+    const target = key.slice(at + 1);
+    places.push(
+      isRemoteTool(tool) ? { kind: 'terminal', tool, host, dest: target } : { kind: 'terminal', tool, host: target },
+    );
+  }
+  return places;
+}

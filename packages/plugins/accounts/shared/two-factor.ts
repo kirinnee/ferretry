@@ -87,6 +87,9 @@ const presentOrUndefined = (text: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed === '' ? undefined : trimmed;
 };
 
+/** Google Authenticator's export-link scheme (a batch of keys): an external name, refused with its own sentence. */
+export const AUTHENTICATOR_EXPORT_SCHEME = 'otpauth-migration';
+
 /**
  * READS A TOTP KEY the owner pasted: a bare base32 key (spaces, dashes and `=` padding are fine; any case), or an
  * `otpauth://totp/<issuer>:<account>?secret=…&issuer=…&algorithm=…&digits=…&period=…` link.
@@ -108,7 +111,7 @@ export function parseTotpInput(text: string): TotpInputParse {
       ? { ok: true, value: { seed: seed.data, params: TotpParametersSchema.parse({}) } }
       : refuse(TOTP_INPUT_PROBLEMS.notAKey);
   }
-  if (scheme === 'otpauth-migration') return refuse(TOTP_INPUT_PROBLEMS.exportLink);
+  if (scheme === AUTHENTICATOR_EXPORT_SCHEME) return refuse(TOTP_INPUT_PROBLEMS.exportLink);
   if (scheme !== 'otpauth') return refuse(TOTP_INPUT_PROBLEMS.notAKey);
   return parseOtpauth(input);
 }
