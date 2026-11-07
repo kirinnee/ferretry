@@ -410,6 +410,46 @@ describe('composer reference families', () => {
     expect(replacements(await provider.candidates(referenceContext(4, 'F')))).not.toContain('&F2');
   });
 
+  describe('a card whose ask the owner did not make', () => {
+    const MIXED = [
+      entry('F12', { label: 'Ship autocomplete' }),
+      entry('F30', { label: 'Warden sweep', agentAsked: true }),
+      entry('F31', { label: 'Helper cleanup', agentAsked: true, closed: true }),
+    ];
+
+    it('is hidden from the ladder and from the direct & menu by default, as today', async () => {
+      const options = optionsOf({ '&': MIXED });
+      expect(replacements(await createReferencesProvider(options).candidates(referenceContext(4, '')))).toEqual([
+        '&F12',
+      ]);
+      const [, , cards] = createDirectReferenceProviders(options);
+      expect(replacements((await cards?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12']);
+    });
+
+    it('is offered once "Include agent cards" is on, still never when closed', async () => {
+      let included = false;
+      const options = optionsOf({ '&': MIXED }, { getIncludeAgentTasks: () => included });
+      const ladder = createReferencesProvider(options);
+      const before = ladder.snapshotKey;
+      included = true;
+      expect(ladder.snapshotKey).not.toBe(before);
+      expect(replacements(await ladder.candidates(referenceContext(4, '')))).toEqual(['&F12', '&F30']);
+      const [, , cards] = createDirectReferenceProviders(options);
+      expect(replacements((await cards?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12', '&F30']);
+    });
+
+    it('is offered when its id is typed exactly, with the switch off', async () => {
+      const ladder = createReferencesProvider(optionsOf({ '&': MIXED }));
+      expect(replacements(await ladder.candidates(referenceContext(4, 'f30')))).toContain('&F30');
+    });
+
+    it('never hides an ask, an agent or any other family by this flag', async () => {
+      const flagged = [entry('A3', { label: 'Choose', agentAsked: true })];
+      const provider = createReferencesProvider(optionsOf({ '!': flagged }));
+      expect(replacements(await provider.candidates(referenceContext(3, '')))).toEqual(['!A3']);
+    });
+  });
+
   it('finds a card by a word only its aliases carry', async () => {
     const result = await createReferencesProvider(optionsOf({ '&': TASKS })).candidates(
       referenceContext(4, 'handbook'),
@@ -456,7 +496,7 @@ describe('composer reference families', () => {
     const provider = createReferencesProvider(optionsOf({ '!': AGENDA }));
     expect(provider.initialCandidates?.(referenceContext(3, ''))).toBeUndefined();
     await provider.candidates(referenceContext(3, ''));
-    expect(provider.initialCandidates?.(referenceContext(3, ''))).toMatchObject({ contextLabel: 'Agenda' });
+    expect(provider.initialCandidates?.(referenceContext(3, ''))).toMatchObject({ contextLabel: 'Asks' });
   });
 
   it('opens each family from its own sigil, from the very same read as the ladder', async () => {
@@ -466,7 +506,7 @@ describe('composer reference families', () => {
     const byTrigger = (trigger: ComposerTrigger) => providers.find(provider => provider.trigger === trigger);
     await ladder?.candidates(referenceContext(3, ''));
     const direct = await byTrigger('!')?.candidates(context('!', ''));
-    expect(direct?.contextLabel).toBe('! open agenda items');
+    expect(direct?.contextLabel).toBe('! open asks');
     expect(replacements(direct ?? { candidates: [] })).toEqual(['!A3']);
     expect(replacements((await byTrigger('&')?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual([
       '&F12',
@@ -517,10 +557,10 @@ describe('composer reference families', () => {
     );
   });
 
-  it('names the task menus the "Include agent tasks" switch applies to', () => {
-    expect(isTaskMenuLabel('Tasks')).toBe(true);
-    expect(isTaskMenuLabel('& tasks')).toBe(true);
-    expect(isTaskMenuLabel('Agenda')).toBe(false);
+  it('names the task menus the "Include agent cards" switch applies to', () => {
+    expect(isTaskMenuLabel('Cards')).toBe(true);
+    expect(isTaskMenuLabel('& cards')).toBe(true);
+    expect(isTaskMenuLabel('Asks')).toBe(false);
     expect(isTaskMenuLabel(undefined)).toBe(false);
   });
 });
