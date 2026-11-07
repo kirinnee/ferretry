@@ -118,3 +118,64 @@ describe('a stream socket over a sealed session', () => {
     expect(closes).toEqual([['invalid browser input', 1008]]);
   });
 });
+
+describe('a stream the rendezvous refuses for its session ceiling', () => {
+  /** A carrier that refuses the stream before a byte of the session is carried: the rendezvous's `4429`. */
+  const refusing = (reason: string) => {
+    const dials: number[] = [];
+    const dial = (events: CarrierSocketEvents) => {
+      dials.push(dials.length + 1);
+      queueMicrotask(() => events.onClose(4429, reason));
+      return { send() {}, sendText() {}, close() {} };
+    };
+    return { dial, dials };
+  };
+
+  /**
+   * REAL FAILURE (reported, product untouched): `SessionTransport.socket` ends a refused stream with the error's
+   * message only (`session-transport.ts`, the `ready()` rejection branch calls `end(message)`), so the close code the
+   * session carried is dropped before the page's `onClose` sees it. `.failing` keeps it out of the guarantee check's
+   * passing set; the session-level R567 test in `session-client.test.ts` proves the code survives up to that point.
+   */
+  test.failing('R567 (open) the stream socket hands the page the 4429 code with its reason, and does not dial again', async () => {
+    const reason = 'this daemon is carrying as many sessions as it allows';
+    const carrier = refusing(reason);
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: (await newDaemonIdentity()).daemonId,
+      device: device.claim,
+      dial: carrier.dial,
+    });
+    const closes: [string, number | undefined][] = [];
+    transport.socket('/v1/browsers/stream', { onFrame: () => {}, onClose: (why, code) => closes.push([why, code]) });
+    await settle();
+    expect(closes).toHaveLength(1);
+    expect(closes[0]?.[0]).toContain(reason);
+    expect(closes[0]?.[1]).toBe(4429);
+    expect(carrier.dials).toEqual([1]);
+  });
+});
+
+describe('who owns a stream session', () => {
+  /**
+   * REAL FAILURE (reported): `SessionTransport.close()` ends only the request session; a stream session opened by
+   * `socket()` / `events()` is never tracked by the transport, so a live socket presenting the device grant survives
+   * it. (Connections' carrier router tracks every walked socket, but a stream on a plain direct dial has no owner.)
+   */
+  test.failing('R568 (open) closing the transport ends the stream sessions it opened, not only its request session', async () => {
+    const daemon = await streamDaemon();
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    const closes: string[] = [];
+    transport.socket('/v1/browsers/stream', { onFrame: () => {}, onClose: reason => closes.push(reason) });
+    await daemon.accept();
+    expect(closes).toEqual([]);
+    transport.close();
+    await settle();
+    expect(closes).toHaveLength(1);
+  });
+});

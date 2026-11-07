@@ -190,3 +190,58 @@ describe('R244 the app session lease retry', () => {
     }
   });
 });
+
+describe('what a device’s sessions to one daemon do', () => {
+  const transportFor = async (closes: readonly number[]) => {
+    const daemon = await scriptedDaemon(() => ({ status: 200, body: { read: true } }), { closes });
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    return { daemon, transport };
+  };
+
+  /**
+   * REAL FAILURE (reported, product untouched): today's `shared-reads.ts` never reached `packages/app` — no file under
+   * `src/` shares an identical in-flight read, so two identical reads send two records. `.failing` keeps it out of the
+   * guarantee check's passing set; when the sharing lands this starts passing and bun says to drop `.failing`.
+   */
+  test.failing('R519 (open) identical in-flight reads are sent once and the answer is shared, never cached', async () => {
+    const { daemon, transport } = await transportFor([]);
+    const [first, second] = await Promise.all([
+      transport.request({ method: 'GET', path: '/v1/health' }),
+      transport.request({ method: 'GET', path: '/v1/health' }),
+    ]);
+    expect(first).toEqual(second);
+    expect(daemon.seen.filter(item => item === 'GET /v1/health')).toHaveLength(1);
+    // Nothing is cached: a read after the answer is sent afresh.
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    expect(daemon.seen.filter(item => item === 'GET /v1/health')).toHaveLength(2);
+    transport.close();
+  });
+
+  /** REAL FAILURE (reported): the transport holds ONE request session, so a body in parts waits behind every read. */
+  test.failing('R532 (open) a body large enough to need parts goes on a second request session', async () => {
+    const { daemon, transport } = await transportFor([]);
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    expect(daemon.dials()).toBe(1);
+    const upload = transport.request({ method: 'POST', path: '/v1/upload', body: 'x'.repeat(300_000) });
+    upload.catch(() => undefined);
+    await settle();
+    expect(daemon.dials()).toBe(2);
+    transport.close();
+  });
+
+  test('R568 closing the transport ends the request session it owns', async () => {
+    const { daemon, transport } = await transportFor([]);
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    transport.close();
+    await settle();
+    // The next request opens a session of its own: the closed one is gone.
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    expect(daemon.dials()).toBe(2);
+    transport.close();
+  });
+});
