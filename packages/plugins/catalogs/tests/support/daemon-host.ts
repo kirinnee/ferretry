@@ -31,6 +31,7 @@ import {
   type MemberStanding,
   type SessionEnd,
   type SessionMode,
+  type StatePort,
 } from '@ferretry/kernel/contract';
 import { Dispatcher, type MountedMemberRoute, type MountedRoute, session } from '@ferretry/kernel/host';
 import { type DrivenClock, fixedClock, type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -49,6 +50,8 @@ import { fakeAccess } from '@ferretry/plugin-access/contract/testing';
 import type { PasskeyVerifier } from '@ferretry/plugin-access/contract';
 import { fakeConnections } from '@ferretry/plugin-connections/contract/testing';
 import type { PublishedCarriers } from '@ferretry/plugin-connections/contract';
+import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
+import { CatalogItems, type CatalogMcpProvider, type McpSourceServer } from '../../contract/items/index.ts';
 import catalogsDaemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
 import type { ConnectionAdvertisement } from '../../daemon/adapters/host-facts.ts';
@@ -126,6 +129,10 @@ function standingOf(request: ApiRequest, callers: Callers): CallStanding | undef
     const base = deviceStanding(principal.holder, callers.device.grants, callers.device.stepUp);
     return {
       ...base,
+      governance: {
+        governed: true,
+        decide: () => ({ allowed: true, refusal: 'granted' }),
+      } as CallStanding['governance'],
       claimFreshStepUp: ((act: string) => {
         const granted = callers.fresh.delete(act);
         callers.claims.push({ act, granted });
@@ -200,7 +207,53 @@ export interface CatalogsFixtureOptions {
   readonly noMemberMode?: boolean;
   readonly config?: Readonly<Record<string, unknown>>;
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
+  /** MCP servers the MCP item provider lists; absent = MCP is off. */
+  readonly mcp?: McpSourceServer[];
 }
+
+/**
+ * The MCP plugin as Catalogs meets it: one `catalog.items:mcp` provider over servers the test edits. Reading the
+ * inventory is all an item needs to be frozen; installing into a runtime or a project is refused here.
+ */
+export function mcpItems(servers: McpSourceServer[]) {
+  const refuse = async (): Promise<never> => {
+    throw new Error('the test MCP provider installs nothing');
+  };
+  const provider: CatalogMcpProvider = {
+    kind: 'mcp',
+    sources: async () => servers,
+    projectRoots: async () => [],
+    project: { read: refuse, replace: refuse } as never,
+    runtime: {
+      runtimes: async () => ({ runtimes: [] }),
+      profiles: async () => ({ profiles: [] }),
+      storedComponent: refuse,
+      propose: refuse,
+      apply: refuse,
+      installCatalogItem: refuse,
+    },
+  };
+  const manifest = definePlugin({
+    id: 'mcp',
+    title: 'MCP',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: ['item'],
+    hooks: { takes: [{ hook: CatalogItems, key: 'mcp' }] },
+  });
+  return implementDaemon(manifest, { build: () => ({ hooks: { 'catalog.items:mcp': provider } }) as never });
+}
+
+/** An MCP component server, the one kind whose harness a shared item carries. */
+export const mcpServer = (name: string, args: readonly string[] = ['-y', name]): McpSourceServer => ({
+  id: `id-component-${name}`,
+  name,
+  scope: 'component',
+  harness: 'claude',
+  declaration: null,
+  component: { command: 'npx', args, env: {}, harness: 'claude' },
+});
 
 export const LOOPBACK_ADVERTISEMENT: ConnectionAdvertisement = {
   advertisement: { kind: 'local-only', url: LOOPBACK_URL },
@@ -290,6 +343,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
         ...ctx,
         kernel: {
           ...ctx.kernel,
+          state: opaqueAsBytes(ctx.kernel.state),
           identity: { daemonId: wireIdentity.daemonId, daemonName: 'Publisher' },
           signer,
         } as typeof ctx.kernel,
@@ -299,7 +353,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     },
   };
   const host = await testHost({
-    plugins: [composed as never],
+    plugins: [...(options.mcp === undefined ? [] : [mcpItems(options.mcp) as never]), composed as never],
     fakes: { access, gate, vault, sealed: new FakeSealedDocuments() },
     uses: { connections },
     gate: admission,
@@ -356,6 +410,35 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
       return new BrowserEnd(link, wireIdentity.daemonId);
     },
   };
+}
+
+/**
+ * TODO(kernel testing): the real host keeps an `opaque` file as the bytes written and reads them back as bytes
+ * (`host/state/state-port.ts`: writeAtomic, readBytesFile); the test host's MemoryStateFolder stamps the value into a
+ * JSON object (a string is spread into its characters). Catalogs is written against the real host, so the fixture
+ * keeps opaque files as the real host does; the write still goes through the test host, so a simulated crash bites.
+ */
+function opaqueAsBytes(state: StatePort): StatePort {
+  const bytes = new Map<string, Uint8Array>();
+  const key = (file: { readonly path: string }, name?: string) => `${file.path}\u0000${name ?? ''}`;
+  return {
+    ...state,
+    read: async (file, name) => {
+      if (file.store !== 'opaque') return await state.read(file, name);
+      const result = await state.read(file, name);
+      if (!result.ok) return result;
+      const held = bytes.get(key(file, name));
+      return { ok: true, value: held === undefined ? undefined : held.slice() } as typeof result;
+    },
+    write: async (file, value, name) => {
+      if (file.store === 'opaque')
+        bytes.set(
+          key(file, name),
+          typeof value === 'string' ? new TextEncoder().encode(value) : (value as Uint8Array).slice(),
+        );
+      await state.write(file, file.store === 'opaque' ? ({} as never) : value, name);
+    },
+  } as StatePort;
 }
 
 // ─── the owner's side, through the test host ─────────────────────────────────────────────────────────────────────
