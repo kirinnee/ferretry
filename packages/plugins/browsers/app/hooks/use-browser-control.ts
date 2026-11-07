@@ -94,7 +94,8 @@ export function useBrowserControl(
     setView(null);
     setFailure(null);
     setDismissed(new Set());
-    const read = (): void => {
+    // Returned, so the feed-aware poll skips a tick while this read is parked (behind a locked machine's unlock).
+    const read = (): Promise<void> =>
       daemon.client
         .call(BROWSER_CONTROL_ROUTES.read, { params: { sessionId: scope.sessionId } })
         .then(answer => {
@@ -104,7 +105,6 @@ export function useBrowserControl(
         .catch(() => {
           // Unread or refused (no grant) proves nothing, and stays unread: no marker, no control.
         });
-    };
     return startFeedAwarePoll({
       read,
       everyMs: pollMs,

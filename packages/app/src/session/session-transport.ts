@@ -191,13 +191,17 @@ async function acceptedSession(
   mode: RelayClientSessionDependencies['mode'],
 ): Promise<OpenedSession> {
   let dial = options.dial;
+  // A refusal seen on ANY leg wins over a later leg's carrier failure (today's `refused ||= deviceRefusal(reason)`):
+  // the leg that refused is the one the pending key (R252) must be tried on, and it only is when this walk ends in it.
+  let refused: unknown;
   for (;;) {
     const opened = openSession(options, dial, mode);
     try {
       await opened.session.ready();
     } catch (reason) {
+      if (refused === undefined && deviceRefusal(reason)) refused = reason;
       const onward = opened.socket.onward?.();
-      if (onward === undefined) throw reason;
+      if (onward === undefined) throw refused ?? reason;
       dial = onward;
       continue;
     }

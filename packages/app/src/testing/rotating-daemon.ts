@@ -38,6 +38,11 @@ export interface RotatingDaemonOptions {
   ) => Promise<{ readonly status: number; readonly body: unknown } | 'drop'>;
   /** Dials from this count on fail as an unreachable carrier does (a socket that closes before `ready`). */
   readonly failFrom?: () => number | undefined;
+  /**
+   * Whether a leg that REFUSED its credential (`4403`) hands the walk a next leg, and that leg fails as an unreachable
+   * carrier does (closes before `ready`). It is the carrier walk a refusal on the first leg and a dead hosted relay make.
+   */
+  readonly onwardFails?: () => boolean;
 }
 
 export interface RotatingDial {
@@ -47,6 +52,12 @@ export interface RotatingDial {
   /** How many sockets were dialled. */
   readonly dialled: () => number;
 }
+
+/** A carrier leg that never answers: its socket closes before `ready`. */
+const unreachable: CarrierDial = events => {
+  queueMicrotask(() => events.onClose(1006, 'the next carrier did not answer'));
+  return { send() {}, sendText() {}, close() {} };
+};
 
 export function rotatingDial(identity: DaemonIdentity, options: RotatingDaemonOptions): RotatingDial {
   let sockets = 0;
@@ -139,6 +150,7 @@ export function rotatingDial(identity: DaemonIdentity, options: RotatingDaemonOp
       close() {
         closed = true;
       },
+      onward: () => (options.onwardFails?.() === true ? unreachable : undefined),
     };
   };
   return { dial, credentials, dialled: () => sockets };

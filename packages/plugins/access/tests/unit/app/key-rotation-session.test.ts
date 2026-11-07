@@ -42,8 +42,8 @@ interface Rig {
   readonly oldKey: Awaited<ReturnType<typeof keyPair>>;
   readonly requests: { readonly request: RotatingRequest; readonly proven: boolean }[];
   readonly credentials: readonly { readonly t: string; readonly accepted: boolean }[];
-  /** Dials from this count on fail as an unreachable carrier does. */
-  readonly carrier: { failFrom: number | undefined };
+  /** Dials from this count on fail as an unreachable carrier does; a refused leg walks on to a leg that fails. */
+  readonly carrier: { failFrom: number | undefined; onwardFails: boolean };
 }
 
 const rig = async (
@@ -62,12 +62,13 @@ const rig = async (
   await store.save(identity.daemonId, oldKey.privateKey);
   const accepted = { keys: [oldKey.publicKey] };
   const requests: Rig['requests'] = [];
-  const carrier: Rig['carrier'] = { failFrom: undefined };
+  const carrier: Rig['carrier'] = { failFrom: undefined, onwardFails: false };
   const route = rotatingDial(identity, {
     accepts: () => accepted.keys,
     // Due until the daemon swapped; the swapped key is due a period later.
     rotateBy: () => (options.due === false ? undefined : accepted.keys.includes(oldKey.publicKey) ? PAST : FUTURE),
     failFrom: () => carrier.failFrom,
+    onwardFails: () => carrier.onwardFails,
     respond: async (request, session) => {
       const body = request.body === undefined ? undefined : (JSON.parse(request.body) as Record<string, unknown>);
       const rotation = DeviceKeyRotationSchema.safeParse(body?.rotation);
@@ -232,6 +233,42 @@ describe('a paired device past rotateBy, through the shell session', () => {
     test.carrier.failFrom = 2;
     await should(test.transport.request(READ)).be.rejected();
     should(test.store.pending.size).equal(1);
+  });
+
+  it('R252 tries the pending key once and promotes it when a refusal on the first leg is followed by a failing leg', async () => {
+    const test = await rig({ dropAnswer: true });
+    await should(test.transport.request(UNLOCK)).be.rejected();
+    should(test.store.pending.size).equal(1);
+    // Leg one refuses the old key; the carrier walks on to a leg that fails (the hosted relay is down).
+    test.carrier.onwardFails = true;
+    const before = test.credentials.length;
+
+    const read = await test.transport.request(READ);
+
+    should(read.status).equal(200);
+    // Exactly one refused credential (the old key) and one accepted (the pending key): tried once, never a loop.
+    should(test.credentials.slice(before).map(credential => credential.accepted)).eql([false, true]);
+    should(test.store.pending.size).equal(0);
+    should(storedIsNotOld(test)).be.true();
+  });
+
+  it('R252 discards the pending key when a refusal on the first leg is followed by a failing leg, and the pending key is refused too', async () => {
+    const test = await rig({ dropAnswer: true });
+    await should(test.transport.request(UNLOCK)).be.rejected();
+    test.accepted.keys = [(await keyPair()).publicKey];
+    test.carrier.onwardFails = true;
+    const before = test.credentials.length;
+
+    const refusal = await test.transport.request(READ).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    // The walk reports the refusal, not the later leg's carrier failure, and the pending key is tried once.
+    should(refusal).match({ code: 4403 });
+    should(test.credentials.length - before).equal(2);
+    should(test.store.pending.size).equal(0);
+    should(test.store.keys.get(test.daemonId)).equal(test.oldKey.privateKey);
   });
 
   it('R252 refuses once, without retrying, when there is no pending key', async () => {
