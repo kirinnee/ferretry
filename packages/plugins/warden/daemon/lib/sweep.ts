@@ -877,13 +877,8 @@ export class WardenSweepService {
     // A write the kernel held is NOT in effect: answer the settings that are, say what waits, and journal no change.
     if (held.length > 0) return { ...(await this.view()), held: [...held] };
     this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
-    const resolved = await this.resolveLogin(next);
-    return {
-      config: next,
-      accounts: [...resolved.accounts],
-      warnings: [...wardenConfigWarnings(next, resolved)],
-      login: resolved.login,
-    };
+    // Answered from a re-read of the settings in effect, never from `next`, so the answer cannot disagree with them.
+    return await this.view();
   }
 
   /**

@@ -38,6 +38,10 @@ export function realWardenConfig(options: { readonly judge?: 'owner-at-machine' 
       fs.seed(path, text);
       await files.reload();
     },
+    /** A hand edit on disk the kernel has NOT reloaded yet (inside the watcher's poll-and-settle window). */
+    plant: (text: string): void => {
+      fs.seed(path, text);
+    },
   };
 }
 

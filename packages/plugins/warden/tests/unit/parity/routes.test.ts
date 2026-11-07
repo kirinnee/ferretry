@@ -93,6 +93,9 @@ describe('route parity', () => {
     const text = await real.text();
     expect(text).toContain('# the owner keeps notes here');
     expect(text).toContain('enabled: false');
+    // Every setting is written from the settings in effect, but a default nobody stated is not written in.
+    expect(text).not.toContain('revive');
+    expect(text).not.toContain('caps');
   });
 
   test('R-0232 GAP (the hold comes from a writer with no judge, not parity) a loosening no judge lets apply is held: the answer shows the settings in effect and journals no change', async () => {
@@ -180,7 +183,7 @@ describe('route parity', () => {
     expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(true);
   });
 
-  test("R-0232 GAP an owner save never puts a held edit (one a ferret could have made) into effect, even where Gate's judge would apply the owner's call", async () => {
+  test("R-0232 GAP an owner save over an edit the kernel HOLDS (one a ferret could have made) is refused 409 and never puts it into effect, even where Gate's judge would apply the owner's call", async () => {
     // The risk: the kernel patches the DISK text, so the judge is asked about the whole patched file, held edit included.
     const exposed = realWardenConfig({ judge: 'owner-at-machine' });
     await exposed.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
@@ -202,6 +205,69 @@ describe('route parity', () => {
     expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ caps: { jevUsdPerDay: 0.5 } });
     expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
     expect(await real.text()).toBe('caps:\n  jevUsdPerDay: 5\n');
+  });
+
+  test("R-0232 GAP an owner save over a BROKEN warden.yaml overwrites its other keys with the settings in effect, so a loosening planted beside the broken value is never put into effect, even where Gate's judge would apply the owner's call", async () => {
+    const real = realWardenConfig({ judge: 'owner-at-machine' });
+    await real.handEdit('enabled: false\ncaps:\n  investigationUsdPerDay: 2\n');
+    // Something (a ferret, say) switches the warden on next to a value the schema refuses: the file is invalid.
+    await real.handEdit('enabled: true\ncaps:\n  investigationUsdPerDay: -1\n');
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'invalid', inEffect: true });
+    const { host } = await wardenHost({ realConfig: real });
+
+    // The owner fixes the cap from the form.
+    const response = await host.request('PATCH', '/v1/warden/config', {
+      body: { caps: { investigationUsdPerDay: 1 } },
+      as: owner(),
+    });
+
+    expect(response.status).toBe(200);
+    const answer = response.json<{
+      held?: string[];
+      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
+    }>();
+    expect(answer.held).toBeUndefined();
+    expect(answer.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
+    const view = (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{
+      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
+    }>();
+    expect(view.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
+    expect(answer.config).toEqual(view.config);
+    expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'valid' });
+    expect(await real.text()).toContain('enabled: false');
+    const journal = host.logs.filter(entry => entry.message === 'fleet.warden_config_changed');
+    expect(journal.map(entry => entry.fields)).toEqual([{ fields: JSON.stringify(['caps']) }]);
+  });
+
+  test("R-0232 GAP an owner save over a hand edit the kernel has not reloaded yet overwrites it with the settings in effect, so its loosening is never put into effect (refusing it as moved since the last reload waits on the kernel), even where Gate's judge would apply the owner's call", async () => {
+    const real = realWardenConfig({ judge: 'owner-at-machine' });
+    await real.handEdit('enabled: false\n');
+    const { host } = await wardenHost({ realConfig: real });
+    // A hand edit in ANOTHER section lands on disk inside the watcher's poll-and-settle window: not reloaded yet.
+    real.plant('enabled: true\n');
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'valid' });
+
+    const response = await host.request('PATCH', '/v1/warden/config', {
+      body: { caps: { investigationUsdPerDay: 1 } },
+      as: owner(),
+    });
+
+    expect(response.status).toBe(200);
+    const answer = response.json<{
+      held?: string[];
+      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
+    }>();
+    expect(answer.held).toBeUndefined();
+    expect(answer.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
+    const view = (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{
+      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
+    }>();
+    expect(view.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
+    expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ enabled: false });
+    expect(await real.text()).toContain('enabled: false');
+    const journal = host.logs.filter(entry => entry.message === 'fleet.warden_config_changed');
+    expect(journal.map(entry => entry.fields)).toEqual([{ fields: JSON.stringify(['caps']) }]);
   });
 
   test('R-0232 a ferret cannot change the warden settings: 403 and warden.yaml unchanged', async () => {
