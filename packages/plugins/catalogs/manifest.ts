@@ -20,6 +20,25 @@ import {
   SKIP_UNRECORDED,
   USE,
 } from './contract/index.ts';
+// Package-internal wire: the bodies each member route parses and answers, which the member-surface hash covers (§9.6).
+import {
+  SharedCatalogItemSchema,
+  SharedContractSchema,
+  SharedMeSchema,
+  SharedRedeemRequestSchema,
+  SharedRedeemResponseSchema,
+  SignedCatalogItemVersionsSchema,
+  SignedCatalogManifestSchema,
+} from './contract/wire/index.ts';
+import {
+  PasskeyOptionsRequestSchema,
+  PasskeyRegistrationOptionsSchema,
+  PasskeyRegistrationSchema,
+  PasskeyViewSchema,
+  StepUpAssertionSchema,
+  StepUpOptionsSchema,
+  UnlockGrantedSchema,
+} from './contract/wire/member-passkeys.ts';
 
 /**
  * Catalogs (§2.3): share your setup — MCP servers, skills, shells, recipes, layouts — with other daemons and people.
@@ -434,6 +453,7 @@ export default definePlugin({
     ],
     memberRoutes: [
       memberRoute('GET /v1/shared/catalogs/:catalogId/items/:itemId/:version', {
+        response: SharedCatalogItemSchema,
         member: 'unlocked',
         catalog: 'path',
         noStore: true,
@@ -441,6 +461,7 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
       memberRoute('GET /v1/shared/catalogs/:catalogId/items/:itemId/versions', {
+        response: SignedCatalogItemVersionsSchema,
         member: 'unlocked',
         catalog: 'path',
         noStore: true,
@@ -448,6 +469,7 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
       memberRoute('GET /v1/shared/catalogs/:catalogId/manifest', {
+        response: SignedCatalogManifestSchema,
         member: 'unlocked',
         catalog: 'path',
         noStore: true,
@@ -455,12 +477,19 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
       memberRoute('GET /v1/shared/contract', {
+        response: SharedContractSchema,
         member: 'unlocked',
         noStore: true,
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      memberRoute('GET /v1/shared/me', { member: 'unlocked', noStore: true, audit: SKIP_READ, guard: GUARD_NONE }),
+      memberRoute('GET /v1/shared/me', {
+        response: SharedMeSchema,
+        member: 'unlocked',
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
       memberRoute('DELETE /v1/shared/me/keys/self', {
         member: 'unlocked',
         noStore: true,
@@ -468,30 +497,40 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
       memberRoute('POST /v1/shared/passkeys', {
+        request: PasskeyRegistrationSchema.omit({ confirmation: true }),
+        response: PasskeyViewSchema,
         member: 'key',
         noStore: true,
         audit: { record: AUDIT.catalogMemberPasskeyAdded },
         guard: GUARD_NONE,
       }),
       memberRoute('POST /v1/shared/passkeys/options', {
+        request: PasskeyOptionsRequestSchema,
+        response: PasskeyRegistrationOptionsSchema,
         member: 'key',
         noStore: true,
         audit: SKIP_UNRECORDED,
         guard: GUARD_NONE,
       }),
       memberRoute('POST /v1/shared/redeem', {
+        request: SharedRedeemRequestSchema,
+        response: SharedRedeemResponseSchema,
         member: 'unlocked',
         noStore: true,
         audit: { record: AUDIT.catalogMemberJoined },
         guard: GUARD_NONE,
       }),
       memberRoute('POST /v1/shared/unlock', {
+        request: StepUpAssertionSchema.omit({ rotation: true }),
+        response: UnlockGrantedSchema,
         member: 'key',
         noStore: true,
         audit: { record: AUDIT.catalogMemberUnlocked },
         guard: GUARD_NONE,
       }),
       memberRoute('POST /v1/shared/unlock/options', {
+        request: PasskeyOptionsRequestSchema,
+        response: StepUpOptionsSchema,
         member: 'key',
         noStore: true,
         audit: SKIP_UNRECORDED,
