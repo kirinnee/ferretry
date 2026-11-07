@@ -42,7 +42,7 @@
  * again.
  */
 
-import { type RuntimeIds } from '../account/ids.ts';
+import type { RuntimeIds } from '../account/ids.ts';
 
 /**
  * The runtime names the fleet recorded in `ids.json`, read for the one thing a start needs from them.

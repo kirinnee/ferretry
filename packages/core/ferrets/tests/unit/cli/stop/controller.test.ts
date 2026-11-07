@@ -340,7 +340,6 @@ describe('the sweep', () => {
     const gateway = {
       list: async () => [session({ id: 'solo', label: 'batch' })],
       get: async () => session({ id: 'solo' }),
-      // biome-ignore lint/suspicious/useAwait: the port is async; this double rejects synchronously.
       stop: async (): Promise<never> => {
         throw 'plain string failure';
       },

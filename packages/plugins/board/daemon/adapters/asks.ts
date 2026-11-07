@@ -2,16 +2,16 @@ import type { AskAnswer, AskDraft, AskId, AsksApi, AskSummary } from '@ferretry/
 import type { EntryId, SourceKey } from '@ferretry/core-asks/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import { type CardId, parseGateReference } from '../../contract/index.ts';
-import {
-  type AnsweredAsk,
-  type AskThread,
-  type BoardOptIn,
-  type BoardThreads,
-  type CardObligations,
-  type FerretAsksReader,
-  type GateAnswer,
-  type OpenAskFacts,
-  type OpenCardAskEntry,
+import type {
+  AnsweredAsk,
+  AskThread,
+  BoardOptIn,
+  BoardThreads,
+  CardObligations,
+  FerretAsksReader,
+  GateAnswer,
+  OpenAskFacts,
+  OpenCardAskEntry,
 } from '../lib/board/index.ts';
 
 /** The Asks source this plugin registers: a card's gate entry is an obligation `{ source: 'card', ref, entry }`. */

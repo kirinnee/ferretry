@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountKey, type SignInRuleId } from '../../../../contract/routes/index.ts';
+import type { AccountKey, SignInRuleId } from '../../../../contract/routes/index.ts';
 import { TERMINAL_RULES_OFFERED } from '../../../../daemon/lib/sign-in-rules/wiring.ts';
 import should from 'should';
 import { SignInGrantLedger } from '../../../../daemon/lib/sign-in-grants/ledger.ts';

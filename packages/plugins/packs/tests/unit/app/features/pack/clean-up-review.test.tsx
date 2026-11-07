@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { type Mounted, mount } from '../../../support/dom.ts';
 import { RUNNING_JOB, SUGGESTION } from '../../../support/pack.ts';
-import { uiDoubles } from '../../../support/ui-doubles.tsx';
+import { mockUi } from '../../../support/ui-doubles.tsx';
 
-mock.module('../../../../../app/ui.ts', () => uiDoubles);
+mockUi();
 const { CleanUpJobCard, CleanUpReview } = await import('../../../../../app/features/pack/clean-up-review.tsx');
 
 let shown: Mounted | undefined;

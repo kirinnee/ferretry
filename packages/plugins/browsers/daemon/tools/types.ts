@@ -1,5 +1,5 @@
-import type { SurfaceOpener } from '../pages/wire/surface.ts';
-import type { SurfaceKind } from './control-wire.ts';
+import type { SurfaceOpener } from '../../contract/wire/surface.ts';
+import type { SurfaceKind } from '../../contract/wire/control.ts';
 
 /**
  * Who calls a browser tool, derived by the half from the kernel-stamped standing, never from the call: a ferret's

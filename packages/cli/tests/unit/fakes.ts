@@ -219,6 +219,21 @@ export interface FakeWorldOptions {
   readonly readInventory?: () => Promise<PluginInventory>;
 }
 
+/** The default fake host: an in-memory home, a fixed working directory, and readers that THROW, so no unit test reads the real disk or stdin. */
+export function fakeHostInputs() {
+  return {
+    home: '/fake-home',
+    fs: state.createMemoryHostFs(),
+    cwd: () => '/fake-cwd',
+    readFile: async (path: string): Promise<string> => {
+      throw new Error(`the fake host reads no real file (${path}): pass readFile`);
+    },
+    readStdin: async (): Promise<string> => {
+      throw new Error('the fake host reads no real standard input: pass readStdin');
+    },
+  };
+}
+
 export function fakeWorld(options: FakeWorldOptions = {}): {
   world: CliWorld;
   io: CapturedIo;
@@ -235,7 +250,7 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     health: { protocol: PROTOCOL, version: '5.0.0' },
   };
   const world: CliWorld = {
-    host: options.host ?? createPluginHost({ home: '/fake-home', fs: state.createMemoryHostFs() }),
+    host: options.host ?? createPluginHost(fakeHostInputs()),
     io,
     environment: options.environment ?? {},
     identity: { binary: 'fy', version: '5.0.0' },

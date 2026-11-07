@@ -9,7 +9,7 @@ import {
   type TwoFactorId,
 } from './borrowed.ts';
 import { type InputRequestField, type LoginObserverBy, ownerTapped } from './wire.ts';
-import { type InputTarget, type InputTargetFacts } from '../../../contract/index.ts';
+import type { InputTarget, InputTargetFacts } from '../../../contract/index.ts';
 
 /**
  * WHAT THE DAEMON SEES WHILE A SAVED ACCOUNT SIGNS IN (docs/input-requests.md, "Login recipes"), kept as the facts of

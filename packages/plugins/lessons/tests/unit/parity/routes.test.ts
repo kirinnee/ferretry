@@ -215,23 +215,81 @@ describe('the lessons routes', () => {
     expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
   });
 
-  test('R-0222 a raw secret in lessons.yaml refuses the write, and the value is never echoed', async () => {
+  test("R-0222 an owner save while a hand edit raising mining spend is held is refused 409 config_held: the held edit stays held and is never put into effect, even where Gate's judge would apply the owner's call", async () => {
+    const real = realLessonsConfig({ judge: 'owner-at-machine' });
+    await real.handEdit('maxMinersPerRun: 2\n');
+    const heldText = 'maxMinersPerRun: 50\nminSpawnGapMinutes: 0\n';
+    await real.handEdit(heldText);
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
+    const { host } = await lessonsHost({ realConfig: real });
+
+    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
+
+    expect(answer.status).toBe(409);
+    expect(json(answer)).toMatchObject({ code: 'config_held' });
+    expect(await real.text()).toBe(heldText);
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() }))).toMatchObject({
+      passiveDefault: true,
+      maxMinersPerRun: 2,
+      minSpawnGapMinutes: 30,
+    });
+  });
+
+  test("R-0222 an owner save over a BROKEN lessons.yaml writes the whole settings in effect plus the switch, so a spend raise planted beside the broken value is overwritten and never put into effect, even where Gate's judge would apply the owner's call", async () => {
+    // Today's `writePassiveDefault` renders the WHOLE settings in effect plus `passiveDefault`; patching only the switch
+    // over the disk text would repair the file and carry every other key on it into effect with the owner's save.
+    const real = realLessonsConfig({ judge: 'owner-at-machine' });
+    await real.handEdit('# the owner keeps notes here\nmaxMinersPerRun: 2\n');
+    await real.handEdit(
+      '# the owner keeps notes here\npassiveDefault: 7\nmaxMinersPerRun: 50\nminSpawnGapMinutes: 0\n',
+    );
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'invalid', inEffect: true });
+    const { host } = await lessonsHost({ realConfig: real });
+
+    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
+
+    expect(answer.status).toBe(200);
+    expect(json(answer).held).toBeUndefined();
+    expect(json(answer)).toMatchObject({ passiveDefault: false, maxMinersPerRun: 2, minSpawnGapMinutes: 30 });
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() }))).toMatchObject({
+      passiveDefault: false,
+      maxMinersPerRun: 2,
+      minSpawnGapMinutes: 30,
+    });
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'valid' });
+    expect(real.port.file(LESSONS_CONFIG)).toEqual({ maxMinersPerRun: 2, passiveDefault: false });
+    const text = await real.text();
+    expect(text).toContain('# the owner keeps notes here');
+    expect(text).not.toContain('50');
+    expect(text).not.toContain('minSpawnGapMinutes');
+    // A default nobody stated is not written in.
+    expect(text).not.toContain('enabled');
+  });
+
+  test('R-0222 a raw secret typed into the switch is refused, and an owner save over a lessons.yaml holding one overwrites it with the settings in effect; the value is never echoed', async () => {
     const pasted = ['gh', 'p_', 'Q7'.repeat(14)].join('');
     const real = realLessonsConfig();
     await real.handEdit('passiveDefault: true\n');
     await real.handEdit(`passiveDefault: true\nmodel: ${pasted}\n`);
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'invalid', inEffect: true });
     const { host } = await lessonsHost({ realConfig: real });
 
-    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
     const typed = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: pasted } });
 
-    expect(answer.status).toBe(400);
-    expect(answer.body).toContain('raw secret');
-    expect(answer.body).not.toContain(pasted);
     expect(typed.status).toBe(400);
     expect(typed.body).not.toContain(pasted);
     expect(await real.text()).toBe(`passiveDefault: true\nmodel: ${pasted}\n`);
-    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(true);
+
+    // Today's save renders the whole settings in effect, which state no `model`: the pasted value is written out.
+    const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
+
+    expect(answer.status).toBe(200);
+    expect(answer.body).not.toContain(pasted);
+    expect(await real.text()).not.toContain(pasted);
+    expect(real.port.file(LESSONS_CONFIG)).toEqual({ passiveDefault: false });
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'valid' });
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(false);
   });
 
   test('R-0222 a ferret cannot change the machine default: 403 and lessons.yaml unchanged', async () => {

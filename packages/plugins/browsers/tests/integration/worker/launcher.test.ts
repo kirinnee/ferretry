@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import type { BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import {
@@ -13,7 +13,7 @@ import {
 import { BrowserWorkerClient } from '../../../daemon/worker/client.ts';
 import { BrowserControlError } from '../../../daemon/worker/control/index.ts';
 import type { ResolvedBrowserProxy } from '../../../daemon/proxy/index.ts';
-import { type BrowserAutomation } from '../../../daemon/pages/automation.ts';
+import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import { BrowserTransportError } from '../../../daemon/worker/protocol.ts';
 import type { ChildHandle } from '@ferretry/kernel/contract';
 import { launcherPorts, processWorkers } from '../../support/process-workers.ts';

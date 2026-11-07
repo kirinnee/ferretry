@@ -15,7 +15,7 @@ import {
   RuntimesFileSchema,
   runtimeFileLoosens,
 } from './config.ts';
-import { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
+import type { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
 
 export * from './config.ts';
 export * from './wire/index.ts';

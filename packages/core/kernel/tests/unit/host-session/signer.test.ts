@@ -63,7 +63,13 @@ describe('identity signer: the rendezvous claim', () => {
   it('refuses a malformed nonce or an empty host before signing anything', async () => {
     const identity = await newDaemonIdentity();
     let signed = 0;
-    const counted = { ...identity, sign: async (bytes: Uint8Array) => ((signed += 1), await identity.sign(bytes)) };
+    const counted = {
+      ...identity,
+      sign: async (bytes: Uint8Array) => {
+        signed += 1;
+        return await identity.sign(bytes);
+      },
+    };
     const signer = createIdentitySigner(counted);
     await expect(signer.sign({ host, nonce: 'short' })).rejects.toThrow(TypeError);
     await expect(signer.sign({ host, nonce: `${nonceText()}=` })).rejects.toThrow(TypeError);

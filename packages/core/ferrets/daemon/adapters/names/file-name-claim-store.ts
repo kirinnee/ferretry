@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { NameClaimSchema } from '../../../contract/state.ts';
 import type { FileSystemPort, SerialExecutor } from '../../lib/ports.ts';
-import { type NameClaim, type NameClaimAttempt, type NameClaimStore } from '../../lib/names/index.ts';
+import type { NameClaim, NameClaimAttempt, NameClaimStore } from '../../lib/names/index.ts';
 
 /**
  * The callsign reservation ledger, in one file inside the state home.

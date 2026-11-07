@@ -19,7 +19,10 @@ describe('the test host act runner keeps the kernel rules for prepare and observ
       observed: (_t, op, actor) => log.push(`observed:${op}:${actor}`),
     };
     const act = testActRunner({ holds: () => holds, actor: () => 'ferret', minted: new MintedIdRegistry(() => 'x') });
-    const first = act(target, 'navigate', async () => ((document = 'b'), { status: 'done' }));
+    const first = act(target, 'navigate', async () => {
+      document = 'b';
+      return { status: 'done' };
+    });
     const second = act(target, 'read', async () => ({ kind: 'content' }) satisfies Content);
     const third = act(target, 'close', async () => ({ status: 'done' }));
     await Promise.all([first, second, third]);

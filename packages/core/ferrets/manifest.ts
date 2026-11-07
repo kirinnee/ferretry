@@ -2,7 +2,7 @@ import { AsksPort } from '@ferretry/core-asks/contract';
 import { AUDIT_KINDS, audit, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
-import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
   AutoResumeFile,
@@ -422,6 +422,21 @@ export default definePlugin({
       verb('worktree add <branch>', { summary: 'alias of fy worktree fork' }),
     ],
   },
+  // The ferret's own pages and header (today's packages/pwa new-session page, migrate sheet, session top bar, Actions ▾,
+  // Info and file browser). `new-ferret` and `move` OFFER the two account slots (contract/slots.ts) that Runtimes
+  // contributes its runtime picker to; neither half imports the other. The header is panels on `ferret.toolbar`, the
+  // file browser a panel on `ferret.side`; the screen that hosts them (Conversation's chat) mounts the slots.
+  ui: {
+    screens: [screen('new-ferret', { path: 'new' }), screen('move', { path: 'ferrets/:ferret/move' })],
+    panels: [
+      panel('ferret.toolbar', { id: 'name', order: 10 }),
+      panel('ferret.toolbar', { id: 'status', order: 20 }),
+      panel('ferret.toolbar', { id: 'info', order: 30 }),
+      panel('ferret.toolbar', { id: 'actions', order: 40 }),
+      panel('ferret.side', { id: 'files', order: 40 }),
+    ],
+  },
+
   data: {
     state: [
       FerretFiles,
@@ -450,6 +465,7 @@ export default definePlugin({
       FerretWaitFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
+    // biome-ignore lint/suspicious/noExplicitAny: the leaf cast named above
     config: [LimitsConfigFile as ConfigDef<any>],
     publishes: [FerretsChanged],
   },

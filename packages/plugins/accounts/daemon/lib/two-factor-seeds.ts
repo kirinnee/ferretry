@@ -290,7 +290,8 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       state: 'waiting',
       ...(request.request === undefined || !caller.device
         ? {}
-        : { useOn: this.#useOn(request.request, request.submit) }),
+        : // biome-ignore lint/correctness/useHookAtTopLevel: `#useOn` is this service's own method (a card's use-on request), not a React hook
+          { useOn: this.#useOn(request.request, request.submit) }),
     };
     this.#stages.set(id, stage);
     return {
@@ -394,7 +395,8 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     const typed =
       saver === undefined || digest === undefined || this.deps.cards?.useNow === undefined
         ? false
-        : await this.deps.cards
+        : // biome-ignore lint/correctness/useHookAtTopLevel: `useNow` is the cards port's own method (type into the page now), not a React hook
+          await this.deps.cards
             .useNow(use.request, {
               account: saved.account,
               factor: saved.factor.id,

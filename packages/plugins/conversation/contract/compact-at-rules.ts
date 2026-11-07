@@ -1,4 +1,4 @@
-import { type CompactAt } from './wire-compact.ts';
+import type { CompactAt } from './wire-compact.ts';
 import { COMPACT_AT_MIN_TOKENS } from './wire-compact.ts';
 
 /** The rules around a ferret's compact-at value (today's `compact-at.ts`, the part that is not a schema). */

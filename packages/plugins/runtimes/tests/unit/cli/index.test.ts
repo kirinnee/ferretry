@@ -32,7 +32,7 @@ describe('the runtimes cli half', () => {
     const half = cli.build?.(ctx);
     should(Object.keys(half?.verbs ?? {}).sort()).eql([...declaredVerbs].sort());
     for (const verbLine of declaredVerbs) {
-      should(typeof (half?.verbs as Record<string, unknown>)[verbLine]).equal('function');
+      should(typeof ((half?.verbs ?? {}) as Record<string, unknown>)[verbLine]).equal('function');
     }
   });
 

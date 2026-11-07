@@ -37,7 +37,8 @@ describe('the slots Ferrets offers', () => {
 
   test('Ferrets imports nothing of Runtimes: the offer is its contract, the contribution is Runtimes’ manifest', () => {
     expect(entryOf('ferrets')?.consumes).not.toContain('runtimes');
-    expect(entryOf('ferrets')?.manifest.ui?.panels ?? []).toEqual([]);
+    const own = (entryOf('ferrets')?.manifest.ui?.panels ?? []).map(panel => panel.slot as string);
+    expect(own.filter(slot => slot.startsWith('ferrets.'))).toEqual([]);
   });
 });
 

@@ -146,6 +146,7 @@ export function PerformanceSettings({
     };
   }, [connection, stopTimers]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different machine makes a new recorder, so the callback is rebuilt with the connection
   const record = useCallback((): void => {
     generation.current += 1;
     const mine = generation.current;

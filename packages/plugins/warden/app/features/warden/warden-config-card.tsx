@@ -203,6 +203,7 @@ export function WardenConfigSurface({
   const [saved, setSaved] = useState(false);
   const [loadFailure, setLoadFailure] = useState<DaemonConnection['daemonId'] | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `deps` is a test seam handed in once; its functions must not restart the load
   useEffect(() => {
     let current = true;
     setLoaded(null);

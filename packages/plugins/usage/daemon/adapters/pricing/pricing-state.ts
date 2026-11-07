@@ -1,11 +1,11 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { PRICING_STATE, type PricingFile } from '../../../contract/index.ts';
-import {
-  type AnalyticsPricingConfiguration,
-  type AnalyticsPricingConfigurationPort,
-  type AnalyticsPricingConfigurationRead,
-  type AnalyticsPricingConfigurationWrite,
-  type AnalyticsPricingConfigurationWriteResult,
+import type {
+  AnalyticsPricingConfiguration,
+  AnalyticsPricingConfigurationPort,
+  AnalyticsPricingConfigurationRead,
+  AnalyticsPricingConfigurationWrite,
+  AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
 import {
   analyticsPricingFingerprint,

@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 
 import should from 'should';
 import { clearJobOf } from '../../../../daemon/lib/sign-in-grants/clear.ts';
-import { type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 const field = (fieldId: string, backendNodeId: number, type: string) => ({
   fieldId,

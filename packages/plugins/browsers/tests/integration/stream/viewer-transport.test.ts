@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../daemon/stream/wire.ts';
-import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../contract/wire/stream.ts';
+import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import { SocketViewerDownstream, type ViewerSocket } from '../../../daemon/stream/socket-downstream.ts';
 import { KernelFrameClock } from '../../../daemon/stream/frame-clock.ts';

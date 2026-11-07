@@ -74,8 +74,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      screen('projects', { path: '/projects', nav: { label: 'Projects', icon: 'folder', order: 35 } }),
-      screen('project', { path: '/projects/:id' }),
+      screen('projects', { path: 'projects', nav: { label: 'Projects', icon: 'folder', order: 35 } }),
+      screen('project', { path: 'projects/:id' }),
     ],
   },
 

@@ -91,7 +91,7 @@ import {
   planImport,
 } from '../account/import.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
-import { type HarnessKind } from '../manifest.ts';
+import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
 import { skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
@@ -119,7 +119,7 @@ import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { ConfigText } from '../ports.ts';
 import { CREDENTIALS_DIRECTORY, harnessKey, harnessKind } from './foreign.ts';
-import { type ModelCatalogSources } from '../models/catalog.ts';
+import type { ModelCatalogSources } from '../models/catalog.ts';
 import { expandAssetPath } from '../paths.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid, configFileWriteRefusal } from './ports.ts';
 import {

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as target from '../../../../daemon/pages/wire/target.ts';
+import * as target from '../../../../contract/wire/target.ts';
 import {
   assertCoversEverySchema,
   assertRejects,

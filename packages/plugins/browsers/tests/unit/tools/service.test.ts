@@ -7,7 +7,7 @@ import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
 import { pageTarget } from '../../../daemon/pages/acts.ts';
 import type { BrowserActGuard } from '../../../daemon/pages/service.ts';
-import type { BrowserInputEvent } from '../../../daemon/pages/wire/browser.ts';
+import type { BrowserInputEvent } from '../../../contract/wire/browser.ts';
 import { heldViewerHost } from '../../../daemon/stream/held-host.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
 import { SurfaceControl } from '../../../daemon/tools/control.ts';

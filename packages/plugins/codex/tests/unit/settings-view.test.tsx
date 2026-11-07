@@ -1,16 +1,15 @@
 /// <reference lib="dom" />
 import { afterEach, expect, test } from 'bun:test';
-import { GlobalRegistrator } from '@happy-dom/global-registrator';
 import { act, createElement, type ComponentType } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import app from '../../app/index.ts';
 import manifest from '../../manifest.ts';
 import { ABSENT_VIEW } from '../../contract/testing/index.ts';
 import type { HarnessCliView } from '../../contract/index.ts';
+// `createRoot` comes from the support file: it registers the DOM first (see why there).
+import { createRoot } from '../support/dom.ts';
 
-GlobalRegistrator.register();
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const mounted: Root[] = [];
 afterEach(async () => {
   await act(async () => {

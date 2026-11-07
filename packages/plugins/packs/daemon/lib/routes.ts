@@ -1,7 +1,6 @@
 import { isFerretCall, ferretOf } from '@ferretry/core-gate/contract';
-import { ApiError, decodeParameter, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
+import { ApiError, decodeParameter, jsonResponse, parseBody, type RouteHandler } from '@ferretry/kernel/contract';
 import type { Redaction } from '@ferretry/kernel/contract';
-import type { ZodType } from 'zod';
 import {
   FerretPackPatchSchema,
   FerretResultSchema,
@@ -67,19 +66,6 @@ export interface PackSubsystem {
 
 type Call = Parameters<RouteHandler>[0];
 
-async function parseBody<T>(call: Call, schema: ZodType<T>): Promise<T> {
-  let raw: unknown;
-  try {
-    const text = await call.request.text();
-    raw = text === '' ? {} : JSON.parse(text);
-  } catch {
-    throw new ApiError(400, 'the request body is not JSON', 'invalid_body');
-  }
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new ApiError(400, 'the request body is not what this route takes', 'invalid_body');
-  return parsed.data;
-}
-
 /** Refuses a ferret's own credential: only a person (at the machine, or a paired device) does these. */
 function personOnly(call: Call, act: string): void {
   if (isFerretCall(call)) throw new ApiError(403, `only a person can ${act}; ask the owner`, 'forbidden');
@@ -107,7 +93,7 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
       jsonResponse(PackInventorySchema.parse(await subsystem.service.inventory()))) satisfies RouteHandler,
     'POST /v1/pack/routing/clean-up': (async call => {
       personOnly(call, 'start a routing prompt clean-up');
-      const request = await parseBody(call, PackCleanUpRequestSchema);
+      const request = await parseBody(call.request, PackCleanUpRequestSchema);
       const started = await subsystem.routing.cleanUp.start(request);
       return jsonResponse(PackCleanUpStartSchema.parse(started), started.outcome === 'started' ? 201 : 200);
     }) satisfies RouteHandler,
@@ -131,7 +117,7 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
     }) satisfies RouteHandler,
     'POST /v1/pack/routing/accept': (async call => {
       personOnly(call, 'accept a cleaned-up routing prompt');
-      const request = await parseBody(call, PackRoutingAcceptRequestSchema);
+      const request = await parseBody(call.request, PackRoutingAcceptRequestSchema);
       return jsonResponse(PackRoutingWriteResultSchema.parse(await subsystem.routing.file.accept(request)));
     }) satisfies RouteHandler,
     'POST /v1/pack/routing/undo': (async call => {
@@ -139,7 +125,7 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
       return jsonResponse(PackRoutingWriteResultSchema.parse(await subsystem.routing.file.undo()));
     }) satisfies RouteHandler,
     'POST /v1/pack/recommend': (async call => {
-      const request = await parseBody(call, PackRecommendRequestSchema);
+      const request = await parseBody(call.request, PackRecommendRequestSchema);
       return jsonResponse(PackRecommendationSchema.parse(await subsystem.service.recommend(request)));
     }) satisfies RouteHandler,
     'GET /v1/ferrets/:ferretId/result': (async call => {
@@ -159,7 +145,7 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
     }) satisfies RouteHandler,
     'PATCH /v1/ferrets/:ferretId/pack': (async call => {
       const id = ferretParameter(call);
-      const request = await parseBody(call, FerretPackPatchSchema);
+      const request = await parseBody(call.request, FerretPackPatchSchema);
       const done = await subsystem.setSwitch(id, request.enabled);
       if (done === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
       return jsonResponse(done);

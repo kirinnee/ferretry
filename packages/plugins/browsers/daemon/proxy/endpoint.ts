@@ -1,4 +1,4 @@
-import { type BrowserProxySetting, type BrowserProxyStatus } from '../../contract/index.ts';
+import type { BrowserProxySetting, BrowserProxyStatus } from '../../contract/index.ts';
 import { secretReferencePattern, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { BrowserControlError } from '../worker/control/policy.ts';
 
