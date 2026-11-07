@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, board, asks/agenda, projects, usage, warden, MCP, logins and Gate have real conversions; conversation is partial
+terminals, harness-homes, board, asks/agenda, projects, usage, warden, MCP, logins, Gate and settings have real conversions; conversation is partial
 (below). The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
@@ -108,7 +108,16 @@ dropped. Logins moves each `fleet/credentials/<login>/` whole with `moveSealedTr
 a file this user may not read fails the step by path, never hard-linked, so the backup stays its own file; a link is
 made again, never followed) and turns
 `state/model-catalog.json` into `models.json` `published`. A v4 login id with capitals fails the step: v5 login ids
-are lowercase. `config/warden.yaml` and `config/logins/*.yaml` belong to the pending Layouts and settings step.
+are lowercase. `config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
+
+Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plugin config file that owns it: runtimes
+(`credential` → `login`), profiles, model sets, MCP and skills items, logins, endpoints (v4 presets), model catalogs,
+`warden.yaml` (`autoMigrate` → `autoMove`, with v4's read-time upgrades applied), `limits.yaml`, `accounts.yaml`, and
+`machine.yaml` split key by key over eight owners. Comments survive (each file is edited as a `yaml` Document) and every
+file is checked by its v5 schema before anything is written. v4 `claude` is v5 `claude-code` in every `harness:` field.
+A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current name (M7). Settings and hooks components,
+an instructions document outside `fleet/assets/`, `voice.yaml`, `pack.yaml` and `models-guide.yaml` wait for v5 schemas
+(the step reports `pending`). The full per-key table is `docs/migration/v4-formats.md` §5a.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,

@@ -11,7 +11,7 @@
  *   key of `config/logins/<id>.yaml`, runtimes, budgets and spend.
  * - `state/model-catalog.json` → `state/logins/models.json` `published` (the catalog last taken and verified by v4).
  *
- * `config/logins/*.yaml` is the Layouts and settings step's (each plugin's config file). Logins are keyed by NAME in
+ * `config/logins/*.yaml` is the Settings step's (`./settings.ts`). Logins are keyed by NAME in
  * v4 already, so there is no runtime uuid to re-key here (M7 applies to routing and usage rows).
  */
 import { LOGINS_CREDENTIALS, LOGINS_MODELS, LoginIdSchema, ModelsStateSchema } from '@ferretry/plugin-logins/contract';
