@@ -14,7 +14,7 @@ export interface AuditFiles {
 const lineBytes = (record: AuditRecord): number => new TextEncoder().encode(`${JSON.stringify(record)}\n`).byteLength;
 
 /**
- * The security log on disk (today's `FileAuditJournal`), through the kernel's state port: two STORES of two files
+ * The audit on disk (today's `FileAuditJournal`), through the kernel's state port: two STORES of two files
  * each, at most a mebibyte a file, never rewritten in place. The kernel's port appends one line at a time on one
  * serialization chain per file and keeps the files `0600`; links, FIFOs and device files are the kernel's to refuse.
  *

@@ -2,6 +2,7 @@ import { implementCli, type TerminalIo, type VerbInvocation } from '@ferretry/ke
 import {
   AUDIT_DEFAULT_LIMIT,
   AUDIT_MAX_LIMIT,
+  CAPABILITY_NAMES,
   type AuditView,
   isSecuritySwitch,
   SECURITY_SETTING_FIELDS,
@@ -10,7 +11,17 @@ import {
   type SecuritySettingsView,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
-import { renderAudit, renderSecurity, renderSecurityChange } from './lib/render.ts';
+import {
+  type GrantHistoryReport,
+  type GrantsReport,
+  grantDifference,
+  renderAudit,
+  renderGrantChange,
+  renderGrantHistory,
+  renderGrants,
+  renderSecurity,
+  renderSecurityChange,
+} from './lib/render.ts';
 
 /** The binary's name, for sentences that name a command. */
 const CLIENT_NAME = 'fy';
@@ -54,6 +65,14 @@ export function parseSettingValue(field: SecuritySettingField, value: string): S
   return { [field]: Number.parseInt(value, 10) };
 }
 
+/** An axis switch: `--use` is on, `--no-use` is off, absence says nothing. */
+const axisOf = (invocation: VerbInvocation, name: string): boolean | undefined => {
+  const value = invocation.options[name];
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return undefined;
+};
+
 function fail(io: TerminalIo, message: string): number {
   io.err(message);
   return 1;
@@ -70,8 +89,42 @@ export default implementCli(manifest, {
       io.out(on(invocation, 'json') ? JSON.stringify(view) : renderSecurity(view, CLIENT_NAME));
       return 0;
     };
+    const grants = async (invocation: VerbInvocation): Promise<number> => {
+      const view = await client.call<GrantsReport>('GET /v1/grants');
+      io.out(on(invocation, 'json') ? JSON.stringify(view) : renderGrants(view, CLIENT_NAME));
+      return 0;
+    };
+    const history = async (invocation: VerbInvocation): Promise<number> => {
+      const view = await client.call<GrantHistoryReport>('GET /v1/grants/audit');
+      io.out(on(invocation, 'json') ? JSON.stringify(view) : renderGrantHistory(view));
+      return 0;
+    };
     return {
       verbs: {
+        'daemon config': grants,
+        'daemon config ls': grants,
+        'daemon config list': grants,
+        'daemon config history': history,
+        'daemon config log': history,
+        'daemon config set <capability>': async invocation => {
+          const [capability] = invocation.args;
+          const target = CAPABILITY_NAMES.find(candidate => candidate === capability);
+          if (target === undefined)
+            return fail(
+              io,
+              `${JSON.stringify(capability ?? '')} is not a capability this daemon has; expected one of ${CAPABILITY_NAMES.join(', ')}`,
+            );
+          const use = axisOf(invocation, 'use');
+          const configure = axisOf(invocation, 'configure');
+          if (use === undefined && configure === undefined)
+            return fail(io, 'nothing to change: name at least one axis, as `--use`/`--no-use` or `--configure`/`--no-configure`');
+          const before = await client.call<GrantsReport>('GET /v1/grants');
+          const after = await client.call<GrantsReport>('PATCH /v1/grants', {
+            body: { [target]: { ...(use === undefined ? {} : { use }), ...(configure === undefined ? {} : { configure }) } },
+          });
+          io.out(renderGrantChange(grantDifference(before, after), CLIENT_NAME));
+          return 0;
+        },
         'daemon audit': async invocation => {
           const limit = parseLimit(text(invocation, 'limit'));
           if (limit === undefined)

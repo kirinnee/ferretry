@@ -84,7 +84,7 @@ describe('authentication', () => {
     expect(bearerToken('Basic x')).toBeUndefined();
   });
 
-  test('S56 removed: only a fys_-shaped value is ever looked up as a ferret token', () => {
+  test('only a fys_-shaped value is ever looked up as a ferret token', () => {
     const ferrets = new FakeFerretBearers();
     ferrets.issue(bearerDigest('unprefixed-value'), 'F1' as never);
     expect(authenticate({ admin: 'a' }, ferrets, { bearer: 'unprefixed-value', privilegedLocal: true })).toEqual({

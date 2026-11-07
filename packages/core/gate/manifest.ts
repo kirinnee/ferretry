@@ -3,6 +3,7 @@ import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
 import {
   AdminTokenFile,
   AdmissionPort,
+  AUDIT_KINDS,
   AuditLogFile,
   AuditRecordSchema,
   Bearers,
@@ -16,7 +17,7 @@ import {
 } from './contract/index.ts';
 
 /**
- * The security log's other three files (today's `audit.1.jsonl`, `audit-kept.jsonl`, `audit-kept.1.jsonl`): the
+ * The audit's other three files (today's `audit.1.jsonl`, `audit-kept.jsonl`, `audit-kept.1.jsonl`): the
  * general store's rotated file and the kept store a flood cannot reach (F-0075…F-0078). Declared here rather than in
  * the frozen contract because no other package reads them.
  */
@@ -45,6 +46,9 @@ export const AuditKeptRotatedFile = defineState({
   mode: 0o600,
 });
 
+/** `state/gate/grant-audit.jsonl` (F-0251): who changed a daemon-wide grant, when. Parsed by the daemon half. */
+export const GrantAuditFile = defineState({ name: 'grant-audit', path: 'grant-audit.jsonl', store: 'jsonl', format: 1, mode: 0o600 });
+
 /**
  * Gate (§2.2): checks every call before it runs. Core; cannot be turned off. It provides the kernel-bound admission,
  * offers the `credentials`, `step-up` and `bearers` hooks, and serves the audit read and the security settings with
@@ -72,7 +76,7 @@ export default definePlugin({
         caller: 'person',
         capability: cap('pairing', 'configure'),
         noStore: true,
-        audit: { skip: 'reading the security log is not itself a security act' },
+        audit: { skip: 'reading the audit is not itself a security act' },
         guard: { none: 'names and ids of security acts only; never a pane, page or vault value' },
       }),
       // How strict the machine is, readable before the unlock, so the app can say why (R-0133).
@@ -95,10 +99,41 @@ export default definePlugin({
         audit: { skip: 'SecuritySettingsService records security.changed with the change lines itself' },
         guard: { none: 'six security settings and their source; no secret' },
       }),
+      // The grant surface (lead decision: Gate declares /v1/grants*). The read is not capability-gated: a restricted UI
+      // must be able to discover why it is restricted (G124). A subject of the decision may read it, a warden included.
+      route('GET /v1/grants', {
+        minimum: 'authenticated',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a read of the grants in effect' },
+        guard: { none: 'capability names, booleans and refusal reasons only' },
+      }),
+      // Names devices, so not a warden's to read (G160).
+      route('GET /v1/grants/audit', {
+        minimum: 'operator',
+        caller: 'person',
+        noStore: true,
+        audit: { skip: 'reading the grant history is not itself a security act' },
+        guard: { none: 'actors and capability axes only' },
+      }),
+      // Not route-gated: may this caller change X is asked per capability in the patch (G122, G123).
+      route('PATCH /v1/grants', {
+        minimum: 'operator',
+        caller: 'person',
+        noStore: true,
+        audit: { record: AUDIT_KINDS['grants.changed'] },
+        guard: { none: 'capability names, booleans and refusal reasons only' },
+      }),
     ],
     cli: [
+      verb('daemon config', { summary: 'read and change what a caller NOT on this host may do' }),
+      verb('daemon config ls', { summary: 'show every capability, both axes, and where each value came from' }),
+      verb('daemon config list', { summary: 'the same as daemon config ls' }),
+      verb('daemon config history', { summary: 'who changed a grant on this machine, and when' }),
+      verb('daemon config log', { summary: 'who changed a grant on this machine, and when' }),
+      verb('daemon config set <capability>', { summary: 'grant or revoke one capability, by axis' }),
       verb('daemon audit', {
-        summary: 'show the security log: who was paired, removed or refused, and what was done, newest first',
+        summary: 'show the audit: who was paired, removed or refused, and what was done, newest first',
       }),
       verb('daemon security', { summary: 'read and change this machine’s security settings' }),
       verb('daemon security show', {
@@ -108,7 +143,15 @@ export default definePlugin({
     ],
   },
   data: {
-    state: [AdminTokenFile, WardenTokenFile, AuditLogFile, AuditRotatedFile, AuditKeptFile, AuditKeptRotatedFile],
+    state: [
+      AdminTokenFile,
+      WardenTokenFile,
+      AuditLogFile,
+      AuditRotatedFile,
+      AuditKeptFile,
+      AuditKeptRotatedFile,
+      GrantAuditFile,
+    ],
     // Cast: the leaf's `DataSection.config` is `ConfigDef<unknown>[]`, contravariant in `loosens`, so no typed config
     // fits it. Reported to the lead (a leaf change: `ConfigDef<any>`); drop the cast when it lands.
     config: [GateConfigFile as ConfigDef<any>],

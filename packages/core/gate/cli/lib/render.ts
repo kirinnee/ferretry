@@ -121,7 +121,7 @@ export function renderAuditRecord(record: AuditRecordView): string {
   return `${localTime(record.at)}  ${eventWords(record.event)}${subject}  by ${describeActor(record.actor)}  ${record.outcome}${describeDetail(record)}`;
 }
 
-/** The security log, newest first: security changes first (never crowded out), activity after, damage at the end. */
+/** The audit, newest first: security changes first (never crowded out), activity after, damage at the end. */
 export function renderAudit(view: AuditView, keptOffset = 0): string {
   if (view.records.length === 0 && view.keptTotal === 0)
     return withGaps(['no security events have been recorded'], view);
@@ -194,5 +194,84 @@ export function renderSecurityChange(
   const lines = [`${field} = ${formatSettingValue(field, change.view.settings)}`];
   if (change.devicesExpiring > 0)
     lines.push(`${String(change.devicesExpiring)} paired device(s) will be unpaired at the next check`);
+  return lines.join('\n');
+}
+
+/** The grant view and history as the CLI reads them (`GET /v1/grants`, `GET /v1/grants/audit`). */
+export interface GrantsReport {
+  readonly capabilities: readonly {
+    readonly capability: string;
+    readonly configure: boolean;
+    readonly granted: { readonly use: boolean; readonly configure: boolean };
+    readonly configureRefusal: string;
+    readonly origin: string;
+  }[];
+}
+export interface GrantHistoryReport {
+  readonly entries: readonly { readonly at: string; readonly actor: string; readonly changes: readonly string[] }[];
+  readonly unreadable: number;
+  readonly truncated: boolean;
+}
+
+const AXES = ['use', 'configure'] as const;
+
+/** The one sentence every step-up refusal is explained with, wherever it is shown. */
+export const STEP_UP_NOTE = 'needs a passkey confirmation from a paired device';
+
+/** The grant report, with the ORIGIN column, and who the rows apply to said once at the top (today's `renderGrants`). */
+export function renderGrants(view: GrantsReport, clientName: string): string {
+  const nameWidth = Math.max(...view.capabilities.map(entry => entry.capability.length));
+  return [
+    'These apply to callers that are NOT on this host. This command line is ungoverned.',
+    '',
+    ...view.capabilities.map(entry => {
+      const axes = AXES.map(axis => `${axis}=${entry.granted[axis] ? 'on ' : 'off'}`).join('  ');
+      const effective =
+        entry.granted.configure && !entry.configure
+          ? `  (configure ${entry.configureRefusal === 'step-up-required' ? STEP_UP_NOTE : entry.configureRefusal} right now)`
+          : '';
+      return `${entry.capability.padEnd(nameWidth)}  ${axes}  (${entry.origin})${effective}`;
+    }),
+    '',
+    `change one with \`${clientName} daemon config set <capability> --use|--no-use --configure|--no-configure\``,
+  ].join('\n');
+}
+
+/** What a change reports about itself, with the restart answer stated at the moment of the change. */
+export function renderGrantChange(changed: readonly string[], clientName: string): string {
+  if (changed.length === 0) return 'nothing changed; those grants already read that way';
+  return [
+    `${changed.join(', ')} — in effect now, no restart needed.`,
+    `(Editing <FY_HOME>/config/gate.yaml by hand is also read live; \`${clientName} daemon config\` shows what is in effect.)`,
+  ].join('\n');
+}
+
+/** Which axes one change actually moved, so the report never claims more than it did. */
+export function grantDifference(before: GrantsReport, after: GrantsReport): readonly string[] {
+  const changed: string[] = [];
+  for (const entry of after.capabilities) {
+    const previous = before.capabilities.find(candidate => candidate.capability === entry.capability);
+    if (previous === undefined) continue;
+    for (const axis of AXES)
+      if (previous.granted[axis] !== entry.granted[axis])
+        changed.push(`${entry.capability}.${axis}=${entry.granted[axis] ? 'on' : 'off'}`);
+  }
+  return changed;
+}
+
+/** Who changed what, most recent first; damage is reported rather than a shorter history. */
+export function renderGrantHistory(view: GrantHistoryReport): string {
+  const lines: string[] = [];
+  if (view.entries.length === 0) lines.push('no grant has been changed on this machine');
+  else {
+    const actorWidth = Math.max(...view.entries.map(entry => entry.actor.length));
+    for (const entry of view.entries) lines.push(`${entry.at}  ${entry.actor.padEnd(actorWidth)}  ${entry.changes.join(', ')}`);
+  }
+  if (view.truncated) lines.push('', 'older records exist; this is the tail of the journal');
+  if (view.unreadable > 0)
+    lines.push(
+      '',
+      `! ${String(view.unreadable)} line${view.unreadable === 1 ? '' : 's'} in this window could not be read as a record — this history is incomplete`,
+    );
   return lines.join('\n');
 }

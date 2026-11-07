@@ -15,9 +15,20 @@ import {
   SecuritySettingsViewSchema,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
+  type CapabilityPresentation,
+  grantRefusalCode,
 } from '../../contract/index.ts';
 import type { AuditReading } from './audit/service.ts';
 import type { SecurityCaller, SecuritySettingsService } from './security/service.ts';
+import {
+  GRANT_AUDIT_MAX_ENTRIES,
+  GrantAuditViewSchema,
+  GrantError,
+  type GrantFailure,
+  GrantsPatchSchema,
+  type GrantService,
+  GrantsViewSchema,
+} from './grants/service.ts';
 
 /** The largest body Gate's own routes accept: a security patch is six fields. */
 export const GATE_BODY_MAX_BYTES = 16 * 1024;
@@ -115,6 +126,47 @@ export function gateRoutes(deps: GateRouteDeps) {
         `${outcome.fields.join(', ')} can only be loosened at the machine itself. Run \`${deps.security.view(caller).widenCommand}\` there.`,
         SECURITY_WIDEN_REFUSED_CODE,
       );
+    },
+  } as const;
+}
+
+const GRANT_REFUSALS: Readonly<Record<GrantFailure, { readonly status: number; readonly code: string }>> = {
+  invalid: { status: 400, code: 'invalid_request' },
+  forbidden: { status: 403, code: 'grant_forbidden' },
+  'device-not-granted': { status: 403, code: grantRefusalCode('device-not-granted') },
+  'step-up-required': { status: 403, code: STEP_UP_REQUIRED_CODE },
+  // 503: the daemon is working, it has lost the ANSWER, and the remedy is to repair the document.
+  unavailable: { status: 503, code: 'grants_undetermined' },
+};
+
+function refuseGrant(error: unknown): never {
+  if (error instanceof GrantError) {
+    const refusal = GRANT_REFUSALS[error.failure];
+    throw new ApiError(refusal.status, error.message, refusal.code);
+  }
+  throw error;
+}
+
+/** Admission's own assembly; a call without one is a wiring mistake and is refused, never guessed at. */
+function presentationOf(call: CallContext): CapabilityPresentation {
+  if (call.presentation === undefined)
+    throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
+  return call.presentation;
+}
+
+/** The handlers for `/v1/grants*` (today's `mounts/grants.ts`). */
+export function grantRoutes(grants: GrantService) {
+  return {
+    'GET /v1/grants': async (call: CallContext): Promise<ApiResponse> =>
+      jsonResponse(GrantsViewSchema.parse(grants.view(presentationOf(call)))),
+    'GET /v1/grants/audit': async (): Promise<ApiResponse> =>
+      jsonResponse(GrantAuditViewSchema.parse(await grants.history(GRANT_AUDIT_MAX_ENTRIES).catch(refuseGrant))),
+    'PATCH /v1/grants': async (call: CallContext): Promise<ApiResponse> => {
+      const patch = await parseBody(call, GrantsPatchSchema);
+      const view = await grants.patch(patch, presentationOf(call)).catch(refuseGrant);
+      // This route asks for its step-up itself, so it spends it itself (G97).
+      call.spendStepUp?.();
+      return jsonResponse(view);
     },
   } as const;
 }

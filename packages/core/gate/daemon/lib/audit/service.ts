@@ -8,7 +8,7 @@ import {
 } from './policy.ts';
 
 /**
- * The security log's one writer and reader (today's `lib/audit/service.ts`, copied; `Date.parse` / `Date.now` are the
+ * the audit's one writer and reader (today's `lib/audit/service.ts`, copied; `Date.parse` / `Date.now` are the
  * kernel clock). AN AUDIT WRITE NEVER DECIDES AN OUTCOME: a record describes something that has already happened, so
  * a write that fails is said out loud to the operator, never thrown into the call.
  */
@@ -184,12 +184,12 @@ export class AuditLog {
       const fromHere = isOwnersOwnRecord(entry) || store === 'general';
       if (await this.options.journal.append(record, store, fromHere ? 'rotate' : 'never')) return;
       this.options.failures(
-        `the security log's kept store is full, so a ${entry.event} event from somebody who is not this machine was written to the ordinary history instead, where newer activity can rotate it away; this machine's own next kept record makes room`,
+        `the audit's kept store is full, so a ${entry.event} event from somebody who is not this machine was written to the ordinary history instead, where newer activity can rotate it away; this machine's own next kept record makes room`,
       );
       await this.options.journal.append(record, 'general');
     } catch (error) {
       this.options.failures(
-        `the security log could not record a ${entry.event} event, so it has a gap: ${error instanceof Error ? error.message : String(error)}`,
+        `the audit could not record a ${entry.event} event, so it has a gap: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
