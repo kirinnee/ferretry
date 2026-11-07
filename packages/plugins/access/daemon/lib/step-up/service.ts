@@ -227,6 +227,17 @@ export class StepUpService {
     return this.#unlockedUntil(subject.deviceId, settings) <= this.deps.clock.nowMs();
   }
 
+  /**
+   * Until when this device's unlock holds under the settings in force (G77), or nothing when it holds none. Read by
+   * the `credentials:device` provider Gate asks; the same rule `unlockRequired` judges.
+   */
+  unlockedUntil(deviceId: string): number | undefined {
+    const settings = this.deps.settings?.();
+    if (settings === undefined) return undefined;
+    const until = this.#unlockedUntil(deviceId, settings);
+    return until > this.deps.clock.nowMs() ? until : undefined;
+  }
+
   /** When a key opened by this device is due for replacement, or nothing when no rotation is asked for. */
   rotateBy(deviceId: string): number | undefined {
     const days = this.deps.settings?.().deviceKeyRotationDays;
