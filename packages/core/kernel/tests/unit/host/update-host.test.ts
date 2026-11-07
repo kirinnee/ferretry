@@ -7,6 +7,7 @@ import { defineState } from '../../../contract/define.ts';
 import type { UpdateHostPort } from '../../../contract/ports.ts';
 import { undeclaredUpdateHost, updateHostFor } from '../../../host/adapters/update-host.ts';
 import { bootHost, type HostOptions } from '../../../host/host.ts';
+import { state } from '../../../host/index.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
@@ -71,7 +72,46 @@ describe('XX kernel.updateHost', () => {
     expect(launched).toEqual([]);
   });
 
-  test('a plugin without permissions.updateHost gets facts that refuse and launches that fail', async () => {
+  test('the report and log sit under the plugin’s own state root, and a declared path with .. or * is refused with no launch', async () => {
+    const launched: { argv: readonly string[]; logFile: string }[] = [];
+    const make = (declared: { report: string; log: string }) =>
+      updateHostFor({
+        home: '/home/owner/.ferretry',
+        binary: 'fy',
+        release: '5.0.0',
+        process: facts,
+        spawn: (argv, options) => launched.push({ argv, logFile: options.logFile }),
+      })('updates', declared);
+    // the log directory is created for real, so run the good case under a throwaway home
+    const root = await mkdtemp(`${tmpdir()}/update-root-`);
+    roots.push(root);
+    const good = updateHostFor({
+      home: root,
+      binary: 'fy',
+      release: '5.0.0',
+      process: facts,
+      spawn: (argv, options) => launched.push({ argv, logFile: options.logFile }),
+    })('updates', files);
+    expect((await good.launchUpdate('5.1.0')).kind).toBe('started');
+    expect(launched[0]?.argv.at(-1)).toBe(`${state.pluginStateRoot(root, 'updates')}/update/report.json`);
+    expect(launched[0]?.logFile).toBe(`${state.pluginStateRoot(root, 'updates')}/update.log`);
+    launched.length = 0;
+    for (const bad of [
+      { report: '../report.json', log: 'update.log' },
+      { report: 'update/../../report.json', log: 'update.log' },
+      { report: 'update/report.json', log: '*.log' },
+      { report: 'update/*.json', log: 'update.log' },
+    ]) {
+      const port = make(bad);
+      const answer = await port.launchUpdate('5.1.0');
+      expect(answer.kind).toBe('failed');
+      expect(answer).toMatchObject({ reason: expect.stringContaining('not one file inside its own state folder') });
+      await expect(port.executable()).rejects.toThrow('state folder');
+    }
+    expect(launched).toEqual([]);
+  });
+
+    test('a plugin without permissions.updateHost gets facts that refuse and launches that fail', async () => {
     const seen: Record<string, UpdateHostPort> = {};
     const half = (id: string, updateHost?: true) =>
       implementDaemon(

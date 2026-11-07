@@ -27,7 +27,7 @@ export const MAX_EXTRA_PIPES = 4;
  * The NON-secret environment names `git` and `gh` children are given from the daemon's own environment, so a
  * keyring-backed `gh` (the session bus and runtime directory), its own config folder, an ssh agent for clones and an
  * operator's proxy keep working. Every other name, and every token (`GH_TOKEN`, `GITHUB_TOKEN`, ...), stays out: a
- * name is added here only when it can hold no credential of its own.
+ * name is added here only when it can hold no credential of its own (the proxy variables are the one known exception: see docs/secrets.md).
  */
 export const TOOL_ENVIRONMENT_NAMES: readonly string[] = Object.freeze([
   'XDG_CONFIG_HOME',

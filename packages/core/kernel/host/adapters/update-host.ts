@@ -7,6 +7,7 @@ import { closeSync, openSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { ExecutableFacts, UpdateHostPort } from '../../contract/ports.ts';
+import { pluginStateRoot } from '../state/state-port.ts';
 
 /**
  * The client verb the launch runs: `<fy> update --run --to <target> --report <file>` (lead decision, batch 2 #1).
@@ -50,6 +51,9 @@ function spawnDetached(
  * Where the plugin's own declared files are, as paths INSIDE its state folder (the `path` of its declared state defs
  * `report` and `log`). The host never spells either path itself: it takes what the plugin declared.
  */
+/** A declared path that could leave the state folder or name more than one file: a `..` segment or a `*`. */
+const unsafeDeclaredPath = (path: string): boolean => path.includes('*') || path.split(/[\\/]/u).includes('..');
+
 export interface UpdateHostFiles {
   readonly report: string;
   readonly log: string;
@@ -79,7 +83,13 @@ export function updateHostFor(options: UpdateHostOptions): (plugin: string, file
   const resolveLink = options.resolveLink ?? (async (path: string) => await realpath(path));
   const environment = options.environment ?? process.env;
   return (plugin, files) => {
-    const directory = join(options.home, 'state', plugin);
+    if (unsafeDeclaredPath(files.report) || unsafeDeclaredPath(files.log))
+      return undeclaredUpdateHost(
+        plugin,
+        options.release,
+        `${plugin} declared a report or log path that is not one file inside its own state folder.`,
+      );
+    const directory = pluginStateRoot(options.home, plugin);
     const compiled = facts.main.startsWith('/$bunfs/');
     const port: UpdateHostPort = {
       release: options.release,
