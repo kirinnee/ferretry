@@ -1,7 +1,7 @@
 import { expect, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import manifest from '../../../manifest.ts';
-import { FileTunnelHolding } from '../../../adapters/tunnel/file-tunnel-holding.ts';
+import { FileTunnelHolding } from '../../../daemon/adapters/tunnel/file-tunnel-holding.ts';
 
 it('R664 persists a format:1 tunnel holding without its connector token and forgets idempotently', async () => {
   const folder = new MemoryStateFolder();

@@ -351,9 +351,9 @@ describe('source scans', () => {
         id: 'connections',
         files: {
           'worker/src/worker.ts': 'await fetch("https://fixture.invalid");',
-          'adapters/webrtc/node-datachannel-engine.ts': 'const platform = process.platform;',
+          'daemon/adapters/webrtc/node-datachannel-engine.ts': 'const platform = process.platform;',
           'daemon/worker.ts': 'await fetch("https://fixture.invalid");',
-          'adapters/webrtc/other.ts': 'const platform = process.platform;',
+          'daemon/adapters/webrtc/other.ts': 'const platform = process.platform;',
         },
       },
       { id: 'catalogs', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
@@ -371,7 +371,7 @@ describe('source scans', () => {
     expect(messages(found)).toContain('connections/daemon/worker.ts');
     expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
     expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
-    expect(messages(found)).toContain('connections/adapters/webrtc/other.ts');
+    expect(messages(found)).toContain('connections/daemon/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
   test('banned-globals planted: clock, timers, env, fs, network and spawn around the ports', () => {

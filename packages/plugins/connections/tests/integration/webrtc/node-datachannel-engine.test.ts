@@ -19,7 +19,7 @@ import {
   loadNodeDataChannel,
   NodeDataChannelEngine,
   type NodeDataChannelModule,
-} from '../../../adapters/webrtc/index.ts';
+} from '../../../daemon/adapters/webrtc/index.ts';
 import {
   WEBRTC_SELF_TEST_CHANNEL,
   WebRtcEngineUnavailable,

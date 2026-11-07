@@ -67,6 +67,10 @@
       "the cli half is a skeleton: fy login verbs are declared but not ported",
       "the app half is a skeleton: the sign-in, add-login and local-models panels are declared but not ported",
       "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported"
+    ],
+    "connections": [
+      "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
+      "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
     ]
   },
   "pendingHalves": {

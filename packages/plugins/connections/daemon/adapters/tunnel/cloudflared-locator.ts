@@ -12,7 +12,7 @@ import {
   type CloudflaredLocation,
   type CloudflaredLocatorPort,
   cloudflaredOverrideRefusal,
-} from '../../daemon/lib/tunnel/index.ts';
+} from '../../lib/tunnel/index.ts';
 
 export class CloudflaredLocator implements CloudflaredLocatorPort {
   constructor(

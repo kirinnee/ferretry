@@ -1,6 +1,6 @@
 import { it } from 'bun:test';
 import should from 'should';
-import { NodeDataChannelEngine } from '../../../adapters/webrtc/index.ts';
+import { NodeDataChannelEngine } from '../../../daemon/adapters/webrtc/index.ts';
 import { WebRtcEngineUnavailable } from '../../../daemon/lib/webrtc/index.ts';
 import { clock } from '../../support/io.ts';
 import { scriptedModule } from '../../support/scripted-webrtc-engine.ts';
