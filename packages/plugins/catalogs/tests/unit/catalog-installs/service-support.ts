@@ -315,6 +315,8 @@ export interface Rig {
   readonly previews: CatalogPreviews;
   readonly clock: { now: number };
   secrets: Set<string>;
+  /** How many times the service asked the Vault for the names of the machine's secrets. */
+  secretNameReads: number;
   roots: string[];
 }
 
@@ -336,6 +338,7 @@ export function rig(options: { maxKept?: number } = {}): Rig {
     previews,
     clock,
     secrets: new Set(['ACME_TOKEN_OWN', 'OTHER']),
+    secretNameReads: 0,
     roots: [ROOT, '/work/app/'],
     service: undefined as unknown as AsCaller,
     inner: undefined as unknown as CatalogInstallService,
@@ -351,7 +354,10 @@ export function rig(options: { maxKept?: number } = {}): Rig {
       skillFiles: new FakeProjectSkills(folders),
       runtimeSkills: new FakeRuntimeSkills(folders),
       fleet: fleet.api,
-      secretNames: async () => state.secrets,
+      secretNames: async () => {
+        state.secretNameReads += 1;
+        return state.secrets;
+      },
       now: () => clock.now,
       mint: prefix => {
         minted += 1;

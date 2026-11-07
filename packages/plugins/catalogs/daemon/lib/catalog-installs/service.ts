@@ -401,7 +401,9 @@ export class CatalogInstallService {
           'catalog_preview_unknown',
           `That preview is for a ${held.target.scope} install, not a ${scope} one.`,
         );
-      const names = await this.deps.secretNames();
+      // As a preview does, the Vault's secret names are read only for a caller who may list them: anyone else binds nothing,
+      // so an install cannot be used to ask, one name at a time, whether a secret exists.
+      const names = caller.mayListSecrets ? await this.deps.secretNames() : undefined;
       this.#bindingsAreValid(held, request.secretBindings, names);
       // The machine may have moved on since the review: judge again against what is true now.
       const state = await this.deps.store.read();
@@ -851,7 +853,8 @@ export class CatalogInstallService {
     return edited;
   }
 
-  #bindingsAreValid(held: HeldPreview, bindings: CatalogSecretBindings, own: ReadonlySet<string>): void {
+  /** `own` is the secret names the caller may bind, or `undefined` for a caller who may not list secrets (it binds none). */
+  #bindingsAreValid(held: HeldPreview, bindings: CatalogSecretBindings, own: ReadonlySet<string> | undefined): void {
     const given = Object.keys(bindings);
     const missing = held.placeholders.filter(name => !given.includes(name));
     if (missing.length > 0)
@@ -867,6 +870,12 @@ export class CatalogInstallService {
       );
     for (const [placeholder, secret] of Object.entries(bindings)) {
       if (secret === null) continue;
+      // The same sentence whether or not the secret exists: a caller who may not list secrets learns nothing from it.
+      if (own === undefined)
+        return refuse(
+          'catalog_bindings_invalid',
+          `You may not bind ${placeholder} to a secret: this caller may not use secrets. Leave it unbound.`,
+        );
       if (!own.has(secret))
         refuse('catalog_bindings_invalid', `You have no secret called ${secret}, so ${placeholder} cannot use it.`);
     }

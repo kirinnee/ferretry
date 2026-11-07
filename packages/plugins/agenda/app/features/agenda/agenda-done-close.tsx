@@ -3,7 +3,7 @@
  * cards are linked, and the line saying why a close did not go through. State lives in `use-done-close-flow.ts`.
  */
 
-import { formatTaskRef } from '../../wire/index.ts';
+import { formatTaskRef } from '@ferretry/core-asks/contract';
 import { Check, LoaderCircle } from 'lucide-react';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 

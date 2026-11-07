@@ -6,7 +6,7 @@
  * Plain notifications (`notice`) are the Inbox's, never the agenda's.
  */
 
-import { type AgendaItem, agendaTurn } from '../wire/index.ts';
+import { type AgendaItem, agendaTurn } from '@ferretry/core-asks/contract';
 
 /** The items of an agenda: open, and not a plain notification. */
 export const agendaItems = (items: readonly AgendaItem[]): readonly AgendaItem[] =>

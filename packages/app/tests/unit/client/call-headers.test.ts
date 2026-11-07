@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { PluginCallHeaders } from '@ferretry/kernel/manifest';
 import { DaemonClient } from '../../../src/client/daemon-client.ts';
 import type { TransportRequest } from '../../../src/client/transport.ts';
 import { CORE, FakeTransport, inventoryOf, json, surface } from './fixtures.ts';
@@ -41,5 +42,40 @@ describe('the headers a plugin half may send', () => {
       'x-fy-request-id': 'req-2',
     });
     expect(transport.requests.find(request => request.path === '/v1/ferrets/f-3/move')?.headers).toBeUndefined();
+  });
+});
+
+describe('the agenda channel header', () => {
+  test('x-fy-agenda-channel: 2 crosses, beside the request id', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    await client.forPackage('runtimes').call('POST /v1/ferrets/:ferretId/move', {
+      params: { ferretId: 'f-4' },
+      body: {},
+      headers: { 'x-fy-agenda-channel': '2', 'x-fy-request-id': 'req-4' },
+    });
+    expect(transport.requests.find(request => request.path === '/v1/ferrets/f-4/move')?.headers).toEqual({
+      'x-fy-request-id': 'req-4',
+      'x-fy-agenda-channel': '2',
+    });
+  });
+
+  test('a channel value outside the list is dropped, and so is every unknown header', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    // Variables, not literals: the type allows only the two names and the one value, and this proves the runtime too.
+    const wrongValue = { 'x-fy-agenda-channel': '1' } as unknown as PluginCallHeaders;
+    const unknown = {
+      'x-fy-agenda-channel': '2',
+      'x-fy-other': 'yes',
+      authorization: 'Bearer forged',
+    } as PluginCallHeaders;
+    const half = client.forPackage('runtimes');
+    await half.call('POST /v1/ferrets/:ferretId/move', { params: { ferretId: 'f-5' }, body: {}, headers: wrongValue });
+    await half.call('POST /v1/ferrets/:ferretId/move', { params: { ferretId: 'f-6' }, body: {}, headers: unknown });
+    expect(transport.requests.find(request => request.path === '/v1/ferrets/f-5/move')?.headers).toBeUndefined();
+    expect(transport.requests.find(request => request.path === '/v1/ferrets/f-6/move')?.headers).toEqual({
+      'x-fy-agenda-channel': '2',
+    });
   });
 });

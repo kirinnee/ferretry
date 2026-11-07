@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 /**
  * Secrets: values ferrets use by name and never see (§2.2, docs/secrets.md). Today's `protocol/src/lib/secrets.ts`,
- * field for field. A value travels IN on `PutSecretRequestSchema` and never travels back: there is no schema for a
+ * field for field. A value travels IN on `PutSecretBodySchema` and never travels back: there is no schema for a
  * value on its way out, and no getter on the port. `${secret:NAME}` is the ONE reference grammar.
  */
 
@@ -21,8 +21,6 @@ export type SecretName = z.infer<typeof SecretNameSchema>;
 
 /** A value on its way IN. Not trimmed: whitespace can be load-bearing in a key. */
 export const SecretValueSchema = z.string().min(MIN_SECRET_VALUE_LENGTH).max(MAX_SECRET_VALUE_LENGTH);
-
-export const PutSecretRequestSchema = z.strictObject({ value: SecretValueSchema });
 
 /** What a listing says about one secret: its name and times, never a value or a digest of one. */
 export const SecretSummarySchema = z.strictObject({
@@ -128,6 +126,27 @@ export interface CredentialPlacement {
   readonly header: string;
   readonly scheme?: string;
 }
+
+/**
+ * The request as DATA (S162). A boundary that checks a request and then sends it parses it ONCE with this schema and
+ * checks and sends only the parsed copy: every field is a plain string, number or record of strings, so neither a getter
+ * nor an object whose `toString` changes between the check and the use can show one host to the check and another to the
+ * send. Bounds are today's callers' (positive whole numbers, string headers).
+ */
+export const OutboundHttpRequestSchema = z.strictObject({
+  method: z.enum(['GET', 'POST']),
+  url: z.string(),
+  headers: z.record(z.string(), z.string()),
+  body: z.string().optional(),
+  timeoutMs: z.number().int().positive(),
+  maxResponseBytes: z.number().int().positive(),
+});
+
+/** {@link CredentialPlacement} as data, parsed once like {@link OutboundHttpRequestSchema}. */
+export const CredentialPlacementSchema = z.strictObject({
+  header: z.string().min(1),
+  scheme: z.string().optional(),
+});
 
 /**
  * What came back (today's `AuthorizedOutcome`). No branch carries the request it built; a reply that echoes the value

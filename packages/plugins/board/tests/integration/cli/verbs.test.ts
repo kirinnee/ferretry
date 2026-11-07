@@ -242,10 +242,10 @@ describe('the other card verbs', () => {
 });
 
 describe('fy card merge-gate', () => {
-  const gate = (overrides: object) => ({
-    'GET /v1/board/merge-gate': { pr: 'u', unit: [], waits: [], unreadable: [], ...overrides },
-  });
   const PR = 'https://github.com/kirinnee/ferretry/pull/42';
+  const gate = (overrides: object) => ({
+    'GET /v1/board/merge-gate': { pr: PR, unit: [], waits: [], unreadable: [], ...overrides },
+  });
 
   it('should exit 0 and print nothing when the PR waits on nothing', async () => {
     const result = await run('card merge-gate', { args: [PR], answers: gate({}) });

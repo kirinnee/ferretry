@@ -239,8 +239,13 @@ describe('links', () => {
     ).toMatchObject({ status: 404 });
     const listed = JSON.parse((await routes['GET /v1/links/conversations'](call({}))).body) as { matched: number };
     expect(listed.matched).toBe(1);
-    const history = JSON.parse((await routes['GET /v1/links/history'](call({}))).body) as { entries: { id: string }[] };
+    const history = JSON.parse((await routes['GET /v1/links/history'](call({}))).body) as {
+      entries: { id: string; turns: number }[];
+      skipped: number;
+    };
     expect(history.entries.map(entry => entry.id)).toEqual([ID]);
+    expect(history.entries[0]?.turns).toBeGreaterThan(0);
+    expect(history.skipped).toBe(0);
     const entry = JSON.parse((await routes['GET /v1/links/history/:entryId'](call({}, { entryId: ID }))).body) as {
       messages: unknown[];
     };

@@ -54,6 +54,8 @@ export interface KernelPorts {
   readonly redaction: Redaction;
   readonly snapshot: SnapshotPort;
   readonly lifecycle: LifecyclePort;
+  /** This plugin's OWN effective contract hash, and no other package's (§9.6). */
+  readonly contract: ContractPort;
 }
 
 // ids ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -212,16 +214,29 @@ export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unkn
 export interface ConfigWriteIssue {
   readonly path: string;
   readonly line?: number;
+  readonly column?: number;
   readonly message: string;
+  /** The plain fix, when there is one. */
+  readonly fix?: string;
 }
 
 /**
  * What a config write did (today's config-files contract), never thrown: `written` (in effect), `held` (written, but
- * a loosening waits for the owner — the tighter version stays in effect), `conflict` (the file moved since `ifMatch`),
+ * a loosening waits for the owner — the tighter version stays in effect), `conflict` (the file moved since `ifMatch`
+ * or since the last reload: an edit nobody has seen is never applied, so the caller reads again and redoes it),
  * `refused` (bad YAML, a raw secret, the schema, or not a def the caller may write).
  */
 export type ConfigWriteOutcome =
-  | { readonly kind: 'written'; readonly etag: string; readonly loosened: readonly string[] }
+  | {
+      readonly kind: 'written';
+      readonly etag: string;
+      readonly loosened: readonly string[];
+      /**
+       * Only on an {@link ConfigPort.writeAsOwner} that left ANOTHER edit of the same file held: the owner's change is
+       * in effect and the held edit (made to both versions, still held) waits for the owner.
+       */
+      readonly stillHeld?: { readonly id: string; readonly sentences: readonly string[] };
+    }
   | { readonly kind: 'held'; readonly etag: string; readonly id: string; readonly sentences: readonly string[] }
   | { readonly kind: 'conflict' }
   | {
@@ -250,6 +265,25 @@ export interface ConfigPort {
     edit: ConfigEdit,
     options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
+  /**
+   * The OWNER's own patch of one of its own files (today's rule 3, docs/config-files.md: "a save never discards a
+   * held edit"). A patch only — top-level keys, `undefined` removes one — because the owner's act is the keys they
+   * changed, never a whole text rendered from what is in effect.
+   *
+   * With no edit held it is {@link write} of that patch. With an edit of the same file held for the owner, the patch
+   * is made to BOTH versions: the version in effect, patched, is recorded as accepted — at once when the patch itself
+   * tightens or Gate's judge lets it loosen — and the held version (the file on disk), patched, stays in the file and
+   * stays held, judged against the new record. The judge is asked about the owner's patch ONLY (the sentences of
+   * what it changes in the version in effect), never about the held edit that rode along: a save can neither discard
+   * a held edit nor put one into effect that nobody confirmed. When the judge holds the patch itself, the version in
+   * effect is untouched and the patch waits with the held version.
+   */
+  writeAsOwner(
+    def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    name: string | undefined,
+    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    options?: { readonly ifMatch?: string },
+  ): Promise<ConfigWriteOutcome>;
   /** Removes one of its own files; removing what loosens (a budget, a rule) is judged and held like a write. */
   remove(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
@@ -265,6 +299,16 @@ export interface ConfigTarget {
   readonly name?: string;
 }
 
+/** One located problem with a config file, as an editor shows it: where, what, and the plain fix. Never a value. */
+export interface ConfigFileIssue {
+  readonly path: string;
+  readonly line?: number;
+  readonly column?: number;
+  readonly severity: 'error' | 'warning';
+  readonly message: string;
+  readonly fix: string;
+}
+
 /** A config file as it is on disk, for an editor: its text, etag and state. */
 export interface ConfigFileRead {
   readonly path: string;
@@ -272,6 +316,8 @@ export interface ConfigFileRead {
   readonly text: string | undefined;
   readonly etag: string;
   readonly status: ConfigFileStatus;
+  /** What is wrong with the file, located (an invalid or unreadable file). Absent: none to show. */
+  readonly issues?: readonly ConfigFileIssue[];
 }
 
 /** An edit held for the owner (the tighter version stays in effect until it is confirmed or discarded). */
@@ -297,16 +343,25 @@ export interface ConfigFilesWriter {
   write(
     target: ConfigTarget,
     edit: ConfigEdit,
-    options?: { readonly confirmedLoosening?: boolean; readonly ifMatch?: string },
+    options?: {
+      readonly confirmedLoosening?: boolean;
+      readonly ifMatch?: string;
+      /** Asked only when the edit loosens and `confirmedLoosening` is not set: true puts it into effect (Gate's claim). */
+      readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
+    },
   ): Promise<ConfigWriteOutcome>;
   remove(
     target: ConfigTarget,
     options?: { readonly confirmedLoosening?: boolean; readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
   held(): readonly HeldConfig[];
-  /** Confirms ONE held edit by id; `false` when there is no such edit any more. */
+  /**
+   * Confirms ONE held edit by id; `false` when there is no such edit any more. The id carries the FULL etag of the
+   * edit that was reviewed and is matched against the disk inside the write queue, after a fresh reload: a file that
+   * moved since is never confirmed.
+   */
   confirm(id: string): Promise<boolean>;
-  /** Drops ONE held edit: the file goes back to the version in effect. */
+  /** Drops ONE held edit: the file goes back to the version in effect. Matched like {@link ConfigFilesWriter.confirm}. */
   discard(id: string): Promise<boolean>;
 }
 
@@ -788,4 +843,12 @@ export interface LifecyclePort {
   onStop(fn: () => void | Promise<void>): void;
   stopping(): boolean;
   readonly signal: AbortSignal;
+}
+
+/**
+ * The effective contract hash of the plugin that holds this port: the one value `GET /v1/plugins` shows for it. It takes
+ * no id, so a plugin can read its own hash and never another package's (no inventory leak).
+ */
+export interface ContractPort {
+  hash(): string;
 }

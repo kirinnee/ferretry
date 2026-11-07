@@ -1,7 +1,9 @@
-// GAP(ferrets): the file index and session search query are Ferrets' wire (`GET /v1/ferrets/:ferretId/fs/index`), held
-// only in its daemon (`core/ferrets/daemon/lib/protocol/session-search.ts`) until its contract exports them (lead
-// decision Q0 moves the search query there). This is that file, copied unchanged, so the in-ferret search reads the
-// same rules the daemon writes by; it goes when the contract carries them.
+// GAP(ferrets): the file index is Ferrets' wire (`GET /v1/ferrets/:ferretId/fs/index`). Its contract exports the search
+// query (`FerretSearchQuerySchema`, imported below) but not the index schemas, the limits or the matching helpers that
+// sit beside it in `core/ferrets/contract/view/session-search.ts`. This file is that part, copied so the in-ferret
+// search reads the same rules the daemon writes by; it goes when Ferrets' contract exports them (an additive export
+// the lead decides; MAX_SESSION_SEARCH_QUERY_LENGTH goes with it).
+import { FerretSearchQuerySchema } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import { NonNegativeIntegerSchema } from '@ferretry/std';
 
@@ -63,14 +65,6 @@ function hasControlCharacter(raw: string): boolean {
   return false;
 }
 
-export const SessionSearchQuerySchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(MAX_SESSION_SEARCH_QUERY_LENGTH)
-  .refine(query => !hasControlCharacter(query), 'search text may not contain control characters');
-export type SessionSearchQuery = z.infer<typeof SessionSearchQuerySchema>;
-
 /**
  * The comparable form of a query: surrounding whitespace removed, then deterministically case folded.
  *
@@ -124,7 +118,7 @@ export function sessionSearchFileHaystack(file: SessionFileIndexEntry): string {
  * the whole session is the one result a reader can never act on.
  */
 export function matchesSessionSearchQuery(haystack: string, query: string): boolean {
-  const parsed = SessionSearchQuerySchema.safeParse(query);
+  const parsed = FerretSearchQuerySchema.safeParse(query);
   return parsed.success && haystack.toLowerCase().includes(normalizeSessionSearchQuery(parsed.data));
 }
 

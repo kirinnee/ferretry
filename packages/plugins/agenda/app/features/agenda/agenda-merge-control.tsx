@@ -7,7 +7,7 @@
  * Each title shows once, in the picker; the confirm names the other agenda by its reference alone. There is no split button: a split is made by the ferret, and the item only shows where it came from.
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { type ReactNode, useId, useState } from 'react';
 import {
   candidateLine,

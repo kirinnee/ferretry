@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { FerretHistoryFiles } from '../../../../contract/index.ts';
+import { FerretHistoryFiles, FerretConfigFile, FerretStateFile } from '../../../../contract/index.ts';
 import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../../../../daemon/lib/protocol/session.ts';
@@ -43,7 +43,6 @@ import {
 } from '../../../../daemon/lib/session/lifecycle/types.ts';
 import type { SessionLifecycleRecord } from '../../../../daemon/lib/session/lifecycle/types.ts';
 import { memoryStorage } from '../../../support/daemon/storage.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../../daemon/lib/state.ts';
 import { type SessionId, parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import type { TransferConversationValidator } from '../../../../daemon/lib/transfer/types.ts';
 import {
@@ -343,7 +342,7 @@ async function view(
  */
 function damage(
   subject: Harness,
-  file: typeof SessionConfigFiles | typeof SessionStateFiles,
+  file: typeof FerretConfigFile | typeof FerretStateFile,
   change: (document: Record<string, unknown>) => Record<string, unknown>,
 ): void {
   const held = JSON.parse(subject.folder.raw(file, TARGET_ID) ?? '{}') as Record<string, unknown>;
@@ -420,7 +419,7 @@ describe('SessionForkTargetBinder', () => {
     should(held.config.cwd).equal(subject.plan.durable.cwd);
     should(held.config.mode).equal('auto');
     should(held.config.parent).equal(undefined);
-    should(held.config.sessionCapabilityHash).equal(CAPABILITY_HASH);
+    should(held.config.capabilityHash).equal(CAPABILITY_HASH);
     should(started.config.incarnation).equal(`${TARGET_ID}-1`);
     should(started.config.runtimeGeneration).equal(1);
     should(started.config.teammate).equal(undefined);
@@ -957,7 +956,7 @@ describe('SessionForkTargetBinder', () => {
     // Arrange
     const subject = await harness('corrupt-config');
     await subject.bind().lifecycle.create(subject.plan);
-    damage(subject, SessionConfigFiles, ({ retry: _retry, ...document }) => document);
+    damage(subject, FerretConfigFile, ({ retry: _retry, ...document }) => document);
 
     // Act
     const refused = await refusal(subject.bind().lifecycle.create(subject.plan));
@@ -1150,7 +1149,7 @@ describe('SessionForkTargetBinder', () => {
     // Arrange: a fork that finished, whose state document has since become unparseable.
     const subject = await harness('unreadable-view');
     await drive(subject);
-    damage(subject, SessionStateFiles, document => ({ ...document, turn: 'many' }));
+    damage(subject, FerretStateFile, document => ({ ...document, turn: 'many' }));
 
     // Act
     const refused = await refusal(subject.bind().lifecycle.view());

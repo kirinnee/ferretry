@@ -262,6 +262,36 @@ describe('push routes', () => {
     should(subject.registrations).be.empty();
   });
 
+  it('G166 should refuse an endpoint that is not a browser push service before anything is stored or sent', async () => {
+    const subject = new FakePush();
+    const surface = mount(subject);
+
+    for (const endpoint of [
+      'https://internal.example.test/hook',
+      'http://fcm.googleapis.com/send/one',
+      'https://fcm.googleapis.com:8443/send/one',
+      'https://127.0.0.1/send/one',
+      'https://user:secret@fcm.googleapis.com/send/one',
+    ]) {
+      const response = await surface.dispatch('POST /v1/push/subscriptions', {
+        device: browser,
+        body: JSON.stringify({ ...body, subscription: { ...body.subscription, endpoint } }),
+      });
+      should(response.status).equal(400);
+    }
+    should(subject.registrations).be.empty();
+
+    // A real browser's push service is not refused.
+    const accepted = await surface.dispatch('POST /v1/push/subscriptions', {
+      device: browser,
+      body: JSON.stringify({
+        ...body,
+        subscription: { ...body.subscription, endpoint: 'https://updates.push.services.mozilla.com/wpush/v2/one' },
+      }),
+    });
+    should(accepted.status).equal(201);
+  });
+
   it('should answer a revocation with the enrolment it ended', async () => {
     const subject = new FakePush();
 

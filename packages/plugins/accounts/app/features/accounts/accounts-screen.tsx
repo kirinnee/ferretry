@@ -31,7 +31,7 @@ import { handleFromLabel, parseDomains, passwordProblem } from '../../lib/login-
 import { AccountDetail, type AccountTab } from './account-detail.tsx';
 import { type AccountOps, INPUT, Refusal } from './accounts-parts.tsx';
 import { SiteDetail, type SiteTab } from './site-detail.tsx';
-import type { RulesBinding } from './sign-in-rules-slot.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
 type AccountsView =
   | { readonly kind: 'list' }

@@ -4,7 +4,7 @@ import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { AgendaDetail, agendaHasDetail } from '../../../../app/features/agenda/agenda-detail.tsx';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const rich = agendaItem('A1', {
   subject: 'Pick the storage',

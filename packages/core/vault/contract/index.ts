@@ -39,15 +39,19 @@ export {
   type ResultMap,
   type ResultOf,
   type RevealGrant,
+  type SecretResolver,
+  SecretResolverPort,
   showsSomething,
   type TargetKind,
   type TargetRef,
   WITHHELD_SENTENCE,
 } from '@ferretry/kernel/contract';
+export * from './config.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
 export * from './port.ts';
 export * from './sealed.ts';
+export * from './secret-wire.ts';
 export * from './secrets.ts';
 export * from './store.ts';
 export * from './targets.ts';

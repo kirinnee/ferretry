@@ -11,6 +11,29 @@ import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
 import type { AgendaSnapshot } from './snapshot/agenda.ts';
 
+/**
+ * The agenda wire shapes the Agenda app and the daemon share: schemas, types and the pure helpers around them
+ * (today's `protocol/src/lib/agenda*.ts`). One copy, here; the daemon's `lib/protocol` files re-export it.
+ */
+export * from './snapshot/account-ids.ts';
+export * from './snapshot/agenda.ts';
+export * from './snapshot/agenda-card-asks.ts';
+export * from './snapshot/agenda-card.ts';
+export * from './snapshot/agenda-form.ts';
+export * from './snapshot/agenda-gate-wording.ts';
+export * from './snapshot/agenda-gate.ts';
+export * from './snapshot/agenda-list.ts';
+export * from './snapshot/agenda-message.ts';
+export * from './snapshot/agenda-patch.ts';
+export * from './snapshot/agenda-shape.ts';
+export * from './snapshot/agenda-stage.ts';
+export * from './snapshot/agenda-state.ts';
+export * from './snapshot/agenda-tabs.ts';
+export * from './snapshot/agenda-versions.ts';
+export * from './snapshot/board-refs.ts';
+export * from './snapshot/plain-label.ts';
+export * from './snapshot/sha256.ts';
+
 /** Complete boards, including parked items, owner answers, card asks and conversation. */
 export {
   AgendaItemSchema as AskItemSchema,

@@ -252,6 +252,20 @@ export interface InputTargetAdapter {
   arm?(ferret: FerretId, target: InputTarget, job: ClearJob): Promise<ClearOutcome>;
   shoot?(ferret: FerretId, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined>;
   document?(ferret: FerretId, key: string): Promise<string | undefined>;
+  /**
+   * The login observer's looks after a submit (today's `InputLoginProbe` over a page's and a terminal's own reads):
+   * `where` is a page's document and host now; `text` is what a ferret's read of the target could return (a page's text,
+   * a terminal's screen), which the Vault only searches for the typed values and never keeps; `promptLine` is a
+   * terminal's line at its cursor. Each is pinned to `surfaces`, the names the typed-into target had: another surface
+   * under the key answers nothing. An adapter that offers none leaves every sign-in fact unknown.
+   */
+  where?(
+    ferret: FerretId,
+    key: string,
+    surfaces: readonly string[],
+  ): Promise<{ readonly navigationId: string; readonly host: string } | undefined>;
+  text?(ferret: FerretId, key: string, surfaces: readonly string[]): Promise<string | undefined>;
+  promptLine?(ferret: FerretId, key: string, surfaces: readonly string[]): Promise<string | undefined>;
   probe?(
     ferret: FerretId,
     target: InputTarget,

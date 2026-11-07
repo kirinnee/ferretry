@@ -32,12 +32,13 @@
  */
 
 import { gateOf } from '../../lib/gate-items.ts';
-import type { AgendaCardAnswer, AgendaItem } from '../../wire/index.ts';
+import type { AgendaCardAnswer, AgendaItem } from '@ferretry/core-asks/contract';
 import { GitCompareArrows, Merge } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { useQuoteMenu, shellClock } from '../../shell.ts';
-import { useDoneClose } from '../../hooks/use-done-close.ts';
+import type { DoneCloseSource } from '../../lib/agenda-done-close.ts';
+import { composerQuoteTarget, useQuoteMenu } from '../../shell.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
+import type { DaemonId, DaemonSessionScope } from '../../lib/machine.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
@@ -45,9 +46,6 @@ import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inb
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { versionCount } from '../../lib/agenda-revisions.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
-import type { DaemonId } from '../../shell.ts';
-import type { DaemonSessionScope } from '../../shell.ts';
-import { composerQuoteTarget } from '../../shell.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
 import { AgendaItemCard } from './agenda-item-card.tsx';
 import { AgendaItemMenu, MenuGroup, SnoozeChoices, VersionPicker } from './agenda-item-menu.tsx';
@@ -55,6 +53,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { CardHead } from './card-head.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
+import { useDoneClose } from '../../hooks/use-done-close.ts';
 import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 
 export interface AgendaItemViewProps {
@@ -79,11 +78,17 @@ export interface AgendaItemViewProps {
   readonly renderProse: (text: string) => ReactNode;
   /**
    * The conversation whose composer takes a quote: select any text in the item and "Quote in composer" puts it
-   * there, exactly as in the chat (`useQuoteMenu`). Absent: nothing to quote into.
+   * there, exactly as in the chat (`useQuoteMenu`, the app's composer quote targets — a composer registers its own
+   * scope, so this view names a scope and imports no composer). Absent: nothing to quote into.
    */
   readonly quoteScope?: DaemonSessionScope | null;
   /** The machine the item is on: with it, an item that offers to close its card draws "Done · closes &F12". */
   readonly daemonId?: DaemonId;
+  /**
+   * The cards an item that offers to close them would close, and how, when the host hands them itself; otherwise
+   * they are read from the board a host provides (`useDoneClose`). Absent both: no such button.
+   */
+  readonly doneClose?: DoneCloseSource | undefined;
   /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
   readonly closeLabel?: string;
   /**
@@ -164,7 +169,7 @@ function useScrollPadding(
 export function AgendaItemView({
   item,
   ferret,
-  now = shellClock.nowMs(),
+  now = Date.now(),
   history,
   position,
   onPrevious,
@@ -186,6 +191,7 @@ export function AgendaItemView({
   cardsForm,
   formKey,
   daemonId,
+  doneClose: doneCloseSource,
   tools,
   startAt,
   startTap,
@@ -220,7 +226,9 @@ export function AgendaItemView({
   // The card draws the description under the title, whole. A gate item, whose card repeats nothing, and a notice drawn
   // with its card rows, which say its lines, keep it behind ⓘ instead.
   const infoDescription = gateOf(item) === undefined && cardsForm === undefined ? null : head.description;
-  const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
+  // A host may hand the source itself; otherwise it is read from the board a host provides (`useDoneClose`).
+  const fromBoard = useDoneClose(daemonId, item);
+  const doneClose = useDoneCloseFlow(doneCloseSource ?? fromBoard, label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
   // Not needed: the host's own tools say it where it has them (the Inbox); otherwise the menu does, on an item that
   // can be put aside at all — not a gate, a notice, an input card, or one whose own answers already dismiss.

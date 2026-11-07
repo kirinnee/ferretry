@@ -26,13 +26,12 @@
  * it escape the effect that started it. Both are spelled out where they happen.
  *
  * NO BROWSER GLOBAL IS READ IN HERE. Permission, the registration and the
- * page-level constructor arrive as a `NotificationSurface`; the push enrolment
- * arrives as a `PushEnrolment`. That is what lets the whole subsystem be proved
+ * page-level constructor arrive as a `NotificationSurface`; push delivery
+ * arrives as a `PushDeliveryPort` (the enrolment itself is Access's). That is what lets the whole subsystem be proved
  * by executed tests, and it is also why a static bundle carries no daemon URL:
  * the only URL this module ever follows is the in-app path the ledger produced.
  */
 
-import type { PushDeviceView } from '../shell.ts';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import type { DaemonSessionScope } from '../shell.ts';
@@ -46,17 +45,12 @@ import {
   showNotification,
 } from '../lib/notify.ts';
 import {
-  type DaemonPushDevices,
-  type DaemonPushService,
-  disablePushDelivery,
-  enablePushDelivery,
+  PUSH_REVOKE_FAILED_MESSAGE,
+  type PushDeliveryPort,
   type PushDeliveryReport,
   type PushDeliveryStatus,
-  type PushEnrolment,
-  type PushEnrolmentContext,
-  readPushDelivery,
-  revokePushDevice,
-} from '../shell.ts';
+  type PushDeviceView,
+} from '../lib/push-delivery.ts';
 
 /** One daemon's live preference slice; another pairing's changes never re-render it. */
 export const useNotificationPreferences = (
@@ -128,10 +122,8 @@ export const useNotificationWatch = (host: NotificationWatchHost, permission: No
 export interface NotificationControlsHost {
   readonly preferences: DaemonNotificationPreferences;
   readonly surface: NotificationSurface;
-  readonly service: DaemonPushService;
-  readonly devices: DaemonPushDevices;
-  /** `null` where this browser cannot do Web Push; local delivery still works. */
-  readonly enrolment: PushEnrolment | null;
+  /** This browser's push delivery with each machine: Access's, handed in (`UNBOUND_PUSH_DELIVERY` when none is). */
+  readonly delivery: PushDeliveryPort;
 }
 
 export interface NotificationControls {
@@ -157,13 +149,24 @@ export interface NotificationControls {
 
 const IDLE_REPORT: PushDeliveryReport = { status: 'idle', message: null, devices: [], currentDeviceId: null };
 
+/** The machine and the delivery one readout was asked of: the identity the fence below compares. */
+interface DeliveryContext {
+  readonly connection: DaemonConnection;
+  readonly delivery: PushDeliveryPort;
+}
+
 /**
  * The settings surface's controls for exactly one paired daemon.
  *
- * It reads that daemon's device list on mount, because "Registered devices" is
+ * It reads that daemon's delivery on mount, because "Registered devices" is
  * part of what the screen exists to show, and re-reads it whenever the selected
- * connection changes. A preference toggle does NOT re-read the list: it sends the
- * new preferences to the daemon holding this device and keeps the readout it has.
+ * machine or the delivery handed in changes. A preference toggle does NOT re-read
+ * the list: it asks delivery to enrol or revoke and keeps the readout it gets.
+ *
+ * The stored switch is the Agenda's (`DaemonNotificationPreferences`): enabling
+ * stores it on before enrolling — permission still has value, because the live
+ * app notifies while it is open — and disabling, or revoking THIS browser's own
+ * device, stores it off, so the UI never claims delivery it no longer has.
  */
 export const useNotificationControls = (
   host: NotificationControlsHost,
@@ -173,42 +176,35 @@ export const useNotificationControls = (
   const [report, setReport] = useState<PushDeliveryReport>(IDLE_REPORT);
   const preferences = useNotificationPreferences(host.preferences, connection.daemonId);
 
-  // Field by field, not by object identity: a root that rebuilds an equivalent
-  // connection each render has not re-paired, while a rotated device token or a
-  // moved base URL is a different live connection and must re-read.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: connection fields are the deliberate re-pair trigger, see above
-  const context = useMemo<PushEnrolmentContext>(
-    () => ({
-      connection,
-      service: host.service,
-      devices: host.devices,
-      preferences: host.preferences,
-      enrolment: host.enrolment,
-    }),
-    [connection.daemonId, connection.baseUrl, connection.deviceId, host],
+  // By the machine's id and the delivery itself, not by the connection object: a root that rebuilds an equivalent
+  // connection each render has not re-paired, while a re-pair hands a new delivery (the shell rebuilt the client).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the daemon id is the deliberate re-read trigger, see above
+  const context = useMemo<DeliveryContext>(
+    () => ({ connection, delivery: host.delivery }),
+    [connection.daemonId, host.delivery],
   );
 
-  // ONLY THE NEWEST CONNECTION CONTEXT MAY PUBLISH A READOUT.
+  // ONLY THE NEWEST CONTEXT MAY PUBLISH A READOUT.
   //
   // Every delivery read is asynchronous and none of them can be cancelled, so a
-  // read started for the previous context is still in flight when a rotated
-  // device token or a moved base URL produces a new one. Whichever resolves last
-  // would otherwise win, and the loser is not merely stale: it is a different
-  // live connection's device list, presented as this one's.
+  // read started for the previous context is still in flight when another machine
+  // is selected or a re-pair hands a new delivery. Whichever resolves last would
+  // otherwise win, and the loser is not merely stale: it is a different machine's
+  // (or a superseded pairing's) device list, presented as this one's.
   //
-  // The fence is the context IDENTITY, which is exactly what the memo above
-  // re-creates on a re-pair — the same identity the mount effect re-reads on. It
-  // is applied at resolution rather than at launch, because the side effects of
-  // an enrolment, a revoke or a preference sync were already asked for and must
-  // still complete against the daemon they were addressed to.
+  // The fence is applied at resolution rather than at launch, because an enrolment
+  // or a revoke was already asked for and must still complete against the machine
+  // it was addressed to.
   const currentContext = useRef(context);
   if (currentContext.current !== context) currentContext.current = context;
+  const lastReport = useRef(report);
+  lastReport.current = report;
 
   const publish = useCallback(
-    (from: PushEnrolmentContext) =>
-      (report: PushDeliveryReport): void => {
+    (from: DeliveryContext) =>
+      (next: PushDeliveryReport): void => {
         if (currentContext.current !== from) return;
-        setReport(report);
+        setReport(next);
       },
     [],
   );
@@ -219,8 +215,11 @@ export const useNotificationControls = (
 
   const refresh = useCallback(() => {
     markChecking();
-    void readPushDelivery(context).then(publish(context));
-  }, [context, markChecking, publish]);
+    const started = context;
+    void started.delivery
+      .read(started.connection, host.preferences.get(started.connection.daemonId).enabled)
+      .then(publish(started));
+  }, [context, host.preferences, markChecking, publish]);
 
   useEffect(() => {
     refresh();
@@ -230,8 +229,10 @@ export const useNotificationControls = (
     (next: boolean) => {
       markChecking();
       const started = context;
+      const daemon = started.connection.daemonId;
       if (!next) {
-        void disablePushDelivery(started).then(publish(started));
+        host.preferences.set(daemon, { enabled: false });
+        void started.delivery.disable(started.connection).then(publish(started));
         return;
       }
       void (async () => {
@@ -240,29 +241,45 @@ export const useNotificationControls = (
         // is never re-prompted, because only the browser's own settings can
         // change that answer.
         const granted = current === 'default' ? await host.surface.requestPermission() : current;
-        // Permission is a fact about the BROWSER, not about a connection, so a
-        // late answer is still the truth for whichever daemon is now selected and
-        // is deliberately outside the fence. The same goes for storing the
-        // refusal: it is written against the daemon the gesture named.
+        // Permission is a fact about the BROWSER, not about a machine, so a late
+        // answer is still the truth for whichever daemon is now selected and is
+        // deliberately outside the fence. The same goes for the stored switch: it
+        // is written against the daemon the gesture named.
         setPermission(granted);
         if (granted !== 'granted') {
-          host.preferences.set(connection.daemonId, { enabled: false });
+          host.preferences.set(daemon, { enabled: false });
           publish(started)(IDLE_REPORT);
           return;
         }
-        publish(started)(await enablePushDelivery(started));
+        host.preferences.set(daemon, { enabled: true });
+        publish(started)(await started.delivery.enable(started.connection));
       })();
     },
-    [connection.daemonId, context, host, markChecking, publish],
+    [context, host, markChecking, publish],
   );
 
   const revokeDevice = useCallback(
     (deviceId: string) => {
       markChecking();
       const started = context;
-      void revokePushDevice(started, deviceId).then(publish(started));
+      const own = deviceId === lastReport.current.currentDeviceId;
+      const settled = (next: PushDeliveryReport): void => {
+        // Revoking THIS browser's own device turns its switch off — once the machine has revoked it. A revoke that
+        // failed leaves the device enrolled and buzzing, so its readout still names it and the switch stays on.
+        if (own && next.currentDeviceId !== deviceId)
+          host.preferences.set(started.connection.daemonId, { enabled: false });
+        publish(started)(next);
+      };
+      void started.delivery.revoke(started.connection, deviceId).then(settled, () =>
+        publish(started)({
+          status: 'unavailable',
+          message: PUSH_REVOKE_FAILED_MESSAGE,
+          devices: [],
+          currentDeviceId: lastReport.current.currentDeviceId,
+        }),
+      );
     },
-    [context, markChecking, publish],
+    [context, host.preferences, markChecking, publish],
   );
 
   return {

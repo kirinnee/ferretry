@@ -1,4 +1,8 @@
-import { AgendaCountResponseSchema, type AgendaListSnapshot, AgendaListSnapshotSchema } from '../wire/index.ts';
+import {
+  AgendaCountResponseSchema,
+  type AgendaListSnapshot,
+  AgendaListSnapshotSchema,
+} from '@ferretry/core-asks/contract';
 import type { DaemonId } from '../shell.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../shell.ts';
 

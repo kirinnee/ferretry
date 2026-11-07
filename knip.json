@@ -6,7 +6,6 @@
       "project": ["scripts/test/*.ts"]
     },
     "packages/std": {
-      "entry": ["tests/**/*.test.ts"],
       "project": ["**/*.ts"]
     },
     "packages/core/kernel": {
@@ -14,24 +13,79 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/*": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "entry": ["tests/**/*.test.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/*": {
-      "entry": [
-        "tests/**/*.test.{ts,tsx}",
-        "tests/types/*.types.ts",
-        "app/views/*.tsx",
-        "tests/**/fixtures/**/*.{ts,tsx}"
-      ],
+      "entry": ["tests/**/*.test.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/cli": {
-      "entry": ["bin/*.ts", "src/index.ts", "tests/**/*.test.ts"],
+      "entry": ["bin/*.ts", "tests/**/*.test.ts"],
       "project": ["**/*.ts"]
     },
     "packages/app": {
-      "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/*.ts", "tests/**/*.test.{ts,tsx}"],
+      "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/**/*.ts", "tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx,css}"]
+    },
+    "packages/core/gate": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/core/ferrets": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/agenda": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/board": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/claude-code": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/packs": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/projects": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/runtimes": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/updates": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/warden": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/connections": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/worker.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/catalogs": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/link-store-worker.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/conversation": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/usage": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/voice": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts"],
       "project": ["**/*.{ts,tsx}"]
     }
   },
@@ -52,5 +106,6 @@
   },
   "ignoreIssues": {
     "packages/plugins/shells/contract/wire.ts": ["duplicates"]
-  }
+  },
+  "tags": ["-pending"]
 }

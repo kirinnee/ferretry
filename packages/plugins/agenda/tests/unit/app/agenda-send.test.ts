@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaResponse } from '../../../app/wire/index.ts';
+import type { AgendaResponse } from '@ferretry/core-asks/contract';
 import type { InboxAction } from '../../../app/lib/agenda-answers.ts';
 import { type AgendaSender, sendAgendaAction } from '../../../app/lib/agenda-send.ts';
 import { daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
 
-const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const connection = daemonConnection({ daemonId: 'daemon-a' });
 const scope = daemonSessionScope(connection, 'fr');
 
 const recorder = () => {

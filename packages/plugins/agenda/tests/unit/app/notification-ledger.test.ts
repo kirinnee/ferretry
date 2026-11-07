@@ -1,10 +1,13 @@
 import { describe, it } from 'bun:test';
-import type { SessionStatus, SessionView } from '../../../app/shell.ts';
+import type {
+  NotifiedFleet as FleetSnapshot,
+  NotifiedStatus as SessionStatus,
+  NotifiedView as SessionView,
+} from '../../../app/lib/notification-ledger.ts';
 import should from 'should';
 
 import { daemonId } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
-import type { FleetSnapshot } from '../../../app/shell.ts';
 import { DEFAULT_NOTIFICATION_FILTER_PREFERENCES } from '../../../app/lib/notification-filter.ts';
 import {
   buildNotification,
@@ -25,7 +28,7 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   type NotificationPreferences,
 } from '../../../app/lib/notification-preferences.ts';
-import { sessionView } from '../../support/app/sessions.ts';
+import { notifiedView as sessionView } from '../../support/app/notified-views.ts';
 
 const daemonA = daemonId('daemon-a');
 const daemonB = daemonId('daemon-b');
@@ -130,8 +133,8 @@ describe('notification payloads', () => {
     );
     should(notificationTitle(view('s1', 'failed', { name: '', teammate: undefined }))).equal('s1');
     should(buildNotification(scope, composed, 'failed', 999).count).equal(100);
-    const failed = view('s1', 'stalled');
-    failed.state.reason = 'pane died';
+    const stalled = view('s1', 'stalled');
+    const failed = { ...stalled, state: { ...stalled.state, reason: 'pane died' } };
     should(buildNotification(scope, failed, 'failed', -1).body).equal('Stalled — pane died');
     should(buildNotification(scope, view('s1', 'completed'), 'completed').body).equal('Finished its task.');
   });

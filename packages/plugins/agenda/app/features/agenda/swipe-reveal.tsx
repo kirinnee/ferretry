@@ -3,7 +3,6 @@
  * the compass (`agenda-compass.ts`): ↓ Skip, ↓← Skip, ↓→ Not needed, ↓↓ Snooze and its shared choices.
  */
 
-import { shellClock } from '../../shell.ts';
 import { Clock, type LucideIcon, SkipForward, X } from 'lucide-react';
 import { snoozePicks } from '../../lib/agenda-snooze.ts';
 
@@ -54,7 +53,7 @@ export function SwipeCompass({
       {snooze ? <span className="fy-swipe-compass__row">{cell('snooze', Clock, 'Snooze')}</span> : null}
       {snooze && slot.startsWith('down-down') ? (
         <span className="fy-swipe-compass__row" data-compass-lengths="">
-          {snoozePicks(shellClock.nowMs()).map(pick => (
+          {snoozePicks(Date.now()).map(pick => (
             <span
               className="fy-swipe-compass__cell"
               data-active={picked === pick.id ? true : undefined}

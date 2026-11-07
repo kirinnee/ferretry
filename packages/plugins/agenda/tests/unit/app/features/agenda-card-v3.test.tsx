@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaAsk } from '../../../../app/wire/index.ts';
+import type { AgendaAsk } from '@ferretry/core-asks/contract';
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { DISMISS_ACTION, type InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 const pick = <T extends HTMLElement>(view: Mounted, selector: string, what: string): T =>
   must(view.container.querySelector<T>(selector), what);

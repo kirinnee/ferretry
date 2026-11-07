@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useState } from 'react';
 import { AgendaItemMenu, MenuGroup } from '../../../../app/features/agenda/agenda-item-menu.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 /** On a phone (under 768px) the ⋯ menu is the app's bottom sheet; the width is a process-wide global, handed back. */
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');

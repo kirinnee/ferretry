@@ -17,6 +17,7 @@ import type {
   TypeOptions,
   TypeResult,
 } from '../../lib/inputs/ports.ts';
+import type { LoginProbePort } from '../../lib/inputs/login-observer.ts';
 import { INPUT_SINGLE_FIELD_ID } from '../../lib/inputs/wire.ts';
 
 /** The `input.targets:<kind>` provider in effect now, or nothing when that plugin is off (§4.7). */
@@ -118,5 +119,40 @@ export class TerminalTargetThroughHook implements TerminalInputTargetPort {
           expected,
           options,
         );
+  }
+}
+
+/**
+ * The login observer's looks, through the `input.targets` adapters' own reads (today's `InputLoginProbe`): where a page
+ * is, whether any typed value shows in what a ferret's read of the target would return (the text itself is dropped
+ * here and goes nowhere), and a terminal's prompt line. A provider that is off, or that offers no such read, answers
+ * nothing: the observer then cannot tell, and keeps no sign-in fact.
+ */
+export class LoginProbeThroughHook implements LoginProbePort {
+  constructor(private readonly provider: TargetProvider) {}
+
+  async prompt(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined> {
+    return await this.provider('terminal')?.promptLine?.(ferretOf(sessionId), key, surfaces);
+  }
+
+  async where(
+    sessionId: string,
+    key: string,
+    surfaces: readonly string[],
+  ): Promise<{ readonly navigationId: string; readonly host: string } | undefined> {
+    return await this.provider('page')?.where?.(ferretOf(sessionId), key, surfaces);
+  }
+
+  async shows(
+    sessionId: string,
+    target: InputTarget,
+    surfaces: readonly string[],
+    values: readonly string[],
+  ): Promise<boolean | undefined> {
+    if (values.length === 0) return undefined;
+    if (target.kind === 'secret') return undefined;
+    const text = await this.provider(target.kind)?.text?.(ferretOf(sessionId), target.key, surfaces);
+    if (text === undefined) return undefined;
+    return values.some(value => value !== '' && text.includes(value));
   }
 }

@@ -56,7 +56,6 @@
       "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
     ],
     "logins": [
-      "GAP(kernel): a fresh home has no state/logins/credentials base, and the kernel's credentials root refuses every call until it exists, so no owned login can be read or signed in on a new machine until the kernel makes the base (sent to the kernel porter)",
       "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
       "GAP(vault): `fy login add <provider>` does not prompt for, nor store, a provider's secret (store each with the Vault's own verbs and name it as `${secret:NAME}`), and `fy login add --from-env` preset detection is not ported; `fy login budget` is Usage's and `login models list --login` reads Runtimes",
       "GAP(runtimes): `fy login rm` and the app's Remove cannot refuse a login a runtime still uses, because Logins cannot see runtime usage without a Logins-to-Runtimes edge; Runtimes' own change path must check its runtimes first, then call Logins' reviewed change routes (`POST /v1/logins/changes`, `GET /v1/logins/changes/:changeId`, `POST /v1/logins/changes/:changeId/apply`, kinds `login.*`)",
@@ -90,36 +89,48 @@
       "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
     ],
     "conversation": [
-      "conversation app half: C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app) and C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel) have landed; the chat and transcript screen and the queue, compact-at, questions, search and links bodies are still the one-line Pending surface until C3 and C4 land",
-      "GAP(C3): ConversationOutbox is mounted nowhere yet (C3 mounts it around the chat screen), so a message the device kept unsent is not retried until the chat screen draws it; today's boot drain of every machine's saved messages stays a named GAP unless the shell offers a hook for it",
+      "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
       "GAP(C3): the Composer takes the ferret's harness as a prop (a Codex ferret's picked skill inserts $name); the chat screen passes it from the Ferrets read",
-      "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt)",
+      "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt); today's boot drain of every machine's saved messages is not run, a kept message is retried when the chat screen draws it",
       "GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes reference.catalog yet, so every composer menu answers provided:false and is empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
       "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
       "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
-      "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
       "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)",
+      "GAP(ferrets): the in-ferret search (app/search/session-search.tsx) is mounted nowhere yet — its host is Ferrets' ferret header and files view; its file index (app/search/ferret-file-index.ts) is a copy of the part of Ferrets' contract/view/session-search.ts that Ferrets' contract index does not export (the search query itself is imported), until an additive export lands",
+      "GAP(conversation daemon): PATCH /v1/ferrets/:ferretId/hypermedia is declared by Conversation's manifest but has no handler in its daemon half, so the hypermedia switch's press is refused; the switch reads the mode default because Ferrets' read of a ferret carries no config",
+      "GAP(app): today's All queues view is dropped (no screen lists every ferret's queue); the queue is a panel in the ferret.side slot with the full page reachable from it",
+      "Runtimes is not a need of Conversation: Continue and the picker mount Ferrets' ferrets.move-account slot for the runtime and fall back to a typed runtime name where no panel is placed; Continue always opens the runtime step, so one runtime takes an extra press where today's adopted it at once",
+      "GAP(app-shell): the command bar's work search keeps today's words, all=true window and 6-per-kind cap, but a command entry has no chips, pending line, muted rows or second line: the Cards/Agenda and Everything/Open filters, the \"Searching cards and agenda…\" line, muted closed rows and a row's project name and ask owner are not drawn (a card's project reads only 'Unfiled', the names being Board's and Ferrets')",
+      "GAP(app-shell): the kernel's PanelProps carries only subject, so Compact memory at and Hypermedia take canControl as a prop (default true) and cannot yet hide from a view-only device; the daemon still refuses at operator",
+      "GAP(links): the harness history lists how many transcripts were skipped and each entry's turns, not today's per-harness skip reasons or recorded event count (the finders describe turns, not events)",
+      "GAP(agenda): lead decision Q9 has Agenda offer an agenda.conversation slot that Conversation contributes a panel to; Agenda declares no such slot yet, so nothing is contributed",
+      "GAP(ferrets): Ferrets' displayCallsign, form parts and setup-note UI are copied into Conversation (app/links/callsign.ts, app/compact-at/form-parts.tsx, app/links/link-ui.tsx) because neither its contract nor @ferretry/app exports them",
       "GAP(packs): the conversation.row slot carries no tool calls, so Packs' Pack card (today reads entry.tools/sent) does not draw; adding masked tool calls to ConversationRowEntry is decided with the Packs slot contribution (its own security look)"
+    ],
+    "accounts": [
+      "GAP(access): no passkey ceremony for the app half's widening acts (a paste rule, programs in your own profile ON, a sign-in rule create/resume/renew/widen, task-plan ticks, a machine-staged confirm); each refuses with today's no-passkey words until Access hands over an ask through its contract or the shell offers one (wiring it is one prop per surface)",
+      "GAP(agenda): Agenda does not mount `ask:sign-in-approval` yet; it must pass the ask (ref, ferret, subject, why, context) in `value`",
+      "GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
+      "GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
+      "GAP(shells): the `#rules/<stage>` deep link and the \"Don't ask again\" offer on the input card are not drawn; they are not Accounts' surfaces, and dropping them removes no protection",
+      "67 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S91 S93 S97 S98"
+    ],
+    "agenda": [
+      "GAP(agenda-inbox-machines): the Inbox reads the one machine this half is built for (runtime.client), where today's hook read every paired machine's list; the cross-machine count, machine filter and per-machine notes need a shell-level reader over every daemon's Agenda half, which is not built",
+      "GAP(agenda-references): references in an ask's prose (&F12, !A3, :agent, …) render as plain text: @ferretry/app offers the ReferenceSurfaceProvider but the surface builder reads other plugins' resolvers and openers (Board's reference:&, Ferrets, Files), which Agenda may not import",
+      "GAP(agenda-history-conversation): an open ask's History shows the words stored on the item, not the chat messages that name it: readConversation is not bound, because it would read Conversation's transcript through an Agenda-to-Conversation edge that is not approved; the receipt badges (Cancelled, Unconfirmed, Held for revive, Typed-not-sent, Saved) return with that read",
+      "GAP(done-close-board) and GAP(cards-board): Done · closes and a notice's Start/Close write through Board ports (DoneCloseBoard, AgendaCardsBoard) that no host provides until Board contributes them or Agenda is given a need on Board",
+      "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
+      "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
+      "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap"
     ]
   },
   "pendingHalves": {
-    "agenda": ["app"],
-    "conversation": ["app"],
     "terminals": ["app"],
     "warden": ["app"]
   },
   "pendingAppPorts": [
-    {
-      "plugin": "conversation",
-      "path": "packages/plugins/conversation/app",
-      "reason": "surfaces, client context, fy-render, the prose kit and the composer (with the attachments and chat-width panels and Conversation Settings) have landed; the chat, transcript, queue, compact-at, questions, search and links bodies are in flight (C3-C4)"
-    },
-    {
-      "plugin": "agenda",
-      "path": "packages/plugins/agenda/app",
-      "reason": "separate app port in flight"
-    },
     {
       "plugin": "terminals",
       "path": "packages/plugins/terminals/app",
@@ -136,29 +147,9 @@
       "reason": "shell daemon-client, grants and browser-link facilities"
     },
     {
-      "plugin": "agenda",
-      "path": "packages/plugins/agenda/tests/unit/app",
-      "reason": "app-shell-fill React runtime and app test harness"
-    },
-    {
-      "plugin": "agenda",
-      "path": "packages/plugins/agenda/tests/support/app",
-      "reason": "app-shell-fill React runtime and app test harness"
-    },
-    {
       "plugin": "warden",
       "path": "packages/plugins/warden/app",
       "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
-    },
-    {
-      "plugin": "voice",
-      "path": "packages/plugins/voice/app/features/settings/use-machine-voice-cleanup.ts",
-      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
-    },
-    {
-      "plugin": "voice",
-      "path": "packages/plugins/voice/app/features/fleet/setup/voice-default.ts",
-      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
     },
     {
       "plugin": "packs",

@@ -72,6 +72,9 @@ route	GET /v1/logins	added	moved to the owning plugin's route prefix /v1/<id>/�
 route	POST /v1/logins/:loginId/check	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/logins/:loginId/test	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/logins/presets	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	POST /v1/logins/changes	added	new in 5.0: Logins owns the login changes that Runtimes' fleet routes staged and applied today (credential.* on the fleet proposal routes); the route has no counterpart in the 4.x descriptor table
+route	GET /v1/logins/changes/:changeId	added	new in 5.0: Logins owns the login changes that Runtimes' fleet routes staged and applied today (credential.* on the fleet proposal routes); the route has no counterpart in the 4.x descriptor table
+route	POST /v1/logins/changes/:changeId/apply	added	new in 5.0: Logins owns the login changes that Runtimes' fleet routes staged and applied today (credential.* on the fleet proposal routes); the route has no counterpart in the 4.x descriptor table
 route	GET /v1/ferrets/:ferretId/mcp/servers	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/mcp/auth	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/mcp/auth/:component	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
@@ -410,3 +413,4 @@ route	PATCH /v1/ferrets/:ferretId/pack	added	session routes renamed /v1/sessions
 route	POST /v1/pack/new	removed	fy new is Ferrets' verb (lead decision D2 #14): Packs starts no helper and shapes a start only through its start.decide taker and the start options
 route	GET /v1/ferrets/:ferretId/references	added	the composer reference menus read one route that answers what each prefix owner provides through the reference.catalog hook (lead decision Q6), instead of the composer reading Board, Agenda and Skills routes itself; it also stands in for the governed fs, terminals and browser lists, and the Board card read, whose filesystem, terminal, browser and fleet grants it keeps through consultsGrants and each provider's declared demand
 route	POST /v1/stt/enhance	changed	tightened by lead decision (R-0400): today caller=any, 5.0 caller=person; enhancement spends the operator's provider key, and a ferret must not trigger a paid call unattended
+member	GET /v1/shared/contract	added	new by design, redesign.md §9.6

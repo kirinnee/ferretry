@@ -1,6 +1,6 @@
 import { CheckSquare, MessageCircleQuestion } from 'lucide-react';
 import type { ReactElement } from 'react';
-import type { CardKind } from '../../shell.ts';
+import type { CardKind } from '../../lib/card-kind.ts';
 
 /**
  * The chip that says what a card IS before a thumb moves it: a TASK (the check box) or an AGENDA item (the speech

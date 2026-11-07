@@ -4,7 +4,7 @@
  * those fields as they were) — nothing here draws anything.
  */
 
-import type { AgendaItem, AgendaRevisableField, AgendaRevision } from '../wire/index.ts';
+import type { AgendaItem, AgendaRevisableField, AgendaRevision } from '@ferretry/core-asks/contract';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;

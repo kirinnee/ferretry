@@ -234,7 +234,8 @@ export class HostHarnessScanner {
     try {
       const info = await this.#inspect(home, directory);
       if (info === undefined) return { found: [], problems: [] };
-      if (info.kind !== 'directory') throw new Error('it is not a directory');
+      // A file where the folder would be is no skills, as it always was: nothing is opened, so nothing is at risk.
+      if (info.kind !== 'directory') return { found: [], problems: [] };
       // No list/readBytes fallback: even an ordinary skill folder can hide a sign-in file or alias.
       throw new Error(CHECKED_READ_UNAVAILABLE);
     } catch (error) {

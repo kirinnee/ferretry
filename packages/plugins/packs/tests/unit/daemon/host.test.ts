@@ -12,6 +12,7 @@ import {
   PackCleanUpJobResultSchema,
   PackTableSchema,
   PackViewSchema,
+  type PacksApi,
   PacksPort,
 } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
@@ -244,7 +245,9 @@ describe('packs: no helper start, and what a finished ferret reported', () => {
     await h.stop();
 
     const failing = builtHalf(ferrets, new Map(), failingRedaction());
-    await expect(failing?.provides?.packs.result(lead) ?? Promise.resolve()).rejects.toThrow(RESULT_UNCHECKED);
+    await expect((failing?.provides?.packs as PacksApi | undefined)?.result(lead) ?? Promise.resolve()).rejects.toThrow(
+      RESULT_UNCHECKED,
+    );
   });
 
   test('R-0170 the result route withholds a summary it could not mask (503), never the text', async () => {
@@ -427,7 +430,7 @@ describe('packs launch.parts: the daemon’s own workers are never told about Pa
     expect(await parts.parts({ ferret: ordinary } as never)).toMatchObject([{ kind: 'env', env: { FY_PACK: '1' } }]);
 
     // `PacksApi.instructed` reads the same walk.
-    const packs = half?.provides?.packs;
+    const packs = half?.provides?.packs as PacksApi | undefined;
     expect(await packs?.instructed(helper)).toBe(false);
     expect(await packs?.instructed(ordinary)).toBe(true);
   });

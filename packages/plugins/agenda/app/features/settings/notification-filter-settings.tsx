@@ -4,7 +4,8 @@
  * Every paired machine now sends every event (`packages/daemon/src/lib/push/service.ts`); this
  * screen is the only place left that decides what a reader actually sees: the four switches
  * (needs you, finished, failed, new device) and quiet hours, all device-wide. Muting one machine alone is a
- * row in `notification-machines.tsx`. All of it is local to this browser; nothing here is sent to any daemon.
+ * row of that machine's notification switch (Access's). All of it is local to this browser; nothing here is sent to any
+ * daemon.
  */
 import {
   type DeviceNotificationFilterPreferences,
@@ -15,10 +16,10 @@ import {
   parseTimeOfDay,
   type QuietHours,
 } from '../../lib/notification-filter.ts';
-import { Toggle } from './notification-settings.tsx';
+import { Toggle } from './toggle.tsx';
 
 const NOTIFICATION_FILTER_SCOPE_NOTE =
-  'Every paired machine sends every event now. These switches decide what this browser shows — they apply to every machine at once. Muting one machine alone is in its row above.';
+  'Every paired machine sends every event now. These switches decide what this browser shows — they apply to every machine at once. Muting one machine alone is that machine’s own notification switch.';
 
 export interface NotificationFilterSettingsViewProps {
   readonly preferences: DeviceNotificationFilterPreferences;

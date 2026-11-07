@@ -8,12 +8,8 @@
  * where its board and its answers go — is decided by {@link isMachineAgendaId}.
  */
 
-import {
-  type AgendaItem,
-  type AgendaListSnapshot,
-  MACHINE_AGENDA_ID,
-  type SessionAgendaSummary,
-} from '../wire/index.ts';
+import { type SessionAgendaSummary } from '../../contract/wire.ts';
+import { type AgendaItem, type AgendaListSnapshot, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../shell.ts';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 

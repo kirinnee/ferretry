@@ -15,7 +15,7 @@ import { join, resolve } from 'node:path';
 import should from 'should';
 import { PROTECTED_PATHS_VARIABLE } from '../../support/ambient-session.ts';
 
-const SWEEP = resolve(import.meta.dir, '../../../../../scripts/test/tmux-sweep.ts');
+const SWEEP = resolve(import.meta.dir, '../../../../../../../scripts/test/tmux-sweep.ts');
 const TMUX = Bun.which('tmux');
 const roots: string[] = [];
 const sockets: string[] = [];

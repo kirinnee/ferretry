@@ -16,9 +16,13 @@
  * buttons stay, so the owner can try the other one.
  */
 
-import { type AgendaCardRow, type BoardTaskId, formatTaskRef } from '../../wire/index.ts';
+import { type AgendaCardRow, type BoardTaskIdSchema, formatTaskRef } from '@ferretry/core-asks/contract';
 import { type ReactNode, useState } from 'react';
+import type { z } from 'zod';
 import { defaultAgendaProse } from './agenda-prose.tsx';
+
+/** A board card's id (`B12`), as an ask names it. */
+export type BoardTaskId = z.infer<typeof BoardTaskIdSchema>;
 
 /** What a button did: a plain sentence either way, so the row can say it without knowing the board. */
 export type AgendaCardOutcome =

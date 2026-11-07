@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaVersionSummary } from '../../../app/wire/index.ts';
+import type { AgendaItem, AgendaVersionSummary } from '@ferretry/core-asks/contract';
 import {
   BASIS_WORDS,
   bagSimilarity,

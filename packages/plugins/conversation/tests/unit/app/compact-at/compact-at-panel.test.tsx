@@ -27,13 +27,31 @@ const radio = (root: HTMLElement, value: string) =>
 const toggle = (root: HTMLElement) =>
   must(root.querySelector<HTMLButtonElement>('[data-compact-at-panel] > button'), 'the toggle');
 
-const openPanel = async (routes: Readonly<Record<string, CallHandler>>, subject: string | null = 'f1') => {
+const openPanel = async (
+  routes: Readonly<Record<string, CallHandler>>,
+  subject: string | null = 'f1',
+  canControl?: boolean,
+) => {
   const client = fakeClient(routes);
-  mounted = await mount(withClient(client, <CompactAtPanel {...(subject === null ? {} : { subject })} />));
+  mounted = await mount(
+    withClient(
+      client,
+      <CompactAtPanel
+        {...(subject === null ? {} : { subject })}
+        {...(canControl === undefined ? {} : { canControl })}
+      />,
+    ),
+  );
   return { client, root: mounted.container };
 };
 
 describe('Compact memory at in the ferret toolbar', () => {
+  it('is hidden from someone who cannot control the ferret, and asks the daemon nothing', async () => {
+    const { root, client } = await openPanel({ [READ_ROUTE]: () => READ }, 'f1', false);
+    expect(root.querySelector('[data-compact-at-panel]')).toBeNull();
+    expect(client.calls).toEqual([]);
+  });
+
   it('draws nothing when the toolbar names no ferret', async () => {
     const { root, client } = await openPanel({}, null);
     expect(root.querySelector('[data-compact-at-panel]')).toBeNull();

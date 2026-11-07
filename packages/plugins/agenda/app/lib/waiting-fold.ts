@@ -6,10 +6,68 @@
 // page, where each can be read, edited or taken back, and appears in the chat once it is delivered. A
 // message that needs the person (failed, refused, unconfirmed, typed but not sent) is NOT waiting and stays.
 // Pure decisions: no clock, no network.
+//
+// The send ledger and the queue are Conversation's. These are the fields of them this fold reads, structurally, so a
+// host's own ledger rows fit without this half importing the plugin that owns them.
 
-import type { LedgerSendRecord } from '../shell.ts';
-import { effectiveQueueState } from '../shell.ts';
-import type { TranscriptEntry } from '../shell.ts';
+/** Where the machine's durable queue has a message. */
+export interface WaitingFoldQueue {
+  readonly state: 'queued' | 'typing' | 'delivered' | 'read' | 'unconfirmed' | 'cancelled' | 'failed';
+  readonly stateAt: string;
+  readonly revision: number;
+  readonly waitReason?: string;
+  readonly failure?: string;
+  readonly deliveredAs?: string;
+}
+
+/** One send as the chat's ledger holds it, as far as the fold reads it. */
+export interface WaitingFoldSend {
+  readonly sendId: string;
+  readonly acceptedAt: string;
+  readonly message: string;
+  readonly attachmentIds: readonly string[];
+  readonly fate: string;
+  readonly from?: string;
+  readonly fromName?: string;
+  readonly held?: true;
+  readonly withdrawn?: true;
+  readonly retryable?: true;
+  readonly typedNotSent?: true;
+  /** This browser could not read the ledger: the fate is the last one it saw. */
+  readonly unread?: unknown;
+  /** Where this device's outbox has the message, while it has not reached the machine's queue. */
+  readonly outbox?: {
+    readonly reason: string;
+    readonly position: number;
+    readonly of: number;
+    readonly refused?: true | boolean;
+  };
+  readonly queue?: WaitingFoldQueue;
+}
+
+/** One row of the chat, as far as the fold reads it: a ledger card carries its send. */
+export interface WaitingFoldEntry {
+  readonly id: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly ledger?: WaitingFoldSend;
+  readonly send?: WaitingFoldSend;
+  readonly settled?: string;
+  readonly placement?: string;
+}
+
+type LedgerSendRecord = WaitingFoldSend;
+type TranscriptEntry = WaitingFoldEntry;
+
+const isQueueArrived = (state: WaitingFoldQueue['state']): boolean => state === 'delivered' || state === 'read';
+
+/** The queue's word for a send, unless the ledger has already seen it delivered (today's `effectiveQueueState`). */
+const effectiveQueueState = (record: LedgerSendRecord): WaitingFoldQueue['state'] | undefined => {
+  const state = record.queue?.state;
+  if (state === undefined) return undefined;
+  if (record.fate === 'delivered' && !isQueueArrived(state)) return 'delivered';
+  return state;
+};
 
 /**
  * Is this send still WAITING to go into the ferret? False for everything else — a message that needs the
@@ -28,7 +86,7 @@ export const isWaitingSend = (record: LedgerSendRecord): boolean => {
 };
 
 /** The conversation without the cards for messages still waiting. Rows that are not waiting are untouched. */
-export const hideWaiting = (entries: readonly TranscriptEntry[]): readonly TranscriptEntry[] => {
+export const hideWaiting = <Entry extends TranscriptEntry>(entries: readonly Entry[]): readonly Entry[] => {
   const kept = entries.filter(
     entry =>
       entry.kind !== 'ledger' ||

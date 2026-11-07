@@ -1,4 +1,4 @@
-import type { InventoryEntry } from '../contract/bound.ts';
+import type { InventoryEntry, InventorySurfaces } from '../contract/bound.ts';
 import type { ApiRequest } from '../contract/http.ts';
 import { ApiError, jsonResponse } from '../contract/http.ts';
 import { z } from 'zod';
@@ -7,15 +7,31 @@ import { CORE_IDS } from '../contract/ids.ts';
 import { PROTOCOL } from '../contract/session.ts';
 import type { DoctorReport } from '../contract/doctor.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
-import type { RouteHandler } from '../contract/route.ts';
+import type { RouteHandler, ScopedRoute } from '../contract/route.ts';
+import type { Manifest } from '../manifest/types.ts';
 import type { ToolResult } from '../manifest/implement.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import { busAccept, type BusSources } from './bus-socket.ts';
 import type kernelManifest from '../plugin.ts';
+import { type ConfigRouteSources, configRoutes } from './config/routes.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
 
-export type { InventoryEntry };
+export type { InventoryEntry, InventorySurfaces };
+
+/**
+ * One plugin's declared surfaces for the inventory projection (§9.6): every route, socket and agent tool, as the
+ * descriptor admission reads (method and path dropped). Read from the manifest only, so a plugin that is off still
+ * has its declarations (the entry's `on` says whether it serves).
+ */
+export function inventorySurfacesOf(manifest: Manifest): readonly Omit<ScopedRoute, 'method' | 'path'>[] {
+  const scope = ({ method: _method, path: _path, ...rest }: ScopedRoute): Omit<ScopedRoute, 'method' | 'path'> => rest;
+  return [
+    ...(manifest.actions?.routes ?? []).map(scope),
+    ...(manifest.actions?.sockets ?? []).map(scope),
+    ...(manifest.actions?.agentTools ?? []),
+  ];
+}
 
 export interface KernelHalfSources {
   readonly version: string;
@@ -33,6 +49,8 @@ export interface KernelHalfSources {
   /** A fresh diagnosis: every plugin's declared checks are run now. */
   doctor(): Promise<DoctorReport>;
   liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
+  /** What the configuration-file routes act through (`./config/routes.ts`). */
+  readonly config: ConfigRouteSources;
 }
 
 /** The most a tool call's body may be. */
@@ -51,6 +69,7 @@ export function kernelSockets(sources: KernelHalfSources): Readonly<Record<Kerne
 /** The kernel's own routes (§9.6, §1.3). Their descriptors are in `plugin.ts`. */
 export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<KernelRouteKey, RouteHandler>> {
   return {
+    ...configRoutes(sources.config),
     'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
     'GET /healthz': async () => {
       const live = sources.liveness();

@@ -4,8 +4,7 @@
  * no status. Nothing here draws anything.
  */
 
-import { shellClock } from '../shell.ts';
-import { type AgendaItem, type AgendaTurn, agendaTurn, agendaWakeAt } from '../wire/index.ts';
+import { type AgendaItem, type AgendaTurn, agendaTurn, agendaWakeAt } from '@ferretry/core-asks/contract';
 
 type AgendaTone = 'blocking' | 'needs-you' | 'will-block' | 'needed-by' | 'ferret' | 'parked' | 'done';
 
@@ -65,7 +64,7 @@ export const parkedUntilWords = (item: Pick<AgendaItem, 'parked' | 'neededBy'>, 
 export const parkedWords = (
   item: Pick<AgendaItem, 'parked' | 'neededBy'>,
   ferret: string,
-  now = shellClock.nowMs(),
+  now = Date.now(),
 ): string => {
   if (item.parked === undefined) return '';
   if (item.parked.reason === 'replied') {
@@ -77,7 +76,7 @@ export const parkedWords = (
 };
 
 /** The status of one item; `null` for a plain notification, which has no turn. `ferret` is the ferret's name. */
-export const agendaStatus = (item: AgendaItem, ferret: string, now = shellClock.nowMs()): AgendaStatus | null => {
+export const agendaStatus = (item: AgendaItem, ferret: string, now = Date.now()): AgendaStatus | null => {
   if (isNotice(item)) return null;
   const turn = agendaTurn(item);
   const deadline = neededByWords(item, now);

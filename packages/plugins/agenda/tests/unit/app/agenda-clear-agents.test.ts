@@ -6,9 +6,10 @@ import {
   previewClearAgents,
 } from '../../../app/lib/agenda-clear-agents.ts';
 import { daemonConnection } from '../../../app/shell.ts';
+import { callFromFetch } from '../../support/app/call-from-fetch.ts';
 
 const target = (id: string, name: string): ClearTarget => {
-  const connection = daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
+  const connection = daemonConnection({ daemonId: id });
   return { daemonId: connection.daemonId, name, connection };
 };
 
@@ -25,14 +26,15 @@ const portFor = (
   return {
     calls,
     port: {
-      fetcher: async (input, init) => {
-        const url = String(input);
-        const body = JSON.parse(String(init?.body ?? '{}')) as { dryRun?: boolean };
-        calls.push({ url, body });
-        const answer = reply(new URL(url).hostname, body.dryRun === true);
-        if (answer instanceof Error) throw answer;
-        return answer;
-      },
+      // Each machine is reached through its own client; the test names it by host.
+      clientFor: target =>
+        callFromFetch(async (url, init) => {
+          const body = JSON.parse(String(init.body ?? '{}')) as { dryRun?: boolean };
+          calls.push({ url, body });
+          const answer = reply(new URL(url).hostname, body.dryRun === true);
+          if (answer instanceof Error) throw answer;
+          return answer;
+        }, `https://${target.daemonId}.example.test`),
     },
   };
 };
@@ -88,5 +90,18 @@ describe('clearAgentsEverywhere', () => {
     const { port } = portFor(() => new Error('offline'));
     const outcome = await clearAgentsEverywhere(await previewClearAgents([target('a', 'Slow')], port), port);
     expect(outcome).toEqual({ cleared: 0, ferrets: 0, unreachable: ['Slow'] });
+  });
+});
+
+describe('a machine this half has no client for', () => {
+  it('is listed as unreachable and is never asked through another machine’s client', async () => {
+    const { port, calls } = portFor(() => json({ cleared: 1, ferrets: 1 }));
+    const only: ClearPort = { clientFor: each => (each.daemonId === 'a' ? port.clientFor(each) : undefined) };
+    const preview = await previewClearAgents([target('a', 'Here'), target('b', 'Elsewhere')], only);
+    expect(preview.rows.map(row => [row.kind, row.name])).toEqual([
+      ['ready', 'Here'],
+      ['unreachable', 'Elsewhere'],
+    ]);
+    expect(calls.map(call => new URL(call.url).hostname)).toEqual(['a.example.test']);
   });
 });

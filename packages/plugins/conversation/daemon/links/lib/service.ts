@@ -90,13 +90,23 @@ export interface LinkServiceNeeds {
 const HISTORY_MESSAGES = 200;
 
 type ForeignHistoryEntry = z.infer<typeof ForeignHistoryEntrySchema>;
-type ForeignHistoryList = { readonly entries: readonly ForeignHistoryEntry[] };
+type ForeignHistoryList = { readonly entries: readonly ForeignHistoryEntry[]; readonly skipped: number };
 type ForeignHistoryDetail = { readonly entry: ForeignHistoryEntry; readonly messages: LinkPreview['messages'] };
 
 const CODEX_INDEX = 'session_index.jsonl';
 const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 const CODEX_MAX_DEPTH = 4;
+
+/** A listed conversation as the read-only history names it. */
+const historyEntryOf = (row: LinkableConversation): ForeignHistoryEntry => ({
+  id: row.id,
+  harness: row.harness,
+  ...(row.name === undefined ? {} : { title: row.name }),
+  at: row.lastActivityAt,
+  turns: row.turns,
+  ...(row.turnsAtLeast === true ? { turnsAtLeast: true as const } : {}),
+});
 
 /** The search a listing applies: every word must appear somewhere, and the date is a floor (today's matcher). */
 export function linkMatcher(query: LinkQuery): (row: LinkableConversation) => boolean {
@@ -162,14 +172,10 @@ export class LinkService {
 
   /** The read-only foreign history (the harness conversations that predate Ferretry): the same finders, never resumable. */
   async history(harness?: string): Promise<ForeignHistoryList> {
-    const { located } = await this.#discover(harness);
+    const { located, skipped } = await this.#discover(harness);
     return {
-      entries: located.map(({ row }) => ({
-        id: row.id,
-        harness: row.harness,
-        ...(row.name === undefined ? {} : { title: row.name }),
-        at: row.lastActivityAt,
-      })),
+      entries: located.map(({ row }) => historyEntryOf(row)),
+      skipped,
     };
   }
 
@@ -180,12 +186,7 @@ export class LinkService {
     const preview = await this.needs.describer.preview(found.candidate, HISTORY_MESSAGES);
     if (preview === undefined) return undefined;
     return {
-      entry: {
-        id: found.row.id,
-        harness: found.row.harness,
-        ...(found.row.name === undefined ? {} : { title: found.row.name }),
-        at: found.row.lastActivityAt,
-      },
+      entry: historyEntryOf(found.row),
       messages: preview.messages,
     };
   }

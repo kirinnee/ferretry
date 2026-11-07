@@ -15,7 +15,7 @@
  * still open, then the main tab's own Markdown (`whereWeAre`) — as long and as rich as the ferret needs.
  */
 
-import { AGENDA_REVIEW_BODY_TAB_NAME, type AgendaViewTab } from '../../wire/index.ts';
+import { AGENDA_REVIEW_BODY_TAB_NAME, type AgendaViewTab } from '@ferretry/core-asks/contract';
 import { ChevronRight } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, type Ref, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useLayoutMode } from '../../shell.ts';

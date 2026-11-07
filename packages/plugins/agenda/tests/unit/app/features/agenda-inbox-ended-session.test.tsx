@@ -1,5 +1,6 @@
+import { type SessionAgendaSummary } from '../../../../contract/wire.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary } from '../../../../app/wire/index.ts';
+import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../../app/shell.ts';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import {
@@ -13,11 +14,11 @@ import { AgendaRollupStore } from '../../../../app/lib/agenda-rollup.ts';
 import { DaemonAgendaStore } from '../../../../app/lib/agenda-store.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../../app/shell.ts';
-import { DEFAULT_LIST_FILTER, sessionsBarView } from '../../../../app/shell.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { needsYouRows } from '../../../../app/features/agenda/agenda-nav.tsx';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
-const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
+const studio = daemonConnection({ daemonId: 'studio' });
 const at = (minutes: number): string => new Date(Date.UTC(2026, 9, 30, 15, minutes)).toISOString();
 
 const summary = (extra: Partial<SessionAgendaSummary> = {}): SessionAgendaSummary => ({
@@ -158,10 +159,8 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
     ended('retired', 'stopped', summary({ ask: 'Ship it?', latestAt: at(4) })),
   ];
 
-  test('stays in the sidebar under Needs you with its badge, though the session is over', () => {
-    const bar = sessionsBarView(sessions, [], DEFAULT_LIST_FILTER);
-    expect(bar.needsYou.map(row => row.config.id)).toEqual(['home-manager', 'retired']);
-    expect(bar.hiddenStopped).toBe(0);
+  test('stays under Needs you with its badge, though the session is over', () => {
+    expect(needsYouRows(sessions).map(row => row.config.id)).toEqual(['home-manager', 'retired']);
   });
 
   test('appears in the Inbox and is dismissed through the daemon, whatever state its session is in', async () => {
@@ -190,7 +189,7 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
     ]);
     const rows = [...view.container.querySelectorAll('[data-agenda-row]')];
     expect(rows).toHaveLength(2);
-    expect(rows.map(row => row.getAttribute('href'))).toContain('/d/studio/session/home-manager?agenda=A1');
+    expect(rows.map(row => row.getAttribute('href'))).toContain('/d/studio/agenda/home-manager/A1');
 
     await interact(() => (rows[0] as HTMLElement).click());
     await settle();

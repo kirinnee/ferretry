@@ -17,7 +17,7 @@ import {
   formAnswerOf,
   formFieldName,
   formValues,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { useMemo, useRef } from 'react';
 import type { InboxAction } from './agenda-answers.ts';
 import { agendaForms, type FormPicks, useFormChanges } from './agenda-form-state.ts';

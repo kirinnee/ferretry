@@ -375,13 +375,13 @@ const POLL_MS = 5000;
 const OLDER_ATTEMPTS = 3;
 
 // GAP(ferrets): the name a person calls a ferret, from Ferrets' summary (`GET /v1/ferrets/:ferretId`), read loosely.
-const FerretNameSchema = z.object({ name: z.string().min(1), label: z.string().min(1).optional() });
+const FerretNameSchema = z.object({ name: z.string().min(1) });
 
-/** What a person calls the ferret: its label, else its name; its id when the read fails. */
+/** What a person calls the ferret: its name; its id when the read fails. */
 const readFerretName = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<string> => {
   try {
     const summary = FerretNameSchema.parse(await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId } }));
-    return summary.label ?? summary.name;
+    return summary.name;
   } catch {
     return ferretId;
   }

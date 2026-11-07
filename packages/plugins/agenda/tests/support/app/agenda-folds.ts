@@ -3,7 +3,7 @@
  * also bundled into the browser scenes of the integration tier, and `dom.ts` (happy-dom) must never reach a browser
  * build.
  */
-import { interact } from './dom.ts';
+import { interact } from '@ferretry/app/testing';
 
 /** Opens the open item's folded Conversation inside `root`, where it has one. */
 export const openConversation = async (root: ParentNode): Promise<void> => {

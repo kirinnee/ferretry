@@ -7,6 +7,7 @@ import {
   SessionStatusSchema,
 } from '../../protocol/session.ts';
 import { z } from 'zod';
+import { MAX_ASSIGNED_TASK_LENGTH, MAX_TMUX_SESSION_NAME_LENGTH } from '../../../../contract/index.ts';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';
 
@@ -57,10 +58,8 @@ export type RecordedSessionStatus = z.infer<typeof RecordedSessionStatusSchema>;
  * bound is what keeps the document a document — an unbounded prompt is re-serialized on every
  * transition.
  */
-export const MAX_ASSIGNED_TASK_LENGTH = 256 * 1024;
-
-/** The longest name tmux itself accepts as a session address (see `lib/tmux/address.ts`). */
-export const MAX_TMUX_SESSION_NAME_LENGTH = 128;
+// The two limits are the contract's: the config file's schema bounds `prompt` and `tmuxSession` by them.
+export { MAX_ASSIGNED_TASK_LENGTH, MAX_TMUX_SESSION_NAME_LENGTH };
 
 /** A relative or unresolved cwd would start the agent in the daemon's own directory. */
 const AbsolutePathSchema = z
@@ -99,7 +98,7 @@ export const SessionLifecycleConfigSchema = z.object({
    * because every reader of it — the resolver, the fork binder — already reads it here, and a second
    * home would be a second answer to "which credential is current".
    */
-  sessionCapabilityHash: z
+  capabilityHash: z
     .string()
     .regex(/^[0-9a-f]{64}$/u)
     .optional(),
@@ -151,7 +150,7 @@ export interface CreateSessionLifecycleRequest {
   readonly prompt?: string;
   readonly parent?: string;
   /** SHA-256 of the credential this session will hold; the plaintext never travels in the record. */
-  readonly sessionCapabilityHash?: string;
+  readonly capabilityHash?: string;
 }
 
 export interface SessionLifecycleEvent {

@@ -16,6 +16,7 @@ import {
   type Admission,
   type AdmissionDecision,
   type InventoryEntry,
+  type InventorySurfaces,
   type ScopedRoute,
   type AdmissionInput,
   type ApiRequest,
@@ -174,7 +175,11 @@ class CatalogsAdmission implements Admission {
     return this.#main.readmit();
   }
 
-  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] {
+  inventory(
+    request: ApiRequest,
+    entries: readonly InventoryEntry[],
+    _surfaces: InventorySurfaces,
+  ): readonly InventoryEntry[] {
     return this.#main.inventory(request, entries);
   }
 
@@ -215,6 +220,8 @@ export interface CatalogsFixtureOptions {
   readonly mcp?: McpSourceServer[];
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
   readonly sealed?: SealedDocumentsApi;
+  /** The effective contract hash the host answers each package; absent = `unhashed`. */
+  readonly contractHash?: (id: string) => string;
 }
 
 /**
@@ -357,6 +364,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     uses: { connections },
     gate: admission,
     clock,
+    ...(options.contractHash === undefined ? {} : { contractHash: options.contractHash }),
     ...(options.config === undefined && options.memberUnlockDays === undefined
       ? {}
       : {

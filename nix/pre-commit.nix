@@ -239,6 +239,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A dead-code keep marker (`@pending`, `@public`, a knip `ignore`) must name an open gap of a pending
+    # port, a kept guarantee row or a declared surface, so the knip gates cannot be quieted by a tag.
+    # See scripts/validate/pending-tags.sh.
+    a-pending-tags = {
+      enable = true;
+      name = "Dead-code keep markers name an open fact";
+      entry = validator "scripts/validate/pending-tags.sh";
+      files = "^(packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/pending-tags\\.(sh|ts))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-fy-render-in-docs = {
       enable = true;
       name = "No fy-render fences in durable files";

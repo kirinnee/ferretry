@@ -8,7 +8,7 @@ import {
   DEFAULT_NOTIFICATION_FILTER_PREFERENCES,
   NOTIFICATION_CATEGORY_COPY,
 } from '../../../../../app/lib/notification-filter.ts';
-import { render, run } from '../../../../support/app/react.ts';
+import { render, run } from '@ferretry/app/testing';
 
 const view = (overrides: Partial<NotificationFilterSettingsViewProps> = {}) => {
   const calls = {

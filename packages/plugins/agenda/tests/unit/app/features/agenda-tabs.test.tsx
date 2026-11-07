@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { Markdown } from '../../../../app/shell.ts';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { AgendaTabs } from '../../../../app/features/agenda/agenda-tabs.tsx';
 import type { AgendaVersionsView } from '../../../../app/features/agenda/use-item-lifecycle.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
-import { settleUntil } from '../../../support/app/settle.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
 
 /**
  * THE TABS (&F923; docs/agenda.md § The tabs): the item's live document — "Where we are now" first and open, "The full

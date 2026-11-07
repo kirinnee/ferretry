@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaDetail, agendaHasDetail } from '../../../../app/features/agenda/agenda-detail.tsx';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

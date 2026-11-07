@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaId } from '../../../../app/wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { agendaConversationPath, type InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import type { DaemonId } from '../../../../app/shell.ts';
@@ -11,7 +11,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, mount, must } from '../../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { typeInto } from '../../../support/app/learning-dom.ts';
 import { sessionView } from '../../../support/app/sessions.ts';

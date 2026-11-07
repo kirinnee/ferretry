@@ -157,15 +157,17 @@ describe('the roll-up and clearing', () => {
     await raiseAsk(asks, 'f1', 'e3');
     const all = await host.request('GET', '/v1/agenda/open', { ...as(owner()) });
     expect(
-      all.json<{ ferrets: Array<{ ferret: string; asks: unknown[] }> }>().ferrets.map(f => [f.ferret, f.asks.length]),
+      all
+        .json<{ sessions: Array<{ sessionId: string; items: unknown[] }> }>()
+        .sessions.map(f => [f.sessionId, f.items.length]),
     ).toEqual([
       ['f1', 2],
       ['f2', 1],
     ]);
     const first = await host.request('GET', '/v1/agenda/open', { query: { limit: '1' }, ...as(owner()) });
-    expect(first.json<{ ferrets: unknown[]; next?: string }>()).toMatchObject({ next: 'f1' });
+    expect(first.json<{ sessions: unknown[]; next?: string }>()).toMatchObject({ next: 'f1' });
     const rest = await host.request('GET', '/v1/agenda/open', { query: { after: 'f1' }, ...as(owner()) });
-    expect(rest.json<{ ferrets: Array<{ ferret: string }> }>().ferrets.map(f => f.ferret)).toEqual(['f2']);
+    expect(rest.json<{ sessions: Array<{ sessionId: string }> }>().sessions.map(f => f.sessionId)).toEqual(['f2']);
     expect((await host.request('GET', '/v1/agenda/open', { query: { limit: '0' }, ...as(owner()) })).status).toBe(400);
   });
 
@@ -234,23 +236,24 @@ describe('the daemon agenda', () => {
     const a = await raiseAsk(asks, MACHINE, 'e1', { kind: 'notice', subject: 'Disk almost full' });
     await raiseAsk(asks, MACHINE, 'e2', { kind: 'notice', subject: 'Update ready' });
     const listed = await host.request('GET', '/v1/machine/agenda', { ...as(owner()) });
-    expect(listed.json<{ asks: unknown[]; resolved: unknown[] }>()).toMatchObject({ asks: [{}, {}], resolved: [] });
+    expect(listed.json<{ items: unknown[]; resolved: unknown[] }>()).toMatchObject({ items: [{}, {}], resolved: [] });
     expect((await host.request('GET', `/v1/machine/agenda/${a.id}`, { ...as(owner()) })).json()).toMatchObject({
       subject: 'Disk almost full',
     });
     expect((await host.request('GET', '/v1/machine/agenda/A99', { ...as(owner()) })).status).toBe(404);
     const dismissed = await host.request('POST', '/v1/machine/agenda', {
-      body: { action: 'dismiss', ask: a.id },
+      body: { action: 'dismiss', id: a.id },
       ...as(owner()),
     });
-    expect(dismissed.json<{ asks: unknown[]; resolved: unknown[] }>()).toMatchObject({ asks: [{}], resolved: [{}] });
+    expect(dismissed.json<{ items: unknown[]; resolved: unknown[] }>()).toMatchObject({ items: [{}], resolved: [{}] });
     const snooze = await host.request('POST', '/v1/machine/agenda', {
-      body: { action: 'snooze', ask: 'A2', until: '2026-11-08T09:00:00.000Z' },
-      as: owner(),
+      body: { action: 'snooze', id: 'A2', until: '2026-11-08T09:00:00.000Z' },
+      ...as(owner()),
     });
-    expect(snooze.status).toBe(501);
+    expect(snooze.status).toBe(400);
+    expect(JSON.stringify(snooze.json())).toContain('a notice is read, not snoozed');
     expect(
-      (await host.request('POST', '/v1/machine/agenda', { body: { action: 'dismiss', ask: 'nope' }, ...as(owner()) }))
+      (await host.request('POST', '/v1/machine/agenda', { body: { action: 'dismiss', id: 'nope' }, ...as(owner()) }))
         .status,
     ).toBe(400);
     expect((await host.request('GET', '/v1/machine/agenda', { ...as({ kind: 'ferret', id: 'f1' }) })).status).toBe(403);

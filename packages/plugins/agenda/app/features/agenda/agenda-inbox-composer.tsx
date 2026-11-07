@@ -18,18 +18,57 @@
  * the message is not sent as chat. It may throw the one sentence the composer shows (empty fields, asked once).
  *
  * The client is the host's (one per paired machine); until it is ready the composer is not drawn.
+ *
+ * THE COMPOSER ITSELF IS CONVERSATION'S, and this half never imports it (lead decision Q9). This is the Agenda's half
+ * of the reply box: which ferret, which item's draft, the `!A5` prefix, a form's Send. The box is whatever composer the
+ * host puts in {@link AgendaComposerContext} — Conversation's, where it binds one — and with none bound nothing is drawn.
+ * The ask screen draws the ferret's conversation through the `agenda.conversation` slot instead; this binder stays for a
+ * host that hands the Inbox a composer of its own.
  */
 
-import type { AgendaId } from '../../wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../shell.ts';
-import { useEffect, useMemo, useState } from 'react';
-import { Composer, type ComposerProps, type ComposerSent } from '../../shell.ts';
-import { useOptionalSessionQuota } from '../../shell.ts';
+import { type ComponentType, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../shell.ts';
-import type { DaemonUsageStore } from '../../shell.ts';
-import { sessionsBarNames } from '../../shell.ts';
+import { sessionsBarNames } from '../../lib/ferret-names.ts';
+
+/** What the composer sends through: the ferret's chat, by id. */
+export interface AgendaComposerApi {
+  readonly send: (sessionId: string, request: { readonly message: string }) => Promise<unknown>;
+}
+
+/** A message the composer saw accepted: the owner's own words, and how it went. */
+export interface AgendaComposerSent {
+  readonly words: string;
+  readonly sendId?: string | undefined;
+  readonly disposition?: string | undefined;
+}
+
+/** What the Agenda hands the host's composer. */
+export interface AgendaComposerProps {
+  readonly api: AgendaComposerApi;
+  readonly daemon: DaemonConnection;
+  readonly sessionId: string;
+  /** This item's own draft: never the ferret's chat box, never another item's. */
+  readonly draftSlot: AgendaId;
+  readonly compact: boolean;
+  readonly disabled: boolean;
+  readonly placeholder: string;
+  readonly allowEmptySend: boolean;
+  readonly clearErrorOn?: unknown;
+  readonly onSent?: (sent: AgendaComposerSent) => void;
+  readonly restore?: string;
+  readonly onRestored?: () => void;
+  readonly dictationSettings?: unknown;
+  readonly enterKeyPreference: unknown;
+  readonly phoneEnterKeyPreference: unknown;
+  readonly autocompleteFetcher?: unknown;
+}
+
+/** The composer the host binds for the Inbox; `null` (no host composer) draws no box. */
+export const AgendaComposerContext = createContext<ComponentType<AgendaComposerProps> | null>(null);
 
 /** The ferret the reply goes to, as the sidebar names it. */
 const ferretName = (view: SessionView): string => {
@@ -39,14 +78,12 @@ const ferretName = (view: SessionView): string => {
 
 export interface AgendaInboxComposerProps {
   readonly connection: DaemonConnection;
-  /** The ferret's conversation: the composer writes to it, and its account's usage is shown as in the chat. */
+  /** The ferret's conversation: the composer writes to it. */
   readonly view: SessionView;
-  /** The host's usage readings; absent, the composer says the usage is unknown. */
-  readonly usage?: DaemonUsageStore | undefined;
   /** The open item: every message sent from here is about it. */
   readonly itemId: AgendaId;
   /** The machine's client; the host keeps one per machine. */
-  readonly clientFor: (connection: DaemonConnection) => Promise<ComposerProps['api']>;
+  readonly clientFor: (connection: DaemonConnection) => Promise<AgendaComposerApi>;
   /** Phone chrome. */
   readonly compact: boolean;
   readonly disabled?: boolean;
@@ -54,13 +91,13 @@ export interface AgendaInboxComposerProps {
   readonly answerForm?: (() => void) | undefined;
   /** The open form's picks key: a changed pick clears the "nothing to send" line under the box. */
   readonly formKey?: string | undefined;
-  readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
-  readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
+  readonly autocompleteFetcher?: unknown;
+  readonly enterKeyPreference?: unknown;
   /** This device's dictation settings, the chat composer's own: present, the box carries the same mic. */
-  readonly dictationSettings?: ComposerProps['dictationSettings'];
-  readonly phoneEnterKeyPreference?: ComposerProps['phoneEnterKeyPreference'];
+  readonly dictationSettings?: unknown;
+  readonly phoneEnterKeyPreference?: unknown;
   /** A chat message about the item was accepted. Not called for a form's answer. */
-  readonly onReplied?: ((sent: ComposerSent) => void) | undefined;
+  readonly onReplied?: ((sent: AgendaComposerSent) => void) | undefined;
   /** The words of a reply that was taken back, for the box; `onRestored` fires once they are in. */
   readonly restore?: string | undefined;
   readonly onRestored?: (() => void) | undefined;
@@ -69,7 +106,6 @@ export interface AgendaInboxComposerProps {
 export function AgendaInboxComposer({
   connection,
   view,
-  usage,
   itemId,
   clientFor,
   compact,
@@ -84,8 +120,8 @@ export function AgendaInboxComposer({
   restore,
   onRestored,
 }: AgendaInboxComposerProps) {
-  const quota = useOptionalSessionQuota(usage, connection, view);
-  const [client, setClient] = useState<{ readonly daemonId: string; readonly api: ComposerProps['api'] } | null>(null);
+  const Composer = useContext(AgendaComposerContext);
+  const [client, setClient] = useState<{ readonly daemonId: string; readonly api: AgendaComposerApi } | null>(null);
   useEffect(() => {
     let current = true;
     void clientFor(connection).then(
@@ -98,11 +134,11 @@ export function AgendaInboxComposer({
       current = false;
     };
   }, [clientFor, connection]);
-  const api = client?.daemonId === connection.daemonId ? client.api : null;
+  const api: AgendaComposerApi | null = client?.daemonId === connection.daemonId ? client.api : null;
   const chat = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
   const form = useFormComposer(chat, answerForm, formKey);
   const forForm = form.allowEmptySend;
-  if (form.api === null) return null;
+  if (form.api === null || Composer === null) return null;
   return (
     <Composer
       allowEmptySend={forForm}
@@ -119,7 +155,6 @@ export function AgendaInboxComposer({
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
       placeholder={forForm ? `Anything else for ${ferretName(view)}?` : `Reply to ${ferretName(view)}…`}
-      quota={quota}
       sessionId={view.config.id}
       {...(autocompleteFetcher === undefined ? {} : { autocompleteFetcher })}
     />

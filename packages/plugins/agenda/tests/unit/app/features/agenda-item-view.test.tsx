@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgendaItem } from '../../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { Markdown } from '../../../../app/shell.ts';
 import { AgendaItemView, type AgendaItemViewProps } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import type { HistoryEvent } from '../../../../app/lib/agenda-history.ts';
@@ -9,7 +9,7 @@ import { DISMISS_ACTION, type InboxAction } from '../../../../app/lib/agenda-inb
 import type { DaemonId } from '../../../../app/shell.ts';
 import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

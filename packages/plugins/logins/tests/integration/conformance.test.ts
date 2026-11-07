@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { testHost } from '@ferretry/kernel/testing';
 import { emptyVault } from '../support/fake-vault.ts';
-import { LoginChangeError, LoginsPort } from '../../contract/index.ts';
+import { LoginChangeError, LoginChangesPort, LoginsPort } from '../../contract/index.ts';
 import { loginsConformance } from '../../contract/testing/index.ts';
 import daemon from '../../daemon/index.ts';
 
@@ -52,12 +52,10 @@ describe('the Logins port changes through the same service as the routes', () =>
   test('a change staged through the port is the one the route reads, and a refusal is the same code on both', async () => {
     const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
     try {
-      const api = host.provided(LoginsPort);
-      const staged = await api.changes.stage({ kind: 'login.label', id: 'team', label: 'Team' });
+      const api = host.provided(LoginChangesPort);
+      const staged = await api.stage({ kind: 'login.label', id: 'team', label: 'Team' });
       const read = await host.request('GET', `/v1/logins/changes/${staged.id}`);
-      const viaPort = (await api.changes
-        .stage({ kind: 'login.enable', id: 'ghost' })
-        .catch(caught => caught)) as unknown;
+      const viaPort = (await api.stage({ kind: 'login.enable', id: 'ghost' }).catch(caught => caught)) as unknown;
       const viaRoute = await host.request('POST', '/v1/logins/changes', {
         body: { kind: 'login.enable', id: 'ghost' },
       });

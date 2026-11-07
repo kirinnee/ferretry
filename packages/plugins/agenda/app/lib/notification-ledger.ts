@@ -7,18 +7,56 @@
  * daemons can safely own the same session id.
  */
 
-import type { PushNotificationKind, SessionStatus, SessionView } from '../shell.ts';
+import { daemonHomeHref } from '../shell.ts';
+import { sessionNotificationPath } from '@ferretry/core-asks/contract';
+import type { SessionConfig, SessionStatus } from '../shell.ts';
 import { parseTaskName } from '../shell.ts';
 import { displayCallsign } from '../shell.ts';
 import type { DaemonId } from '../shell.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../shell.ts';
-import type { FleetSnapshot } from '../shell.ts';
-import type { DeviceNotificationFilterPreferences } from './notification-filter.ts';
+import type { DeviceNotificationFilterPreferences, PushNotificationKind } from './notification-filter.ts';
 import { shouldShowNotification } from './notification-filter.ts';
 import type { NotificationPreferences } from './notification-preferences.ts';
-import { daemonSessionPath, daemonHomePath } from '../shell.ts';
 
 export type NotifyKind = PushNotificationKind;
+
+/**
+ * Every status a ferret's view may carry here: Ferrets' four (and the machine's own `running`), and the ones a
+ * session list says about a ferret that is waiting, finished or dead. A ferret that DIED says one of the failed three;
+ * Ferrets' own list (`starting | working | idle | stopped`) says none of them, so with that list alone no transition
+ * here ever notifies — see GAP(ferret-failed-status) in NEEDS-APP-SHELL.txt.
+ */
+export type NotifiedStatus =
+  | SessionStatus
+  | 'awaiting_user'
+  | 'awaiting_question'
+  | 'completed'
+  | 'failed'
+  | 'stalled'
+  | 'kill_failed';
+
+/** The ferret, as far as a notification reads it. A Ferrets row (`FerretView`) is one. */
+export interface NotifiedView {
+  readonly config: SessionConfig;
+  readonly state: {
+    readonly status: NotifiedStatus;
+    readonly reason?: string;
+    readonly turn?: number;
+    /** Whose turn the ferret's last turn left it on. */
+    readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+    /** When that turn ended: each turn end is its own event. */
+    readonly turnStateAt?: string;
+  };
+}
+
+/** Every machine's ferrets as the watch reads them; `sessions: null` is a list not read yet. */
+export interface NotifiedFleet {
+  readonly daemons: ReadonlyMap<DaemonId, { readonly sessions: readonly NotifiedView[] | null }>;
+}
+
+/** A ferret's page under its machine, as a daemon names it (`/session/<id>`, relative to the machine's pages). */
+const ferretPagePath = (daemonId: DaemonId, sessionId: string): string =>
+  `${daemonHomeHref(daemonId)}${sessionNotificationPath(sessionId)}`;
 
 /**
  * The kinds a SESSION transition can produce. `device-paired` is never one of them — no session
@@ -28,7 +66,7 @@ export type NotifyKind = PushNotificationKind;
  */
 export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired' | 'question'>;
 
-const FAILED_STATUSES: ReadonlySet<SessionStatus> = new Set(['failed', 'stalled', 'kill_failed']);
+const FAILED_STATUSES: ReadonlySet<NotifiedStatus> = new Set(['failed', 'stalled', 'kill_failed']);
 
 /**
  * NOTIFICATIONS ARE ATTENTION (docs/agenda.md): a ferret that wants the owner raises an Agenda
@@ -40,7 +78,10 @@ const FAILED_STATUSES: ReadonlySet<SessionStatus> = new Set(['failed', 'stalled'
  * One transition still notifies, because a dead ferret CANNOT raise an item for itself: it died
  * (`failed`, `stalled`, `kill_failed`). First sight and every other transition stay silent.
  */
-export const classifyTransition = (prev: SessionStatus | undefined, next: SessionStatus): SessionNotifyKind | null => {
+export const classifyTransition = (
+  prev: NotifiedStatus | undefined,
+  next: NotifiedStatus,
+): SessionNotifyKind | null => {
   if (prev === undefined || prev === next) return null;
   return FAILED_STATUSES.has(next) ? 'failed' : null;
 };
@@ -65,15 +106,15 @@ const isDaemonKey = (key: string, daemonId: DaemonId): boolean => {
  * lifecycle invalidation.
  */
 export class DaemonNotificationLedger {
-  readonly #statuses = new Map<string, SessionStatus>();
+  readonly #statuses = new Map<string, NotifiedStatus>();
   readonly #fired = new Map<string, Fired>();
   readonly #groups = new Map<string, Group>();
 
-  status(scope: DaemonSessionScope): SessionStatus | undefined {
+  status(scope: DaemonSessionScope): NotifiedStatus | undefined {
     return this.#statuses.get(daemonSessionKey(scope));
   }
 
-  setStatus(scope: DaemonSessionScope, status: SessionStatus): void {
+  setStatus(scope: DaemonSessionScope, status: NotifiedStatus): void {
     this.#statuses.set(daemonSessionKey(scope), status);
   }
 
@@ -135,7 +176,7 @@ export interface NotificationSpec {
   readonly count: number;
 }
 
-const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
+const bodyFor = (view: NotifiedView, kind: SessionNotifyKind): string => {
   switch (kind) {
     case 'agenda':
     case 'attention':
@@ -152,27 +193,27 @@ const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
   }
 };
 
-export const notificationEventKey = (scope: DaemonSessionScope, view: SessionView, kind: SessionNotifyKind): string =>
+export const notificationEventKey = (scope: DaemonSessionScope, view: NotifiedView, kind: SessionNotifyKind): string =>
   JSON.stringify(notificationEventParts(scope, view, kind));
 
 const notificationEventParts = (
   scope: DaemonSessionScope,
-  view: SessionView,
+  view: NotifiedView,
   kind: SessionNotifyKind,
-): readonly [DaemonId, string, SessionNotifyKind, SessionStatus, number, string] => {
+): readonly [DaemonId, string, SessionNotifyKind, NotifiedStatus, number, string] => {
   if (scope.sessionId !== view.config.id) throw new Error('notification scope must match the session view');
   return [
     scope.daemonId,
     scope.sessionId,
     kind,
     view.state.status,
-    view.state.turn,
+    view.state.turn ?? 0,
     // The boundary itself, so each turn end is its own event and never collapsed into the last one.
     kind === 'attention' || kind === 'agenda' ? (view.state.turnStateAt ?? '') : '',
   ];
 };
 
-export const notificationTitle = (view: SessionView): string => {
+export const notificationTitle = (view: NotifiedView): string => {
   const { prefix, task } = parseTaskName(view.config.name);
   const title = task || view.config.id;
   const callsign = displayCallsign(view.config.teammate) || prefix || '';
@@ -182,14 +223,14 @@ export const notificationTitle = (view: SessionView): string => {
 /** Builds a daemon-qualified OS payload for one session transition. */
 export const buildNotification = (
   scope: DaemonSessionScope,
-  view: SessionView,
+  view: NotifiedView,
   kind: SessionNotifyKind,
   count = 1,
 ): NotificationSpec => ({
   title: notificationTitle(view),
   body: bodyFor(view, kind),
   tag: `fy-session:${encodeURIComponent(scope.daemonId)}:${encodeURIComponent(scope.sessionId)}`,
-  url: daemonSessionPath(scope.daemonId, scope.sessionId),
+  url: ferretPagePath(scope.daemonId, scope.sessionId),
   sessionId: scope.sessionId,
   scope,
   kind,
@@ -218,7 +259,7 @@ export const summaryNotification = (
   title: 'ferretry',
   body: `${count} sessions need you.`,
   tag: `fy-summary:${encodeURIComponent(daemonId)}`,
-  url: daemonHomePath(daemonId),
+  url: daemonHomeHref(daemonId),
   eventKey,
   count: 1,
 });
@@ -233,7 +274,7 @@ export const summaryNotification = (
  */
 export const planNotifications = (
   daemonId: DaemonId,
-  views: readonly SessionView[],
+  views: readonly NotifiedView[],
   ledger: DaemonNotificationLedger,
   prefs: NotificationPreferences,
   filter: DeviceNotificationFilterPreferences,
@@ -270,7 +311,7 @@ export const planNotifications = (
 export interface SessionsSource {
   subscribe(listener: () => void): () => void;
   /** `null` is an unhydrated fleet, which must not reset any baseline. */
-  snapshot(): FleetSnapshot | null;
+  snapshot(): NotifiedFleet | null;
 }
 
 export interface NotificationWatchEnvironment {

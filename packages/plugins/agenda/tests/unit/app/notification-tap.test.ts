@@ -2,11 +2,12 @@
  * Where a tap on each kind of push lands. The worker's click handler is
  * `notificationTapUrl(notificationUrl(url, origin, machine, sessionId), origin)`, so the proof is that
  * composition, per kind, against the page a daemon names (`agendaNotificationPath`) — plus the mark every
- * one of them wears.
+ * one of them wears. The rules are the Agenda's own (`lib/notification-tap.ts`); an ask's tap opens the ask's own
+ * page (`/d/<daemon>/agenda/<ferret>/<ask>`), where today it opened the Inbox at that card.
  */
 import { describe, expect, it } from 'bun:test';
-import { agendaNotificationPath, type AgendaId, MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
-import type { PushNotificationPayload } from '../../../app/shell.ts';
+import { type AgendaId, agendaNotificationPath, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
+import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON, showGroupedNotification } from '../../../app/lib/notify.ts';
 import {
@@ -15,7 +16,7 @@ import {
   notificationTapUrl,
   notificationUrl,
   unverifiedNotification,
-} from '../../../app/shell.ts';
+} from '../../../app/lib/notification-tap.ts';
 import { daemonId } from '../../../app/shell.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
@@ -60,26 +61,26 @@ describe('inboxTargetPath / inboxTargetFromSearch', () => {
 });
 
 describe('a tap, per kind of push', () => {
-  it('an agenda item lands on that item in the Inbox', () => {
-    const payload = push({ kind: 'attention', sessionId: 's1', url: agendaNotificationPath('s1', 'A3') });
-    expect(tapTarget(payload)).toBe(`${HOME}/inbox?session=s1&agenda=A3`);
+  it('an agenda item lands on that ask’s own page', () => {
+    const payload = push({ kind: 'attention', sessionId: 's1', url: agendaNotificationPath('s1', A3) });
+    expect(tapTarget(payload)).toBe(`${HOME}/agenda/s1/A3`);
   });
 
-  it('a machine notice lands on its item in the Inbox, never on a conversation page', () => {
+  it('a machine notice lands on its ask’s page, never on a conversation page', () => {
     const payload = push({
       kind: 'attention',
       sessionId: MACHINE_AGENDA_ID,
       url: agendaNotificationPath(MACHINE_AGENDA_ID, A3),
     });
-    expect(tapTarget(payload)).toBe(`${HOME}/inbox?session=${MACHINE_AGENDA_ID}&agenda=A3`);
-    // A push that named no page the worker may open still opens the Inbox, not a machine-agenda conversation.
-    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${HOME}/inbox`);
+    expect(tapTarget(payload)).toBe(`${HOME}/agenda/${MACHINE_AGENDA_ID}/A3`);
+    // A push that named no page the worker may open still opens the Agenda, not a machine-agenda conversation.
+    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${HOME}/agenda`);
   });
 
   it('a ping, a deadline, a wake-up and a stop all carry their item, so all land on it', () => {
     for (const kind of ['agenda', 'attention', 'question'] as const) {
-      const payload = push({ kind, sessionId: 's9', url: agendaNotificationPath('s9', 'A12') });
-      expect(tapTarget(payload)).toBe(`${HOME}/inbox?session=s9&agenda=A12`);
+      const payload = push({ kind, sessionId: 's9', url: agendaNotificationPath('s9', 'A12' as AgendaId) });
+      expect(tapTarget(payload)).toBe(`${HOME}/agenda/s9/A12`);
     }
   });
 

@@ -32,6 +32,9 @@ import {
   SitrepLines,
   SubtreeViewSchema,
   StartDecide,
+  AgentPinsFile,
+  FerretDetailsFile,
+  FerretPinsFile,
 } from '../contract/index.ts';
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
@@ -68,7 +71,7 @@ import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
 import { RestartQueueEntrySchema } from './lib/protocol/session-restart.ts';
 import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles, FerretWaitFiles } from './lib/state.ts';
+import { FerretSummaryFiles, FerretWaitFiles } from './lib/state.ts';
 import { FerretSignals } from './lib/ferrets/signals.ts';
 import { SessionSignalService } from './lib/session/signal/service.ts';
 import {
@@ -128,7 +131,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       else if (!read.ok) log.warn('a ferret record could not be read', { file: read.error.file });
       if (!read.ok || read.value === undefined) continue;
       // Its start options and title, kept beside the record so a list or a read stays memory-only.
-      const details = await kernel.state.read(FerretDetailsFiles, name);
+      const details = await kernel.state.read(FerretDetailsFile, name);
       if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);
       else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
       // Its declared wait, if it was parked when the daemon last ran.
@@ -241,7 +244,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     started: payload => {
       hooks.observe(FerretStarted, payload);
     },
-    saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
+    saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFile, details, ferret),
     // A stopped ferret holds no declared wait; the credit it banked stays.
     endWait: async ferret => {
       if (registry.waitingOf(ferret) === undefined) return;
@@ -553,7 +556,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const noteBoard = pinRoutes({
     pins: new PinService(
       new RegistryPinSessionDirectory(ferret => registry.get(ferret as FerretId) !== undefined),
-      new StatePinRepository(kernel.state, FerretPinFiles, pinClock),
+      new StatePinRepository(kernel.state, FerretPinsFile, pinClock),
       pinClock,
       { next: () => randomUUID() },
     ),

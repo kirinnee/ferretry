@@ -8,9 +8,8 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 import { flush } from '../board-support.ts';
-import { fakeActions } from './board-detail-support.tsx';
 
 const NOW = Date.parse('2026-08-02T12:00:00.000Z');
 
@@ -40,7 +39,6 @@ interface Options {
 
 const open = async ({ cards = [rebase, second], phone = false, page = {} }: Options = {}) => {
   const fake = fakeInbox();
-  const actions = fakeActions({});
   view = await mount(
     <InboxHarness
       cards={cards}
@@ -60,7 +58,7 @@ const open = async ({ cards = [rebase, second], phone = false, page = {} }: Opti
     />,
   );
   await interact(() => flush());
-  return { root: view.container, fake, actions };
+  return { root: view.container, fake };
 };
 
 const quick = (root: HTMLElement): HTMLElement =>

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Carriers, DoctorChecks, defineConfig, PluginsChanged, SessionModes } from './contract/index.ts';
+import { Carriers, DoctorChecks, defineConfig, PluginsChanged, policyRef, SessionModes } from './contract/index.ts';
 import { definePlugin, route, socket } from './manifest/index.ts';
 
 /** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
@@ -27,6 +27,10 @@ export const PluginsConfig = defineConfig({
           .map(id => `turns ${id} on (its off line was removed)`),
       ),
 });
+
+/** Gate's vocabulary by name: the kernel carries these refs and never reads them (§7.1). */
+const FLEET_USE = { capability: policyRef('capability', 'fleet'), axis: 'use' } as const;
+const FLEET_CONFIGURED = policyRef('audit', 'fleet.configured');
 
 /**
  * The Kernel's own declaration (§2.2). Exported as `@ferretry/kernel/plugin` rather than `./manifest`, because
@@ -89,6 +93,35 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'each tool records itself, by its own declaration' },
         guard: { none: 'the answer is the tool’s, already guarded by the tool’s own declaration' },
+      }),
+      // The configuration files (docs/config-files.md, D2 #3): today's three routes, served here because every plugin's
+      // files are the kernel's to read and write. Gate answers per file which capability and axis the act needs.
+      route('GET /v1/config/file', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { skip: 'a read of one configuration file' },
+        guard: {
+          none: 'a configuration file names secrets as ${secret:NAME} and never holds a raw value (a raw secret is refused on write)',
+        },
+      }),
+      route('PUT /v1/config/file', {
+        minimum: 'operator',
+        caller: 'person',
+        ferretDoor: 'a ferret writes a config file with config_write, where the owner turned "Ferretry settings" on',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { record: FLEET_CONFIGURED },
+        guard: { none: 'the answer names the path, the etag and what waits for the owner; never the text or a value' },
+      }),
+      route('POST /v1/config/confirm', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { record: FLEET_CONFIGURED },
+        guard: { none: 'the answer names the path and whether the held edit was confirmed; never a value' },
       }),
       // §1.3.
       route('GET /v1/glossary', {
