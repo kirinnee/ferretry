@@ -229,7 +229,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       const bytes = new TextEncoder().encode(folder.files.get(pathOf(file, options.name)) ?? '');
       const from = Math.max(0, bytes.byteLength - maxBytes);
       let window = bytes.subarray(from);
-      if (from > 0) {
+      if (from > 0 && bytes[from - 1] !== 0x0a) {
         const firstBreak = window.indexOf(0x0a);
         window = firstBreak < 0 ? new Uint8Array() : window.subarray(firstBreak + 1);
       }

@@ -71,10 +71,14 @@ export async function readJsonlLines<Shape>(
   try {
     if (maxBytes === undefined) bytes = await fs.readBytes(path);
     else {
-      const tail = await fs.readTail(path, maxBytes);
+      // One byte of lookbehind distinguishes a cut line from a window starting exactly after a newline.
+      const tail = await fs.readTail(path, maxBytes + 1);
       if (tail !== undefined) {
-        const firstBreak = tail.from === 0 ? -1 : tail.bytes.indexOf(0x0a);
-        bytes = tail.from === 0 ? tail.bytes : firstBreak < 0 ? new Uint8Array() : tail.bytes.subarray(firstBreak + 1);
+        const skip = tail.from === 0 ? Math.max(0, tail.bytes.byteLength - maxBytes) : 1;
+        const window = tail.bytes.subarray(skip);
+        const completeStart = skip === 0 || tail.bytes[skip - 1] === 0x0a;
+        const firstBreak = completeStart ? -1 : window.indexOf(0x0a);
+        bytes = completeStart ? window : firstBreak < 0 ? new Uint8Array() : window.subarray(firstBreak + 1);
       }
     }
   } catch (error) {
