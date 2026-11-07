@@ -2,7 +2,7 @@ import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type ConversationApi, LinkKept, QuestionSchema, SearchSources } from '../contract/index.ts';
 import manifest from '../manifest.ts';
-import { followFerretChanges } from './ferret-changes.ts';
+import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
 import { buildReading } from './reading.ts';
 import { maskedBody } from './seams/masked-body.ts';
@@ -98,6 +98,8 @@ export default implementDaemon(manifest, {
       hooks: {
         'ask.sources:question': { schema: QuestionSchema, title: 'Question', form: true },
         'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
+        // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
+        'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),
         // A ferret stopped or is gone: its unlocked attachments are zeroed first; every change is a turn look.
         'ferret.changed': followFerretChanges({
           release: ferret => b.release(ferret),

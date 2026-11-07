@@ -35,8 +35,13 @@ describe('conversation manifest', () => {
       expect(secrets(path).every(guard => guard === 'secrets')).toBe(true);
     expect(secrets('/v1/ferrets/:ferretId/shared-draft/stream')).toEqual(['secrets']);
   });
-  test('takes the question source, sitrep lines and ferret.changed; offers message.before-send, turn.ended and search.sources', () => {
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ask.sources', 'sitrep.lines', 'ferret.changed']);
+  test('takes the question source, sitrep lines, ferret.changed and ferret.stopping; offers message.before-send, turn.ended and search.sources', () => {
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'ask.sources',
+      'sitrep.lines',
+      'ferret.changed',
+      'ferret.stopping',
+    ]);
     expect(manifest.hooks.takes[0]?.key).toBe('question');
     expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual([
       'message.before-send',

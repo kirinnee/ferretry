@@ -5,10 +5,10 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { WorkerHandle } from '@ferretry/kernel/contract';
 import { fixedClock, testHost } from '@ferretry/kernel/testing';
-import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
+import { CONVERSATION_STATE, type ConversationApi, ConversationPort } from '../../../contract/index.ts';
 import { memoryStatePort } from '../../support/state.ts';
 import daemon from '../../../daemon/index.ts';
-import { followFerretChanges } from '../../../daemon/ferret-changes.ts';
+import { followFerretChanges, followFerretStopping } from '../../../daemon/ferret-changes.ts';
 
 const F1 = ferretId('f1');
 const change = (state: FerretChangedPayload['state'], what: FerretChangedPayload['change']): FerretChangedPayload => ({
@@ -104,8 +104,54 @@ async function conversation() {
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
   const changed = (payload: FerretChangedPayload) => built.half?.hooks['ferret.changed'](payload);
-  return { host, changed, observed };
+  const stopping = (ferret: typeof F1) => built.half?.hooks['ferret.stopping']({ ferret });
+  return { host, changed, stopping, observed };
 }
+
+/** An encrypted PDF on F1, unlocked: its plaintext is held in memory. */
+async function unlockedPdf(api: ConversationApi) {
+  const encrypted = new TextEncoder().encode('%PDF-1.7\n1 0 obj << /Encrypt 2 0 R >>\n');
+  const added = await api.addAttachment(F1, {
+    filename: 'locked.pdf',
+    mime: 'application/pdf',
+    base64: Buffer.from(encrypted).toString('base64'),
+  });
+  if (!added.ok) throw new Error(added.error.message);
+  const unlocked = await api.unlockAttachment(F1, added.value.id, 'pw');
+  if (!unlocked.ok) throw new Error(unlocked.error.message);
+  expect(unlocked.value.encrypted?.locked).toBe(false);
+  return added.value.id;
+}
+
+describe('Conversation takes ferret.stopping', () => {
+  test('followFerretStopping releases at once and does not swallow a failing release', () => {
+    const calls: string[] = [];
+    followFerretStopping({ release: ferret => calls.push(`release ${ferret}`) })({ ferret: F1 });
+    expect(calls).toEqual(['release f1']);
+    expect(() =>
+      followFerretStopping({
+        release: () => {
+          throw new Error('release failed');
+        },
+      })({ ferret: F1 }),
+    ).toThrow('release failed');
+  });
+
+  test('a stop that is attempted zeroes the unlocked PDF plaintext even when the stop then fails', async () => {
+    const { host, stopping } = await conversation();
+    const api = host.provided(ConversationPort);
+    const id = await unlockedPdf(api);
+
+    // Ferrets says ferret.stopping before the harness stop; this stop then fails, so no ferret.changed follows.
+    stopping(F1);
+
+    const after = await api.attachment(F1, id);
+    if (!after.ok) throw new Error(after.error.message);
+    expect(after.value.attachment.encrypted?.locked).toBe(true);
+    expect(Buffer.from(after.value.base64, 'base64').equals(Buffer.from(PLAINTEXT))).toBe(false);
+    await host.stop();
+  });
+});
 
 describe('Conversation takes ferret.changed', () => {
   test('a ferret that stops has its unlocked PDF plaintext zeroed: the attachment is locked again', async () => {

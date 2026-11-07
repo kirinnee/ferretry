@@ -15,6 +15,7 @@ import { err, ok } from '@ferretry/std';
 import {
   type FerretId,
   FerretChanged,
+  FerretStopping,
   FerretFiles,
   FerretHistoryFiles,
   type FerretRecord,
@@ -193,6 +194,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     changed: payload => {
       hooks.observe(FerretChanged, payload);
+    },
+    stopping: ferret => {
+      hooks.observe(FerretStopping, { ferret });
     },
     saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
     history: appendHistory,
