@@ -12,6 +12,7 @@ import {
   FerretConfigFile,
   FerretStateFile,
 } from '../../../contract/index.ts';
+import type { SessionProtocolEnvelope } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
 import type { ClockPort, SessionIndex, YieldingSerialExecutor } from '../../../daemon/lib/ports.ts';
 
@@ -108,4 +109,31 @@ export function sessionConfig(id: string, fields: Record<string, unknown> = {}):
 /** Everything `SessionStateSchema` demands. */
 export function sessionState(id: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
   return { id, status: 'running', turn: 0, ...fields };
+}
+
+/**
+ * The protocol half of a session configuration that a start decides and the lifecycle does not
+ * (`SessionProtocolEnvelope`): handed to `StorageSessionLifecycleRepository` so the configuration it writes meets the
+ * declared `SessionConfigSchema`, as every start's does.
+ */
+export function sessionEnvelope(overrides: Record<string, unknown> = {}): SessionProtocolEnvelope {
+  return {
+    incarnation: 'envelope-1',
+    runtimeGeneration: 1,
+    agent: 'claude-auto-loge',
+    harness: 'claude',
+    modelHint: '',
+    remoteControl: false,
+    harnessFlags: [],
+    turn: 0,
+    intervalSeconds: 30,
+    timeoutSeconds: 600,
+    nudgeAfterSeconds: 120,
+    killAfterSeconds: 900,
+    directSendMaxChars: 4000,
+    resumeMenuChoice: 'full',
+    maxSnapshots: 5,
+    retry: { transientAttempts: 2, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
+    ...overrides,
+  } as SessionProtocolEnvelope;
 }

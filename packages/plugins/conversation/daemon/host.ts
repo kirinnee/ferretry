@@ -29,9 +29,11 @@ import { answerOf } from './queue/lib/answer.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
+import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
+import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
-import { parseSessionId, type SessionId } from './seams/ferret-id.ts';
+import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
@@ -77,6 +79,8 @@ export interface ConversationAHalf {
     | 'editDraft'
   >;
   readonly sitrep: SitrepLineSource;
+  /** The hypermedia switch the owner set for a ferret, or `undefined` when none (the launch reads it). */
+  hypermediaRecorded(ferret: string): Promise<boolean | undefined>;
   /** The ferret stopped or went away: the question it was asking is withdrawn, so `question.json` goes. */
   withdrawQuestion(ferret: string): Promise<void>;
   /** An ask was answered: the draft of its item goes with it. */
@@ -223,6 +227,21 @@ export function buildConversationA(deps: {
     return view;
   };
 
+  const hypermediaSwitch = new StateHypermediaSwitch(kernel.state);
+  const hypermedia = new SessionHypermediaService({
+    facts: async ferret => {
+      const id = tryParseSessionId(ferret);
+      const summary = id === undefined ? undefined : await ferrets.get(id);
+      if (summary === undefined) return undefined;
+      return {
+        enabled: (await hypermediaSwitch.recorded(summary.id)) ?? hypermediaDefault(summary.mode),
+        running: summary.state !== 'stopped',
+      };
+    },
+    write: async (ferret, enabled, at) => await hypermediaSwitch.write(ferret, enabled, at),
+    now: () => kernel.clock.now(),
+  });
+
   const mounts: MountRoute[] = [
     ...sessionSendRoutes(
       {
@@ -251,6 +270,7 @@ export function buildConversationA(deps: {
     ),
     ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
     ...sessionCompactAtRoutes({ get: async () => pending(), set: async () => pending() }),
+    ...sessionHypermediaRoutes({ set: async (ferret, enabled) => await hypermedia.set(ferret, enabled) }),
     ...sharedDraftRoutes(drafts),
   ];
   const sockets = sharedDraftSocketRoutes(drafts, {
@@ -366,6 +386,7 @@ export function buildConversationA(deps: {
     sockets: socketTable(sockets),
     api,
     sitrep,
+    hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
     withdrawQuestion: async ferret => await clearAskedQuestion(kernel.state, questionSerial, ferret),
     onAskAnswered: async ({ ferret, askId }) => {
       await drafts.discard(ferret, askId).catch(() => undefined);

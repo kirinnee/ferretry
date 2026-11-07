@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
+import type { CliContext, Manifest, PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
 import cli from '../../../cli/index.ts';
 import { FERRET_ROUTES } from '../../../cli/lib/client.ts';
 import { WORKTREE_ROUTES } from '../../../cli/lib/worktrees/gateway.ts';
@@ -17,7 +17,12 @@ class ShellRefusal extends Error {
   readonly exitCode = 69;
 }
 
-function run(answers: Readonly<Record<string, unknown>> = {}, fail?: Error) {
+function run(
+  answers: Readonly<Record<string, unknown>> = {},
+  fail?: Error,
+  exists?: NonNullable<CliContext<Manifest>['exists']>,
+  readText?: NonNullable<CliContext<Manifest>['readText']>,
+) {
   const calls: Call[] = [];
   const out: string[] = [];
   const err: string[] = [];
@@ -38,6 +43,8 @@ function run(answers: Readonly<Record<string, unknown>> = {}, fail?: Error) {
     sleep: async delay => {
       time += Number(delay);
     },
+    ...(exists === undefined ? {} : { exists }),
+    ...(readText === undefined ? {} : { readText }),
   });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
@@ -375,6 +382,27 @@ describe('wait and instructions', () => {
     const ended = run({ [FERRET_ROUTES.get]: sessionView({ id: 'lead', state: 'stopped' }) });
     expect(await ended.verb('wait <id>', ['lead'])).toBe(1);
     expect(ended.err.join('')).toContain('fy wait: the ferret ended as stopped');
+  });
+
+  test('V-0496 wait --until-marker asks the shell whether the path exists and never reads it (a folder counts)', async () => {
+    const running = sessionView({ id: 'lead', name: 'wren', state: 'working' });
+    const reads: string[] = [];
+    const asked: string[] = [];
+    const present = run({ [FERRET_ROUTES.get]: running }, undefined, async path => {
+      asked.push(path);
+      return path === 'out/';
+    }, async path => {
+      reads.push(path);
+      throw new Error('a marker poll must not read');
+    });
+    expect(await present.verb('wait <id>', ['lead'], { 'until-marker': 'out/' })).toBe(0);
+    expect(asked).toEqual(['out/']);
+    expect(reads).toEqual([]);
+    const dash = run({ [FERRET_ROUTES.get]: running }, undefined, async path => path === '-');
+    expect(await dash.verb('wait <id>', ['lead'], { 'until-marker': '-' })).toBe(0);
+    const without = run({ [FERRET_ROUTES.get]: running });
+    expect(await without.verb('wait <id>', ['lead'], { 'until-marker': 'out/' })).toBe(1);
+    expect(without.err.join('')).toContain('existence check');
   });
 
   test('V-instructions answers from the environment the shell handed over, and says so when there is none', async () => {

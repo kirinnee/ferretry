@@ -162,6 +162,27 @@ export interface SignedCatalogSignature {
   readonly signature: string;
 }
 
+/**
+ * A link-store request to sign (Catalogs): the store's host, its challenge nonce (32 bytes) and the request body as
+ * canonical JSON text (UTF-8): `{ request: 'upload' | 'delete' | 'status', … }`, only the fields the action signs.
+ * The kernel parses and checks it, builds the one transcript for that action itself and signs it; the caller never
+ * supplies bytes to sign.
+ */
+export interface LinkStoreSignRequest {
+  /** The store's host, as the daemon's discovered origin spells it. */
+  readonly host: string;
+  readonly nonce: Uint8Array;
+  readonly canonicalBody: Uint8Array;
+}
+
+/** A signed link-store request, in its wire spelling; the caller already holds the nonce it sent. */
+export interface SignedLinkStoreSignature {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  readonly signature: string;
+}
+
 /** A secret-import offer to sign (Vault): the fields the target publishes; the kernel adds its own id and key. */
 export interface SecretOfferSignRequest {
   readonly v: number;
@@ -191,6 +212,8 @@ export interface IdentitySigner {
   signTunnel(request: TunnelSignRequest): Promise<SignedTunnelSignature>;
   /** `ferretry-catalog-{manifest,versions,link}-v1` ‖ 0x00 ‖ SHA-256(canonical): today's catalog signatures. */
   signCatalog(request: CatalogSignRequest): Promise<SignedCatalogSignature>;
+  /** `ferretry-link-store-{upload,delete,status}-v1` ‖ LP(protocol) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ the action's fields. */
+  signLinkStoreRequest(request: LinkStoreSignRequest): Promise<SignedLinkStoreSignature>;
   /** LP(`ferretry-secret-import-offer-v1`) ‖ LP(v) ‖ LP(importId) ‖ LP(daemonId) ‖ LP(identityKey) ‖ LP(publicKey) ‖ LP(expiresAt). */
   signSecretOffer(request: SecretOfferSignRequest): Promise<SignedSecretOffer>;
 }

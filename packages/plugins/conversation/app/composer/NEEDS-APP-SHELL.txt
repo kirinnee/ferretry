@@ -15,6 +15,5 @@ FerretContext / ContextUsage | GAP(ferrets, Q0): a local shape until the Ferrets
 LedgerSendRecord (ferretry-sender.ts) | GAP(C3): a minimal local type until C3's chat/send-ledger.ts exports it
 transcript images (seam-attachments.ts) | GAP(C3): a copy of today's transcript-image-source.ts until C3's lands
 reference.catalog providers | GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes the hook yet, so every prefix answers `provided: false` and its menu is empty (never an error); a provider declares the demand its own route asks (filesystem, terminal, browser, and fleet for cards) and the route asks it first
-"Include agent tasks" | GAP(board): a catalog entry does not say who asked for a card, so the switch is read but filters nothing
 dictation in the composer | moved to Voice's `composer.tools` panel (ComposerDraftProvider); the composer draws the slot only inside the shell
 composer quota line | moved to Usage's `composer.tools` panel (lead decision Q5)

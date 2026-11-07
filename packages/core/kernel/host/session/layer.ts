@@ -93,6 +93,7 @@ import {
   memberRenewMessage,
   NONCE_BYTES,
   newReceiveWindow,
+  OLDER_APP_SENTENCE,
   newSendWindow,
   openChannel,
   openRecord,
@@ -113,6 +114,7 @@ import {
   sealRecord,
   sessionApiRequest,
   sessionStreamRequest,
+  speaksPreviousSessionProtocol,
   streamDataFrame,
   streamDataRecord,
   toBase64Url,
@@ -539,7 +541,12 @@ class SealedSession implements CarrierLink {
     }
     const hello = decodeClientHello(frame.payload);
     if (hello === null) {
-      this.#endSession(SESSION_CLOSE_CODES.protocolError, 'unparseable client hello');
+      // An app from before device keys is not an attacker and not a bug: it is an app nobody updated,
+      // and the person holding it can only fix that if they are told which side is old. The sentence
+      // is public on purpose — it crosses the carrier unsealed and says nothing about anybody.
+      if (speaksPreviousSessionProtocol(frame.payload))
+        this.#endSession(SESSION_CLOSE_CODES.versionUnsupported, OLDER_APP_SENTENCE);
+      else this.#endSession(SESSION_CLOSE_CODES.protocolError, 'unparseable client hello');
       return;
     }
     const answered = await answerClientHandshake(this.deps.crypto, this.deps.identity, wireId, hello);

@@ -5,7 +5,8 @@
  * current.
  */
 
-import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { DaemonCallError, FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type SessionProcess,
   SessionProcessIdSchema,
@@ -16,11 +17,7 @@ import {
   type SessionProcessStopResult,
   SessionProcessStopResultSchema,
 } from './protocol/session-processes.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
-import { grantRefusalNotice } from '../../../access/app/lib/grants.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
+import { assertScopeDaemon, type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../shell.ts';
 
 /** What a 403 means to the reader: the grant is the answer, in the words the brief fixes. */
 export const PROCESSES_FORBIDDEN_TEXT =
@@ -29,52 +26,37 @@ export const PROCESSES_FORBIDDEN_TEXT =
 /** What a 409 `process_changed` means to the reader. */
 export const PROCESS_CHANGED_TEXT = 'That process already ended or was replaced — nothing was stopped.';
 
-const processesPath = (scope: DaemonSessionScope): string =>
-  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/processes`;
+/** What every process call needs of the shell's per-daemon client: a route by its manifest key. */
+export type ProcessCalls = Pick<PluginClient, 'call'>;
 
-const processPath = (scope: DaemonSessionScope, processId: string): string =>
-  `${processesPath(scope)}/${encodeURIComponent(SessionProcessIdSchema.parse(processId))}`;
+/** The process routes, by manifest key. */
+export const PROCESS_ROUTES = {
+  list: 'GET /v1/ferrets/:ferretId/processes',
+  output: 'GET /v1/ferrets/:ferretId/processes/:processId/output',
+  stop: 'POST /v1/ferrets/:ferretId/processes/:processId/stop',
+} as const;
 
-const responseError = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
-};
+const mismatch = (message: string): DaemonCallError => new DaemonCallError(502, 'daemon_mismatch', message);
 
-const processJson = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  path: string,
-  init: RequestInit,
-  fetcher: DaemonFetch,
-  signal?: AbortSignal,
-): Promise<unknown> => {
-  if (daemon.daemonId !== scope.daemonId) throw new Error('process scope must belong to the requested daemon');
-  const mutation = (init.method ?? 'GET').toUpperCase() !== 'GET';
-  const request = daemonRequest(daemon, path, {
-    ...init,
-    ...(signal === undefined ? {} : { signal }),
-    headers: mutation ? { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() } : {},
-  });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await responseError(response);
-  return await response.json();
+/** A read that was cancelled while it was in flight answers as the cancel, not as the daemon's answer. */
+const settled = <T>(value: T, signal: AbortSignal | undefined): T => {
+  signal?.throwIfAborted();
+  return value;
 };
 
 /** Lists the processes under one session's pane. */
 export const listSessionProcesses = async (
+  client: ProcessCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
   signal?: AbortSignal,
 ): Promise<SessionProcessList> => {
+  assertScopeDaemon(daemon, scope);
+  signal?.throwIfAborted();
   const list = SessionProcessListSchema.parse(
-    await processJson(daemon, scope, processesPath(scope), { method: 'GET' }, fetcher, signal),
+    settled(await client.call(PROCESS_ROUTES.list, { params: { ferretId: scope.sessionId } }), signal),
   );
-  if (list.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon listed another session');
+  if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;
 };
 
@@ -83,45 +65,45 @@ export const listSessionProcesses = async (
  * `after` is a byte offset the previous answer's `end` supplied, so it is built here as digits only.
  */
 export const readSessionProcessOutput = async (
+  client: ProcessCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   processId: string,
   after: number | undefined,
-  fetcher: DaemonFetch = browserFetch,
   signal?: AbortSignal,
 ): Promise<SessionProcessOutput> => {
-  const query = after === undefined ? '' : `?after=${String(Math.max(0, Math.trunc(after)))}`;
+  assertScopeDaemon(daemon, scope);
+  signal?.throwIfAborted();
+  const params = { ferretId: scope.sessionId, processId: SessionProcessIdSchema.parse(processId) };
+  const query: Record<string, string> = after === undefined ? {} : { after: String(Math.max(0, Math.trunc(after))) };
   const output = SessionProcessOutputSchema.parse(
-    await processJson(
-      daemon,
-      scope,
-      `${processPath(scope, processId)}/output${query}`,
-      { method: 'GET' },
-      fetcher,
-      signal,
-    ),
+    settled(await client.call(PROCESS_ROUTES.output, { params, query }), signal),
   );
-  if (output.processId !== processId) throw new DaemonResponseError(502, 'daemon read another process');
+  if (output.processId !== processId) throw mismatch('daemon read another process');
   return output;
 };
 
 /** Asks the daemon to stop one process and everything it started (SIGTERM). */
 export const stopSessionProcess = async (
+  client: ProcessCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   processId: string,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<SessionProcessStopResult> => {
+  assertScopeDaemon(daemon, scope);
   const stopped = SessionProcessStopResultSchema.parse(
-    await processJson(daemon, scope, `${processPath(scope, processId)}/stop`, { method: 'POST' }, fetcher),
+    await client.call(PROCESS_ROUTES.stop, {
+      params: { ferretId: scope.sessionId, processId: SessionProcessIdSchema.parse(processId) },
+      headers: { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() } as { readonly 'x-fy-request-id': string },
+    }),
   );
-  if (stopped.processId !== processId) throw new DaemonResponseError(502, 'daemon stopped another process');
+  if (stopped.processId !== processId) throw mismatch('daemon stopped another process');
   return stopped;
 };
 
 /** A failure, in the words the reader should see: the 403 copy, the changed-process copy, else the daemon's. */
 export const processErrorText = (error: unknown): string => {
-  if (error instanceof DaemonResponseError) {
+  if (error instanceof DaemonCallError) {
     if (error.status === 403) return PROCESSES_FORBIDDEN_TEXT;
     if (error.status === 409 && error.code === 'process_changed') return PROCESS_CHANGED_TEXT;
   }
@@ -131,7 +113,7 @@ export const processErrorText = (error: unknown): string => {
 };
 
 export const isForbidden = (error: unknown): boolean =>
-  (error instanceof DaemonResponseError && error.status === 403) || grantRefusalNotice(error) !== null;
+  (error instanceof DaemonCallError && error.status === 403) || grantRefusalNotice(error) !== null;
 
 /** The command as the agent wrote it when there is one. */
 export const processTitle = (entry: SessionProcess): string => entry.label ?? entry.command;
@@ -229,3 +211,50 @@ export const processElapsedText = (entry: SessionProcess, now: number): string =
 
 export const formatMemory = (bytes: number): string =>
   `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+
+// ── Following one process's output ─────────────────────────────────────────────────────────────────────────────────
+
+/** The most output text held for one process; older text is dropped, and the pane says so. */
+export const PROCESS_OUTPUT_HELD_MAX = 2 * 1024 * 1024;
+
+/** What a pane holds of one process's output while it follows it. */
+export interface HeldOutput {
+  readonly text: string;
+  /** The byte the next read asks after: the last answer's `end`. Absent before the first answer. */
+  readonly end: number | undefined;
+  /** Text before what is held exists and is not shown. */
+  readonly skipped: boolean;
+  readonly source: SessionProcessOutput['source'] | undefined;
+  readonly reason: string | undefined;
+  /** Nothing more will be written. */
+  readonly complete: boolean;
+}
+
+export const EMPTY_OUTPUT: HeldOutput = {
+  text: '',
+  end: undefined,
+  skipped: false,
+  source: undefined,
+  reason: undefined,
+  complete: false,
+};
+
+/**
+ * Folds one answer into what is held — the whole of the follow bookkeeping, kept pure so it is tested
+ * without a clock:
+ *
+ *  - the first answer (no `end` held) is the tail, and says whether earlier text exists;
+ *  - `reset` means the file was replaced or truncated: what is held is dropped and the answer stands alone;
+ *  - `skipped` after the first read means the gap was larger than one read: what is held no longer
+ *    touches the new text, so it is dropped and the pane says "earlier output not shown";
+ *  - otherwise the answer continues what is held, which is capped at {@link PROCESS_OUTPUT_HELD_MAX}.
+ */
+export const applyOutput = (held: HeldOutput, answer: SessionProcessOutput): HeldOutput => {
+  const base = { end: answer.end, source: answer.source, reason: answer.reason, complete: answer.complete };
+  if (held.end === undefined || answer.reset || answer.skipped) {
+    return { ...base, text: answer.text, skipped: answer.skipped };
+  }
+  const joined = held.text + answer.text;
+  if (joined.length <= PROCESS_OUTPUT_HELD_MAX) return { ...base, text: joined, skipped: held.skipped };
+  return { ...base, text: joined.slice(joined.length - PROCESS_OUTPUT_HELD_MAX), skipped: true };
+};

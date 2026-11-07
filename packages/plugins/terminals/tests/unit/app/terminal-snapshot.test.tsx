@@ -1,21 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { interact, mount, must } from '@ferretry/app/testing';
+import { readPaneSnapshot, SNAPSHOT_ROUTE } from '../../../app/components/terminal-snapshot-model.ts';
+import { daemonConnection, daemonSessionScope } from '../../../app/shell.ts';
+import { interact, mount, must, ensureDom } from '@ferretry/app/testing';
 
-const daemon = daemonConnection({
-  daemonId: 'pane-daemon',
-  baseUrl: 'https://pane.example.test',
-  deviceId: 'pane-token',
-});
+// These suites read the document directly; register one before any hook or test runs.
+ensureDom();
+
+const daemon = daemonConnection('pane-daemon');
 const scope = daemonSessionScope(daemon, 'pane-session');
 
-const second = daemonConnection({
-  daemonId: 'second-daemon',
-  baseUrl: 'https://second.example.test',
-  deviceId: 'second-token',
-});
+const second = daemonConnection('second-daemon');
 const secondScope = daemonSessionScope(second, 'pane-session');
 
 /** Lets a test say what `document.hidden` is; happy-dom leaves it read-only. */
@@ -248,22 +243,29 @@ describe('terminal snapshot view', () => {
     }
   });
 
-  it('reads through the paired daemon by default', async () => {
+  it('reads through the host’s client for the paired daemon', async () => {
     setHidden(false);
-    const original = globalThis.fetch;
-    const seen: string[] = [];
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      seen.push(String(input));
-      return new Response('default reader frame');
-    }) as unknown as typeof fetch;
-    try {
-      const view = await mount(<TerminalSnapshotView daemon={daemon} scope={scope} tmuxSession="pane" now={() => 0} />);
-      expect(seen).toEqual(['https://pane.example.test/v1/ferrets/pane-session/snapshot?live=false']);
-      expect(view.container.textContent).toContain('default reader frame');
-      await view.unmount();
-    } finally {
-      globalThis.fetch = original;
-    }
+    const seen: { route: string; init: unknown }[] = [];
+    const client = {
+      call: async <T,>(route: string, init?: unknown): Promise<T> => {
+        seen.push({ route, init });
+        return 'default reader frame' as T;
+      },
+    };
+    const view = await mount(
+      <TerminalSnapshotView
+        daemon={daemon}
+        scope={scope}
+        tmuxSession="pane"
+        now={() => 0}
+        readSnapshot={(connection, target) => readPaneSnapshot(client, connection, target)}
+      />,
+    );
+    expect(seen).toEqual([
+      { route: SNAPSHOT_ROUTE, init: { params: { ferretId: 'pane-session' }, query: { live: 'false' } } },
+    ]);
+    expect(view.container.textContent).toContain('default reader frame');
+    await view.unmount();
   });
 
   describe('on a phone', () => {

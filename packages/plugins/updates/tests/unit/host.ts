@@ -7,6 +7,7 @@ export const HOME = '/home/kirin';
 
 export interface FakeHostOptions extends Partial<ExecutableFacts> {
   readonly compiled?: boolean;
+  readonly checks?: boolean;
   readonly release?: string;
   readonly homeDirectory?: string;
   readonly which?: (name: string) => string | undefined;
@@ -27,6 +28,7 @@ export function fakeHost(overrides: FakeHostOptions = {}): InstallHost & { reado
   const port: UpdateHostPort = {
     release: overrides.release ?? '4.28.0',
     compiled: overrides.compiled ?? executable.main.startsWith('/$bunfs/'),
+    checks: overrides.checks ?? overrides.compiled ?? executable.main.startsWith('/$bunfs/'),
     executable: async () => executable,
     launchUpdate:
       overrides.launch ??

@@ -3,7 +3,8 @@ import type { Duration, Instant, Result } from '@ferretry/std';
 import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
-import type { FerretId } from './ids.ts';
+import type { ApiHeaders } from './http.ts';
+import type { CarrierKey, FerretId } from './ids.ts';
 import type { HeldRoot, PinnedWorkingDirectory, PinOptions } from './pinned.ts';
 import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
@@ -27,6 +28,12 @@ export interface KernelPorts {
   readonly fetch: FetchPort;
   /** WebSocket clients to the hosts the manifest declared in `permissions.network` (`ws:`/`wss:` only). */
   readonly websocket: WebSocketPort;
+  /**
+   * A loopback listener that serves ONE declared socket route and stamps every arrival `carried` (a carrier whose
+   * traffic reaches this host through a local forwarder, like the tunnel's `cloudflared`). Refused unless the manifest
+   * takes that carrier's hook and declares the route.
+   */
+  readonly carrierListener: CarrierListenerPort;
   /** Who this daemon is, read-only: its id and name, never its key. */
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
@@ -44,7 +51,7 @@ export interface KernelPorts {
   readonly secrets: SecretsPort;
   /**
    * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
-   * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
+   * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`, `signLinkStoreRequest`: Catalogs). No key export, no raw signing.
    */
   readonly signer: IdentitySigner;
   /** The writer over every declared config file: Gate's alone, `undefined` for every other plugin. */
@@ -243,6 +250,17 @@ export type ConfigWriteOutcome =
       readonly kind: 'refused';
       readonly reason: 'yaml' | 'raw_secret' | 'schema' | 'not_declared' | 'bad_name' | 'not_a_mapping';
       readonly issues: readonly ConfigWriteIssue[];
+    }
+  /**
+   * Only from {@link ConfigPort.remove} with `refuseIfHeld`: the removal loosens and this call's judge did not let it
+   * into effect, so it would have been held. Nothing was touched: the file is still in effect, nothing is held.
+   */
+  | {
+      readonly kind: 'refused';
+      readonly reason: 'would_hold';
+      /** Always empty: nothing is wrong with the file; `sentences` say what the removal would loosen. */
+      readonly issues: readonly ConfigWriteIssue[];
+      readonly sentences: readonly string[];
     };
 
 /** Its declared config files and collections, parsed, live (§7.2). */
@@ -284,11 +302,15 @@ export interface ConfigPort {
     edit: { readonly patch: Readonly<Record<string, unknown>> },
     options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
-  /** Removes one of its own files; removing what loosens (a budget, a rule) is judged and held like a write. */
+  /**
+   * Removes one of its own files; removing what loosens (a budget, a rule) is judged and held like a write.
+   * `refuseIfHeld`: a removal that would be held is refused `would_hold` instead, with the file left untouched and
+   * nothing held. It is the same one judgement as the removal (asked once, in the same act), never a separate dry run.
+   */
   remove(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
     name: string | undefined,
-    options?: { readonly ifMatch?: string },
+    options?: { readonly ifMatch?: string; readonly refuseIfHeld?: true },
   ): Promise<ConfigWriteOutcome>;
 }
 
@@ -686,6 +708,47 @@ export interface WebSocketPort {
   connect(url: string | URL): WebSocketClient;
 }
 
+// carrier listener ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** What a carrier listener serves: one declared socket route, and how its arrivals are told apart. */
+export interface CarrierListenerSurface {
+  /** The plugin's declared socket, spelled as its manifest spells it: `GET /v1/rendezvous/:daemonId/client`. */
+  readonly socket: string;
+  /**
+   * The rate-limit identity of one arrival, from its headers (the tunnel keys by the address its edge saw). It names
+   * a bucket and nothing else: it can never make an arrival local. Absent: one shared identity for the listener.
+   */
+  readonly peer?: (headers: ApiHeaders) => string;
+  /**
+   * The browser origins an upgrade may present (today's `corsOrigins`). An upgrade whose `Origin` names another site is
+   * answered 404 before admission, like every path this listener does not serve; an absent `Origin`, or the listener's
+   * own, is not a browser cross-origin and passes. Absent: no origin gate.
+   */
+  readonly origins?: readonly string[];
+}
+
+/** A bound carrier listener. */
+export interface CarrierListenerHandle {
+  /** The ephemeral loopback port (127.0.0.1) the carrier's forwarder is pointed at. */
+  readonly port: number;
+  /** Frees the port. Idempotent; a daemon stop closes every listener still open. */
+  close(): Promise<void>;
+}
+
+/**
+ * A second loopback listener for a carrier that arrives through a local forwarder (§15). A forwarder on this host
+ * makes everything it carries come from a loopback peer, so pointing it at the API listener would make a phone beyond
+ * the far edge indistinguishable from a browser at the machine. This listener is the other wall: it serves only the
+ * declared route (404 to every other path and method; nothing else of the daemon is reachable) and stamps EVERY arrival
+ * `{ kind: 'carried', carrier }`, never local (G15, G16): admission governs it as remote.
+ */
+export interface CarrierListenerPort {
+  open(input: {
+    readonly carrier: CarrierKey;
+    readonly surface: CarrierListenerSurface;
+  }): Promise<CarrierListenerHandle>;
+}
+
 // identity ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -769,16 +832,21 @@ export type UpdateLaunchOutcome = { readonly kind: 'started' } | { readonly kind
 
 /**
  * The daemon's own update seam (today's `DaemonUpdateService` host parts): the release this build carries, what the
- * running executable is, and one launch: `<client> daemon update --yes --to <target> --report <report>` (the verb is
- * the host's `UPDATE_LAUNCH_VERB`), detached in
- * its own process group so it survives the daemon's restart, its output appended to the plugin's `update.log` and
- * its report written to the plugin's `report.json` (both in the plugin's own state folder). No other command.
+ * running executable is, and one launch: `<fy> update --run --to <target> --report <report>` (the verb is the host's
+ * `UPDATE_LAUNCH_VERB`), detached in its own process group so it survives the daemon's restart. The plugin's declared
+ * state files `report` and `log` (its manifest `data.state`) say where the report is written and the output is
+ * appended; the host spells neither path. No other command.
  */
 export interface UpdateHostPort {
   /** The release number this build carries. */
   readonly release: string;
   /** Whether this is a compiled release (a source run has no release to compare with). */
   readonly compiled: boolean;
+  /**
+   * Whether the daemon asks GitHub for a newer release: a compiled build AND `FY_UPDATE_CHECK` not `off` (the
+   * operator / CI switch). The kernel reads the switch, so the plugin never reads the environment.
+   */
+  readonly checks: boolean;
   executable(): Promise<ExecutableFacts>;
   /** `target` is a release number (`5.1.0`, `v5.1.0-rc.1`); anything else is refused without a launch. */
   launchUpdate(target: string): Promise<UpdateLaunchOutcome>;
@@ -812,6 +880,18 @@ export interface IdentityPort {
   readonly daemonId: string;
   /** The host name with control and format characters removed, trimmed, at most 100 characters. */
   readonly daemonName: string;
+  /**
+   * The product's binary names, single-sourced from the `bin` keys of `packages/cli/package.json` and this package:
+   * the client the owner types (`fy`) and the daemon (`fyd`). Plugins name them in sentences and requests from here,
+   * never as a literal.
+   */
+  readonly binaries: BinaryNames;
+}
+
+/** The names of the two programs the product ships. */
+export interface BinaryNames {
+  readonly client: string;
+  readonly daemon: string;
 }
 
 // snapshot / lifecycle ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -828,10 +908,15 @@ export interface LifecyclePort {
   readonly signal: AbortSignal;
 }
 
+/** Which hash of its own contract a plugin asks for: the whole effective surface (absent) or its member table only. */
+export type ContractSurface = 'member';
+
 /**
- * The effective contract hash of the plugin that holds this port: the one value `GET /v1/plugins` shows for it. It takes
- * no id, so a plugin can read its own hash and never another package's (no inventory leak).
+ * The contract hash of the plugin that holds this port. With no argument it is the effective hash: the one value
+ * `GET /v1/plugins` shows for it. `hash('member')` is the hash over its member-table routes only (§9.6), so a change to
+ * its owner routes does not move it; a plugin that declares no member routes has none and the call throws. It takes no
+ * id, so a plugin can read its own hash and never another package's (no inventory leak).
  */
 export interface ContractPort {
-  hash(): string;
+  hash(surface?: ContractSurface): string;
 }

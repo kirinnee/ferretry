@@ -945,6 +945,10 @@ export const AccountChangeOutcomeSchema = z.discriminatedUnion('outcome', [
     outcome: z.literal('login-changed'),
     result: z.enum(['applied', 'held']),
     sentences: z.array(NonEmptyStringSchema).readonly().optional(),
+    /** What the change was, in the words the preview used ("Remove login work"): a client says what happened, not just "Done". */
+    summary: NonEmptyStringSchema.optional(),
+    /** A removal that moved or removed runtimes first: what that apply did, with the paths it left as they were. */
+    moved: ApplyOutcomeSchema.optional(),
   }),
   z.strictObject({
     outcome: z.literal('executed'),

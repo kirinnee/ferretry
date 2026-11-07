@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Carriers, DoctorChecks, defineConfig, PluginsChanged, policyRef, SessionModes } from './contract/index.ts';
-import { definePlugin, route } from './manifest/index.ts';
+import { definePlugin, route, socket } from './manifest/index.ts';
 
 /** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
 export const PluginsYamlSchema = z.strictObject({
@@ -76,6 +76,24 @@ export default definePlugin({
         audit: { skip: 'the bootstrap read records nothing' },
         guard: { none: 'plugin ids, on/off and contract hashes only' },
       }),
+      // Today's `GET /v1/doctor` (R-0081): the host diagnosis, now the rows every plugin's declared checks give.
+      route('GET /v1/doctor', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a diagnosis read records nothing' },
+        guard: { none: 'check names and sentences the checks wrote; never a secret' },
+      }),
+      // R-0246: the agent's tool door. It names no ferret and no plugin: the credential it carries decides who the
+      // caller is, and each tool is admitted by its own declaration (`callTool`). Over a privileged local carrier only.
+      route('POST /v1/agent/tools', {
+        minimum: 'none',
+        caller: 'any',
+        privilegedOnly: true,
+        noStore: true,
+        audit: { skip: 'each tool records itself, by its own declaration' },
+        guard: { none: 'the answer is the tool’s, already guarded by the tool’s own declaration' },
+      }),
       // The configuration files (docs/config-files.md, D2 #3): today's three routes, served here because every plugin's
       // files are the kernel's to read and write. Gate answers per file which capability and axis the act needs.
       route('GET /v1/config/file', {
@@ -111,6 +129,15 @@ export default definePlugin({
         caller: 'any',
         audit: { skip: 'public vocabulary' },
         guard: { none: 'public vocabulary' },
+      }),
+    ],
+    sockets: [
+      // The plugin event bus (`PluginClient.subscribe`): one { name, payload } frame per event the caller may see.
+      socket('GET /v1/bus', {
+        minimum: 'authenticated',
+        caller: 'any',
+        audit: { skip: 'a live feed of wake-ups records nothing' },
+        guard: 'secrets',
       }),
     ],
   },

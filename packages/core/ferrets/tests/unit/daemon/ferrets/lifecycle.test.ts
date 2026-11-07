@@ -208,17 +208,21 @@ test('R-0363 confirmed restoration is checked before rotation and failed restore
   await f.service.stop(f.id, 'now');
   let confirmed = 0;
   f.ports.decide = async () => ({ allow: false, reason: 'admission refused' });
-  const refused = await f.service.resume(f.id, undefined, () => {
-    confirmed++;
+  const refused = await f.service.resume(f.id, undefined, {
+    confirmRestore: () => {
+      confirmed++;
+    },
   });
   expect(refused.ok).toBe(false);
   expect(confirmed).toBe(1);
   expect(f.tokens.isCutOff(f.id)).toBe(true);
   f.ports.decide = async () => ({ allow: true });
-  const resumed = await f.service.resume(f.id, undefined, () => {
-    expect(f.tokens.holds(f.id)).toBe(false);
-    expect(f.tokens.isCutOff(f.id)).toBe(true);
-    confirmed++;
+  const resumed = await f.service.resume(f.id, undefined, {
+    confirmRestore: () => {
+      expect(f.tokens.holds(f.id)).toBe(false);
+      expect(f.tokens.isCutOff(f.id)).toBe(true);
+      confirmed++;
+    },
   });
   expect(resumed.ok).toBe(true);
   expect(confirmed).toBe(2);
@@ -232,13 +236,15 @@ test('R-0363 a denied restoration or damaged credential state cannot launch or i
   await f.service.revokeToken(f.id);
   await f.service.stop(f.id, 'now');
   await expect(
-    f.service.resume(f.id, undefined, () => {
-      throw new Error('owner only');
+    f.service.resume(f.id, undefined, {
+      confirmRestore: () => {
+        throw new Error('owner only');
+      },
     }),
   ).rejects.toThrow('owner only');
   expect(f.tokens.isCutOff(f.id)).toBe(true);
   f.tokens.unavailable();
-  await expect(f.service.resume(f.id, undefined, () => {})).rejects.toMatchObject({ status: 503 });
+  await expect(f.service.resume(f.id, undefined, { confirmRestore: () => {} })).rejects.toMatchObject({ status: 503 });
   expect(f.tokens.holds(f.id)).toBe(false);
   expect(f.runner.starts).toBe(1);
 });

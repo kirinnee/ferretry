@@ -1,4 +1,12 @@
-import { defineEvent, defineHook, definePort, defineState, type FerretId } from '@ferretry/kernel/contract';
+import {
+  defineConfig,
+  defineEvent,
+  defineHook,
+  definePort,
+  defineState,
+  neverLoosens,
+  type FerretId,
+} from '@ferretry/kernel/contract';
 import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
 import type { AgendaSnapshot } from './snapshot/agenda.ts';
@@ -49,6 +57,22 @@ export {
  *
  * Limits and kinds are today's agenda (`protocol/src/lib/agenda.ts`); the words are §1's (ask, notice, answer).
  */
+
+// ─── configuration ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `config/asks.yaml`: Asks' one setting. Discussions resurface only when configured; snooze waking is always on.
+ *
+ * Today's key is `attention.resurfaceAfterMinutes` in the daemon's `config.json` (integer 1 to 10 080 minutes, ABSENT
+ * by default = off: an ask stays in discussion until its ferret surfaces it). A converter carries that one value to
+ * `resurfaceAfterMinutes` here; there is no default to write.
+ */
+export const AsksConfigFile = defineConfig({
+  file: 'asks.yaml',
+  schema: z.strictObject({ resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional() }),
+  axis: 'configure',
+  loosens: neverLoosens,
+});
 
 // ─── ids ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -417,3 +441,20 @@ export const AskVersionsFiles = defineState({
   store: 'sqlite',
   format: 1,
 });
+
+// ─── what an ask's renderer receives ──────────────────────────────────────────────────────────────────────────────
+/**
+ * The value the ask list hands the renderer that draws part of an ask (`ask:sign-in-approval`, `ask:input`): the ref (its own
+ * kind and ids), the ask's words, and WHO the ask is from — the ferret's id (a plan or an approval is matched by it),
+ * the ferret's spoken name ("{ferretName} wants…") and the board project it works in (the standing rule's scopes).
+ */
+export const AskOnScreenSchema = z.object({
+  ref: z.looseObject({ kind: z.string() }),
+  subject: z.string(),
+  why: z.string().optional(),
+  context: z.string().optional(),
+  ferret: z.string().min(1),
+  ferretName: z.string(),
+  projectId: z.string().optional(),
+});
+export type AskOnScreen = z.infer<typeof AskOnScreenSchema>;

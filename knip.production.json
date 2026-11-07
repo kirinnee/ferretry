@@ -105,7 +105,6 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "app/search/session-search.tsx",
-        "app/search/ferret-file-index.ts",
         "app/composer/composer-references.ts",
         "app/render/fy-render-workspace-media.ts",
         "app/render/workspace-path.ts",

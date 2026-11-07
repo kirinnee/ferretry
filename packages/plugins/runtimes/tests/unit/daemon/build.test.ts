@@ -23,7 +23,7 @@ import { runtimesConformance } from '../../../contract/testing/index.ts';
 import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
-import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const login = sampleLogin;
@@ -80,7 +80,7 @@ async function build(
   ) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
-    fakes: { ferrets, logins: fakeLogins(logins) },
+    fakes: { ferrets, logins: fakeLogins(logins), loginChanges: fakeLoginChanges() },
     gate: new StandInAdmission(() => ownerStanding()),
     config: options.config ?? FILES,
   });

@@ -174,6 +174,7 @@ export interface FileFleetCatalogOptions {
   /** The session records a runtime removal or rename reads and re-points. Absent: neither is known. */
   readonly sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>;
   readonly credentials: FleetCatalogServiceDeps['credentials'];
+  readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
   /** Writes the configuration documents of a change. GAP(kernel): plugins have no config write port. */
   readonly configWriter: RuntimeConfigWriter;
   readonly locate: FleetCatalogServiceDeps['locate'];
@@ -301,6 +302,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         }),
     machineName: options.machineName,
     credentials: options.credentials,
+    loginChanges: options.loginChanges,
     configWriter: options.configWriter,
     provisioner: acknowledgingProvisioner(
       new FileFleetProvisioner(

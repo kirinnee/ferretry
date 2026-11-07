@@ -1,5 +1,5 @@
 /** `fy doctor` (§3.5 `doctor.checks`, S60): this fy against the daemon, plugin by plugin. */
-import { PROTOCOL } from '@ferretry/kernel/contract';
+import { type DoctorReport, DoctorReportSchema, PROTOCOL } from '@ferretry/kernel/contract';
 import { judgePlugin, pausedSentence } from '../guard.ts';
 import { paneCredentialWarnings, type Environment } from '../credential.ts';
 import { EXIT } from '../errors.ts';
@@ -29,6 +29,11 @@ export interface DoctorInput {
   readonly probe: Probe;
   /** `undefined` with a reason when the inventory could not be read (no credential, refused). */
   readonly inventory: PluginInventory | { readonly unreadable: string };
+  /**
+   * What the daemon's own checks said (`GET /v1/doctor`), or why they could not be read. Absent where the daemon was
+   * not asked (it is away).
+   */
+  readonly hostChecks?: DoctorReport | { readonly unreadable: string };
   readonly registry: readonly Pick<RegistryEntry, 'id' | 'contract'>[];
   readonly titles: Readonly<Record<string, string>>;
   readonly halves: readonly HalfStatus[];
@@ -97,6 +102,7 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
         detail: 'every plugin of this build is present, on and in agreement',
       });
   }
+  if (input.hostChecks !== undefined) findings.push(...hostFindings(input.hostChecks));
   for (const half of input.halves)
     if (half.error !== undefined)
       findings.push({ state: 'fail', title: `${half.id} commands`, detail: `would not load: ${half.error}` });
@@ -115,6 +121,27 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
     });
   for (const warning of paneCredentialWarnings(input.environment))
     findings.push({ state: 'warn', title: 'credential', detail: warning });
+  return findings;
+}
+
+/**
+ * The daemon's own diagnosis as findings, so this exit code follows its checks exactly as `fyd --check` did: a required
+ * check that is missing fails, an optional (or capability / alternative) one warns, and `ready: false` fails on its own.
+ */
+function hostFindings(report: NonNullable<DoctorInput['hostChecks']>): readonly Finding[] {
+  if ('unreadable' in report)
+    return [{ state: 'warn', title: 'host checks', detail: `host checks could not be read: ${report.unreadable}` }];
+  const findings: Finding[] = report.checks.map(check => {
+    const state = check.status !== 'missing' ? 'ok' : check.requirement === 'required' ? 'fail' : 'warn';
+    return {
+      state,
+      title: `host ${check.name}`,
+      detail: check.summary,
+      ...(state === 'ok' ? {} : { fix: check.impact }),
+    };
+  });
+  if (!report.ready)
+    findings.push({ state: 'fail', title: 'host checks', detail: 'the daemon reports it is not ready', fix: report.limitation });
   return findings;
 }
 
@@ -140,6 +167,15 @@ export const doctorVerb: ShellVerb = async ctx => {
       inventory = { unreadable: error instanceof Error ? error.message : String(error) };
     }
   }
+  let hostChecks: DoctorInput['hostChecks'];
+  if (probe.state === 'up') {
+    try {
+      const parsed = DoctorReportSchema.safeParse(await ctx.client('kernel').call('GET /v1/doctor'));
+      hostChecks = parsed.success ? parsed.data : { unreadable: 'the daemon’s answer was not in a shape this fy reads' };
+    } catch (error) {
+      hostChecks = { unreadable: error instanceof Error ? error.message : String(error) };
+    }
+  }
   const halves: HalfStatus[] = [];
   for (const entry of world.registry.plugins) {
     try {
@@ -157,6 +193,7 @@ export const doctorVerb: ShellVerb = async ctx => {
     binary: world.identity.binary,
     probe,
     inventory,
+    ...(hostChecks === undefined ? {} : { hostChecks }),
     registry: world.registry.plugins,
     titles: ctx.surfaces.titles,
     halves,

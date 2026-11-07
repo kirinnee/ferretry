@@ -1,0 +1,242 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import { link, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { err, ok } from '@ferretry/std';
+import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
+import type { FerretId } from '../../../contract/ids.ts';
+import type { RootHandle, RootName } from '../../../contract/ports.ts';
+import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
+import { fencedByName, fencedReal, fenceOf } from '../../../host/fence-guard.ts';
+import { RootError, rootsPortFor } from '../../../host/roots.ts';
+
+/**
+ * The fence rows (S40, S43, S44, S45, S46, S48) at the unit tier: the REAL roots and fence over real temp folders
+ * (no tmux, no network). The integration tier keeps the same proofs; this is the copy the unit report can judge.
+ */
+
+const parents: string[] = [];
+afterEach(async () => {
+  for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
+});
+
+const SECRET = 'protected-fixture';
+
+async function layout() {
+  const parent = await mkdtemp(`${tmpdir()}/fy-fence-`);
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const work = `${parent}/work`;
+  await mkdir(`${home}/state/gate`, { recursive: true });
+  await writeFile(`${home}/state/gate/probe`, SECRET);
+  await mkdir(`${home}/state/codex/agent-homes/F1`, { recursive: true });
+  await writeFile(`${home}/state/codex/agent-homes/F1/own.txt`, 'mine');
+  await mkdir(`${parent}/home-before-2026-11-01-0900`, { recursive: true });
+  await writeFile(`${parent}/home-before-2026-11-01-0900/probe`, SECRET);
+  await mkdir(work, { recursive: true });
+  await writeFile(`${work}/notes.md`, 'hello');
+  return { parent, home, work };
+}
+
+const fs = nodeFs(() => 'r');
+
+const workFolders = (folder: string): WorkFolders => ({
+  folderOf: () => folder as FencedPath,
+  check: (_ferret, path) => (path.startsWith(folder) ? ok(path as FencedPath) : err('outside')),
+});
+
+function rootOf(
+  home: string,
+  name: RootName,
+  scope: { readonly ferret?: FerretId; readonly subfolder?: string },
+  options: { readonly fs?: HostFs; readonly work?: string; readonly hardLinkRoots?: readonly string[] } = {},
+): RootHandle {
+  const roots = rootsPortFor(
+    options.fs ?? fs,
+    { home, plugin: 'codex', worktrees: `${home}-worktrees` },
+    [name],
+    () => (options.work === undefined ? undefined : workFolders(options.work)),
+    { random: () => 'r', ...(options.hardLinkRoots === undefined ? {} : { hardLinkRoots: options.hardLinkRoots }) },
+  );
+  return roots.root(name, scope);
+}
+
+/** Reads `relative` through `root`; answers the text, or the refusal the root threw. */
+async function attempt(root: RootHandle, relative: string): Promise<string> {
+  const path = root.resolve(relative);
+  if (!path.ok) return `refused:${path.error}`;
+  try {
+    return await root.readText(path.value);
+  } catch (error) {
+    if (error instanceof RootError) return `refused:${error.refusal}`;
+    return `error:${(error as { code?: string }).code ?? String(error)}`;
+  }
+}
+
+/** A disk that runs `before` once, just before the real call named `at` — the deterministic interleave. */
+function interleaved(at: 'openRead' | 'writeNew' | 'openDirectory', before: () => Promise<void>): HostFs {
+  let armed = true;
+  const wrap =
+    <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      if (armed) {
+        armed = false;
+        await before();
+      }
+      return await call(...args);
+    };
+  return { ...fs, [at]: wrap(fs[at] as (...args: unknown[]) => Promise<unknown>) } as HostFs;
+}
+describe('the fence (§7.7, §9.3), unit tier', () => {
+  test('S40 an owner root reaches nothing inside the home or a moved-aside home, whatever the spelling', async () => {
+    const { parent, home } = await layout();
+    const imports = rootOf(home, 'imports', { subfolder: parent });
+    for (const spelling of [
+      'home/state/gate/probe',
+      './home/state/gate/probe',
+      'home/./state/gate/probe',
+      './/home//state/./gate/probe',
+      `${parent}/./home/state/gate/probe`,
+      './home-before-2026-11-01-0900/probe',
+    ])
+      expect(await attempt(imports, spelling)).toBe('refused:fenced');
+    // The root itself spelled with a dot is the same root, judged after normalizing.
+    expect(await attempt(rootOf(home, 'imports', { subfolder: `${parent}/./work` }), './notes.md')).toBe('hello');
+    expect(await attempt(rootOf(home, 'imports', { subfolder: `${parent}/./home` }), 'state/gate/probe')).toBe(
+      'refused:fenced',
+    );
+  });
+
+  test('S43 a path whose resolution hops through a link living inside the home is refused', async () => {
+    const { parent, home, work } = await layout();
+    await mkdir(`${parent}/outside`);
+    await writeFile(`${parent}/outside/component.md`, 'component');
+    // work/source -> <home>/state/gate/out -> <parent>/outside: lands outside, but its hop lives in the home.
+    await symlink(`${parent}/outside`, `${home}/state/gate/out`);
+    await symlink(`${home}/state/gate/out`, `${parent}/source`);
+    const imports = rootOf(home, 'imports', { subfolder: parent });
+    expect(await attempt(imports, 'source/component.md')).toBe('refused:fenced');
+    expect(await attempt(imports, 'outside/component.md')).toBe('component');
+    expect(await attempt(rootOf(home, 'imports', { subfolder: work }), 'notes.md')).toBe('hello');
+  });
+
+  test('S44 a write goes through the checked folder: a folder swapped for a link to the home is never written', async () => {
+    const { home, work } = await layout();
+    await mkdir(`${work}/sub`);
+    const swapping = interleaved('writeNew', async () => {
+      await rename(`${work}/sub`, `${work}/sub-moved`);
+      await symlink(`${home}/state/gate`, `${work}/sub`);
+    });
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { fs: swapping, work });
+    const path = root.resolve('sub/out.txt');
+    if (!path.ok) throw new Error('resolve');
+    await root.writeText(path.value, 'written');
+    expect((await readdir(`${home}/state/gate`)).sort()).toEqual(['probe']);
+    expect(await readFile(`${work}/sub-moved/out.txt`, 'utf8')).toBe('written');
+  });
+
+  test('S44 without descriptor reach nothing outside the daemon folders is removed', async () => {
+    const { home, work } = await layout();
+    const blind = nodeFs(() => 'r', { descriptorFolder: `${work}/no-such-descriptor-folder` });
+    const owner = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { fs: blind, work });
+    const notes = owner.resolve('notes.md');
+    if (!notes.ok) throw new Error('resolve');
+    await expect(owner.remove(notes.value)).rejects.toMatchObject({ refusal: 'no_descriptor_reach' });
+    expect(await readFile(`${work}/notes.md`, 'utf8')).toBe('hello');
+    const internal = rootOf(home, 'agent-homes', { subfolder: 'F1' }, { fs: blind });
+    const own = internal.resolve('own.txt');
+    if (!own.ok) throw new Error('resolve');
+    await internal.remove(own.value);
+    expect(await readdir(`${home}/state/codex/agent-homes/F1`)).toEqual([]);
+  });
+
+  test('S44 a folder tree is removed one name at a time through descriptors, never following a link out', async () => {
+    const { home, work } = await layout();
+    await mkdir(`${work}/tree/deep`, { recursive: true });
+    await writeFile(`${work}/tree/deep/a.txt`, 'a');
+    await symlink(`${home}/state/gate`, `${work}/tree/link`);
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    const tree = root.resolve('tree');
+    if (!tree.ok) throw new Error('resolve');
+    await root.remove(tree.value);
+    expect(await readdir(work)).toEqual(['notes.md']);
+    expect(await readFile(`${home}/state/gate/probe`, 'utf8')).toBe(SECRET);
+  });
+
+  test('S46 a read takes only a regular file, never blocks on a pipe, and reads no more than its limit', async () => {
+    const { home, work } = await layout();
+    execFileSync('mkfifo', [`${work}/pipe`]);
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    expect(await attempt(root, 'pipe')).toBe('refused:device_file');
+    await writeFile(`${work}/big.txt`, 'x'.repeat(200 * 1024));
+    const big = root.resolve('big.txt');
+    if (!big.ok) throw new Error('resolve');
+    expect((await root.readBytes(big.value, 64 * 1024)).byteLength).toBe(64 * 1024);
+    const missing = root.resolve('none.txt');
+    if (!missing.ok) throw new Error('resolve');
+    await expect(root.readText(missing.value)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('S46 a write is an exclusive temp file renamed in the same folder: a link at the name is replaced, not followed', async () => {
+    const { home, work } = await layout();
+    await symlink(`${home}/state/gate/probe`, `${work}/lease`);
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    const path = root.resolve('lease');
+    expect(path.ok).toBe(true);
+    // The name resolves through the link into the home, so the write is refused outright...
+    if (path.ok) await expect(root.writeText(path.value, 'lease')).rejects.toBeInstanceOf(RootError);
+    expect(await readFile(`${home}/state/gate/probe`, 'utf8')).toBe(SECRET);
+    // ...and an ordinary write leaves no temp file behind.
+    const fresh = root.resolve('fresh/lease');
+    if (!fresh.ok) throw new Error('resolve');
+    await root.writeText(fresh.value, 'one');
+    await root.writeText(fresh.value, 'two');
+    expect(await readdir(`${work}/fresh`)).toEqual(['lease']);
+    expect(await readFile(`${work}/fresh/lease`, 'utf8')).toBe('two');
+  });
+
+  test('S48 a work folder inside the home, named directly or through a link, reaches nothing', async () => {
+    const { parent, home } = await layout();
+    for (const folder of [`${home}/state/gate`, `${parent}/./home/state/gate`]) {
+      const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work: folder });
+      expect(await attempt(root, 'probe')).toBe('refused:fenced');
+    }
+    await symlink(`${home}/state/gate`, `${parent}/linked-cwd`);
+    const linked = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work: `${parent}/linked-cwd` });
+    expect(await attempt(linked, 'probe')).toBe('refused:fenced');
+  });
+
+  test('S40 the fence is the home, its state and config by real path, every moved-aside home, and the key files by identity', async () => {
+    const { parent, home } = await layout();
+    await writeFile(`${home}/api-token`, 'token-fixture');
+    const fence = await fenceOf(fs, home);
+    expect(fence.real).toBe(home);
+    for (const inside of [
+      home,
+      `${home}/state/gate/probe`,
+      `${home}/config`,
+      `${parent}/home-before-2026-11-01-0900/probe`,
+    ])
+      expect(fencedByName(fence, inside)).toBe(true);
+    expect(fencedByName(fence, `${parent}/work/notes.md`)).toBe(false);
+    // A real path inside the home is fenced whatever route found it; a folder beside it is not.
+    expect(await fencedReal(fs, fence, `${home}/state/gate`)).toBe(true);
+    expect(await fencedReal(fs, fence, `${parent}/work`)).toBe(false);
+    // A key file hard-linked into a work folder is recognised by IDENTITY under another name.
+    await link(`${home}/api-token`, `${parent}/work/innocent.txt`);
+    expect(await fencedReal(fs, fence, `${parent}/work/innocent.txt`)).toBe(true);
+    // A folder that cannot be looked at fails closed.
+    expect(await fencedReal(fs, fence, `${parent}/work/not-there/at-all`)).toBe(true);
+  });
+
+  test('S45 the kernel part of an id at a boundary: a name that would climb out of its root never resolves, a plain one does', async () => {
+    const { home } = await layout();
+    const root = rootOf(home, 'agent-homes', { subfolder: 'F1' });
+    for (const id of ['../other', '../../gate', '/other', 'a/../../other', 'F1/../../x'])
+      expect(root.resolve(id).ok, id).toBe(false);
+    for (const id of ['own.txt', 'conversation_1-a', 'a'.repeat(128)]) expect(root.resolve(id).ok, id).toBe(true);
+    // The grammar of a conversation id itself (letters, digits, - and _, at most 128) is the harness's own test (S45
+    // in claude-code); the kernel's part is that no id can reach past the root it names.
+    expect(await attempt(root, '../other')).toMatch(/^refused:/u);
+  });
+});

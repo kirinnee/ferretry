@@ -11,10 +11,12 @@ import { type Instant, milliseconds } from '@ferretry/std';
 import { CredentialPlacementSchema, OutboundHttpRequestSchema } from '@ferretry/core-vault/contract';
 import manifest from '../manifest.ts';
 import {
+  type LoginChangesApi,
   type LoginId,
   type LoginsApi,
   LOGINS_CONFIG,
   LoginChanged,
+  LoginsUsedBy,
   LoginSignedIn,
   ModelsChanged,
 } from '../contract/index.ts';
@@ -41,6 +43,7 @@ import { modelCatalogsView, type PublishedCatalogState } from './lib/models/view
 import { presetFromFile, type ProviderPreset, type ProviderPresetFile } from './lib/presets/schema.ts';
 import { ProviderPresetService } from './lib/provider-probe/presets.ts';
 import { ProviderProbeService } from './lib/provider-probe/service.ts';
+import { loginChangesPort } from './lib/changes/port.ts';
 import { LoginChangeService } from './lib/changes/service.ts';
 import { changeRoutes } from './lib/routes/changes.ts';
 import { loginRoutes } from './lib/routes/logins.ts';
@@ -61,7 +64,7 @@ const PROGRAMS: Readonly<Record<HarnessKind, string>> = { claude: 'claude', code
  */
 export function buildLoginsDaemon() {
   return implementDaemon(manifest, {
-    build({ needs, uses, kernel }) {
+    build({ needs, uses, kernel, hooks }) {
       const { clock, config, events, jobs, lifecycle, log, state } = kernel;
       const files = () => loginFiles(config);
 
@@ -217,9 +220,6 @@ export function buildLoginsDaemon() {
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
         models: modelsView,
-        // The routes and this port share ONE service below, so a change staged either way has the same refusals, the
-        // same held review and the same events. `changes` is built after `api` (it reads `api.get`); these call it lazily.
-        changes: { stage: change => changes.stage(change), apply: id => changes.apply(id) },
       };
 
       /**
@@ -253,6 +253,14 @@ export function buildLoginsDaemon() {
         },
       });
 
+      // The routes and this port share ONE service below, so a change staged either way has the same refusals, the
+      // same held review and the same events. `changes` is built after `api` (it reads `api.get`); these call it lazily.
+      const changesApi: LoginChangesApi = loginChangesPort({
+        stage: (change, options) => changes.stage(change, options),
+        apply: (id, door) => changes.apply(id, door),
+        discard: id => changes.discard(id),
+      });
+
       // Logins OWNS its change routes: add, sign out, disable, enable, label, remove. A change edits this plugin's own
       // `config/logins/<id>.yaml` through the kernel's config write port, so the one writer's rules hold (a raw secret
       // refused, the last good version kept, a loosening held for the owner).
@@ -260,10 +268,19 @@ export function buildLoginsDaemon() {
         files,
         presets: async () => Object.values(await presetService.presets()),
         machineName: () => 'this machine',
+        // Which runtimes use a login is Runtimes' to say. No provider (Runtimes off) is an answer too: unknown, and a
+        // removal fails closed on it.
+        usedBy: async id => {
+          const users = hooks.provider(LoginsUsedBy, 'runtimes');
+          if (users === 'unavailable') throw new Error('nothing answers which runtimes use a login');
+          return await users.of(id);
+        },
         view: id => api.get(id as LoginId),
         signOut: id => credentials.signOut(id),
         write: (id, patch) => config.write(LOGINS_CONFIG, id, { patch }),
-        remove: id => config.remove(LOGINS_CONFIG, id),
+        // A removal that the kernel would hold is refused instead: a held removal would leave the login in effect and be
+        // put through later by a path that does not ask what uses it.
+        remove: id => config.remove(LOGINS_CONFIG, id, { refuseIfHeld: true }),
         changed: (loginId, change) => {
           events.publish(LoginChanged, { loginId: loginId as LoginId, change });
         },
@@ -293,7 +310,7 @@ export function buildLoginsDaemon() {
             refreshLocal: () => localModels.refresh(),
           }),
         },
-        provides: { logins: perNeeder(apiFor) },
+        provides: { logins: perNeeder(apiFor), loginChanges: changesApi },
         hooks: {
           'logins:anthropic': kinds.anthropic,
           'logins:openai': kinds.openai,

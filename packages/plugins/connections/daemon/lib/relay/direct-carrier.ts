@@ -22,7 +22,11 @@ import {
   type SessionId,
 } from '@ferretry/kernel/wire';
 import { encodeControlMessage, RELAY_LIMITS } from './control.ts';
+import type { DirectSessionLog } from '../tunnel/session-log.ts';
 import type { OpenCarrierSession, RelayLinkScheduler } from './session-ports.ts';
+
+/** The carrier whose sessions are reported to the daemon's log (§15, "What the daemon logs"). */
+const TUNNEL_CARRIER = 'tunnel' as CarrierKey;
 
 export const MAX_DIRECT_SESSIONS = 64;
 export const MAX_DIRECT_UNPROVEN_SESSIONS = 16;
@@ -37,6 +41,12 @@ export interface DirectCarrierDependencies {
   readonly randomBytes: (length: number) => Uint8Array;
   readonly sessions: () => SessionLayer;
   readonly openSession: OpenCarrierSession;
+  /**
+   * Where a TUNNEL session's life is reported (`docs/relay-protocol.md` §15, "What the daemon logs"). Absent means
+   * nothing is logged. Only a session that arrived on the tunnel carrier is reported: a tab on the host opening and
+   * closing sessions all day is not news, and a phone behind Cloudflare dropping one is what an owner asks about.
+   */
+  readonly sessionLog?: DirectSessionLog;
 }
 function frameBytes(frame: SocketFrame): Uint8Array | null {
   if (typeof frame === 'string') return null;
@@ -45,27 +55,47 @@ function frameBytes(frame: SocketFrame): Uint8Array | null {
 }
 export class DirectSession implements SocketHandler {
   readonly #sessionId: SessionId;
+  readonly #onProved: () => void;
   #link: CarrierLink | undefined;
   #stop: (() => void) | undefined;
   #ended = false;
   #draining = false;
+  /** Where this session's life is reported — only for a tunnel arrival — and what is reported. */
+  readonly #log: DirectSessionLog | undefined;
+  readonly #openedAt: number;
+  #lastFrameAt: number;
+  #bytesIn = 0;
+  #bytesOut = 0;
+  #proved = false;
+  /** Set when THIS daemon ended the socket, before the transport reports the close back. */
+  #endedHere: { readonly code: number; readonly reason: string } | undefined;
   constructor(
     private readonly deps: DirectCarrierDependencies,
+    /** The carrier the ARRIVAL names: the kernel session opens on it, so a tunnel socket is never a direct session. */
+    private readonly carrier: CarrierKey,
     private readonly peer: string | undefined,
     private readonly downstream: SocketDownstream,
     private readonly release: () => void,
-    private readonly onProved: () => void = () => undefined,
+    onProved: () => void = () => undefined,
   ) {
     const id = sessionIdFromBytes(deps.randomBytes(SESSION_ID_BYTES));
     if (id === null) throw new Error('the session identifier generator produced an unusable identifier');
     this.#sessionId = id;
+    this.#log = carrier === TUNNEL_CARRIER ? deps.sessionLog : undefined;
+    this.#openedAt = deps.clock.now();
+    this.#lastFrameAt = this.#openedAt;
+    this.#onProved = () => {
+      this.#proved = true;
+      onProved();
+    };
   }
   get sessionId(): SessionId {
     return this.#sessionId;
   }
   async open(): Promise<void> {
     if (this.#ended) return;
-    this.downstream.send(
+    this.#log?.opened();
+    this.#send(
       encodeFrame({
         kind: FRAME_KINDS.control,
         sessionId: this.#sessionId,
@@ -75,17 +105,19 @@ export class DirectSession implements SocketHandler {
     );
     this.#link = this.deps.openSession(
       this.deps.sessions(),
-      'direct' as CarrierKey,
+      this.carrier,
       this.peer === undefined ? {} : { address: this.peer },
-      this.onProved,
+      this.#onProved,
     );
     this.#stop = this.#link.outbound.onReady(() => this.#drain());
     this.#drain();
   }
   fromClient(frame: SocketFrame): void {
     if (this.#ended) return;
+    this.#lastFrameAt = this.deps.clock.now();
+    this.#bytesIn += typeof frame === 'string' ? frame.length : frame.byteLength;
     if (frame === HEARTBEAT_REQUEST) {
-      this.downstream.send(HEARTBEAT_RESPONSE);
+      this.#send(HEARTBEAT_RESPONSE);
       return;
     }
     if (frame === HEARTBEAT_RESPONSE) return;
@@ -113,7 +145,7 @@ export class DirectSession implements SocketHandler {
         const next = this.#link.outbound.next();
         if (next === undefined) break;
         if (isSessionEnd(next)) {
-          this.downstream.send(
+          this.#send(
             encodeFrame({
               kind: FRAME_KINDS.control,
               sessionId: this.#sessionId,
@@ -125,7 +157,7 @@ export class DirectSession implements SocketHandler {
           break;
         }
         // The final permit is inside next(); this socket write must be synchronous.
-        this.downstream.send(next.bytes);
+        this.#send(next.bytes);
       }
     } catch {
       this.#end(SESSION_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
@@ -139,12 +171,39 @@ export class DirectSession implements SocketHandler {
     this.#stop?.();
     this.#link?.closed(ended?.reason ?? 'the daemon released this socket');
     this.release();
+    this.#report(ended);
+  }
+  /** One socket write, counted for the session's closing line. */
+  #send(frame: Uint8Array | string): void {
+    this.#bytesOut += typeof frame === 'string' ? frame.length : frame.byteLength;
+    this.downstream.send(frame);
+  }
+  /**
+   * The one line a tunnel session's end earns. A close with no report from the transport and none from this daemon is
+   * the daemon releasing the socket itself — a shutdown, or a peer gone before it attached. Counts and timings only:
+   * never a key, a device or an address.
+   */
+  #report(ended: SocketEnded | undefined): void {
+    if (this.#log === undefined) return;
+    const now = this.deps.clock.now();
+    const here = this.#endedHere;
+    this.#log.closed({
+      by: here !== undefined || ended === undefined ? 'daemon' : 'peer',
+      code: here?.code ?? ended?.code,
+      reason: here?.reason ?? ended?.reason ?? 'the daemon released this socket',
+      durationMs: now - this.#openedAt,
+      lastFrameAgeMs: now - this.#lastFrameAt,
+      bytesIn: this.#bytesIn,
+      bytesOut: this.#bytesOut,
+      proved: this.#proved,
+    });
   }
   evict(): void {
     this.#end(SESSION_CLOSE_CODES.rendezvousBusy, EVICTED_REASON);
   }
   #end(code: number, reason: string): void {
     if (this.#ended) return;
+    this.#endedHere = { code, reason };
     this.close({ code, reason });
     this.downstream.close(code, truncateUtf8(reason, 123));
   }

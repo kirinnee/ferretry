@@ -15,8 +15,7 @@
  */
 
 import type { ReactNode } from 'react';
-import type { AskOnScreen } from '../../../contract/wire.ts';
-import type { AgendaItem } from '@ferretry/core-asks/contract';
+import type { AgendaItem, AskOnScreen } from '@ferretry/core-asks/contract';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import type { InboxCard } from '../../lib/agenda-inbox.ts';
 import { inboxWho } from '../../lib/agenda-inbox-list.ts';

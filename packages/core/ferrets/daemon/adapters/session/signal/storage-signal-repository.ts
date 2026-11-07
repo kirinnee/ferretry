@@ -8,7 +8,7 @@ import {
   signalStatusOf,
 } from '../../../lib/session/signal/types.ts';
 import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
-import type { DaemonStorage } from '../../storage/session-storage.ts';
+import { type DaemonStorage, InvalidStateDocumentError } from '../../storage/session-storage.ts';
 import { sessionAddressCandidates } from '../session-address-candidates.ts';
 
 function record(value: unknown): Record<string, unknown> {
@@ -72,10 +72,19 @@ export class StorageSignalRepository implements SignalRepository {
     private readonly clock: ClockPort,
   ) {}
 
+  /**
+   * A document the store refuses to read (its declared schema is not met: no known mode, no known status) yields NO
+   * target, exactly as a record the repository itself could not parse: it never guesses.
+   */
   async read(id: SessionId): Promise<SignalTarget | undefined> {
-    const [config, state] = await Promise.all([this.storage.readConfig(id), this.storage.readState(id)]);
-    if (config === undefined || state === undefined) return undefined;
-    return this.target(id, record(config), record(state));
+    try {
+      const [config, state] = await Promise.all([this.storage.readConfig(id), this.storage.readState(id)]);
+      if (config === undefined || state === undefined) return undefined;
+      return this.target(id, record(config), record(state));
+    } catch (error) {
+      if (error instanceof InvalidStateDocumentError) return undefined;
+      throw error;
+    }
   }
 
   /**
@@ -122,8 +131,11 @@ export class StorageSignalRepository implements SignalRepository {
       ...(change.reason === undefined ? {} : { reason: change.reason }),
       ...(change.data ?? {}),
     });
-    const config = await this.storage.readConfig(id);
-    const target = this.target(id, record(config), record(updated));
+    const config = await this.storage.readConfig(id).catch((error: unknown) => {
+      if (error instanceof InvalidStateDocumentError) return undefined;
+      throw error;
+    });
+    const target = config === undefined ? undefined : this.target(id, record(config), record(updated));
     if (target === undefined) throw new Error(`session ${id} is unreadable after a signal transition`);
     return target;
   }

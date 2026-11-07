@@ -26,7 +26,7 @@
  * the gallery takes the connection as a prop.
  */
 
-import { cn, ExternalLink as ExternalAnchor } from '@ferretry/app/ui';
+import { cn, ExternalLink as ExternalAnchor, ImageViewer, type ViewerImage } from '@ferretry/app/ui';
 import { Download, ExternalLink, FileText, ImageOff } from 'lucide-react';
 import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -53,7 +53,6 @@ import {
   transcriptImageErrorMessage,
   transcriptImageHandleOf,
 } from './seam-attachments.ts';
-import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 
 /** The browser's own object-URL pair, isolated so tests never touch it. */
 const browserBlobUrls: AttachmentBlobUrlPort = {
