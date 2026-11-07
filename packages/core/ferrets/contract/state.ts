@@ -60,7 +60,8 @@ export type ParsedLimitSize =
 
 /** Today's `parseLimitSize`. */
 export function parseLimitSize(value: unknown): ParsedLimitSize | undefined {
-  if (typeof value === 'number') return Number.isInteger(value) && value > 0 ? { kind: 'bytes', bytes: value } : undefined;
+  if (typeof value === 'number')
+    return Number.isInteger(value) && value > 0 ? { kind: 'bytes', bytes: value } : undefined;
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
   if (text.toLowerCase() === 'infinity') return { kind: 'unlimited' };

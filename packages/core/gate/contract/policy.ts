@@ -43,7 +43,6 @@ export const CAPABILITIES = {
 
 export const CapabilityNameSchema = z.enum(CAPABILITY_NAMES);
 
-
 /** The core capability a ref names, or `undefined` for one Gate does not know (fail closed: `undetermined`). */
 export function coreCapabilityName(ref: PolicyRef<'capability'>): CapabilityName | undefined {
   return (CAPABILITY_NAMES as readonly string[]).includes(ref) ? (ref as string as CapabilityName) : undefined;
@@ -118,7 +117,13 @@ export const CAPABILITY_NOUNS: Readonly<Record<CapabilityName, string>> = {
 };
 
 /** The `use` capabilities that ask a step-up when governed (today's `STEP_UP_USE_CAPABILITIES`). */
-export const STEP_UP_USE_CAPABILITIES: readonly CapabilityName[] = ['terminal', 'browser', 'pairing', 'secrets', 'sharing'];
+export const STEP_UP_USE_CAPABILITIES: readonly CapabilityName[] = [
+  'terminal',
+  'browser',
+  'pairing',
+  'secrets',
+  'sharing',
+];
 
 // ─── remedies and audit kinds ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -201,7 +206,8 @@ export type AuditKindName = (typeof AUDIT_KIND_NAMES)[number];
 export type AuditKindRef<N extends string = AuditKindName> = PolicyRef<'audit'> & N;
 
 /** Mints an audit kind ref; a plugin's contract uses it for kinds it adds. */
-export const auditKind = <const N extends string>(name: N): AuditKindRef<N> => policyRef('audit', name) as AuditKindRef<N>;
+export const auditKind = <const N extends string>(name: N): AuditKindRef<N> =>
+  policyRef('audit', name) as AuditKindRef<N>;
 
 /** Every core audit kind as a ref, keyed by its name: `AUDIT_KINDS['device.paired']`. */
 export const AUDIT_KINDS: { readonly [K in AuditKindName]: AuditKindRef<K> } = Object.freeze(
@@ -264,7 +270,8 @@ export type StepUpActName = (typeof STEP_UP_ACT_NAMES)[number];
 /** A step-up act ref with its literal kept: `'add-2fa-key'` alone is not one, so a claim cannot be asked by string. */
 export type StepUpActRef<N extends StepUpActName = StepUpActName> = PolicyRef<'step-up-act'> & N;
 
-const act = <const N extends StepUpActName>(name: N): StepUpActRef<N> => policyRef('step-up-act', name) as StepUpActRef<N>;
+const act = <const N extends StepUpActName>(name: N): StepUpActRef<N> =>
+  policyRef('step-up-act', name) as StepUpActRef<N>;
 
 /**
  * The acts that add access or run someone else's code, each wanting a passkey proved for it alone (today's
@@ -289,9 +296,7 @@ export const STEP_UP_ACTS = {
 } as const;
 export type StepUpAct = (typeof STEP_UP_ACTS)[keyof typeof STEP_UP_ACTS];
 
-export const StepUpActSchema = z
-  .enum(STEP_UP_ACT_NAMES)
-  .transform(name => policyRef('step-up-act', name) as StepUpAct);
+export const StepUpActSchema = z.enum(STEP_UP_ACT_NAMES).transform(name => policyRef('step-up-act', name) as StepUpAct);
 
 /**
  * THE ACTS ASKED OF EVERY CALLER, the machine itself included (today's `STEP_UP_ACTS_EVERY_CALLER`): no governed or
@@ -339,11 +344,8 @@ export const STEP_UP_SUBJECTS = {
 } as const;
 type SubjectSchemas = typeof STEP_UP_SUBJECTS;
 /** The stage id an every-caller act's proof is bound to. */
-export type StepUpSubjectOf<A extends EveryCallerStepUpAct> = A extends StepUpActRef<infer N>
-  ? N extends keyof SubjectSchemas
-    ? z.infer<SubjectSchemas[N]>
-    : never
-  : never;
+export type StepUpSubjectOf<A extends EveryCallerStepUpAct> =
+  A extends StepUpActRef<infer N> ? (N extends keyof SubjectSchemas ? z.infer<SubjectSchemas[N]> : never) : never;
 
 /** The error code a governed route answers when it needs a step-up this caller does not hold. */
 export const STEP_UP_REQUIRED_CODE = 'grant_step_up_required' as const;
@@ -384,3 +386,19 @@ export const StepUpRequiredBodySchema = z.strictObject({
   demand: StepUpDemandSchema,
 });
 export type StepUpRequiredBody = z.infer<typeof StepUpRequiredBodySchema>;
+
+// ─── descriptor helpers ───────────────────────────────────────────────────────────────────────────────────────────
+
+/** `cap('fleet', 'configure')`: a descriptor's capability demand on a core capability. */
+export function cap(
+  capability: CapabilityName,
+  axis: CapabilityAxis,
+  options: { readonly narrowing?: true } = {},
+): { readonly capability: PolicyRef<'capability'>; readonly axis: CapabilityAxis; readonly narrowing?: true } {
+  return Object.freeze({ capability: CAPABILITIES[capability], axis, ...options });
+}
+
+/** `audit('fleet.configured')`: a descriptor's audit declaration recording one kind. */
+export function audit<const N extends string>(kind: N): { readonly record: AuditKindRef<N> } {
+  return Object.freeze({ record: auditKind(kind) });
+}

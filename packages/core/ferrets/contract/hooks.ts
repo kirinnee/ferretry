@@ -58,14 +58,14 @@ export const StartDecide = defineHook('start.decide', { mode: 'decide', input: S
 /** Conversation and Board add sitrep lines. */
 export const SitrepLines = defineHook('sitrep.lines', { mode: 'contribute', item: z.custom<SitrepLineSource>() });
 
-export const FerretChangedSchema = z.strictObject({
+export const FerretChangedPayloadSchema = z.strictObject({
   ferret: FerretIdSchema,
   state: FerretStateSchema,
   previous: FerretStateSchema.optional(),
   /** What changed besides the state. */
   change: z.enum(['started', 'state', 'stopped', 'renamed', 'moved', 'archived', 'removed']),
 });
-export type FerretChanged = z.infer<typeof FerretChangedSchema>;
+export type FerretChangedPayload = z.infer<typeof FerretChangedPayloadSchema>;
 
 /** Updates, Warden, Tidy hear that a ferret changed, after Ferrets' write. */
-export const FerretChangedHook = defineHook('ferret.changed', { mode: 'observe', payload: FerretChangedSchema });
+export const FerretChanged = defineHook('ferret.changed', { mode: 'observe', payload: FerretChangedPayloadSchema });

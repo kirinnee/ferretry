@@ -37,12 +37,20 @@ const SENSITIVITY_RANK: Readonly<Record<InputSensitivity, number>> = { plain: 0,
 /** The most careful sensitivity among some fields (today's `strongestSensitivity`). */
 export function strongestSensitivity(fields: readonly { readonly sensitivity: InputSensitivity }[]): InputSensitivity {
   return fields.reduce<InputSensitivity>(
-    (strongest, field) => (SENSITIVITY_RANK[field.sensitivity] > SENSITIVITY_RANK[strongest] ? field.sensitivity : strongest),
+    (strongest, field) =>
+      SENSITIVITY_RANK[field.sensitivity] > SENSITIVITY_RANK[strongest] ? field.sensitivity : strongest,
     'plain',
   );
 }
 
-export const InputRequestStateSchema = z.enum(['pending', 'delivering', 'delivered', 'refused', 'expired', 'cancelled']);
+export const InputRequestStateSchema = z.enum([
+  'pending',
+  'delivering',
+  'delivered',
+  'refused',
+  'expired',
+  'cancelled',
+]);
 export type InputRequestState = z.infer<typeof InputRequestStateSchema>;
 
 export const INPUT_REASONS = [
@@ -114,7 +122,10 @@ export const InputRaiseSchema = z
     expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
     blocking: z.boolean().optional(),
     /** A follow-up in a multi-step login: the ask it follows (`A12`). */
-    chain: z.string().regex(/^A[1-9][0-9]*$/u).optional(),
+    chain: z
+      .string()
+      .regex(/^A[1-9][0-9]*$/u)
+      .optional(),
     secretHint: z.string().min(1).max(128).optional(),
     factor: z.string().min(1).max(128).optional(),
     source: z.strictObject({ kind: z.literal('sealed'), name: z.string().min(1).max(64) }).optional(),

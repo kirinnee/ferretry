@@ -6,7 +6,7 @@ import { definePlugin } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
   AutoResumeFile,
-  FerretChangedHook,
+  FerretChanged,
   FerretFiles,
   FerretHistoryFiles,
   FerretIndexFile,
@@ -80,7 +80,7 @@ export default definePlugin({
       { hook: LaunchParts },
       { hook: StartDecide },
       { hook: SitrepLines },
-      { hook: FerretChangedHook },
+      { hook: FerretChanged },
     ],
     takes: [{ hook: Bearers, key: 'ferret' }],
   },

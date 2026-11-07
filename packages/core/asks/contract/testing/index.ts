@@ -60,13 +60,25 @@ export class FakeAsks implements AsksApi {
     if (ask === undefined) throw new Error(`no ask ${id}`);
     this.#nextAnswer += 1;
     const answerId = `an_${this.#nextAnswer.toString(16).padStart(24, '0')}` as AnswerId;
-    this.#answers.push({ id: answerId, ask: id, source: ask.source, entry: ask.entry, effect, by, at: AT as AskAnswer['at'], ...extra });
+    this.#answers.push({
+      id: answerId,
+      ask: id,
+      source: ask.source,
+      entry: ask.entry,
+      effect,
+      by,
+      at: AT as AskAnswer['at'],
+      ...extra,
+    });
     this.#asks.set(id, { ...ask, state: 'answered' });
     return answerId;
   }
   async answers(filter: { readonly source: SourceKey; readonly entry?: EntryId }, since?: string) {
     return this.#answers.filter(
-      a => a.source === filter.source && (filter.entry === undefined || a.entry === filter.entry) && (since === undefined || a.at > since),
+      a =>
+        a.source === filter.source &&
+        (filter.entry === undefined || a.entry === filter.entry) &&
+        (since === undefined || a.at > since),
     );
   }
   async close(id: AskId, _reason: CloseReason): Promise<void> {
@@ -154,13 +166,15 @@ export function askSourceConformance(
     });
     test('a ref with an unknown field or the wrong shape is refused (strict)', () => {
       for (const ref of samples.valid)
-        if (typeof ref === 'object' && ref !== null) expect(spec.schema.safeParse({ ...ref, extra: 1 }).success).toBe(false);
+        if (typeof ref === 'object' && ref !== null)
+          expect(spec.schema.safeParse({ ...ref, extra: 1 }).success).toBe(false);
       for (const ref of samples.invalid) expect(spec.schema.safeParse(ref).success).toBe(false);
     });
     test('its title template names only fields of the ref', () => {
       const fields = [...spec.title.matchAll(/\{([A-Za-z]+)\}/gu)].map(match => match[1]);
       const first = samples.valid[0];
-      if (typeof first === 'object' && first !== null) for (const field of fields) expect(field !== undefined && field in first).toBe(true);
+      if (typeof first === 'object' && first !== null)
+        for (const field of fields) expect(field !== undefined && field in first).toBe(true);
     });
   });
 }

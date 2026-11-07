@@ -79,7 +79,8 @@ export function projectInventory(
       return keep(id => WARDEN_SEES.includes(id));
     case 'device':
       return keep(
-        id => DEVICE_ALWAYS.includes(id) || (surfaces.get(id) ?? []).some(surface => deviceAdmits(surface, viewer.grants)),
+        id =>
+          DEVICE_ALWAYS.includes(id) || (surfaces.get(id) ?? []).some(surface => deviceAdmits(surface, viewer.grants)),
       );
     case 'member':
       return { outcome: 'refused', status: 403 };

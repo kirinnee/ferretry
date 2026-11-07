@@ -39,12 +39,16 @@ export interface Sitrep {
  */
 export interface FerretsApi {
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
-  list(filter?: { readonly state?: FerretState; readonly parent?: FerretId; readonly pack?: PackId }): Promise<
-    readonly FerretSummary[]
-  >;
+  list(filter?: {
+    readonly state?: FerretState;
+    readonly parent?: FerretId;
+    readonly pack?: PackId;
+  }): Promise<readonly FerretSummary[]>;
   /** Synchronous, memory-only: whether `caller` may act on `target` (itself, or a helper of its own lineage). */
   mayTouch(caller: FerretId, target: FerretId): boolean;
   children(ferret: FerretId): readonly FerretId[];
+  /** The harness keys currently provided under `harnesses` (a plugin off is absent). */
+  harnesses(): readonly HarnessKey[];
   start(request: StartRequest): Promise<Result<FerretId, StartFailure>>;
   stop(ferret: FerretId, how: 'polite' | 'now'): Promise<void>;
   resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>>;

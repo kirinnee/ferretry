@@ -144,7 +144,9 @@ export function gateConfigLoosens(before: GateConfig | undefined, after: GateCon
   const loosened = [...widenedGrants(from.grants, after.grants)];
   for (const field of SECURITY_SETTING_FIELDS)
     if (widensSecurity(field, from.security[field], after.security[field]))
-      loosened.push(`security ${field} loosened from ${String(from.security[field])} to ${String(after.security[field])}`);
+      loosened.push(
+        `security ${field} loosened from ${String(from.security[field])} to ${String(after.security[field])}`,
+      );
   if (!from.warden.remote && after.warden.remote) loosened.push('a remote warden is now honoured');
   return loosened;
 }

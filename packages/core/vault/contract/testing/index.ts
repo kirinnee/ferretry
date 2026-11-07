@@ -358,7 +358,10 @@ export function fakeChildEnvironmentValues(env: ChildEnvironment): Readonly<Reco
 }
 
 /** What a fake `run` child prints, given its resolved environment. */
-export type FakeChild = (command: SecretUseCommand, env: Readonly<Record<string, string>>) => { stdout: string; stderr: string };
+export type FakeChild = (
+  command: SecretUseCommand,
+  env: Readonly<Record<string, string>>,
+) => { stdout: string; stderr: string };
 
 /** A fake transport: what came back from a request, given the headers it was sent with. */
 export type FakeTransport = (request: OutboundHttpRequest) => AuthorizedOutcome;
@@ -375,11 +378,16 @@ export class FakeVault implements VaultApi {
   ) {}
 
   async names(): Promise<readonly SecretSummary[]> {
-    return [...this.#values].map(([name, entry]) => ({ name, createdAt: entry.createdAt, updatedAt: entry.updatedAt }) as SecretSummary);
+    return [...this.#values].map(
+      ([name, entry]) => ({ name, createdAt: entry.createdAt, updatedAt: entry.updatedAt }) as SecretSummary,
+    );
   }
   async put(name: SecretName, value: string): Promise<void> {
     const at = '2026-11-07T12:00:00.000Z';
     this.#values.set(name, { value, createdAt: this.#values.get(name)?.createdAt ?? at, updatedAt: at });
+  }
+  async has(name: SecretName): Promise<boolean> {
+    return this.#values.has(name);
   }
   async remove(name: SecretName): Promise<boolean> {
     return this.#values.delete(name);
@@ -395,7 +403,10 @@ export class FakeVault implements VaultApi {
     const out: Record<string, string> = {};
     for (const [key, raw] of Object.entries(env)) {
       for (const name of secretReferencesIn(raw)) if (!this.#values.has(name)) unknown.push(name);
-      out[key] = raw.replace(/\$\{secret:([A-Z][A-Z0-9_]{0,63})\}/gu, (_, name: string) => this.#values.get(name)?.value ?? '');
+      out[key] = raw.replace(
+        /\$\{secret:([A-Z][A-Z0-9_]{0,63})\}/gu,
+        (_, name: string) => this.#values.get(name)?.value ?? '',
+      );
     }
     return unknown.length > 0 ? err(unknown) : ok(out);
   }
@@ -438,7 +449,10 @@ export class FakeVault implements VaultApi {
   ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> {
     const resolved = this.#resolve(env);
     if (!resolved.ok) return err({ unknown: resolved.error });
-    const handle = Object.freeze({ names: Object.keys(env), toJSON: () => ({ names: Object.keys(env) }) }) as unknown as ChildEnvironment;
+    const handle = Object.freeze({
+      names: Object.keys(env),
+      toJSON: () => ({ names: Object.keys(env) }),
+    }) as unknown as ChildEnvironment;
     childValues.set(handle, Object.freeze(resolved.value));
     return ok(handle);
   }
@@ -489,13 +503,21 @@ export function vaultConformance(name: string, make: () => VaultSubject | Promis
     test('a run that prints the value returns it masked (S14)', async () => {
       const { vault } = await make();
       await vault.put(NAME, VALUE);
-      const result = await vault.run({ command: ['sh', '-c', 'echo $API_KEY'], cwd: '/tmp', secrets: [NAME], env: {}, timeoutMs: 1_000 });
+      const result = await vault.run({
+        command: ['sh', '-c', 'echo $API_KEY'],
+        cwd: '/tmp',
+        secrets: [NAME],
+        env: {},
+        timeoutMs: 1_000,
+      });
       expect(result.ok && result.value.stdout.includes(VALUE)).toBe(false);
       expect(result.ok && result.value.used).toEqual([NAME]);
     });
     test('a relative cwd and an unknown secret are refused', async () => {
       const { vault } = await make();
-      expect(await vault.run({ command: ['true'], cwd: 'rel', secrets: [], env: {}, timeoutMs: 1_000 })).toEqual(err('invalid_cwd'));
+      expect(await vault.run({ command: ['true'], cwd: 'rel', secrets: [], env: {}, timeoutMs: 1_000 })).toEqual(
+        err('invalid_cwd'),
+      );
       expect(
         await vault.run({ command: ['true'], cwd: '/tmp', secrets: ['NOPE' as SecretName], env: {}, timeoutMs: 1_000 }),
       ).toEqual(err('unknown_secret'));
@@ -504,13 +526,20 @@ export function vaultConformance(name: string, make: () => VaultSubject | Promis
       const { vault } = await make();
       await vault.put(NAME, VALUE);
       expect(await vault.authorizeFetch(NAME, ['other.example.test'], request)).toEqual({ kind: 'refused' });
-      expect(await vault.authorizeFetch(NAME, ['api.example.test'], { ...request, url: 'http://api.example.test/' })).toEqual({
+      expect(
+        await vault.authorizeFetch(NAME, ['api.example.test'], { ...request, url: 'http://api.example.test/' }),
+      ).toEqual({
         kind: 'refused',
       });
       expect(
-        await vault.authorizeFetch(NAME, ['api.example.test'], { ...request, headers: { Authorization: 'Bearer mine' } }),
+        await vault.authorizeFetch(NAME, ['api.example.test'], {
+          ...request,
+          headers: { Authorization: 'Bearer mine' },
+        }),
       ).toEqual({ kind: 'refused' });
-      expect(await vault.authorizeFetch('MISSING' as SecretName, ['api.example.test'], request)).toEqual({ kind: 'secret_missing' });
+      expect(await vault.authorizeFetch('MISSING' as SecretName, ['api.example.test'], request)).toEqual({
+        kind: 'secret_missing',
+      });
     });
     test('a child environment refuses an unknown secret and serialises as names only', async () => {
       const { vault } = await make();
@@ -544,7 +573,10 @@ export interface InputTargetSubject {
 }
 
 /** What every `input.targets` adapter must do with a target that is not there; tools add their own cases. */
-export function inputTargetConformance(name: string, make: () => InputTargetSubject | Promise<InputTargetSubject>): void {
+export function inputTargetConformance(
+  name: string,
+  make: () => InputTargetSubject | Promise<InputTargetSubject>,
+): void {
   describe(`input target conformance: ${name}`, () => {
     test('it declares its masking ability', async () => {
       const { adapter } = await make();
@@ -587,7 +619,13 @@ export function inputTargetConformance(name: string, make: () => InputTargetSubj
                 },
               ],
             };
-      const typed = await adapter.type('f1' as FerretId, { kind, key: unknownKey }, [{ field: 'value', text: 'x' }], false, facts);
+      const typed = await adapter.type(
+        'f1' as FerretId,
+        { kind, key: unknownKey },
+        [{ field: 'value', text: 'x' }],
+        false,
+        facts,
+      );
       expect(typed === 'target_gone' || typed === 'target_changed').toBe(true);
     });
   });

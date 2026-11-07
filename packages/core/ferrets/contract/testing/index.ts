@@ -29,7 +29,8 @@ export const T0: Instant = instantFromEpochMs(1_794_052_800_000);
 export const ferretId = (id: string): FerretId => id as FerretId;
 export const fenced = (path: string): FencedPath => path as FencedPath;
 /** An opaque child environment for runner and harness tests (names only; no value). */
-export const emptyChildEnvironment = (): ChildEnvironment => Object.freeze({ names: [] }) as unknown as ChildEnvironment;
+export const emptyChildEnvironment = (): ChildEnvironment =>
+  Object.freeze({ names: [] }) as unknown as ChildEnvironment;
 
 // ─── runner ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -138,7 +139,10 @@ export class FakeHarness implements Harness {
     return running.ok ? ok({ running: running.value, harnessConversation: `conv-${spec.ferret}` }) : running;
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
-    const running = await runner.resume({ ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env }, conversation);
+    const running = await runner.resume(
+      { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
+      conversation,
+    );
     return running.ok ? ok({ running: running.value, harnessConversation: conversation }) : running;
   }
   async stop(_ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now') {
@@ -280,7 +284,9 @@ export class FakeFerrets implements FerretsApi {
   }
   async list(filter: { readonly state?: FerretState; readonly parent?: FerretId } = {}) {
     return [...this.#ferrets.values()].filter(
-      f => (filter.state === undefined || f.state === filter.state) && (filter.parent === undefined || f.parent === filter.parent),
+      f =>
+        (filter.state === undefined || f.state === filter.state) &&
+        (filter.parent === undefined || f.parent === filter.parent),
     );
   }
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -288,13 +294,22 @@ export class FakeFerrets implements FerretsApi {
       if (at === caller) return true;
     return false;
   }
+  harnesses(): readonly HarnessKey[] {
+    return ['claude-code', 'codex'];
+  }
   children(ferret: FerretId): readonly FerretId[] {
     return [...this.#ferrets.values()].filter(f => f.parent === ferret).map(f => f.id);
   }
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
     this.#next += 1;
     const id = ferretId(`f${this.#next}`);
-    this.add({ id, name: request.name ?? id, folder: request.folder, state: 'starting', ...(request.parent === undefined ? {} : { parent: request.parent }) });
+    this.add({
+      id,
+      name: request.name ?? id,
+      folder: request.folder,
+      state: 'starting',
+      ...(request.parent === undefined ? {} : { parent: request.parent }),
+    });
     return ok(id);
   }
   async stop(ferret: FerretId) {
@@ -324,13 +339,9 @@ export function mayTouchConformance(
   describe(`ferret lineage conformance: ${name}`, () => {
     test('a ferret touches only its own; a lead also its helpers’', () => {
       const subject = make();
-      const [lead, helper, grandHelper, sibling, stranger] = ['lead', 'helper', 'grand', 'sibling', 'stranger'].map(ferretId) as [
-        FerretId,
-        FerretId,
-        FerretId,
-        FerretId,
-        FerretId,
-      ];
+      const [lead, helper, grandHelper, sibling, stranger] = ['lead', 'helper', 'grand', 'sibling', 'stranger'].map(
+        ferretId,
+      ) as [FerretId, FerretId, FerretId, FerretId, FerretId];
       subject.add(lead);
       subject.add(helper, lead);
       subject.add(grandHelper, helper);

@@ -76,7 +76,14 @@ describe('ferret records', () => {
   });
   test('a start.decide input names who asked', () => {
     expect(
-      StartDecideInputSchema.safeParse({ ferret: 'f1', name: 'Fern', role: 'lead', harness: 'claude-code', folder: '/w', by: 'pack' }).success,
+      StartDecideInputSchema.safeParse({
+        ferret: 'f1',
+        name: 'Fern',
+        role: 'lead',
+        harness: 'claude-code',
+        folder: '/w',
+        by: 'pack',
+      }).success,
     ).toBe(true);
   });
   test('the Ferrets port attaches a known ferret without starting it (D15)', async () => {
@@ -103,7 +110,9 @@ describe('limits.yaml', () => {
   });
   test('raising a cap or turning limits off loosens; lowering does not', () => {
     expect(limitsLoosen({ perFerret: { memoryMax: '8G' } }, { perFerret: { memoryMax: '4G' } })).toEqual([]);
-    expect(limitsLoosen({ perFerret: { memoryMax: '4G' } }, { perFerret: { memoryMax: '8G' } })).toEqual(['perFerret.memoryMax raised']);
+    expect(limitsLoosen({ perFerret: { memoryMax: '4G' } }, { perFerret: { memoryMax: '8G' } })).toEqual([
+      'perFerret.memoryMax raised',
+    ]);
     expect(limitsLoosen({}, { enabled: false })).toEqual(['limits turned off']);
     expect(limitsLoosen({ fleet: { tasksMax: 100 } }, { fleet: {} })).toEqual(['fleet.tasksMax removed']);
   });

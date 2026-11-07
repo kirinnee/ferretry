@@ -128,7 +128,10 @@ describe('gate.yaml', () => {
     const before = DEFAULT_GATE_CONFIG;
     const narrowed = { ...before, grants: { ...before.grants, terminal: { use: false, configure: false } } };
     expect(gateConfigLoosens(before, narrowed)).toEqual([]);
-    expect(gateConfigLoosens(narrowed, before)).toEqual(['grants terminal.use turned on', 'grants terminal.configure turned on']);
+    expect(gateConfigLoosens(narrowed, before)).toEqual([
+      'grants terminal.use turned on',
+      'grants terminal.configure turned on',
+    ]);
     const loose = { ...before, security: { ...before.security, unlockOnOpen: false }, warden: { remote: true } };
     expect(gateConfigLoosens(before, loose)).toEqual([
       'security unlockOnOpen loosened from true to false',
@@ -140,14 +143,27 @@ describe('gate.yaml', () => {
 describe('inventory projection (§9.6)', () => {
   const inventory: PluginInventory = {
     protocol: PROTOCOL,
-    plugins: ['gate', 'vault', 'ferrets', 'asks', 'kernel', 'access', 'terminals', 'board', 'warden', 'updates'].map(id => ({
-      id,
-      on: true,
-      contract: `h-${id}`,
-    })),
+    plugins: ['gate', 'vault', 'ferrets', 'asks', 'kernel', 'access', 'terminals', 'board', 'warden', 'updates'].map(
+      id => ({
+        id,
+        on: true,
+        contract: `h-${id}`,
+      }),
+    ),
   };
   const surfaces = new Map([
-    ['terminals', [{ minimum: 'operator', caller: 'person', capability: { capability: CAPABILITIES.terminal, axis: 'use' }, audit: { skip: 'x' }, guard: 'secrets' }]],
+    [
+      'terminals',
+      [
+        {
+          minimum: 'operator',
+          caller: 'person',
+          capability: { capability: CAPABILITIES.terminal, axis: 'use' },
+          audit: { skip: 'x' },
+          guard: 'secrets',
+        },
+      ],
+    ],
     ['board', [{ minimum: 'authenticated', caller: 'any', audit: { skip: 'x' }, guard: { none: 'x' } }]],
     ['updates', [{ minimum: 'admin-token', caller: 'person', audit: { skip: 'x' }, guard: { none: 'x' } }]],
   ] as const);
@@ -174,14 +190,27 @@ describe('inventory projection (§9.6)', () => {
     ]);
   });
   test('the remote warden sees the core pieces and Warden; a member and no principal are refused', () => {
-    expect(ids(projectInventory(inventory, { kind: 'warden' }, surfaces))).toEqual(['gate', 'vault', 'ferrets', 'asks', 'kernel', 'warden']);
+    expect(ids(projectInventory(inventory, { kind: 'warden' }, surfaces))).toEqual([
+      'gate',
+      'vault',
+      'ferrets',
+      'asks',
+      'kernel',
+      'warden',
+    ]);
     expect(ids(projectInventory(inventory, { kind: 'member' }, surfaces))).toBe(403);
     expect(ids(projectInventory(inventory, { kind: 'none' }, surfaces))).toBe(401);
   });
   test('an unknown capability is never admitted', () => {
     expect(
       deviceAdmits(
-        { minimum: 'authenticated', caller: 'any', capability: { capability: 'mystery' as never, axis: 'use' }, audit: { skip: 'x' }, guard: { none: 'x' } },
+        {
+          minimum: 'authenticated',
+          caller: 'any',
+          capability: { capability: 'mystery' as never, axis: 'use' },
+          audit: { skip: 'x' },
+          guard: { none: 'x' },
+        },
         LIMITED_DEVICE_GRANTS,
       ),
     ).toBe(false);
@@ -190,12 +219,27 @@ describe('inventory projection (§9.6)', () => {
 
 describe('StandInAdmission', () => {
   const request = (path: string) =>
-    ({ method: 'GET', path, query: new Map(), headers: new Map(), arrival: { kind: 'carried', carrier: 'relay' }, text: async () => '' }) as never;
+    ({
+      method: 'GET',
+      path,
+      query: new Map(),
+      headers: new Map(),
+      arrival: { kind: 'carried', carrier: 'relay' },
+      text: async () => '',
+    }) as never;
   const route = (extra: object) => ({
     table: 'route' as const,
     request: request('/v1/x'),
     params: new Map(),
-    descriptor: { method: 'GET', path: '/v1/x', minimum: 'operator' as const, caller: 'any' as const, audit: { skip: 'x' }, guard: { none: 'x' } as const, ...extra },
+    descriptor: {
+      method: 'GET',
+      path: '/v1/x',
+      minimum: 'operator' as const,
+      caller: 'any' as const,
+      audit: { skip: 'x' },
+      guard: { none: 'x' } as const,
+      ...extra,
+    },
   });
   test('a person route refuses a ferret with owner_only (G7)', () => {
     const admission = new StandInAdmission(() => ferretStanding('f1' as FerretId));
@@ -208,13 +252,22 @@ describe('StandInAdmission', () => {
     expect(decision.outcome === 'refused' && JSON.parse(decision.response.body).code).toBe('grant_device_not_granted');
   });
   test('an undetermined policy fails closed', () => {
-    const admission = new StandInAdmission(() => deviceStanding('d1'), () => undefined);
+    const admission = new StandInAdmission(
+      () => deviceStanding('d1'),
+      () => undefined,
+    );
     const decision = admission.admit(route({ capability: { capability: CAPABILITIES.fleet, axis: 'use' } }));
     expect(decision.outcome === 'refused' && JSON.parse(decision.response.body).code).toBe('grant_undetermined');
   });
   test('the warden never reaches an operator route; the owner reaches everything', () => {
     expect(new StandInAdmission(() => wardenStanding('w1' as FerretId)).admit(route({})).outcome).toBe('refused');
-    expect(new StandInAdmission(() => ownerStanding()).admit(route({ minimum: 'admin-token' })).outcome).toBe('admitted');
-    expect(new StandInAdmission(() => ownerStanding()).admit(route({ capability: { capability: CAPABILITIES.secrets, axis: 'configure' } })).outcome).toBe('admitted');
+    expect(new StandInAdmission(() => ownerStanding()).admit(route({ minimum: 'admin-token' })).outcome).toBe(
+      'admitted',
+    );
+    expect(
+      new StandInAdmission(() => ownerStanding()).admit(
+        route({ capability: { capability: CAPABILITIES.secrets, axis: 'configure' } }),
+      ).outcome,
+    ).toBe('admitted');
   });
 });

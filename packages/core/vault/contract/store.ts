@@ -32,7 +32,13 @@ export const VaultDocumentSchema = z.strictObject({
   format: z.literal(1),
   cipher: z.literal(SECRET_CIPHER_ALGORITHM),
   /** Keyed by secret name; the name is the AAD, so moving an entry under another name fails to open. */
-  entries: z.record(z.string().regex(/^[A-Z][A-Z0-9_]*$/u).max(64), SealedSecretSchema),
+  entries: z.record(
+    z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]*$/u)
+      .max(64),
+    SealedSecretSchema,
+  ),
 });
 export type VaultDocument = z.infer<typeof VaultDocumentSchema>;
 

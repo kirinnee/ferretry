@@ -72,7 +72,17 @@ const singleLine = (max: number) =>
     .regex(/^[^\r\n]*$/u, 'one line');
 
 /** What kind of answer an ask wants (today's `AgendaKindSchema`, with `info` named `notice`). */
-export const ASK_KINDS = ['task', 'yesno', 'permission', 'choice', 'review', 'notice', 'reply', 'form', 'input'] as const;
+export const ASK_KINDS = [
+  'task',
+  'yesno',
+  'permission',
+  'choice',
+  'review',
+  'notice',
+  'reply',
+  'form',
+  'input',
+] as const;
 export const AskKindSchema = z.enum(ASK_KINDS);
 export type AskKind = z.infer<typeof AskKindSchema>;
 
@@ -116,7 +126,16 @@ export const AskDraftSchema = z
 export type AskDraft = z.input<typeof AskDraftSchema>;
 
 /** What an answer did (today's `AgendaAnswerEffectSchema`). */
-export const ANSWER_EFFECTS = ['choose', 'approve', 'reject', 'good', 'clarify', 'done', 'needs-info', 'dismiss'] as const;
+export const ANSWER_EFFECTS = [
+  'choose',
+  'approve',
+  'reject',
+  'good',
+  'clarify',
+  'done',
+  'needs-info',
+  'dismiss',
+] as const;
 export const AnswerEffectSchema = z.enum(ANSWER_EFFECTS);
 export type AnswerEffect = z.infer<typeof AnswerEffectSchema>;
 
@@ -185,7 +204,10 @@ export interface AsksApi {
   raise(ask: AskDraft): Promise<AskId>;
   /** A notice: something the owner should know; no answer. Idempotent by `(source, entry)`. */
   notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskId>;
-  answers(filter: { readonly source: SourceKey; readonly entry?: EntryId }, since?: string): Promise<readonly AskAnswer[]>;
+  answers(
+    filter: { readonly source: SourceKey; readonly entry?: EntryId },
+    since?: string,
+  ): Promise<readonly AskAnswer[]>;
   close(id: AskId, reason: CloseReason): Promise<void>;
   open(filter: AskFilter): Promise<readonly AskSummary[]>;
   get(id: AskId): Promise<AskSummary | undefined>;
@@ -247,4 +269,9 @@ export const AnswersFile = defineState({
   schema: z.strictObject({ format: z.literal(1), answers: z.array(AskAnswerSchema) }),
 });
 export const AskHistoryFile = defineState({ name: 'history', path: 'history.jsonl', store: 'jsonl', format: 1 });
-export const AskVersionsFiles = defineState({ name: 'versions', path: 'versions/*.sqlite', store: 'sqlite', format: 1 });
+export const AskVersionsFiles = defineState({
+  name: 'versions',
+  path: 'versions/*.sqlite',
+  store: 'sqlite',
+  format: 1,
+});

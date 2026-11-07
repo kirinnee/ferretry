@@ -169,7 +169,9 @@ export type TypeResult = 'typed' | 'target_gone' | 'target_changed' | 'uncertain
 /** One card field as the adapter is asked to find it: a page field names its element (selector or snapshot ref). */
 export interface InputTargetField {
   readonly id: string;
-  readonly element?: { readonly kind: 'selector'; readonly selector: string } | { readonly kind: 'ref'; readonly ref: string };
+  readonly element?:
+    | { readonly kind: 'selector'; readonly selector: string }
+    | { readonly kind: 'ref'; readonly ref: string };
 }
 
 /** One value to type. Held only for the write; never logged, never kept. */

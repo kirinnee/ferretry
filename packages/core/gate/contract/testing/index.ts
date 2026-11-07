@@ -58,7 +58,12 @@ export class FakeDeviceProvider implements CredentialProvider<DeviceHolderStandi
   readonly #holders = new Map<string, DeviceHolderStanding | 'revoked'>();
 
   enrol(id: HolderId, grants: CapabilityGrants = FULL_DEVICE_GRANTS, unlockedUntil?: Instant): void {
-    this.#holders.set(id, { kind: 'device', holder: id, grants, ...(unlockedUntil === undefined ? {} : { unlockedUntil }) });
+    this.#holders.set(id, {
+      kind: 'device',
+      holder: id,
+      grants,
+      ...(unlockedUntil === undefined ? {} : { unlockedUntil }),
+    });
     this.#generation += 1;
   }
   revoke(id: HolderId): void {
@@ -95,7 +100,9 @@ export class FakeStepUpWitness implements StepUpWitness {
   passkeys(id: HolderId): readonly PasskeyDescriptor[] | 'unknown' {
     return this.#passkeys.get(id) ?? 'unknown';
   }
-  async verify(ceremony: StepUpCeremony): Promise<StepUpVerified | { readonly refused: 'not-verified' | 'no-passkey' }> {
+  async verify(
+    ceremony: StepUpCeremony,
+  ): Promise<StepUpVerified | { readonly refused: 'not-verified' | 'no-passkey' }> {
     const known = this.#passkeys.get(ceremony.holder);
     if (known === undefined) return { refused: 'no-passkey' };
     const ownKey = known.some(key => key.id === ceremony.assertion.credentialId);
@@ -150,7 +157,10 @@ export class FakeGate implements GateApi {
 
 // ─── standings for handler tests ──────────────────────────────────────────────────────────────────────────────────
 
-const noStepUp = { claimFreshStepUp: (() => false) as CallStanding['claimFreshStepUp'], claimStoredProof: () => undefined };
+const noStepUp = {
+  claimFreshStepUp: (() => false) as CallStanding['claimFreshStepUp'],
+  claimStoredProof: () => undefined,
+};
 
 /** The owner at the machine: the admin token, local, ungoverned. */
 export function ownerStanding(client: 'ui' | 'cli' = 'cli'): CallStanding {
@@ -178,7 +188,11 @@ export function ferretStanding(ferret: FerretId): CallStanding {
 }
 
 /** A paired device on a sealed session, with its effective grants. */
-export function deviceStanding(device: string, grants: CapabilityGrants = FULL_DEVICE_GRANTS, stepUp = false): CallStanding {
+export function deviceStanding(
+  device: string,
+  grants: CapabilityGrants = FULL_DEVICE_GRANTS,
+  stepUp = false,
+): CallStanding {
   const principal: SessionPrincipal = {
     kind: 'device',
     holder: device as HolderId,
@@ -276,7 +290,10 @@ export interface StepUpWitnessSubject {
 }
 
 /** The `step-up` conformance suite: unknown holders, a bad assertion refused, a good one bound to the act asked. */
-export function stepUpWitnessConformance(name: string, make: () => StepUpWitnessSubject | Promise<StepUpWitnessSubject>): void {
+export function stepUpWitnessConformance(
+  name: string,
+  make: () => StepUpWitnessSubject | Promise<StepUpWitnessSubject>,
+): void {
   const challenge = new Uint8Array([1, 2, 3, 4]);
   describe(`step-up conformance: ${name}`, () => {
     test('a holder it never enrolled has no passkeys to offer', async () => {
@@ -348,13 +365,23 @@ export class StandInAdmission implements Admission {
         ? { outcome: 'admitted', standing: {} }
         : { outcome: 'refused', response: errorResponse(401, 'this call needs a credential', 'unauthorized') };
     if (descriptor.caller === 'person' && callerIsAgent(standing.credential, standing.actor))
-      return { outcome: 'refused', response: errorResponse(403, ownerOnlyWords(`may use ${request.method} ${request.path}`), OWNER_ONLY_CODE) };
+      return {
+        outcome: 'refused',
+        response: errorResponse(403, ownerOnlyWords(`may use ${request.method} ${request.path}`), OWNER_ONLY_CODE),
+      };
     const admin = standing.credential?.tokenClass === 'admin';
     if (
       !meetsMinimum(standing.credential, descriptor.minimum) ||
       (descriptor.privilegedOnly === true && !arrivedPrivileged(request, admin))
     )
-      return { outcome: 'refused', response: errorResponse(403, `the presented credential may not use ${request.method} ${request.path}`, 'forbidden') };
+      return {
+        outcome: 'refused',
+        response: errorResponse(
+          403,
+          `the presented credential may not use ${request.method} ${request.path}`,
+          'forbidden',
+        ),
+      };
     const demand = descriptor.capability;
     // Ungoverned: the admin token on the host, and a ferret's own token (today's `loopback` presentation).
     if (demand !== undefined && standing.presentation?.local !== true) {
@@ -371,18 +398,29 @@ export class StandInAdmission implements Admission {
             : own !== undefined && (!own.use || (demand.axis === 'configure' && !own.configure))
               ? 'device-not-granted'
               : undefined;
-      if (refusal !== undefined) return { outcome: 'refused', response: errorResponse(403, refusal, grantRefusalCode(refusal)) };
+      if (refusal !== undefined)
+        return { outcome: 'refused', response: errorResponse(403, refusal, grantRefusalCode(refusal)) };
       const needsStepUp =
         demand.narrowing !== true &&
         (demand.axis === 'configure' || (name !== undefined && STEP_UP_USE_CAPABILITIES.includes(name)));
-      if (needsStepUp && standing.presentation?.stepUp !== true && (policy === undefined || asksStepUpPerAction(policy.security)))
-        return { outcome: 'refused', response: errorResponse(403, 'needs a passkey confirmation', STEP_UP_REQUIRED_CODE) };
+      if (
+        needsStepUp &&
+        standing.presentation?.stepUp !== true &&
+        (policy === undefined || asksStepUpPerAction(policy.security))
+      )
+        return {
+          outcome: 'refused',
+          response: errorResponse(403, 'needs a passkey confirmation', STEP_UP_REQUIRED_CODE),
+        };
     }
     return { outcome: 'admitted', standing };
   }
 
   admitMember(): AdmissionDecision<MemberStanding> {
-    return { outcome: 'refused', response: errorResponse(403, 'the stand-in admission serves no member routes', 'forbidden') };
+    return {
+      outcome: 'refused',
+      response: errorResponse(403, 'the stand-in admission serves no member routes', 'forbidden'),
+    };
   }
 
   readmit(): boolean {

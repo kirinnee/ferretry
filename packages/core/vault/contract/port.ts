@@ -33,6 +33,8 @@ export interface ChildEnvironment {
  */
 export interface VaultApi {
   names(): Promise<readonly SecretSummary[]>;
+  /** Whether a secret of this name is held. Never its value. */
+  has(name: SecretName): Promise<boolean>;
   /** A value in; person-only at the route. */
   put(name: SecretName, value: string): Promise<void>;
   remove(name: SecretName): Promise<boolean>;

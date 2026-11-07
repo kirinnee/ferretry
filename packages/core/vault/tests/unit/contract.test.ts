@@ -32,9 +32,19 @@ redactionConformance('FakeRedaction', () => {
   const value = 'sk-live-abcdef0123456789';
   return { redaction: new FakeRedaction(new Map([[name, value]])), name, value };
 });
-vaultConformance('FakeVault', () => ({ vault: new FakeVault((_, env) => ({ stdout: env.API_KEY ?? '', stderr: '' })) }));
-inputTargetConformance('goneTargetAdapter (terminal)', () => ({ adapter: goneTargetAdapter, unknownKey: 'nope', kind: 'terminal' }));
-inputTargetConformance('goneTargetAdapter (page)', () => ({ adapter: goneTargetAdapter, unknownKey: 'nope', kind: 'page' }));
+vaultConformance('FakeVault', () => ({
+  vault: new FakeVault((_, env) => ({ stdout: env.API_KEY ?? '', stderr: '' })),
+}));
+inputTargetConformance('goneTargetAdapter (terminal)', () => ({
+  adapter: goneTargetAdapter,
+  unknownKey: 'nope',
+  kind: 'terminal',
+}));
+inputTargetConformance('goneTargetAdapter (page)', () => ({
+  adapter: goneTargetAdapter,
+  unknownKey: 'nope',
+  kind: 'page',
+}));
 
 const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 
@@ -47,13 +57,24 @@ describe('the sealed store is byte-compatible (spine D16)', () => {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const aad = new TextEncoder().encode('API_KEY');
     const sealed = new Uint8Array(
-      await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, new TextEncoder().encode('v4-value')),
+      await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv, additionalData: aad },
+        key,
+        new TextEncoder().encode('v4-value'),
+      ),
     );
     // Today's document, with only its envelope key renamed (`v` → `format`); the entry moves byte for byte.
     const today = {
       v: 1,
       cipher: 'AES-256-GCM',
-      entries: { API_KEY: { iv: b64(iv), ciphertext: b64(sealed), createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' } },
+      entries: {
+        API_KEY: {
+          iv: b64(iv),
+          ciphertext: b64(sealed),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
     };
     const { v: _v, ...rest } = today;
     const parsed = VaultDocumentSchema.parse({ format: 1, ...rest });
@@ -77,11 +98,18 @@ describe('the sealed store is byte-compatible (spine D16)', () => {
 
 describe('secrets', () => {
   test('the reference grammar is today’s', () => {
-    expect(secretReferencesIn('Bearer ${secret:API_KEY} ${secret:API_KEY} ${secret:OTHER}')).toEqual(['API_KEY', 'OTHER']);
+    expect(secretReferencesIn('Bearer ${secret:API_KEY} ${secret:API_KEY} ${secret:OTHER}')).toEqual([
+      'API_KEY',
+      'OTHER',
+    ]);
     expect(malformedSecretReference('x ${secret:lower}')).toBe('${secret:lower}');
   });
   test('a use request defaults as today', () => {
-    expect(SecretUseRequestSchema.parse({ command: ['true'], cwd: '/tmp' })).toMatchObject({ secrets: [], env: {}, timeoutMs: 60_000 });
+    expect(SecretUseRequestSchema.parse({ command: ['true'], cwd: '/tmp' })).toMatchObject({
+      secrets: [],
+      env: {},
+      timeoutMs: 60_000,
+    });
   });
   test('only https or a loopback http host on the allowlist is a destination', () => {
     expect(allowedDestination('https://api.example.test/x', ['api.example.test'])).toBe(true);
@@ -109,7 +137,9 @@ describe('input requests', () => {
     expect(parsed.submit).toBe('offer-owner');
   });
   test('the most careful sensitivity wins', () => {
-    expect(strongestSensitivity([{ sensitivity: 'plain' }, { sensitivity: 'secret' }, { sensitivity: 'code' }])).toBe('secret');
+    expect(strongestSensitivity([{ sensitivity: 'plain' }, { sensitivity: 'secret' }, { sensitivity: 'code' }])).toBe(
+      'secret',
+    );
   });
   test('page facts are today’s browser facts under the name page', () => {
     expect(
@@ -119,7 +149,17 @@ describe('input requests', () => {
         origin: 'https://example.test',
         secure: true,
         navigationId: 'n1',
-        fields: [{ fieldId: 'password', frameOrigin: 'https://example.test', frameId: 'f', backendNodeId: 3, field: { tag: 'input', type: 'password' }, box: { x: 0, y: 0, w: 1, h: 1 }, visible: true }],
+        fields: [
+          {
+            fieldId: 'password',
+            frameOrigin: 'https://example.test',
+            frameId: 'f',
+            backendNodeId: 3,
+            field: { tag: 'input', type: 'password' },
+            box: { x: 0, y: 0, w: 1, h: 1 },
+            visible: true,
+          },
+        ],
       }).success,
     ).toBe(true);
   });

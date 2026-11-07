@@ -194,7 +194,12 @@ export interface Harness {
   /** Writes instructions, MCP config and skills in its own format, inside the ferret's home only. */
   prepareHome(spec: LaunchSpec): Promise<HomePlan>;
   start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>>;
-  resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, harnessConversation: string): Promise<Result<Started, StartRefusal>>;
+  resume(
+    spec: LaunchSpec,
+    runner: Runner,
+    env: ChildEnvironment,
+    harnessConversation: string,
+  ): Promise<Result<Started, StartRefusal>>;
   fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
   stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void>;
   deliver(ferret: FerretId, handle: RunnerHandle, message: OutboundMessage): Promise<Delivery>;
