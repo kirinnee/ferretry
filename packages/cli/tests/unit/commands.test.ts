@@ -273,14 +273,11 @@ describe('fy doctor', () => {
     const healthyWorld = (body: unknown) => {
       const transport = new RecordingTransport();
       transport.replies.push({ status: 200, body });
-      return {
+      return fakeWorld({
+        registry: registryOf(boardEntry()),
+        inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
         transport,
-        ...fakeWorld({
-          registry: registryOf(boardEntry()),
-          inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
-          transport,
-        }),
-      };
+      });
     };
 
     it('should exit 1 when a required host check is missing, and say the fix', async () => {
