@@ -30,11 +30,7 @@
     "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
-      "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
-    ],
-    "ferrets": [
-      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
     ],
     "warden": [
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
@@ -76,6 +72,20 @@
       "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
       "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
       "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+    ],
+    "ferrets": [
+      "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
+      "Interrupt is not ported: it is Conversation's turn.interrupt, and Ferrets' Actions menu has no row for it until that route is bound",
+      "Actions rows still to port: add MCP server, compact-at, the context menu, the ferret row-actions and the Warden and learning actions; each needs the plugin that owns it to contribute a row",
+      "Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported: they read other plugins' facts (Board, Usage, Conversation, Surfaces, Warden) and wait for those contracts to be bound; only Overview and Runtime are drawn",
+      "Session search inside the files tab is not ported",
+      "The file-instance surface and the image viewer are not ported: the image viewer still lives in Conversation's app and composer, and the files tab opens an image through a plain preview until it is shared",
+      "Continue-conversation (resume a finished ferret's conversation as a new one) and the registered-projects picker on the new-ferret page are not ported",
+      "The files side tab is hidden until Layouts lists it in the ferret.side panel layout",
+      "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
+      "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
+      "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
+      "The fast switch needs Runtimes' account picker to fill the new optional `fast` on each ChosenFerretAccount model (from runtime-models.ts); until it does, no model is known to lack fast mode and the daemon is the one that refuses it"
     ]
   },
   "pendingHalves": {
