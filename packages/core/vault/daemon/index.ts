@@ -8,6 +8,7 @@ import {
   type CredentialPlacement,
   type OutboundHttpRequest,
   HoldsChanged,
+  RedactionSources,
   SecretsChanged,
   type SecretName,
   type SecretUseCommand,
@@ -37,6 +38,7 @@ import { type SecretCloneIdentitySource, SecretExportService, SecretImportServic
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
 import { expandSecretReferences } from './lib/secrets/policy.ts';
 import { VaultRedaction } from './lib/secrets/read-scope.ts';
+import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { NO_RECIPES, SecretUseError, SecretUseService } from './lib/secrets/use.ts';
@@ -81,7 +83,13 @@ export default implementDaemon(manifest, {
     );
     // As today: close every surface before exposing readers, until durable holds have been replayed (I82).
     quarantine.lock();
-    const maskSources = combinedValues(vault);
+    // Declaration metadata names even a failed or stopped provider, so only an undeclared source masks nothing; a
+    // declared one that is not live is unavailable and refuses (S19).
+    const contributedMasks = new DeclaredMaskSource(() => {
+      if (ctx.hooks.declaredProvider(RedactionSources, 'source') === undefined) return 'absent';
+      return ctx.hooks.provider(RedactionSources, 'source');
+    });
+    const maskSources = combinedValues(vault, contributedMasks);
     const masks = new EphemeralAwareRedactor(new SecretRedactor(maskSources), values);
     const redaction = new VaultRedaction(maskSources, scrub => masks.scope(scrub));
     const redact = async (text: string): Promise<string> => await masks.redact(text);
@@ -102,6 +110,7 @@ export default implementDaemon(manifest, {
       new KernelSecretChildRunner(kernel.spawn, kernel.clock),
       environments,
       NO_RECIPES,
+      masks,
     );
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
     const crypto = new WebCryptoCloneCrypto();
