@@ -1,0 +1,523 @@
+/**
+ * PARITY ON REAL EVIDENCE: the inline observer host against the pre-3a path, side by side.
+ *
+ * Stage 3a (`docs/design/session-workers.md` §4.3) must not change what a person sees. Each scenario
+ * here drives ONE real tmux pane — a frame player redrawing what each harness draws — and appends the
+ * same transcript lines to two real transcripts, then lets two daemons' worth of storage observe it:
+ *
+ *   - the PRE-3a PATH: `SessionTurnWatcher` over `StorageTurnPorts` (which re-reads every state
+ *     document per tick) and a verbatim copy of the composition root's old `projectSessionEvidence`;
+ *   - the INLINE HOST: `InlineObserverHost`, told its facts by storage, writing through
+ *     `SessionObservationApplier`.
+ *
+ * Both must journal the same `turn.*` events in the same order and end on the same `state.json`.
+ * (Send evidence parity is the pure fold's and lives in the unit replay suite: the send tracker's
+ * ports did not change.)
+ */
+import { afterEach, describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { appendFile, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { type SessionState, SessionStateSchema } from '@ferretry/protocol';
+import should from 'should';
+import { unrefFileEventTimers } from '../../../../src/adapters/file-events/bun-file-event-source.ts';
+import { platformFileEventSource } from '../../../../src/adapters/file-events/platform.ts';
+import {
+  BunSqliteIndexFactory,
+  BunTmuxProcess,
+  bundledWorkerUrl,
+  type DaemonStorage,
+  DaemonStorageFactory,
+  DEFAULT_WORKER_SUPERVISOR_SETTINGS,
+  FileAnswerLedger,
+  InlineObserverHost,
+  KeyedSerialExecutor,
+  RuntimeEnvironment,
+  SessionObservationApplier,
+  SqliteHomeLockFactory,
+  StateFileSystemFactory,
+  StateHomeLayout,
+  StorageTurnPorts,
+  SystemClock,
+  WorkerObserverHost,
+  WorkerSupervisor,
+} from '../../../../src/adapters/index.ts';
+import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
+import { FileEventHub } from '../../../../src/lib/file-events/hub.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  createSessionPaths,
+  observedRuntimeStatePatch,
+  parseSessionId,
+  projectObservedRuntime,
+  projectStructuredQuestion,
+  reconcileAnswerEvidence,
+  type SessionBinding,
+  type SessionId,
+  SessionObserver,
+  type SessionObserverHost,
+  type SessionTranscriptTail,
+  SessionTurnWatcher,
+  structuredQuestionStatePatch,
+  TmuxController,
+} from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
+
+const NOW = '2026-10-22T08:00:00.000Z';
+const clock = { now: () => NOW };
+const cleanups = new Set<() => Promise<void>>();
+
+afterEach(async () => {
+  await Promise.all([...cleanups].map(cleanup => cleanup()));
+  cleanups.clear();
+});
+
+const CLAUDE_IDLE = '  ? for shortcuts · ✻ Welcome back\n╭────────────────────╮\n│ > ';
+const CLAUDE_WORKING = '⏺ Reading.\n✽ Pontificating… (3s · ↓ 1.2k tokens · esc to interrupt)\n\n│ > ';
+const CLAUDE_PERMISSION = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
+const CODEX_IDLE = '  100% context left\n\n› Ask Codex to do anything';
+const CODEX_WORKING = '• Working (5s • Esc to interrupt)\n\n› ';
+
+const line = (record: object): string => `${JSON.stringify(record)}\n`;
+const claudeUser = (id: string, content: unknown) =>
+  line({
+    type: 'user',
+    sessionId: 's',
+    uuid: id,
+    parentUuid: null,
+    timestamp: NOW,
+    message: { role: 'user', content },
+  });
+const claudeAnswer = (id: string, stop: string | null, content: unknown[]) =>
+  line({
+    type: 'assistant',
+    sessionId: 's',
+    uuid: id,
+    parentUuid: null,
+    timestamp: NOW,
+    message: { id: `m-${id}`, role: 'assistant', model: 'claude-opus-5-5', stop_reason: stop, content },
+  });
+const ASK = claudeAnswer('a-ask', 'tool_use', [
+  {
+    type: 'tool_use',
+    id: 'toolu_ship',
+    name: 'AskUserQuestion',
+    input: {
+      questions: [
+        {
+          question: 'Ship it?',
+          header: 'Ship',
+          multiSelect: false,
+          options: [
+            { label: 'Yes', description: 'ship' },
+            { label: 'No', description: 'hold' },
+          ],
+        },
+      ],
+    },
+  },
+]);
+const ANSWER = claudeUser('u-answer', [{ type: 'tool_result', tool_use_id: 'toolu_ship', content: 'Yes' }]);
+const codexEvent = (type: string) => line({ timestamp: NOW, type: 'event_msg', payload: { type, turn_id: 'turn-1' } });
+const CODEX_CONTEXT = line({ timestamp: NOW, type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'high' } });
+
+async function openStorage(home: string): Promise<DaemonStorage> {
+  const opened = await new DaemonStorageFactory(
+    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
+    new StateFileSystemFactory(),
+    new StateHomeLayout(),
+    new SqliteHomeLockFactory(),
+    new BunSqliteIndexFactory(),
+    new SystemClock(() => new Date(NOW)),
+    () => new KeyedSerialExecutor(),
+  ).open();
+  return opened.storage;
+}
+
+/** One side of the comparison: a storage home with its own transcript, observing the shared pane. */
+interface Side {
+  readonly storage: DaemonStorage;
+  readonly transcript: string;
+  readonly tail: SessionTranscriptTail;
+  readonly ledger: FileAnswerLedger;
+}
+
+interface Pair {
+  readonly id: SessionId;
+  readonly reference: Side;
+  readonly host: Side;
+  /** One look by both: the turn tick, then (when asked) the question pass. */
+  readonly look: (options?: { readonly questions?: boolean }) => Promise<void>;
+  readonly frame: (text: string) => Promise<void>;
+  readonly append: (text: string) => Promise<void>;
+  readonly write: (fields: Partial<SessionState>) => Promise<void>;
+  /** Looks a session worker answered, failures included; `undefined` for the inline host. */
+  readonly workerLooks: () => { readonly answered: number; readonly failed: number } | undefined;
+}
+
+type HostKind = 'inline' | 'worker';
+
+/** The last non-blank rows of a frame or a capture, without trailing spaces, to tell whether a pane has drawn it. */
+const lastRows = (text: string, count = 3): readonly string[] =>
+  text
+    .split('\n')
+    .map(row => row.trimEnd())
+    .filter(row => row !== '')
+    .slice(-count);
+
+async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: HostKind): Promise<Pair> {
+  const tmux = Bun.which('tmux');
+  if (tmux === null) throw new Error('tmux is required for observer parity coverage');
+  const root = await mkdtemp(join(tmpdir(), 'fy-observer-parity-'));
+  const id = parseSessionId(`parity-${harness}-${kind}`);
+  const tmuxSession = `fy-parity-${harness}-${kind}`;
+  const frameFile = join(root, 'frame.txt');
+  await writeFile(frameFile, initialFrame);
+  const player = join(root, 'player.sh');
+  await writeFile(
+    player,
+    [
+      '#!/bin/sh',
+      'last=""',
+      'while :; do',
+      `  now="$(cat '${frameFile}')"`,
+      '  if [ "$now" != "$last" ]; then printf \'\\033[H\\033[2J%s\\n\\033[1A\' "$now"; last="$now"; fi',
+      '  sleep 0.05',
+      'done',
+    ].join('\n'),
+  );
+  await chmod(player, 0o755);
+  const socket = join(root, 'tmux.sock');
+  const controller = new TmuxController(new BunTmuxProcess(tmux, socket));
+  await controller.launch({ session: tmuxSession, cwd: root, command: ['/bin/sh', player], width: 100, height: 40 });
+
+  const source = new NodeTranscriptSource(
+    harness === 'claude' ? new ClaudeTranscriptParser() : new CodexTranscriptParser(),
+  );
+  const side = async (name: string): Promise<Side> => {
+    const storage = await openStorage(join(root, name));
+    await storage.writeConfig(id, { id, name: 'Parity', tmuxSession, harness, mode: 'interactive' });
+    await storage.writeState(id, { id, status: 'running', turn: 1 });
+    const transcript = join(root, `${name}.jsonl`);
+    await writeFile(transcript, '');
+    return {
+      storage,
+      transcript,
+      tail: {
+        tail: async (_id, limit) => ({ kind: 'read', events: (await source.read(transcript)).events.slice(-limit) }),
+      },
+      ledger: new FileAnswerLedger(session => createSessionPaths(storage.paths, session).directory, clock),
+    };
+  };
+  const reference = await side('reference');
+  const host = await side('host');
+  cleanups.add(async () => {
+    await Bun.spawn([tmux, '-S', socket, 'kill-server'], { stdout: 'ignore', stderr: 'ignore' }).exited;
+    await reference.storage.close();
+    await host.storage.close();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // THE PRE-3a PATH.
+  const watcher = new SessionTurnWatcher(
+    new StorageTurnPorts(reference.storage, reference.tail, async () => reference.transcript, controller, clock),
+  );
+  const referenceSerial = new KeyedSerialExecutor();
+  const referenceProject = async (session: SessionId): Promise<void> => {
+    const storage = reference.storage;
+    const answerLedger = reference.ledger;
+    await referenceSerial.runIfIdle(session, async () => {
+      const transcript = await reference.tail.tail(session, 400);
+      if (transcript.kind !== 'read') return;
+      const current = SessionStateSchema.safeParse(await storage.readState(session));
+      if (!current.success) return;
+      const projection = projectStructuredQuestion(transcript.events);
+      const answerEvidence = reconcileAnswerEvidence(await answerLedger.all(session), current.data, {
+        ...(projection.kind === 'pending' ? { activeToolUseId: projection.question.toolUseId } : {}),
+        ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
+      });
+      for (const settlement of answerEvidence.settlements) await answerLedger.append(session, settlement);
+      const answerRecords = [...answerEvidence.records.values()];
+      const observedRuntime = projectObservedRuntime(transcript.events);
+      const question = structuredQuestionStatePatch(current.data, projection, answerRecords);
+      const patch = { ...question, ...observedRuntimeStatePatch(current.data, observedRuntime) };
+      if (Object.keys(patch).length === 0) return;
+      await storage.updateState(session, raw => {
+        const verified = SessionStateSchema.safeParse(raw);
+        if (!verified.success) return raw;
+        const currentQuestion = structuredQuestionStatePatch(verified.data, projection, answerRecords);
+        const currentPatch = { ...currentQuestion, ...observedRuntimeStatePatch(verified.data, observedRuntime) };
+        if (Object.keys(currentPatch).length === 0) return raw;
+        const next = { ...(raw as Record<string, unknown>), ...currentPatch };
+        if (Object.hasOwn(currentQuestion, 'pendingQuestion') && currentQuestion.pendingQuestion === undefined)
+          delete next.pendingQuestion;
+        if (Object.hasOwn(currentQuestion, 'needsHumanKind') && currentQuestion.needsHumanKind === undefined)
+          delete next.needsHumanKind;
+        if (Object.hasOwn(currentQuestion, 'needsHuman') && currentQuestion.needsHuman === undefined)
+          delete next.needsHuman;
+        return next as typeof raw;
+      });
+    });
+  };
+
+  // THE HOST UNDER TEST: the inline host, or the worker host over it with a real session-worker thread.
+  const hostPanes = new StorageTurnPorts(host.storage, host.tail, async () => host.transcript, controller, clock);
+  const applier = new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor());
+  const fold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'));
+  const answerSerial = new KeyedSerialExecutor();
+  const inline = new InlineObserverHost(
+    {
+      storage: host.storage,
+      questionRoster: () => host.storage.listSessions().map(session => session.id),
+      tail: host.tail,
+      pane: async session => await hostPanes.pane(session),
+      answers: host.ledger,
+      answerSerial,
+      applier,
+      liveness: {
+        screen: async () => {
+          throw new Error('not looked at here');
+        },
+        transcript: async () => {
+          throw new Error('not looked at here');
+        },
+        processes: async () => {
+          throw new Error('not looked at here');
+        },
+      },
+      clock,
+      yieldToLoop: async () => undefined,
+      paneState: async session => await hostPanes.paneState(session),
+      sendEvidence: { read: async () => ({ readable: false, inputs: [] }) },
+      every: (intervalMs, tick) => {
+        const timer = setInterval(tick, intervalMs);
+        return () => clearInterval(timer);
+      },
+    },
+    fold,
+  );
+  let observer: SessionObserverHost = inline;
+  let looks: { answered: number; failed: number } | undefined;
+  let workerHost: WorkerObserverHost | undefined;
+  if (kind === 'worker') {
+    looks = { answered: 0, failed: 0 };
+    const supervisor = new WorkerSupervisor(
+      {
+        spawn: () => new Worker(bundledWorkerUrl('session'), { type: 'module' }),
+        nowMs: () => Date.now(),
+        schedule: (delayMs, run) => {
+          const timer = setTimeout(run, delayMs);
+          return () => clearTimeout(timer);
+        },
+        notice: () => undefined,
+        report: () => {
+          if (looks !== undefined) looks.answered += 1;
+        },
+        observed: (session, patches, transcript) => workerHost?.observed(session, patches, transcript),
+        liveness: (session, liveness) => workerHost?.livenessChanged(session, liveness),
+        changed: () => workerHost?.poke(),
+        exited: () => undefined,
+      },
+      { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: 8 },
+    );
+    const binding = async (): Promise<SessionBinding> => ({
+      tmux: { executable: tmux, socket, target: tmuxSession },
+      transcript: { file: host.transcript, harness },
+    });
+    // The real file-event hub, so a transcript append reaches the worker as it does in the daemon.
+    const files = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
+    workerHost = new WorkerObserverHost({
+      inline,
+      supervisor,
+      binding,
+      applier,
+      answerSerial,
+      answers: host.ledger,
+      files,
+      observer: fold,
+      liveness: {
+        redact: async text => text,
+        processes: async () => ({ kind: 'unobserved', reason: 'not looked at here' }) as never,
+      },
+      clock,
+      barrierMs: 5_000,
+      // Never "already seen": every read barrier asks the worker, as the scenario means it to.
+      stat: async () => undefined,
+      schedule: (delayMs, run) => {
+        const timer = setTimeout(run, delayMs);
+        return () => clearTimeout(timer);
+      },
+      activity: async work => await work(),
+    });
+    observer = workerHost;
+    cleanups.add(async () => {
+      await observer.close();
+      files.close();
+    });
+    // Hosted before the scenario starts, so both sides begin it with no previous observation.
+    const [session] = await inline.turnRoster();
+    if (session === undefined) throw new Error('the session is not on the roster');
+    const wanted = [{ id, facts: session.state, binding: await binding() }];
+    supervisor.reconcile(wanted);
+    await waitFor(() => supervisor.hosts(id), 'the session worker to start');
+    workerHost.reconcileWatches(wanted);
+  }
+
+  return {
+    id,
+    reference,
+    host,
+    look: async options => {
+      // The question pass runs first, as the boot order (#689) and the observer's step both have it.
+      if (options?.questions === true) {
+        await referenceProject(id);
+        await observer.questions();
+      }
+      await watcher.tick();
+      // A worker looks on its own when the pane draws or the transcript changes; the read barrier is
+      // what a tick is to the reference — a fresh look, applied before it returns.
+      if (kind === 'worker') await observer.project(id);
+      await observer.turns.run();
+    },
+    frame: async text => {
+      await writeFile(frameFile, text);
+      // Until the pane shows it: the player redraws on its own poll, and a terminal paints bytes in order, so
+      // the frame's last rows on screen mean the rows above them are too.
+      const wanted = lastRows(text);
+      await waitFor(async () => {
+        const screen = await controller.visible(tmuxSession);
+        const shown = screen === undefined ? undefined : lastRows(screen);
+        return shown?.length === wanted.length && shown.every((row, index) => row === wanted[index]);
+      }, 'the pane to draw the frame');
+    },
+    append: async text => {
+      await appendFile(reference.transcript, text);
+      await appendFile(host.transcript, text);
+    },
+    workerLooks: () => looks,
+    write: async fields => {
+      for (const storage of [reference.storage, host.storage])
+        await storage.updateState(id, raw => ({ ...(raw as Record<string, unknown>), ...fields }));
+    },
+  };
+}
+
+const journal = async (side: Side, id: SessionId) =>
+  (await side.storage.replay(id)).events.map(event => ({ type: event.type, data: event.data }));
+const state = async (side: Side, id: SessionId) => await side.storage.readState(id);
+
+/** A journaled transition by where it arrived — what it recorded — not where it came from. */
+const arrival = (entry: { readonly type: string; readonly data: unknown }): string => {
+  const { from: _from, ...arrived } = entry.data as Record<string, unknown>;
+  return JSON.stringify({ type: entry.type, ...arrived });
+};
+
+/** Whether every item of `needle` appears in `haystack`, in the same order. */
+function isSubsequence(needle: readonly string[], haystack: readonly string[]): boolean {
+  let at = 0;
+  for (const item of haystack) if (item === needle[at]) at += 1;
+  return at === needle.length;
+}
+
+async function shouldAgree(subject: Pair): Promise<void> {
+  // The worker host really looked through its thread, not only through the inline fallback.
+  const looks = subject.workerLooks();
+  if (looks !== undefined) should(looks.answered).be.above(0);
+  const recorded = await journal(subject.host, subject.id);
+  const expected = await journal(subject.reference, subject.id);
+  // The inline host samples on the same tick as the reference, so it journals exactly the same. A worker
+  // looks whenever the pane draws, so it may also see a state the reference's 2 s sampling never did — but
+  // never miss one: every transition the reference journaled appears in the worker's, in order.
+  if (looks === undefined) should(recorded).deepEqual(expected);
+  else should(isSubsequence(expected.map(arrival), recorded.map(arrival))).be.true();
+  should(await state(subject.host, subject.id)).deepEqual(await state(subject.reference, subject.id));
+  should(await subject.host.ledger.all(subject.id)).deepEqual(await subject.reference.ledger.all(subject.id));
+}
+
+describe.each([['inline'], ['worker']] as const)(
+  'the %s observer host against the pre-3a path, over real panes and transcripts',
+  kind => {
+    it('should journal and record the same Claude turn: idle, working, permission, ended', async () => {
+      // Arrange
+      const subject = await pair('claude', CLAUDE_IDLE, kind);
+      await subject.frame(CLAUDE_IDLE);
+
+      // Act
+      await subject.look();
+      await subject.append(claudeUser('u1', 'go'));
+      await subject.frame(CLAUDE_WORKING);
+      await subject.look();
+      await subject.frame(CLAUDE_PERMISSION);
+      await subject.look();
+      await subject.look();
+      await subject.frame(CLAUDE_WORKING);
+      await subject.look();
+      await subject.append(claudeAnswer('a1', 'end_turn', [{ type: 'text', text: 'done' }]));
+      await subject.frame(CLAUDE_IDLE);
+      await subject.look({ questions: true });
+      await subject.look({ questions: true });
+
+      // Assert
+      const turns = (await journal(subject.reference, subject.id)).filter(event => event.type.startsWith('turn.'));
+      should(turns.map(event => (event.data as { to: string | null }).to)).deepEqual([
+        'your-turn',
+        'working',
+        'needs-input',
+        'working',
+        'your-turn',
+      ]);
+      await shouldAgree(subject);
+    });
+
+    it('should journal and record the same Codex turn and its observed runtime', async () => {
+      // Arrange
+      const subject = await pair('codex', CODEX_IDLE, kind);
+      await subject.frame(CODEX_IDLE);
+
+      // Act
+      await subject.append(codexEvent('task_started'));
+      await subject.append(CODEX_CONTEXT);
+      await subject.frame(CODEX_WORKING);
+      await subject.look({ questions: true });
+      await subject.append(codexEvent('task_complete'));
+      await subject.frame(CODEX_IDLE);
+      await subject.look();
+      await subject.look();
+
+      // Assert
+      const ended = (await state(subject.host, subject.id)) as Record<string, unknown>;
+      should(ended.observedModel).equal('gpt-5.5');
+      should(ended.turnState).equal('your-turn');
+      await shouldAgree(subject);
+    });
+
+    it('should project the same structured question, its answer, and the stop that ends the turn', async () => {
+      // Arrange
+      const subject = await pair('claude', CLAUDE_WORKING, kind);
+      await subject.frame(CLAUDE_WORKING);
+
+      // Act — asked: the question pass projects it, the turn reads needs-input.
+      await subject.append(claudeUser('u1', 'go'));
+      await subject.append(ASK);
+      await subject.look({ questions: true });
+      await subject.look({ questions: true });
+      const asked = (await state(subject.host, subject.id)) as Record<string, unknown>;
+      // Answered in the harness: the picker clears and the turn goes on.
+      await subject.append(ANSWER);
+      await subject.look({ questions: true });
+      await subject.look({ questions: true });
+      // Stopped: the turn record is cleared and never given back.
+      await subject.write({ status: 'stopped' });
+      await subject.look({ questions: true });
+      await subject.look();
+
+      // Assert
+      should(asked.status).equal('awaiting_question');
+      should(asked.turnState).equal('needs-input');
+      should(((await state(subject.host, subject.id)) as Record<string, unknown>).turnState).be.undefined();
+      await shouldAgree(subject);
+    });
+  },
+);

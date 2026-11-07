@@ -1,0 +1,185 @@
+import { launchInstructions } from '@ferretry/fleet';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
+import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
+import {
+  type SessionEnvironmentStore,
+  type SessionLifecycleLauncher,
+  type SessionLifecycleRecord,
+  type SessionPaneFolders,
+  sessionPaneEnvironment,
+} from '../../../lib/session/lifecycle/index.ts';
+import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
+import type { TmuxController } from '../../../lib/tmux/index.ts';
+import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
+
+export interface SessionPaneRegistrar {
+  register(record: SessionLifecycleRecord): Promise<void>;
+}
+
+/**
+ * The one seam through which a managed pane can be launched inside a resource-limited scope.
+ *
+ * It takes the argv rather than the record, and answers with the argv the pane must actually exec.
+ * The record's own `command` is DURABLE and stays the harness command: a relaunch after enforcement
+ * is turned off must run the same session directly, so the wrapper can never be baked into what was
+ * written down.
+ *
+ * A launcher constructed without one launches exactly as it did before this port existed.
+ */
+export interface AgentLaunchWrapper {
+  command(
+    sessionId: string,
+    command: readonly string[],
+    kind?: { readonly terminal?: boolean },
+  ): Promise<readonly string[]>;
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** A session with no stored environment launches with none, which is the pre-credential behaviour. */
+const NO_ENVIRONMENT: SessionEnvironmentStore = {
+  write: async () => undefined,
+  read: async () => ({}),
+};
+
+/** Maps validated lifecycle records to the daemon's isolated tmux controller. */
+export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
+  constructor(
+    private readonly tmux: TmuxController,
+    private readonly delivery: TmuxPaneDelivery,
+    private readonly environment: SessionEnvironmentStore = NO_ENVIRONMENT,
+    private readonly registrar?: SessionPaneRegistrar,
+    private readonly snapshots?: LastSnapshotWriter,
+    private readonly limits?: AgentLaunchWrapper,
+    /**
+     * What this account's own profile supplies. A launcher built without one launches exactly as it
+     * did before profiles existed, which is also what every account that binds no secret gets.
+     */
+    private readonly accountEnvironment?: AccountLaunchEnvironment,
+    /**
+     * The account's chance to renew its own credential before this pane runs it.
+     *
+     * ATTENDED, because a person started this session — which is the whole rule renewal is allowed
+     * under. A launcher built without one launches exactly as it did before, and one built WITH one
+     * still launches whatever happens: the port answers nothing a launch could branch on.
+     */
+    private readonly accountRenewal?: AccountLaunchRenewal,
+    /** Creates the session's media folder and names its pane files (`FY_MEDIA_DIR`, `FY_QUESTION_FILE`). */
+    private readonly files?: SessionPaneFolders,
+    /**
+     * The CLI's binary name, as the wrapper's instructions spell it. With it, a launch answers what the
+     * pane was told (`launchInstructions`); without it, it answers nothing and the record keeps what it had.
+     */
+    private readonly clientName?: string,
+  ) {}
+
+  async alive(record: SessionLifecycleRecord): Promise<boolean> {
+    return await this.tmux.alive(record.config.tmuxSession);
+  }
+
+  async launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined> {
+    // Resolved per launch, from the saved limits and this session's own spawn record, and applied to
+    // the argv rather than to the durable command — see `AgentLaunchWrapper`. A daemon with no
+    // wrapper, or one whose limits are off, gets back exactly what it passed in.
+    const wrapped = (await this.limits?.command(record.config.id, record.config.command)) ?? record.config.command;
+    const [program, ...arguments_] = wrapped;
+    if (program === undefined) throw new Error('session command is empty');
+    // Read per launch rather than cached at construction: a relaunch after a rotated credential must
+    // hand the pane the CURRENT secret, and one launcher instance serves every session.
+    //
+    // The env is never empty now — `sessionPaneEnvironment` always contributes the session's own id —
+    // so the branch that omitted it entirely is gone. A pane launched without it is a teammate that
+    // cannot name itself in a single request.
+    //
+    // The account's own profile is resolved per launch for the same reason, and against the account
+    // this session actually runs — a credential rotated in the store reaches the next pane without an
+    // apply, and a missing one refuses HERE, naming the secret, rather than letting the harness fail
+    // to authenticate against a remote service minutes later.
+    const env = sessionPaneEnvironment(
+      record.config.id,
+      launchEnvironment(
+        (await this.accountEnvironment?.forWrapper(record.config.agent, record.config.cwd)) ?? {},
+        await this.environment.read(record.config.id),
+      ),
+      record.config.mode,
+      await this.files?.(record.config.id),
+    );
+    // Before the pane, not after: an access token that has aged out is renewed while there is still
+    // somebody here to be told it could not be, rather than surfacing later as an agent that cannot
+    // explain itself. It cannot refuse this launch — see `lib/fleet/launch-renewal.ts` — so there is
+    // nothing here to check and nothing to branch on.
+    await this.accountRenewal?.beforeLaunch(record.config.agent);
+    await this.tmux.launch({
+      session: record.config.tmuxSession,
+      cwd: record.config.cwd,
+      command: [program, ...arguments_],
+      env,
+    });
+    await this.register(record);
+    // Read off the environment the pane was just given, never the stored one: a switch flipped after
+    // this launch reaches the agent only at its next one.
+    return this.clientName === undefined ? undefined : launchInstructions(this.clientName, env);
+  }
+
+  /**
+   * Record the new pane's identity, or do not leave the pane running.
+   *
+   * The pane already exists here, so a registration that fails would otherwise leave an agent
+   * running that no durable record names: the lifecycle sees a live pane and records the failure
+   * without retrying, the reap never sweeps it because it reads only registrations, and it survives
+   * `fy daemon stop` because the multiplexer server outlives the daemon on purpose. Killing it makes
+   * the failure what it looks like — nothing running — and lets the launch retry cleanly.
+   */
+  private async register(record: SessionLifecycleRecord): Promise<void> {
+    if (this.registrar === undefined) return;
+    try {
+      await this.registrar.register(record);
+    } catch (error) {
+      try {
+        await this.tmux.stop(record.config.tmuxSession);
+      } catch (stopError) {
+        throw new Error(
+          `${message(error)}; the unregistered pane could not be stopped either (${message(stopError)})`,
+          {
+            cause: error,
+          },
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** The startup-only wait; interactive runtime controls keep refusing a pane that is not idle. */
+  async ready(record: SessionLifecycleRecord): Promise<void> {
+    await this.delivery.waitReady(record.config.tmuxSession);
+  }
+
+  /**
+   * Hands the pane its first turn, once the harness is provably able to take it.
+   *
+   * The whole act — waiting out the boot, answering the trust prompt a first launch in a new
+   * directory always shows, choosing the transport, and proving the payload reached the composer
+   * before submitting — belongs to the delivery adapter, so the launch path and the revive path
+   * cannot drift apart on any of it.
+   */
+  async deliver(record: SessionLifecycleRecord, instruction: string, beforeWrite?: () => Promise<void>): Promise<void> {
+    await this.delivery.deliver(record.config.tmuxSession, instruction, {}, beforeWrite);
+  }
+
+  /** Waits, boundedly, for the harness to finish its own startup now that its first turn is in. */
+  async settled(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'> {
+    return await this.delivery.waitStartupSettled(record.config.tmuxSession);
+  }
+
+  async snapshot(record: SessionLifecycleRecord): Promise<void> {
+    const state = await this.tmux.state(record.config.tmuxSession);
+    if (state.alive && !state.dead) await this.snapshots?.write(record.config.id, state.visible);
+  }
+
+  async stop(record: SessionLifecycleRecord): Promise<void> {
+    await this.tmux.stop(record.config.tmuxSession);
+  }
+}

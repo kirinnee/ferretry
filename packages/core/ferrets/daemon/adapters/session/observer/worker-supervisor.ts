@@ -1,0 +1,552 @@
+import {
+  type AnswerOperationRecord,
+  type FromSessionWorker,
+  NEW_WORKER,
+  type ObserverFacts,
+  type ObserverPatch,
+  planSessionWorkers,
+  type SessionBinding,
+  type SessionId,
+  sessionWorkerRestart,
+  type ToSessionWorker,
+  type TranscriptStamp,
+  type WorkerAnswers,
+  type WorkerAsk,
+  type WorkerChild,
+  type WorkerLiveness,
+} from '../../../lib/index.ts';
+
+/** The part of a Worker the supervisor uses, so a test can stand in a thread that misbehaves on cue. */
+export interface ObserverWorker {
+  onmessage: ((event: MessageEvent<FromSessionWorker>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  postMessage(message: ToSessionWorker): void;
+  terminate(): void;
+  unref?(): void;
+  addEventListener?(type: 'close', listener: () => void): void;
+}
+
+/** What a worker reported beside a look or an answer, for the profile. */
+export interface WorkerLookReport {
+  /** A look the worker made, or an answer it gave when asked. */
+  readonly kind: 'look' | 'answer';
+  readonly lookMs: number;
+  readonly children: readonly WorkerChild[];
+}
+
+export interface WorkerSupervisorPorts {
+  /** Starts one session-worker thread. */
+  spawn(): ObserverWorker;
+  nowMs(): number;
+  /** Runs `run` after `delayMs` without holding the daemon open; answers how to cancel it. */
+  schedule(delayMs: number, run: () => void): () => void;
+  /** A session given up on a worker, said once (design §3.3). */
+  notice(session: SessionId, message: string): void;
+  /** Every look's report, so `fy daemon profile` still sees the work (design §6.5). */
+  report(report: WorkerLookReport): void;
+  /**
+   * What a session's worker found, unasked, in the order it must be applied — and which transcript bytes
+   * it decided from, so a read can tell whether the worker has seen everything there is.
+   */
+  observed(session: SessionId, patches: readonly ObserverPatch[], transcript: TranscriptStamp | undefined): void;
+  /** A session's screen or transcript tail changed: its liveness look, pushed. */
+  liveness(session: SessionId, liveness: WorkerLiveness): void;
+  /** A session's pane died, as its worker saw it. */
+  exited(session: SessionId): void;
+  /** Which sessions are hosted may have changed — a thread answered its probe, crashed, or a back-off ran out. */
+  changed(): void;
+}
+
+export interface WorkerSupervisorSettings {
+  /** Dedicated threads before sessions are pooled into them. */
+  readonly cap: number;
+  /** A request with no answer this long ends its worker as stuck. */
+  readonly requestTimeoutMs: number;
+  /** How long an emptied worker is kept before its thread ends. */
+  readonly drainMs: number;
+  /** How many workers may be starting at once, so a boot does not start every thread together. */
+  readonly startConcurrency: number;
+  /**
+   * How long a thread being ended may take to end its tmux clients before it is terminated anyway. Absent:
+   * {@link DEFAULT_WORKER_STOP_MS}.
+   */
+  readonly stopMs?: number;
+}
+
+/** Long enough for a client to detach and be reaped on a slow host, short enough not to hold a thread for long. */
+export const DEFAULT_WORKER_STOP_MS = 5_000;
+
+export const DEFAULT_WORKER_SUPERVISOR_SETTINGS: Omit<WorkerSupervisorSettings, 'cap'> = {
+  requestTimeoutMs: 10_000,
+  drainMs: 2_000,
+  startConcurrency: 2,
+};
+
+/** A session the supervisor should host, with what it needs to attach. */
+export interface WantedSession {
+  readonly id: SessionId;
+  readonly facts: ObserverFacts;
+  readonly binding: SessionBinding;
+}
+
+interface PendingRequest {
+  readonly thread: number;
+  readonly session: SessionId;
+  readonly generation: number;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+  readonly cancel: () => void;
+}
+
+interface Thread {
+  readonly id: number;
+  readonly worker: ObserverWorker;
+  readonly sessions: Set<SessionId>;
+  /** What this thread is to be told once it has answered its probe, in order; until then it is told nothing. */
+  readonly held: ToSessionWorker[];
+  ready: boolean;
+  ended: boolean;
+  drain: (() => void) | undefined;
+  /** Called when the thread answers `stopped`, while {@link WorkerSupervisor.stop} waits for it. */
+  stopped: (() => void) | undefined;
+}
+
+interface Placement {
+  readonly thread: number;
+  readonly generation: number;
+  binding: SessionBinding;
+}
+
+const sameBinding = (a: SessionBinding, b: SessionBinding): boolean =>
+  a.tmux.executable === b.tmux.executable &&
+  a.tmux.socket === b.tmux.socket &&
+  a.tmux.target === b.tmux.target &&
+  a.transcript?.file === b.transcript?.file &&
+  a.transcript?.harness === b.transcript?.harness;
+
+/**
+ * THE SESSION WORKERS: which thread observes which session, and what happens when one fails.
+ *
+ * One thread per running session up to the cap, then least-loaded pooling (`planSessionWorkers`). A
+ * thread is started, asked the `fyd --check` probe, and hosts sessions only once it has answered — until
+ * then, and whenever a session has no worker, the caller observes it on the main thread as stage 3a did.
+ *
+ * A THREAD IS TOLD NOTHING BUT THE PROBE UNTIL IT ANSWERS. What it is handed meanwhile is held here and
+ * sent, in order, with its answer. A thread ended while it still loads is not ended at once —
+ * `LoadSafeWorker` waits for it to open — and one already handed a session would attach it in that
+ * moment: start a tmux client for a daemon that has stopped, which nothing would ever end. Held here,
+ * it is ended knowing of no session at all.
+ *
+ * FAILURE IS A GENERATION. A thread that errors, closes, or leaves a look unanswered past the timeout is
+ * ended; every look waiting on it is refused (its caller looks once itself), every session it hosted is
+ * re-attached at a NEW generation after a back-off of 1 s, 2 s, 4 s … 60 s, and any message from the old
+ * generation is ignored. Five crashes of one session inside ten minutes keep it on the main thread until
+ * the daemon next starts, said once through `notice` (design §3.3).
+ */
+export class WorkerSupervisor {
+  private readonly threads = new Map<number, Thread>();
+  private readonly placements = new Map<SessionId, Placement>();
+  private readonly generations = new Map<SessionId, number>();
+  private readonly crashes = new Map<SessionId, number[]>();
+  private readonly retryAt = new Map<SessionId, number>();
+  private readonly inline = new Set<SessionId>();
+  private readonly pending = new Map<number, PendingRequest>();
+  /**
+   * Threads already ended — hosting nothing, answering nothing — that are still ending their tmux clients. Kept
+   * so a stopping daemon waits for them and terminates them like any other thread, instead of exiting while
+   * their clients are still running. `finish` is idempotent: it cancels the wait and terminates.
+   */
+  private readonly retiring = new Map<number, { readonly finish: () => void; readonly finished: Promise<void> }>();
+  private nextThread = 1;
+  private nextRequest = 1;
+  private closed = false;
+
+  constructor(
+    private readonly ports: WorkerSupervisorPorts,
+    private readonly settings: WorkerSupervisorSettings,
+  ) {}
+
+  /** Looks waiting on a worker: the gauge `fy daemon profile` samples. */
+  get inFlight(): number {
+    return this.pending.size;
+  }
+
+  /**
+   * The pool as `fy daemon status` and a performance report show it: the configured size, the threads
+   * running now, and how many sessions each observes, busiest first.
+   */
+  get pool(): { readonly max: number; readonly threads: number; readonly sessionsPerThread: readonly number[] } {
+    const running = [...this.threads.values()].filter(thread => !thread.ended);
+    return {
+      max: this.settings.cap,
+      threads: running.length,
+      sessionsPerThread: running.map(thread => thread.sessions.size).sort((a, b) => b - a),
+    };
+  }
+
+  /** Threads running now. */
+  get threadCount(): number {
+    return [...this.threads.values()].filter(thread => !thread.ended).length;
+  }
+
+  /** Whether `session` is observed by a worker that has started: if not, the caller observes it inline. */
+  hosts(session: SessionId): boolean {
+    const placement = this.placements.get(session);
+    return placement !== undefined && this.threads.get(placement.thread)?.ready === true;
+  }
+
+  /** Whether `session` has been handed to a worker, ready or still starting: messages to it are queued. */
+  attached(session: SessionId): boolean {
+    return this.placements.has(session);
+  }
+
+  /**
+   * Make hosting match `wanted`: detach what left, start or pool what arrived, rebind what moved.
+   * Sessions held back by a back-off or kept inline are left to the caller. Answers the sessions it attached
+   * just now, whose answer receipts the caller then pushes.
+   */
+  reconcile(wanted: readonly WantedSession[]): readonly SessionId[] {
+    if (this.closed) return [];
+    const attached: SessionId[] = [];
+    const now = this.ports.nowMs();
+    const eligible = wanted.filter(
+      session => !this.inline.has(session.id) && (this.retryAt.get(session.id) ?? 0) <= now,
+    );
+    const byId = new Map(eligible.map(session => [session.id, session]));
+    const hosted = new Map<number, SessionId[]>();
+    for (const thread of this.threads.values()) if (!thread.ended) hosted.set(thread.id, [...thread.sessions]);
+    const plan = planSessionWorkers(
+      eligible.map(session => session.id),
+      hosted,
+      this.settings.cap,
+    );
+    for (const { session } of plan.detach) this.detach(session);
+    for (const id of plan.terminate) this.scheduleDrain(id);
+    let starting = [...this.threads.values()].filter(thread => !thread.ended && !thread.ready).length;
+    for (const { session, worker } of plan.attach) {
+      const wantedSession = byId.get(session);
+      if (wantedSession === undefined) continue;
+      if (worker === NEW_WORKER) {
+        if (starting >= this.settings.startConcurrency) continue;
+        starting += 1;
+        this.attach(wantedSession, this.start().id);
+      } else this.attach(wantedSession, worker);
+      attached.push(session);
+    }
+    for (const session of eligible) {
+      const placement = this.placements.get(session.id);
+      if (placement === undefined || sameBinding(placement.binding, session.binding)) continue;
+      placement.binding = session.binding;
+      this.post(placement.thread, {
+        kind: 'bind',
+        session: session.id,
+        generation: placement.generation,
+        binding: session.binding,
+      });
+    }
+    return attached;
+  }
+
+  /** The session's transcript changed: its worker looks again. */
+  file(session: SessionId): void {
+    const placement = this.placements.get(session);
+    if (placement !== undefined)
+      this.post(placement.thread, { kind: 'file', session, generation: placement.generation });
+  }
+
+  /** The session's answer receipts, after the answer ledger was appended to. */
+  answers(session: SessionId, rows: readonly AnswerOperationRecord[]): void {
+    const placement = this.placements.get(session);
+    if (placement !== undefined)
+      this.post(placement.thread, { kind: 'answers', session, generation: placement.generation, rows });
+  }
+
+  /** The main thread wrote this session's document: tell its worker what it now says. */
+  facts(session: SessionId, facts: ObserverFacts): void {
+    const placement = this.placements.get(session);
+    if (placement !== undefined)
+      this.post(placement.thread, { kind: 'facts', session, generation: placement.generation, facts });
+  }
+
+  /**
+   * Ask the session's worker for an answer now. Rejects when it could not answer in time, or hosts no
+   * worker yet — the caller then does the work once itself, on this thread.
+   */
+  async request<K extends WorkerAsk['kind']>(
+    session: SessionId,
+    ask: Extract<WorkerAsk, { kind: K }>,
+  ): Promise<WorkerAnswers[K]> {
+    const placement = this.placements.get(session);
+    const thread = placement === undefined ? undefined : this.threads.get(placement.thread);
+    if (placement === undefined || thread?.ready !== true) throw new Error(`no worker observes ${session}`);
+    const request = this.nextRequest++;
+    return await new Promise<WorkerAnswers[K]>((resolve, reject) => {
+      const cancel = this.ports.schedule(this.settings.requestTimeoutMs, () =>
+        this.crash(
+          thread.id,
+          `a ${ask.kind} request for ${session} had no answer within ${String(this.settings.requestTimeoutMs)} ms`,
+        ),
+      );
+      this.pending.set(request, {
+        thread: thread.id,
+        session,
+        generation: placement.generation,
+        resolve: value => resolve(value as WorkerAnswers[K]),
+        reject,
+        cancel,
+      });
+      this.post(thread.id, { kind: 'request', session, generation: placement.generation, request, ask });
+    });
+  }
+
+  /** Ends every thread and refuses every look still waiting: the daemon is stopping. */
+  close(): void {
+    this.closed = true;
+    for (const thread of [...this.threads.values()]) this.end(thread, new Error('the session workers were closed'));
+    for (const retiring of [...this.retiring.values()]) retiring.finish();
+  }
+
+  /**
+   * {@link close}, but first has every thread that has started end its tmux clients and answer once they
+   * have EXITED — waiting at most `withinMs` for each. WHAT A STOPPING DAEMON CALLS: a terminated
+   * thread's clients would be left to notice the daemon's exit, and a `kill-server` while one is still
+   * detaching keeps the server and the client running for good. A thread still loading was told nothing
+   * but the probe, so it started no client and is simply ended.
+   */
+  async stop(withinMs = 5_000): Promise<void> {
+    this.closed = true;
+    const started = [...this.threads.values()].filter(thread => thread.ready && !thread.ended);
+    // A thread that was already ending is waited for the same way: its `stop` is already on its way to it.
+    const ending = [...this.retiring.values()].map(
+      async retiring =>
+        await new Promise<void>(resolve => {
+          const cancel = this.ports.schedule(withinMs, resolve);
+          void retiring.finished.then(() => {
+            cancel();
+            resolve();
+          });
+        }),
+    );
+    await Promise.all([
+      ...ending,
+      ...started.map(
+        async thread =>
+          await new Promise<void>(resolve => {
+            const cancel = this.ports.schedule(withinMs, resolve);
+            thread.stopped = () => {
+              cancel();
+              resolve();
+            };
+            this.post(thread.id, { kind: 'stop' });
+          }),
+      ),
+    ]);
+    this.close();
+  }
+
+  private start(): Thread {
+    const id = this.nextThread++;
+    const worker = this.ports.spawn();
+    const thread: Thread = {
+      id,
+      worker,
+      sessions: new Set(),
+      held: [],
+      ready: false,
+      ended: false,
+      drain: undefined,
+      stopped: undefined,
+    };
+    this.threads.set(id, thread);
+    worker.unref?.();
+    worker.onmessage = event => this.receive(thread, event.data);
+    // Both mean the thread itself is gone: there is nobody left to ask to end its clients.
+    worker.onerror = event => this.crash(id, `the worker failed: ${event.message}`, 'gone');
+    worker.addEventListener?.('close', () => this.crash(id, 'the worker exited', 'gone'));
+    // Ready once it answers the probe: until then its sessions are observed inline.
+    worker.postMessage({ probe: true });
+    return thread;
+  }
+
+  private attach(session: WantedSession, threadId: number): void {
+    const thread = this.threads.get(threadId);
+    if (thread === undefined || thread.ended) return;
+    const generation = (this.generations.get(session.id) ?? 0) + 1;
+    this.generations.set(session.id, generation);
+    thread.sessions.add(session.id);
+    this.placements.set(session.id, { thread: threadId, generation, binding: session.binding });
+    this.post(threadId, {
+      kind: 'attach',
+      session: session.id,
+      generation,
+      facts: session.facts,
+      binding: session.binding,
+    });
+  }
+
+  private detach(session: SessionId): void {
+    const placement = this.placements.get(session);
+    if (placement === undefined) return;
+    this.placements.delete(session);
+    this.threads.get(placement.thread)?.sessions.delete(session);
+    this.post(placement.thread, { kind: 'detach', session, generation: placement.generation });
+  }
+
+  private scheduleDrain(threadId: number): void {
+    const thread = this.threads.get(threadId);
+    if (thread === undefined || thread.ended || thread.drain !== undefined) return;
+    thread.drain = this.ports.schedule(this.settings.drainMs, () => {
+      thread.drain = undefined;
+      if (thread.sessions.size === 0) this.end(thread, new Error('the worker was drained'));
+    });
+  }
+
+  private receive(thread: Thread, message: FromSessionWorker): void {
+    // An ended thread is heard only to say it has stopped: everything else it sends is stale.
+    if (thread.ended) {
+      if ('kind' in message && message.kind === 'stopped') thread.stopped?.();
+      return;
+    }
+    if ('probe' in message) {
+      thread.ready = true;
+      for (const held of thread.held.splice(0)) this.post(thread.id, held);
+      this.ports.changed();
+      return;
+    }
+    switch (message.kind) {
+      case 'observed':
+        this.ports.report({ kind: 'look', lookMs: message.lookMs, children: message.metrics.children });
+        if (this.current(thread, message.session, message.generation))
+          this.ports.observed(message.session as SessionId, message.patches, message.transcript);
+        return;
+      case 'liveness':
+        if (this.current(thread, message.session, message.generation))
+          this.ports.liveness(message.session as SessionId, message.liveness);
+        return;
+      case 'answered': {
+        const pending = this.pending.get(message.request);
+        this.ports.report({ kind: 'answer', lookMs: 0, children: message.metrics.children });
+        if (pending === undefined || pending.generation !== message.generation) return;
+        this.pending.delete(message.request);
+        pending.cancel();
+        if (message.failure === undefined) pending.resolve(message.value);
+        else pending.reject(new Error(message.failure));
+        return;
+      }
+      case 'exited':
+        if (this.current(thread, message.session, message.generation)) this.ports.exited(message.session as SessionId);
+        return;
+      case 'fault':
+        if (message.fatal) this.crash(thread.id, message.message);
+        return;
+      case 'stopped':
+        thread.stopped?.();
+        return;
+    }
+  }
+
+  /** Whether a message names the session's current generation on this thread: anything else is stale. */
+  private current(thread: Thread, session: string, generation: number): boolean {
+    const placement = this.placements.get(session as SessionId);
+    return placement?.thread === thread.id && placement.generation === generation;
+  }
+
+  private crash(threadId: number, reason: string, state: 'alive' | 'gone' = 'alive'): void {
+    const thread = this.threads.get(threadId);
+    if (thread === undefined || thread.ended || this.closed) return;
+    const now = this.ports.nowMs();
+    for (const session of thread.sessions) {
+      const history = [...(this.crashes.get(session) ?? []), now];
+      this.crashes.set(session, history);
+      const verdict = sessionWorkerRestart(history, now);
+      if (verdict.kind === 'inline') {
+        this.inline.add(session);
+        this.ports.notice(
+          session,
+          `${session} crashed its session worker ${String(history.length)} times in ten minutes and is observed on the main thread until the daemon restarts; the last failure: ${reason}`,
+        );
+      } else {
+        this.retryAt.set(session, now + verdict.afterMs);
+        // Nothing else would bring the session back to a worker: say so when its back-off is over.
+        this.ports.schedule(verdict.afterMs, () => this.ports.changed());
+      }
+    }
+    this.end(thread, new Error(reason), state);
+    this.ports.changed();
+  }
+
+  /**
+   * Ends a thread — and, while the daemon is NOT stopping, lets it end its tmux clients first.
+   *
+   * A CHILD IS REAPED ONLY BY THE THREAD THAT STARTED IT. A worker's `Bun.spawn` children are watched by that
+   * worker's own loop; terminate the thread and a client that exits afterwards is never waited for, and stays a
+   * zombie of the daemon for good. On 2026-11-05 the daemon held 134 `tmux: client <defunct>`, started at boot
+   * and in the stall windows — when a slow disk made a look miss its timeout and the thread was ended as stuck,
+   * and when an emptied thread was drained. So a thread that has started is told to `stop` (end its clients
+   * and answer once they have EXITED, as {@link stop} does for the whole pool) and is terminated on that answer,
+   * or after {@link WorkerSupervisorSettings.stopMs} if it cannot give one: a thread that is truly stuck still
+   * goes. Its sessions and looks are released AT ONCE either way; only the thread's own exit waits.
+   * {@link close} — the daemon stopping — terminates at once, as before: {@link stop} already gave the threads
+   * their chance.
+   */
+  private end(thread: Thread, error: Error, state: 'alive' | 'gone' = 'alive'): void {
+    if (thread.ended) return;
+    thread.ended = true;
+    // Posted directly, never through `post`: a refused post there is a crash, and this thread is already ending.
+    let graceful = !this.closed && thread.ready && state === 'alive';
+    if (graceful)
+      try {
+        thread.worker.postMessage({ kind: 'stop' } satisfies ToSessionWorker);
+      } catch {
+        graceful = false;
+      }
+    thread.drain?.();
+    thread.held.splice(0);
+    for (const session of thread.sessions) this.placements.delete(session);
+    thread.sessions.clear();
+    for (const [request, pending] of this.pending) {
+      if (pending.thread !== thread.id) continue;
+      this.pending.delete(request);
+      pending.cancel();
+      pending.reject(error);
+    }
+    const terminate = (): void => {
+      try {
+        thread.worker.terminate();
+      } catch {
+        // Already gone.
+      }
+    };
+    if (graceful) {
+      let settle: () => void = () => undefined;
+      const finished = new Promise<void>(resolve => {
+        settle = resolve;
+      });
+      let cancel: () => void = () => undefined;
+      const finish = (): void => {
+        if (!this.retiring.delete(thread.id)) return;
+        cancel();
+        terminate();
+        settle();
+      };
+      this.retiring.set(thread.id, { finish, finished });
+      cancel = this.ports.schedule(this.settings.stopMs ?? DEFAULT_WORKER_STOP_MS, finish);
+      thread.stopped = finish;
+    } else terminate();
+    this.threads.delete(thread.id);
+  }
+
+  private post(threadId: number, message: ToSessionWorker): void {
+    const thread = this.threads.get(threadId);
+    if (thread === undefined || thread.ended) return;
+    if (!thread.ready) {
+      thread.held.push(message);
+      return;
+    }
+    try {
+      thread.worker.postMessage(message);
+    } catch (error) {
+      this.crash(threadId, `a message could not be posted: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}

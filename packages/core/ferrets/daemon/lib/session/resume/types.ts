@@ -1,0 +1,287 @@
+import type { QueueAuthor } from '@ferretry/protocol';
+import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
+import { z } from 'zod';
+import type { SessionId } from '../../session-id.ts';
+
+/**
+ * Which statuses a resume can act on: EVERY status the protocol's state document may hold.
+ *
+ * It used to be the LIFECYCLE's own six plus `retrying`, and that was a defect the moment the route
+ * was mounted. The status this parses comes off `state.json`, which `SessionStateSchema` governs, and
+ * that schema has sixteen — so a session sitting in `stalled`, `rate_limited`, `awaiting_question`,
+ * `thinking`, `tool_running`, `interrupted`, `waiting` or `completed` failed to parse here, the
+ * repository answered "no target", and `POST /v1/sessions/:id/resume` told the operator
+ * `session not found` about a session `GET /v1/sessions` was listing at that same moment.
+ *
+ * Those are not obscure states: `stalled` and `rate_limited` are the two an operator revives FROM,
+ * and they are also the two a migration onto another account exists for. Reading the document with
+ * its own schema is what makes the answer honest — a status the resume policy has no special opinion
+ * about is simply a non-terminal one, which is what it was.
+ */
+export const ResumableSessionStatusSchema = SessionStatusSchema;
+export type ResumableSessionStatus = SessionStatus;
+
+/**
+ * Statuses from which a session will never run again without a deliberate revive.
+ *
+ * `completed` joins the two the lifecycle knew about, and for exactly their reason: a session that
+ * finished its work has no agent left to type into, so its leftover pane is not a session to send a
+ * message to — a revive replaces it. Every other status is a session that may still be running,
+ * including `stalled` and `rate_limited`, where the pane is usually alive and the send shortcut is
+ * the right answer.
+ */
+export const TERMINAL_RESUME_STATUSES: ReadonlySet<ResumableSessionStatus> = new Set([
+  'failed',
+  'stopped',
+  'completed',
+]);
+
+/**
+ * Who asked. An operator at a CLI and an automatic reviver reach the same method, and they must not
+ * get the same policy: only the automated path may be suppressed by a duplicate-work heuristic.
+ * `device` is the owner in the app on a paired device (`device:<id>`): a person, like `admin-ui`.
+ */
+export const ResumeActorSchema = z.enum(['admin-cli', 'admin-ui', 'device', 'peer', 'warden', 'daemon', 'unknown']);
+export type ResumeActor = z.infer<typeof ResumeActorSchema>;
+
+export interface ResumePolicy {
+  /**
+   * Whether this is automated recovery rather than a person asking. Automatic retries must not
+   * clear the human-attention state an operator has not yet seen.
+   */
+  readonly automatic: boolean;
+  /**
+   * Whether the legacy label+checkout duplicate-work suppression applies. A label is a batch slug,
+   * not lineage, so it may only ever gate an automatic reviver.
+   */
+  readonly dedupeSharedRecoveryScope: boolean;
+  /**
+   * Whether a PERSON with operator standing asked, as opposed to anything else that can reach here.
+   *
+   * `automatic` cannot answer this question, because `peer` is not automatic and is also not an
+   * operator: another daemon relaying a request is a program, and the released structured-answer
+   * advisory exists precisely to be dismissed by a human who looked at the terminal. Only
+   * `admin-cli`, `admin-ui` and `device` resolve to true; peer, warden, daemon and unknown never do, and an
+   * absent value is false — so a hand-built policy that forgets the field gets the safe answer
+   * rather than operator standing.
+   */
+  readonly humanOperator?: boolean | undefined;
+  /**
+   * Whether a LIVE, healthy pane must be replaced rather than typed into.
+   *
+   * A plain resume takes the send shortcut when the harness is still at a prompt, because the
+   * cheapest way to hand a running agent its next turn is to type it. A MIGRATION cannot: the whole
+   * point is that a different executable answers the next turn, so typing into the pane that is
+   * already running would leave the old account serving a session whose own document says it moved.
+   *
+   * It is a policy field rather than a second method because everything else about the relaunch —
+   * the snapshot before the kill, the journalled composer discard, the turn document, the retry
+   * accounting, the launch gate and the per-session queue — is identical, and a parallel path would
+   * be those orderings written a second time.
+   */
+  readonly replaceLiveTerminal?: boolean | undefined;
+  /** Refuse if the session is no longer in this status — the state it was scheduled against. */
+  readonly expectedStatus?: ResumableSessionStatus | undefined;
+  /** Refuse if the retry counter moved, so two schedulers cannot both consume one attempt. */
+  readonly retryAttempt?: number | undefined;
+}
+
+/** What the terminal itself shows, independent of what any record claims. */
+export interface PaneObservation {
+  /** A pane exists under this session's name. */
+  readonly alive: boolean;
+  /** The pane exists but its process is gone — a shell that outlived its agent. */
+  readonly dead: boolean;
+  /** The harness is at a prompt and will accept typed input. */
+  readonly promptReady: boolean;
+}
+
+/** One session, as everything in this slice reads it. */
+export interface ResumeTarget {
+  readonly id: SessionId;
+  readonly status: ResumableSessionStatus;
+  readonly mode: 'auto' | 'interactive';
+  readonly cwd: string;
+  /** Batch slug, if the client set one. Never lineage. */
+  readonly label?: string | undefined;
+  readonly turn: number;
+  readonly retryAttempt?: number | undefined;
+  /** A structured question the agent asked and nobody answered. */
+  readonly pendingQuestion?: { readonly toolUseId: string } | undefined;
+  /** Set when the session is quarantined awaiting a person; the value names why. */
+  readonly needsHumanKind?: string | undefined;
+  /** How many transient relaunch failures may be retried automatically. */
+  readonly transientRetryBudget?: number | undefined;
+}
+
+/** A resume the daemon declined to perform. Distinct from a resume that was attempted and failed. */
+export class ResumeRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ResumeRefused';
+  }
+}
+
+/** The guard failed: the session moved out from under the caller that scheduled this resume. */
+export class ResumeCancelled extends ResumeRefused {
+  constructor(expected: ResumableSessionStatus, found: ResumableSessionStatus) {
+    super(`resume guard expected status ${expected} but found ${found}`);
+    this.name = 'ResumeCancelled';
+  }
+}
+
+/**
+ * A replacement pane was created but its process identity could not be recorded durably.
+ *
+ * This is not an ordinary readiness or delivery failure. A later probe may quite truthfully see
+ * the pane alive, but preserving it would leave every durable reader addressing the incarnation
+ * the revive replaced. Recovery must therefore surface the failure even when teardown also failed
+ * and the unregistered replacement is still present.
+ */
+export class UnregisteredResumeReplacement extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'UnregisteredResumeReplacement';
+  }
+}
+
+/**
+ * The replacement pane launched, but the released advisory could not be durably acknowledged.
+ *
+ * It is its own class because the honest report is two facts at once: the revive WORKED, and the
+ * warning the operator meant to dismiss is still standing. Recovery must therefore not relaunch
+ * again, must not call the replacement a terminal failure, and must still hand the live pane to a
+ * monitor — while the caller learns the dismissal did not happen.
+ */
+export class ResumeAcknowledgementFailed extends Error {
+  constructor(
+    readonly id: SessionId,
+    options?: ErrorOptions,
+  ) {
+    super(
+      `session ${id} was revived, but its structured-answer advisory could not be acknowledged, so the ` +
+        `warning still stands: ${options?.cause instanceof Error ? options.cause.message : String(options?.cause ?? 'no reason given')}`,
+      options,
+    );
+    this.name = 'ResumeAcknowledgementFailed';
+  }
+}
+
+/** The legacy duplicate-work suppression fired. Only ever raised against an automatic reviver. */
+export class ReviveDedupeConflict extends ResumeRefused {
+  constructor(
+    readonly target: ResumeTarget,
+    readonly conflict: ResumeTarget,
+  ) {
+    super(
+      `automatic revive suppressed for session ${target.id}: live session ${conflict.id} shares ` +
+        `label ${target.label ?? ''} and checkout ${target.cwd}, the legacy automatic-recovery ` +
+        `dedupe scope; resume ${target.id} explicitly to recover the original session`,
+    );
+    this.name = 'ReviveDedupeConflict';
+  }
+}
+
+/** Durable boundary for resume: reads the target and records each transition it makes. */
+export interface ResumeRepository {
+  read(id: SessionId): Promise<ResumeTarget | undefined>;
+  /** Every live session, for the duplicate-work heuristic. Terminal ones may be included. */
+  list(): Promise<readonly ResumeTarget[]>;
+  transition(id: SessionId, change: ResumeTransition): Promise<ResumeTarget>;
+}
+
+/** One durable state change a resume makes, named by the event it journals. */
+export interface ResumeTransition {
+  readonly event:
+    | 'session.resuming'
+    | 'session.resumed'
+    | 'session.resume_false_terminal_averted'
+    | 'session.retry_scheduled'
+    | 'session.failed'
+    | 'session.question_cancelled'
+    | 'session.composer_discarded';
+  readonly status?: ResumableSessionStatus | undefined;
+  readonly turn?: number | undefined;
+  readonly retryAttempt?: number | undefined;
+  readonly reason?: string | undefined;
+  /** When a terminal verdict was reached; a transition that ends nothing leaves the old stamp. */
+  readonly finishedAt?: string | undefined;
+  readonly clearPendingQuestion?: boolean | undefined;
+  readonly clearNeedsHuman?: boolean | undefined;
+  readonly data?: Readonly<Record<string, string | number | boolean>> | undefined;
+  /** The launch fact a relaunch just produced, written over the previous pane's. */
+  readonly launchInstructions?: SessionLaunchInstructions | undefined;
+}
+
+/** The terminal a resume replaces. Every call goes through the injected tmux port, never a shell. */
+export interface ResumeLauncher {
+  observe(id: SessionId): Promise<PaneObservation>;
+  /** Captures the final frame before a pane is destroyed, so discarded composer text is recoverable. */
+  snapshot(id: SessionId): Promise<void>;
+  /** Kills the pane this daemon created for this session, and nothing else. */
+  kill(id: SessionId, reason: string): Promise<void>;
+  /** Replaces the pane; answers what the replacement was told, as the lifecycle launcher's `launch` does. */
+  relaunch(id: SessionId): Promise<SessionLaunchInstructions | undefined>;
+  deliver(id: SessionId, instruction: string): Promise<void>;
+  /**
+   * Independently re-probes after a relaunch error. A readiness failure is one observation; the
+   * pane and process tree are another, and only their agreement justifies a terminal verdict.
+   */
+  confirmExit(id: SessionId): Promise<{ readonly confirmed: boolean; readonly pane: PaneObservation }>;
+}
+
+/**
+ * Durable dismissal of the released structured-answer advisory, and nothing else.
+ *
+ * Deliberately one method with no arguments beyond the session: the resume slice must not know
+ * which ledger row is being closed, because choosing the row is exactly where the old
+ * composition-root wrapper went wrong — it selected by `needsHuman.includes(toolUseId)` and would
+ * happily close several rows, or a failed one. The composition picks the single owned record under
+ * the answer queue and fails closed when there is not exactly one.
+ *
+ * A rejection means the advisory stands. It is never a claim that the structured answer landed.
+ *
+ * IT MUST NOT TAKE THE ANSWER QUEUE ITSELF. The resume service already holds it — that is the whole
+ * mechanism, see `SessionResumePorts.serial` — and the queue is not reentrant, so a nested
+ * acquisition here would deadlock the dismissal against itself.
+ */
+export interface ResumeAnswerAgenda {
+  /**
+   * `actor` is ATTRIBUTION, never authorization. The policy already decided whether this dismissal
+   * may happen; passing the actor through means the audit line names the operator who asked, and it
+   * means the composition root does not get a second, drifting copy of the eligibility test.
+   *
+   * A crash-gap retry — the row already `acknowledged`, the advisory still standing — appends
+   * nothing and returns, so the clear can finish.
+   */
+  acknowledge(id: SessionId, actor: ResumeActor): Promise<void>;
+}
+
+/** Where a revived agent reads its new turn. */
+export interface ResumeTurnStore {
+  /**
+   * Persists the turn document and returns the absolute file the agent must open. `by`, when given, is
+   * kept beside it as metadata — who the turn is from — and never written into the document.
+   */
+  writeTurn(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string>;
+  /** Clears the completion markers a previous turn left, so a stale one cannot end the new one. */
+  clearMarkers(id: SessionId): Promise<void>;
+}
+
+/**
+ * The per-session monitor. A relaunch must disarm the old one first: otherwise that monitor sees
+ * resume's own deliberate kill and writes a terminal verdict in the middle of the relaunch.
+ */
+export interface ResumeMonitorControl {
+  stop(id: SessionId): Promise<void>;
+  start(id: SessionId): Promise<void>;
+}
+
+/** Whether a first launch for this session is still in flight, and how a caller waits for it. */
+export interface LaunchGate {
+  launching(id: SessionId): boolean;
+  /** Resolves true once the launch settled, false if it did not within the budget. */
+  awaitSettled(id: SessionId, timeoutMs: number): Promise<boolean>;
+  /** Registers this resume's own relaunch, so the reflex layer grants it the same amnesty. */
+  register(id: SessionId): { release(): void };
+}
