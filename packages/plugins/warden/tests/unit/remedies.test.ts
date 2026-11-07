@@ -1,23 +1,71 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { entryId, FakeAsks, sourceKey } from '@ferretry/core-asks/contract/testing';
+import type {
+  FerretId,
+  FerretsApi,
+  FerretSummary,
+  MoveFailure,
+  MoveOptions,
+  ResumeOptions,
+} from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
+import { err, ok, type Result } from '@ferretry/std';
+import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { createWardenRemedies, RESTART_STOP_REASON } from '../../daemon/remedies.ts';
 
+/** Ferrets' fake with the two additives it does not model: the options a resume carries, and the move. */
+class AdditiveFerrets extends FakeFerrets {
+  readonly resumeOptions: (ResumeOptions | undefined)[] = [];
+  readonly moves: { ferret: FerretId; runtime: string; options?: MoveOptions; caller?: FerretId }[] = [];
+  refuseMove: MoveFailure | undefined;
+
+  override async resume(ferret: FerretId, message?: string, options?: ResumeOptions) {
+    this.resumeOptions.push(options);
+    return await super.resume(ferret, message);
+  }
+
+  move: NonNullable<FerretsApi['move']> = async (
+    ferret,
+    runtime,
+    options,
+    caller,
+  ): Promise<Result<FerretSummary, MoveFailure>> => {
+    this.moves.push({
+      ferret,
+      runtime,
+      ...(options === undefined ? {} : { options }),
+      ...(caller === undefined ? {} : { caller }),
+    });
+    const found = await this.get(ferret);
+    if (found === undefined || this.refuseMove !== undefined)
+      return err(this.refuseMove ?? { code: 'not_found', reason: 'no such ferret' });
+    return ok({ ...found, runtime });
+  };
+}
+
 function subject() {
-  const ferrets = new FakeFerrets();
+  const ferrets = new AdditiveFerrets();
   const asks = new FakeAsks();
   const conversation = fakeConversation();
   const acted: string[] = [];
+  const undelivered: string[] = [];
   const made = createWardenRemedies({
     ferrets,
     asks,
     conversation,
     acted: (ferret, action, outcome) => acted.push(`${ferret} ${action} ${outcome}`),
+    noticeUndelivered: (ferret, reason) => undelivered.push(`${ferret}: ${reason}`),
   });
-  return { ferrets, asks, acted, ...made };
+  return { ferrets, asks, acted, undelivered, conversation, ...made };
 }
+
+/** Conversation as 5.0 has it: every send refuses until its terminal seam lands. */
+const refuseSends = (conversation: ConversationApi): void => {
+  (conversation as { send: ConversationApi['send'] }).send = async () =>
+    err({ code: 'unavailable', message: 'This needs the ferret’s terminal' } as never);
+};
 
 const askQuestion = async (asks: FakeAsks, ferret: string): Promise<void> => {
   await asks.raise({
@@ -138,5 +186,113 @@ describe('the auto-revive resume', () => {
     // Assert
     should(revived).eql({ ok: true });
     should(ferrets.resumes).eql([{ ferret: 'f1', message: 'carry on' }]);
+  });
+});
+
+describe('a resume that started the ferret but whose notice cannot be typed', () => {
+  it('should answer a revive as ok (so it is recorded and the loop limits apply), saying it could not tell the ferret', async () => {
+    // Arrange
+    const { ferrets, conversation, undelivered, resume } = subject();
+    refuseSends(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+
+    // Act
+    const revived = await resume('f1', 'carry on');
+
+    // Assert
+    should(revived.ok).be.true();
+    should((revived as { caveat?: string }).caveat).startWith('It could not be told why');
+    should(ferrets.resumes).eql([{ ferret: 'f1', message: 'carry on' }]);
+    should(undelivered).have.length(1);
+  });
+
+  it('should still report a resume and a restart done, with the notice failure journalled apart', async () => {
+    // Arrange
+    const { ferrets, conversation, acted, undelivered, remedies } = subject();
+    refuseSends(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'working' });
+
+    // Act
+    await remedies.resume('f1', 'carry on');
+    await remedies.restart('f2', 'carry on');
+
+    // Assert
+    should(acted).eql(['f1 resume done', 'f2 restart done']);
+    should(undelivered).have.length(2);
+  });
+
+  it('should count a revive as done when Ferrets threw instead of answering (whether it started cannot be told)', async () => {
+    // Arrange
+    const { ferrets, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async () => await Promise.reject(new Error('the runner went away'));
+
+    // Act
+    const revived = await resume('f1', 'carry on');
+
+    // Assert: fail closed — counted as a revive
+    should(revived.ok).be.true();
+    should((revived as { caveat?: string }).caveat).containEql('counts as a revive');
+  });
+
+  it('should answer ok false when Ferrets itself refused the resume (nothing started)', async () => {
+    // Arrange
+    const { ferrets, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async () => err({ code: 'failed', reason: 'no login' } as never);
+
+    // Act
+    const refused = await resume('f1', 'carry on');
+
+    // Assert
+    should(refused).eql({ ok: false, reason: 'revive refused: no login' });
+  });
+});
+
+describe('the Warden’s resumes are automatic (ResumeOptions.automatic)', () => {
+  it('should mark a resume, a restart and a revive as automated recovery, not a person asking', async () => {
+    // Arrange
+    const { ferrets, remedies, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'working' });
+    ferrets.add({ id: ferretId('f3'), state: 'stopped' });
+
+    // Act
+    await remedies.resume('f1');
+    await remedies.restart('f2');
+    await resume('f3', 'carry on');
+
+    // Assert
+    should(ferrets.resumeOptions).eql([{ automatic: true }, { automatic: true }, { automatic: true }]);
+  });
+});
+
+describe('the Warden moves a ferret to another login (a failover, through Ferrets’ move)', () => {
+  it('should move the same ferret onto the named runtime moved by the Warden (today’s movedBy only), and report it done', async () => {
+    // Arrange
+    const { ferrets, remedies, acted } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'working', runtime: 'claude-a' as never });
+
+    // Act
+    await remedies.failover('f1', 'claude-b');
+
+    // Assert
+    should(ferrets.moves).eql([{ ferret: 'f1', runtime: 'claude-b', options: { movedBy: 'warden' } }]);
+    should(acted).eql(['f1 failover done']);
+  });
+
+  it('should throw Ferrets’ own reason when the move is refused, and report it failed', async () => {
+    // Arrange
+    const { ferrets, remedies, acted } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'working' });
+    ferrets.refuseMove = { code: 'move_refused', reason: 'a tool is running' };
+
+    // Act
+    const refused = await remedies.failover('f1', 'claude-b').catch((error: Error) => error);
+
+    // Assert
+    should((refused as Error).message).equal('the move was refused: a tool is running');
+    should(acted).eql(['f1 failover failed']);
   });
 });

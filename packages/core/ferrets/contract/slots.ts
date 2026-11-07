@@ -16,9 +16,23 @@ import type { HarnessKey } from './ids.ts';
 export const NEW_FERRET_ACCOUNT_SLOT = 'ferrets.new-ferret-account' as const;
 /** The move page's runtime field. */
 export const MOVE_ACCOUNT_SLOT = 'ferrets.move-account' as const;
+/** The Actions ▾ menu's rows another plugin owns (see {@link ActionsRowSlotProps}). */
+export const ACTIONS_ROW_SLOT = 'ferrets.actions-row' as const;
+/** The file browser's search box: Conversation contributes the current-ferret file and card search. */
+export const FILES_SEARCH_SLOT = 'ferrets.files-search' as const;
+/** The new-ferret page's registered-projects picker: Projects contributes it; a pick fills the folder field. */
+export const NEW_FERRET_PROJECT_SLOT = 'ferrets.new-ferret-project' as const;
 
-/** Every slot Ferrets' pages offer, in one list a test can pair against the panels the other plugins contribute. */
-export const FERRET_SLOTS = [NEW_FERRET_ACCOUNT_SLOT, MOVE_ACCOUNT_SLOT] as const;
+/** The two account slots Runtimes contributes its runtime picker to, in one list a test can pair against its panels. */
+export const FERRET_ACCOUNT_SLOTS = [NEW_FERRET_ACCOUNT_SLOT, MOVE_ACCOUNT_SLOT] as const;
+
+/** Every slot Ferrets' pages offer (the account slots and the ferret page's three below), in one list a test can pair. */
+export const FERRET_SLOTS = [
+  ...FERRET_ACCOUNT_SLOTS,
+  ACTIONS_ROW_SLOT,
+  FILES_SEARCH_SLOT,
+  NEW_FERRET_PROJECT_SLOT,
+] as const;
 export type FerretSlot = (typeof FERRET_SLOTS)[number];
 
 /** A runtime the owner picked, as far as the page needs to know it (the model box follows it). */
@@ -92,4 +106,90 @@ export function isNewFerretAccountSlotProps(props: unknown): props is NewFerretA
 
 export function isMoveAccountSlotProps(props: unknown): props is MoveAccountSlotProps {
   return hasAccountSlotProps(props) && typeof (props as { harness?: unknown }).harness === 'string';
+}
+
+// ─── the ferret page's other slots ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The Actions ▾ menu's rows that another plugin owns (Interrupt, Fork into a new ferret…, Add MCP server, Compact memory
+ * at…, the Warden and learning actions). The menu mounts this slot beside its own rows and hands each contributing
+ * panel the ferret and a way to OFFER rows; a panel draws nothing itself, it offers a row while it applies and takes it
+ * back (`null`) when it does not or unmounts. Rows are plain data (no icon, no framework node): the menu draws them
+ * as it draws its own. A row that needs a form opens its own surface from `run`.
+ */
+
+/** Where in the Actions menu an offered row sits (the menu's own sections). */
+export type ActionsRowGroup = 'ferret' | 'move' | 'danger';
+
+interface ActionsRowBase {
+  /** Stable within the menu; two rows with one id keep the first. */
+  readonly id: string;
+  readonly label: string;
+  readonly group: ActionsRowGroup;
+  /** Within its group, lower first. */
+  readonly order: number;
+  /** A short fact at the row's end. */
+  readonly detail?: string;
+  readonly danger?: boolean;
+  /** Why it cannot be done now: the row is drawn dimmed and does nothing. */
+  readonly unavailable?: string;
+}
+
+/** A row that does its work at once, or asks inside the menu first. */
+export type ActionsRowOffer =
+  | (ActionsRowBase & { readonly kind: 'run'; readonly run: () => Promise<void> | void })
+  | (ActionsRowBase & {
+      readonly kind: 'confirm';
+      readonly question: string;
+      readonly consequence: string;
+      readonly confirmLabel: string;
+      readonly run: () => Promise<void> | void;
+    });
+
+export interface ActionsRowSlotProps {
+  /** The ferret the menu is for. */
+  readonly ferret: string;
+  readonly name: string;
+  /** Whether this connection may change the ferret (the menu's own flag). */
+  readonly canControl: boolean;
+  /** Offers (or, with `null`, withdraws) the row `id`. */
+  readonly offer: (id: string, row: ActionsRowOffer | null) => void;
+}
+
+/** What the file browser hands a search panel. */
+export interface FilesSearchSlotProps {
+  readonly ferret: string;
+  /** Opens a file of this ferret in the browser. */
+  readonly openFile: (path: string) => void;
+}
+
+/** What the new-ferret page hands a project picker. */
+export interface NewFerretProjectSlotProps {
+  /** The folder field's current value. */
+  readonly value: string;
+  /** Fills the folder field with a registered project's folder. */
+  readonly onPick: (folder: string) => void;
+}
+
+export function isActionsRowSlotProps(props: unknown): props is ActionsRowSlotProps {
+  if (typeof props !== 'object' || props === null) return false;
+  const candidate = props as Record<string, unknown>;
+  return (
+    typeof candidate.ferret === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.canControl === 'boolean' &&
+    typeof candidate.offer === 'function'
+  );
+}
+
+export function isFilesSearchSlotProps(props: unknown): props is FilesSearchSlotProps {
+  if (typeof props !== 'object' || props === null) return false;
+  const candidate = props as Record<string, unknown>;
+  return typeof candidate.ferret === 'string' && typeof candidate.openFile === 'function';
+}
+
+export function isNewFerretProjectSlotProps(props: unknown): props is NewFerretProjectSlotProps {
+  if (typeof props !== 'object' || props === null) return false;
+  const candidate = props as Record<string, unknown>;
+  return typeof candidate.value === 'string' && typeof candidate.onPick === 'function';
 }

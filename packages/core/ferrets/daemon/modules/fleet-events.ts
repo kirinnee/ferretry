@@ -195,3 +195,12 @@ export function fleetEventsAccept(
   };
 }
 
+
+/**
+ * Whether a stream may follow `id`: the live registry, or a ferret the archive holds. Today's `findSession` found both,
+ * and an archived ferret's journal is untouched (docs/session-archive.md), so its stream replays like any other.
+ */
+export const followableFerret =
+  (known: { readonly live: (id: string) => boolean; readonly archived: (id: string) => boolean }) =>
+  (id: string): boolean =>
+    known.live(id) || known.archived(id);

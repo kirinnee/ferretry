@@ -32,6 +32,8 @@ export const INFO_HINT = {
   login: 'The login (runtime) this ferret runs on. Its quota is shared with every ferret on it.',
   runtime: 'The runtime the ferret was started on: a login with its model and settings.',
   model: 'The model this ferret was started with.',
+  effort: 'How hard the model was asked to think when this ferret was started.',
+  cause: 'Why the ferret ended, as Ferretry recorded it.',
   mode: 'Interactive ferrets wait for you at their prompt; auto ferrets keep going on their own.',
   state: 'Where the ferret stands: starting, working, idle, or stopped (a stopped ferret can resume).',
   pack: 'The pack this ferret belongs to: ferrets started together under one label.',
@@ -126,4 +128,26 @@ export const relativeTime = (at: number | string | undefined, now = globalThis.D
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
+};
+
+/** Why a ferret ended, in the person's words; the record's `cause` names it (an end nobody chose reads as a crash). */
+export const endCauseWord = (cause: NonNullable<FerretSummary['cause']>): string => {
+  switch (cause.kind) {
+    case 'tmux_crashed':
+      return 'Its terminal server crashed';
+    case 'terminal_gone':
+      return 'Its terminal vanished';
+    case 'signal':
+      return `Killed by signal ${cause.signal}`;
+    case 'agent_crashed':
+      return `The agent exited with code ${cause.exitCode}`;
+    case 'stopped':
+      return 'Stopped';
+    case 'completed':
+      return 'Said it was done';
+    case 'start_failed':
+      return 'Never started';
+    case 'clean_exit':
+      return 'Exited cleanly';
+  }
 };

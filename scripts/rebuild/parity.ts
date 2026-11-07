@@ -166,6 +166,9 @@ function ownerOf(file: string, what = ''): string {
   if (/agent-pins\.json/.test(semantic)) return 'ferrets';
   if (/\bboard(?:[ ._-]|$)|boardimporter|cardstarts|unfiledrefiler/.test(semantic)) return 'board';
   if (/sweepdeadlines/.test(semantic)) return 'asks';
+  // The input-request sweep is Vault's `inputs-sweep` job in 5.0 (lead ruling, ports-pending exit tidy); the word
+  // `housekeeping` in today's function name is not Tidy's.
+  if (/startinputhousekeeping|sweepinputrequests/.test(semantic)) return 'vault';
   if (/sendtracking|sendreproof|subsystems\.observer/.test(semantic)) return 'conversation';
   if (/\/secrets\/logins/.test(semantic)) return 'accounts';
   if (
@@ -218,6 +221,8 @@ function ownerOf(file: string, what = ''): string {
   for (const [pattern, owner] of rules) if (pattern.test(semantic)) return owner;
   if (/\/agenda\//.test(source) || /\/mounts\/agenda/.test(source)) return 'asks';
   if (/\/features\/fleet\/shell\//.test(source)) return 'app';
+  // The Codex rollout watch sits under today's housekeeping folder but is Codex's, not Tidy's (same ruling).
+  if (/codex-rollout/.test(source)) return 'codex';
   for (const [pattern, owner] of rules) if (pattern.test(source)) return owner;
   if (/agent-files|harness-update/.test(text)) return /codex/.test(text) ? 'codex' : 'claude-code';
   if (/session|ferret|auto-resume|worktree|fork|handover|\bname/.test(text.replace(/packages\//g, '')))
@@ -279,9 +284,12 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
   const check =
     kind === 'V' && what === 'fy daemon update'
       ? 'packages/cli/tests/unit/update/shell.test.ts'
-      : kind === 'R'
-        ? 'descriptor-parity'
-        : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+      : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+        kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+        ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+        : kind === 'R'
+          ? 'descriptor-parity'
+          : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
   rows.push({
     id: '',
     kind,

@@ -198,3 +198,7 @@ _none_
 ### Whole files that are compatibility code (0); do not copy
 
 _none found by file name; still strip any `legacy`, `deprecated`, `compat`, `migrat*`, `retired` identifiers, old-format readers, one-shot boot passes and feature flags about an older peer (clean slate A452)_
+
+## Open items
+
+- The registered-projects picker on the new-ferret page is not contributed yet. Ferrets offers the slot `ferrets.new-ferret-project` (props: the folder value and `onPick(folder)`, see `packages/core/ferrets/contract/slots.ts`) and mounts it on the new-ferret page; Projects contributes a `panel('ferrets.new-ferret-project', …)` that lists `projects.json` and calls `onPick`. Projects is not listed in `ports-pending.json`, so this line is its tracker.

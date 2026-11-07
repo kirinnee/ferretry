@@ -500,7 +500,16 @@ const RuntimeStateSchema = z.object({
     )
     .optional(),
   overdue: z
-    .record(z.string(), z.object({ asked: Instant, nudgedAt: Instant.optional(), toldParentAt: Instant.optional() }))
+    .record(
+      z.string(),
+      z.object({
+        asked: Instant,
+        nudgedAt: Instant.optional(),
+        toldParentAt: Instant.optional(),
+        nudgeFailedAt: Instant.optional(),
+        parentFailedAt: Instant.optional(),
+      }),
+    )
     .optional(),
   stuckInput: z
     .record(

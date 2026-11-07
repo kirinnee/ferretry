@@ -861,6 +861,15 @@ button.kt-fs-row:active {
   background: var(--surface);
 }
 
+.kt-rich-file-image-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
 .kt-rich-file-image {
   display: block;
   max-width: 100%;

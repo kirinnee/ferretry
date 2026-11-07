@@ -31,4 +31,6 @@ export const createStatusPanel =
 
 export const createActionsPanel =
   (client: LiveFerretsClient): AppComponent<PanelProps> =>
-  ({ subject }) => <ActionsPanel client={client} subject={subject} />;
+  // Keyed by the ferret: rows another plugin offered (their `run` closures target the ferret they were offered for), the
+  // open form and any alert belong to one ferret, so a different one starts the panel, and the slot's panels, afresh.
+  ({ subject }) => <ActionsPanel client={client} key={subject ?? ''} subject={subject} />;

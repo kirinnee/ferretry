@@ -6,7 +6,7 @@
  * slot a host hands them in through, and Info draws nothing in their place when it is absent. The facts a CLI reports
  * about itself (the model it is actually answering with, its effort, its launch instructions, the capability
  * switches) and the lists other plugins own (MCP, skills, instruction files) are not on the ferret record, so no row
- * claims them here.
+ * claims them here. The model and effort it was LAUNCHED with are the ferret's own and are drawn.
  */
 
 import type { ReactNode } from 'react';
@@ -56,6 +56,14 @@ export function InfoRuntime({ ferret, controls, relaunch, onRestart }: InfoRunti
           </span>
         )}
       </InfoRow>
+      {ferret.effort === undefined ? null : (
+        <InfoRow hint={INFO_HINT.effort} label="Effort">
+          <span className="font-mono" data-info-effort="">
+            {ferret.effort}
+          </span>
+          {ferret.fast === true ? <InfoChip>fast mode</InfoChip> : null}
+        </InfoRow>
+      )}
       {controls === undefined ? null : <InfoRow label="Change">{controls}</InfoRow>}
       {relaunch === undefined ? null : (
         <InfoRelaunchRow read={relaunch} {...(onRestart === undefined ? {} : { onRestart })} />

@@ -8,6 +8,7 @@ import {
   backlogTailBytes,
   eventStreamScope,
   fleetEventsAccept,
+  followableFerret,
   HistoryEventSource,
 } from '../../../../daemon/modules/fleet-events.ts';
 import { FyEventStreamFrameSchema } from '../../../../daemon/lib/protocol/session.ts';
@@ -400,5 +401,28 @@ describe('G161 live frames widen nothing', () => {
     for (const run of timers.splice(0)) run();
     await Bun.sleep(5);
     expect(feed.frames.map(frame => FyEventStreamFrameSchema.parse(frame).kind)).not.toContain('live');
+  });
+});
+
+describe('GET /v1/events follows an archived ferret as today’s findSession did', () => {
+  const known = (live: string[], archived: string[]) =>
+    followableFerret({ live: id => live.includes(id), archived: id => archived.includes(id) });
+
+  test('a live ferret and an archived one are both followed; one nobody holds is a 404', () => {
+    const exists = known(['wren'], ['oak']);
+    expect(eventStreamScope(call([['sessionId', 'wren']]), exists)).toMatchObject({ kind: 'session', sessionId: 'wren' });
+    expect(eventStreamScope(call([['sessionId', 'oak'], ['after', '3']]), exists)).toEqual({
+      kind: 'session',
+      sessionId: 'oak',
+      after: 3,
+    });
+    expect(() => eventStreamScope(call([['sessionId', 'ghost']]), exists)).toThrow('no session ghost');
+  });
+
+  test('an archived ferret’s journal replays through the same source', async () => {
+    const { append, source } = world();
+    await append('oak', 3);
+    const page = await source.replay('oak', 1, 10, new AbortController().signal);
+    expect(page.map(event => event.sequence)).toEqual([2, 3]);
   });
 });
