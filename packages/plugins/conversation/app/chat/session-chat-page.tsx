@@ -295,6 +295,8 @@ export function SessionChatPage({
             <Composer
               busy={busy}
               compact={compact}
+              compacting={liveSample?.compaction?.phase === 'running'}
+              {...(session.context === undefined ? {} : { context: session.context })}
               daemon={daemonConnection(daemonId)}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               ferretId={ferretId}
