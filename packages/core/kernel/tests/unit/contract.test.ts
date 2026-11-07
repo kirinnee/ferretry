@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { CARRY_OVER_PROMPT, closeAck, decideHome, insideFence, type MintedIds, type OpaqueId } from '../../contract/index.ts';
+import {
+  CARRY_OVER_PROMPT,
+  closeAck,
+  decideHome,
+  insideFence,
+  type MintedIds,
+  type OpaqueId,
+} from '../../contract/index.ts';
 
 const minted = (ids: readonly string[]): MintedIds => {
   const set = new Set(ids);

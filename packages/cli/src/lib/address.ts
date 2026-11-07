@@ -4,9 +4,9 @@
  */
 
 /** Loopback, never a routable interface: a daemon binds the machine it runs on and nothing else. */
-export const LOOPBACK = '127.0.0.1';
+const LOOPBACK = '127.0.0.1';
 /** The port a daemon binds when its operator has named none. */
-export const DEFAULT_DAEMON_PORT = 7431;
+const DEFAULT_DAEMON_PORT = 7431;
 
 const LOOPBACK_IPV4_BLOCK = /^127(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/u;
 const IPV6_GROUP = /^[0-9a-f]{1,4}$/u;
@@ -54,7 +54,7 @@ export function isWildcardHost(host: string): boolean {
   return groups?.every(group => group === 0) === true;
 }
 
-export function daemonAddress(host: string, port: number): string {
+function daemonAddress(host: string, port: number): string {
   const authorityHost = host.startsWith('[') && host.endsWith(']') ? host : host.includes(':') ? `[${host}]` : host;
   return `http://${authorityHost}:${String(port)}`;
 }

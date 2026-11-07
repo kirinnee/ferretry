@@ -7,7 +7,7 @@ import {
 } from '../../lib/listener-owner.ts';
 
 /** The kernel's socket tables, or `undefined` on a host that publishes none (macOS). */
-export async function procTcpTables(
+async function procTcpTables(
   read: (path: string) => Promise<string> = path => readFile(path, 'utf8'),
 ): Promise<readonly string[] | undefined> {
   const tables = await Promise.all(PROC_TCP_TABLES.map(path => read(path).catch(() => undefined)));
@@ -21,7 +21,7 @@ export interface ListenerGuardPorts {
   readonly uid: () => number | undefined;
 }
 
-export const systemListenerPorts: ListenerGuardPorts = {
+const systemListenerPorts: ListenerGuardPorts = {
   tables: () => procTcpTables(),
   uid: () => process.getuid?.(),
 };

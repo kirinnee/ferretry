@@ -14,7 +14,7 @@
  */
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 
-export type OptionValue = string | boolean | readonly string[];
+type OptionValue = string | boolean | readonly string[];
 
 export function parseArgs(tokens: readonly string[]): VerbInvocation {
   const args: string[] = [];

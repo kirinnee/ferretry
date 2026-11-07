@@ -1,7 +1,8 @@
 /**
- * Updates' wire (§2.1), copied from today's `packages/protocol/src/lib/{daemon-update,harness-update,version-skew}.ts`.
- * The full `GET /v1/daemon/update` and `GET /v1/harnesses/update` views (install method, plan, check, job) are
- * copied by the port with the code that builds them; the contract carries what others and the app read.
+ * Updates' wire (§2.1), copied from today's `packages/protocol/src/lib/{daemon-update,version-skew}.ts`. Harness
+ * updates are the harness plugins' (`/v1/<harness>/update`, design §1.4). The full `GET /v1/daemon/update` view
+ * (install method, plan, check, job) is copied by the port with the code that builds it; the contract carries what
+ * others and the app read.
  */
 import { InstantSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
@@ -40,29 +41,6 @@ export const DAEMON_UPDATE_CODES = {
 } as const;
 
 export const UpdateOutcomeSchema = z.enum(['succeeded', 'rolled-back', 'failed']);
-
-/** The agent CLIs this machine updates (today's wire names). */
-export const HarnessSchema = z.enum(['claude', 'codex']);
-export type Harness = z.infer<typeof HarnessSchema>;
-
-/** `POST /v1/harnesses/update`. */
-export const HarnessUpdateStartRequestSchema = z.strictObject({
-  harness: HarnessSchema,
-  /** The version to install; absent is the newest the method offers. */
-  target: VersionSchema.optional(),
-  /** The person's explicit yes to going past the version Ferretry verified. */
-  confirmUnverified: z.boolean().optional(),
-});
-export type HarnessUpdateStartRequest = z.infer<typeof HarnessUpdateStartRequestSchema>;
-
-export const HARNESS_UPDATE_CODES = {
-  unverified: 'harness_update_unverified',
-  inProgress: 'harness_update_in_progress',
-  notLocated: 'harness_update_not_located',
-  notSelfUpdatable: 'harness_update_not_self_updatable',
-  notTargetable: 'harness_update_not_targetable',
-  notAvailable: 'harness_update_not_available',
-} as const;
 
 /** What the app's "behind" notice and `fy doctor` read through the port: this daemon against the newest release. */
 export const UpdateStatusSchema = z.strictObject({

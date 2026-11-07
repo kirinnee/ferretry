@@ -235,9 +235,7 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
-    return await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call)),
-    );
+    return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
   }
 
   private async dispatchMember(request: ApiRequest): Promise<ApiResponse> {
@@ -287,7 +285,9 @@ export class Dispatcher {
   /** The session layer's question about a stream already open: the same socket route, asked again (R217). */
   reauthorize(request: ApiRequest): boolean {
     const found = this.sockets.lookup(request.method, request.path);
-    return found.kind === 'matched' && notServing(found.route.owner) === undefined && this.readmit(request, found.route);
+    return (
+      found.kind === 'matched' && notServing(found.route.owner) === undefined && this.readmit(request, found.route)
+    );
   }
 
   /** Re-admits an open stream after a provider's generation moved (§7.1); false closes it `4401`. */

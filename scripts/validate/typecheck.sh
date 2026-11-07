@@ -134,7 +134,8 @@ root_files="$("${tsc}" -p tsconfig.json --listFilesOnly | sed "s#^${root_dir}/##
 uncovered=()
 for package in "${workspace_packages[@]}"; do
   [ -f "${package}/tsconfig.json" ] && continue
-  sources="$(git ls-files -co --exclude-standard -- "${package}/*.ts" "${package}/*.tsx" | head -n 1)"
+  # `sed -n 1p`, not `head -n 1`: head closes the pipe early and `pipefail` turns git's SIGPIPE into exit 141.
+  sources="$(git ls-files -co --exclude-standard -- "${package}/*.ts" "${package}/*.tsx" | sed -n 1p)"
   [ -z "${sources}" ] && continue
   grep -qxF -- "${sources}" <<<"${root_files}" || uncovered+=("${package} (${sources})")
 done

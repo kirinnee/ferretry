@@ -115,8 +115,7 @@ export function planGraph(
     for (const after of manifest.order?.after ?? []) if (liveIds.has(after)) deps.add(after);
     before.set(manifest.id, deps);
   }
-  for (const manifest of live)
-    for (const later of manifest.order?.before ?? []) before.get(later)?.add(manifest.id);
+  for (const manifest of live) for (const later of manifest.order?.before ?? []) before.get(later)?.add(manifest.id);
   const order: Manifest[] = [];
   const done = new Set<string>();
   while (order.length < live.length) {
@@ -143,8 +142,7 @@ export function planGraph(
 export function dependentsOf(id: string, order: readonly Manifest[], providers: ReadonlyMap<string, string>): string[] {
   const out = new Set<string>([id]);
   for (const manifest of order)
-    for (const token of tokens(manifest.needs))
-      if (out.has(providers.get(token.name) ?? '')) out.add(manifest.id);
+    for (const token of tokens(manifest.needs)) if (out.has(providers.get(token.name) ?? '')) out.add(manifest.id);
   out.delete(id);
   return [...out];
 }

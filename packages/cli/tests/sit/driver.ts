@@ -12,7 +12,7 @@ export interface CliDriver {
 }
 
 /** The ambient environment minus every `FY_*` variable: a journey must not inherit this machine's daemon or credential. */
-export function cleanEnvironment(extra: Record<string, string>): Record<string, string> {
+function cleanEnvironment(extra: Record<string, string>): Record<string, string> {
   const base: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env))
     if (value !== undefined && !name.startsWith('FY_')) base[name] = value;

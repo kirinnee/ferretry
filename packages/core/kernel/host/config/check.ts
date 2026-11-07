@@ -64,7 +64,7 @@ function fixFor(issue: z.core.$ZodIssue, where: string): string {
 }
 
 /** The issues a failed schema parse means, each located in the file. */
-export function schemaIssues(
+function schemaIssues(
   path: string,
   error: z.ZodError,
   locate: (path: readonly PropertyKey[]) => TextPosition | undefined,

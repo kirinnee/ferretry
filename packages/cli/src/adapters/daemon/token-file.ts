@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 
-export interface DaemonTokenFileSystem {
+interface DaemonTokenFileSystem {
   stat(path: string): Promise<{ isFile(): boolean; mode: number }>;
   readFile(path: string, encoding: 'utf8'): Promise<string>;
 }

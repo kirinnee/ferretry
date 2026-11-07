@@ -58,11 +58,21 @@ export async function loadDataPlugins(
     }
     const parsed = DataPluginSchema.safeParse(decoded);
     if (!parsed.success) {
-      refused.push({ folder, sentence: `The data plugin in ${folder} does not check: ${parsed.error.issues[0]?.message ?? 'invalid'}.` });
+      refused.push({
+        folder,
+        sentence: `The data plugin in ${folder} does not check: ${parsed.error.issues[0]?.message ?? 'invalid'}.`,
+      });
       continue;
     }
-    if (parsed.data.id !== folder || codeIds.has(parsed.data.id) || accepted.some(other => other.id === parsed.data.id)) {
-      refused.push({ folder, sentence: `The data plugin in ${folder} names the id ${parsed.data.id}, which is taken or not its folder.` });
+    if (
+      parsed.data.id !== folder ||
+      codeIds.has(parsed.data.id) ||
+      accepted.some(other => other.id === parsed.data.id)
+    ) {
+      refused.push({
+        folder,
+        sentence: `The data plugin in ${folder} names the id ${parsed.data.id}, which is taken or not its folder.`,
+      });
       continue;
     }
     accepted.push(parsed.data);
