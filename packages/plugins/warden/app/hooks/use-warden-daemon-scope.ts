@@ -6,14 +6,19 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
-import type { DaemonControlsStore } from '../shell.ts';
+/** This device's remembered choices, as far as this hook reads them: a record with a subscription and one setter. */
+export interface WardenDaemonControls {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly snapshot: () => { readonly device: { readonly wardenDaemon: string | null } };
+  readonly setDeviceControls: (patch: { readonly wardenDaemon: string | null }) => unknown;
+}
 
 export interface WardenDaemonScope {
   readonly remembered: string | null;
   readonly remember: (daemonId: string | null) => void;
 }
 
-export function useWardenDaemonScope(controls: DaemonControlsStore): WardenDaemonScope {
+export function useWardenDaemonScope(controls: WardenDaemonControls): WardenDaemonScope {
   const remembered = useSyncExternalStore(
     controls.subscribe,
     () => controls.snapshot().device.wardenDaemon,

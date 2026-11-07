@@ -5,8 +5,8 @@
  * a phone gets its own picker and a keyboard gets the usual keys.
  */
 
-import type { DaemonId } from '../../shell.ts';
-import { INSIGHTS_COLUMN_CLASS } from '../../shell.ts';
+import { INSIGHTS_COLUMN_CLASS } from '../../lib/layout.ts';
+import type { DaemonId } from '../../lib/machine.ts';
 import type { WardenMachine } from './warden-daemon-scope.ts';
 
 export function WardenDaemonFilter({

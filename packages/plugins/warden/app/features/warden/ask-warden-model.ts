@@ -12,7 +12,7 @@
  */
 
 import type { WardenStatusView } from '../../wire.ts';
-import type { GrantsView } from '../../shell.ts';
+import type { GrantsView } from '../../lib/grants.ts';
 import { usd } from './warden-overview-model.ts';
 import { wardenInvestigationHead, wardenLoginProblem, wardenPacedUntil } from './warden-status-model.ts';
 

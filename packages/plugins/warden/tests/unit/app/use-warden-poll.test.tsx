@@ -5,11 +5,11 @@ import {
   useWardenPoll,
   type WardenReadState,
 } from '../../../app/hooks/use-warden-poll.ts';
-import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount } from '@ferretry/app/testing';
 
-const alpha = daemonConnection({ daemonId: 'daemon-alpha', baseUrl: 'https://alpha.invalid', deviceId: 'alpha-token' });
-const beta = daemonConnection({ daemonId: 'daemon-beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-token' });
+const alpha = daemonConnection({ daemonId: 'daemon-alpha' });
+const beta = daemonConnection({ daemonId: 'daemon-beta' });
 
 interface ProbeProps {
   readonly daemon: DaemonConnection;

@@ -30,7 +30,9 @@
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/plugin-board": "workspace:*",
     "@ferretry/plugin-terminals": "workspace:*",
-    "@ferretry/plugin-browsers": "workspace:*"
+    "@ferretry/plugin-browsers": "workspace:*",
+    "@ferretry/plugin-runtimes": "workspace:*",
+    "@ferretry/plugin-voice": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

@@ -21,12 +21,13 @@ import {
   type WardenEffort,
   type WardenMayActAlone,
 } from '../../wire.ts';
-import type { PickerAccount } from '../../shell.ts';
+import type { PickerAccount } from '../../lib/account-picker.ts';
 
 /** Whether the Jev key is in this machine's secret store. `unknown` when that could not be read. */
-type JevKeyState = 'set' | 'missing' | 'unknown';
+type JevKeyState = 'set' | 'missing' | 'unknown' | 'off';
 
 export interface JevKeyStatus {
+  /** `off`: Voice, which answers it, is not running on the daemon — the form shows no key line at all. */
   readonly state: JevKeyState;
   /** Where to get a key, from the daemon's own Speed-ups description. */
   readonly keyUrl?: string;

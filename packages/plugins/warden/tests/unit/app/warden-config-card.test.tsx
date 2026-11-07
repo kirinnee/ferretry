@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { SpeedupsView } from '../../../app/shell.ts';
+import type { SpeedupsView } from '../../../app/lib/speedups.ts';
 import type { WardenConfig, WardenConfigPatch, WardenConfigView } from '../../../app/wire.ts';
 import { type ComponentProps, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
@@ -12,15 +12,15 @@ import {
 } from '../../../app/features/warden/warden-config-card.tsx';
 import type { WardenClient } from '../../../app/lib/warden-client.ts';
 import type { WardenClientFactory } from '../../../app/lib/warden-client-context.tsx';
-import { daemonConnection, type PickerAccount } from '../../../app/shell.ts';
+import type { PickerAccount } from '../../../app/lib/account-picker.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { render, run, runAsync } from '@ferretry/app/testing';
 import { wardenConfig, wardenFailover, wardenStatus } from '../../support/app/warden.ts';
 import { fakeWardenClient } from '../../support/app/clients.ts';
 import { configChangeHarness } from '../../support/app/config-changes.ts';
 import { pickerAccount } from '../../support/app/pickers.ts';
 
-const connection = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
+const connection = (id: string) => daemonConnection({ daemonId: id });
 
 const view = (config: WardenConfig = wardenConfig(), warnings: string[] = []): WardenConfigView => ({
   config,
@@ -209,7 +209,7 @@ describe('WardenConfigSurface', () => {
 
     // Assert
     expect(json(renderer)).toContain('codex-default');
-    const link = renderer.root.findAll(node => node.type === 'a' && node.props.href === '/d/a/settings#speedups');
+    const link = renderer.root.findAll(node => node.type === 'a' && node.props.href === '/d/a/settings/voice/speedups');
     expect(link).toHaveLength(0);
     run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onClick());
     run(() => renderer.unmount());
@@ -230,7 +230,7 @@ describe('WardenConfigSurface', () => {
     await settle();
 
     // Act
-    const link = renderer.root.find(node => node.type === 'a' && String(node.props.href).endsWith('#speedups'));
+    const link = renderer.root.find(node => node.type === 'a' && node.props.href === '/d/a/settings/voice/speedups');
     run(() => link.props.onClick({ button: 0, preventDefault: () => {} }));
 
     // Assert

@@ -6,7 +6,7 @@ import {
   groupByTier,
   MODEL_TIER_LABELS,
   type ModelTier,
-} from '../../../app/lib/model-tiers.ts';
+} from '../../../src/ui/model-tiers.ts';
 
 describe('model tiers', () => {
   test('reads a tier from an untrusted value', () => {

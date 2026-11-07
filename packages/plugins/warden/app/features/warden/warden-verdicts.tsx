@@ -10,9 +10,9 @@ import { ChevronRight, Gavel, Skull, HeartPulse, Bell, Check, UserRound } from '
 import { useState } from 'react';
 
 import { cn } from '../../ui.ts';
-import type { DaemonConnection } from '../../shell.ts';
-import { relativeTime, shellClock } from '../../shell.ts';
-import { displayCallsign } from '../../shell.ts';
+import { relativeTime } from '@ferretry/app';
+import { displayCallsign } from '../../lib/callsign.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
 
 type WardenVerdictKind = 'killed' | 'revived' | 'nudged' | 'cleared' | 'needs_human' | 'unknown';
 
@@ -95,7 +95,7 @@ export interface WardenVerdictsProps {
  * histories, but arriving at a closed accordion would make the reader tap to
  * see the content they explicitly navigated to.
  */
-export function WardenVerdicts({ connection, verdicts, now = shellClock.nowMs(), onOpenReport }: WardenVerdictsProps) {
+export function WardenVerdicts({ connection, verdicts, now = Date.now(), onOpenReport }: WardenVerdictsProps) {
   const [open, setOpen] = useState(true);
 
   // Old daemons and a clean history stay quiet, matching the source surface.
@@ -123,12 +123,7 @@ export function WardenVerdicts({ connection, verdicts, now = shellClock.nowMs(),
 }
 
 /** Pure rows; the daemon-bound host owns fetching and rendering a full report. */
-function VerdictRows({
-  connection,
-  verdicts,
-  now = shellClock.nowMs(),
-  onOpenReport,
-}: WardenVerdictsProps): React.JSX.Element {
+function VerdictRows({ connection, verdicts, now = Date.now(), onOpenReport }: WardenVerdictsProps): React.JSX.Element {
   return (
     <ul className="m-0 list-none divide-y divide-border-soft border-t border-border-soft p-0">
       {verdicts.map(verdict => {

@@ -14,7 +14,8 @@
 
 import { useEffect, useState } from 'react';
 import type { WardenStatusView } from '../wire.ts';
-import { type DaemonConnection, type DaemonId, shellClock } from '../shell.ts';
+import { every as repeatEvery } from '../lib/every.ts';
+import type { DaemonConnection, DaemonId } from '../lib/machine.ts';
 
 /**
  * A sweep result changes on the warden's own schedule, minutes apart, and its configuration arrives on
@@ -49,7 +50,7 @@ export function useWardenStatus(
   read: WardenStatusReader,
   options: WardenStatusOptions = {},
 ): WardenStatusView | null {
-  const { pollMs = WARDEN_POLL_MS, isHidden = documentHidden, every = shellClock.every } = options;
+  const { pollMs = WARDEN_POLL_MS, isHidden = documentHidden, every = repeatEvery } = options;
   const [held, setHeld] = useState<Held>({ daemonId: daemon.daemonId, status: null });
 
   useEffect(() => {

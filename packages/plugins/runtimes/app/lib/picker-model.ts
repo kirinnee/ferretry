@@ -3,7 +3,7 @@
  * gives its window, the efforts it takes and whether the CLI has a fast mode on it.
  */
 
-import type { ModelTier } from './model-tiers.ts';
+import type { ModelTier } from '@ferretry/app/ui';
 
 // GAP(accounts): `PickerModel` and `PickerAccount` live in the Accounts app half (account-picker-catalog.ts); this is
 // the smallest copy the pickers here read.

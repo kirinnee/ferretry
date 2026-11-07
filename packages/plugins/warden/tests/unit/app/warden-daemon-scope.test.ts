@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
 import { resolveWardenScope, type WardenMachine } from '../../../app/features/warden/warden-daemon-scope.ts';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 
 const machine = (id: string, name: string): WardenMachine => ({
-  connection: daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: 'tok' }),
+  connection: daemonConnection({ daemonId: id }),
   name,
 });
 const ec2 = machine('daemon-ec2', 'Liftoff EC2');

@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import type { WardenJevBefore, WardenStatusView } from '../../../app/wire.ts';
-import type { FerretView } from '../../../app/shell.ts';
+import type { FerretView } from '../../../app/lib/callsign.ts';
 
 import type { WardenReportTarget } from '../../../app/features/warden/warden-overview-model.ts';
 import { RecentTriggers } from '../../../app/features/warden/warden-trigger-rows.tsx';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
+import { Screens } from '../../support/app/screens.tsx';
 import { ferretView } from '../../support/app/ferrets.ts';
-import '../../support/app/shell-parts.ts';
 import { wardenAction, wardenInvestigation, wardenStatus } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
-const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'tok' });
+const connection = daemonConnection({ daemonId: 'daemon-a' });
 
 const known: readonly FerretView[] = [
   ferretView('sess-a', { config: { name: 'maryah' } }),
@@ -24,14 +24,16 @@ const render = async (status: WardenStatusView, ferrets: readonly FerretView[] =
   const reports: WardenReportTarget[] = [];
   const navigations: string[] = [];
   const view = await mount(
-    <RecentTriggers
-      connection={connection}
-      status={status}
-      ferrets={new Map(ferrets.map(ferret => [ferret.config.id, ferret]))}
-      now={NOW}
-      onNavigate={to => navigations.push(to)}
-      onOpenReport={target => reports.push(target)}
-    />,
+    <Screens>
+      <RecentTriggers
+        connection={connection}
+        status={status}
+        ferrets={new Map(ferrets.map(ferret => [ferret.config.id, ferret]))}
+        now={NOW}
+        onNavigate={to => navigations.push(to)}
+        onOpenReport={target => reports.push(target)}
+      />
+    </Screens>,
   );
   return { ...view, reports, navigations };
 };

@@ -5,7 +5,7 @@
  */
 
 import { Fragment } from 'react';
-import { INSIGHTS_COLUMN_CLASS } from '../../shell.ts';
+import { INSIGHTS_COLUMN_CLASS } from '../../lib/layout.ts';
 import type { CombinedTotals } from './warden-stats-model.ts';
 
 export function WardenCombinedTotals({ totals }: { readonly totals: CombinedTotals }) {

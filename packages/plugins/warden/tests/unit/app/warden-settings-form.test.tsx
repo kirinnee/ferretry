@@ -8,10 +8,9 @@ import {
   wardenConfigPatchFrom,
   wardenFormErrors,
 } from '../../../app/features/warden/warden-settings-model.ts';
-import type { PickerAccount } from '../../../app/shell.ts';
+import type { PickerAccount } from '../../../app/lib/account-picker.ts';
 import { render, run } from '@ferretry/app/testing';
 import { wardenConfig } from '../../support/app/warden.ts';
-import '../../support/app/shell-parts.ts';
 
 interface HarnessProps {
   readonly initial: WardenConfig;

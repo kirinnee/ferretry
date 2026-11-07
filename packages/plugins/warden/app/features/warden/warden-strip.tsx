@@ -16,7 +16,7 @@
 import type { WardenStatusView } from '../../wire.ts';
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '../../ui.ts';
-import { relativeTime, shellClock } from '../../shell.ts';
+import { relativeTime } from '@ferretry/app';
 import {
   wardenAccountLabel,
   wardenAccountTitle,
@@ -41,7 +41,7 @@ function Dot() {
   );
 }
 
-export function WardenStrip({ status, now = shellClock.nowMs() }: WardenStripProps) {
+export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   if (status === null) return null;
 
   const digest = wardenFlagDigest(status.flags);

@@ -5,7 +5,7 @@
  */
 
 import { useId } from 'react';
-import { LocalModelsNote } from '../components/local-models-note.tsx';
+import { LocalModelsNote } from '@ferretry/app/ui';
 import { LOCAL_TONE_CLASS, type LocalModelsRead, modelDetailWords, tileWords } from '../lib/local-models.ts';
 import { Button } from '../ui.ts';
 import type { ClipboardWriter } from '../ui.ts';
