@@ -12,8 +12,8 @@ import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersVie
 import { CircleAlert, SquareTerminal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import type { DaemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
 import { Badge, Button } from '@ferretry/app';
+import type { DaemonConnection } from '../../shell.ts';
 import { closeFinishedTerminals, readTerminalHolders, type TerminalSlotsClient } from './terminal-slots-api.ts';
 
 export type TerminalSlotsClientFactory = (connection: DaemonConnection) => Promise<TerminalSlotsClient>;
@@ -143,14 +143,3 @@ export function TerminalSlotsSettings({
     </section>
   );
 }
-
-/** The Settings tab, for the composition root's `daemonSettingsTabs`, bound to the app's client pool. */
-export const terminalSlotsSettingsTab = (createClient: TerminalSlotsClientFactory) =>
-  ({
-    id: 'terminals',
-    label: 'Terminals',
-    description: 'Who holds the machine’s terminal slots, and closing the ones finished ferrets left behind.',
-    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <TerminalSlotsSettings connection={connection} createClient={createClient} />
-    ),
-  }) as const;

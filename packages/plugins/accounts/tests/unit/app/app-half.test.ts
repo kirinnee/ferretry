@@ -76,7 +76,13 @@ describe('the app half', () => {
     const { client } = recording({});
     const Renderer = signInApprovalRenderer(client);
     const seed = Renderer({
-      value: { ref: { kind: 'two-factor-seed', stage: STAGE }, subject: 'Save automatic codes?', why: 'w' },
+      value: {
+        ref: { kind: 'two-factor-seed', stage: STAGE },
+        subject: 'Save automatic codes?',
+        why: 'w',
+        ferret: 'sess-1',
+        ferretName: 'judson',
+      },
     }) as { type: unknown; props: { item: { twoFactorSeed?: { stage: string } } } };
     should(seed.type).equal(TwoFactorSeedHost);
     should(seed.props.item.twoFactorSeed?.stage).equal(STAGE);
@@ -87,8 +93,11 @@ describe('the app half', () => {
     const { client } = recording({});
     const Renderer = signInApprovalRenderer(client);
     const PLAN = 'a'.repeat(32);
-    const drawn = (ref: unknown, ferret: string | undefined = 'sess-1') =>
-      Renderer({ value: { ref, ferret, subject: 's', why: 'w' } }) as { type: unknown; props: Record<string, unknown> };
+    const drawn = (ref: unknown, ferret = 'sess-1') =>
+      Renderer({ value: { ref, ferret, ferretName: 'judson', subject: 's', why: 'w' } }) as {
+        type: unknown;
+        props: Record<string, unknown>;
+      };
     const task = drawn({ kind: 'task-plan', planId: PLAN });
     should(task.type).equal(TaskPlanHost);
     should(task.props).match({ ferret: 'sess-1', planId: PLAN });
@@ -105,20 +114,20 @@ describe('the app half', () => {
   it('should draw a ref it cannot read a card for, a suspended rule and a recipe proposal as the daemon’s words and where to act', () => {
     const { client } = recording({});
     const Renderer = signInApprovalRenderer(client);
-    const plain = (ref: unknown, ferret?: string) =>
-      Renderer({ value: { ref, ferret, subject: 'Approve a rule?', why: 'because' } }) as {
+    const plain = (ref: unknown, ferret = 'sess-1') =>
+      Renderer({ value: { ref, ferret, ferretName: 'judson', subject: 'Approve a rule?', why: 'because' } }) as {
         type: unknown;
         props: { children: unknown[] };
       };
-    // No ferret named: a card that needs one is not drawn from a guess.
-    should(plain({ kind: 'task-plan', planId: 'a'.repeat(32) }).type).equal('section');
-    should(plain({ kind: 'sign-in-rule' }, 'sess-1').type).equal('section');
-    const text = (node: unknown): string => JSON.stringify(node);
-    should(text(plain({ kind: 'rule-suspended', rule: RULE_ID }, 'sess-1'))).containEql('Standing sign-in rules');
+    should(plain({ kind: 'sign-in-rule' }).type).equal('section');
+    // An ask that names no ferret is not an ask (Asks' contract requires one): nothing is drawn from a guess.
     should(
-      text(
-        plain({ kind: 'recipe-proposal', signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' }, 'sess-1'),
-      ),
+      Renderer({ value: { ref: { kind: 'task-plan', planId: 'a'.repeat(32) }, subject: 's', why: 'w' } }),
+    ).be.null();
+    const text = (node: unknown): string => JSON.stringify(node);
+    should(text(plain({ kind: 'rule-suspended', rule: RULE_ID }))).containEql('Standing sign-in rules');
+    should(
+      text(plain({ kind: 'recipe-proposal', signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' })),
     ).containEql('Settings › Accounts');
   });
 });

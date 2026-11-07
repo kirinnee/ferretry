@@ -203,20 +203,3 @@ export const SessionAgendaSummarySchema = z.object({
   stopped: z.literal(true).optional(),
 });
 export type SessionAgendaSummary = z.infer<typeof SessionAgendaSummarySchema>;
-
-// ─── what an owner's ask renderer receives ────────────────────────────────────────────────────────────────────────
-/**
- * The value Agenda hands the renderer that draws part of an ask (`ask:sign-in-approval`, `ask:input`): the ref (its own
- * kind and ids), the ask's words, and WHO the ask is from — the ferret's id (a plan or an approval is matched by it),
- * the ferret's spoken name ("{ferretName} wants…") and the board project it works in (the standing rule's scopes).
- */
-export const AskOnScreenSchema = z.object({
-  ref: z.looseObject({ kind: z.string() }),
-  subject: z.string(),
-  why: z.string().optional(),
-  context: z.string().optional(),
-  ferret: z.string().min(1),
-  ferretName: z.string(),
-  projectId: z.string().optional(),
-});
-export type AskOnScreen = z.infer<typeof AskOnScreenSchema>;

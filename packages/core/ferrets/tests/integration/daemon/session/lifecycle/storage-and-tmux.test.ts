@@ -34,9 +34,13 @@ import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keye
 // there and again in `adapters/index.ts`.
 import { fsyncEnvironmentDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { fsyncTaskDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
-import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
+import {
+  type DaemonStorage,
+  InvalidStateDocumentError,
+} from '../../../../../daemon/adapters/storage/session-storage.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import { SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
+import { FerretStateFile } from '../../../../../contract/index.ts';
 import { createSessionRecord, transitionSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { SessionLifecycleService } from '../../../../../daemon/lib/session/lifecycle/service.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
@@ -48,7 +52,7 @@ import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../..
 import type { TmuxLaunch } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import { FakePaneDelivery, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
-import { memoryStorage } from '../../../../support/daemon/storage.ts';
+import { memoryStorage, sessionEnvelope } from '../../../../support/daemon/storage.ts';
 
 /**
  * The lifecycle's storage-backed repository, its tmux launcher and its file stores, composed.
@@ -85,6 +89,11 @@ function record(id = 'stored-session', overrides: Record<string, unknown> = {}):
   ).record;
 }
 
+/** A record's configuration as the store holds it: the protocol envelope beneath, the lifecycle's own fields over it. */
+function storedConfig(held: SessionLifecycleRecord): Record<string, unknown> {
+  return { ...sessionEnvelope(), ...held.config, agent: 'claude-auto-loge' };
+}
+
 /** A launcher over a fresh fake tmux, with the delivery that reads it. */
 function launcher(environment?: SessionEnvironmentStore) {
   const tmux = new FakeTmux();
@@ -107,7 +116,7 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should persist and read the lifecycle record through the authoritative daemon store', async () => {
     // Arrange
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const created = createSessionRecord(
       { agent: AGENT, cwd: '/workspace/project', mode: 'auto', prompt: 'Persist me' },
       {
@@ -128,11 +137,16 @@ describe('StorageSessionLifecycleRepository', () => {
     // protocol's, whose `agent` is the name every account is published under. The absolute executable
     // the lifecycle authorizes against is `command[0]`, which is where the read above recovered it
     // from — so the record round-trips while the document stays the one every mounted surface parses.
+    // beneath it, the protocol envelope the start decided, which the declared schema demands of every document.
     should(await storage.readConfig(created.record.config.id)).deepEqual({
+      ...sessionEnvelope(),
       ...created.record.config,
       agent: 'claude-auto-loge',
     });
-    should(await storage.readState(created.record.config.id)).deepEqual(created.record.state);
+    should(await storage.readState(created.record.config.id)).deepEqual({
+      ...created.record.state,
+      turn: sessionEnvelope().turn,
+    });
     should(await journal(storage, created.record.config.id)).containEql('session.created');
     await storage.close();
   });
@@ -140,7 +154,7 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should report an unknown session as missing rather than inventing one', async () => {
     // Arrange
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
 
     // Act
     const actual = await subject.read(parseSessionId('never-created'));
@@ -153,7 +167,7 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should reserve a session without publishing a record or duplicate create event', async () => {
     // Arrange
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const id = parseSessionId('reserved-session');
     const capability = 'reserved-capability';
     const capabilityHash = createHash('sha256').update(capability, 'utf8').digest('hex');
@@ -189,7 +203,7 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should still publish no session document from a reservation', async () => {
     // Arrange
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const id = parseSessionId('reserved-invisible');
 
     // Act
@@ -203,9 +217,9 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should recover a create that tore between its configuration and state writes', async () => {
     // Arrange — exactly what a crash between the two writes leaves behind.
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const torn = record('torn-session');
-    await storage.writeConfig(torn.config.id, torn.config);
+    await storage.writeConfig(torn.config.id, storedConfig(torn));
 
     // Act
     const actual = await subject.read(torn.config.id);
@@ -221,12 +235,15 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should name the damage when a record cannot be trusted at all', async () => {
     // Arrange
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const orphan = parseSessionId('state-only-session');
     const invalid = record('invalid-session');
-    await storage.writeState(orphan, { id: orphan, status: 'running' });
-    await storage.writeConfig(invalid.config.id, { ...invalid.config, command: [] });
-    await storage.writeState(invalid.config.id, invalid.state);
+    await storage.writeState(orphan, { id: orphan, status: 'running', turn: 0 });
+    // The file schema keeps `command` optional and refuses an empty one; the lifecycle's record schema is what refuses
+    // a configuration that has none, so that is the damage a stored document can carry.
+    const { command: _launchArgv, ...withoutCommand } = storedConfig(invalid);
+    await storage.writeConfig(invalid.config.id, withoutCommand);
+    await storage.writeState(invalid.config.id, { ...invalid.state, turn: 0 });
 
     // Act + Assert
     await should(subject.read(orphan)).be.rejectedWith(UnusableSessionRecordError);
@@ -238,9 +255,9 @@ describe('StorageSessionLifecycleRepository', () => {
   it('should read, and let a stop write, a session whose turn was interrupted by a client', async () => {
     // Arrange — the exact state a person's Stop met: the send path wrote a turn-level status.
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const interrupted = record('interrupted-session');
-    await storage.writeConfig(interrupted.config.id, interrupted.config);
+    await storage.writeConfig(interrupted.config.id, storedConfig(interrupted));
     await storage.writeState(interrupted.config.id, {
       id: interrupted.config.id,
       status: 'interrupted',
@@ -269,30 +286,33 @@ describe('StorageSessionLifecycleRepository', () => {
 
   it('should read a session carrying any status the protocol defines', async () => {
     // Arrange
-    const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const held = record('every-status');
-    await storage.writeConfig(held.config.id, held.config);
+    await storage.writeConfig(held.config.id, storedConfig(held));
 
     for (const status of SessionStatusSchema.options) {
-      await storage.writeState(held.config.id, { id: held.config.id, status });
+      await storage.writeState(held.config.id, { id: held.config.id, status, turn: 0 });
 
       // Act + Assert
       should((await subject.read(held.config.id))?.state.status).equal(status);
     }
-    await should(
-      (async () => {
-        await storage.writeState(held.config.id, { id: held.config.id, status: 'not-a-status' });
-        return await subject.read(held.config.id);
-      })(),
-    ).be.rejectedWith(/state\.status/u);
+    // The store refuses to write a status the protocol does not name, so the document is laid on disk as a foreign
+    // file would be; reading it names the damage rather than guessing a status.
+    folder.plant(
+      FerretStateFile,
+      JSON.stringify({ format: 1, id: held.config.id, status: 'not-a-status', turn: 0 }),
+      held.config.id,
+    );
+    await should(subject.read(held.config.id)).be.rejectedWith(InvalidStateDocumentError);
+    await should(subject.read(held.config.id)).be.rejectedWith(/every-status\/state\.json.*does not match its schema/u);
     await storage.close();
   });
 
   it('should keep the journal behind the state it describes', async () => {
     // Arrange
     const storage = await openStorage();
-    const subject = new StorageSessionLifecycleRepository(storage);
+    const subject = new StorageSessionLifecycleRepository(storage, sessionEnvelope());
     const created = record('journal-session');
     const started = transitionSessionRecord(created, 'starting', '2026-07-31T10:01:00.000Z');
 
@@ -774,7 +794,7 @@ describe('the composed session lifecycle', () => {
     const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
     const subject = new SessionLifecycleService(
       {
-        repository: new StorageSessionLifecycleRepository(storage),
+        repository: new StorageSessionLifecycleRepository(storage, sessionEnvelope()),
         launcher: instance,
         tasks: new FileSessionTaskStore(id => join(files, id)),
         effects: new FileSessionEffectLedger(id => join(files, id)),
@@ -830,7 +850,7 @@ describe('the composed session lifecycle', () => {
     const { instance, tmux } = launcher(environment);
     const subject = new SessionLifecycleService(
       {
-        repository: new StorageSessionLifecycleRepository(storage),
+        repository: new StorageSessionLifecycleRepository(storage, sessionEnvelope()),
         launcher: instance,
         tasks: new FileSessionTaskStore(id => join(files, id)),
         effects: new FileSessionEffectLedger(id => join(files, id)),

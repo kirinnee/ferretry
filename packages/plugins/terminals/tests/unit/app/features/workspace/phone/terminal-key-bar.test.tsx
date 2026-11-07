@@ -4,7 +4,10 @@ import {
   TerminalKeyBar,
   useStickyCtrl,
 } from '../../../../../../app/features/workspace/phone/terminal-key-bar.tsx';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { interact, type Mounted, mount, must, ensureDom } from '@ferretry/app/testing';
+
+// These suites read the document directly; register one before any hook or test runs.
+ensureDom();
 
 let mounted: Mounted | null = null;
 afterEach(async () => {

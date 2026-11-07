@@ -1,31 +1,23 @@
 import type { Instant } from '@ferretry/std';
 import { describe, expect, test } from 'bun:test';
 
-import {
-  browserTerminalDeckDependencies,
-  SessionTerminalDeck,
-} from '../../../app/components/session-terminal-deck.tsx';
-import { RECONNECTING_GRACE_MS } from '../../../../connections/app/lib/connection-health.ts';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../../../../access/app/lib/grants.ts';
-import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
+import { RECONNECTING_GRACE_MS } from '@ferretry/app';
+import type { PluginClient, PluginSocketListeners } from '@ferretry/kernel/manifest';
+import { browserTerminalDeckHost, SessionTerminalDeck } from '../../../app/components/session-terminal-deck.tsx';
+import { pluginTerminalDeckDependencies } from '../../../app/lib/plugin-client.ts';
+import { daemonConnection, daemonSessionScope, grantRefusalNotice } from '../../../app/shell.ts';
+import { DaemonCallError } from '@ferretry/app';
 import { TERMINAL_REOPEN_BASE_MS } from '../../../app/lib/terminal-co-control.ts';
 import { TerminalStreamRefused } from '../../../app/lib/web-terminals.ts';
 import '@ferretry/app/testing';
-import { render, run, runAsync } from '@ferretry/app/testing';
+import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../../support/app/terminal-deck.ts';
 
-const alpha = daemonConnection({
-  daemonId: 'alpha',
-  baseUrl: 'https://alpha.example.test',
-  deviceId: 'alpha-token',
-});
-const beta = daemonConnection({
-  daemonId: 'beta',
-  baseUrl: 'https://beta.example.test',
-  deviceId: 'beta-token',
-});
+// `useDocumentVisible` and the theme watcher read the document, which the test renderer does not provide.
+ensureDom();
+
+const alpha = daemonConnection('alpha');
+const beta = daemonConnection('beta');
 const scopeAlpha = daemonSessionScope(alpha, 'shared');
 const scopeBeta = daemonSessionScope(beta, 'shared');
 
@@ -230,6 +222,77 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  // The daemon's own close code travels the shell client's socket to the deck unchanged, so a 1008 or 1009 is
+  // final there too: one stream, "refused", and no reopen loop however long the deck waits.
+  for (const code of [1008, 1009]) {
+    test(`a ${code} close on the shell client's socket is final: no reconnect loop`, async () => {
+      const opened: PluginSocketListeners[] = [];
+      const shell: PluginClient = {
+        call: async () => undefined as never,
+        subscribe: () => () => undefined,
+        socket: (_key, _params, listeners) => {
+          opened.push(listeners);
+          return { send: () => undefined, close: () => undefined };
+        },
+      };
+      const base = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+      const dependencies = {
+        ...base.dependencies,
+        attach: pluginTerminalDeckDependencies(shell, browserTerminalDeckHost()).attach,
+      };
+      const page = mount(<SessionTerminalDeck connection={alpha} dependencies={dependencies} scope={scopeAlpha} />);
+      await settle();
+      expect(opened).toHaveLength(1);
+
+      await runAsync(async () => {
+        opened[0]?.onOpen?.();
+        opened[0]?.onClose('policy', code);
+        await Promise.resolve();
+      });
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS * 4));
+      });
+      await settle();
+
+      expect(opened).toHaveLength(1);
+      expect(json(page)).toContain('refused');
+      expect(json(page)).not.toContain('reconnecting');
+      run(() => page.unmount());
+    });
+  }
+
+  test('a close the carrier reports without a code is a drop, and the deck reopens the stream', async () => {
+    const opened: PluginSocketListeners[] = [];
+    const shell: PluginClient = {
+      call: async () => undefined as never,
+      subscribe: () => () => undefined,
+      socket: (_key, _params, listeners) => {
+        opened.push(listeners);
+        return { send: () => undefined, close: () => undefined };
+      },
+    };
+    const base = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const dependencies = {
+      ...base.dependencies,
+      attach: pluginTerminalDeckDependencies(shell, browserTerminalDeckHost()).attach,
+    };
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    await runAsync(async () => {
+      opened[0]?.onOpen?.();
+      opened[0]?.onClose('carrier lost');
+      await Promise.resolve();
+    });
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS + 100));
+    });
+    await settle();
+
+    expect(opened).toHaveLength(2);
+    run(() => page.unmount());
+  });
+
   /*
    * A refusal that arrives BEFORE the stream ever opens, which is what a relayed carrier does.
    * `docs/relay-protocol.md` §14 gives `stream-refused` a status so "it is gone" can be told from
@@ -352,7 +415,7 @@ describe('SessionTerminalDeck', () => {
   });
 
   test('words a refused listing as the grant refusal it is, not as a bare HTTP status', async () => {
-    const refusal = new DaemonResponseError(403, '', 'grant_not_granted');
+    const refusal = new DaemonCallError(403, 'grant_not_granted', '');
     const explanation = grantRefusalNotice(refusal)?.guidance.explanation ?? '';
     expect(explanation).not.toBe('');
     const deck = fakeDeck(async () => {
@@ -745,14 +808,35 @@ describe('SessionTerminalDeck pane wiring', () => {
     expect(listeners.size).toBe(0);
   });
 
-  test('carries a recovery port through the browser dependencies only when one is given', () => {
-    const opener = async () => {
-      throw new Error('unused');
-    };
-    const fetcher = async () => new Response(null);
-    expect(browserTerminalDeckDependencies(fetcher, opener).onRecovered).toBeUndefined();
-    const port = () => () => undefined;
-    expect(browserTerminalDeckDependencies(fetcher, opener, port).onRecovered).toBe(port);
+  test('hears the daemon become reachable from the shell client’s feed, and only then', () => {
+    const lives: ((live: boolean) => void)[] = [];
+    const client = (feed?: PluginClient['feed']): PluginClient => ({
+      call: async () => undefined as never,
+      subscribe: () => () => undefined,
+      ...(feed === undefined ? {} : { feed }),
+    });
+    const host = browserTerminalDeckHost();
+    expect(pluginTerminalDeckDependencies(client(), host).onRecovered).toBeUndefined();
+
+    let cancelled = 0;
+    const dependencies = pluginTerminalDeckDependencies(
+      client({
+        isLive: () => true,
+        subscribeLive: listener => {
+          lives.push(listener);
+          return () => (cancelled += 1);
+        },
+      }),
+      host,
+    );
+    let recoveries = 0;
+    const stop = dependencies.onRecovered?.(alpha, () => (recoveries += 1));
+    lives[0]?.(false);
+    expect(recoveries).toBe(0);
+    lives[0]?.(true);
+    expect(recoveries).toBe(1);
+    stop?.();
+    expect(cancelled).toBe(1);
   });
 
   test('reports a create, rename or close the daemon refused', async () => {
@@ -832,12 +916,7 @@ describe('SessionTerminalDeck theming', () => {
     const repainted = new Promise<void>(resolve => {
       markRepainted = resolve;
     });
-    const stopWatchingTheme = browserTerminalDeckDependencies(
-      async () => new Response(),
-      async () => {
-        throw new Error('unused');
-      },
-    ).watchTheme(() => {
+    const stopWatchingTheme = browserTerminalDeckHost().watchTheme(() => {
       repaints += 1;
       markRepainted();
     });
@@ -1266,7 +1345,7 @@ describe('SessionTerminalDeck quarantine', () => {
   test('says so and keeps the quarantine when the daemon refuses to end it', async () => {
     const { deck } = quarantinedDeck('dev');
     deck.dependencies.endQuarantine = async () => {
-      throw new DaemonResponseError(403, 'only the owner can end a quarantine');
+      throw new DaemonCallError(403, 'forbidden', 'only the owner can end a quarantine');
     };
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
@@ -1297,5 +1376,5 @@ describe('SessionTerminalDeck quarantine', () => {
       await new Promise(resolve => setTimeout(resolve, 5_200));
     });
     expect(reads).toBe(1);
-  });
+  }, 15_000);
 });

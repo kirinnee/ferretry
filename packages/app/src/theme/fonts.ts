@@ -37,6 +37,12 @@ interface ThemeFontFiles {
 }
 
 const jetBrainsMono = [jetBrainsMono400, jetBrainsMono700] as const;
+
+/**
+ * The built URLs of the code face's regular and bold files, for a plugin half that draws code on a canvas the stylesheet
+ * cannot reach (the terminal emulator measures its cells from a face it loads itself). The files are the shell's.
+ */
+export const CODE_FACE_URLS = { regular: jetBrainsMono400, bold: jetBrainsMono700 } as const;
 const ibmPlexMono = [ibmPlexMono400, ibmPlexMono700] as const;
 
 const THEME_FONT_FILES: Readonly<Partial<Record<ThemeFamilyId, ThemeFontFiles>>> = Object.freeze({
