@@ -17,10 +17,17 @@ export type ItemReachOf = (kind: ItemKind) => ItemReach;
 
 export const NO_ITEMS: ItemReachOf = () => ({ programs: [], hosts: [] });
 
-/** The declared strings plus what each `{ items }` entry's installed items name now (a resolver is asked apart). */
+/**
+ * The declared strings plus what each `{ items }` entry's installed items name now (a resolver is asked apart). An
+ * item's name with `*` in it is dropped: `'*'` (and any pattern) is a core piece's alone, never an item's.
+ */
 function expand(declared: readonly PermissionEntry[], items: ItemReachOf, pick: keyof ItemReach): readonly string[] {
   return declared.flatMap(entry =>
-    typeof entry === 'string' ? [entry] : 'items' in entry ? items(entry.items)[pick] : [],
+    typeof entry === 'string'
+      ? [entry]
+      : 'items' in entry
+        ? items(entry.items)[pick].filter(name => !name.includes('*'))
+        : [],
   );
 }
 

@@ -7,11 +7,13 @@ import { daemonNameFrom } from '../../../host/identity.ts';
 import { installedItemReach } from '../../../host/items.ts';
 import {
   effectivePermissions,
+  hostPermitted,
   type ItemReach,
   PermissionError,
   restrictFetch,
   restrictSpawn,
   restrictWebSocket,
+  spawnPermitted,
 } from '../../../host/permissions.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 
@@ -220,6 +222,62 @@ describe('BB wildcard reach: core only', () => {
     await expect(
       restrictFetch('mcp', effectivePermissions('mcp', ['*']), fetchPort).request('https://anything.example/'),
     ).rejects.toThrow(PermissionError);
+  });
+});
+
+describe('an installed item never grants a pattern', () => {
+  test("S? items wildcard: an item naming '*' (or any pattern) reaches nothing for a non-core { items } plugin", async () => {
+    // At use: what an item reach answers is filtered, whoever produced it.
+    const wild = (): ItemReach => ({ programs: ['*', 'np*'], hosts: ['*', '*.example', 'ev*l.example'] });
+    expect(spawnPermitted([{ items: 'mcp' }], wild, '/bin/sh')).toBe(false);
+    expect(spawnPermitted([{ items: 'mcp' }], wild, 'npx')).toBe(false);
+    expect(hostPermitted([{ items: 'mcp' }], wild, 'evil.example')).toBe(false);
+    expect(hostPermitted([{ items: 'mcp' }], wild, 'sub.example')).toBe(false);
+    const spawned: string[] = [];
+    const base: SpawnPort = {
+      run: async program => {
+        spawned.push(program);
+        return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+      },
+      runBytes: async () => {
+        throw new Error('not run here');
+      },
+      start: () => {
+        throw new Error('not started here');
+      },
+    };
+    await expect(restrictSpawn('mcp', [{ items: 'mcp' }], base, wild).run('/bin/sh', [])).rejects.toThrow(
+      PermissionError,
+    );
+    expect(spawned).toEqual([]);
+    // A literal item name still passes beside the dropped patterns.
+    const mixed = (): ItemReach => ({ programs: ['*', 'npx'], hosts: ['*', 'mcp.acme.test'] });
+    expect(spawnPermitted([{ items: 'mcp' }], mixed, 'npx')).toBe(true);
+    expect(hostPermitted([{ items: 'mcp' }], mixed, 'mcp.acme.test')).toBe(true);
+    expect(hostPermitted([{ items: 'mcp' }], mixed, 'other.example')).toBe(false);
+    // At read: an installed item file whose command or url is a pattern names nothing.
+    const files = new Map([
+      ['/home/fy/state/kernel/plugins/acme/items/any.yaml', "command: '*'\nurl: https://*/x\n"],
+      ['/home/fy/state/kernel/plugins/acme/items/sub.yaml', 'command: np*\nurl: https://*.acme.test/x\n'],
+    ]);
+    const fs = {
+      realpath: async (file: string) => file,
+      lstat: async (file: string) => {
+        const text = files.get(file);
+        return text === undefined ? undefined : { kind: 'file' as const, size: text.length, mtimeMs: 0 };
+      },
+      readText: async (file: string) => files.get(file) ?? '',
+    } as unknown as HostFs;
+    const reach = await installedItemReach(fs, '/home/fy', [
+      {
+        id: 'acme',
+        items: [
+          { kind: 'mcp', id: 'any', file: 'items/any.yaml' },
+          { kind: 'mcp', id: 'sub', file: 'items/sub.yaml' },
+        ],
+      },
+    ]);
+    expect(reach('mcp')).toEqual({ programs: [], hosts: [] });
   });
 });
 

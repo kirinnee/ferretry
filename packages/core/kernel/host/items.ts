@@ -15,7 +15,14 @@ const ITEM_FILE_MAX_BYTES = 256 * 1024;
 const isPlainRelative = (file: string): boolean =>
   file !== '' && !file.startsWith('/') && !file.split('/').some(part => part === '..' || part === '' || part === '.');
 
-/** The program an item's `command` names, and the host its `url` names; nothing else in the item is read. */
+/** A name with `*` in it is a pattern, and a pattern is a core piece's alone: an item never grants one. */
+const literal = (name: string | undefined): string | undefined =>
+  name === undefined || name.includes('*') ? undefined : name;
+
+/**
+ * The program an item's `command` names, and the host its `url` names; nothing else in the item is read. A program or
+ * host with `*` in it (`command: '*'`, a url whose host is `*`) names nothing.
+ */
 function reachOf(value: unknown): { readonly program?: string; readonly host?: string } {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
   const { command, url } = value as { command?: unknown; url?: unknown };
@@ -28,8 +35,10 @@ function reachOf(value: unknown): { readonly program?: string; readonly host?: s
       host = undefined;
     }
   }
+  const program = literal(typeof command === 'string' && command.trim() !== '' ? command.trim() : undefined);
+  host = literal(host);
   return {
-    ...(typeof command === 'string' && command.trim() !== '' ? { program: command.trim() } : {}),
+    ...(program === undefined ? {} : { program }),
     ...(host === undefined ? {} : { host }),
   };
 }
