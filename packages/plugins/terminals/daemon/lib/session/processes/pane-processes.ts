@@ -24,8 +24,9 @@
  * Only processes whose ancestry runs through THIS pane are ever passed in (the walk starts at the pane
  * pid), so a entry belonging to another session, or the daemon's own tmux client, cannot be counted.
  *
- * A copy of the Warden's `lib/warden/pane-processes.ts` classifier (the part the Processes tab reads): Terminals and
- * Warden may not import each other, and the two must agree, so the shared fact is stated twice and tested in each.
+ * A copy of the Warden's `lib/warden/pane-processes.ts` classifier (what the Processes tab, the liveness look and the
+ * leftover-browser read use): Terminals and Warden may not import each other, and the two must agree, so the shared
+ * fact is stated twice and tested in each.
  * Pure: no IO, no clock, no globals.
  */
 
@@ -142,4 +143,27 @@ function subtreeOf(rootPid: number, processes: readonly PaneProcess[]): readonly
   const members = new Set([rootPid]);
   for (const entry of processes) if (entry.ppid !== undefined && members.has(entry.ppid)) members.add(entry.pid);
   return [...members];
+}
+
+/** What the liveness look keeps of a pane's processes: whether work runs, which, and a leftover browser. */
+export interface PaneWorkSummary {
+  /** A tool command is running under the pane. */
+  readonly toolCommand: boolean;
+  /** Identity of the youngest running tool command — a different one starts a new episode. */
+  readonly commandKey?: string;
+  /** A browser the agent launched is still running. */
+  readonly leftoverBrowser: boolean;
+}
+
+/** Today's `paneWorkSummary` (the Warden's liveness look), over the same classifier. */
+export function paneWorkSummary(processes: readonly PaneProcess[]): PaneWorkSummary {
+  const view = classifyPaneProcesses(processes);
+  // The YOUNGEST command is the one being waited on: a watcher started early (`tsc -w`) must not stand
+  // for every command after it.
+  const youngest = view.toolCommands.at(-1);
+  return {
+    toolCommand: youngest !== undefined,
+    ...(youngest === undefined ? {} : { commandKey: `pid:${youngest.pid}` }),
+    leftoverBrowser: view.leftoverBrowsers.length > 0,
+  };
 }

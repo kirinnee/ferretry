@@ -14,6 +14,7 @@ import type { ISessionApi, RenameChange, SignalAnswer, SignalKind, SignalOptions
 import type { ISessionSubtree } from './session/subtree-controller.ts';
 import type { CredentialRevoked, ISessionCredentialGateway } from './session/revoke-credential.ts';
 import type { IStopSessionGateway } from './stop/types.ts';
+import { HeldFleetList } from './session/held-list.ts';
 
 /**
  * Every Ferrets route the `fy` verbs call, by its manifest key (route paths: `/v1/ferrets/…`, today's elsewhere).
@@ -66,6 +67,28 @@ function lostStartAnswer(error: unknown): boolean {
   return 'cause' in error && error.cause !== error && lostStartAnswer(error.cause);
 }
 
+/** The call's answer, or an `AbortError` as soon as `signal` aborts; the call's own late outcome is dropped. */
+function abandonOnAbort<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
+  call.catch(() => undefined);
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    call.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+const abortError = (): Error =>
+  Object.assign(new Error('the read was abandoned at the deadline'), { name: 'AbortError' });
+
 /**
  * The ferret verbs' daemon side, over the shell's guarded client. Every method is one route and a parse of its answer
  * against the contract's schema where the contract has one; the decisions live in the controllers.
@@ -73,15 +96,37 @@ function lostStartAnswer(error: unknown): boolean {
 export class ClientSessionApi
   implements ISessionApi, ISessionSubtree, IStopSessionGateway, ISessionPinGateway, ISessionCredentialGateway
 {
-  constructor(private readonly client: PluginClient) {}
+  /** R502: the one last list this connection holds, read conditionally while the shell can (the held list's reader). */
+  readonly #held: HeldFleetList | undefined;
 
-  async list(): Promise<readonly ListedFerret[]> {
-    const answer = await this.client.call<unknown>(FERRET_ROUTES.list);
-    return ListedSchema.parse(answer);
+  constructor(private readonly client: PluginClient) {
+    const conditional = client.conditional?.bind(client);
+    this.#held =
+      conditional === undefined
+        ? undefined
+        : new HeldFleetList(async headers => {
+            const tag = headers['if-none-match'];
+            const answer = await conditional(FERRET_ROUTES.list, {}, tag === undefined ? {} : { ifNoneMatch: tag });
+            return {
+              status: answer.status,
+              ...(answer.etag === undefined ? {} : { etag: answer.etag }),
+              body: answer.status === 200 ? JSON.stringify(answer.body) : '',
+            };
+          });
   }
 
-  async get(reference: string): Promise<FerretSummary> {
-    return FerretSummarySchema.parse(await this.client.call<unknown>(FERRET_ROUTES.get, at(reference)));
+  async list(): Promise<readonly ListedFerret[]> {
+    if (this.#held !== undefined) return await this.#held.list();
+    return ListedSchema.parse(await this.client.call<unknown>(FERRET_ROUTES.list));
+  }
+
+  /**
+   * `signal` ends the wait for the answer when it aborts (a `--timeout` deadline, today's gateway.get): the client
+   * call takes no signal, so a read still in flight is abandoned and its late answer or failure is dropped.
+   */
+  async get(reference: string, signal?: AbortSignal): Promise<FerretSummary> {
+    const call = this.client.call<unknown>(FERRET_ROUTES.get, at(reference));
+    return FerretSummarySchema.parse(signal === undefined ? await call : await abandonOnAbort(call, signal));
   }
 
   async subtree(reference: string): Promise<SubtreeView> {
@@ -99,7 +144,7 @@ export class ClientSessionApi
     const payload = JSON.stringify(body);
     const captured: unknown = JSON.parse(payload);
     const init = Object.freeze({ body: captured, headers: Object.freeze({ 'x-fy-request-id': requestId }) });
-    // GG's header shape. Until the shell forwards GG, the server answers 400 missing_request_id, fail closed.
+    // The one header a half may set (PluginCallHeaders); the shell forwards it, and a start without it is refused.
     let originalError: unknown;
     try {
       return await this.client.call<{ id: string }>(FERRET_ROUTES.start, init);

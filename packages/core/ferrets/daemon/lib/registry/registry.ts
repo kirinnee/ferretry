@@ -1,4 +1,11 @@
-import type { FerretId, FerretRecord, FerretState, FerretSummary, PackId } from '../../../contract/index.ts';
+import type {
+  FerretId,
+  FerretRecord,
+  FerretState,
+  FerretSummary,
+  FerretWaiting,
+  PackId,
+} from '../../../contract/index.ts';
 import type { FerretDetails } from '../state.ts';
 
 /**
@@ -23,7 +30,12 @@ export interface FerretFilter {
  * What other subsystems and the app read: the record without its format stamp and runner handle, with the model and
  * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
  */
-export function summaryOf(record: FerretRecord, details?: FerretDetails): FerretSummary {
+export function summaryOf(
+  record: FerretRecord,
+  details?: FerretDetails,
+  waiting?: FerretWaiting,
+  finishedAt?: string,
+): FerretSummary {
   const { format: _format, handle: _handle, transcript, ...rest } = record;
   // Public reads never carry the launch-time rollout exclusion set (today's session view).
   const summary: FerretSummary =
@@ -33,12 +45,18 @@ export function summaryOf(record: FerretRecord, details?: FerretDetails): Ferret
           ...rest,
           transcript: (({ baseline: _baseline, ...shown }) => shown)(transcript),
         };
-  if (details === undefined) return summary;
+  const waited = waiting === undefined ? summary : { ...summary, waiting };
+  // Finished only while it is still stopped on that word: a later stop, or a resume, is not the ferret finishing.
+  const waits =
+    finishedAt !== undefined && record.state === 'stopped' && finishedAt >= record.stateAt
+      ? { ...waited, finishedAt: finishedAt as FerretSummary['finishedAt'] }
+      : waited;
+  if (details === undefined) return waits;
   const model = details.options?.model;
   const card = details.options?.card;
   const label = details.options?.label;
   return {
-    ...summary,
+    ...waits,
     ...(model === undefined ? {} : { model }),
     ...(card === undefined ? {} : { card }),
     ...(label === undefined ? {} : { label }),
@@ -52,6 +70,10 @@ export class FerretRegistry {
   private readonly summaries = new Map<FerretId, FerretSummary>();
   /** Each ferret's `details.json`, held beside its record and loaded with it. */
   private readonly details = new Map<FerretId, FerretDetails>();
+  /** Each ferret's declared wait while it has one (`signal waiting`), held beside its record. */
+  private readonly waits = new Map<FerretId, FerretWaiting>();
+  /** When each ferret said `signal done`. */
+  private readonly finished = new Map<FerretId, string>();
   private moved = 0;
 
   constructor(
@@ -93,7 +115,7 @@ export class FerretRegistry {
 
   put(record: FerretRecord): void {
     this.records.set(record.id, record);
-    this.summaries.set(record.id, summaryOf(record, this.details.get(record.id)));
+    this.summaries.set(record.id, summaryOf(record, this.details.get(record.id), this.waits.get(record.id), this.finished.get(record.id)));
     this.moved += 1;
     this.changed({ ferret: record.id, state: record.state });
   }
@@ -103,9 +125,34 @@ export class FerretRegistry {
     this.details.set(ferret, details);
     const record = this.records.get(ferret);
     if (record === undefined) return;
-    this.summaries.set(ferret, summaryOf(record, details));
+    this.summaries.set(ferret, summaryOf(record, details, this.waits.get(ferret), this.finished.get(ferret)));
     this.moved += 1;
     this.changed({ ferret, state: record.state });
+  }
+
+  /** A ferret's declared wait, or `undefined` to end it; its summary is remade when the ferret is known. */
+  putWaiting(ferret: FerretId, waiting: FerretWaiting | undefined): void {
+    if (waiting === undefined) this.waits.delete(ferret);
+    else this.waits.set(ferret, waiting);
+    const record = this.records.get(ferret);
+    if (record === undefined) return;
+    this.summaries.set(ferret, summaryOf(record, this.details.get(ferret), waiting, this.finished.get(ferret)));
+    this.moved += 1;
+    this.changed({ ferret, state: record.state });
+  }
+
+  /** When a ferret said `signal done`; its summary is remade when the ferret is known. */
+  putFinished(ferret: FerretId, finishedAt: string): void {
+    this.finished.set(ferret, finishedAt);
+    const record = this.records.get(ferret);
+    if (record === undefined) return;
+    this.summaries.set(ferret, summaryOf(record, this.details.get(ferret), this.waits.get(ferret), finishedAt));
+    this.moved += 1;
+    this.changed({ ferret, state: record.state });
+  }
+
+  waitingOf(ferret: FerretId): FerretWaiting | undefined {
+    return this.waits.get(ferret);
   }
 
   detailsOf(ferret: FerretId): FerretDetails | undefined {
@@ -117,6 +164,8 @@ export class FerretRegistry {
     const had = this.records.delete(ferret);
     this.summaries.delete(ferret);
     this.details.delete(ferret);
+    this.waits.delete(ferret);
+    this.finished.delete(ferret);
     if (had && record !== undefined) {
       this.moved += 1;
       this.changed({ ferret, state: record.state, gone: true });

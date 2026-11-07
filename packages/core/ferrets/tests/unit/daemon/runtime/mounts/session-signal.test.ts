@@ -1,17 +1,14 @@
 import { describe, it } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
-import {
-  SessionViewSchema,
-  type SessionView,
-  type SignalSessionRequest,
-} from '../../../../../daemon/lib/protocol/session.ts';
+import { type FerretSummary, FerretSummarySchema } from '../../../../../contract/index.ts';
+import { T0 } from '../../../../../contract/testing/index.ts';
+import type { SignalSessionRequest } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   SessionSignalError,
   type SessionSignalSubsystem,
   sessionSignalRoutes,
 } from '../../../../../daemon/lib/runtime/mounts/session-signal.ts';
-import { sessionView } from '../../../../support/daemon/session-view.ts';
 import { jsonOf, requestOf } from '../../support/requests.ts';
 import { refusalOf } from '../../support/calls.ts';
 
@@ -35,15 +32,25 @@ class FakeSessionSignal implements SessionSignalSubsystem {
     private readonly refusals: Readonly<Record<string, SessionSignalError>> = {},
   ) {}
 
-  async signal(sessionId: string, request: SignalSessionRequest): Promise<SessionView> {
+  async signal(sessionId: string, request: SignalSessionRequest): Promise<FerretSummary> {
     this.signals.push([sessionId, request]);
     const refusal = this.refusals[sessionId];
     if (refusal !== undefined) throw refusal;
     if (!this.known.includes(sessionId)) throw new SessionSignalError('not_found', `no session ${sessionId}`);
-    // The status each kind produces, because a view still reporting `running` would not distinguish a
+    // The state each kind produces, because a view still reporting `working` would not distinguish a
     // completion from a read.
-    const status = request.kind === 'done' ? 'completed' : request.kind === 'working' ? 'running' : 'waiting';
-    return sessionView(sessionId, {}, { status });
+    return FerretSummarySchema.parse({
+      id: sessionId,
+      name: sessionId,
+      role: 'lead',
+      harness: 'claude-code',
+      runner: 'tmux',
+      folder: '/work/a',
+      state: request.kind === 'done' ? 'stopped' : 'working',
+      createdAt: T0,
+      stateAt: T0,
+      ...(request.kind === 'waiting' ? { waiting: { since: T0 } } : {}),
+    });
   }
 }
 
@@ -64,10 +71,10 @@ describe('the session signal mount', () => {
     // Assert
     should(response.status).equal(200);
     // Parsed with the protocol's own schema: a body the client would refuse is a signal that failed.
-    const view = SessionViewSchema.parse(jsonOf(response));
-    should(view.config.id).equal('s1');
-    // The status moved to the one only this surface can write.
-    should(view.state.status).equal('completed');
+    const view = FerretSummarySchema.parse(jsonOf(response));
+    should(view.id).equal('s1');
+    // The state moved to the one only this surface can write.
+    should(view.state).equal('stopped');
     should(sessions.signals).deepEqual([['s1', { kind: 'done', message: 'shipped' }]]);
   });
 

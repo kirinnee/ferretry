@@ -10,10 +10,13 @@ import { createWardenSubsystem } from './subsystem.ts';
  *
  * DECLARED GAPS, each with its reason in `ports-pending.json` `pendingReasons.warden`.
  * The sweep sees only what Ferrets, Conversation and Asks tell it, so:
- * - Pane-level liveness (frozen frames, token counters, tool processes) and leftover browsers need a look at a ferret's
- *   own pane that neither Terminals' port nor Browsers' offers on 5.0 (D2 #19). The liveness monitor is not built and
- *   the classifiers that need those facts stay quiet; what the sweep can flag from the contracts is a question nobody
- *   answered (an open ask of the ferret's own) and a sub-ferret overdue on a report (Conversation's send ledger).
+ * - Pane-level liveness (frozen frames, token counters, tool processes) is today's liveness monitor, fed by Terminals'
+ *   `liveness` look at each ferret's own pane and Conversation's transcript tail every 30 s while Terminals (an
+ *   optional use) is on; off, `dead_monitor`, `sus_*` and `agent_frozen` do not run. A browser left under a pane is
+ *   closed through Browsers' `closeLeftoverBrowsers` (an optional use) behind today's `mayActAlone.closeLeftovers`;
+ *   off, that check does not run. Ferrets stores each ferret's declared wait and its own nudge and frozen times, but
+ *   `FerretSummary` does not carry them, so none reads as waiting and the reflex keeps its defaults: it therefore only
+ *   DETECTS (`reflexNudges` off) — `agent_frozen`, `sus_*` and `dead_monitor` fire, and no quiet ferret is nudged.
  * - A sub-ferret overdue on a report is flagged only: today nudged it and told its parent, skipping one that declared a
  *   wait or signalled done, and `FerretSummary` carries neither, so nothing is typed to anyone until Ferrets does.
  * - Investigator wardens, failover and auto-move need a folder Ferrets can start a warden in and read reports back from,
@@ -41,6 +44,8 @@ export default implementDaemon(manifest, {
       asks,
       usage: () => ctx.uses.usage.current(),
       board: () => ctx.uses.board.current(),
+      terminals: () => ctx.uses.terminals.current(),
+      browsers: () => ctx.uses.browsers.current(),
     });
 
     // Arming reads the interval from `warden.yaml` and starts the timer: after `build`, in a job (§7.6 step 4).

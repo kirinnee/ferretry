@@ -1,4 +1,5 @@
-import { SignalSessionRequestSchema, type SessionView, type SignalSessionRequest } from '../../protocol/session.ts';
+import type { FerretSummary } from '../../../../contract/index.ts';
+import { SignalSessionRequestSchema, type SignalSessionRequest } from '../../protocol/session.ts';
 import {
   ApiError,
   type ApiResponse,
@@ -33,9 +34,8 @@ type RouteContext = CallContext;
  * the fleet wrappers also hold, still works as before. The target is the path's session, as for every
  * caller.
  *
- * WHY THE ANSWER IS A SESSION VIEW. The wire shape the client parses is `SessionView`, the same one
- * the stop and the revive answer with, and it carries everything a signal changes: the status, the
- * health, and the declared wait itself.
+ * WHY THE ANSWER IS THE FERRET. The wire shape is the ferret's summary, the one a read of it answers with, and it
+ * carries everything a signal changes: the state, and the declared wait itself.
  */
 
 /** Why a signal could not be acted on. */
@@ -64,7 +64,7 @@ export class SessionSignalError extends Error {
 
 /** One session speaking about itself. The request is the parsed wire shape, unchanged. */
 export interface SessionSignalSubsystem {
-  signal(sessionId: string, request: SignalSessionRequest): Promise<SessionView>;
+  signal(sessionId: string, request: SignalSessionRequest): Promise<FerretSummary>;
 }
 
 /** The HTTP status and code each refusal answers with. */

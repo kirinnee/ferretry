@@ -153,7 +153,7 @@ describe('reading a ferret’s files', () => {
     expect(refused.json<{ code: string }>().code).toBe('not_own_session');
   });
 
-  test('S47 an agent reaches only its own ferret and helpers; file reads await the confined reader', async () => {
+  test('S47 an agent reaches only its own ferret and helpers; a file read needs the kernel’s pinned walk', async () => {
     const h = await host([record('lead'), record('helper', 'lead'), record('grand', 'helper')]);
     h.putRoot('work', 'notes.md', 'hello');
     for (const target of ['lead', 'helper', 'grand']) {
@@ -161,7 +161,8 @@ describe('reading a ferret’s files', () => {
         ...as('lead'),
         query: { path: 'notes.md' },
       });
-      expect(read.status).toBe(503);
+      // The test host's pinner refuses, as a platform with no descriptor walk does: never an ordinary root read.
+      expect(read.status).toBe(501);
       expect(read.body).not.toContain('hello');
     }
     const up = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('helper'), query: { path: 'notes.md' } });
@@ -174,9 +175,9 @@ describe('reading a ferret’s files', () => {
     const climb = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: '../x' } });
     expect(climb.status).toBeGreaterThanOrEqual(400);
     const secret = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: '.env' } });
-    expect(secret.status).toBe(503);
+    expect(secret.status).toBe(501);
     const person = await h.request('GET', '/v1/ferrets/other/fs/file', { query: { path: 'notes.md' } });
-    expect(person.status).toBe(503);
+    expect(person.status).toBe(501);
   });
 });
 
@@ -308,12 +309,12 @@ describe('managed worktrees and the file browser before the kernel host IO is bo
     expect(refused.json<{ code: string }>().code).toBe('not_own_session');
   });
 
-  test('the file browser answers 503 not built yet until the kernel root walk lands', async () => {
+  test('the file browser answers unsupported where the kernel cannot hold the folder open, never a plain read', async () => {
     const h = await host([record('lead')]);
     for (const path of ['fs', 'fs/index', 'fs/changes', 'fs/diff']) {
       const answer = await h.request('GET', `/v1/ferrets/lead/${path}`, { query: { path: 'a.txt' } });
-      expect(answer.status).toBe(503);
-      expect(answer.json<{ code: string }>().code).toBe('plugin_unavailable');
+      expect(answer.status).toBe(501);
+      expect(answer.json<{ code: string }>().code).toBe('unsupported');
     }
   });
 });
@@ -503,7 +504,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
     expect(runner.starts).toBe(0);
   });
 
-  test('the port’s work folder answers nothing while no real-path seam is bound (kernel item N)', async () => {
+  test('the port’s work folder answers nothing where the ferret’s work root refuses the folder', async () => {
     const h = await host([record('lead')]);
     expect(await h.provided(FerretsPort).workFolder(ferretId('lead'))).toBeUndefined();
   });
@@ -539,13 +540,10 @@ describe('what a ferret may control (limits.yaml agentControl)', () => {
 });
 
 describe('session routes whose services are not bound in this build', () => {
-  test('signal, restarts and the archive list answer 503 not built yet rather than a missing route', async () => {
+  test('the archive list and an out-of-date restart answer 503 not built yet rather than a missing route', async () => {
     const h = await host([record('lead')]);
     const answers = [
-      await h.request('POST', '/v1/ferrets/lead/signal', { body: { kind: 'done' } }),
       await h.request('POST', '/v1/restarts', { body: { scope: 'outdated' } }),
-      await h.request('GET', '/v1/restarts'),
-      await h.request('DELETE', '/v1/restarts'),
       await h.request('GET', '/v1/archived-sessions'),
     ];
     for (const answer of answers) {
