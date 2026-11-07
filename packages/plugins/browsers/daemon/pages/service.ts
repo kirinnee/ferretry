@@ -29,7 +29,7 @@ import type { BrowserAutomation, BrowserPageActed } from './automation.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
 import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
 import type { BrowserUploadMode } from './page-acts.ts';
-import type { PageScript } from '../worker/adapters/page-script.ts';
+import type { PageScript } from './wire/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../worker/protocol.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from '../target/sign-in/watch.ts';

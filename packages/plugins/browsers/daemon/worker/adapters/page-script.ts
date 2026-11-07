@@ -1,4 +1,4 @@
-import { type BrowserElementTarget } from '../../pages/wire/target.ts';
+import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from '../../pages/wire/page-script.ts';
 import { AGENT_TOOL_DEFAULT_SCRIPT_MS, AGENT_TOOL_MAX_SCRIPT_MS } from '../../tools/limits.ts';
 import { type ActableCdp, type ActablePage, browserElementOf } from '../../pages/page-acts.ts';
 
@@ -22,8 +22,6 @@ import { type ActableCdp, type ActablePage, browserElementOf } from '../../pages
 
 /** The most a script's answer may hand back; the daemon clips again to its own wire bound. */
 export const PAGE_SCRIPT_MAX_RESULT_CHARS = 200_000;
-/** The longest origin a world may report; a longer one is dropped (it reads as unreadable), never cut. */
-export const PAGE_SCRIPT_ORIGIN_MAX_CHARS = 2_048;
 /** How long one read of a world's origin may take. */
 const ORIGIN_READ_MS = 5_000;
 /** The name the isolated world carries in DevTools. */
@@ -31,13 +29,6 @@ export const PAGE_SCRIPT_WORLD = 'ferretry-agent-script';
 
 /** The attribute that marks the script's element, for the one call that needs it. */
 const MARK = 'data-ferretry-script';
-
-export interface PageScript {
-  /** A function expression, `() => …` or `(element) => …`, as the agent wrote it. */
-  readonly source: string;
-  readonly target?: BrowserElementTarget;
-  readonly timeoutMs?: number;
-}
 
 /** What a script handed back, as text, and the origin of the world it ran in. */
 export interface PageScriptResult {

@@ -21,7 +21,7 @@ import type {
   BrowserTypeOptions,
   BrowserUploadMode,
 } from './page-acts.ts';
-import type { PageScript } from '../worker/adapters/page-script.ts';
+import type { PageScript } from './wire/page-script.ts';
 import type { WorkerStagedFile } from '../worker/protocol.ts';
 
 /** What an act answers: the page list, and the dialog the acted page is waiting on, if it has one. */

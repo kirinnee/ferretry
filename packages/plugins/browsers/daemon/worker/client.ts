@@ -48,7 +48,7 @@ import {
   type WorkerStagedFile,
 } from './protocol.ts';
 import { type FrameClock } from '../stream/contracts.ts';
-import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from './adapters/page-script.ts';
+import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from '../pages/wire/page-script.ts';
 import { type PointerAct } from '../pages/pointer-acts.ts';
 import { KernelFrameClock } from '../stream/frame-clock.ts';
 
