@@ -29,6 +29,7 @@ export { daemonOfClient } from './connect/daemon-of.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
   PAIRING_REFUSED_REASON,
+  type DeviceKeyRotation,
   type RelayClientSocket,
   RelayPairingRefusedError,
   type RelayPairingOutcome,
@@ -37,10 +38,15 @@ export {
   type SessionDeviceClaim,
 } from './session/session-client.ts';
 export {
+  type AmendedRotation,
   type CarrierDial,
   type CarrierSocketEvents,
   type CarrierWalkSocket,
   fromBase64Url,
+  NO_DEVICE_KEY,
+  type RotatingSession,
+  type RotationRequest,
+  type SessionKeyRotation,
   toBase64Url,
 } from './session/session-transport.ts';
 export { RelayKeyHandleError } from './session/webcrypto.ts';
@@ -55,6 +61,21 @@ export {
   type RelayCrypto,
   RELAY_CLOSE_CODES,
 } from './session/wire/index.ts';
+
+// ─── the one passkey prompt: what Access provides, and where every daemon call consults it (G95, G105) ──────────
+export {
+  PASSKEY_TAKERS,
+  type PasskeyAsk,
+  type PasskeyHandler,
+  type PasskeyNeed,
+  type PasskeyPorts,
+  type PasskeyProvision,
+  type PasskeyRefusal,
+  type PasskeyWords,
+  type PromptOrigin,
+  requestOrigin,
+} from './passkey/passkey.ts';
+export { useLockedDaemons, usePasskeyAsk } from './shell/passkey-mount.tsx';
 
 // ─── the paired daemons ────────────────────────────────────────────────────────────────────────────────────────────
 export {
@@ -106,7 +127,7 @@ export {
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
-/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar. */
+/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 export {
   COLOUR_TOKENS,

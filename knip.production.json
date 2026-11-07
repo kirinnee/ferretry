@@ -125,6 +125,14 @@
         "app/composer/use-composer-preferences.ts",
         "daemon/attachments/adapters/raw-deflate.ts"
       ]
+    },
+    "packages/plugins/mcp": {
+      "entry": ["app/views/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/skills": {
+      "entry": ["app/views/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     }
   },
   "bun": false,

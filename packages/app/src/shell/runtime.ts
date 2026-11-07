@@ -7,6 +7,7 @@ import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
 import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
 import { DaemonLayouts } from '../layout/daemon-layout.ts';
 import { noteClientDaemon } from '../connect/daemon-of.ts';
+import type { PasskeyProvision } from '../passkey/passkey.ts';
 
 /**
  * THE SHELL'S RUNTIME: one generated client per paired daemon, started on first use; the halves built against it;
@@ -25,6 +26,11 @@ export interface ShellRuntimeOptions {
   readonly surfaces: readonly SurfaceEntry[];
   readonly daemons: DaemonList;
   readonly connect: TransportFactory;
+  /**
+   * Access's passkey provision, read per connection (`passkey/passkey.ts`): its handler is what every daemon call
+   * consults on an unlock or step-up refusal, its prompts what the frame mounts. Absent, nothing asks.
+   */
+  readonly passkey?: () => PasskeyProvision | undefined;
 }
 
 type Connection =
@@ -38,6 +44,7 @@ export class ShellRuntime {
   readonly byId: ReadonlyMap<string, SurfaceEntry>;
   readonly daemons: DaemonList;
   readonly #connect: TransportFactory;
+  readonly #passkey: () => PasskeyProvision | undefined;
   readonly #connections = new Map<string, Connection>();
   readonly #halves: HalfCache;
   readonly #packageClients = new Map<string, ShellPluginClient>();
@@ -52,6 +59,7 @@ export class ShellRuntime {
     this.byId = indexSurfaces(options.surfaces);
     this.daemons = options.daemons;
     this.#connect = options.connect;
+    this.#passkey = options.passkey ?? (() => undefined);
     this.#halves = new HalfCache(this.byId, (daemon, id) => this.#clientFor(daemon, id));
     this.layouts = new DaemonLayouts(this);
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
@@ -67,6 +75,11 @@ export class ShellRuntime {
   };
 
   titleOf = (id: string): string => this.byId.get(id)?.title ?? id;
+
+  /** The one passkey provision (the handler and its prompts), or `undefined` when Access gave none. */
+  passkey(): PasskeyProvision | undefined {
+    return this.#passkey();
+  }
 
   /** The connection to a daemon, opening it on first ask. */
   connection(daemon: string): Connection {
@@ -140,7 +153,12 @@ export class ShellRuntime {
       this.#changed();
       return;
     }
-    const client = new DaemonClient({ transport, surfaces: this.surfaces });
+    const handler = this.#passkey()?.handler;
+    const client = new DaemonClient({
+      transport,
+      surfaces: this.surfaces,
+      ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
+    });
     client.onChange(() => {
       this.#halves.clearDaemon(paired.daemon);
       this.#changed();

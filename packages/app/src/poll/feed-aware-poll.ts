@@ -11,7 +11,11 @@
  *     page the person closed elsewhere;
  *   * while there is no feed, or it is not live, polls at its old cadence (`everyMs`), so a dropped feed makes the
  *     screen as fresh as it always was rather than stale;
- *   * never reads while the tab is hidden: the tick is noted, and one read is made when it is shown.
+ *   * never reads while the tab is hidden: the tick is noted, and one read is made when it is shown;
+ *   * never starts a read while its previous one is still in flight (when `read` returns its promise): a timer tick
+ *     is skipped, and a feed event asks for ONE read once the pending one settles. A read the shell parks — a
+ *     background read on a locked machine waits for its unlock prompt — therefore never piles up behind itself, and
+ *     a confirm never releases a burst of them.
  *
  * A change of liveness re-arms the timer at the new cadence; it does not read by itself, because a feed that comes
  * back resumes and replays what it missed, and those events read.
@@ -49,7 +53,8 @@ export const browserFeedAwarePollEnvironment: FeedAwarePollEnvironment = {
 export const FEED_EVENT_SETTLE_MS = 250;
 
 export interface FeedAwarePollOptions<Event = unknown> {
-  readonly read: () => void;
+  /** One read. Return its promise so a tick is skipped while it is still in flight; `void` keeps no such guard. */
+  readonly read: () => unknown;
   /** The cadence with no live feed: what this read polled at before it had one. */
   readonly everyMs: number;
   /** The safety-net cadence while the feed is live. */
@@ -61,6 +66,11 @@ export interface FeedAwarePollOptions<Event = unknown> {
   readonly settleMs?: number;
 }
 
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  (typeof value === 'object' || typeof value === 'function') &&
+  value !== null &&
+  typeof (value as { then?: unknown }).then === 'function';
+
 /** Starts reading as described above; the returned function stops every timer and subscription. */
 export const startFeedAwarePoll = <Event = unknown>(options: FeedAwarePollOptions<Event>): (() => void) => {
   const environment = options.environment ?? browserFeedAwarePollEnvironment;
@@ -70,20 +80,48 @@ export const startFeedAwarePoll = <Event = unknown>(options: FeedAwarePollOption
   /** A read was due while the tab was hidden, so one is owed when it is shown. */
   let owed = false;
   let stopped = false;
+  /** A read is in flight (its promise has not settled). */
+  let inFlight = false;
+  /** A feed event asked for a read while one was in flight: one more is made when it settles. */
+  let trailing = false;
+
+  /** Starts one read, unless one is in flight; `event` reads are kept as one trailing read instead of dropped. */
+  const start = (event: boolean): void => {
+    if (inFlight) {
+      if (event) trailing = true;
+      return;
+    }
+    let returned: unknown;
+    try {
+      returned = read();
+    } catch {
+      return;
+    }
+    if (!isThenable(returned)) return;
+    const pending = returned;
+    inFlight = true;
+    const settled = (): void => {
+      inFlight = false;
+      if (!trailing || stopped) return;
+      trailing = false;
+      readNow(true);
+    };
+    pending.then(settled, settled);
+  };
 
   const cadence = (): number => (feed?.isLive?.() === true ? options.liveEveryMs : options.everyMs);
   const arm = (): void => {
     if (timer !== undefined) environment.clearTimeout(timer);
     timer = environment.setTimeout(tick, cadence());
   };
-  const readNow = (): void => {
+  function readNow(event = false): void {
     if (environment.hidden()) {
       owed = true;
       return;
     }
-    read();
+    start(event);
     arm();
-  };
+  }
   function tick(): void {
     timer = undefined;
     readNow();
@@ -93,7 +131,7 @@ export const startFeedAwarePoll = <Event = unknown>(options: FeedAwarePollOption
     environment.onVisible(() => {
       if (!owed || stopped) return;
       owed = false;
-      read();
+      start(false);
       arm();
     }),
   ];
@@ -104,7 +142,7 @@ export const startFeedAwarePoll = <Event = unknown>(options: FeedAwarePollOption
         if (stopped || settle !== undefined || !relevant(event)) return;
         settle = environment.setTimeout(() => {
           settle = undefined;
-          readNow();
+          readNow(true);
         }, options.settleMs ?? FEED_EVENT_SETTLE_MS);
       }),
     );
@@ -127,7 +165,7 @@ export const startFeedAwarePoll = <Event = unknown>(options: FeedAwarePollOption
 
 /** A plain poll that reads nothing while the tab is hidden: {@link startFeedAwarePoll} with no feed. */
 export const startVisiblePoll = (
-  read: () => void,
+  read: () => unknown,
   everyMs: number,
   environment?: FeedAwarePollEnvironment,
 ): (() => void) =>
