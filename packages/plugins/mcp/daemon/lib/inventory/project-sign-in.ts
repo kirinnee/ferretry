@@ -17,16 +17,21 @@
  *    in its own `.claude.json` — with an `Authorization` header naming a launch variable. Claude uses a
  *    local server in place of a same-named project one (local › project › user), and expands `${VAR}`
  *    in its headers from its own environment;
- * 3. the variable is added to the launch environment, resolved.
+ * 3. the variable is added to the launch environment as a `${secret:NAME}` REFERENCE, which the Vault
+ *    opens into the child's environment as it starts (use, never read): MCP never holds the value.
  *
  * The configuration file holds a variable NAME, never the token — the same boundary, and the same GAP
  * (the agent can read its own environment), as a component's sign-in.
+ *
+ * ON 5.0 the Claude Code harness writes its own local scope (`adapters/harness-documents.ts`), so the
+ * launch is asked for its {@link ProjectMcpLaunchShare} — the entries as data, handed on as `mcp` launch
+ * parts — and `localScope` is bound only where something else writes the file.
  *
  * WHAT IT RESPECTS. A runtime that DISABLED the server in this project gets no override: somebody said
  * no there. A runtime that has not been asked yet gets it — signing in was an explicit act behind
  * `fleet`/`configure`, and the override runs nothing (it is a web address).
  */
-import type { SecretName } from '@ferretry/core-vault/contract';
+import { type SecretName, secretReference } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames, parseMcpProjectSubject } from '../../../contract/index.ts';
 import type { McpOAuthServer, McpOAuthServers } from '../oauth/ports.ts';
 import {
@@ -126,10 +131,24 @@ export interface ProjectMcpLaunchDeps {
   /** Which project a folder is in: the same source the inventory and the sign-in list read. */
   readonly folders: McpProjectFolders;
   readonly documents: McpHarnessDocuments;
-  readonly secrets: { values(): Promise<ReadonlyMap<SecretName, string>> };
+  /** Which secret NAMES the Vault holds — never a value (use, never read). */
+  readonly secrets: { held(): Promise<ReadonlySet<SecretName>> };
   readonly renewal?: { refreshForLaunch(names: readonly SecretName[]): Promise<void> };
-  readonly localScope: ClaudeLocalScope;
+  /** Absent on 5.0: the harness writes its own local scope from {@link ProjectMcpLaunchShare.servers}. */
+  readonly localScope?: ClaudeLocalScope;
 }
+
+/** What one launch gets for its project's signed-in servers. */
+export interface ProjectMcpLaunchShare {
+  /** The project root the local-scope entries are for. */
+  readonly root: string;
+  /** The local-scope entries, by server name: each names its variable, never the token. */
+  readonly servers: Readonly<Record<string, LocalScopeServer>>;
+  /** Each variable bound to its `${secret:NAME}` reference; the Vault opens it for the child. */
+  readonly env: Readonly<Record<string, string>>;
+}
+
+const NOTHING_TO_ADD: ProjectMcpLaunchShare = { root: '', servers: {}, env: {} };
 
 export class ProjectMcpLaunch {
   constructor(private readonly deps: ProjectMcpLaunchDeps) {}
@@ -141,10 +160,15 @@ export class ProjectMcpLaunch {
    * worktree is a project of its own, exactly as its ferret is listed.
    */
   async forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>> {
+    return (await this.share(agent, cwd)).env;
+  }
+
+  /** {@link forLaunch}'s whole answer: the entries as well as the variables. */
+  async share(agent: string, cwd: string): Promise<ProjectMcpLaunchShare> {
     const account = (await this.deps.accounts()).find(
       candidate => candidate.wrapper === agent || candidate.runtime === agent,
     );
-    if (account === undefined || account.harness !== 'claude-code') return {};
+    if (account === undefined || account.harness !== 'claude-code') return NOTHING_TO_ADD;
     const folder = await this.deps.folders.forCwd(cwd);
     const root = folder.root.replace(/\/+$/u, '');
     const claudeJson = `${account.home.replace(/\/+$/u, '')}/.claude.json`;
@@ -153,27 +177,30 @@ export class ProjectMcpLaunch {
       declaration,
       names: mcpOAuthSecretNames(mcpFolderSubject(folder, declaration.name), declaration.url),
     }));
+    // Renewal on USE: the only moment a token is refreshed is the moment a launch needs it.
     if (named.length > 0) await this.deps.renewal?.refreshForLaunch(named.map(entry => entry.names.access));
-    const values = named.length === 0 ? new Map<SecretName, string>() : await this.deps.secrets.values();
+    const held = named.length === 0 ? new Set<SecretName>() : await this.deps.secrets.held();
     const home = await this.#read(claudeJson);
     const settings = claudeApprovalKeys(await this.#read(`${account.home.replace(/\/+$/u, '')}/settings.json`));
     const servers: Record<string, LocalScopeServer> = {};
     const env: Record<string, string> = {};
     for (const { declaration, names } of named) {
-      const token = values.get(names.access);
-      if (token === undefined) continue;
+      if (!held.has(names.access)) continue;
       if (claudeApproval(declaration.name, claudeProjectEntry(home, root), [settings]) === 'disabled') continue;
       servers[declaration.name] = {
         type: declaration.transport,
         url: declaration.url,
         headers: { ...declaration.headers, Authorization: `Bearer \${${names.variable}}` },
       };
-      env[names.variable] = token;
+      env[names.variable] = secretReference(names.access);
     }
     // Reconciled even when empty: a sign-out, or a server removed from `.mcp.json`, leaves no entry behind.
-    if (Object.keys(servers).length > 0 || hasFerretryEntry(claudeProjectEntry(home, root)))
+    if (
+      this.deps.localScope !== undefined &&
+      (Object.keys(servers).length > 0 || hasFerretryEntry(claudeProjectEntry(home, root)))
+    )
       await this.deps.localScope.reconcile(claudeJson, root, servers);
-    return env;
+    return { root, servers, env };
   }
 
   async #read(path: string): Promise<unknown> {

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SecretName } from '@ferretry/core-vault/contract';
+import { type SecretName, secretReference } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
@@ -34,17 +34,14 @@ class RecordingLocalScope implements ClaudeLocalScope {
   }
 }
 
-function launcher(
-  files: Map<string, unknown> = documents(),
-  held: Record<string, string> = { [DOCS.access]: 'docs-token' },
-) {
+function launcher(files: Map<string, unknown> = documents(), held: readonly string[] = [DOCS.access]) {
   const localScope = new RecordingLocalScope();
   const renewed: (readonly SecretName[])[] = [];
   const launch = new ProjectMcpLaunch({
     accounts: async () => ACCOUNTS,
     folders: knownFolders(FOLDERS),
     documents: new MemoryDocuments(files),
-    secrets: { values: async () => new Map(Object.entries(held) as [SecretName, string][]) },
+    secrets: { held: async () => new Set(held as SecretName[]) },
     renewal: { refreshForLaunch: async names => void renewed.push(names) },
     localScope,
   });
@@ -107,7 +104,7 @@ describe('ProjectMcpOAuthServers', () => {
 });
 
 describe('ProjectMcpLaunch', () => {
-  it('should renew, then write a local-scope entry naming the variable and answer the variable’s value', async () => {
+  it('should renew, then write a local-scope entry naming the variable and answer the variable’s secret reference', async () => {
     // Arrange
     const { launch, localScope, renewed } = launcher();
 
@@ -116,7 +113,8 @@ describe('ProjectMcpLaunch', () => {
 
     // Assert
     should(renewed).deepEqual([[DOCS.access, LINEAR.access]]);
-    should(env).deepEqual({ [DOCS.variable]: 'docs-token' });
+    // A reference the Vault opens into the child, never the token: MCP holds no value (use, never read).
+    should(env).deepEqual({ [DOCS.variable]: secretReference(DOCS.access) });
     should(localScope.calls).deepEqual([
       {
         path: `${CLAUDE_HOME}/.claude.json`,
@@ -151,7 +149,7 @@ describe('ProjectMcpLaunch', () => {
     const home = files.get(`${CLAUDE_HOME}/.claude.json`) as { projects: Record<string, { mcpServers: unknown }> };
     const entry = home.projects[PROJECT];
     if (entry !== undefined) entry.mcpServers = { mine: { command: 'node' } };
-    const { launch, localScope, renewed } = launcher(files, {});
+    const { launch, localScope, renewed } = launcher(files, []);
 
     // Act
     const env = await launch.forLaunch('/fy/fleet/bin/claude-work', PROJECT);
@@ -194,7 +192,7 @@ describe('ProjectMcpLaunch', () => {
           return files.read(target);
         },
       },
-      secrets: { values: async () => new Map([[DOCS.access, 'docs-token']]) },
+      secrets: { held: async () => new Set([DOCS.access]) },
       localScope: new RecordingLocalScope(),
     });
 
@@ -233,9 +231,9 @@ describe('ProjectMcpLaunch', () => {
       folders: knownFolders(FOLDERS),
       documents: new MemoryDocuments(files),
       secrets: {
-        values: async () => {
+        held: async () => {
           opened += 1;
-          return new Map();
+          return new Set();
         },
       },
       localScope: new RecordingLocalScope(),

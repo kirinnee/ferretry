@@ -14,7 +14,8 @@ import { type FerretRoot, RootMcpProjectFiles } from './adapters/project-files.t
 import { McpCheckService } from './lib/inventory/check.ts';
 import { KnownAndFerretFolders } from './lib/inventory/folders.ts';
 import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
-import { mcpParts } from './lib/launch-parts.ts';
+import { ProjectMcpLaunch } from './lib/inventory/project-sign-in.ts';
+import { McpLaunchParts } from './lib/launch-parts.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
 import { SessionMcpService } from './lib/session/service.ts';
 import { inventoryRoutes, oauthRoutes, sessionRoutes } from './routes.ts';
@@ -37,6 +38,9 @@ const NOT_YET = (what: string): never => {
  *   port and handed to the sign-in service alone. Reading a held ACCESS token back (revoke it at sign-out, a check's
  *   bearer) needs a Vault operation that spends a named secret for this plugin; until that contract change it is not
  *   sent (sign-out revokes with the held refresh token, and answers `revoked: false` when there is none).
+ * - The Claude Code harness's home is not a root MCP may read, so a project server's local-scope entry is handed to
+ *   the harness as an `mcp` launch part, and a runtime that DISABLED that server in the project (today's
+ *   `disabledMcpjsonServers` in its `.claude.json`) is not seen yet: the entry is offered regardless.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -85,6 +89,38 @@ export default implementDaemon(manifest, {
       internal: sealedMcpOAuthSecrets(sealed, kernel.state),
     });
 
+    // ── what a ferret's folder holds: one source for the inventory and the launch ──────────────────────────────────
+    const folders = new KnownAndFerretFolders(async () => [], refreshOwners);
+    const documents = new RootMcpHarnessDocuments(
+      path => workRootFor(path),
+      (text, format) => {
+        if (format === 'json') return JSON.parse(text) as unknown;
+        return NOT_YET('Reading a Codex config.toml');
+      },
+    );
+    const held = async (): Promise<ReadonlySet<SecretName>> =>
+      new Set((await vault.names()).map(summary => summary.name));
+
+    // ── every launch: renew the sign-ins it uses, then name them (today's launch environment, `modules/mcp.ts`) ──
+    const launch = new McpLaunchParts({
+      items,
+      held,
+      renewal: oauth,
+      project: async spec => {
+        // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
+        await refreshOwners();
+        // The launch is its own account: 5.0 carries the runtime, harness and home on the spec (no Runtimes import).
+        const agent = spec.runtime ?? spec.ferret;
+        return await new ProjectMcpLaunch({
+          accounts: async () => [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
+          folders,
+          documents,
+          secrets: { held },
+          renewal: oauth,
+        }).share(agent, spec.folder);
+      },
+    });
+
     // ── inventory and check ────────────────────────────────────────────────────────────────────────────────────────
     const inventory = new McpInventoryService({
       accounts: async () => [],
@@ -94,15 +130,9 @@ export default implementDaemon(manifest, {
           runtimes: [],
           ...(item.auth === undefined ? {} : { auth: item.auth }),
         })),
-      folders: new KnownAndFerretFolders(async () => [], refreshOwners),
+      folders,
       connections: async () => await oauth.connections(),
-      documents: new RootMcpHarnessDocuments(
-        path => workRootFor(path),
-        (text, format) => {
-          if (format === 'json') return JSON.parse(text) as unknown;
-          return NOT_YET('Reading a Codex config.toml');
-        },
-      ),
+      documents,
       ferrets: {
         get: async id => {
           const ferret = await ferrets.get(id as FerretId);
@@ -217,7 +247,7 @@ export default implementDaemon(manifest, {
       },
       provides: { mcp: api },
       hooks: {
-        'launch.parts': () => [{ id: 'mcp', item: { parts: async spec => mcpParts(items(), spec.harness) } }],
+        'launch.parts': () => [{ id: 'mcp', item: launch }],
       },
     };
   },
