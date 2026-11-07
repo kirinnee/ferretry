@@ -8,7 +8,17 @@ import { parseArgs } from './argv.ts';
 import { type ClientDeps, pluginClient, routeFactsBeforeContact, type Surfaces, surfacesOf } from './client.ts';
 import { AS_OWNER_NOTE, inPane } from './credential.ts';
 import { askVerb } from './commands/ask.ts';
-import { daemonRestart, daemonStart, daemonStatus, daemonStop } from './commands/daemon.ts';
+import {
+  daemonInstall,
+  daemonLogs,
+  daemonReset,
+  daemonRestart,
+  daemonStart,
+  daemonStatus,
+  daemonStop,
+  daemonUninstall,
+  daemonWhich,
+} from './commands/daemon.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import { wordsVerb } from './commands/words.ts';
@@ -34,6 +44,11 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'daemon start': daemonStart,
   'daemon stop': daemonStop,
   'daemon restart': daemonRestart,
+  'daemon install': daemonInstall,
+  'daemon uninstall': daemonUninstall,
+  'daemon logs': daemonLogs,
+  'daemon which': daemonWhich,
+  'daemon reset': daemonReset,
   ask: askVerb,
   update: updateVerb,
 };

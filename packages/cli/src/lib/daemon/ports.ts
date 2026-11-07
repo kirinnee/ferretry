@@ -192,3 +192,65 @@ export interface INixGcRootPort {
 }
 
 export type { IClockPort } from '../update/machine.ts';
+
+/**
+ * Whether the daemon of this state home is answering, and which process it is.
+ *
+ * The pid is the daemon's own account of itself (`GET /healthz`) at the address its run record names. It is never
+ * trusted alone: every signal sent to it first passes `assertServes`, which proves the pid holds this state home's
+ * lifetime lock. `undefined` is "did not answer", a fact to report and not an error to raise.
+ */
+export interface IDaemonHealthPort {
+  probe(): Promise<LocalUpdateHealth | undefined>;
+}
+
+/** Showing the daemon log: the one-shot read, or following it as it grows. */
+export interface IDaemonLogPort {
+  exists(logFile: string): Promise<boolean>;
+  /** Streams the log to this terminal; the exit code of the reader. */
+  show(logFile: string, follow: boolean): Promise<number>;
+}
+
+/** What one tree holds, measured or removed. */
+export type ResetTreeMeasure =
+  | { readonly kind: 'absent' }
+  | {
+      readonly kind: 'measured';
+      readonly files: number;
+      readonly bytes: number;
+      /** `<path relative to the tree> -> <target>` for every link that points out of the tree. */
+      readonly escapingLinks: readonly string[];
+    };
+
+/** The trees a reset destroys, measured and then removed. Every failure throws. */
+export interface IResetTreePort {
+  measure(root: string): Promise<ResetTreeMeasure>;
+  remove(root: string): Promise<ResetTreeMeasure>;
+}
+
+/** What a reset destroys that nothing brings back, counted from the daemon that still holds it. */
+export interface ResetCounts {
+  readonly secrets: number;
+  readonly devices: number;
+  readonly ferrets: number;
+}
+
+export interface IResetInventoryPort {
+  /** `undefined` when the daemon cannot be asked: a reset must never depend on the thing it recovers from. */
+  count(): Promise<ResetCounts | undefined>;
+}
+
+export type SessionTerminalEnding =
+  | { readonly kind: 'ended' }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/** The private terminal server every ferret's agent runs under; it outlives a daemon stop. */
+export interface ISessionTerminalServerPort {
+  end(socket: string): Promise<SessionTerminalEnding>;
+}
+
+/** How many ferrets are mid-turn, for the line a restart says and for `--when-idle`. */
+export interface IDaemonTurnsPort {
+  midTurn(): Promise<number>;
+}
