@@ -99,7 +99,7 @@ describe('fy harness codex status', () => {
   it('says what runs, how to update it, and that running ferrets keep their version', () => {
     const text = renderStatus(view({}), 'fy');
     should(text).match(/Codex 0\.140\.0 - update available: 0\.163\.0/u);
-    should(text).match(/Update:     fy harness codex update - runs npm install/u);
+    should(text).match(/Update: {5}fy harness codex update - runs npm install/u);
     should(text).match(/Running ferrets keep the version they started with/u);
   });
 });

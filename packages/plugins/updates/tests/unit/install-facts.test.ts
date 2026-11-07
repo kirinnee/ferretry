@@ -81,6 +81,27 @@ describe('the host install facts', () => {
     should(lost.launchedPath).equal(`${STORE}/bin/fyd`);
   });
 
+  it('folds the . and .. segments of a relative launch, so a nix profile reached by ../ is still the nix profile', async () => {
+    const profile = JSON.stringify({ version: 3, elements: { ferretry: { storePaths: [STORE] } } });
+    const link = '/home/u/.nix-profile/bin/fyd';
+    const run: FactCommand = async argv => {
+      if (argv[0] === 'readlink')
+        return argv[1] === link ? { code: 0, stdout: `${STORE}/bin/fyd\n` } : { code: 1, stdout: '' };
+      return { code: 0, stdout: profile };
+    };
+    const facts = await new HostInstallFacts(
+      fakeHost({ argv0: '../.nix-profile/bin/fyd', workingDirectory: '/home/u/x', homeDirectory: '/home/u' }),
+      run,
+    ).facts();
+    should(facts.launchedPath).equal(link);
+    should(classifyInstallMethod(facts)).deepEqual({ kind: 'nix-profile', element: 'ferretry' });
+    const dotted = await new HostInstallFacts(
+      fakeHost({ argv0: './a/./b/../fyd', workingDirectory: '/work//' }),
+      runner({}),
+    ).facts();
+    should(dotted.launchedPath).equal('/work/a/fyd');
+  });
+
   it('calls a source run a development build', async () => {
     const facts = await new HostInstallFacts(
       fakeHost({ main: '/work/packages/daemon/bin/fyd.ts' }),

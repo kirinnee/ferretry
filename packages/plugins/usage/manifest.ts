@@ -146,8 +146,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      screen('insights', { path: '/insights', nav: { label: 'Insights', icon: 'chart', order: 70 } }),
-      screen('insights-query', { path: '/insights/query' }),
+      screen('insights', { path: 'insights', nav: { label: 'Insights', icon: 'chart', order: 70 } }),
+      screen('insights-query', { path: 'insights/query' }),
     ],
     panels: [
       // The quota readout in the top bar, and a ferret's own insights next to it.

@@ -49,7 +49,7 @@ import {
   routeOf,
   selectedWords,
 } from './words.ts';
-import { type AuditActor, type AuditDetail } from '@ferretry/core-gate/contract';
+import type { AuditActor, AuditDetail } from '@ferretry/core-gate/contract';
 
 /**
  * A FERRET'S TASK PLAN (docs/secure-copy.md, "Task plans"): one card, raised before a task, on which the owner

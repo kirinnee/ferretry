@@ -14,20 +14,20 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { harnessKey } from './foreign.ts';
-import {
-  type FleetApplyCommittedState,
-  type FleetApplyFailureError,
-  type FleetApplyResult,
-  type FleetWriteOperation,
+import type {
+  FleetApplyCommittedState,
+  FleetApplyFailureError,
+  FleetApplyResult,
+  FleetWriteOperation,
 } from '../provisioning.ts';
-import { type FleetManifest } from '../manifest.ts';
-import {
-  type ApplyCommittedState as FleetWireCommittedState,
-  type ApplyOutcome as FleetWireApplyOutcome,
-  type ApplyResult as FleetWireApplyResult,
-  type ManifestSummary,
-  type SharedHistorySummary,
-  type WriteOperation as FleetWireOperation,
+import type { FleetManifest } from '../manifest.ts';
+import type {
+  ApplyCommittedState as FleetWireCommittedState,
+  ApplyOutcome as FleetWireApplyOutcome,
+  ApplyResult as FleetWireApplyResult,
+  ManifestSummary,
+  SharedHistorySummary,
+  WriteOperation as FleetWireOperation,
 } from '../../../contract/index.ts';
 
 /**

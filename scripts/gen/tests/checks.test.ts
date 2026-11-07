@@ -24,6 +24,7 @@ import { check as pluginGraph } from '../../validate/plugin-graph.ts';
 import { check as portsPending } from '../../validate/ports-pending.ts';
 import { readScopedIn } from '../../validate/read-scoped.ts';
 import { check as registriesFresh } from '../../validate/registries-fresh.ts';
+import { check as screenPaths, screenPathFindings } from '../../validate/screen-paths.ts';
 import { check as words } from '../../validate/words.ts';
 import { buildModel, generateGlobal, generatePackage, packageRegistryPath, writeFiles } from '../registries.ts';
 import { type Fixture, type FixturePackage, LEAF, SDK, ZOD, fixture, routeDecl } from './fixture.ts';
@@ -398,7 +399,7 @@ describe('source scans', () => {
     ])
       expect(found).toContain(what);
   });
-  test('banned-globals in a browser app half: timers and the clock are allowed, the rest stays refused (DECISIONS-2 #4)', async () => {
+  test('banned-globals in a browser app half: timers and the clock are allowed, setImmediate and the rest stay refused (DECISIONS-2 #4)', async () => {
     const f = ws([
       {
         id: 'alpha',
@@ -406,6 +407,7 @@ describe('source scans', () => {
           'app/timers.ts':
             'export const a = Date.now(); export const b = new Date(); setTimeout(() => {}, 1); setInterval(() => {}, 1);',
           'app/network.ts': 'export const c = fetch("https://fixture.invalid");',
+          'app/immediate.ts': 'setImmediate(() => {});',
           'app/process.ts': 'export const d = process.env.HOME;',
           'daemon/timers.ts': 'export const a = Date.now(); setTimeout(() => {}, 1);',
         },
@@ -414,6 +416,7 @@ describe('source scans', () => {
     const found = messages(await run(bannedGlobals, f));
     expect(found).not.toContain('alpha/app/timers.ts');
     expect(found).toContain('alpha/app/network.ts');
+    expect(found).toContain('alpha/app/immediate.ts');
     expect(found).toContain('alpha/app/process.ts');
     expect(found).toContain('alpha/daemon/timers.ts');
   });
@@ -620,6 +623,38 @@ describe('glossary phrase exceptions', () => {
   test('the phrase covers only itself: a second bare use beside it still fails', () => {
     expect(glossaryFindings('x', 'the browser proxy, not a plain proxy', index).length).toBe(1);
     expect(glossaryFindings('x', 'the firewall timer and a second timer', index).length).toBe(1);
+  });
+});
+
+describe('screen-paths', () => {
+  const screens = (body: string): FixturePackage => ({
+    id: 'sample',
+    manifestImports: `import { screen } from '${SDK}';`,
+    manifest: `  ui: { screens: [${body}] },`,
+  });
+  test('planted: an absolute path without the marker is a finding', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('board', { path: '/board' })")]);
+    const found = messages(await run(screenPaths, f));
+    expect(found).toContain('sample');
+    expect(found).toContain('"/board"');
+  });
+  test('a relative path is per daemon and passes', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('board', { path: 'board/:project?' })")]);
+    expect(messages(await run(screenPaths, f))).toBe('');
+  });
+  test('an absolute path that declares itself daemonless passes', async () => {
+    const f = ws([KERNEL_PACKAGE, screens("screen('join', { path: '/join', daemonless: true })")]);
+    expect(messages(await run(screenPaths, f))).toBe('');
+  });
+  test('the marker on a relative path contradicts itself', () => {
+    expect(screenPathFindings('x', [{ id: 'a', path: 'a', daemonless: true }]).length).toBe(1);
+    expect(screenPathFindings('x', [{ id: 'a', path: '/a' }]).length).toBe(1);
+    expect(
+      screenPathFindings('x', [
+        { id: 'a', path: '/a', daemonless: true },
+        { id: 'b', path: 'b' },
+      ]),
+    ).toEqual([]);
   });
 });
 

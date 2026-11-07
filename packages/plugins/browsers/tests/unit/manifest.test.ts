@@ -6,8 +6,8 @@ const routes = manifest.actions.routes;
 const tools = manifest.actions.agentTools;
 
 describe('browsers manifest', () => {
-  test("declares today's browser, login-window, proxy and surface routes and the page stream", () => {
-    expect(routes).toHaveLength(9);
+  test("declares today's browser, login-window, proxy and surface routes, the open-url route (G27) and the page stream", () => {
+    expect(routes).toHaveLength(10);
     expect(manifest.actions.sockets.map(socket => socket.key)).toEqual(['GET /v1/sessions/:sessionId/browser/stream']);
   });
   test('the page stream and the per-ferret browser are built inside one Redaction.read', () => {

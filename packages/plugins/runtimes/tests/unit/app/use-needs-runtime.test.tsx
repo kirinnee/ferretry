@@ -25,7 +25,13 @@ const machine = (state: { empty: boolean; fail?: boolean }) => {
       return () => listeners.delete(listener);
     },
   } as unknown as Pick<PluginClient, 'call' | 'subscribe'>;
-  return { client, changed: () => interact(async () => void [...listeners].forEach(listener => listener({}))) };
+  return {
+    client,
+    changed: () =>
+      interact(async () => {
+        for (const listener of [...listeners]) listener({});
+      }),
+  };
 };
 
 function Probe({ client }: { readonly client: Pick<PluginClient, 'call' | 'subscribe'> | undefined }) {

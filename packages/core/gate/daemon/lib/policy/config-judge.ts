@@ -1,4 +1,5 @@
 import type { ConfigWriteJudgement } from '@ferretry/kernel/contract';
+import { proofClaimed } from '../../../contract/claimed-standings.ts';
 import { CAPABILITIES, isFerretCall } from '../../../contract/index.ts';
 
 /** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
@@ -15,8 +16,12 @@ const spent = new WeakSet<object>();
  *
  * The caller must be a person (an agent, a warden and a job never confirm), hold the `configure` grant of the file's
  * own capability and the fleet's `use` grant, and then either be at this machine (`governance.governed === false`:
- * the admin token that arrived on the host) or hold a step-up proved for the act, which this loosening spends (one
- * proof, one loosening). Anything undetermined (no standing, no grant standing, a missing spend) holds.
+ * the admin token that arrived on the host) or hold a step-up proved for the act, which this loosening CLAIMS at
+ * judge time (one proof, one act). The claim is atomic (Access's `claimFresh`), so the admission snapshot's
+ * `freshStepUp` is never read: of two requests admitted on ONE proof — whatever their acts — exactly one takes it.
+ * A standing whose proof an owner-only act (`claimOwnerOnly`) already claimed for THIS request is accepted without
+ * a second claim, once: that claim is the act's own, and its loosening write rides on it.
+ * Anything undetermined (no standing, no grant standing, a missing claim) holds.
  */
 export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hold' {
   if (input.actor === 'ferret' || input.actor === 'warden') return 'hold';
@@ -29,9 +34,8 @@ export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hol
   if (!governance.decide({ capability, axis: 'configure' }).allowed) return 'hold';
   if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
   if (!governance.governed) return 'apply';
-  if (spent.has(standing) || standing.presentation?.freshStepUp !== true || standing.spendFreshStepUp === undefined)
-    return 'hold';
+  if (spent.has(standing)) return 'hold';
+  if (!proofClaimed(standing.claimFreshStepUp) && standing.claimFreshStepUp?.() !== true) return 'hold';
   spent.add(standing);
-  standing.spendFreshStepUp();
   return 'apply';
 }

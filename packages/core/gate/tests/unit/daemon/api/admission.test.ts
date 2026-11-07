@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { type HolderId, type PolicyRef, type ScopedRoute } from '@ferretry/kernel/contract';
+import type { HolderId, PolicyRef, ScopedRoute } from '@ferretry/kernel/contract';
 import { addDuration, minutes } from '@ferretry/std';
 import {
   AUDIT_KINDS,

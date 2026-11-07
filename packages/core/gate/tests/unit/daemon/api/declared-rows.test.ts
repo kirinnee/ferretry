@@ -74,7 +74,7 @@ describe('download links', () => {
 });
 
 describe('narrowing', () => {
-  /** The 5.0 spelling of every route G128 names. */
+  /** The 5.0 spelling of every route G128a–G128i names (each is tested by the plugin that serves it). */
   const NARROWING_ROUTES = [
     'POST /v1/ferrets/:ferretId/task-plans/:planId/revoke', // plan revoke
     'POST /v1/sign-in-rules/:id/narrow', // sign-in rule narrow
@@ -87,7 +87,7 @@ describe('narrowing', () => {
     'PATCH /v1/pair/devices/:deviceId/grants', // device grants patch
   ] as const;
 
-  test('G128 every narrowing route is declared narrowing, so a governed device is not asked to step up again', async () => {
+  test('G127 every route G128a–G128i names is declared narrowing, so a governed device is not asked to step up again', async () => {
     const w = world({ policy: perAct });
     w.enrol('phone');
     for (const key of NARROWING_ROUTES) {
@@ -103,7 +103,7 @@ describe('narrowing', () => {
     }
   });
 
-  test('G128 a narrowing route still needs the grant: narrowing never asks again, it does not skip the operator', async () => {
+  test('G127 a narrowing route still needs the grant: narrowing never asks again, it does not skip the operator', async () => {
     const route = await declaredRoute('DELETE /v1/pair/devices/:deviceId');
     const w = world({ policy: { ...perAct, grants: { ...perAct.grants, pairing: { use: false, configure: false } } } });
     w.enrol('phone');

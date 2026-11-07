@@ -14,7 +14,7 @@ import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatu
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
 import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
-import { type BrowserActionResult, BrowserActionSchema } from './wire/browser.ts';
+import { type BrowserActionResult, BrowserActionSchema } from '../../contract/wire/browser.ts';
 
 /**
  * The per-session browser and the human sign-in window (today's `runtime/mounts/browser-login.ts`).

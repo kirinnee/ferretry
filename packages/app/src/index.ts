@@ -24,11 +24,7 @@ export {
   type ShellAppImplementation,
   type ShellProvides,
 } from './connect/provides.ts';
-export {
-  CONTROL_UNREACHABLE,
-  type DirectDial,
-  PairingOutcomeUnknownError,
-} from './connect/connector.ts';
+export { CONTROL_UNREACHABLE, type DirectDial, PairingOutcomeUnknownError } from './connect/connector.ts';
 export { daemonOfClient } from './connect/daemon-of.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
@@ -77,13 +73,21 @@ export {
 export { fillPath, HEALTH_ROUTE, INVENTORY_ROUTE, type ShellPluginClient } from './client/daemon-client.ts';
 export type { BlockReason, InventoryEntry, Standing } from './client/inventory.ts';
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
-export {
-  DaemonCallError,
-  type SocketListeners,
-  type TransportSocket,
-} from './client/transport.ts';
+export { DaemonCallError, type SocketListeners, type TransportSocket } from './client/transport.ts';
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
+
+// ─── a poll beside the event feed (today's feed-aware-poll) ───────────────────────────────────────────────────────
+export {
+  browserFeedAwarePollEnvironment,
+  FEED_EVENT_SETTLE_MS,
+  type FeedAwarePollEnvironment,
+  type FeedAwarePollOptions,
+  type LiveFeedSignal,
+  startFeedAwarePoll,
+  startVisiblePoll,
+  whileVisible,
+} from './poll/feed-aware-poll.ts';
 
 // ─── layout, slots, theme (§5.2, §5.3) ────────────────────────────────────────────────────────────────────────────
 export type { OwnerLayout } from './layout/daemon-layout.ts';

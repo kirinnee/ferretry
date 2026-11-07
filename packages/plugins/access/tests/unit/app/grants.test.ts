@@ -210,6 +210,17 @@ describe('grant vocabulary', () => {
     expect(originNote(entry({ origin: 'default' }))).toContain('default');
   });
 
+  it('G56 carries "revoke that device FIRST" on the pairing turn-off warning and on no other capability', () => {
+    expect(remoteRevokeWarning('pairing')).toContain('revoke that device FIRST');
+    for (const capability of CAPABILITY_NAMES.filter(name => name !== 'pairing'))
+      expect(remoteRevokeWarning(capability)).not.toContain('revoke that device FIRST');
+  });
+
+  it('G59 names `fy daemon config set secrets --use` in the secrets turn-off warning, and the client name it is given', () => {
+    expect(remoteRevokeWarning('secrets')).toContain('`fy daemon config set secrets --use`');
+    expect(remoteRevokeWarning('secrets', 'fyd')).toContain('`fyd daemon config set secrets --use`');
+  });
+
   it('says how a remote reader gets a switch back, and the order that avoids a lockout', () => {
     expect(remoteRevokeWarning('terminal')).toContain('fy daemon config set terminal --use');
     expect(remoteRevokeWarning('terminal', 'fyd')).toContain('fyd daemon config set terminal --use');

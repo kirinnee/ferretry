@@ -11,6 +11,7 @@ import {
   lessonsConfigFromFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { writeLessonsSettings } from './adapters/config-writer.ts';
 import { ConversationPassiveChannel } from './adapters/passive-channel.ts';
 import { LESSONS_MINER_NAME, FerretLessonSessions } from './adapters/ferret-sessions.ts';
 import { StateGlobalLessons, WorkRootLessonFiles } from './adapters/instruction-files.ts';
@@ -81,7 +82,8 @@ export default implementDaemon(manifest, {
       store,
       serial,
       config: async () => config(),
-      writeConfig: async (patch: LessonsConfigPatch) => await kernel.config.write(LESSONS_CONFIG, undefined, { patch }),
+      // The WHOLE settings in effect plus the owner's patch, so a broken file's other keys never ride into effect.
+      writeConfig: async (patch: LessonsConfigPatch) => await writeLessonsSettings(kernel.config, patch),
       configHeld: () => kernel.config.fileState(LESSONS_CONFIG).state === 'held',
       now,
       run: async (spawn: boolean) => await miner.run(spawn),

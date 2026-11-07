@@ -26,7 +26,11 @@ function hooks() {
   let follow: ((after: RuleListing) => Promise<void>) | undefined;
   const listeners: PasskeysChangedListener[] = [];
   return {
-    accounts: { followRulesWith: (next: (after: RuleListing) => Promise<void>) => void (follow = next) },
+    accounts: {
+      followRulesWith: (next: (after: RuleListing) => Promise<void>) => {
+        follow = next;
+      },
+    },
     passkeys: {
       subscribe: (listener: PasskeysChangedListener) => {
         listeners.push(listener);

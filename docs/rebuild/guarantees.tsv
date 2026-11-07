@@ -25,7 +25,7 @@ G23	kept	gate	-	behaviour as written	grants	G23
 G24	kept	ferrets	vault	behaviour as written	grants	G24
 G25	kept	gate	-	behaviour as written	grants	G25
 G26	kept	gate	-	`privilegedOnly`	grants	G26
-G27	kept	gate	-	behaviour as written	grants	G27
+G27	kept	browsers	gate	behaviour as written	grants	G27
 G28	kept	gate	-	behaviour as written	grants	G28
 G29	kept	terminals	-	attach proof	grants	G29
 G30	kept	terminals	gate	behaviour as written	grants	G30
@@ -54,10 +54,10 @@ G52	kept	access	gate	behaviour as written	grants	G52
 G53	kept	access	gate	relay-protocol §14	grants	G53
 G54	kept	access	gate	behaviour as written	grants	G54
 G55	kept	gate	-	behaviour as written	grants	G55
-G56	kept	gate	-	`COARSE_SWITCH_ALSO_STOPS` (`packages/pwa/src/lib/grants.ts`)	grants	G56
+G56	kept	access	gate	`COARSE_SWITCH_ALSO_STOPS` (`packages/pwa/src/lib/grants.ts`)	grants	G56
 G57	kept	kernel	-	behaviour as written	grants	G57
 G58	kept	gate	-	behaviour as written	grants	G58
-G59	kept	gate	-	behaviour as written	grants	G59
+G59	kept	access	gate	behaviour as written	grants	G59
 G60	kept	gate	-	behaviour as written	grants	G60
 G61	kept	gate	-	behaviour as written	grants	G61
 G62	kept	gate	-	behaviour as written	grants	G62
@@ -93,7 +93,7 @@ G91	kept	gate	access	behaviour as written	grants	G91
 G92	kept	gate	access	behaviour as written	grants	G92
 G93	kept	gate	access	behaviour as written	grants	G93
 G94	kept	gate	access	behaviour as written	grants	G94
-G95	kept	gate	access	behaviour as written	grants	G95
+G95	kept	access	gate	behaviour as written	grants	G95
 G96	kept	gate	access	behaviour as written	grants	G96
 G97	kept	gate	access	`stepUpWindowMinutes`	grants	G97
 G98	kept	gate	access	`demandNeedsStepUp`	grants	G98
@@ -126,7 +126,15 @@ G124	kept	gate	-	`mayGrant`	grants	G124
 G125	kept	gate	-	behaviour as written	grants	G125
 G126	kept	gate	-	behaviour as written	grants	G126
 G127	kept	gate	-	`narrowing: true` (`api/capability.ts`)	grants	G127
-G128	kept	gate	-	behaviour as written	grants	G128
+G128a	kept	accounts	gate	behaviour as written	grants	G128a
+G128b	kept	accounts	gate	behaviour as written	grants	G128b
+G128c	kept	accounts	gate	behaviour as written	grants	G128c
+G128d	kept	accounts	gate	behaviour as written	grants	G128d
+G128e	kept	accounts	gate	behaviour as written	grants	G128e
+G128f	kept	accounts	gate	behaviour as written	grants	G128f
+G128g	kept	accounts	gate	behaviour as written	grants	G128g
+G128h	kept	access	gate	behaviour as written	grants	G128h
+G128i	kept	access	gate	behaviour as written	grants	G128i
 G129	kept	gate	-	behaviour as written	grants	G129
 G130	kept	gate	-	behaviour as written	grants	G130
 G131	kept	gate	-	behaviour as written	grants	G131

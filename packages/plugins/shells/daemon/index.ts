@@ -2,7 +2,6 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { LaunchPartSource } from '@ferretry/core-ferrets/contract';
 import manifest from '../manifest.ts';
 import { nixTool } from './adapters/nix.ts';
-import { configDoorOf } from './lib/config-door.ts';
 import { shellsRoutes } from './lib/routes.ts';
 import { createShellsService } from './lib/service.ts';
 
@@ -14,7 +13,6 @@ export default implementDaemon(manifest, {
   build: ({ kernel }) => {
     const service = createShellsService({
       config: kernel.config,
-      door: configDoorOf(kernel.config),
       state: kernel.state,
       nix: nixTool(kernel.spawn),
       clock: kernel.clock,
