@@ -84,6 +84,8 @@ export function createActRunner(holds: () => InputHolds | undefined, minted: Min
       let decision: HoldDecision;
       if (bound === undefined) return err({ refused: 'holds_unavailable' });
       try {
+        // The fresh read, then the decision with NO await between them: nothing can change the target in the gap.
+        if (bound.prepare !== undefined) await bound.prepare(target, runtimeOp, actor);
         decision = bound.decide(target, runtimeOp, actor);
       } catch {
         return err({ refused: 'holds_unavailable' });
@@ -96,8 +98,15 @@ export function createActRunner(holds: () => InputHolds | undefined, minted: Min
         return err({ refused });
       }
       const raw: unknown = await fn(Object.freeze({ answer: decision, actor }));
-      if (!showsSomething(runtimeOp)) return ok(closeAck(raw, minted) as ResultOf<O>);
-      return ok(raw as ResultOf<O>);
+      const result = showsSomething(runtimeOp) ? raw : closeAck(raw, minted);
+      if (showsSomething(runtimeOp) || (result as { status: string }).status === 'done') {
+        try {
+          bound.observed?.(target, runtimeOp, actor);
+        } catch {
+          // the act already happened; a failing observer cannot undo it or fail the caller
+        }
+      }
+      return ok(result as ResultOf<O>);
     });
   };
   return runner as ActRunner;

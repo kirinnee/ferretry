@@ -1,5 +1,5 @@
 /** Reading a ferret's conversation: transcript pages, logs, search inside one, images (today's `session-transcript.ts`). */
-import { InstantSchema } from '@ferretry/std';
+import { InstantSchema, JsonValueSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
@@ -24,6 +24,77 @@ export const TranscriptPageSchema = z.strictObject({
   previousCursor: z.string().min(1).nullable().optional(),
 });
 export type TranscriptPage = z.infer<typeof TranscriptPageSchema>;
+
+const EventRoleSchema = z.enum(['user', 'assistant', 'developer', 'system', 'tool']);
+
+/**
+ * One event of a ferret's transcript tail, in the order the harness wrote it: a message, a tool call the ferret made, or
+ * the result that came back. This is the tail a CHECK reads (what a turn did: a PR it opened, a command it ran), where
+ * `TranscriptMessageSchema` is the page a person reads (messages only, each bound to a cursor token). Every string in it,
+ * a tool call's input and a tool result's content included, has been through the read-scoped redaction.
+ */
+export const TranscriptEventSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('message'),
+    role: EventRoleSchema,
+    text: z.string(),
+    timestamp: InstantSchema.optional(),
+    /** `harness` is text the harness wrote into the user channel itself: never something the owner said. */
+    inputSource: z.enum(['native-queue', 'harness']).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('tool-call'),
+    role: EventRoleSchema,
+    timestamp: InstantSchema.optional(),
+    call: z.strictObject({ id: z.string().min(1), name: z.string().min(1), input: JsonValueSchema }),
+  }),
+  z.strictObject({
+    kind: z.literal('tool-result'),
+    role: EventRoleSchema,
+    timestamp: InstantSchema.optional(),
+    result: z.strictObject({
+      callId: z.string().min(1),
+      content: JsonValueSchema,
+      text: z.string().optional(),
+      isError: z.boolean(),
+    }),
+  }),
+]);
+export type TranscriptEvent = z.infer<typeof TranscriptEventSchema>;
+
+/** The newest events of a ferret's transcript, oldest first (`ConversationApi.transcriptEvents`). */
+export const TranscriptEventTailSchema = z.strictObject({
+  v: z.literal(1),
+  ferret: FerretIdSchema,
+  events: z.array(TranscriptEventSchema).readonly(),
+});
+export type TranscriptEventTail = z.infer<typeof TranscriptEventTailSchema>;
+
+export interface TranscriptEventsOptions {
+  /** How many of the newest events; the transcript's own bound when absent. */
+  readonly limit?: number;
+}
+
+/**
+ * What the owner said to a ferret: every message of theirs, from the queue, the send ledger and the turn documents
+ * (`ConversationApi.ownerWords`). A message with a recorded author is the owner's only when that record says so; one
+ * with none is the owner's less any paragraph that is Ferretry's own notice.
+ */
+export const OwnerWordsSchema = z.strictObject({
+  v: z.literal(1),
+  ferret: FerretIdSchema,
+  words: z.array(z.string()).readonly(),
+});
+export type OwnerWords = z.infer<typeof OwnerWordsSchema>;
+
+export interface OwnerWordsOptions {
+  /**
+   * Refuse rather than guess. A best-effort read answers with whatever it could read; a strict one fails when any record
+   * could not be read or was damaged, so a caller deciding something permanent never takes "nobody spoke" for "nothing
+   * could be read".
+   */
+  readonly strict?: boolean;
+}
 
 /** Log pages are whole records meeting at `start`; a stale file token is `409 log_cursor_stale` (R266, kept half). */
 export const LogPageSchema = z.strictObject({

@@ -47,6 +47,8 @@ import {
   AsksLaneProposals,
 } from './adapters/lanes/index.ts';
 import { ConversationMessages } from './adapters/messages.ts';
+import { ConversationOwnerWords } from './adapters/owner-words.ts';
+import { BoardWorkSource } from './adapters/work-source.ts';
 import { KernelFerretFocus } from './adapters/store/focus-store.ts';
 import { KernelCardStore } from './adapters/store/card-store.ts';
 import { KernelSweepMemory } from './adapters/store/sweep-memory.ts';
@@ -124,6 +126,8 @@ export interface BoardWiringNeeds {
 /** Everything the plugin assembles, so `index.ts` stays a table of what is provided. */
 export interface BoardWorld {
   readonly service: BoardService;
+  /** Board's cards as work, for Conversation's `search.sources`: `fy search` and `search_work` find them. */
+  readonly workSource: BoardWorkSource;
   readonly lanes: LaneSetService;
   readonly switches: BoardSwitchService;
   readonly gates: GateItems;
@@ -284,6 +288,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     adoption: { adopt: async (ferret, proposed) => await adoption.adopt(ferret, proposed) },
     helpers,
     optIn,
+    // What the owner said to a ferret, read through Conversation (strict for a ferret's private choice, F-0001).
+    ownerWords: new ConversationOwnerWords(needs.conversation),
     threads: new AsksThreads(asks),
     gates: { written: async id => await gateItems?.written(id) },
     moving: needs.moving,
@@ -605,6 +611,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
 
   return {
     service,
+    workSource: new BoardWorkSource(service),
     lanes,
     switches,
     gates,

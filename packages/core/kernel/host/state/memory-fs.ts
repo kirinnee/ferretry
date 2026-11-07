@@ -49,6 +49,12 @@ export function createMemoryHostFs(clock: () => number = () => 0): MemoryHostFs 
     async readBytes(path) {
       return files.get(path)?.bytes.slice();
     },
+    async readTail(path, maxBytes) {
+      const entry = files.get(path);
+      if (entry === undefined) return undefined;
+      const from = Math.max(0, entry.bytes.byteLength - maxBytes);
+      return { bytes: entry.bytes.slice(from), from };
+    },
     async info(path): Promise<HostFileInfo | undefined> {
       const entry = files.get(path);
       if (entry !== undefined)
@@ -98,6 +104,17 @@ export function createMemoryHostFs(clock: () => number = () => 0): MemoryHostFs 
     },
     async ensureDirectory(path, mode) {
       if (!directories.has(path)) directories.set(path, mode);
+    },
+    async createPrivateDirectory(path) {
+      if (files.has(path) || isDirectory(path)) throw new Error('directory entry already exists');
+      directories.set(path, 0o700);
+    },
+    async removeEmptyDirectory(path) {
+      if (files.has(path)) throw new Error('not a directory');
+      const prefix = `${path}/`;
+      if ([...files.keys(), ...directories.keys()].some(key => key.startsWith(prefix)))
+        throw new Error('directory is not empty');
+      directories.delete(path);
     },
     async remove(path) {
       files.delete(path);

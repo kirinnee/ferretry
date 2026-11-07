@@ -1,14 +1,20 @@
 import type { Manifest } from '../manifest/types.ts';
 import { systemClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
-import { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
+import { homedir, hostname } from 'node:os';
+import { platformRootPinner } from './adapters/pinned/index.ts';
+import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
+import { scratchPort } from './scratch.ts';
+import { nodeHostFacts } from './adapters/host-facts.ts';
+import { NodeGzip } from './adapters/node-gzip.ts';
+import { updateHostFor } from './adapters/update-host.ts';
 import { createConfigFiles } from './config/index.ts';
-import { acquireHomeLock } from './state/home-lock.ts';
-import type { HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
+import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import {
   createNodeHostFs,
   createStatePort,
+  acquireHomeLock,
   type HostFs as StateFs,
   moveStateAside,
   openPluginState,
@@ -98,10 +104,23 @@ export function stateOpener(
 }
 
 export function configService(home: string, fs: StateFs, clock: Clock, log: Log, binary: string) {
-  return (declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[]): HostConfig => {
-    const service = createConfigFiles({ home, defs: declarations, fs, clock, log, binary });
+  return (
+    declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
+    judge?: ConfigJudge,
+  ): HostConfig => {
+    const service = createConfigFiles({
+      home,
+      defs: declarations,
+      fs,
+      clock,
+      log,
+      binary,
+      ...(judge === undefined ? {} : { judge }),
+    });
     return {
       port: plugin => service.port(plugin),
+      secretReferences: plugin => service.secretReferences(plugin),
+      writer: () => service.writer(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
     };
@@ -112,7 +131,12 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
 export function realAdapters(
   home: string,
   logSink: LogSink,
-  options: { readonly binary: string; readonly childEnv?: Readonly<Record<string, string>> },
+  options: {
+    readonly binary: string;
+    readonly childEnv?: Readonly<Record<string, string>>;
+    /** The release this build carries, for `kernel.updateHost`; absent, no plugin can launch an update. */
+    readonly release?: string;
+  },
 ): HostAdapters {
   const clock = systemClock();
   const log = scopedLog(logSink, 'kernel');
@@ -127,6 +151,16 @@ export function realAdapters(
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
+    websocket: bunWebSockets(),
+    hostname: () => hostname(),
+    ownerHome: () => homedir(),
+    pinner: platformRootPinner(),
+    scratch: scratchPort(),
+    hostFacts: nodeHostFacts(),
+    compressor: new NodeGzip(),
+    ...(options.release === undefined
+      ? {}
+      : { updateHost: updateHostFor({ home, binary: options.binary, release: options.release }) }),
     homeLock: async lockedHome => await acquireHomeLock({ home: lockedHome, binary: options.binary }),
   };
 }

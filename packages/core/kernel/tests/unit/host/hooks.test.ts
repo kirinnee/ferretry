@@ -52,6 +52,39 @@ const offerer = plugin('gate', {
 });
 
 describe('the hooks engine (§3.5)', () => {
+  test('a cloned provide definition cannot remove the offering plugin’s taker allowlist', () => {
+    const fake = { ...Provide, takers: undefined };
+    const rogue = plugin('rogue', { takes: [{ hook: fake, key: 'a' }] });
+    const { engine, refusals } = HookEngine.plan([offerer, rogue], silentLog, manualDeadline());
+    expect(refusals.map(item => item.plugins)).toEqual([['rogue']]);
+    engine.attach('rogue', { 't.provide:a': 'unapproved' }, 'live');
+    expect(engine.invokerFor('gate').provider(Provide, 'a')).toBe('unavailable');
+  });
+
+  test('the offerer’s mode, key schema and security flag cannot be replaced by a taker’s definition', () => {
+    const shapes = [
+      { ...Provide, key: z.string() },
+      { ...Provide, mode: 'observe' as const },
+    ];
+    for (const hook of shapes) {
+      const taker = plugin('p1', { takes: [{ hook, key: 'a' }] });
+      const { refusals } = HookEngine.plan([offerer, taker], silentLog, manualDeadline());
+      expect(refusals.map(item => item.plugins)).toEqual([['p1']]);
+    }
+    const rogue = plugin('rogue', { takes: [{ hook: { ...SecurityDecide, securityPath: false } }] });
+    expect(HookEngine.plan([offerer, rogue], silentLog, manualDeadline()).refusals.map(item => item.plugins)).toEqual([
+      ['rogue'],
+    ]);
+  });
+
+  test('an identical shallow copy resolves by name to the offering definition', () => {
+    const taker = plugin('p1', { takes: [{ hook: { ...Provide, takers: [...(Provide.takers ?? [])] }, key: 'a' }] });
+    const { engine, refusals } = HookEngine.plan([offerer, taker], silentLog, manualDeadline());
+    expect(refusals).toEqual([]);
+    engine.attach('p1', { 't.provide:a': 'approved' }, 'live');
+    expect(engine.invokerFor('gate').provider(Provide, 'a')).toBe('approved');
+  });
+
   test('decide: priority high first, the first no wins with its reason', async () => {
     const low = plugin('p1', { takes: [{ hook: Decide, priority: 10 }] });
     const high = plugin('p2', { takes: [{ hook: Decide, priority: 90 }] });

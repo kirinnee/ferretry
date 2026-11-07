@@ -3,7 +3,7 @@
  * the edges `needs` and taken hooks make, the order they give, and every way the graph can be wrong
  * (`plugin-graph`, `core-closed`). Pure over loaded manifests; no subsystem is named.
  */
-import { CORE_IDS, KERNEL_BOUND_PORTS } from '../../../packages/core/kernel/contract/index.ts';
+import { CORE_IDS, KERNEL_BOUND_PORTS, KERNEL_ONLY_PORTS } from '../../../packages/core/kernel/contract/index.ts';
 import type { HookDef, PortToken } from '../../../packages/core/kernel/contract/index.ts';
 import type { Manifest } from '../../../packages/core/kernel/manifest/index.ts';
 import type { LoadedSubsystem } from './workspace.ts';
@@ -152,6 +152,15 @@ export function pluginGraphFindings(graph: StartGraph): Finding[] {
     for (const offer of manifest.hooks?.offers ?? [])
       if (offer.hook.mode === 'decide' && offer.hook.securityPath && !isCore(id))
         findings.push({ check, where: id, message: `offers security-path hook "${offer.hook.name}"; only core may` });
+    // A port only the kernel binds (the ChildEnvironment opener) is never a half's need or use (lead decision 8).
+    for (const token of [...Object.values(manifest.needs ?? {}), ...Object.values(manifest.uses ?? {})])
+      if (KERNEL_ONLY_PORTS.includes(token.name))
+        findings.push({ check, where: id, message: `asks for "${token.name}", which only the kernel may hold` });
+    // A wildcard reach (Vault's `${secret}` run of an owner command, its authorized fetch) is core's alone.
+    if (manifest.core !== true)
+      for (const field of ['spawn', 'network'] as const)
+        if ((manifest.permissions?.[field] ?? []).some(entry => entry === '*'))
+          findings.push({ check, where: id, message: `declares permissions.${field} '*'; only a core piece may` });
     for (const token of Object.values(manifest.provides ?? {}))
       if (token.boundBy !== undefined && token.boundBy !== id)
         findings.push({

@@ -13,6 +13,7 @@ import {
   rename,
   rm,
   rmdir,
+  symlink,
   unlink,
 } from 'node:fs/promises';
 import { userInfo } from 'node:os';
@@ -37,10 +38,15 @@ export interface FileIdentity {
 }
 
 /** A file opened once to read (`O_NOFOLLOW | O_NONBLOCK`): what it is, and the reads that use THIS descriptor. */
-interface OpenedFile {
+export interface OpenedFile {
   readonly identity: FileIdentity;
   /** At most `limit` bytes from the start, read through this descriptor. */
   read(limit?: number): Promise<Uint8Array>;
+  /**
+   * `length` bytes from `offset` (`offset` < 0 counts back from the end) and the file's size, through this
+   * descriptor.
+   */
+  readWindow(offset: number, length: number): Promise<{ readonly bytes: Uint8Array; readonly size: number }>;
   close(): Promise<void>;
 }
 
@@ -49,16 +55,24 @@ export interface OpenedDirectory {
   readonly identity: FileIdentity;
   /** A path that reaches `leaf` in this open folder (Linux `/proc/self/fd/N/leaf`), or `undefined` where there is none. */
   entryPath(leaf: string): string | undefined;
+  /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
+  chmod(mode: number): Promise<void>;
   close(): Promise<void>;
 }
 
 /** The kernel's filesystem seam: the only place `node:fs` is used by the host (§7.7 `banned-globals`). */
 export interface HostFs {
   realpath(path: string): Promise<string>;
-  lstat(
-    path: string,
-  ): Promise<
-    | { readonly kind: 'file' | 'directory' | 'link' | 'other'; readonly size: number; readonly mtimeMs: number }
+  lstat(path: string): Promise<
+    | {
+        readonly kind: 'file' | 'directory' | 'link' | 'other';
+        readonly size: number;
+        readonly mtimeMs: number;
+        /** Hard links to the object; a file with more than one may be a file from anywhere and is never copied. */
+        readonly links?: number;
+        /** POSIX permission bits. */
+        readonly mode?: number;
+      }
     | undefined
   >;
   /** The entry itself (`lstat`), never followed; `undefined` when nothing is there. */
@@ -67,10 +81,15 @@ export interface HostFs {
   openRead(path: string): Promise<OpenedFile>;
   /** Opens a folder without following a link at the last step. */
   openDirectory(path: string): Promise<OpenedDirectory>;
-  /** Creates a NEW file (`O_EXCL | O_NOFOLLOW | O_NONBLOCK`), writes `data`, syncs it; answers what was created. */
+  /**
+   * Creates a NEW file (`O_EXCL | O_NOFOLLOW | O_NONBLOCK`) with exactly `mode` (not filtered by the umask), writes
+   * `data`, syncs it; answers what was created.
+   */
   writeNew(path: string, data: string | Uint8Array, mode: number): Promise<FileIdentity>;
   /** Makes ONE folder (no parents). */
   mkdir(path: string, mode: number): Promise<void>;
+  /** A link at `path` whose text is `target`; refused when anything is already there. */
+  symlink(target: string, path: string): Promise<void>;
   readlink(path: string): Promise<string>;
   unlink(path: string): Promise<void>;
   rmdir(path: string): Promise<void>;
@@ -198,7 +217,7 @@ export function nodeFs(
             : info.isFile()
               ? 'file'
               : 'other';
-        return { kind, size: info.size, mtimeMs: info.mtimeMs };
+        return { kind, size: info.size, mtimeMs: info.mtimeMs, links: info.nlink, mode: info.mode & 0o7777 };
       } catch (error) {
         if (isMissing(error)) return undefined;
         throw error;
@@ -214,7 +233,19 @@ export function nodeFs(
     },
     openRead: async path => {
       const [handle, identity] = await opened(path, READ_FILE);
-      return { identity, read: async limit => await readAll(handle, limit), close: async () => await handle.close() };
+      return {
+        identity,
+        read: async limit => await readAll(handle, limit),
+        readWindow: async (offset, length) => {
+          const size = Number((await handle.stat({ bigint: true })).size);
+          const from = offset < 0 ? Math.max(0, size + offset) : offset;
+          const buffer = new Uint8Array(Math.max(0, Math.min(length, size - from)));
+          const { bytesRead } =
+            buffer.length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, buffer.length, from);
+          return { bytes: buffer.subarray(0, bytesRead), size };
+        },
+        close: async () => await handle.close(),
+      };
     },
     openDirectory: async path => {
       const reached = await throughDescriptors();
@@ -222,12 +253,15 @@ export function nodeFs(
       return {
         identity,
         entryPath: leaf => (reached ? `${descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined),
+        chmod: async mode => await handle.chmod(mode),
         close: async () => await handle.close(),
       };
     },
     writeNew: async (path, data, mode) => {
       const [handle, identity] = await opened(path, NEW_FILE, mode);
       try {
+        // exactly the asked bits: the mode `open` was given is filtered by the umask
+        await handle.chmod(mode);
         await handle.writeFile(data);
         await handle.sync();
       } finally {
@@ -248,12 +282,17 @@ export function nodeFs(
       const temp = `${path}.${randomSuffix()}.tmp`;
       const handle = await open(temp, 'wx', mode);
       try {
+        // exactly the asked bits: the mode `open` was given is filtered by the umask
+        await handle.chmod(mode);
         await handle.writeFile(data);
         await handle.sync();
       } finally {
         await handle.close();
       }
       await rename(temp, path);
+    },
+    symlink: async (target, path) => {
+      await symlink(target, path);
     },
     list: async path => {
       try {

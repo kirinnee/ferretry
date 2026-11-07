@@ -8,6 +8,7 @@ import { jsonResponse } from '../../../contract/http.ts';
 import type { CarrierKey, HolderId } from '../../../contract/ids.ts';
 import type {
   CarrierLink,
+  CarrierConnection,
   CarrierPeer,
   HolderWatch,
   ModeProof,
@@ -36,6 +37,7 @@ import {
   openRecord,
   SESSION_PROTOCOL_ID,
   type SessionFrame,
+  type SessionCrypto,
   type SessionId,
   type SessionLayerHost,
   sealRecord,
@@ -63,6 +65,11 @@ class FakeClock {
     const id = this.#next++;
     this.#timers.set(id, { at: this.#now + delay, fn });
     return () => this.#timers.delete(id);
+  }
+
+  /** Moves the clock WITHOUT firing anything: a timer that fires late (R245). */
+  skew(ms: number): void {
+    this.#now += ms;
   }
 
   advance(ms: number): void {
@@ -134,7 +141,7 @@ export interface Fixture {
   modesOff: Set<string>;
 }
 
-export async function fixture(options: { lease?: AccessLeasePolicy } = {}): Promise<Fixture> {
+export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto } = {}): Promise<Fixture> {
   const identity = await newDaemonIdentity();
   const clock = new FakeClock();
   const device = new FakeDeviceMode();
@@ -163,7 +170,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy } = {}): Prom
     modesOff: new Set(),
   };
   const layer = createSessionLayer({
-    crypto: relayCrypto,
+    crypto: options.crypto ?? relayCrypto,
     identity,
     modes: key => {
       if (state.modesOff.has(key)) return undefined;
@@ -226,6 +233,11 @@ export class TestClient {
 
   static open(fx: Fixture, carrier = 'relay', peer?: CarrierPeer): TestClient {
     return new TestClient(fx.layer.open(carrier as CarrierKey, peer), freshSessionId());
+  }
+
+  /** A session on a shared connection (one rendezvous socket carrying many sessions). */
+  static on(connection: CarrierConnection, peer?: CarrierPeer): TestClient {
+    return new TestClient(connection.open(peer), freshSessionId());
   }
 
   /** hs1 → hs2, keyed. */

@@ -10,7 +10,12 @@ import type {
 } from '@ferretry/kernel/contract';
 import { WARDEN_JEV_CHECKS, WARDEN_REMEMBERED, WARDEN_REPORTS, WARDEN_STATE } from '../../contract/index.ts';
 
-export const WARDEN_STATE_FILES: readonly StateFileDef[] = [WARDEN_STATE, WARDEN_REPORTS, WARDEN_JEV_CHECKS, WARDEN_REMEMBERED];
+export const WARDEN_STATE_FILES: readonly StateFileDef[] = [
+  WARDEN_STATE,
+  WARDEN_REPORTS,
+  WARDEN_JEV_CHECKS,
+  WARDEN_REMEMBERED,
+];
 
 /**
  * A state port for the warden's files: json files through the kernel's in-memory folder (its format and damage rules),
@@ -36,7 +41,10 @@ export function wardenState(folder = new MemoryStateFolder()): StatePort & { rea
     list: async (file: StateFileDef) => {
       if (!isOpaque(file)) return await json.list(file);
       const prefix = file.path.replace('*', '');
-      return [...opaque.keys()].filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length)).sort();
+      return [...opaque.keys()]
+        .filter(path => path.startsWith(prefix))
+        .map(path => path.slice(prefix.length))
+        .sort();
     },
     remove: async (file: StateFileDef, name?: string) => {
       if (!isOpaque(file)) return await json.remove(file, name);
@@ -49,7 +57,7 @@ export function wardenState(folder = new MemoryStateFolder()): StatePort & { rea
 export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(value: unknown): void } {
   let current = initial;
   const listeners = new Set<() => void>();
-  return {
+  const port: Omit<ConfigPort, 'fileState' | 'write' | 'remove'> & { set(value: unknown): void } = {
     file: (_def: ConfigFileDef<unknown>) => current as never,
     collection: (_def: ConfigCollectionDef<unknown>) => new Map() as never,
     watch: (_def, listener): Cancel => {
@@ -61,6 +69,8 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
       for (const listener of listeners) listener();
     },
   };
+  // Reads only: a test that needs the write door adds `write` and `remove` itself.
+  return port as ConfigPort & { set(value: unknown): void };
 }
 
 export interface FakeKernel {
@@ -87,7 +97,9 @@ export function fakeKernel(options: { readonly config?: ConfigPort; readonly sta
     log,
     state: wardenState(),
     config: options.config ?? wardenConfig(),
-    events: { publish: (event: { name: string }, payload: unknown) => void published.push({ event: event.name, payload }) },
+    events: {
+      publish: (event: { name: string }, payload: unknown) => void published.push({ event: event.name, payload }),
+    },
     redaction: { read: async (fn: (scope: { text(s: string): string }) => unknown) => await fn({ text: s => s }) },
     jobs: { add: () => undefined, kick: () => undefined },
     lifecycle: { onStop: () => undefined, stopping: () => false, signal: new AbortController().signal },

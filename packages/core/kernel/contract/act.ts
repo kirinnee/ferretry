@@ -159,6 +159,10 @@ export type TargetKind = Brand<string, 'TargetKind'>;
 /** One thing a tool acts on: a terminal pane, a browser page. */
 export interface TargetRef {
   readonly kind: TargetKind;
+  /**
+   * For kind 'terminal' the key is the pane id (Terminals' runner handle, e.g. '%7'), the same key Vault's holds
+   * use; for 'page' it is the browser page id.
+   */
   readonly key: string;
 }
 
