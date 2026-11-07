@@ -46,8 +46,8 @@ H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before
 2. Note how Ferretry is installed here (Homebrew, nix profile, home-manager/nix-darwin, deb/rpm, standalone binary):
    `fy daemon update --check` names it. You need it in step 7 and for a rollback.
 3. Get the v5 repository at the release you will install, in a folder **outside** `H`:
-   `git clone --branch v5.0.0 https://github.com/kirinnee/ferretry ~/ferretry-v5-src` (or `git fetch && git checkout
-   v5.0.0` in an existing clone). Check the converter is there: `ls ~/ferretry-v5-src/migration/v4-to-v5/README.md`.
+   `git clone --branch v5.0.0 https://github.com/kirinnee/ferretry ~/ferretry-v5-src`, or in an existing clone
+   `git fetch && git checkout v5.0.0`. Check the converter is there: `ls ~/ferretry-v5-src/migration/v4-to-v5/README.md`.
    If it is not, this machine is already past the window in which the converter exists: stop and tell the owner.
 4. Check free space: the new home needs about as much as `du -sh "$H"` reports, on **the same filesystem** as `H`
    (`df -h "$(dirname "$H")"`).
@@ -113,25 +113,25 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
 
 Tell the owner this list before starting v5, and say which items the summary showed as converted.
 
-| Item | Kept? | How |
-| --- | --- | --- |
-| Every ferret, live and archived: id, name, lineage (parent/child, pack), project, runtime, history | **Kept** | converted into Ferrets |
-| Running ferrets | **Kept, same pane** | v5 attaches to each live tmux pane by its handle (no new window, no lost turn). A ferret whose pane is gone is resumed from its harness conversation id. Whether an attached harness is also restarted in place (with resume) at its next idle turn, so its hooks and tools are v5, is decision M3 in [v4-formats.md](v4-formats.md) |
-| Harness conversations (Claude Code / Codex transcripts, for resume) | **Kept** | moved whole, never parsed |
-| Message queue, shared drafts, pins, sitrep, attachments, renders | **Kept** | converted into Conversation |
-| Board: cards, lanes, links, dependencies, history; projects | **Kept** | converted |
-| Agenda: asks, answers, notices | **Kept** | converted into Asks and Agenda |
-| Lessons, usage history and budgets, warden history and settings | **Kept** | converted |
-| Catalogs and shares (published catalogs, links, members, installs) | **Kept** | converted; link keys moved sealed |
-| Settings, layouts, runtimes, profiles, logins | **Kept** | YAML split per v5 owner |
-| Harness sign-ins | **Kept** | the sign-in folders move whole; never read |
-| Secrets | **Kept** | the sealed vault and its key move byte for byte; no value is ever opened |
-| Paired phones and browsers, passkeys, unlock settings, push | **Kept** | the daemon identity, device public keys, grants, passkey ids and push keys move as they are |
-| Admin and warden tokens | **New** | re-minted by v5 at first start; `fy` reads the new one by itself |
-| Pairing codes | **Not kept** | single-use, two minutes long |
-| Live unlocks | **Not kept** | each device unlocks again with its passkey, once |
-| In-flight input holds | **Not kept** | a hold mid-delivery is closed and its pane quarantined, as at any restart |
-| Caches (session index, analytics, search) | **Rebuilt** | v5 rebuilds them from the kept files |
+| Item                                                                                               | Kept?               | How                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Every ferret, live and archived: id, name, lineage (parent/child, pack), project, runtime, history | **Kept**            | converted into Ferrets                                                                                                                                                                                                                                                                                                               |
+| Running ferrets                                                                                    | **Kept, same pane** | v5 attaches to each live tmux pane by its handle (no new window, no lost turn). A ferret whose pane is gone is resumed from its harness conversation id. Whether an attached harness is also restarted in place (with resume) at its next idle turn, so its hooks and tools are v5, is decision M3 in [v4-formats.md](v4-formats.md) |
+| Harness conversations (Claude Code / Codex transcripts, for resume)                                | **Kept**            | moved whole, never parsed                                                                                                                                                                                                                                                                                                            |
+| Message queue, shared drafts, pins, sitrep, attachments, renders                                   | **Kept**            | converted into Conversation                                                                                                                                                                                                                                                                                                          |
+| Board: cards, lanes, links, dependencies, history; projects                                        | **Kept**            | converted                                                                                                                                                                                                                                                                                                                            |
+| Agenda: asks, answers, notices                                                                     | **Kept**            | converted into Asks and Agenda                                                                                                                                                                                                                                                                                                       |
+| Lessons, usage history and budgets, warden history and settings                                    | **Kept**            | converted                                                                                                                                                                                                                                                                                                                            |
+| Catalogs and shares (published catalogs, links, members, installs)                                 | **Kept**            | converted; link keys moved sealed                                                                                                                                                                                                                                                                                                    |
+| Settings, layouts, runtimes, profiles, logins                                                      | **Kept**            | YAML split per v5 owner                                                                                                                                                                                                                                                                                                              |
+| Harness sign-ins                                                                                   | **Kept**            | the sign-in folders move whole; never read                                                                                                                                                                                                                                                                                           |
+| Secrets                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no value is ever opened                                                                                                                                                                                                                                                             |
+| Paired phones and browsers, passkeys, unlock settings, push                                        | **Kept**            | the daemon identity, device public keys, grants, passkey ids and push keys move as they are                                                                                                                                                                                                                                          |
+| Admin and warden tokens                                                                            | **New**             | re-minted by v5 at first start; `fy` reads the new one by itself                                                                                                                                                                                                                                                                     |
+| Pairing codes                                                                                      | **Not kept**        | single-use, two minutes long                                                                                                                                                                                                                                                                                                         |
+| Live unlocks                                                                                       | **Not kept**        | each device unlocks again with its passkey, once                                                                                                                                                                                                                                                                                     |
+| In-flight input holds                                                                              | **Not kept**        | a hold mid-delivery is closed and its pane quarantined, as at any restart                                                                                                                                                                                                                                                            |
+| Caches (session index, analytics, search)                                                          | **Rebuilt**         | v5 rebuilds them from the kept files                                                                                                                                                                                                                                                                                                 |
 
 ## 7. Start v5
 
@@ -179,6 +179,6 @@ Then reinstall 4.291.5 the way this machine installs Ferretry ([updating.md](../
   fences every `<home>-before-*` folder and never reads it. It holds the old vault, key and sign-ins, so it stays `0700`.
 - Report to the owner: the converter's summary, the §8 results, and where the backup and the report are.
 - Do not delete `~/ferretry-v5-src` until the owner says this machine is done.
-- **When all three machines are on v5**, the converter is deleted from the repository (`git rm -r migration/v4-to-v5
-  scripts/validate/migration-isolated.sh` and its wiring), together with this prompt's reference to it. Say so to the
+- **When all three machines are on v5**, the converter is deleted from the repository (`git rm -r migration/v4-to-v5 scripts/validate/migration-isolated.sh`
+  and its wiring), together with this prompt's reference to it. Say so to the
   owner when you report the last machine.
