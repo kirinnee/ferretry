@@ -232,20 +232,30 @@ describe('the Warden half, bound to the shell', () => {
 });
 
 describe('what the Warden reads of other plugins', () => {
+  const grantRow = (capability: string, use: boolean, useRefusal: string) => ({
+    capability,
+    use,
+    configure: true,
+    granted: { use, configure: true },
+    useRefusal,
+    configureRefusal: 'granted',
+    mayGrant: false,
+    origin: 'default',
+  });
+
   it('reads whether warden.use is open from the grants, and nothing else of them', async () => {
     const client = fakeClient({
       'GET /v1/grants': {
-        capabilities: [
-          { capability: 'warden', use: false, useRefusal: 'not-granted', configure: true, configureRefusal: 'granted' },
-          { capability: 'fleet', use: true },
-        ],
+        capabilities: [grantRow('warden', false, 'not-granted'), grantRow('fleet', true, 'granted')],
         governed: true,
+        hostLocal: false,
+        steppedUp: false,
       },
     });
     expect(await readGrants(client)).toEqual({
       capabilities: [
         { capability: 'warden', use: false, useRefusal: 'not-granted' },
-        { capability: 'fleet', use: true },
+        { capability: 'fleet', use: true, useRefusal: 'granted' },
       ],
     });
   });
@@ -255,7 +265,13 @@ describe('the ferrets of a paired daemon', () => {
   const row = (id: string, extra: Record<string, unknown> = {}) => ({
     id,
     name: `ferret-${id}`,
+    role: 'lead',
+    harness: 'claude-code',
+    runner: 'tmux',
     folder: `/work/${id}`,
+    state: 'working',
+    createdAt: '2026-11-07T00:00:00.000Z',
+    stateAt: '2026-11-07T00:00:00.000Z',
     ...extra,
   });
 

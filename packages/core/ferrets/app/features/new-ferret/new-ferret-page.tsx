@@ -1,8 +1,7 @@
 import type { ChosenFerretAccount, NewFerretAccountSlotProps } from '@ferretry/core-ferrets/contract';
 import { type ComponentType, type ReactNode, useEffect, useState } from 'react';
-import { ModelSelect } from '../../components/model-select.tsx';
 import type { LiveFerretsClient } from '../../lib/client.ts';
-import { Button, Card, cn, FastSwitch, PanelBody, Textarea } from '../../ui.ts';
+import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
 import { daemonHomeHref, ferretChatHref, runtimesSettingsHref } from './hrefs.ts';
 import { canStartFerret, emptyNewFerretDraft, type NewFerretDraft, startFerret } from './new-ferret-draft.ts';

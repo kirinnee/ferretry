@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { GrantRefusal } from '@ferretry/core-gate/contract';
 import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../../app/wire.ts';
 import type { CoreActionContext, FerretActionFormHost } from '../../../app/lib/ferret-actions.ts';
 import type { GrantsView } from '../../../app/lib/grants.ts';
@@ -32,7 +33,6 @@ const settle = async (): Promise<void> => {
   });
 };
 
-type GrantRefusal = 'granted' | 'not-granted' | 'device-not-granted' | 'step-up-required' | 'undetermined';
 const CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing'] as const;
 const grants = (warden: GrantRefusal): GrantsView => ({
   capabilities: CAPABILITIES.map(capability => {

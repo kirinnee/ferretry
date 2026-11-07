@@ -41,7 +41,7 @@ export const distinctDaemonName = (daemon: PairedDaemon, paired: readonly Paired
     other => other.daemon !== daemon.daemon && daemonTitle(other) === name && !replacedPairing(other, paired),
   );
   if (twins.length === 0) return name;
-  const sharedAddress = twins.some(other => other.address === daemon.address);
+  const sharedAddress = name === daemon.address || twins.some(other => other.address === daemon.address);
   if (!sharedAddress) return `${name} (${daemon.address.replace(/^[a-z]+:\/\//u, '')})`;
   return `${name} (paired ${pairedDay(daemon.pairedAt)})`;
 };

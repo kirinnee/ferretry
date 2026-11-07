@@ -64,6 +64,9 @@ describe('ModelSelect', () => {
     expect(select.options[0]?.textContent).toBe('Login default (GLM-5.3)');
     expect(select.options[1]?.textContent).toBe('GLM-5.3 · default · 1M context');
     expect([...select.options].find(option => option.value === 'glm-old')?.disabled).toBe(true);
+    expect([...select.options].find(option => option.value === 'glm-old')?.textContent).toBe(
+      'GLM old · not on this login',
+    );
     expect([...select.options].some(option => option.textContent === 'Custom id…')).toBe(false);
     await screen.unmount();
   });

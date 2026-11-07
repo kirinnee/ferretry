@@ -13,15 +13,16 @@
  * about this device and this copy of the app; no challenge or assertion is stored, and none is logged.
  */
 
-import type {
-  PairedDaemon,
-  PasskeyAsk,
-  PasskeyHandler,
-  PasskeyNeed,
-  PasskeyPorts,
-  PasskeyProvision,
-  PasskeyRefusal,
-  PromptOrigin,
+import {
+  distinctDaemonName,
+  type PairedDaemon,
+  type PasskeyAsk,
+  type PasskeyHandler,
+  type PasskeyNeed,
+  type PasskeyPorts,
+  type PasskeyProvision,
+  type PasskeyRefusal,
+  type PromptOrigin,
 } from '@ferretry/app';
 import {
   PasteRuleStageIdSchema,
@@ -47,7 +48,7 @@ import {
 import { describeStepUpFailure, firstPasskeyOffer, stepUpCeremony, unlockCeremony } from './lib/step-up-ceremony.ts';
 import type { StepUpClient } from './lib/step-up-client.ts';
 import { type PromptOrigin as GateOrigin, StepUpGate } from './lib/step-up-gate.ts';
-import { type DaemonConnection, type DaemonId, daemonConnection, distinctDaemonName } from './shell-pairing.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection } from './shell-pairing.ts';
 
 /** Said when the ceremony is asked for a machine this device cannot reach right now (no session, or Access paused). */
 export const PASSKEY_UNREACHABLE =
@@ -90,13 +91,6 @@ const connectionOf = (daemon: PairedDaemon): DaemonConnection =>
     deviceId: daemon.deviceId,
     daemonName: daemon.machine,
   });
-
-/** A pairing as `distinctDaemonName` reads it: its name, its label, its address and the day it was made. */
-const namedPairing = (daemon: PairedDaemon) => ({
-  ...connectionOf(daemon),
-  ...(daemon.label === undefined ? {} : { label: daemon.label }),
-  pairedAt: daemon.pairedAt,
-});
 
 /** What the shell's origin is in the gate's words (the same two values). */
 const gateOrigin = (origin: PromptOrigin): GateOrigin => origin;
@@ -180,9 +174,8 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
     // G95: a prompt names WHICH machine is asking, told apart from a twin by its address.
     const machineName = useCallback(
       (daemonId: string): string => {
-        const paired = snapshot.daemons.map(namedPairing);
-        const record = paired.find(candidate => candidate.daemonId === daemonId);
-        return record === undefined ? 'This machine' : distinctDaemonName(record, paired);
+        const record = snapshot.daemons.find(candidate => candidate.daemon === daemonId);
+        return record === undefined ? 'This machine' : distinctDaemonName(record, snapshot.daemons);
       },
       [snapshot],
     );

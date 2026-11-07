@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { AnalyticsMetricChart, chartLabelKeys, type MetricChartPoint } from '../../../src/ui/metric-chart.tsx';
+import {
+  AnalyticsMetricChart,
+  analyticsAxisTicks,
+  chartLabelKeys,
+  type MetricChartPoint,
+} from '../../../src/ui/metric-chart.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 
 const point = (key: string, values: readonly number[], extra: Partial<MetricChartPoint> = {}): MetricChartPoint => ({
@@ -102,5 +107,15 @@ describe('AnalyticsMetricChart', () => {
 
   it('prints every nth label counted back from the last', () => {
     expect([...chartLabelKeys(POINTS, 2)]).toEqual(['2026-10-12', '2026-10-14']);
+  });
+});
+
+describe('axis and formatting', () => {
+  it('picks round ticks from zero past the maximum', () => {
+    expect(analyticsAxisTicks(109.4)).toEqual([0, 50, 100, 150]);
+    expect(analyticsAxisTicks(3)).toEqual([0, 1, 2, 3]);
+    expect(analyticsAxisTicks(0.6)).toEqual([0, 0.2, 0.4, 0.6]);
+    expect(analyticsAxisTicks(0.7)).toEqual([0, 0.25, 0.5, 0.75]);
+    expect(analyticsAxisTicks(0)).toEqual([0, 1]);
   });
 });

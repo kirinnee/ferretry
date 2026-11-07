@@ -40,7 +40,7 @@ import {
   type RuntimeModelChoice,
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
-import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '../lib/model-tiers.ts';
+import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '@ferretry/app/ui';
 import { callFailure } from '../lib/client.ts';
 import type { RuntimeControlApi, RuntimeControlCommand } from '../lib/runtime-switch.ts';
 import {

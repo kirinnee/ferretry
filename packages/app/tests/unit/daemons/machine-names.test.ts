@@ -54,3 +54,17 @@ describe('machineDisplayOrder', () => {
     expect(reconcileMachineOrder(['a', 'b'], ['b', 'b', 'z'])).toEqual(['b', 'a']);
   });
 });
+
+describe('reconcileMachineOrder', () => {
+  test('is the pairing order when nothing was saved', () => {
+    expect(reconcileMachineOrder(['a', 'b', 'c'], [])).toEqual(['a', 'b', 'c']);
+  });
+
+  test('follows the saved order, then appends machines it has never seen in pairing order', () => {
+    expect(reconcileMachineOrder(['a', 'b', 'c', 'd'], ['c', 'a'])).toEqual(['c', 'a', 'b', 'd']);
+  });
+
+  test('drops a machine that was unpaired and a repeated id', () => {
+    expect(reconcileMachineOrder(['a', 'b'], ['gone', 'b', 'b', 'a'])).toEqual(['b', 'a']);
+  });
+});

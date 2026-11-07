@@ -7,6 +7,7 @@ import { VoicePort } from '@ferretry/plugin-voice/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { GatePort } from '@ferretry/core-gate/contract';
 import { UsagePort } from './contract/others.ts';
 import {
   cap,
@@ -60,7 +61,8 @@ export default definePlugin({
    * check does not run).
    * Runtimes and Voice are read by the settings tab only (britnee, optional uses): the runtime list for the
    * investigation login and model field (off: the model field is a plain text box) and whether the Jev key is set
-   * (off: the key line is hidden). None of Terminals, Browsers, Runtimes and Voice uses the Warden, so no cycle.
+   * (off: the key line is hidden). Gate (core, always on) is declared because the app half parses its `GET /v1/grants`
+   * answer with Gate's own schema to know whether `warden.use` is open. None of Terminals, Browsers, Runtimes and Voice uses the Warden, so no cycle.
    */
   uses: {
     usage: UsagePort,
@@ -69,6 +71,7 @@ export default definePlugin({
     browsers: BrowsersPort,
     runtimes: RuntimesPort,
     voice: VoicePort,
+    gate: GatePort,
   },
   provides: { warden: WardenPort },
 
