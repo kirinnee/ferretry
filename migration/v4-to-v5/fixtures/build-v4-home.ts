@@ -527,6 +527,8 @@ async function build(): Promise<void> {
 
   await step('make board cards in two lanes, with a link, a dependency and history', false, async () => {
     await fy(['board', 'on', '--project', 'alpha']);
+    // A project has no lanes until a template is proposed; it is live at once (the owner is only asked to accept it).
+    await fyOk(['board', 'lanes', 'propose', '--project', 'alpha', '--template', 'pr']);
     const create = async (kind: string, title: string, extra: readonly string[]): Promise<string> => {
       const text = await fyOk([
         'task',
@@ -580,6 +582,8 @@ async function build(): Promise<void> {
           kind,
           '--ask',
           ask,
+          '--new',
+          'Fixture: nothing open fits.',
           '--premise',
           'Fixture: a v4 home is being built for the converter.',
           '--context',
@@ -604,17 +608,22 @@ async function build(): Promise<void> {
     made.notices = [{ ferret: target, summary: 'fixture notice' }];
   });
 
-  await step('file a lesson suggestion', false, async () => {
-    const text = await fyOk([
-      'lesson',
-      'suggest',
-      'Fixture rule: say what you did.',
-      '--scope',
-      'global',
-      '--session',
-      target,
-      '--json',
-    ]);
+  await step('file a lesson suggestion, from inside the ferret as a ferret does', false, async () => {
+    // `fy lesson suggest` acts with the session credential only a ferret's own environment holds, and this program
+    // never reads it. So the (fake) ferret runs the command itself: its stand-in harness executes a line that starts
+    // with FIXTURE-RUN, in the environment the daemon gave its pane.
+    const result = join(out, 'lesson-result.txt');
+    const command = `${join(v4Dir, 'fy')} lesson suggest 'Fixture rule: say what you did.' --scope global --json`;
+    await fyOk(['send', target, '--kind', 'blocker', `FIXTURE-RUN ${result} ${command}`]);
+    const deadline = Date.now() + 90_000;
+    let code = '';
+    while (code === '' && Date.now() < deadline) {
+      code = (await readFile(`${result}.code`, 'utf8').catch(() => '')).trim();
+      if (code === '') await Bun.sleep(500);
+    }
+    if (code === '') throw new Error('the ferret never ran the lesson command within 90 s');
+    const text = await readFile(result, 'utf8').catch(() => '');
+    if (code !== '0') throw new Error(`fy lesson suggest, run by the ferret, exited ${code}: ${text.trim()}`);
     made.lessons = [{ ferret: target, scope: 'global', id: findString(parseJson(text), ['id']) ?? null }];
   });
 
