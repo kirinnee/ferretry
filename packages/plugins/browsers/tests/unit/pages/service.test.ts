@@ -9,7 +9,7 @@ import {
   pendingDialogOf,
 } from '../../../daemon/pages/service.ts';
 import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
-import { TypedIdentities } from '../../support/typed-identities.ts';
+import { TypedIdentities } from '../../../daemon/target/sign-in/identities.ts';
 
 type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
 
