@@ -1,4 +1,5 @@
-import type { AuditActor, AuditDetail, PhoneApproval } from '@ferretry/protocol';
+import type { AuditActor, AuditDetail } from '@ferretry/core-gate/contract';
+import type { PhoneApproval } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
 import type { PhoneApprovalAudit, PhoneApprovalAuditEvent } from './phone-approval.ts';
 import type { InputAudit, InputAuditEntry, InputSaveAuditEntry, InputStoreAuditEntry } from './ports.ts';

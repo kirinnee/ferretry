@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
-import type { InputTargetFacts } from '@ferretry/protocol';
+import type { InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import { digestFacts, digestLine } from '../../../src/lib/input-requests/digest.ts';
 

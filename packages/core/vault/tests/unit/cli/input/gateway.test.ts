@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type InputDeliverBody, padInputValue } from '@ferretry/protocol';
+import { type InputDeliverBody, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import {
   inputCancelPath,

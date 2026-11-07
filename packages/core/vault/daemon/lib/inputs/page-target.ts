@@ -1,4 +1,5 @@
-import type { BrowserElementTarget, InputShot, InputTarget, InputTargetFacts } from '@ferretry/protocol';
+import type { BrowserElementTarget } from './borrowed.ts';
+import type { InputShot, InputTarget, InputTargetFacts } from '../../../contract/index.ts';
 import type { BrowserInputFieldsPort, BrowserPushNumberRead } from '../browser/transport/input-contracts.ts';
 import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
 import type {

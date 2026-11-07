@@ -1,12 +1,7 @@
 import { describe, it } from 'bun:test';
-import {
-  type AgendaId,
-  type InputRaise,
-  type InputTargetFacts,
-  PutLoginEntryRequestSchema,
-  type SignInId,
-  TASK_PLAN_MISS_AGENT_NOTE,
-} from '@ferretry/protocol';
+import { type AskId } from '@ferretry/core-asks/contract';
+import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
+import { PutLoginEntryRequestSchema, type SignInId, TASK_PLAN_MISS_AGENT_NOTE } from '../../../../daemon/lib/inputs/borrowed.ts';
 import should from 'should';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import { InputAuditAdapter } from '../../../src/lib/input-requests/audit-adapter.ts';
@@ -198,7 +193,7 @@ function harness(options: Options = {}) {
         options.onRaise?.();
         quietAtRaise.push(service.quietCard(options.session ?? SESSION, raised.requestId));
         sinks.push(JSON.stringify(raised));
-        return { ok: true, id: `A${card++}` as AgendaId };
+        return { ok: true, id: `A${card++}` as AskId };
       },
       close: async (_session, _id, note) => void sinks.push(`closed: ${note}`),
       promptOf: async () => undefined,

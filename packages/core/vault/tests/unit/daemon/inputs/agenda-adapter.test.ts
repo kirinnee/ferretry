@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { type AgendaId, AgendaItemSchema } from '@ferretry/protocol';
+import { type AskId } from '@ferretry/core-asks/contract';
+import { AgendaItemSchema } from '@ferretry/protocol';
 import should from 'should';
 import { closestAgendaLink } from '../../../src/lib/agenda/closest.ts';
 import {
@@ -47,7 +48,7 @@ const card = (overrides: Partial<InputCard> = {}): InputCard => ({
 
 function world() {
   const repository = new MemoryRepository();
-  const closed: { sessionId: string; id: AgendaId }[] = [];
+  const closed: { sessionId: string; id: AskId }[] = [];
   const observer = new InputCardClosedObserver(async (sessionId, id) => {
     closed.push({ sessionId, id });
   });
@@ -61,7 +62,7 @@ function world() {
   return { repository, closed, service, adapter: new InputAgendaAdapter(service) };
 }
 
-const raisedId = async (adapter: InputAgendaAdapter, input: InputCard = card()): Promise<AgendaId> => {
+const raisedId = async (adapter: InputAgendaAdapter, input: InputCard = card()): Promise<AskId> => {
   const result = await adapter.raise(SESSION, input);
   if (!result.ok) throw new Error(result.message);
   return result.id;

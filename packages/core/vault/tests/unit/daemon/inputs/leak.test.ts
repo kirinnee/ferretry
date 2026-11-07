@@ -1,12 +1,8 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  type AgendaId,
-  type InputDeliverBody,
-  type InputEvent,
-  type InputTargetFacts,
-  padInputValue,
-} from '@ferretry/protocol';
+import { type AskId } from '@ferretry/core-asks/contract';
+import { type InputDeliverBody, type InputEvent, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
+import { type InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import type { AgendaLedger, AgendaLedgerRepository, AgendaMutation } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/index.ts';
@@ -217,7 +213,7 @@ describe('the value reaches the terminal and nowhere else, over the real adapter
       const [second] = await service.list(HOST);
       const closed = await agenda.resolve(
         SESSION,
-        (second?.agendaItemId ?? 'A2') as AgendaId,
+        (second?.agendaItemId ?? 'A2') as AskId,
         { kind: 'human' },
         OTHER,
       );
@@ -257,7 +253,7 @@ describe('the value reaches the terminal and nowhere else, over the real adapter
     const failed = await settle(
       service.deliver(SESSION, request?.id ?? '', bodyFor(request?.observedDigest ?? '', VALUE), HOST),
     );
-    const view = await service.agentView(SESSION, (request?.agendaItemId ?? 'A1') as AgendaId, 0);
+    const view = await service.agentView(SESSION, (request?.agendaItemId ?? 'A1') as AskId, 0);
 
     should(failed).be.instanceOf(InputRequestError);
     should(view.state).not.equal('pending');

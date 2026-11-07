@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
-import {
-  type AgendaId,
-  type InputDeliverBody,
-  type InputEvent,
-  type InputQuarantineEvent,
-  padInputValue,
-} from '@ferretry/protocol';
+import { type AskId } from '@ferretry/core-asks/contract';
+import { type InputDeliverBody, type InputEvent, type InputQuarantineEvent, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import {
   RedactingTerminalStreamService,
@@ -197,7 +192,7 @@ function composed(
     agenda: {
       raise: async (_session, cardBody) => {
         emitted.push(JSON.stringify(cardBody));
-        return { ok: true, id: `A${card++}` as AgendaId };
+        return { ok: true, id: `A${card++}` as AskId };
       },
       close: async (_session, closed, note) => void emitted.push(`${closed} ${note}`),
       promptOf: async () => 'sudo wants your password',

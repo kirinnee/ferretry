@@ -1,16 +1,6 @@
-import {
-  DAEMON_FEATURES,
-  type InputActor,
-  InputCancelBodySchema,
-  InputDeliverBodySchema,
-  type InputQuarantineList,
-  type InputRequest,
-  type InputRequestList,
-  type InputShot,
-  type PhoneApproval,
-  PhoneApprovalIdSchema,
-  type PhoneApprovalList,
-} from '@ferretry/protocol';
+import { type InputActor, InputCancelBodySchema, InputDeliverBodySchema, type InputQuarantineList, type InputRequest, type InputRequestList } from '../../inputs/wire.ts';
+import { type InputShot } from '../../../../contract/index.ts';
+import { DAEMON_FEATURES, type PhoneApproval, PhoneApprovalIdSchema, type PhoneApprovalList } from '@ferretry/protocol';
 import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';

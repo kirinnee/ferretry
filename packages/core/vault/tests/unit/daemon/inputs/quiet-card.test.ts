@@ -1,13 +1,7 @@
 import { describe, it } from 'bun:test';
-import {
-  type AccountId,
-  type AccountKey,
-  type AgendaItem,
-  factorFingerprint,
-  type InputRaise,
-  type InputTargetFacts,
-  type SignInId,
-} from '@ferretry/protocol';
+import { type AccountId, type AccountKey, factorFingerprint, type SignInId } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
+import { type AgendaItem } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AgendaLedger,

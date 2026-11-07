@@ -1,23 +1,7 @@
-import type {
-  AccountList,
-  AgendaId,
-  CopyMeta,
-  CopyName,
-  CopyOrigin,
-  InputActor,
-  InputAuditDetail,
-  InputAuditEvent,
-  InputEvent,
-  InputFieldElement,
-  InputQuarantineEvent,
-  InputShot,
-  InputTarget,
-  InputTargetFacts,
-  LoginEntryId,
-  LoginFieldRole,
-  SignInChoiceContext,
-  TwoFactorId,
-} from '@ferretry/protocol';
+import type { AccountList, CopyMeta, CopyName, CopyOrigin, LoginEntryId, LoginFieldRole, SignInChoiceContext, TwoFactorId } from './borrowed.ts';
+import type { AskId } from '@ferretry/core-asks/contract';
+import type { InputActor, InputAuditDetail, InputAuditEvent, InputEvent, InputFieldElement, InputQuarantineEvent } from './wire.ts';
+import type { InputShot, InputTarget, InputTargetFacts } from '../../../contract/index.ts';
 import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
 
 /**
@@ -235,30 +219,30 @@ export interface InputCard {
   readonly prompt: string;
   readonly blocking: boolean;
   readonly expiresAt: string;
-  readonly chain?: AgendaId;
+  readonly chain?: AskId;
 }
 
 export type InputCardResult =
-  | { readonly ok: true; readonly id: AgendaId }
+  | { readonly ok: true; readonly id: AskId }
   | { readonly ok: false; readonly message: string };
 
 /** The agenda, as the input service needs it: raise a `kind: 'input'` card, close it when the request ends. */
 export interface InputAgendaPort {
   raise(sessionId: string, card: InputCard): Promise<InputCardResult>;
   /** Resolve the card as the daemon's own act; never throws for a card that is already gone. */
-  close(sessionId: string, id: AgendaId, note: string): Promise<void>;
+  close(sessionId: string, id: AskId, note: string): Promise<void>;
   /** The agent's prompt stored on the open card, so a restart can rebuild its request; nothing when there is no such card. */
-  promptOf(sessionId: string, id: AgendaId): Promise<string | undefined>;
+  promptOf(sessionId: string, id: AskId): Promise<string | undefined>;
   /**
    * Adds one line of the daemon's own above the card's context (the card as raised, so the agent's prompt stays where a
    * restart reads it). A daemon edit, so the card buzzes as any raise does once it is the owner's to answer. Total.
    */
-  note?(sessionId: string, id: AgendaId, card: Pick<InputCard, 'prompt' | 'chain'>, line: string): Promise<void>;
+  note?(sessionId: string, id: AskId, card: Pick<InputCard, 'prompt' | 'chain'>, line: string): Promise<void>;
 }
 
 /** Tells the raising agent its request ended, in plain words with no value. Total: never rejects. */
 export interface InputAgentNotifier {
-  tell(sessionId: string, agendaId: AgendaId, message: string): Promise<void>;
+  tell(sessionId: string, agendaId: AskId, message: string): Promise<void>;
 }
 
 /** The session journal: ids and states only (`InputEvent`). `history` is replayed on start. */

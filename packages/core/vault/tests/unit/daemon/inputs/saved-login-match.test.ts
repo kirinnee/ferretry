@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import type { AccountSummary, InputSaved, InputTargetFacts, SignInSummary } from '@ferretry/protocol';
+import type { AccountSummary, InputSaved, SignInSummary } from '../../../../daemon/lib/inputs/borrowed.ts';
+import type { InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import {
   codeCardKeys,

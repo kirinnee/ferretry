@@ -1,64 +1,7 @@
-import {
-  type AccountId,
-  type AccountKey,
-  type AgendaId,
-  type CopyMeta,
-  copyHandle,
-  factorAskWords,
-  fillRoleFor,
-  grantFilledLineFor,
-  type GrantMissReason,
-  INPUT_DEFAULT_EXPIRY_SECONDS,
-  INPUT_ERROR_CODES,
-  INPUT_JOURNAL_EVENT_TYPES,
-  INPUT_MAX_CHECK_FAILURES,
-  INPUT_MAX_PENDING_PER_SESSION,
-  INPUT_MAX_RAISES_PER_HOUR,
-  INPUT_MAX_REBINDS,
-  INPUT_PROMPT_MAX_LENGTH,
-  INPUT_QUARANTINE_EVENT_TYPES,
-  INPUT_CODE_VISIBLE_NOTICE,
-  INPUT_PLAIN_VALUE_NOTICE,
-  INPUT_QUARANTINE_SECONDS,
-  INPUT_QUARANTINE_WORDS,
-  INPUT_SINGLE_FIELD_ID,
-  type InputActor,
-  type InputAgentView,
-  type InputAuditDetail,
-  type InputAuditEvent,
-  type InputDeliverBody,
-  type InputDeliverResult,
-  type InputEvent,
-  type InputFieldRaise,
-  type InputQuarantine,
-  type InputQuarantineEvent,
-  type InputRaise,
-  type InputReason,
-  type InputRequest,
-  type InputRequestField,
-  type InputRisk,
-  type InputSensitivity,
-  type InputShot,
-  type InputTarget,
-  type InputTargetFacts,
-  inputRaiseFields,
-  inputValueProblem,
-  LOGIN_PASSWORD_MIN_LENGTH,
-  LOGIN_USERNAME_MAX_LENGTH,
-  type LoginEntryId,
-  MAX_AGENDA_TITLE_LENGTH,
-  observerByOf,
-  type PushSubject,
-  placeKeys,
-  type SignInChoiceContext,
-  type SignInId,
-  savedRolesOf,
-  strongestSensitivity,
-  TASK_PLAN_MISS_AGENT_NOTE,
-  type TwoFactorId,
-  unpadInputValue,
-  worstRisk,
-} from '@ferretry/protocol';
+import { type AccountId, type AccountKey, type CopyMeta, copyHandle, factorAskWords, fillRoleFor, grantFilledLineFor, type GrantMissReason, LOGIN_PASSWORD_MIN_LENGTH, LOGIN_USERNAME_MAX_LENGTH, type LoginEntryId, type PushSubject, placeKeys, type SignInChoiceContext, type SignInId, TASK_PLAN_MISS_AGENT_NOTE, type TwoFactorId } from './borrowed.ts';
+import { type AskId, MAX_ASK_SUBJECT_LENGTH } from '@ferretry/core-asks/contract';
+import { INPUT_DEFAULT_EXPIRY_SECONDS, INPUT_MAX_CHECK_FAILURES, INPUT_MAX_PENDING_PER_FERRET, INPUT_MAX_RAISES_PER_HOUR, INPUT_MAX_REBINDS, INPUT_PROMPT_MAX_LENGTH, INPUT_QUARANTINE_SECONDS, type InputFieldRaise, type InputRaise, type InputSensitivity, type InputShot, type InputTarget, type InputTargetFacts, strongestSensitivity } from '../../../contract/index.ts';
+import { INPUT_ERROR_CODES, INPUT_JOURNAL_EVENT_TYPES, INPUT_QUARANTINE_EVENT_TYPES, INPUT_CODE_VISIBLE_NOTICE, INPUT_PLAIN_VALUE_NOTICE, INPUT_QUARANTINE_WORDS, INPUT_SINGLE_FIELD_ID, type InputActor, type InputAgentView, type InputAuditDetail, type InputAuditEvent, type InputDeliverBody, type InputDeliverResult, type InputEvent, type InputQuarantine, type InputQuarantineEvent, type InputReason, type InputRequest, type InputRequestField, type InputRisk, inputRaiseFields, inputValueProblem, observerByOf, savedRolesOf, unpadInputValue, worstRisk } from './wire.ts';
 import { LoginEntryError, type LoginFieldValues } from '../secrets/accounts.ts';
 import { type ClearJob, type ClearOutcome, clearJobOf } from '../sign-in-grants/clear.ts';
 import type { GrantReservation } from '../sign-in-grants/ledger.ts';
@@ -205,7 +148,7 @@ interface Held {
    * The cards this request was shown on before its current one: a code Ferretry made that did not go through opens the
    * request again on a new card ({@link InputRequestService.reopen}), and the ferret may still wait on the old id.
    */
-  readonly formerCards: AgendaId[];
+  readonly formerCards: AskId[];
   /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
   matchKey?: string;
   /**
@@ -1046,7 +989,7 @@ export class InputRequestService {
    * of THIS session's input requests that this daemon holds: another session's card, an unknown one, or one from
    * before a restart is refused, so a card never claims to continue a login it is not part of.
    */
-  private stepAfter(sessionId: string, chain: AgendaId): number {
+  private stepAfter(sessionId: string, chain: AskId): number {
     const before = this.byCard(sessionId, chain);
     if (before === undefined)
       throw new InputRequestError(
@@ -1057,7 +1000,7 @@ export class InputRequestService {
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
-  async agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView> {
+  async agentView(sessionId: string, id: AskId, waitMs: number): Promise<InputAgentView> {
     await this.sweep();
     const held = this.byCard(sessionId, id);
     if (held === undefined) throw new InputRequestError('not_found', `no input request ${id} in this session`);
@@ -1253,7 +1196,7 @@ export class InputRequestService {
     sessionId: string,
     target: { readonly kind: string; readonly key: string },
     options?: { readonly typing?: boolean },
-  ): AgendaId | undefined {
+  ): AskId | undefined {
     for (const { request } of this.held.values()) {
       if (request.sessionId !== sessionId || isFinal(request)) continue;
       if (options?.typing === true && request.fields.every(field => field.sensitivity === 'code')) continue;
@@ -1477,7 +1420,7 @@ export class InputRequestService {
   }
 
   /** The owner dismissed the card without answering: the request ends, and the card is already closed. */
-  async cardDismissed(sessionId: string, id: AgendaId): Promise<void> {
+  async cardDismissed(sessionId: string, id: AskId): Promise<void> {
     const held = this.byCard(sessionId, id);
     // Only the card the request is on now: a card it was on before is closed already, and says nothing of this one.
     if (held === undefined || held.request.state !== 'pending' || held.request.agendaItemId !== id) return;
@@ -1758,10 +1701,10 @@ export class InputRequestService {
 
   private guardRate(sessionId: string, target: InputTarget, now: number): void {
     const open = [...this.held.values()].filter(h => h.request.sessionId === sessionId && !isFinal(h.request));
-    if (open.length >= INPUT_MAX_PENDING_PER_SESSION)
+    if (open.length >= INPUT_MAX_PENDING_PER_FERRET)
       throw new InputRequestError(
         'capacity',
-        `${INPUT_MAX_PENDING_PER_SESSION} input requests are already waiting on the owner; wait for one to be answered`,
+        `${INPUT_MAX_PENDING_PER_FERRET} input requests are already waiting on the owner; wait for one to be answered`,
         INPUT_ERROR_CODES.rateLimited,
       );
     const recent = (this.raises.get(sessionId) ?? []).filter(at => at > now - HOUR_MS);
@@ -2790,7 +2733,7 @@ export class InputRequestService {
     held.waiters.clear();
   }
 
-  private byCard(sessionId: string, id: AgendaId): Held | undefined {
+  private byCard(sessionId: string, id: AskId): Held | undefined {
     for (const held of this.held.values()) {
       if (held.request.sessionId === sessionId && held.request.agendaItemId === id) return held;
     }
@@ -3193,8 +3136,8 @@ const CODE_DID_NOT_GO_THROUGH = "The saved key's code didn't go through: type th
 
 /** A title cut to what an agenda card holds, on a word where it can be. */
 function clipped(title: string): string {
-  if (title.length <= MAX_AGENDA_TITLE_LENGTH) return title;
-  return `${title.slice(0, MAX_AGENDA_TITLE_LENGTH - 1).trimEnd()}…`;
+  if (title.length <= MAX_ASK_SUBJECT_LENGTH) return title;
+  return `${title.slice(0, MAX_ASK_SUBJECT_LENGTH - 1).trimEnd()}…`;
 }
 
 /**

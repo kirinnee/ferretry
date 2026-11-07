@@ -1,46 +1,71 @@
+import { AskIdSchema } from '@ferretry/core-asks/contract';
+import { durationWords, InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { SignInIdSchema, SignInRuleIdSchema, SignInRuleRevisionSchema, TwoFactorIdSchema } from './account-ids.ts';
-import { AgendaIdSchema } from './agenda.ts';
-import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
-import { durationWords, InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import {
+  INPUT_MAX_FIELDS,
+  INPUT_PAD_BUCKET_BYTES,
+  INPUT_PROMPT_MAX_LENGTH,
+  INPUT_QUARANTINE_SECONDS,
+  INPUT_SENSITIVITIES,
+  INPUT_VALUE_MAX_BYTES,
+  InputDeliveryIdSchema,
+  InputEchoSchema,
+  type InputFieldRaise,
+  InputFieldIdSchema,
+  type InputForegroundSchema,
+  type InputHoldReasonSchema,
+  InputHoldSchema,
+  type InputPaneProofSchema,
+  type InputRaise,
+  InputReasonSchema,
+  InputRequestIdSchema,
+  InputRequestStateSchema,
+  type InputSensitivity,
+  InputSensitivitySchema,
+  InputSubmitModeSchema,
+  InputTargetFactsSchema,
+  InputTargetSchema,
+  type PageFieldFactsSchema,
+  SurfaceKeySchema,
+} from '../../../contract/index.ts';
+import {
+  CopyNameSchema,
+  CopyOriginSchema,
+  CopyPlanIdSchema,
+  GrantMissReasonSchema,
   InputSavedSchema,
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   LoginEntryIdSchema,
   oneLine,
-} from './login-entries.ts';
-import { SecretNameSchema } from './secrets.ts';
-import { CopyNameSchema, CopyOriginSchema, CopyPlanIdSchema } from './secure-copy.ts';
-import { SurfaceKeySchema } from './surface-names.ts';
-import { GrantMissReasonSchema, TaskPlanLineNumberSchema } from './task-plan.ts';
+  SignInIdSchema,
+  SignInRuleIdSchema,
+  SignInRuleRevisionSchema,
+  TaskPlanLineNumberSchema,
+  TwoFactorIdSchema,
+  BrowserRefSchema,
+} from './borrowed.ts';
 
 /**
- * THE INPUT REQUEST: the contract between an agent stuck at a password, sudo, one-time-code or 2FA prompt
- * and the owner who knows the value (docs/input-requests.md).
+ * THE INPUT REQUEST WIRE (today's `protocol/src/lib/input-request.ts`, copied): what the contract
+ * (`contract/inputs.ts`, `contract/targets.ts`) does not already declare. The declarations the contract carries are
+ * imported from it, never repeated; everything else here is today's, byte for byte, with a browser target named
+ * `page` (§4.7).
  *
  * ## THE SCHEMAS HERE HAVE NO FIELD FOR THE VALUE — EXCEPT ONE, AND IT IS PADDED
  *
  * A request, its facts, its events, its audit detail, the agenda item that presents it and everything an
  * agent is told describe WHERE a value goes and WHAT happened, never WHAT it was. The one place a value
  * exists is {@link InputDeliverBodySchema}: the owner's deliver, carried inside the sealed carrier and
- * dropped by the handler the moment it has been typed. `tests/unit/input-request.test.ts` fails if any
+ * dropped by the handler the moment it has been typed. `tests/unit/contract/input-request.test.ts` fails if any
  * other schema here ever gains a field named or shaped like a value.
  */
 
-/** The longest prompt an agent may write; the card shows it as "the agent says", never as fact. */
-export const INPUT_PROMPT_MAX_LENGTH = 280;
-/** How long a request lives when the agent names no time, and the most it may ask for. */
-export const INPUT_DEFAULT_EXPIRY_SECONDS = 600;
-export const INPUT_MAX_EXPIRY_SECONDS = 3_600;
-/** How long a delivered value stays masked from reads: the default and the cap. */
-export const INPUT_DEFAULT_REDACTION_SECONDS = 600;
-export const INPUT_MAX_REDACTION_SECONDS = 3_600;
-/**
- * How long a terminal is QUARANTINED after the daemon types a secret into it: the agent's reads of it are
- * refused and the owner's viewer shows a cover instead of the screen. The owner can end it sooner.
- */
-export const INPUT_QUARANTINE_SECONDS = 120;
+/** Why a card's hold lasts as long as it does (the contract's `InputHoldReasonSchema`). */
+export type InputLockReason = z.infer<typeof InputHoldReasonSchema>;
+/** How long a card's hold lasts and why (the contract's `InputHoldSchema`). */
+export type InputLock = z.infer<typeof InputHoldSchema>;
+
 /** The lock's length in the owner's and the ferret's words ("two minutes"), from {@link INPUT_QUARANTINE_SECONDS}. */
 export const INPUT_QUARANTINE_WORDS = durationWords(INPUT_QUARANTINE_SECONDS);
 /**
@@ -65,63 +90,8 @@ export const inputContextLines = (context: string | null | undefined): string | 
 
 export const INPUT_PLAIN_VALUE_NOTICE = 'Not secret: the ferret can see this value.';
 export const INPUT_CODE_VISIBLE_NOTICE = 'One-time code: the ferret can see it.';
-/**
- * THE SHORT LOCK (docs/input-requests.md, "How long the lock lasts"): a target PROVEN not to show what is typed is
- * kept from the ferret this long after the write instead of {@link INPUT_QUARANTINE_SECONDS}. Masking still runs
- * its whole redaction window either way.
- */
-export const INPUT_SHORT_LOCK_SECONDS = 10;
 
-/**
- * Why a card's lock is as long as it is. Only the first three are short, and each is something the DAEMON saw. Every
- * long one says its own cause, so the owner reads why the page or terminal stays hidden for two minutes:
- *
- * - `hidden-terminal`: a local password prompt: echo off in line mode, sudo/su/doas/passwd running setuid root.
- * - `proven-field`: a password field on a secure page whose identity Ferretry has seen, on an earlier sign-in, hide
- *   the value after submit and move on (a saved login's observed facts).
- * - `probed-field`: one password field on a secure page into which Ferretry typed a throwaway value, did not find it in
- *   the page's text, and cleared it again, with no request or socket it could see and no navigation meanwhile.
- * - `code`: a `private` value shows as it is typed (a one-time `code` field has no lock at all).
- * - `not-proven`: nothing could be checked (no observer, an unreadable login store). Also an older daemon's one word
- *   for every long page lock.
- * - `terminal-shows`: a terminal that is not a local sudo, su, doas or passwd prompt with typing hidden.
- * - `scripted`: a ferret ran a page script on this page or on this site (its registrable domain; any ferret,
- *   machine-wide), or one whose site could not be read; or one is running now.
- * - `steered`: this ferret acted on this page, or on a page that shares its cookies and storage on its site, after the
- *   card was raised.
- * - `not-password-field`: a secret field is not a visible, uncovered password box in the page's own origin on a secure
- *   page, or a human check shows.
- * - `first-time`: no saved sign-in here has facts for this field, and no probe ran.
- * - `did-not-move-on`: a sign-in's facts for this field say it showed the value, or did not move on.
- * - `until-moved-on`: the facts prove the field after a submit, but Ferretry is not pressing Enter, so the value sits
- *   on the page: it stays hidden while the page shows that document, at most the full window (docs/input-requests.md).
- * - `probe-shown`: the throwaway value showed in the page's text.
- * - `probe-stopped`: the probe could not finish cleanly (a request, a socket, a navigation, a field that did not empty).
- */
-export const INPUT_LOCK_REASONS = [
-  'hidden-terminal',
-  'proven-field',
-  'probed-field',
-  'code',
-  'not-proven',
-  'terminal-shows',
-  'scripted',
-  'steered',
-  'not-password-field',
-  'first-time',
-  'did-not-move-on',
-  'until-moved-on',
-  'probe-shown',
-  'probe-stopped',
-] as const;
-export const InputLockReasonSchema = z.enum(INPUT_LOCK_REASONS);
-export type InputLockReason = z.infer<typeof InputLockReasonSchema>;
 
-export const InputLockSchema = z.strictObject({
-  seconds: z.number().int().min(1).max(INPUT_QUARANTINE_SECONDS),
-  reason: InputLockReasonSchema,
-});
-export type InputLock = z.infer<typeof InputLockSchema>;
 
 /** What the card says about each reason: one fixed, plain sentence, never page or terminal text. */
 export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
@@ -147,23 +117,6 @@ export function lockWords(lock: InputLock): string {
     ? `${String(Math.round(lock.seconds / 60))} minute${lock.seconds >= 90 ? 's' : ''}`
     : `${String(lock.seconds)} s`;
 }
-/** Per session: requests open at once, and raises an hour. Past either, the raise is refused with a sentence. */
-export const INPUT_MAX_PENDING_PER_SESSION = 3;
-export const INPUT_MAX_RAISES_PER_HOUR = 20;
-/** Per request: deliveries that fail a check (the target changed, echo came on) before the request is refused. */
-export const INPUT_MAX_CHECK_FAILURES = 3;
-/**
- * Per request: times the daemon may find the SAME target again after it changed under the card (a page that
- * re-rendered its field, a terminal that redrew its prompt) and redraw the card instead of counting a failure.
- * Past it the target is changing faster than the owner can answer, and the request ends.
- */
-export const INPUT_MAX_REBINDS = 5;
-/** Per daemon: deliveries an hour from carriers that are not this machine. */
-export const INPUT_MAX_REMOTE_DELIVERIES_PER_HOUR = 30;
-/** The longest value, in UTF-8 bytes, before padding. */
-export const INPUT_VALUE_MAX_BYTES = 1_024;
-/** The bucket a padded value is rounded up to, so the relay cannot read the length from the size. */
-export const INPUT_PAD_BUCKET_BYTES = 256;
 
 const boundedLine = (maximum: number) =>
   z
@@ -175,30 +128,7 @@ const boundedLine = (maximum: number) =>
 const HEX_DIGEST = /^[0-9a-f]{64}$/u;
 const Digest = z.string().regex(HEX_DIGEST, 'a sha-256 digest in lowercase hex');
 
-/** 128 random bits in hex: unguessable, and never reused. The owner reads the card as `!A<n>`, not this. */
-export const InputRequestIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
-export type InputRequestId = z.infer<typeof InputRequestIdSchema>;
-
-/** One Send, minted by the client. A retry carries the same id and gets the first outcome; it never types twice. */
-export const InputDeliveryIdSchema = z.uuid();
 export type InputDeliveryId = z.infer<typeof InputDeliveryIdSchema>;
-
-/**
- * How careful the daemon is with what is typed, most careful first:
- * - `secret`: a password, passphrase or token. Echo must be off or the field a password field; masked
- *   from reads; never shown back; may be saved to the secret store.
- * - `private`: a value that is not one-time but shows on screen as it is typed (rare). Masked from reads for a
- *   window, and the target is kept from the ferret for the full lock.
- * - `code`: a one-time code (2FA, an e-mail or SMS verification code, a device code). NOT secret: the ferret may see
- *   it, and may type one itself. No lock and no masking, except a code the DAEMON made from a saved 2FA seed: no tool,
- *   result or route RETURNS it, and its text is masked from text reads; the ferret may still see it on screen (a
- *   screenshot, a scripted read), as the owner allowed (docs/input-requests.md, "One-time codes").
- * - A `code` field the daemon sees going into a password field or prompt is handled as `secret` instead.
- * - `plain`: nothing sensitive (a username, a hostname, "y"). Only the target binding is checked.
- */
-export const INPUT_SENSITIVITIES = ['secret', 'private', 'code', 'plain'] as const;
-export const InputSensitivitySchema = z.enum(INPUT_SENSITIVITIES);
-export type InputSensitivity = z.infer<typeof InputSensitivitySchema>;
 
 /**
  * A sensitivity as a CLIENT reads it off a request: one this build does not know (a newer daemon's) reads as
@@ -211,38 +141,16 @@ export const ReadInputSensitivitySchema = z.preprocess(
   InputSensitivitySchema,
 );
 
-/** Who presses Enter: the agent afterwards, the owner offered the choice, or the owner's default is on. */
-export const InputSubmitModeSchema = z.enum(['agent', 'offer-owner', 'owner-default']);
 export type InputSubmitMode = z.infer<typeof InputSubmitModeSchema>;
 
-/** Where the value goes. A browser's fields each name their own element; the daemon, not the agent, observes what it is. */
-export const InputTargetSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('terminal'), key: SurfaceKeySchema }),
-  z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema }),
-  /**
-   * The secret store, under a name (docs/secure-copy.md): only a paste of a secure copy goes here, and what the
-   * daemon observes is whether the name already holds a value.
-   */
-  z.strictObject({ kind: z.literal('secret'), key: SecretNameSchema }),
-]);
-export type InputTarget = z.infer<typeof InputTargetSchema>;
-
 /** The kinds of place a value can go: a terminal, a page, or the secret store. */
-export const InputTargetKindSchema = z.enum(['terminal', 'browser', 'secret']);
+export const InputTargetKindSchema = z.enum(['terminal', 'page', 'secret']);
 export type InputTargetKind = z.infer<typeof InputTargetKindSchema>;
 
-/** The most fields one card holds: a login's username, password and code, and one spare. */
-export const INPUT_MAX_FIELDS = 4;
 /** The longest label an agent may give a field ("Email", "Password"). */
 export const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
 /** The id a request with one field gives it when the agent names none. */
 export const INPUT_SINGLE_FIELD_ID = 'value';
-
-/** A field's id within its card: a short lowercase word, so a deliver can say which value is which. */
-export const InputFieldIdSchema = z
-  .string()
-  .regex(/^[a-z][a-z0-9_]{0,31}$/u, 'a field id is a short lowercase word: letters, digits and underscores');
-export type InputFieldId = z.infer<typeof InputFieldIdSchema>;
 
 const FieldLabelSchema = z
   .string()
@@ -250,6 +158,11 @@ const FieldLabelSchema = z
   .min(1)
   .max(INPUT_FIELD_LABEL_MAX_LENGTH)
   .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
+
+const fieldsProblem = (fields: readonly { readonly id: string }[]): string | undefined =>
+  new Set(fields.map(field => field.id)).size === fields.length ? undefined : 'each field needs its own id';
+
+export type InputFieldId = z.infer<typeof InputFieldIdSchema>;
 
 /**
  * The element a browser field names, the way every browser act names one: a snapshot's `ref` or a selector.
@@ -260,68 +173,6 @@ export const InputFieldElementSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ref'), ref: BrowserRefSchema }),
 ]);
 export type InputFieldElement = z.infer<typeof InputFieldElementSchema>;
-
-/**
- * One value a card asks for, as the agent raises it. Each field carries its own sensitivity, so a login is
- * "Email (plain, the ferret can see it)" + "Password (secret)" on ONE card. A terminal takes exactly one field
- * (its prompts come one at a time: a second is a chained request); a browser field names its element.
- */
-export const InputFieldRaiseSchema = z.strictObject({
-  id: InputFieldIdSchema,
-  label: FieldLabelSchema.optional(),
-  sensitivity: InputSensitivitySchema,
-  element: InputFieldElementSchema.optional(),
-});
-export type InputFieldRaise = z.infer<typeof InputFieldRaiseSchema>;
-
-const fieldsProblem = (fields: readonly { readonly id: string }[]): string | undefined =>
-  new Set(fields.map(field => field.id)).size === fields.length ? undefined : 'each field needs its own id';
-
-/**
- * Exactly what an agent may say when it raises a request: nothing in it was observed. A one-value request
- * names its `sensitivity`; a card of several values names its `fields` instead.
- */
-export const InputRaiseSchema = z
-  .strictObject({
-    target: InputTargetSchema,
-    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
-    sensitivity: InputSensitivitySchema.optional(),
-    fields: z.array(InputFieldRaiseSchema).min(1).max(INPUT_MAX_FIELDS).optional(),
-    submit: InputSubmitModeSchema.default('offer-owner'),
-    /** Seconds the request lives; the default and the cap are above. */
-    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
-    /** Pings the owner (default when a field is `secret`). */
-    blocking: z.boolean().optional(),
-    /** A follow-up in a multi-step login: the card it follows. */
-    chain: AgendaIdSchema.optional(),
-    /**
-     * The account the ferret expects to be used. A HINT only: the daemon decides what matches the target,
-     * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
-     * An account handle, or a sign-in (`si_…`). A daemon from before sign-ins refuses a `si_` hint, and one that
-     * does not yet keep them (no `accounts.signins.1`) names no sign-in, so the hint orders nothing. No client gates
-     * it: the MCP tools pass the ferret's hint through as given, and the DAEMON refuses one it cannot read. Either way
-     * a hint can only choose among the sign-ins the daemon itself matched (accounts.ts `chosenSignIn`).
-     */
-    secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
-    /**
-     * The 2FA key the code is from, as `account_hint` listed it: names the card ("Code sent to ••42 (SMS)"). A HINT
-     * like `secretHint`: used only if it is a key of the account of a sign-in the daemon matched, otherwise ignored,
-     * never an error that would say whether such a key exists. A daemon from before 2FA keys ignores it.
-     */
-    factor: TwoFactorIdSchema.optional(),
-    /**
-     * The value comes from a secure copy the agent holds (`sealed:<name>`, docs/secure-copy.md), not from the
-     * owner's keyboard: the owner only allows it. The daemon treats every field as `secret` whatever it says.
-     */
-    source: z.strictObject({ kind: z.literal('sealed'), name: CopyNameSchema }).optional(),
-  })
-  .superRefine((raise, context) => {
-    if ((raise.sensitivity === undefined) === (raise.fields === undefined))
-      context.addIssue({ code: 'custom', message: 'name the sensitivity of one value, or the fields of several' });
-    const problem = raise.fields === undefined ? undefined : fieldsProblem(raise.fields);
-    if (problem !== undefined) context.addIssue({ code: 'custom', path: ['fields'], message: problem });
-  });
-export type InputRaise = z.infer<typeof InputRaiseSchema>;
 
 /** Where a pasted value came from, as the DAEMON recorded it when the copy was captured: names, never the value. */
 export const InputSourceSchema = z.strictObject({
@@ -356,166 +207,15 @@ export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields
   return [{ id: INPUT_SINGLE_FIELD_ID, sensitivity: raise.sensitivity ?? 'secret' }];
 }
 
-const SENSITIVITY_RANK: Readonly<Record<InputSensitivity, number>> = { plain: 0, code: 1, private: 2, secret: 3 };
 
-/** The most careful sensitivity among some fields: what the card, the journal and the audit record as the request's. */
-export function strongestSensitivity(fields: readonly { readonly sensitivity: InputSensitivity }[]): InputSensitivity {
-  return fields.reduce<InputSensitivity>(
-    (strongest, field) =>
-      SENSITIVITY_RANK[field.sensitivity] > SENSITIVITY_RANK[strongest] ? field.sensitivity : strongest,
-    'plain',
-  );
-}
-
-/** The pane the value goes to, as {@link PANE_PROOF_FORMAT} proved it (daemon-side `pane-proof.ts`). */
-export const InputPaneProofSchema = z.strictObject({
-  paneId: z.string().regex(/^%(?:0|[1-9][0-9]*)$/u),
-  pid: PositiveIntegerSchema,
-  sessionCreated: PositiveIntegerSchema.optional(),
-});
 export type InputPaneProof = z.infer<typeof InputPaneProofSchema>;
 
-/** Does the TTY echo what is typed? `unknown` (the probe failed) is treated as `on` for a `secret`. */
-export const InputEchoSchema = z.enum(['off', 'on', 'unknown']);
 export type InputEcho = z.infer<typeof InputEchoSchema>;
 
-/** The program reading the pane's TTY right now. `argv` is cut to 200 characters and is never audited. */
-export const InputForegroundSchema = z.strictObject({
-  pid: PositiveIntegerSchema,
-  pgid: PositiveIntegerSchema,
-  comm: boundedLine(64),
-  argv: z
-    .string()
-    .max(200)
-    .regex(/^[^\p{Cc}\p{Cf}]*$/u),
-});
 export type InputForeground = z.infer<typeof InputForegroundSchema>;
 
-const TerminalFactsSchema = z.strictObject({
-  kind: z.literal('terminal'),
-  paneProof: InputPaneProofSchema,
-  foreground: InputForegroundSchema,
-  echo: InputEchoSchema,
-  cursorRow: NonNegativeIntegerSchema,
-  /** The prompt's own line, scrubbed of known values; the daemon captured it, the agent did not write it. */
-  promptLine: z
-    .string()
-    .max(200)
-    .regex(/^[^\p{Cc}\p{Cf}]*$/u),
-  promptLineDigest: Digest,
-  /**
-   * The program reading the terminal, PROVED by the kernel to be the one program every process of the foreground group
-   * runs, with no process of another session holding the TTY open. Absent: UNVERIFIED — `foreground.comm` is only the
-   * name a process gave itself, and a ferret's shell can call itself `sudo`.
-   */
-  program: boundedLine(64).optional(),
-  /**
-   * Every process of the foreground group is PROVED to be a program that asks for a secret (sudo, ssh, gpg, …); the
-   * shell itself or an interpreter is not. Never true without `program`.
-   */
-  recognisedConsumer: z.boolean(),
-  /**
-   * The TTY is in canonical (line) mode, as a password prompt reads it. A program in raw or readline mode turns echo
-   * off and draws every character itself (ssh to a remote shell, psql), so echo off alone proves nothing.
-   */
-  canonical: z.boolean().optional(),
-  /**
-   * EVERY process of the foreground group runs setuid root (effective uid 0, real uid not): not a script or binary a
-   * ferret placed. Never true without `program`.
-   */
-  trustedProgram: z.literal(true).optional(),
-});
+export type InputBrowserFieldFacts = z.infer<typeof PageFieldFactsSchema>;
 
-const BrowserFieldSchema = z.strictObject({
-  tag: boundedLine(32),
-  type: boundedLine(32).optional(),
-  autocomplete: boundedLine(64).optional(),
-  name: boundedLine(128).optional(),
-  id: boundedLine(128).optional(),
-  inputmode: boundedLine(32).optional(),
-});
-
-/** One field of a page as the daemon found it: the element the agent pointed at, resolved by the browser. */
-export const InputBrowserFieldFactsSchema = z.strictObject({
-  /** The card's field this element is for. */
-  fieldId: InputFieldIdSchema,
-  /** The origin of the frame the element is in; the card flags one that is not the page's own. */
-  frameOrigin: boundedLine(256),
-  /** The frame the element is in, as the browser names it: the write goes there and nowhere else. */
-  frameId: boundedLine(128),
-  backendNodeId: PositiveIntegerSchema,
-  field: BrowserFieldSchema,
-  box: z.strictObject({
-    x: z.number().finite(),
-    y: z.number().finite(),
-    w: z.number().finite().nonnegative(),
-    h: z.number().finite().nonnegative(),
-  }),
-  visible: z.boolean(),
-  /** Something else is on top at the field's centre, or it is off screen: the card flags it, nothing refuses it. */
-  covered: z.literal(true).optional(),
-});
-export type InputBrowserFieldFacts = z.infer<typeof InputBrowserFieldFactsSchema>;
-
-const BrowserFactsSchema = z.strictObject({
-  kind: z.literal('browser'),
-  pageId: boundedLine(128),
-  /** scheme + host + port from the browser itself, never from the agent. */
-  origin: boundedLine(256),
-  /** https, or a page on this machine (`http://localhost`): what is typed does not cross a network in the clear. */
-  secure: z.boolean(),
-  /** The document the fields belong to: a navigation since the card was drawn changes it. */
-  navigationId: boundedLine(128),
-  fields: z.array(InputBrowserFieldFactsSchema).min(1).max(INPUT_MAX_FIELDS),
-  /** The page appears to be asking for a human check: the owner completes it (`browser_ask_owner`), never Ferretry. */
-  challenge: z.strictObject({ provider: BrowserChallengeProviderSchema }).optional(),
-});
-
-/**
- * WHAT THE DAEMON SAW at the target when the request was raised, and sees again before it types. Held in
- * RAM and re-observed on restart; the card draws it large and the agent's `prompt` small, which is the
- * defence against a fake prompt.
- */
-/** The secret store under one name: whether it already holds a value, as the vault said when the daemon looked. */
-const SecretStoreFactsSchema = z.strictObject({
-  kind: z.literal('secret'),
-  name: SecretNameSchema,
-  /** The name already holds a value: the paste REPLACES it. */
-  exists: z.boolean(),
-});
-
-export const InputTargetFactsSchema = z.discriminatedUnion('kind', [
-  TerminalFactsSchema,
-  BrowserFactsSchema,
-  SecretStoreFactsSchema,
-]);
-export type InputTargetFacts = z.infer<typeof InputTargetFactsSchema>;
-
-/** Where a request stands. Only `pending` may become `delivering`; the rest are final. */
-export const InputRequestStateSchema = z.enum([
-  'pending',
-  'delivering',
-  'delivered',
-  'refused',
-  'expired',
-  'cancelled',
-]);
-export type InputRequestState = z.infer<typeof InputRequestStateSchema>;
-
-/** Why a request was refused or cancelled: a closed list, so a reader's words fail typecheck for a new one. */
-export const INPUT_REASONS = [
-  'target_changed',
-  'target_gone',
-  'insecure_origin',
-  'interrupted',
-  'owner_declined',
-  'agent_cancelled',
-  'check_failures',
-  'expired',
-  /** The secure copy a paste was to come from was discarded, expired, or forgotten by a restart. */
-  'copy_gone',
-] as const;
-export const InputReasonSchema = z.enum(INPUT_REASONS);
 export type InputReason = z.infer<typeof InputReasonSchema>;
 
 /** Who did it, as the daemon's actor rule names callers: a person at the machine or a paired device. */
@@ -657,7 +357,7 @@ export const InputRequestSchema = z.strictObject({
   /** From the agent's session credential, never from a body. */
   sessionId: boundedLine(128),
   /** The agenda card that presents it (`kind: 'input'`): the owner knows it as `!A<n>`. */
-  agendaItemId: AgendaIdSchema,
+  agendaItemId: AskIdSchema,
   /** A paste of a secure copy: where the value comes from. The owner allows it; there is nothing to type. */
   source: InputSourceSchema.optional(),
   target: InputTargetSchema,
@@ -669,7 +369,7 @@ export const InputRequestSchema = z.strictObject({
   submit: InputSubmitModeSchema,
   raisedAt: InstantSchema,
   expiresAt: InstantSchema,
-  chain: AgendaIdSchema.optional(),
+  chain: AskIdSchema.optional(),
   /** Which step of a chained login this is: 2 for the card that follows the first. Absent for a lone card. */
   step: z.number().int().min(2).max(16).optional(),
   observed: InputTargetFactsSchema.optional(),
@@ -682,7 +382,7 @@ export const InputRequestSchema = z.strictObject({
   /** Saved logins: what the card may offer and what "Save as" suggests. The owner's view only. */
   saved: InputSavedSchema.optional(),
   /** How long the target is kept from the ferret after the write, and why: the card shows it. */
-  lock: InputLockSchema.optional(),
+  lock: InputHoldSchema.optional(),
   state: InputRequestStateSchema,
   outcome: InputOutcomeSchema.optional(),
   /**
@@ -701,7 +401,7 @@ export type InputRequest = z.infer<typeof InputRequestSchema>;
  * `secret`. `screen` is the target's text through the redactor.
  */
 export const InputAgentViewSchema = z.strictObject({
-  id: AgendaIdSchema,
+  id: AskIdSchema,
   state: InputRequestStateSchema,
   observed: z
     .strictObject({
@@ -945,7 +645,7 @@ export type InputJournalEventType = z.infer<typeof InputJournalEventTypeSchema>;
 export const InputEventSchema = z.strictObject({
   type: InputJournalEventTypeSchema,
   requestId: InputRequestIdSchema,
-  agendaItemId: AgendaIdSchema,
+  agendaItemId: AskIdSchema,
   sessionId: boundedLine(128),
   target: z.strictObject({ kind: InputTargetKindSchema, key: SurfaceKeySchema }),
   sensitivity: InputSensitivitySchema,

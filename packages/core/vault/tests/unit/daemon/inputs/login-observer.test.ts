@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { InputRequestField, InputTargetFacts, LoginObservation } from '@ferretry/protocol';
+import type { InputRequestField } from '../../../../daemon/lib/inputs/wire.ts';
+import type { InputTargetFacts } from '../../../../contract/index.ts';
+import type { LoginObservation } from '../../../../daemon/lib/inputs/borrowed.ts';
 import should from 'should';
 import {
   identityOf,

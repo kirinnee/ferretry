@@ -1,10 +1,7 @@
 import { describe, it } from 'bun:test';
-import {
-  INPUT_LOCK_WORDS,
-  type InputRequestField,
-  type InputTargetFacts,
-  type LoginObserved,
-} from '@ferretry/protocol';
+import { INPUT_LOCK_WORDS, type InputRequestField } from '../../../../daemon/lib/inputs/wire.ts';
+import { type InputTargetFacts } from '../../../../contract/index.ts';
+import { type LoginObserved } from '../../../../daemon/lib/inputs/borrowed.ts';
 import should from 'should';
 import {
   heldFromView,

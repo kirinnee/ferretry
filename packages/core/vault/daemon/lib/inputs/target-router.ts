@@ -1,4 +1,4 @@
-import type { InputShot, InputTarget, InputTargetFacts } from '@ferretry/protocol';
+import type { InputShot, InputTarget, InputTargetFacts } from '../../../contract/index.ts';
 import type {
   InputFieldValue,
   InputTargetField,

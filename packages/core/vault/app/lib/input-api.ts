@@ -7,36 +7,10 @@
  * and sends the request again), so a deliver that needs one needs no code here.
  */
 
-import {
-  type AccountId,
-  type AccountList,
-  AccountListSchema,
-  type IFyApiClient,
-  type InputDeliverBody,
-  InputDeliverBodySchema,
-  type InputDeliverResult,
-  InputDeliverResultSchema,
-  type InputRequest,
-  InputRequestSchema,
-  type InputShot,
-  InputShotSchema,
-  type PhoneApproval,
-  type PhoneApprovalList,
-  PhoneApprovalListSchema,
-  type PutAccountDefaultRequest,
-  PutAccountDefaultRequestSchema,
-  type PutAccountDefaultResult,
-  PutAccountDefaultResultSchema,
-  type StageTwoFactorSeedRequest,
-  StageTwoFactorSeedRequestSchema,
-  type TwoFactorSeedSaved,
-  TwoFactorSeedSavedSchema,
-  type TwoFactorSeedStaged,
-  TwoFactorSeedStagedSchema,
-  type TwoFactorSeedStageView,
-  TwoFactorSeedStageViewSchema,
-  type TwoFactorStageId,
-} from '@ferretry/protocol';
+import { type AccountId, type AccountList, AccountListSchema } from '../../daemon/lib/inputs/borrowed.ts';
+import { type InputDeliverBody, InputDeliverBodySchema, type InputDeliverResult, InputDeliverResultSchema, type InputRequest, InputRequestSchema, InputShotSchema } from '../../daemon/lib/inputs/wire.ts';
+import { type InputShot } from '../../contract/index.ts';
+import { type IFyApiClient, type PhoneApproval, type PhoneApprovalList, PhoneApprovalListSchema, type PutAccountDefaultRequest, PutAccountDefaultRequestSchema, type PutAccountDefaultResult, PutAccountDefaultResultSchema, type StageTwoFactorSeedRequest, StageTwoFactorSeedRequestSchema, type TwoFactorSeedSaved, TwoFactorSeedSavedSchema, type TwoFactorSeedStaged, TwoFactorSeedStagedSchema, type TwoFactorSeedStageView, TwoFactorSeedStageViewSchema, type TwoFactorStageId } from '@ferretry/protocol';
 import { z } from 'zod';
 
 export type InputClient = Pick<IFyApiClient, 'request'>;

@@ -1,4 +1,4 @@
-import type { InputDeliverBody, InputDeliverResult, InputRequest, InputRequestList } from '@ferretry/protocol';
+import type { InputDeliverBody, InputDeliverResult, InputRequest, InputRequestList } from '../../../../daemon/lib/inputs/wire.ts';
 import type { IHiddenValuePrompt, IInputGateway, IInputOutput, InputPorts } from '../../../src/lib/input/ports';
 
 export const SESSION = 'ms8kkfyd-95b7037e';

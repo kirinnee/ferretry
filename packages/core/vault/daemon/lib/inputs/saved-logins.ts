@@ -1,33 +1,6 @@
-import {
-  type AccountId,
-  type AccountList,
-  type AccountSummary,
-  automaticKeysInOfferOrder,
-  chosenSignIn,
-  fillRoleFor,
-  type InputCodeKey,
-  type InputSaved,
-  type InputSavedOffer,
-  InputSavedSchema,
-  type InputSensitivity,
-  type InputSignIn,
-  type InputTargetFacts,
-  type LoginFieldRole,
-  LoginMatchSchema,
-  LOGIN_MATCH_MAX,
-  matchedSignIns,
-  namesSignIn,
-  type PlaceKey,
-  placeHosts,
-  type SignInChoiceContext,
-  type SignInSummary,
-  savedRolesOf,
-  signInMatches,
-  strongestSensitivity,
-  suggestedNewAccount,
-  type TwoFactorId,
-  type TwoFactorKeySummary,
-} from '@ferretry/protocol';
+import { type AccountId, type AccountList, type AccountSummary, automaticKeysInOfferOrder, chosenSignIn, fillRoleFor, type InputCodeKey, type InputSaved, type InputSavedOffer, InputSavedSchema, type InputSignIn, type LoginFieldRole, LoginMatchSchema, LOGIN_MATCH_MAX, matchedSignIns, namesSignIn, type PlaceKey, placeHosts, type SignInChoiceContext, type SignInSummary, signInMatches, suggestedNewAccount, type TwoFactorId, type TwoFactorKeySummary } from './borrowed.ts';
+import { type InputSensitivity, type InputTargetFacts, strongestSensitivity } from '../../../contract/index.ts';
+import { savedRolesOf } from './wire.ts';
 
 /**
  * WHICH SIGN-IN IS FOR THIS TARGET — decided by the daemon from what IT observed, never by the agent.

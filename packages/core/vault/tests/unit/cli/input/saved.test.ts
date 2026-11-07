@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { InputRequest, InputSaved } from '@ferretry/protocol';
-import { unpadInputValue } from '@ferretry/protocol';
+import type { InputRequest } from '../../../../daemon/lib/inputs/wire.ts';
+import type { InputSaved } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { unpadInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { Command } from 'commander';
 import should from 'should';
 import { registerInputCommands } from '../../../src/lib/input/commands';

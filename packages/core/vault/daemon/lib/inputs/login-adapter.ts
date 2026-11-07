@@ -1,4 +1,4 @@
-import type { AccountList, LoginEntryId, LoginFieldRole, TwoFactorId } from '@ferretry/protocol';
+import type { AccountList, LoginEntryId, LoginFieldRole, TwoFactorId } from './borrowed.ts';
 import type { AccountVault, LoginFieldValues } from '../secrets/accounts.ts';
 import type { LoginDirectory } from '../secrets/logins.ts';
 import type { InputLoginPort } from './ports.ts';

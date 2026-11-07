@@ -1,10 +1,5 @@
-import type {
-  IFyApiClient,
-  InputDeliverBody,
-  InputDeliverResult,
-  InputRequest,
-  InputRequestList,
-} from '@ferretry/protocol';
+import type { InputDeliverBody, InputDeliverResult, InputRequest, InputRequestList } from '../../../daemon/lib/inputs/wire.ts';
+import type { IFyApiClient } from '@ferretry/protocol';
 
 /** Presentation port for `fy input`: the narrowest slice of the shipped console adapter. */
 export interface IInputOutput {

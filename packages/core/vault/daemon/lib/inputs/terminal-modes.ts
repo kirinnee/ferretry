@@ -1,4 +1,4 @@
-import type { InputEcho } from '@ferretry/protocol';
+import type { InputEcho } from './wire.ts';
 
 /** Reads whether a TTY echoes what is typed. `unknown` when it cannot be read; the service treats that as `on`. */
 export interface TerminalModes {

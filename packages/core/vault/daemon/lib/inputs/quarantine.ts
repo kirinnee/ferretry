@@ -1,4 +1,4 @@
-import { INPUT_QUARANTINE_SECONDS } from '@ferretry/protocol';
+import { INPUT_QUARANTINE_SECONDS } from '../../../contract/index.ts';
 import type { InputClock } from './ports.ts';
 
 /**

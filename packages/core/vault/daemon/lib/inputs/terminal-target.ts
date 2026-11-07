@@ -1,4 +1,5 @@
-import type { InputForeground, InputTarget, InputTargetFacts } from '@ferretry/protocol';
+import type { InputForeground } from './wire.ts';
+import type { InputTarget, InputTargetFacts } from '../../../contract/index.ts';
 import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';

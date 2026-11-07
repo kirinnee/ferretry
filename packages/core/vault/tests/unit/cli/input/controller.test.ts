@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { unpadInputValue } from '@ferretry/protocol';
+import { unpadInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
 import { InputController } from '../../../src/lib/input/controller';

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { type AccountList, INPUT_ERROR_CODES, unpadInputValue } from '@ferretry/protocol';
+import { type AccountList } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { INPUT_ERROR_CODES, unpadInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import {
   accountTitleWords,
   alwaysUseFor,

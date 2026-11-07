@@ -1,13 +1,6 @@
 import { hostname } from 'node:os';
-import {
-  DAEMON_FEATURES,
-  daemonFeatureList,
-  InputEventSchema,
-  InputQuarantineEventSchema,
-  SessionStateSchema,
-  type InputEvent,
-  type InputQuarantineEvent,
-} from '@ferretry/protocol';
+import { InputEventSchema, InputQuarantineEventSchema, type InputEvent, type InputQuarantineEvent } from './lib/inputs/wire.ts';
+import { DAEMON_FEATURES, daemonFeatureList, SessionStateSchema } from '@ferretry/protocol';
 import { asActivity } from '../../src/adapters/index.ts';
 import { runProgram } from '../../src/adapters/terminal/index.ts';
 import { ExecutableCodePrograms } from '../../src/adapters/system/executable-code-programs.ts';

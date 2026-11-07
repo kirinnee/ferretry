@@ -1,4 +1,4 @@
-import type { InputReason, InputRequest, InputRequestList } from '@ferretry/protocol';
+import type { InputReason, InputRequest, InputRequestList } from '../../../daemon/lib/inputs/wire.ts';
 
 const UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 

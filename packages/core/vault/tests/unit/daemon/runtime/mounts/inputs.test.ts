@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { type InputTargetFacts, padInputValue } from '@ferretry/protocol';
+import { type InputTargetFacts } from '../../../../../contract/index.ts';
+import { padInputValue } from '../../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

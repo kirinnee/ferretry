@@ -1,4 +1,4 @@
-import { LOGIN_USERNAME_MAX_LENGTH } from '@ferretry/protocol';
+import { LOGIN_USERNAME_MAX_LENGTH } from './borrowed.ts';
 
 /**
  * WHO A PAGE IS SIGNING IN, as the daemon saw the ferret type it (docs/input-requests.md, "Who is signing in").

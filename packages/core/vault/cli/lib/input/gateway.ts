@@ -1,13 +1,4 @@
-import {
-  type InputDeliverBody,
-  InputDeliverBodySchema,
-  type InputDeliverResult,
-  InputDeliverResultSchema,
-  type InputRequest,
-  type InputRequestList,
-  InputRequestListSchema,
-  InputRequestSchema,
-} from '@ferretry/protocol';
+import { type InputDeliverBody, InputDeliverBodySchema, type InputDeliverResult, InputDeliverResultSchema, type InputRequest, type InputRequestList, InputRequestListSchema, InputRequestSchema } from '../../../daemon/lib/inputs/wire.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME } from '../session/connection.ts';
 import type { IInputGateway, InputApiClient } from './ports.ts';
 

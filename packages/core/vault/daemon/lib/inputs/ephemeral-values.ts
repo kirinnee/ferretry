@@ -1,9 +1,5 @@
-import {
-  COPY_AFTER_MASK_SECONDS,
-  COPY_MAX_LIFETIME_SECONDS,
-  INPUT_DEFAULT_REDACTION_SECONDS,
-  INPUT_MAX_REDACTION_SECONDS,
-} from '@ferretry/protocol';
+import { COPY_AFTER_MASK_SECONDS, COPY_MAX_LIFETIME_SECONDS } from './borrowed.ts';
+import { INPUT_DEFAULT_REDACTION_SECONDS, INPUT_MAX_REDACTION_SECONDS } from '../../../contract/index.ts';
 import { coverageOf, type TextRange } from '../secrets/policy.ts';
 import type { InputClock } from './ports.ts';
 

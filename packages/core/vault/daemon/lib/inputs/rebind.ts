@@ -1,4 +1,4 @@
-import type { InputTargetFacts } from '@ferretry/protocol';
+import type { InputTargetFacts } from '../../../contract/index.ts';
 import { digestValue } from './digest.ts';
 
 /**

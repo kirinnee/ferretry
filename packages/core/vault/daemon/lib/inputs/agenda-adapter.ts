@@ -1,4 +1,5 @@
-import { type AgendaId, INPUT_PROMPT_MARKER } from '@ferretry/protocol';
+import { type AskId } from '@ferretry/core-asks/contract';
+import { INPUT_PROMPT_MARKER } from './wire.ts';
 import { type ClosestAgenda, closestAgendaLink } from '../agenda/closest.ts';
 import type { AgendaBoardChange, AgendaChangeObserver, AgendaService } from '../agenda/service.ts';
 import type { AgendaActor } from '../agenda/state-machine.ts';
@@ -71,17 +72,17 @@ export class InputAgendaAdapter implements InputAgendaPort {
       : { ok: true, id: outcome.item.id };
   }
 
-  async close(sessionId: string, id: AgendaId, note: string): Promise<void> {
+  async close(sessionId: string, id: AskId, note: string): Promise<void> {
     await this.agenda.resolve(sessionId, id, INPUT_CARD_ACTOR, note).catch(() => undefined);
   }
 
-  async note(sessionId: string, id: AgendaId, card: Pick<InputCard, 'prompt' | 'chain'>, line: string): Promise<void> {
+  async note(sessionId: string, id: AskId, card: Pick<InputCard, 'prompt' | 'chain'>, line: string): Promise<void> {
     await this.agenda
       .edit?.(sessionId, id, { context: contextOf(card, line) }, INPUT_CARD_ACTOR)
       .catch(() => undefined);
   }
 
-  async promptOf(sessionId: string, id: AgendaId): Promise<string | undefined> {
+  async promptOf(sessionId: string, id: AskId): Promise<string | undefined> {
     const listed = await this.agenda.list(sessionId);
     if (!listed.ok) return undefined;
     const context = listed.value.items.find(item => item.id === id)?.context;
@@ -121,11 +122,11 @@ export class PhoneApprovalAgendaAdapter implements PhoneApprovalAgendaPort {
       : { ok: true, id: outcome.item.id };
   }
 
-  async close(sessionId: string, id: AgendaId, note: string): Promise<void> {
+  async close(sessionId: string, id: AskId, note: string): Promise<void> {
     await this.agenda.resolve(sessionId, id, PHONE_APPROVAL_ACTOR, note).catch(() => undefined);
   }
 
-  async open(sessionId: string): Promise<readonly AgendaId[]> {
+  async open(sessionId: string): Promise<readonly AskId[]> {
     const listed = await this.agenda.list(sessionId);
     if (!listed.ok) return [];
     return listed.value.items.filter(item => item.phoneApproval !== undefined).map(item => item.id);
@@ -136,7 +137,7 @@ export class PhoneApprovalAgendaAdapter implements PhoneApprovalAgendaPort {
 export class InputAgentNotifierAdapter implements InputAgentNotifier {
   constructor(private readonly add: (sessionId: string, key: string, message: string) => Promise<unknown>) {}
 
-  async tell(sessionId: string, agendaId: AgendaId, message: string): Promise<void> {
+  async tell(sessionId: string, agendaId: AskId, message: string): Promise<void> {
     await this.add(sessionId, agendaId, message).catch(() => undefined);
   }
 }
@@ -146,7 +147,7 @@ export class InputAgentNotifierAdapter implements InputAgentNotifier {
  * The daemon's own closing of a card is not heard: it is the request that ended, not the owner.
  */
 export class InputCardClosedObserver implements AgendaChangeObserver {
-  constructor(private readonly closed: (sessionId: string, id: AgendaId) => Promise<void>) {}
+  constructor(private readonly closed: (sessionId: string, id: AskId) => Promise<void>) {}
 
   async changed(sessionId: string, change: AgendaBoardChange): Promise<void> {
     const addressed = change.addressed;

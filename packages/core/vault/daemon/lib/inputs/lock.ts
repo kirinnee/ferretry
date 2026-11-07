@@ -1,11 +1,6 @@
-import {
-  INPUT_QUARANTINE_SECONDS,
-  INPUT_SHORT_LOCK_SECONDS,
-  type InputLock,
-  type InputRequestField,
-  type InputTargetFacts,
-  type LoginObserved,
-} from '@ferretry/protocol';
+import { INPUT_QUARANTINE_SECONDS, INPUT_SHORT_LOCK_SECONDS, type InputTargetFacts } from '../../../contract/index.ts';
+import { type InputLock, type InputRequestField } from './wire.ts';
+import { type LoginObserved } from './borrowed.ts';
 import { identityOf, placeOf } from './login-observer.ts';
 
 /**

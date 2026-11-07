@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { InputTargetFacts } from '@ferretry/protocol';
+import type { InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import type {
   BrowserInputFacts,

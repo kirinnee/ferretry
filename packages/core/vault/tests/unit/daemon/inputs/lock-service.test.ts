@@ -1,14 +1,7 @@
 import { describe, it } from 'bun:test';
-import {
-  type AccountList,
-  type AccountSummary,
-  type InputRaise,
-  type InputTargetFacts,
-  type LoginObserved,
-  padInputValue,
-  PutLoginEntryRequestSchema,
-  type SignInSummary,
-} from '@ferretry/protocol';
+import { type AccountList, type AccountSummary, type LoginObserved, PutLoginEntryRequestSchema, type SignInSummary } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
+import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
 import { identityOf, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';

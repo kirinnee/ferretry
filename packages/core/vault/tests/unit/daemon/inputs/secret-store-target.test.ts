@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { InputTarget, InputTargetFacts, SecretName } from '@ferretry/protocol';
+import type { InputTarget, InputTargetFacts, SecretName } from '../../../../contract/index.ts';
 import should from 'should';
 import {
   InputTargetRouter,

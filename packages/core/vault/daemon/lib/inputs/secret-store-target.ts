@@ -1,4 +1,4 @@
-import type { InputTarget, InputTargetFacts, SecretName } from '@ferretry/protocol';
+import type { InputTarget, InputTargetFacts, SecretName } from '../../../contract/index.ts';
 import type { InputFieldValue, InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
 
 /** The secret store as a paste needs it: which names it holds, and storing one if it is still as seen. Never a value back. */

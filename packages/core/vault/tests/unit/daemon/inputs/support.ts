@@ -1,4 +1,6 @@
-import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } from '@ferretry/protocol';
+import type { AskId } from '@ferretry/core-asks/contract';
+import type { InputEvent } from '../../../../daemon/lib/inputs/wire.ts';
+import type { InputRaise, InputShot, InputTargetFacts } from '../../../../contract/index.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAgendaPort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
@@ -90,7 +92,7 @@ export function inputRequestService(
       },
     },
     agenda: options.agenda ?? {
-      raise: async () => ({ ok: true, id: `A${card++}` as AgendaId }),
+      raise: async () => ({ ok: true, id: `A${card++}` as AskId }),
       close: async () => undefined,
       promptOf: async () => 'sudo wants your password',
     },

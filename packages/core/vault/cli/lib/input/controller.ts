@@ -1,13 +1,6 @@
-import {
-  type InputDeliverBody,
-  type InputRequest,
-  type InputSensitivity,
-  inputValueProblem,
-  LOGIN_LABEL_MAX_LENGTH,
-  LOGIN_PASSWORD_MIN_LENGTH,
-  LoginEntryIdSchema,
-  padInputValue,
-} from '@ferretry/protocol';
+import { type InputDeliverBody, type InputRequest, inputValueProblem, padInputValue } from '../../../daemon/lib/inputs/wire.ts';
+import { type InputSensitivity } from '../../../contract/index.ts';
+import { LOGIN_LABEL_MAX_LENGTH, LOGIN_PASSWORD_MIN_LENGTH, LoginEntryIdSchema } from '../../../daemon/lib/inputs/borrowed.ts';
 import { parseAgendaReference } from '../agenda/reference.ts';
 import { refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
 import type { InputPorts } from './ports.ts';

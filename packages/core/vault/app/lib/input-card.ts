@@ -10,35 +10,10 @@
  * its value, so a saved value never passes through the app.
  */
 
-import {
-  type AccountList,
-  type AccountSummary,
-  factorAskWords,
-  INPUT_ERROR_CODES,
-  type InputBrowserFieldFacts,
-  type InputCodeKey,
-  type InputDeliverBody,
-  type InputDeliverResult,
-  type InputRequest,
-  type InputRisk,
-  type InputSaved,
-  type InputSavedOffer,
-  type InputSensitivity,
-  type InputShot,
-  inputValueProblem,
-  LOGIN_LABEL_MAX_LENGTH,
-  LOGIN_ONE_FACTOR_WARNING,
-  LOGIN_PASSWORD_MIN_LENGTH,
-  LOGIN_USERNAME_MAX_LENGTH,
-  LoginEntryIdSchema,
-  loginMethodSentence,
-  PlaceKeySchema,
-  type PutAccountDefaultRequest,
-  padInputValue,
-  signInChoiceWords,
-  type SignInId,
-  type TwoFactorId,
-} from '@ferretry/protocol';
+import { type AccountList, type AccountSummary, factorAskWords, type InputCodeKey, type InputSaved, type InputSavedOffer, LOGIN_LABEL_MAX_LENGTH, LOGIN_ONE_FACTOR_WARNING, LOGIN_PASSWORD_MIN_LENGTH, LOGIN_USERNAME_MAX_LENGTH, LoginEntryIdSchema, loginMethodSentence, PlaceKeySchema, signInChoiceWords, type SignInId, type TwoFactorId } from '../../daemon/lib/inputs/borrowed.ts';
+import { INPUT_ERROR_CODES, type InputBrowserFieldFacts, type InputDeliverBody, type InputDeliverResult, type InputRequest, type InputRisk, inputValueProblem, padInputValue } from '../../daemon/lib/inputs/wire.ts';
+import { type InputSensitivity, type InputShot } from '../../contract/index.ts';
+import { type PutAccountDefaultRequest } from '@ferretry/protocol';
 import { grantRefusalNotice } from './grants.ts';
 
 /**

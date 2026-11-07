@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from 'node:crypto';
-import type { InputTargetFacts } from '@ferretry/protocol';
+import type { InputTargetFacts } from '../../../contract/index.ts';
 
 /**
  * KEYED, NOT PLAIN. A digest of a prompt line is shown to the owner's client and compared on Send; had it been

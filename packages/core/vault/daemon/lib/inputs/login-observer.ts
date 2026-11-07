@@ -1,18 +1,7 @@
 import { createHash } from 'node:crypto';
-import {
-  type AccountId,
-  type InputRequestField,
-  type InputTarget,
-  type InputTargetFacts,
-  type LoginEntryId,
-  type LoginObservation,
-  type LoginObserverBy,
-  ownerTapped,
-  type SignInId,
-  type SurfaceKind,
-  TASK_PLAN_TERMINAL_TOOLS,
-  type TwoFactorId,
-} from '@ferretry/protocol';
+import { type AccountId, type LoginEntryId, type LoginObservation, type SignInId, type SurfaceKind, TASK_PLAN_TERMINAL_TOOLS, type TwoFactorId } from './borrowed.ts';
+import { type InputRequestField, type LoginObserverBy, ownerTapped } from './wire.ts';
+import { type InputTarget, type InputTargetFacts } from '../../../contract/index.ts';
 
 /**
  * WHAT THE DAEMON SEES WHILE A SAVED ACCOUNT SIGNS IN (docs/input-requests.md, "Login recipes"), kept as the facts of
