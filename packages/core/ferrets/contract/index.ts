@@ -3,12 +3,7 @@
  * `attach`, spine D15) and login kinds, the launch and sitrep hooks, `ferret.changed`, the Ferrets port and its files.
  * Re-exports the kernel-bound `WorkFolders` port Ferrets provides (spine D4).
  */
-export {
-  type FencedPath,
-  type FolderRefusal,
-  type WorkFolders,
-  WorkFoldersPort,
-} from '@ferretry/kernel/contract';
+export { type FencedPath, type FolderRefusal, type WorkFolders, WorkFoldersPort } from '@ferretry/kernel/contract';
 export * from './hooks.ts';
 export * from './ids.ts';
 export * from './kinds.ts';
@@ -30,12 +25,7 @@ export * from './move-state.ts';
  * the live line while a turn runs, how full the context is, the in-ferret search query, and the file index the search reads (its schemas, limits and matching helpers). The daemon builds them;
  * the app's chat parses the same shapes.
  */
-export {
-  type FerretContext,
-  FerretContextSchema,
-  type FerretView,
-  FerretViewSchema,
-} from './view/ferret-view.ts';
+export { type FerretContext, FerretContextSchema, type FerretView, FerretViewSchema } from './view/ferret-view.ts';
 export {
   compactionFreed,
   type FerretCompactionDone,
@@ -46,3 +36,6 @@ export {
 export * from './view/session-search.ts';
 export * from './pins.ts';
 export * from './ferret-files.ts';
+export * from './session-restart.ts';
+export * from './start-requests.ts';
+export * from './worktrees.ts';

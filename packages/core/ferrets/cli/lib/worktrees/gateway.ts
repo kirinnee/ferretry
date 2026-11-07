@@ -12,7 +12,7 @@ import {
   WorktreeRemovalDecisionSchema,
   type WorktreeRemovalRequest,
   WorktreeRemovalRequestSchema,
-} from '../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../contract/index.ts';
 import type { IWorktreeGateway } from './ports.ts';
 
 /** The managed-worktree routes (today's paths: none of them names a replaced word). */
