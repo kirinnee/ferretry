@@ -20,6 +20,7 @@ export function expectedSections(manifest: Manifest, half: HalfName): Record<str
         take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name,
       ),
       subscribers: (manifest.data?.subscribes ?? []).map(event => event.name),
+      doctor: [...(manifest.doctor ?? [])],
     };
   if (half === 'app')
     return {

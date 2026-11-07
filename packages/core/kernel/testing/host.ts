@@ -41,9 +41,10 @@ import { hostPermitted, type ItemReachOf, NO_ITEMS, spawnPermitted } from '../ho
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
+import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
-import type { DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
 import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
@@ -138,6 +139,8 @@ export interface TestHost {
   state(pluginId: string): MemoryStateFolder;
   setConfig(fileOrCollection: string, value: unknown): void;
   runJob(id: string): Promise<void>;
+  /** Runs a half's declared `doctor` check (manifest `doctor` id) as `fy doctor` would. */
+  doctor(plugin: string, check: string): Promise<DoctorFinding>;
   jobIds(): readonly string[];
   /** Makes `InputHolds.decide` refuse this target (when the stand-in holds are in use). */
   hold(target: TargetRef, code?: RefusalCode): void;
@@ -843,6 +846,15 @@ async function start(world: World): Promise<TestHost> {
       return toTestResponse(
         await actorScope.run(actorOf(caller), () => runHandler(() => handler(call), route.guard, route.noStore)),
       );
+    },
+    async doctor(plugin, check) {
+      const entry = built.find(b => b.manifest.id === plugin);
+      if (entry === undefined) throw new Error(`no plugin ${plugin} under test`);
+      if (!(entry.manifest.doctor ?? []).includes(check))
+        throw new Error(`${plugin} declares no doctor check ${check}`);
+      const run = (entry.half?.doctor as Readonly<Record<string, DoctorRun | undefined>> | undefined)?.[check];
+      if (run === undefined) throw new Error(`${plugin}: the doctor check ${check} has no implementation`);
+      return await run();
     },
     async tool(name, input, init = {}) {
       const entry = tools.get(name);

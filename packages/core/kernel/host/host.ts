@@ -33,6 +33,7 @@ import type {
   DaemonContext,
   DaemonHalf,
   DaemonImplementation,
+  DoctorRun,
   ToolHandler,
   ToolResult,
 } from '../manifest/implement.ts';
@@ -162,6 +163,10 @@ export interface DoctorLine {
   readonly plugin: string;
   readonly state: 'ok' | 'warn' | 'fail';
   readonly detail: string;
+  /** The manifest `doctor` id that produced it, when a declared check did. */
+  readonly check?: string;
+  /** What to do about it, when the check said. */
+  readonly fix?: string;
 }
 
 export interface RunningHost {
@@ -746,6 +751,31 @@ async function doctorLines(
       });
   for (const note of hooks.notes) lines.push({ plugin: 'kernel', state: 'warn', detail: note });
   for (const refused of dataRefused) lines.push({ plugin: refused.folder, state: 'fail', detail: refused.sentence });
+  // Each started plugin's declared checks (manifest `doctor`), in start order; a check that throws is a failure that
+  // names the check, never the thrown text (which may carry anything).
+  for (const [id, record] of records) {
+    if (record.status !== 'serving' && record.status !== 'damaged') continue;
+    const runs = (record.half?.doctor ?? {}) as Readonly<Record<string, DoctorRun | undefined>>;
+    for (const check of record.manifest.doctor ?? []) {
+      const run = runs[check];
+      if (run === undefined) {
+        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} has no implementation.` });
+        continue;
+      }
+      try {
+        const finding = await run();
+        lines.push({
+          plugin: id,
+          check,
+          state: finding.state,
+          detail: finding.detail,
+          ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+        });
+      } catch {
+        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} failed to run.` });
+      }
+    }
+  }
   const checks: readonly { readonly id: string; readonly item: DoctorCheck }[] = hooks.contributions(DoctorChecks);
   for (const check of checks) {
     try {

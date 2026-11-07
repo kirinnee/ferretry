@@ -13,6 +13,7 @@ import type {
   ProvideHook,
   TransformHook,
 } from '../contract/define.ts';
+import type { DoctorFinding } from '../contract/kernel.ts';
 import type { Cancel, KernelPorts } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
@@ -39,6 +40,7 @@ export type SettingsIdsOf<M> = Field<Elem<Ui<M>, 'settings'>, 'id'>;
 export type RendererKeysOf<M> = Field<Elem<Ui<M>, 'renderers'>, 'key'>;
 export type SubscribesOf<M> = Elem<Data<M>, 'subscribes'>;
 export type TakesOf<M> = Elem<Hooks<M>, 'takes'>;
+export type DoctorIdsOf<M> = M extends { readonly doctor: readonly (infer D extends string)[] } ? D : never;
 
 type TokensOf<M, K extends 'needs' | 'uses' | 'provides'> = M extends { readonly [P in K]: infer T } ? T : {};
 
@@ -109,6 +111,9 @@ export interface ToolResult {
 
 export type ToolHandler = (call: CallContext, input: unknown) => Promise<ToolResult>;
 
+/** One declared `fy doctor` check: reads only the plugin's own ports; never a secret in `detail` or `fix`. */
+export type DoctorRun = () => Promise<DoctorFinding>;
+
 /** What `build` returns: one implementation for everything the manifest declares, nothing more (`manifest-match`). */
 export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in RouteKeysOf<M>]: RouteHandler }> &
   Section<'sockets', { readonly [K in SocketKeysOf<M>]: SocketAccept }> &
@@ -116,7 +121,8 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'tools', { readonly [K in ToolNamesOf<M>]: ToolHandler }> &
   Section<'provides', PortsOf<TokensOf<M, 'provides'>>> &
   Section<'hooks', HookImplsOf<M>> &
-  Section<'subscribers', SubscribersOf<M>>;
+  Section<'subscribers', SubscribersOf<M>> &
+  Section<'doctor', { readonly [K in DoctorIdsOf<M>]: DoctorRun }>;
 
 export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly half: 'daemon';
