@@ -844,6 +844,10 @@ async function bootLocked(
     version: options.version,
     inventory,
     project,
+    tools: {
+      owners: name => [...tools.keys()].filter(key => key.slice(key.indexOf('/') + 1) === name).map(key => key.slice(0, key.indexOf('/'))),
+      call: (plugin, name, input, request) => callTool(plugin, name, input, request),
+    },
     bus: {
       subscribe: listener => events.onAny(listener),
       publisher: name => eventPublishers.get(name),

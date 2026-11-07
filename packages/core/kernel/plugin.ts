@@ -80,6 +80,16 @@ export default definePlugin({
         audit: { skip: 'a diagnosis read records nothing' },
         guard: { none: 'check names and sentences the checks wrote; never a secret' },
       }),
+      // R-0246: the agent's tool door. It names no ferret and no plugin: the credential it carries decides who the
+      // caller is, and each tool is admitted by its own declaration (`callTool`). Over a privileged local carrier only.
+      route('POST /v1/agent/tools', {
+        minimum: 'none',
+        caller: 'any',
+        privilegedOnly: true,
+        noStore: true,
+        audit: { skip: 'each tool records itself, by its own declaration' },
+        guard: { none: 'the answer is the tool’s, already guarded by the tool’s own declaration' },
+      }),
       // §1.3.
       route('GET /v1/glossary', {
         minimum: 'authenticated',
