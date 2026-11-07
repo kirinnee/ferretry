@@ -6,7 +6,7 @@ import { defineEvent, defineState } from '../../../contract/define.ts';
 import { jsonResponse } from '../../../contract/http.ts';
 import type { CarrierKey } from '../../../contract/ids.ts';
 import { policyRef } from '../../../contract/policy.ts';
-import type { Carrier, CarrierLink, SessionLayer } from '../../../contract/session.ts';
+import { type Carrier, type CarrierLink, isSessionEnd, type SessionLayer } from '../../../contract/session.ts';
 import { definePlugin, implementDaemon, route, skeletonDaemon, tool } from '../../../manifest/index.ts';
 import {
   type CarrierPeer,
@@ -265,7 +265,7 @@ function memoryCarrier(key: CarrierKey): { carrier: Carrier; connect(): CarrierP
         for (;;) {
           const next = link.outbound.next();
           if (next === undefined) return;
-          if (next === 'ended') {
+          if (isSessionEnd(next)) {
             peer.end();
             return;
           }

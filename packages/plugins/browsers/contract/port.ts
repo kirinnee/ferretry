@@ -4,7 +4,7 @@
  */
 import { defineEvent, definePort, type FerretId } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { BrowserPageIdSchema, type BrowserStateView, SurfaceNameSchema } from './wire.ts';
+import { BrowserPageIdSchema, type BrowserStateView, type SurfaceNameSchema } from './wire.ts';
 
 export interface BrowserPageRef {
   readonly id: z.infer<typeof BrowserPageIdSchema>;

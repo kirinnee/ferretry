@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { CarrierKey } from '../contract/ids.ts';
-import type { Carrier, CarrierLink, SealedFrame, SealedOutbound, SessionLayer } from '../contract/session.ts';
+import type {
+  Carrier,
+  CarrierLink,
+  SealedFrame,
+  SealedOutbound,
+  SessionEnd,
+  SessionLayer,
+} from '../contract/session.ts';
 
 /** The far end of a carrier's own transport, driven by the suite (a WebSocket client, a relay peer, a data channel). */
 export interface CarrierPeer {
@@ -39,7 +46,7 @@ export class RecordingLink implements CarrierLink {
   readonly inbounds: Uint8Array[] = [];
   closedWith: string | undefined;
   /** What `next()` will answer, in order: a frame, `undefined` (nothing may leave now) or `'ended'`. */
-  readonly queue: (SealedFrame | 'ended' | undefined)[] = [];
+  readonly queue: (SealedFrame | SessionEnd | undefined)[] = [];
   nextCalls = 0;
   private readonly listeners = new Set<() => void>();
   readonly outbound: SealedOutbound = {
@@ -60,12 +67,13 @@ export class RecordingLink implements CarrierLink {
     this.closedWith = reason;
   }
   /** Queues and signals ready, as the session layer does when a sealed frame may leave. */
-  offer(...items: (SealedFrame | 'ended' | undefined)[]): void {
+  offer(...items: (SealedFrame | SessionEnd | undefined)[]): void {
     this.queue.push(...items);
     for (const listener of this.listeners) listener();
   }
 }
 
+const ENDED: SessionEnd = Object.freeze({ code: 4400, reason: 'the session ended' });
 const frame = (sequence: number, text: string): SealedFrame => ({ sequence, bytes: new TextEncoder().encode(text) });
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
@@ -153,7 +161,7 @@ export function carrierConformance(
       const h = await started();
       const peer = await h.harness.connect();
       await h.harness.flush();
-      (h.layer.links[0] as RecordingLink).offer('ended');
+      (h.layer.links[0] as RecordingLink).offer(ENDED);
       await h.harness.flush();
       expect(peer.closed()).toBe(true);
       await done(h);

@@ -17,7 +17,7 @@ export interface Finding {
 }
 
 /** How one plugin's `cli` half loaded: skeleton halves are named so nobody mistakes them for a port. */
-export interface HalfStatus {
+interface HalfStatus {
   readonly id: string;
   readonly title: string;
   readonly skeleton: boolean;

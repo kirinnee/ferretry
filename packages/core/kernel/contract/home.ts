@@ -28,9 +28,12 @@ export type HomeDecision =
       readonly sentence: string;
     };
 
+/** The carry-over prompt a refused home points at (§9.5). The one place the path is spelled; `no-compat` allowlists it. */
+export const CARRY_OVER_PROMPT = 'docs/migration/v4-to-v5-prompt.md';
+
 const CARRY_OVER_SENTENCE = (home: string): string =>
   `${home} is not empty and has no home.json, so Ferretry will not use or change it.\n` +
-  'If it is a home from an older Ferretry, follow docs/migration/clean-slate-prompt.md: it moves the folder aside ' +
+  `If it is a home from an older Ferretry, follow ${CARRY_OVER_PROMPT}: it moves the folder aside ` +
   'with your yes, and Ferretry then starts empty.\n' +
   'If it is a Ferretry 5 home whose home.json was lost, restore home.json from a backup.\n' +
   'Or point FY_HOME at another folder.';

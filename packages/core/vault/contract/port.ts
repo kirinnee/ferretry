@@ -13,18 +13,9 @@ import type {
   SecretUseResult,
 } from './secrets.ts';
 
-declare const childEnvironmentBrand: unique symbol;
-
-/**
- * An environment whose `${secret:NAME}` references the Vault resolved for ONE child process. Opaque: no field,
- * no enumeration, no JSON (it serialises as names only). Only a runner hands it to the process it starts, so the
- * values are in that child's environment and in no plugin's data (secrets.md "use, never read").
- */
-export interface ChildEnvironment {
-  readonly [childEnvironmentBrand]: true;
-  /** The variable names it sets, for the launch record. Never a value. */
-  readonly names: readonly string[];
-}
+/** The opaque child environment lives in the kernel leaf (lead decision 9: the kernel opens it at exec time). */
+export type { ChildEnvironment } from '@ferretry/kernel/contract';
+import type { ChildEnvironment } from '@ferretry/kernel/contract';
 
 /**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the

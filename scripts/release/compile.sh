@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Cross-compile every standalone executable from EVERY .bin entry of each shipped package for every
-# supported target. Every entry, not the first: the daemon package also declares its browser worker,
-# and a release that compiled only the first entry shipped a daemon whose browser pane could never
-# start (the worker is run beside the daemon, see packages/daemon/src/lib/browser/runtime/worker-program.ts).
+# supported target. Every entry, not the first: a package may declare a helper beside its own executable,
+# and a 4.x release that compiled only the first entry shipped a daemon whose browser worker could never
+# start. The shipped packages are the CLI (`fy`, packages/cli) and the daemon host (`fyd`, packages/core/kernel).
 #
 # `COMPILE_TARGETS` narrows that to the named artifact suffixes (space-separated, e.g. `linux-x64-baseline`)
-# for a caller that runs only some of them: the e2e tier drives the one binary of its own host
-# (scripts/ci/e2e.sh), and compiling the other eight binaries cost ~15s in every shard. UNSET, IT IS EVERY
+# for a caller that runs only some of them (a local check of its own host's binary: compiling every
+# target costs seconds per binary). UNSET, IT IS EVERY
 # TARGET (a whitespace-only value counts as unset): the release path (publish.sh, the `compile` job) never
 # sets it, and an unknown name fails
 # rather than silently compiling less.
@@ -46,9 +46,11 @@ done <<<"${targets}"
 mapfile -t install_os < <(printf '%s\n' "${install_os[@]}" | sort -u)
 mapfile -t install_cpu < <(printf '%s\n' "${install_cpu[@]}" | sort -u)
 bun install --frozen-lockfile "${install_os[@]}" "${install_cpu[@]}"
+# The hosts import the git-ignored generated registries (the install above also runs it as postinstall).
+./scripts/local/gen.sh
 
 CLI_PKG="packages/cli"
-DAEMON_PKG="packages/daemon"
+DAEMON_PKG="packages/core/kernel"
 
 # The FIRST bin key is the package's own executable name (the two-name model reads
 # `.bin | to_entries[0].key`); the remaining entries are helpers that ship beside it.
@@ -62,7 +64,7 @@ package_bins() {
 OUTDIR="${COMPILE_OUTDIR:-dist/bin}"
 mkdir -p "${OUTDIR}"
 
-# The daemon imports the hosted directory default from @ferretry/relay. Do not add a build define
+# The daemon compiles the hosted directory default from its one source constant. Do not add a build define
 # here: a release-only define was why Nix and GoReleaser could produce different reachability.
 
 count=0

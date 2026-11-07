@@ -23,7 +23,7 @@ on:
       - 'Changelog.md'
       - 'Changelog.old.md'
       - 'packages/cli/package.json'
-      - 'packages/daemon/package.json'
+      - 'packages/core/kernel/package.json'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
@@ -116,37 +116,6 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
 
-  # Does this pull request change anything the PWA browser gate reads? One decision for all three legs of
-  # `pwa-screenshot`: when it is `false` they are SKIPPED, which counts as passed, so a daemon-only, CLI-only
-  # or docs-only pull request skips a gate that is ~19% of the Namespace bill. scripts/ci/pwa-relevance.sh has the
-  # list and why it is a job and not `paths-ignore`; scripts/validate/pwa-relevance.sh holds it to the
-  # imports of the harness. `main`, dispatch and any doubt decide `true`.
-  # The job is self-contained: it reads the PR's file list through the API and nothing else, so it stays
-  # valid whenever and however `pwa-screenshot` is triggered.
-  pwa-relevance:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
-    timeout-minutes: 5
-    name: PWA Relevance
-    permissions:
-      contents: read
-      pull-requests: read
-    # GitHub, not Namespace: a few seconds of bash with no nix shell (docs/standards/ci-cd, "Runners").
-    # It must stay that cheap: `pwa-screenshot` waits for it, so its seconds are the gate's start delay.
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-          sparse-checkout: scripts/ci
-      - id: decide
-        name: Decide whether the PWA browser gate has anything to prove
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: ./scripts/ci/pwa-relevance.sh
-
   # Starts immediately, before Namespace provisioning. A new head has no full proof yet.
   full-pending:
     name: Full CI Pending
@@ -167,85 +136,10 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: ./scripts/ci/full-status.sh pending
 
-  pwa-screenshot:
-    timeout-minutes: 20
-    name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
-    needs: pwa-relevance
-    if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
-    permissions:
-      contents: read
-    # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
-    # Integration Tests job's shared Chromium launches, so this needs no new tool and no further macOS
-    # job. A sibling job rather than a step on an existing one, so it adds runner time and no wall clock.
-    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). The Settings walk
-    # fits a 2x4. The full gallery is two legs, one viewport each, each on a 4x8: unsplit it walked its
-    # viewports one after the other, 643s on GitHub against ~422s on a Namespace 4x8, and a viewport's
-    # walk peaks at 5-7GB so a leg cannot drop to a 2x4. A GitHub leg runs about as long as a Namespace one
-    # but waits in GitHub's queue, which on a busy day put the pull-request p90 near 11 minutes against
-    # 8, so a pull request keeps Namespace (docs/standards/ci-cd, "Runners": GitHub only when Namespace
-    # buys close to nothing).
-    # Separate jobs, not one job running both at once: that was three software-rendered Chromes on four
-    # cores, and it timed out in 3 of 7 runs under load (#598). On `main` both legs take the GitHub
-    # branch below, like every other job there.
-    runs-on: >-
-      ${{
-        (matrix.shape == 'github' || github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
-        && 'ubuntu-latest'
-        || fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]', matrix.shape))
-      }}
-    # One job per colour scheme: the two runs are independent first frames (`pre-paint.js` resolves the
-    # theme before paint), so running them in sequence only added a scheme's ~70s to the wall clock.
-    # The dark leg walks the WHOLE gallery: the Settings walk never reaches its later sections, and one
-    # of those timed out on every full run for ~250 commits with this job green. It also makes every
-    # Settings check a dark `settings` leg would (the same four tallies, owed in full), which is why
-    # there is no such leg: it was the same proof twice. `scripts/ci/pwa-screenshot-proof.sh` says why
-    # the full walk is one scheme and what it costs.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { scheme: light, scope: settings, shape: 2x4 }
-          - { scheme: dark, scope: full, viewport: mobile, shape: 4x8 }
-          - { scheme: dark, scope: full, viewport: desktop, shape: 4x8 }
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
-      - uses: ./.github/actions/install-nix
-      # `packages/pwa/harness/screenshot.ts` could always prove the Settings surfaces do not scroll
-      # sideways at 390px, and until now nothing ran it — so a change could reintroduce the exact
-      # clipping that shipped once already and every gate here would stay green. The script's header
-      # says which frames this covers, which it does not, and why the assertion is the gate while the
-      # images are only evidence.
-      - name: Prove the ${{ matrix.scope }} harness at ${{ matrix.viewport || 'both viewports' }} in ${{ matrix.scheme }}
-        env:
-          SCHEME: ${{ matrix.scheme }}
-          SCOPE: ${{ matrix.scope }}
-          VIEWPORT: ${{ matrix.viewport }}
-        run: ./scripts/ci/in-devshell.sh ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" ${VIEWPORT:+"$VIEWPORT"}
-      # `always()` because a red run is the run whose frames matter most: the artifact carries this
-      # colour scheme at its viewports plus the run's full log, so a reviewer can see the panel that
-      # broke instead of reading a geometry number and guessing.
-      - name: Upload the captured ${{ matrix.scope }} frames
-        if: always()
-        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
-        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}${{ matrix.viewport && format('-{0}', matrix.viewport) || '' }}
-          path: packages/pwa/.artifacts/pwa-screenshot/
-          if-no-files-found: warn
-
   # ONE job on one 8x16 runner, not a matrix of 2x4 runners: `integration.sh` runs every group of
   # config/test-groups.json side by side (six at a time) and then the 100% ledger. The groups are
-  # balanced by measured test time (the PWA browser walks are dealt out by name prefix), so no one
-  # group is the long pole; rebalance from per-file times, not by guessing.
+  # balanced by measured test time, so no one group is the long pole; rebalance from per-file times, not
+  # by guessing.
   int:
     name: Integration Tests
     if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
@@ -290,7 +184,7 @@ jobs:
             coverage/ci/int/*.tsv
           if-no-files-found: warn
 
-  # Knip (twice) and the route agreement: the gates that need more than 4GB, so they are not in Quick's
+  # Knip (twice): the gates that need more than 4GB, so they are not in Quick's
   # per-hook buckets and not in compile, which runs SIT and whose binaries the smokes and darwin wait for. A job of
   # its own, in the verdict's needs, so it overlaps compile instead of lengthening the critical path.
   full-gates:
@@ -300,7 +194,7 @@ jobs:
     permissions:
       contents: read
     # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). Knip ran out of
-    # memory on a 2x4's 4GB, so this is a 4x8; its two modes and the route check run one after another.
+    # memory on a 2x4's 4GB, so this is a 4x8; its two modes run one after another.
     runs-on: >-
       ${{
         (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
@@ -438,144 +332,9 @@ jobs:
     with:
       advisory: ${{ github.event_name == 'pull_request' }}
 
-  relevance:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
-    timeout-minutes: 5
-    name: E2E Relevance
-    permissions:
-      contents: read
-      pull-requests: read
-    # GitHub, not Namespace: a few seconds of bash with no nix shell. Namespace bills it a whole minute
-    # and attaches the cache volume for nothing, and here it is free.
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-          sparse-checkout: scripts/ci
-      - id: decide
-        name: Decide whether the journeys have anything to prove
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: ./scripts/ci/e2e-relevance.sh
-
-  # The journeys of the `fast` tier, split by test across the matrix (scripts/ci/e2e-shards.ts, balanced
-  # by tests/e2e/timings.json). Each shard compiles its own binaries: measured, the compile is ~6s of a
-  # shard's ~40s setup, and a build-once job in front would add a whole job's startup to the critical path.
-  journeys:
-    name: E2E Shard (${{ matrix.shard }})
-    needs: relevance
-    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && needs.relevance.outputs.run == 'true' }}
-    permissions:
-      contents: read
-    # `ubuntu-latest` ships the Google Chrome the journeys launch and the tmux their agent sessions
-    # live in, exactly as the int tier and the Settings geometry gate already rely on. The timeout stops
-    # a wedged browser from holding the runner for the default six hours.
-    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners").
-    # A shard drives one journey at a time: measured at about one busy core and under 2GB, so 2x4.
-    runs-on: >-
-      ${{
-        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
-        && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
-      }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
-      - uses: ./.github/actions/install-nix
-      # ADVISORY: `continue-on-error` on this STEP, not the job. On a job it still paints the job's check
-      # red; on the step the job stays green while the step's own result, the job summary line, a warning
-      # annotation and the `E2E Journeys` tally record every failure. Removed when the tier becomes required.
-      - name: Run this shard of the e2e journeys
-        continue-on-error: true
-        env:
-          FY_E2E_TIER: fast
-          FY_E2E_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-        run: nix develop .#ci -c ./scripts/ci/e2e.sh
-      # `always()` because a red run is the run whose evidence matters most: every screen the journeys
-      # reached at phone and desktop width in both colour schemes, the per-step journey log, the relay
-      # ledger, the JUnit report the timings are regenerated from, and the shard's result for the summary.
-      - name: Upload this shard's e2e evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          # One artifact per shard and attempt: v4 artifacts are immutable within a run, so a re-run
-          # reusing the name failed its upload after the journeys had passed.
-          name: e2e-evidence-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/e2e-evidence/
-          if-no-files-found: warn
-      # The shard's tally alone, so the summary reads a few bytes instead of every shard's screens.
-      - name: Upload this shard's result
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: e2e-result-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/e2e-evidence/result.json
-          if-no-files-found: warn
-
-  # THE status: one name for branch protection and merge tooling however many shards there are.
-  summary:
-    timeout-minutes: 5
-    name: E2E Journeys
-    needs: [relevance, journeys]
-    if: ${{ !cancelled() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
-    permissions:
-      contents: read
-    # GitHub, not Namespace: a few seconds of bash with no nix shell. Namespace bills it a whole minute
-    # and attaches the cache volume for nothing, and here it is free.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-          sparse-checkout: scripts/ci
-      # Every attempt's: "re-run failed jobs" re-runs only some shards, and the summary keeps each
-      # shard's latest. A shard whose journeys never started left no result; the summary counts it.
-      - name: Download every shard's result
-        if: needs.relevance.outputs.run == 'true'
-        continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: e2e-result-*
-          path: ${{ runner.temp }}/e2e-shards
-      - name: Add up the shards
-        env:
-          RELEVANCE: ${{ needs.relevance.result }}
-          RUN: ${{ needs.relevance.outputs.run }}
-          SHARDS: ${{ needs.journeys.result }}
-        run: ./scripts/ci/e2e-summary.sh "${{ runner.temp }}/e2e-shards" 3
-
   full:
     name: Full CI
-    needs:
-      [
-        quick,
-        full-pending,
-        int,
-        full-gates,
-        compile,
-        smoke,
-        smoke-darwin,
-        pwa-relevance,
-        pwa-screenshot,
-        relevance,
-        journeys,
-        summary,
-      ]
+    needs: [quick, full-pending, int, full-gates, compile, smoke, smoke-darwin]
     if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
     timeout-minutes: 5
     permissions:

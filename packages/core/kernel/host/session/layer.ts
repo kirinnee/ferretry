@@ -580,7 +580,10 @@ class SealedSession implements CarrierLink {
     }
     // The lease is checked here too, not only by its timer: a record queued behind a late timer is not served
     // after the authority it needed has ended.
-    if ((this.#phase === 'serving' || this.#phase === 'streaming') && this.deps.clock.nowMs() >= this.#leaseExpiresAtMs) {
+    if (
+      (this.#phase === 'serving' || this.#phase === 'streaming') &&
+      this.deps.clock.nowMs() >= this.#leaseExpiresAtMs
+    ) {
       this.#endSession(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
       return;
     }
@@ -657,7 +660,11 @@ class SealedSession implements CarrierLink {
     );
     if (!proved) return;
     this.#phase = 'serving';
-    this.#sendRecord({ t: 'authenticated', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: instant(this.#leaseExpiresAtMs) });
+    this.#sendRecord({
+      t: 'authenticated',
+      protocol: SESSION_PROTOCOL_ID,
+      accessExpiresAt: instant(this.#leaseExpiresAtMs),
+    });
   }
 
   /**
@@ -683,7 +690,14 @@ class SealedSession implements CarrierLink {
       (await verifyDeviceProof(this.deps.crypto, holder?.key ?? UNKNOWN_HOLDER_KEY, signature, message(transcript)));
     if (!this.#live()) return false;
     const kind = mode?.principalKind;
-    if (mode === undefined || holder === undefined || !checked || transcript === undefined || kind === 'none' || kind === undefined) {
+    if (
+      mode === undefined ||
+      holder === undefined ||
+      !checked ||
+      transcript === undefined ||
+      kind === 'none' ||
+      kind === undefined
+    ) {
       this.#refuseHolder(modeKey);
       return false;
     }
@@ -747,7 +761,8 @@ class SealedSession implements CarrierLink {
     const capAtMs = this.#provedAtMs + lease.maxSessionMs;
     this.#leaseExpiresAtMs = Math.min(now + lease.leaseMs, capAtMs);
     const standing = this.#standing;
-    if (standing !== undefined) standing.principal = { ...standing.principal, leaseUntil: instant(this.#leaseExpiresAtMs) };
+    if (standing !== undefined)
+      standing.principal = { ...standing.principal, leaseUntil: instant(this.#leaseExpiresAtMs) };
     const renewInMs = this.#leaseExpiresAtMs - lease.renewLeadMs - now;
     if (this.#leaseExpiresAtMs < capAtMs && renewInMs > 0)
       this.#renewal = this.deps.clock.after(milliseconds(renewInMs), () => this.#askRenewal());
@@ -1044,7 +1059,10 @@ class SealedSession implements CarrierLink {
     const transcript = this.#transcript;
     const redeemed = await this.#redeem(
       'member',
-      { mode: 'member', body: { act: 'join-options', code: request.code, memberKey: request.memberKey, origin: request.origin } },
+      {
+        mode: 'member',
+        body: { act: 'join-options', code: request.code, memberKey: request.memberKey, origin: request.origin },
+      },
       async () =>
         transcript !== undefined &&
         (await verifyDeviceProof(
@@ -1070,7 +1088,11 @@ class SealedSession implements CarrierLink {
   }
 
   /** Ask a mode to redeem; a missing mode, a throw and a refusal are all `undefined` (one refusal). */
-  async #redeem(modeKey: 'pair' | 'member', proof: ModeProof, prove: () => Promise<boolean>): Promise<ModeRedeemed | undefined> {
+  async #redeem(
+    modeKey: 'pair' | 'member',
+    proof: ModeProof,
+    prove: () => Promise<boolean>,
+  ): Promise<ModeRedeemed | undefined> {
     const mode = this.deps.modes(modeKey);
     if (mode?.redeem === undefined) return undefined;
     try {
@@ -1111,7 +1133,12 @@ class SealedSession implements CarrierLink {
     try {
       handler = await decision.attach(this.#downstream());
     } catch {
-      this.#queue({ t: 'stream-refused', protocol: SESSION_PROTOCOL_ID, status: 500, body: 'the daemon failed to attach this stream' });
+      this.#queue({
+        t: 'stream-refused',
+        protocol: SESSION_PROTOCOL_ID,
+        status: 500,
+        body: 'the daemon failed to attach this stream',
+      });
       this.#conclude();
       return;
     }
@@ -1292,7 +1319,12 @@ class SealedSession implements CarrierLink {
     const owed = creditToReturn({ ...this.#receive, consumed: this.#receive.consumed - this.#backlog.length });
     if (owed === 0 || this.#wireId === undefined) return;
     this.#receive = recordCredited(this.#receive, owed);
-    this.#pushPlain({ kind: FRAME_KINDS.credit, sessionId: this.#wireId, sequence: 0, payload: encodeCreditPayload(owed) });
+    this.#pushPlain({
+      kind: FRAME_KINDS.credit,
+      sessionId: this.#wireId,
+      sequence: 0,
+      payload: encodeCreditPayload(owed),
+    });
   }
 
   #pushPlain(frame: SessionFrame): void {
@@ -1308,7 +1340,10 @@ class SealedSession implements CarrierLink {
   #sendEncodedRecord(record: PendingRecord): void {
     const room = Math.max(0, this.#send.allowed - this.#send.sent);
     // Only records past what the peer has credited are WAITING FOR CREDIT; the rest wait only for the pull.
-    if (record.plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(this.#waiting) - room >= CREDIT_WINDOW_FRAMES) {
+    if (
+      record.plaintext.byteLength > MAX_PLAINTEXT_BYTES ||
+      wholeRecords(this.#waiting) - room >= CREDIT_WINDOW_FRAMES
+    ) {
       this.#endSession(SESSION_CLOSE_CODES.protocolError, 'this session cannot carry its own answer');
       return;
     }
@@ -1404,4 +1439,3 @@ function instant(ms: number): SessionPrincipal['leaseUntil'] {
 export function transcriptKey(transcript: Uint8Array): string {
   return [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
-
