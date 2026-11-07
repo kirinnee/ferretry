@@ -54,11 +54,6 @@ export interface PrNudgeSender {
   send(card: Pick<Card, 'id' | 'owner' | 'assignee'>, message: string, reason: PrAlertReason): Promise<void>;
 }
 
-/** One-shot timers. `after` returns the cancel; `run` settles when the work it started is done. */
-export interface WatcherTimers {
-  after(ms: number, run: () => Promise<void>): () => void;
-}
-
 export interface WatcherClock {
   /** The instant now. */
   now(): string;

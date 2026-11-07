@@ -5,4 +5,5 @@ export * from './releases.ts';
 export * from './remote.ts';
 export * from './transcript.ts';
 export * from './unfiled.ts';
+export * from './watch-job.ts';
 export * from './watcher.ts';

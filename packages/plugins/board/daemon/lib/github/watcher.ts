@@ -41,7 +41,6 @@ import {
   cardCategory,
   isLinkable,
   isWatched,
-  jittered,
   MAX_COMPARES_PER_TICK,
   MAX_REPOSITORIES_PER_TICK,
   needsPoll,
@@ -50,8 +49,6 @@ import {
   prKey,
   repoKey,
   SHARED_BRANCHES,
-  WATCH_FIRST_TICK_MS,
-  WATCH_TICK_MS,
 } from './plan.ts';
 import type {
   GhOutcome,
@@ -61,7 +58,6 @@ import type {
   SessionFolders,
   WatchedBoard,
   WatcherClock,
-  WatcherTimers,
   WorkingCopies,
 } from './ports.ts';
 import { parseRepositoryAnswer, pollArguments, type RepositoryAnswer, type RepositoryPoll } from './query.ts';
@@ -77,7 +73,6 @@ export interface GitHubWatcherPorts {
   readonly projects: ProjectFolders;
   readonly transcripts: FerretTranscriptTail;
   readonly nudges: PrNudgeSender;
-  readonly timers: WatcherTimers;
   readonly clock: WatcherClock;
   readonly diagnostics: BoardDiagnostics;
   /** The Unfiled board's refile step, handed the projects' repositories this tick read. */
@@ -129,38 +124,28 @@ export class GitHubWatcher {
   /** The keys warned about, so each problem is reported once until it clears. */
   private readonly warned = new Set<string>();
   private remotes: { readonly at: number; readonly projects: readonly ProjectRemote[] } | undefined;
-  private stopped = false;
+  /** The signal of the run in flight: the job's, aborted when the daemon stops. */
+  private aborting: AbortSignal | undefined;
 
   constructor(private readonly ports: GitHubWatcherPorts) {}
 
-  /**
-   * Starts the loop: a first tick shortly after boot, then one every {@link WATCH_TICK_MS} (jittered),
-   * each scheduled when the last has finished so two never overlap. Returns the stop: no tick starts after
-   * it, and one already running writes nothing more.
-   */
-  arm(): () => void {
-    this.stopped = false;
-    let cancel: (() => void) | undefined;
-    const schedule = (ms: number): void => {
-      cancel = this.ports.timers.after(ms, async () => {
-        await this.run();
-        if (!this.stopped) schedule(jittered(WATCH_TICK_MS, this.ports.clock.random()));
-      });
-    };
-    schedule(jittered(WATCH_FIRST_TICK_MS, this.ports.clock.random()));
-    return () => {
-      this.stopped = true;
-      cancel?.();
-    };
+  private get stopped(): boolean {
+    return this.aborting?.aborted === true;
   }
 
-  /** One tick that never rejects: a failure is reported to the board's diagnostics. */
-  async run(): Promise<WatchReport | null> {
+  /**
+   * One tick that never rejects, as the job runs it: when `signal` aborts, no further card is written and the Unfiled
+   * refile is skipped. A failure is reported to the board's diagnostics.
+   */
+  async run(signal?: AbortSignal): Promise<WatchReport | null> {
+    this.aborting = signal;
     try {
       return await this.tick();
     } catch (error) {
       this.ports.diagnostics.warn(`GitHub watcher: a tick failed: ${detail(error)}`);
       return null;
+    } finally {
+      this.aborting = undefined;
     }
   }
 
