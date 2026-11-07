@@ -43,8 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, board, asks/agenda, projects, usage, warden, MCP, logins, Gate, settings and daemon settings have real conversions; conversation is partial
-(below). The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+terminals, harness-homes, conversation, board, asks/agenda, projects, usage, warden, MCP, logins, Gate, settings and daemon settings have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -91,13 +90,22 @@ card and type. Lane sets and the switch become one `boards/<project>.json` each 
 becomes `state/board/focus.json`. `legacyRef`, the session an owner or the daemon acted from and the switch's
 `migratedAt` have no v5 field and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).
 
-Conversation is half done on purpose and reports `pending`. It writes only what `rebuild/5.0` and the Conversation
-port (`origin/rebuild/fix-port-conversation-r1`) agree on: the message-token key (moved unopened), each ferret's
-`turns/` (copied byte for byte), its chat draft (the port's `{chat, items}` drafts document, through v5's
-`DraftSnapshotSchema`) and `links.json` (from v4 ferrets whose transcript identity is `adopted`). Queue, sends,
-answers, inbox/outbox, the open question, attachments and renders are read and checked by `src/v4/conversation.ts`
-but not written, because the port changes their v5 shape; their mapping is added when the port lands. Agenda reply
-drafts are kept under their ask ids, which v5 leaves unchanged.
+Conversation (`src/steps/conversation.ts`) writes every file `@ferretry/plugin-conversation` declares under
+`state/conversation/`: the message-token key (moved unopened), each ferret's `turns/` (byte for byte), its drafts
+document (`{chat, items}`, snapshots through `DraftSnapshotSchema`, reply drafts under their unchanged ask ids),
+`links.json` (ferrets whose transcript identity is `adopted`), and `queue`, `sends`, `answers`, `inbox` and `outbox`
+`.jsonl` line for line. Every log line gains the kernel's `"format": 1` stamp and is parsed by the v5 store's own line
+shape (built from the contract's schemas, because v5 keeps those line schemas private to its daemon); a send line is
+also projected to the wire view and parsed by `SendRecordSchema`. In the send ledger `session_ended` becomes
+`ferret_ended`, and `payloadFile` (a path to v4's `channel/queued-<id>.md`, which v5 neither reads nor has a place
+for) and four v4 tracker timers are dropped. Outbox `question` lines are Ferrets' in v5 and are not carried. A live
+ferret's `question-asked.json` becomes `question.json` through `QuestionSchema`, as v5's own writer stores it (one
+question, proved against the ferret's transcript rewritten into the new home, `askedAt` = the file's mtime); anything
+that writer would clear is left to the transcript. Attachments become `attachments/<ferret>~<id>.original` (moved
+unopened) and `.manifest` (re-encoded as v5's store writes it, checked as its parser checks), the `<daemonId>` segment
+dropped; renders become unsharded `renders/<id>.json` (`StoredRenderMetaSchema`, `author.sessionId` →
+`author.ferret`) and `renders/<id>.payload` (moved unopened). A line or document v5 would refuse fails the step by
+file and line, never by value.
 
 Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
 runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
