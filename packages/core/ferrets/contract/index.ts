@@ -16,3 +16,4 @@ export * from './port.ts';
 export * from './records.ts';
 export * from './state.ts';
 export * from './transfer.ts';
+export * from './subtree.ts';

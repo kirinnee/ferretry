@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type FerretSummary, FerretSummarySchema } from '../../contract/index.ts';
+import { type FerretSummary, FerretSummarySchema, SubtreeViewSchema, type SubtreeView } from '../../contract/index.ts';
 import type {
   RestartCancelResult,
   RestartRequest,
@@ -11,6 +11,7 @@ import type { IRestartGateway } from './restart/ports.ts';
 import type { ListedFerret } from './session/display.ts';
 import type { PinnedView, ISessionPinGateway } from './session/pin-agent.ts';
 import type { ISessionApi, RenameChange, SignalAnswer, SignalKind, SignalOptions, StartBody } from './session/ports.ts';
+import type { ISessionSubtree } from './session/subtree-controller.ts';
 import type { CredentialRevoked, ISessionCredentialGateway } from './session/revoke-credential.ts';
 import type { IStopSessionGateway } from './stop/types.ts';
 
@@ -21,6 +22,7 @@ import type { IStopSessionGateway } from './stop/types.ts';
  */
 export const FERRET_ROUTES = {
   list: 'GET /v1/ferrets',
+  subtree: 'GET /v1/ferrets/:ferretId/subtree',
   get: 'GET /v1/ferrets/:ferretId',
   start: 'POST /v1/ferrets',
   recoverStart: 'GET /v1/ferrets/by-request/:requestId',
@@ -69,7 +71,7 @@ function lostStartAnswer(error: unknown): boolean {
  * against the contract's schema where the contract has one; the decisions live in the controllers.
  */
 export class ClientSessionApi
-  implements ISessionApi, IStopSessionGateway, ISessionPinGateway, ISessionCredentialGateway
+  implements ISessionApi, ISessionSubtree, IStopSessionGateway, ISessionPinGateway, ISessionCredentialGateway
 {
   constructor(private readonly client: PluginClient) {}
 
@@ -80,6 +82,10 @@ export class ClientSessionApi
 
   async get(reference: string): Promise<FerretSummary> {
     return FerretSummarySchema.parse(await this.client.call<unknown>(FERRET_ROUTES.get, at(reference)));
+  }
+
+  async subtree(reference: string): Promise<SubtreeView> {
+    return SubtreeViewSchema.parse(await this.client.call<unknown>(FERRET_ROUTES.subtree, at(reference)));
   }
 
   async suggestNames(count: number): Promise<string[]> {

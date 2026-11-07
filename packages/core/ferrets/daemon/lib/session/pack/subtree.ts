@@ -17,7 +17,14 @@
  * Lineage comes from the registry's `parent` links and nothing else: the request names only the root.
  */
 import { epochMs, instantFromEpochMs, type Instant } from '@ferretry/std';
-import type { FerretId, FerretState, FerretSummary, SitrepLine } from '../../../../contract/index.ts';
+import type {
+  FerretId,
+  FerretSummary,
+  SitrepLine,
+  SubtreeRow,
+  SubtreeState,
+  SubtreeView,
+} from '../../../../contract/index.ts';
 import type { FerretRegistry } from '../../registry/registry.ts';
 import { mapBounded } from './bounded.ts';
 
@@ -28,26 +35,6 @@ export const SUBTREE_LAST_LINE_MAX = 100;
 
 /** The text shown in place of an excerpt that could not be redacted. */
 export const EXCERPT_WITHHELD = '[excerpt withheld]';
-
-export type SubtreeState = 'running' | 'waiting' | 'ended';
-
-export interface SubtreeRow {
-  readonly id: FerretId;
-  readonly name: string;
-  readonly parent?: FerretId;
-  readonly depth: number;
-  readonly state: SubtreeState;
-  readonly ferretState: FerretState;
-  readonly last?: { readonly at: string; readonly kind: SitrepLine['kind']; readonly text: string };
-  readonly endedAt?: string;
-}
-
-export interface SubtreeView {
-  readonly root: { readonly id: FerretId; readonly name: string };
-  readonly at: Instant;
-  readonly endedWindowMs: number;
-  readonly rows: readonly SubtreeRow[];
-}
 
 /** One member of the subtree, in tree order. */
 export interface SubtreeMember {

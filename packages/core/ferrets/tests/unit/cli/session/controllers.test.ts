@@ -14,7 +14,7 @@ import { StartSessionController } from '../../../../cli/lib/session/start-contro
 import { buildStartRequest } from '../../../../cli/lib/session/start-request.ts';
 import { SessionStatusController } from '../../../../cli/lib/session/status-controller.ts';
 import { SessionSubtreeController } from '../../../../cli/lib/session/subtree-controller.ts';
-import { buildSubtree, renderSubtreeTable } from '../../../../cli/lib/session/subtree-table.ts';
+import { renderSubtreeTable } from '../../../../cli/lib/session/subtree-table.ts';
 import { capturedPresenter, RecordingApi } from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
 
@@ -91,7 +91,35 @@ describe('fy status', () => {
   });
 
   test('V-0445 --subtree draws the helpers from parent links, indented, an ended one marked', async () => {
-    const api = new RecordingApi({ list: fleet, get: fleet[0] });
+    const api = {
+      subtree: async (reference: string) => {
+        expect(reference).toBe('wren');
+        return {
+          root: { id: fleet[0]!.id, name: 'wren' },
+          at: '2026-11-06T09:00:00.000Z' as Instant,
+          endedWindowMs: 7200000,
+          rows: [
+            {
+              id: fleet[1]!.id,
+              name: 'fern',
+              depth: 1,
+              state: 'running' as const,
+              ferretState: 'working' as const,
+              last: { at: '2026-11-06T08:59:00.000Z', kind: 'note' as const, text: '[excerpt withheld]' },
+            },
+            { id: fleet[2]!.id, name: 'ash', depth: 2, state: 'waiting' as const, ferretState: 'idle' as const },
+            {
+              id: fleet[3]!.id,
+              name: 'oak',
+              depth: 1,
+              state: 'ended' as const,
+              ferretState: 'stopped' as const,
+              endedAt: '2026-11-06T08:00:00.000Z',
+            },
+          ],
+        };
+      },
+    };
     const { io, presenter } = capturedPresenter();
     await new SessionSubtreeController(
       api,
@@ -100,6 +128,7 @@ describe('fy status', () => {
       { nowMs: () => Date.parse('2026-11-06T09:00:00.000Z') },
     ).execute('wren');
     expect(io.out[0]).toBe('wren (lead): 3 descendants');
+    expect(io.out.join(' ')).toContain('[excerpt withheld]');
     expect(io.out.slice(2).map(line => line.trimEnd())).toEqual([
       expect.stringMatching(/^fern\s/u),
       expect.stringMatching(/^ {2}ash\s/u),
@@ -108,14 +137,30 @@ describe('fy status', () => {
   });
 
   test('--subtree keeps an ended helper only inside the window, and refuses with no ferret named', async () => {
-    const late = buildSubtree(fleet, fleet[0]!, Date.parse('2026-11-06T12:00:00.000Z'));
-    expect(late.rows.map(row => row.id)).toEqual(['mid', 'kid']);
-    expect(renderSubtreeTable(buildSubtree([], fleet[0]!), undefined)).toEqual([
-      'wren (lead): 0 descendants; ended ones show for 120m',
-    ]);
+    expect(
+      renderSubtreeTable(
+        {
+          root: { id: fleet[0]!.id, name: 'wren' },
+          at: '2026-11-06T09:00:00.000Z' as Instant,
+          rows: [],
+          endedWindowMs: 7200000,
+        },
+        undefined,
+      ),
+    ).toEqual(['wren (lead): 0 descendants; ended ones show for 120m']);
     const { presenter } = capturedPresenter();
     expect(
-      await caught(new SessionSubtreeController(new RecordingApi(), presenter, {}).execute(undefined)),
+      await caught(
+        new SessionSubtreeController(
+          {
+            subtree: async () => {
+              throw new Error('must not read');
+            },
+          },
+          presenter,
+          {},
+        ).execute(undefined),
+      ),
     ).toBeInstanceOf(SessionCommandError);
   });
 });

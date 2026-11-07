@@ -74,6 +74,15 @@ export default definePlugin({
         audit: { skip: 'a fleet read records nothing' },
         guard: { none: 'ferret identity records: names, lineage, folders and states, no pane or vault text' },
       }),
+      // Today's subtree API (G24): lineage is from the registry, excerpts are masked before truncation.
+      route('GET /v1/ferrets/:ferretId/subtree', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.fleet, axis: 'use' },
+        audit: { skip: 'a subtree read records nothing, as today' },
+        guard: { none: 'G24 masks whole excerpts through kernel.redaction before cutting; failures withhold excerpts' },
+      }),
       // R-0135
       route('GET /v1/ferrets/:ferretId', {
         minimum: 'operator',

@@ -26,8 +26,10 @@ import {
   LaunchParts,
   Runners,
   SitrepLines,
+  SubtreeViewSchema,
   StartDecide,
 } from '../contract/index.ts';
+import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService } from './lib/ferrets/service.ts';
@@ -199,6 +201,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     realPath: async () => undefined,
     vault: needs.vault,
     asks: needs.asks,
+  });
+
+  // G24: the same bounded read as today's subtree API, masked whole before excerpts are cut.
+  const subtree = new SubtreeService(registry, {
+    nowMs: () => kernel.clock.nowMs(),
+    lines: async ferret => (await service.sitrep(ferret))?.lines ?? [],
+    redact: texts => kernel.redaction.read(scope => texts.map(text => scope.text(text))),
   });
 
   // Managed worktrees (today's worktrees module). The Git/disk IO is the kernel's spawn and root additions on
@@ -390,6 +399,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       'GET /v1/ferrets': async call => {
         await ready();
         return fleetList.answer(await service.list(), headerValue(call.request, 'if-none-match'));
+      },
+      'GET /v1/ferrets/:ferretId/subtree': async call => {
+        const id = await pathFerret(call);
+        mayAct(call, id);
+        const view = await subtree.view(id);
+        if (view === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
+        return jsonResponse(SubtreeViewSchema.parse(view));
       },
       'GET /v1/ferrets/:ferretId': async call => {
         const id = await pathFerret(call);
