@@ -16,6 +16,28 @@ and every job is reproducible on a laptop.
 If a workflow step contains repository logic beyond that shape, the logic is in the wrong place
 — move it into a script ([Shell Script Conventions](../shell-scripts/index.md)).
 
+## Ferretry 5.0 rebuild: what CI runs today
+
+The 5.0 layout (`docs/rebuild/spine.md`) replaced `packages/{daemon,protocol,fleet,pwa,relay}`. The
+sections below still describe the 4.x pipeline in places; on the 5.0 tree the differences are:
+
+- **Removed, returning with their ports:** the PWA screenshot gate (`pwa-relevance`, `pwa-screenshot`),
+  the E2E tier (`relevance`, `journeys`, `summary`, `e2e-slow.yaml`, `tests/e2e`), Harness Contract
+  (`harness-contract-latest.yaml` and its realworld leg), and Realworld's macOS containment, Safari and
+  tmux 3.8 proofs. Realworld is nightly and dispatch only (#1573).
+- **Quick Checks** on every pull request: install (whose `postinstall` regenerates the plugin
+  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (one `all` group
+  globbing `packages/`), the coverage ledger over every `lib/` directory at any depth, treefmt, every
+  pre-commit hook (typecheck of every workspace package and `scripts/`, the 5.0 checks through
+  `scripts/validate/rebuild-checks.sh`), and the build part (Nix `fy` + `fyd`, the Worker rehearsals once
+  ported, the app bundle once it has a build script).
+- **Full set** (`full-ci` label): integration groups (none configured until an integration test exists),
+  Knip, the cross-compile of `fy` (packages/cli) and `fyd` (packages/core/kernel `bin`) plus SIT, and the
+  Linux and darwin smokes — which are the launch stage only (`--version`) until the hosts gain the
+  session journey.
+- Gates that still name a not-yet-ported Worker or app file report it as **PENDING** by name
+  (`relay-config.sh`, `pages-config.sh`, `build-checks.sh`) rather than passing it silently.
+
 ## Runners
 
 **Quick Checks runs on every PR push; the full set runs before merge.** Both run on

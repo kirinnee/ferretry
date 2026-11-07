@@ -5,9 +5,16 @@ root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 ./scripts/ci/setup.sh
 export FY_CI_SETUP_DONE=1
+mapfile -t groups < <(jq -r '.int[].name' config/test-groups.json)
+# A tier with no group holds no test file: scripts/validate/test-tiers.sh refuses an integration test that
+# no group would run. So an empty list is the honest "nothing to run yet", never a skipped suite.
+if [[ ${#groups[@]} -eq 0 ]]; then
+  echo "✅ No integration test group is configured and no integration test exists yet: nothing to run" |
+    tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 0
+fi
 ./scripts/ci/warm-chrome.sh
 export FY_CI_CHROME_WARM=1
-mapfile -t groups < <(jq -r '.int[].name' config/test-groups.json)
 rm -rf coverage/int/groups
 status=0
 # test.sh writes each group's own LCOV/config. Its swept.sh makes a unique /tmp/fyt.* root,

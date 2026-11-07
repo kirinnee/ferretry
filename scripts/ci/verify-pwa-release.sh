@@ -2,7 +2,7 @@
 # Proves a signed PWA release before it is published (docs/pwa-release-signing.md):
 #
 # <dist>/release-manifest.sig is a signature by <public-key.pem> (default: the committed
-# packages/pwa/release-signing-key.pub) over the exact bytes of <dist>/release-manifest.json. What the
+# packages/app/release-signing-key.pub) over the exact bytes of <dist>/release-manifest.json. What the
 # list SAYS, and that <dist> holds exactly the files it names, is check-pwa-release.sh; the deploy job
 # runs both, so the bytes it uploads are the bytes that were signed.
 #
@@ -13,7 +13,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dist="${1:?usage: verify-pwa-release.sh <dist> [<public-key.pem>]}"
-public_key="${2:-${script_dir}/../../packages/pwa/release-signing-key.pub}"
+public_key="${2:-${script_dir}/../../packages/app/release-signing-key.pub}"
 manifest="${dist}/release-manifest.json"
 
 fail() {

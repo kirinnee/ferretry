@@ -5,36 +5,29 @@
       "entry": [],
       "project": []
     },
+    "packages/std": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/core/kernel": {
+      "entry": ["host/fyd.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**", "!testing/**"]
+    },
+    "packages/core/*": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/*": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
     "packages/cli": {
-      "entry": ["bin/*.ts"],
+      "entry": ["bin/*.ts", "src/index.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts"]
     },
-    "packages/daemon": {
-      "entry": ["bin/*.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts"]
-    },
-    "packages/fleet": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/relay": {
-      "entry": ["src/lib/index.ts", "src/adapters/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/protocol": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/pwa": {
-      "entry": ["src/main.tsx", "src/worker/service-worker.ts"],
-      "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
-      "ignore": [
-        "src/lib/stt/speed-bench-report.ts",
-        "src/lib/shared-draft-client.ts",
-        "src/lib/voice-chat/turn-endpointer.ts",
-        "src/lib/voice-chat/turn-endpointer-scoring.ts"
-      ]
+    "packages/app": {
+      "entry": ["src/index.ts", "src/main.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
     }
   },
   "bun": false,
@@ -52,6 +45,7 @@
     "devDependencies": "off",
     "optionalPeerDependencies": "off",
     "binaries": "off",
-    "enumMembers": "off"
+    "enumMembers": "off",
+    "dependencies": "warn"
   }
 }

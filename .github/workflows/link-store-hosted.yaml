@@ -86,7 +86,7 @@ jobs:
           # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
           LINK_STORE_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
             set -euo pipefail
-            cd packages/relay
+            cd packages/plugins/catalogs/worker
             bun install --frozen-lockfile
             wrangler deploy --config wrangler.link-store.hosted.json \
               --message "hosted link store" --secrets-file "$LINK_STORE_SECRETS_FILE"

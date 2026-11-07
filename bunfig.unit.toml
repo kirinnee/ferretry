@@ -1,6 +1,8 @@
 [test]
-# Every tier runs offline: no booted daemon follows the published model catalog or the hosted relay.
-preload = ["./packages/daemon/tests/support/offline-environment.ts", "./packages/daemon/tests/support/unit-determinism.ts", "./packages/pwa/tests/support/dom-leak-guard.ts"]
+# Every tier runs offline: scripts/ci/test.sh exports the switches that keep a booted daemon from following
+# the published model catalog, the hosted relay directory or the update check. (The 4.x preloads that also
+# did this, and the unit tier's fake-clock guard, lived in packages/daemon and packages/pwa; in 5.0 the driven
+# clock is the test host's, `@ferretry/kernel/testing`.)
 root = "packages"
 pathIgnorePatterns = ["**/tests/integration/**", "**/tests/sit/**", "**/tests/realworld/**"]
 # Bun 1.3.13 truncates LCOV at 640 KiB when the text reporter is also active.
@@ -8,28 +10,11 @@ pathIgnorePatterns = ["**/tests/integration/**", "**/tests/sit/**", "**/tests/re
 coverageReporter = ["lcov"]
 coverageDir = "coverage/unit"
 coverageSkipTestFiles = true
-# Unit ledger = the domain tier only (src/lib, 100% goal); adapters/glue belong to other tiers, tests/** never counts.
-#
-# A package-root `*.config.ts` is build configuration, classified exactly like `bin/**`: a
-# declaration a tool reads, not behaviour the product runs. It is still worth a test —
-# `packages/pwa/tests/unit/build-contract.test.ts` imports `vite.config.ts` and asserts the output
-# contract the Pages deployment depends on — and importing it is what puts it in front of the
-# instrumenter. The glob is the whole family, not just that one file, because importing one config
-# drags in the others: `vite.config.ts` imports `tailwind.config.ts` so the PostCSS plugin and the
-# Tailwind config cannot drift, which lands BOTH in the ledger from a single import.
+# Unit ledger = the domain tier only: every `lib/` directory of a workspace package, at any depth
+# (scripts/ci/coverage-ledger.sh judges only those). tests/** never counts.
 coveragePathIgnorePatterns = [
-  "packages/*/bin/**",
-  "packages/*/src/adapters/**",
-  "packages/*/tests/**",
-  "packages/*/*.config.ts",
-  # The hosted app's release key, compiled into fyd as text (bunfig.int.toml says why it is listed).
-  "packages/pwa/*.pub",
-  # THE HOST FIREWALL SCRIPT AND UNIT, text files `fy browser firewall script|unit` compiles in verbatim
-  # (docs/loopback-firewall.md). Bun records a text import as a covered "file", so a tier that loads the
-  # bundle would otherwise report `scripts/host/…` and fail on a PATH, not on a test.
-  "scripts/host/**",
-  # REPO GATES, which are pre-commit tools and not package code. A unit test that imports one to pin its
-  # parser (`no-sync-io-gate.test.ts` → `scripts/validate/no-sync-io.ts`) would otherwise land it in the
-  # ledger, which admits only `src/lib/`; the gate's own planted-violation tests are what hold it.
-  "scripts/validate/**",
+  "packages/**/tests/**",
+  # REPO GATES and host text assets, which are not package code: a unit test that imports one to pin its
+  # parser would otherwise land it in the ledger.
+  "scripts/**",
 ]

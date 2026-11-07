@@ -2,64 +2,9 @@
   "schemaVersion": 1,
   "unit": [
     {
-      "name": "pwa-features",
-      "prefixes": [
-        "packages/pwa/tests/unit/features/",
-        "packages/pwa/tests/unit/stt/",
-        "packages/pwa/tests/unit/dictation-control.test.tsx"
-      ],
-      "leakGuard": true
-    },
-    {
-      "name": "pwa",
-      "prefixes": ["packages/pwa/"]
-    },
-    {
-      "name": "everything-else",
+      "name": "all",
       "prefixes": ["packages/"]
     }
   ],
-  "int": [
-    {
-      "name": "daemon-runtime",
-      "prefixes": ["packages/daemon/tests/integration/runtime/"]
-    },
-    {
-      "name": "daemon",
-      "prefixes": ["packages/daemon/"]
-    },
-    {
-      "name": "pwa-render",
-      "prefixes": [
-        "packages/pwa/tests/integration/fy-render-",
-        "packages/pwa/tests/integration/composer-",
-        "packages/pwa/tests/integration/jump-latest-",
-        "packages/pwa/tests/integration/chat-polish",
-        "packages/pwa/tests/integration/chat-rerender"
-      ]
-    },
-    {
-      "name": "pwa-chat",
-      "prefixes": [
-        "packages/pwa/tests/integration/add-to-chat",
-        "packages/pwa/tests/integration/release-",
-        "packages/pwa/tests/integration/chat-history",
-        "packages/pwa/tests/integration/snooze",
-        "packages/pwa/tests/integration/agenda-"
-      ]
-    },
-    {
-      "name": "pwa-surfaces",
-      "prefixes": [
-        "packages/pwa/tests/integration/features/",
-        "packages/pwa/tests/integration/send-handover.",
-        "packages/pwa/tests/integration/inbox-"
-      ]
-    },
-    {
-      "name": "everything-else",
-      "prefixes": ["packages/"],
-      "processes": 2
-    }
-  ]
+  "int": []
 }

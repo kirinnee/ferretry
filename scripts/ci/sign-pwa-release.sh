@@ -20,13 +20,13 @@
 # The private key (PKCS#8 PEM) arrives on STDIN, never through the environment or an argument. It is
 # written only to a 0600 file under a fresh 0700 temp directory, removed by the trap on every exit
 # path, and never echoed: `set -x` is never enabled here. The script refuses a key whose public half
-# is not <public-key.pem> (default: the committed packages/pwa/release-signing-key.pub), because every
+# is not <public-key.pem> (default: the committed packages/app/release-signing-key.pub), because every
 # installed copy trusts that key and would refuse anything else, and it proves the signature with
 # verify-pwa-release.sh before it returns.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-public_key="${script_dir}/../../packages/pwa/release-signing-key.pub"
+public_key="${script_dir}/../../packages/app/release-signing-key.pub"
 check_args=()
 dist=""
 while [[ $# -gt 0 ]]; do

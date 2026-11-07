@@ -5,29 +5,29 @@
       "entry": [],
       "project": []
     },
+    "packages/std": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/core/kernel": {
+      "entry": ["host/fyd.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**", "!testing/**"]
+    },
+    "packages/core/*": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/*": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
     "packages/cli": {
-      "entry": ["bin/*.ts"],
+      "entry": ["bin/*.ts", "src/index.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts"]
     },
-    "packages/daemon": {
-      "entry": ["bin/*.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts"]
-    },
-    "packages/fleet": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/protocol": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/pwa": {
-      "entry": ["src/main.tsx"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/relay": {
-      "entry": ["src/lib/index.ts", "src/adapters/index.ts"],
-      "project": ["src/**/*.ts"]
+    "packages/app": {
+      "entry": ["src/index.ts", "src/main.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
     }
   },
   "bun": false,
