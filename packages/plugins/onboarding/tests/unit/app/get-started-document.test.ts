@@ -155,8 +155,8 @@ describe('the "Or let your agent do it" prompt', () => {
       'fy daemon status',
       'fy login ls',
       'fy runtime ls',
-      'fy runtime import claude',
-      'fy runtime import codex',
+      'fy runtime link claude',
+      'fy runtime link codex',
       'fy onboard',
     ]) {
       expect(shippedPrompt).toContain(command);

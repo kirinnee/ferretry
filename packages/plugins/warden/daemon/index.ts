@@ -8,8 +8,8 @@ import { createWardenSubsystem } from './subsystem.ts';
 /**
  * Warden (§2.3): the sweep that watches ferrets, flags trouble and applies the remedies the owner allowed.
  *
- * DECLARED GAPS, each with its reason in `ports-pending.json` `pendingGaps.warden`. The sweep sees only what Ferrets,
- * Conversation and Asks tell it, so:
+ * DECLARED GAPS, each with its reason in `ports-pending.json` `pendingReasons.warden`.
+ * The sweep sees only what Ferrets, Conversation and Asks tell it, so:
  * - Pane-level liveness (frozen frames, token counters, tool processes) and leftover browsers need a look at a ferret's
  *   own pane that neither Terminals' port nor Browsers' offers on 5.0 (D2 #19). The liveness monitor is not built and
  *   the classifiers that need those facts stay quiet; what the sweep can flag from the contracts is a question nobody

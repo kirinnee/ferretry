@@ -3,9 +3,9 @@
  * names an id that is no subsystem, or lists a plugin none of whose halves is a skeleton any more. A port removes its
  * own line in the same branch.
  *
- * `pendingGaps` is a ported plugin's declared GAPs, in words: `{ "<id>": ["<what is missing>: <what it needs>", …] }`.
- * It may name only subsystems, each with at least one non-empty reason; it is what a port that left a half of today's
- * behaviour waiting on another subsystem says out loud.
+ * A plugin whose halves are all ported but whose port still has named gaps open stays listed, and says why in
+ * `pendingReasons` (`{ "<id>": ["<open gap>", …] }`): a listed plugin with no skeleton half left is accepted only
+ * while it states at least one reason, and a reason for an id that is not listed is a finding.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -17,40 +17,32 @@ import { HALVES, loadHalf } from '../gen/lib/workspace.ts';
 export interface PortsPending {
   readonly format: 1;
   readonly pending: readonly string[];
+  /** Why a fully ported plugin is still listed: its open gaps, by plugin id. */
+  readonly reasons: Readonly<Record<string, readonly string[]>>;
 }
 
 export function parsePending(text: string, where: string): PortsPending {
-  const value = JSON.parse(text) as { format?: unknown; pending?: unknown };
+  const value = JSON.parse(text) as { format?: unknown; pending?: unknown; pendingReasons?: unknown };
   if (value.format !== 1) throw new Error(`${where}: format is not 1`);
   if (!Array.isArray(value.pending) || value.pending.some(id => typeof id !== 'string'))
     throw new Error(`${where}: "pending" is not a list of ids`);
-  return { format: 1, pending: value.pending as string[] };
-}
-
-/** The declared GAPs of `ports-pending.json`, or a finding's message when the field is malformed. */
-export function readPendingGaps(root: string): ReadonlyMap<string, readonly string[]> | string {
-  const file = join(root, 'ports-pending.json');
-  if (!existsSync(file)) return new Map();
-  const value = (JSON.parse(readFileSync(file, 'utf8')) as { pendingGaps?: unknown }).pendingGaps;
-  if (value === undefined) return new Map();
-  if (typeof value !== 'object' || value === null || Array.isArray(value))
-    return 'pendingGaps must map subsystem ids to their reasons';
-  const gaps = new Map<string, readonly string[]>();
-  for (const [id, reasons] of Object.entries(value)) {
-    if (
-      !Array.isArray(reasons) ||
-      reasons.length === 0 ||
-      reasons.some(reason => typeof reason !== 'string' || reason.trim() === '')
-    )
-      return `pendingGaps: ${id} needs a list of non-empty reasons`;
-    gaps.set(id, reasons as string[]);
+  const reasons: Record<string, string[]> = {};
+  if (value.pendingReasons !== undefined) {
+    const given = value.pendingReasons;
+    if (typeof given !== 'object' || given === null || Array.isArray(given))
+      throw new Error(`${where}: "pendingReasons" is not an object of plugin id to reasons`);
+    for (const [id, list] of Object.entries(given)) {
+      if (!Array.isArray(list) || list.some(reason => typeof reason !== 'string' || reason.trim() === ''))
+        throw new Error(`${where}: "pendingReasons.${id}" is not a list of non-empty sentences`);
+      reasons[id] = list as string[];
+    }
   }
-  return gaps;
+  return { format: 1, pending: value.pending as string[], reasons };
 }
 
 export function readPending(root: string): PortsPending {
   const file = join(root, 'ports-pending.json');
-  if (!existsSync(file)) return { format: 1, pending: [] };
+  if (!existsSync(file)) return { format: 1, pending: [], reasons: {} };
   return parsePending(readFileSync(file, 'utf8'), 'ports-pending.json');
 }
 
@@ -82,6 +74,13 @@ export const check: Check = {
       if (seen.has(id)) findings.push({ check, where: 'ports-pending.json', message: `${id} listed twice` });
       seen.add(id);
     }
+    for (const id of Object.keys(current.reasons))
+      if (!seen.has(id))
+        findings.push({
+          check,
+          where: 'ports-pending.json',
+          message: `${id} has reasons but is not listed in "pending"`,
+        });
     const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
     if (base !== undefined) {
       const before = new Set(base.pending);
@@ -90,12 +89,6 @@ export const check: Check = {
           findings.push({ check, where: 'ports-pending.json', message: `${id} was added; the list may only shrink` });
     }
     const model = await ctx.model();
-    const gaps = readPendingGaps(ctx.root);
-    if (typeof gaps === 'string') findings.push({ check, where: 'ports-pending.json', message: gaps });
-    else
-      for (const id of gaps.keys())
-        if (!model.loaded.some(s => s.id === id))
-          findings.push({ check, where: 'ports-pending.json', message: `pendingGaps: ${id} is not a subsystem` });
     for (const id of current.pending) {
       const subsystem = model.loaded.find(s => s.id === id);
       if (subsystem === undefined) {
@@ -111,11 +104,11 @@ export const check: Check = {
           anySkeleton = true; // manifest-match reports the load failure
         }
       }
-      if (!anySkeleton)
+      if (!anySkeleton && (current.reasons[id]?.length ?? 0) === 0)
         findings.push({
           check,
           where: 'ports-pending.json',
-          message: `${id} has no skeleton half left; remove its line`,
+          message: `${id} has no skeleton half left; remove its line, or say what is still open in "pendingReasons"`,
         });
     }
     return findings;

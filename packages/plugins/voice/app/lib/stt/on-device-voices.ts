@@ -1,0 +1,86 @@
+/**
+ * EVERY ON-DEVICE SPEECH MODEL THIS DEVICE CAN RUN — one {@link OnDeviceVoice} per catalog entry
+ * (`model-catalog.ts`), built once per document by the app store, like the dictation settings.
+ *
+ * The dictation hook asks it for the voice behind the chosen engine id; Settings lists every one with
+ * its install. Each voice is built by its runtime's factory, so adding a runtime is adding a factory,
+ * never a branch in the hook or the screen.
+ */
+
+import { ON_DEVICE_MODELS, type OnDeviceModel, type SpeechRuntimeId } from './model-catalog.ts';
+import type { OnDeviceVoice } from './on-device-voice.ts';
+import {
+  browserParakeetVoice,
+  type ParakeetAssets,
+  type ParakeetGlobalLike,
+  type ParakeetVoice,
+} from './parakeet-voice.ts';
+import { flatSpeedPlanner, type SpeedPlanner } from './speed-planner.ts';
+import { browserSherpaVoice, type SherpaAssets, type SherpaGlobalLike } from './sherpa-voice.ts';
+import { browserVoskVoice, type VoskAssets } from './vosk-voice.ts';
+import { browserWhisperVoice, type WhisperAssets } from './whisper-voice.ts';
+
+export class OnDeviceVoices {
+  readonly #voices: readonly OnDeviceVoice[];
+
+  constructor(voices: readonly OnDeviceVoice[]) {
+    this.#voices = voices;
+  }
+
+  /** Every voice, in catalog order. */
+  list(): readonly OnDeviceVoice[] {
+    return this.#voices;
+  }
+
+  /** The voice behind an engine id, or `null` for `browser`, an unknown id, or a model not built here. */
+  get(id: string | null): OnDeviceVoice | null {
+    return this.#voices.find(voice => voice.model.id === id) ?? null;
+  }
+
+  /** Whether a model other than `except` is installed on `runtime`, so its shared binary must stay. */
+  runtimeInUse(runtime: SpeechRuntimeId, except: string): boolean {
+    return this.#voices.some(
+      voice =>
+        voice.model.id !== except && voice.model.runtime === runtime && voice.getSnapshot().phase === 'installed',
+    );
+  }
+
+  /** Re-read every install. Never downloads. */
+  async refresh(): Promise<void> {
+    await Promise.all(this.#voices.map(voice => voice.refresh()));
+  }
+}
+
+/** Where the build put every runtime's worker and binary (bound in `src/main.tsx`). */
+export interface SpeechAssets extends ParakeetAssets {
+  readonly sherpa?: SherpaAssets;
+  /** Vosk's worker and WebAssembly runtime; absent from a build without them. */
+  readonly vosk?: VoskAssets;
+  /** The Whisper worker and the transformers.js runtime binary; absent from a build without them. */
+  readonly whisper?: WhisperAssets;
+}
+
+/** Every global the on-device runtimes read. */
+export type SpeechGlobalLike = ParakeetGlobalLike & SherpaGlobalLike;
+
+/** The production registry, bound to this page. Parakeet's service is passed in so the store keeps one. */
+export function browserOnDeviceVoices(
+  global: SpeechGlobalLike,
+  assets: SpeechAssets | null,
+  parakeet: ParakeetVoice = browserParakeetVoice(global, assets),
+  planner: SpeedPlanner = flatSpeedPlanner(),
+): OnDeviceVoices {
+  // A shared runtime asks the registry at Remove time, once every voice exists.
+  let registry: OnDeviceVoices | null = null;
+  const runtimeInUse = (model: OnDeviceModel) => (): boolean =>
+    registry?.runtimeInUse(model.runtime, model.id) ?? false;
+  const voiceFor = (model: OnDeviceModel): OnDeviceVoice => {
+    if (model.runtime === 'onnxruntime-web') return parakeet;
+    if (model.runtime === 'vosk-wasm') return browserVoskVoice(global, assets?.vosk ?? null);
+    if (model.runtime === 'transformers-js')
+      return browserWhisperVoice(global, assets?.whisper, model, runtimeInUse(model), planner);
+    return browserSherpaVoice(model, global, assets?.sherpa ?? null, runtimeInUse(model));
+  };
+  registry = new OnDeviceVoices(ON_DEVICE_MODELS.map(voiceFor));
+  return registry;
+}

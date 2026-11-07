@@ -32,7 +32,10 @@ const made: Fixture[] = [];
 afterAll(() => {
   for (const f of made) f.dispose();
 });
-const ws = (packages: readonly FixturePackage[], options?: { pending?: readonly string[] }): Fixture => {
+const ws = (
+  packages: readonly FixturePackage[],
+  options?: { pending?: readonly string[]; pendingReasons?: Readonly<Record<string, readonly string[]>> },
+): Fixture => {
   const f = fixture(packages, options);
   made.push(f);
   return f;
@@ -98,18 +101,34 @@ describe('ports-pending', () => {
     expect(found).toContain('ghost is not a subsystem');
     expect(found).toContain('alpha has no skeleton half left');
   });
-  test('planted: declared gaps that name no subsystem, or give no reason', async () => {
-    const f = ws([{ id: 'beta' }], { pending: ['beta'] });
-    const write = (pendingGaps: unknown) =>
-      f.write('ports-pending.json', JSON.stringify({ format: 1, pending: ['beta'], pendingGaps }));
-    write({ ghost: ['a reason'] });
-    expect(messages(await run(portsPending, f, NO_BASE))).toContain('pendingGaps: ghost is not a subsystem');
-    write({ beta: [] });
-    expect(messages(await run(portsPending, f, NO_BASE))).toContain(
-      'pendingGaps: beta needs a list of non-empty reasons',
+  test('a fully ported plugin stays listed only while it states what is still open', async () => {
+    const ported = `import { implementApp, implementCli } from '${SDK}';`;
+    const alpha = {
+      id: 'alpha',
+      daemon: `import { implementDaemon } from '${SDK}';\nimport manifest from '../manifest.ts';\nexport default implementDaemon(manifest, { build: () => ({}) });\n`,
+      app: `${ported}\nimport manifest from '../manifest.ts';\nexport default implementApp(manifest, { build: () => ({}) });\n`,
+      cli: `${ported}\nimport manifest from '../manifest.ts';\nexport default implementCli(manifest, { build: () => ({}) });\n`,
+    };
+    const base = JSON.stringify({ format: 1, pending: ['alpha'] });
+
+    const stated = ws([alpha], {
+      pending: ['alpha'],
+      pendingReasons: { alpha: ['Edit as YAML waits for the kernel'] },
+    });
+    stated.write('base.json', base);
+    expect(messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }))).toBe('');
+
+    const unstated = ws([alpha], { pending: ['alpha'], pendingReasons: { alpha: [] } });
+    unstated.write('base.json', base);
+    expect(messages(await run(portsPending, unstated, { base: `file:${join(unstated.root, 'base.json')}` }))).toContain(
+      'alpha has no skeleton half left',
     );
-    write({ beta: ['the move needs Ferrets\u2019 move'] });
-    expect(messages(await run(portsPending, f, NO_BASE))).toBe('');
+
+    const stray = ws([{ id: 'beta' }], { pending: ['beta'], pendingReasons: { alpha: ['a reason for nobody'] } });
+    stray.write('base.json', JSON.stringify({ format: 1, pending: ['beta'] }));
+    expect(messages(await run(portsPending, stray, { base: `file:${join(stray.root, 'base.json')}` }))).toContain(
+      'alpha has reasons but is not listed in "pending"',
+    );
   });
   test('a shrinking list of skeletons passes', async () => {
     const f = ws([{ id: 'beta' }], { pending: ['beta'] });

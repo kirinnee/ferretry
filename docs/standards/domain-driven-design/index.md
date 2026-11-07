@@ -63,7 +63,7 @@ names unambiguous:
 - **`fyd`** is the per-host daemon (`packages/daemon`, composition root `bin/fyd.ts`). Keeping it a
   separate name from `fy` keeps the boundary between _CLI_ and _daemon_ unambiguous.
 - **ferret** (an agent session, in UI copy), **the business** (a machine's ferrets together), and
-  **lesson** (a rule learned from a ferret, reviewed by the owner — [learning.md](../../learning.md)) are UI
+  **lesson** (a rule learned from a ferret, reviewed by the owner — [lessons.md](../../lessons.md)) are UI
   language over the same entities; identifiers stay session ids.
 - **session**, **task**, **agenda**, **warden**, and **fleet** are the product's established
   domain terms. They are named here only to fix the vocabulary — this document does **not** define

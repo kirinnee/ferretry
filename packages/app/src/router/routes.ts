@@ -9,14 +9,15 @@ import type { ScreenRef } from '../layout/engine.ts';
  * - an ABSOLUTE path (`/join`) is a daemon-less screen (a share link's landing page, first-run setup).
  *
  * The shell's own: `/` (home: the daemon list), `/settings` (this device's settings, §5.2), `/d/<daemon>` (that
- * daemon's first nav screen), `/d/<daemon>/settings[/<plugin>]` (one tab per plugin, per daemon).
+ * daemon's first nav screen), `/d/<daemon>/settings[/<plugin>[/<tab>]]` (a plugin's settings tabs, per daemon; a
+ * plugin that declares several names each by its tab id, and `settings/<plugin>` is its first).
  */
 
 export type Route =
   | { readonly kind: 'home' }
   | { readonly kind: 'device-settings' }
   | { readonly kind: 'daemon-home'; readonly daemon: string }
-  | { readonly kind: 'daemon-settings'; readonly daemon: string; readonly tab?: string }
+  | { readonly kind: 'daemon-settings'; readonly daemon: string; readonly tab?: string; readonly tabId?: string }
   | {
       readonly kind: 'screen';
       readonly daemon?: string;
@@ -102,9 +103,17 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
         if (daemon === undefined || daemon.length === 0) return { kind: 'not-found', path: pathname };
         const rest = parts.slice(2);
         if (rest.length === 0) return { kind: 'daemon-home', daemon };
-        if (rest[0] === 'settings' && rest.length <= 2) {
+        if (rest[0] === 'settings' && rest.length <= 3) {
           const tab = rest[1] === undefined ? undefined : decode(rest[1]);
-          return tab === undefined ? { kind: 'daemon-settings', daemon } : { kind: 'daemon-settings', daemon, tab };
+          const tabId = rest[2] === undefined ? undefined : decode(rest[2]);
+          if ((rest[1] !== undefined && tab === undefined) || (rest[2] !== undefined && tabId === undefined))
+            return { kind: 'not-found', path: pathname };
+          return {
+            kind: 'daemon-settings',
+            daemon,
+            ...(tab === undefined ? {} : { tab }),
+            ...(tabId === undefined ? {} : { tabId }),
+          };
         }
         const found = find(false, rest);
         return found === undefined ? { kind: 'not-found', path: pathname } : { kind: 'screen', daemon, ...found };
@@ -127,8 +136,9 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
 }
 
 export const daemonHomeHref = (daemon: string): string => `/d/${encodeURIComponent(daemon)}`;
-export const daemonSettingsHref = (daemon: string, tab?: string): string =>
-  `/d/${encodeURIComponent(daemon)}/settings${tab === undefined ? '' : `/${encodeURIComponent(tab)}`}`;
+/** A settings tab's address: `settings/<plugin>` is that plugin's first tab, `settings/<plugin>/<tab>` names one. */
+export const daemonSettingsHref = (daemon: string, plugin?: string, tab?: string): string =>
+  `/d/${encodeURIComponent(daemon)}/settings${plugin === undefined ? '' : `/${encodeURIComponent(plugin)}${tab === undefined ? '' : `/${encodeURIComponent(tab)}`}`}`;
 export const DEVICE_SETTINGS_HREF = '/settings';
 /** The app's home (the daemon list). `/` is the public landing page; the app lives under `/app/`. */
 export const HOME_HREF = '/app/';
