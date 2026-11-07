@@ -196,7 +196,12 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       // Board off (or not loaded): no port, so no card is reported orphaned and none is cleared.
       board: () => {
         const board = host.board();
-        return board === undefined ? undefined : boardReader(board);
+        return board === undefined
+          ? undefined
+          : boardReader(board, {
+              // A helper is a ferret another ferret started: it may not move cards, so its brief does not say to.
+              isHelper: async ferret => (await ferrets.get(ferret as FerretId))?.parent !== undefined,
+            });
       },
       // The send ledgers, for DETECTION only: a sub-ferret overdue on a report its parent asked for is flagged
       // `report_overdue`, and nobody is typed to (`nudgesOverdue: false` below).

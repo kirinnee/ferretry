@@ -98,7 +98,7 @@ import type {
   FerretParents,
 } from './ports.ts';
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
-import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
+import { compareViews, countsOf, inScope, isOpenOnBoard, pageOf, passesFilters } from './query.ts';
 import { returnCard, returnLead } from './return-to-lead.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { helperCloseReason } from './sub-card-close.ts';
@@ -406,6 +406,20 @@ export class BoardService {
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
     const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
     return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
+  }
+
+  /**
+   * Every open card that is orphaned, in board order, with every board's lanes: `sweepBoard`'s one read narrowed to
+   * what the Warden reports, so the whole set is judged against one store read and one derivation of activity.
+   */
+  async orphanedCards(): Promise<{ readonly views: readonly CardView[]; readonly laneSets: LaneSets }> {
+    const { views, laneSets } = await this.sweepBoard();
+    const orphaned = views
+      .filter(
+        view => view.activity === 'orphaned' && isOpenOnBoard(cardCategory(view, laneSets), view.dropped !== null),
+      )
+      .sort(compareViews);
+    return { views: orphaned, laneSets };
   }
 
   /**

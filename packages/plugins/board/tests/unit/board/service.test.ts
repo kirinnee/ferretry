@@ -1819,6 +1819,58 @@ describe('reading the board', () => {
     should(sessions.reads).equal(1);
     should(unidentified.views).have.length(5);
   });
+
+  describe('the orphaned cards, one snapshot', () => {
+    /** Derives every card as `orphaned` unless it is named, counting each derivation. */
+    const orphanedExcept = (named: Readonly<Record<string, 'active' | 'idle'>> = {}) => {
+      const derivations: number[] = [];
+      const activity = {
+        derive: async (inputs: Parameters<LivenessActivityDeriver['derive']>[0]) => {
+          derivations.push(inputs.cards.length);
+          return new Map(
+            inputs.cards.map(each => [
+              each.id,
+              { lastTouchedAt: null, touchedBy: null, activity: named[each.id] ?? ('orphaned' as const) },
+            ]),
+          );
+        },
+      };
+      return { activity, derivations };
+    };
+
+    it('should list every open orphaned card past one page of 500, from one derivation of activity', async () => {
+      // Arrange
+      const cards = Array.from({ length: 620 }, (_, each) => card({ id: `F${String(each + 1)}`, laneId: 'implement' }));
+      const { activity, derivations } = orphanedExcept();
+
+      // Act
+      const read = await serviceWith(cards, { activity }).service.orphanedCards();
+
+      // Assert
+      should(read.views).have.length(620);
+      should(new Set(read.views.map(view => view.id)).size).equal(620);
+      should(derivations).eql([620]);
+      should([...read.laneSets.keys()]).eql([PROJECT]);
+    });
+
+    it('should leave out a card that is active, idle, closed or dropped', async () => {
+      // Arrange
+      const cards = [
+        card({ id: 'F1', laneId: 'implement' }),
+        card({ id: 'F2', laneId: 'implement' }),
+        card({ id: 'F3', laneId: 'implement' }),
+        card({ id: 'F4', laneId: 'closed' }),
+        card({ id: 'F5', laneId: 'implement', dropped: { reason: 'no', at: NOW } }),
+      ];
+      const { activity } = orphanedExcept({ F2: 'active', F3: 'idle' });
+
+      // Act
+      const read = await serviceWith(cards, { activity }).service.orphanedCards();
+
+      // Assert
+      should(read.views.map(view => view.id)).eql(['F1']);
+    });
+  });
 });
 
 describe('what follows a write', () => {

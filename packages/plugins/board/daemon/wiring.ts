@@ -18,7 +18,10 @@ import {
   type CardRef,
   type CardView,
   type CountersFileSchema,
+  type FocusCard,
   type FocusFile,
+  type LaneSet,
+  type OrphanedCards,
   BoardQuerySchema,
   parseGateReference,
   type SweepFile,
@@ -71,6 +74,7 @@ import {
   type StartOnCardPorts,
   type GateBoard,
   type GateCard,
+  BoardError,
   BoardIndex,
   stillBuilding,
   ownerDelegation,
@@ -148,6 +152,12 @@ export interface BoardWorld {
   readonly sweepTick: () => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
   readonly heldBy: (ferret: string) => Promise<readonly CardView[]>;
+  /** The lane set of every project that has a card (`BoardApi.laneSets`). */
+  readonly laneSets: () => Promise<readonly LaneSet[]>;
+  /** Every open orphaned card with every board's lanes, from one snapshot (`BoardApi.orphanedCards`). */
+  readonly orphanedCards: () => Promise<OrphanedCards>;
+  /** The card a ferret works on with its lane set, when it is on this machine (`BoardApi.focusOf`). Not-found is `undefined`. */
+  readonly focusCard: (ferret: string) => Promise<FocusCard | undefined>;
   /** `turn.ended` (Conversation): the turn-end check and the gate check, each failure said, never thrown. */
   readonly turnEnded: (ferret: string) => Promise<void>;
   /** `ferret.started` (Ferrets): the started ferret's card (today's `SessionCards`). Never rejects. */
@@ -634,6 +644,23 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
         ref: `&${card.id}`,
       })),
     heldBy,
+    laneSets: async () => [...(await service.snapshot()).laneSets.values()],
+    orphanedCards: async () => {
+      const { views, laneSets } = await service.orphanedCards();
+      return { cards: views, laneSets: [...laneSets.values()] };
+    },
+    focusCard: async ferret => {
+      const ref = await focus.focusOf(ferret);
+      if (ref === null) return undefined;
+      // A card of another machine is not answered here: its id means nothing in this store (today's guard).
+      if (ref.machineId !== undefined && ref.machineId !== machineId()) return undefined;
+      try {
+        return await service.card(ref.id);
+      } catch (error) {
+        if (error instanceof BoardError && error.code === 'not-found') return undefined;
+        throw error;
+      }
+    },
     turnEnded,
     ferretStarted,
   };
