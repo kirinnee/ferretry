@@ -4,7 +4,7 @@
  * The one place those are decided, so the CLI that raises an item, the daemon that pushes it and the
  * app that draws it agree. An item raised before cards had titles carries none of these fields; every
  * reader goes through the functions here, which derive them from the item's ask and summary, so an old
- * item reads exactly as it did — never a parse failure, never a second migration.
+ * item reads exactly as it did — never a parse failure.
  *
  * The defaults (docs/agenda.md, "Answering a card"):
  *

@@ -1449,7 +1449,7 @@ const AgendaItemBaseShape = {
   askVersion: PositiveIntegerSchema.optional(),
 };
 
-/** Stored entries are decoded before the transport budget is applied by migration. */
+/** Stored entries are decoded before the transport budget is applied. */
 export const StoredAgendaItemSchema = z
   .discriminatedUnion('raisedBy', [
     z.object({

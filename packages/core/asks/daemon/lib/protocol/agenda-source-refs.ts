@@ -34,7 +34,7 @@ export const isDaemonSourceRef = (sourceRef: string | null | undefined): boolean
 /**
  * Whether a harness question's tool id may name its agenda item (`question:<id>`, {@link harnessQuestionRef}). The
  * namespace keeps it apart from every other producer whatever it holds, so a provider's id is taken as written — a
- * colon included (an OpenAI-compatible `functions.Name:0`). Refused: blank, too long to store, or itself in a
+ * colon included (an OpenAI-style `functions.Name:0`). Refused: blank, too long to store, or itself in a
  * daemon grammar, which no provider writes.
  */
 export const isHarnessQuestionId = (toolUseId: string): boolean =>

@@ -222,7 +222,7 @@ export const cardAskStage = (gate: Pick<AgendaGate, 'options'>): Extract<AgendaS
  * Whether an open agenda can carry a card's ask: a ferret's own item, or one the daemon raised on a ferret's behalf (the
  * card's own agenda, a Not good follow-up). Not a notice, a gate item from before card asks, nor an item that is
  * something else for the owner to do (an input, a confirmation, a copied plan, a task plan, a 2FA seed, a phone
- * approval, a sign-in rule). The ONE test the engine and the boot migration share.
+ * approval, a sign-in rule). The ONE test the engine and the app share.
  */
 export const canCarryCardAsk = (
   item: Pick<

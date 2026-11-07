@@ -825,7 +825,7 @@ export function agendaLedgerDocument(ledger: AgendaLedger): string {
  * held to the schema the reader holds it to, and a change that fails is refused instead of written.
  */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
-  // Accepted chat has its own send bound: reply keeps that full source outside the bounded legacy history note.
+  // Accepted chat has its own send bound: reply keeps that full source outside the bounded history note.
   if (
     ['answer', 'resolve', 'dismiss', 'needs-info', 'discuss', 'reply'].includes(command.action) &&
     !(command.action === 'reply' && command.fromChat !== undefined) &&
@@ -2651,7 +2651,7 @@ function nudging(ledger: AgendaLedger, command: NudgingCommand): AgendaMutation 
 
 /**
  * The Warden nudged the ferret about a RESTING item waiting on it: the item records when, and how many times, so the
- * next nudge waits its backoff and a migrated item is never nudged twice. Only the daemon says so, and only of the
+ * next nudge waits its backoff. Only the daemon says so, and only of the
  * rest it nudged for (`since`, `nudges`) — a rest that has moved on since is left as it is.
  */
 function nudged(ledger: AgendaLedger, command: NudgedCommand): AgendaMutation {

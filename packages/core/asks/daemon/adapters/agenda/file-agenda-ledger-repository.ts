@@ -248,7 +248,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       const loaded = await this.loadDigested(sessionId);
       let current = loaded?.ledger ?? null;
       let base = loaded?.digest ?? null;
-      // Migrate old in-ledger history before applying even an unchanged command. Appending precedes the
+      // Move pending in-ledger history to the sidecar before applying even an unchanged command. Appending precedes the
       // atomic cursor write; a retry after a crash cuts the uncommitted append and writes it once again.
       if ((current?.archivePending?.length ?? 0) > 0 && current !== null) {
         current = await this.write(sessionId, current);
@@ -379,7 +379,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     await this.retire(sessionId, effect);
   }
 
-  /** What follows a committed agenda file: its history mark lifted, its change event kept, its intent retired. */
+  /** What follows a committed agenda file: its history mark lifted, its change event kept, its intent cleared. */
   private async finish(sessionId: string, effect: AgendaChangeEffect | undefined): Promise<void> {
     await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
     await this.retire(sessionId, effect);

@@ -37,8 +37,7 @@ export const AGENDA_REST_NUDGE_MS = 30 * 60_000;
 /**
  * WHAT A RESTING ITEM WAITS ON, beside the `parked: replied` (or `waitingOn: ferret`) an older app reads. `at` is
  * when it began resting, which is the nudge clock; `nudgedAt` and `nudges` are the Warden's own record of the
- * nudges it sent. `migrated` marks an item that was `parked: replied` before Resting existed: it is nudged once
- * after the upgrade and never again. `nudgeSend` is the send id of a nudge the Warden has decided on and not yet
+ * nudges it sent. `nudgeSend` is the send id of a nudge the Warden has decided on and not yet
  * recorded as sent, kept so a restart resumes that very message instead of sending another. An object, not a strict
  * one, so a later field reads in this app too.
  */
@@ -49,7 +48,6 @@ export const AgendaRestingSchema = z.object({
   nudgedAt: InstantSchema.optional(),
   nudges: PositiveIntegerSchema.optional(),
   nudgeSend: z.string().min(1).max(256).optional(),
-  migrated: z.literal(true).optional(),
 });
 export type AgendaResting = z.infer<typeof AgendaRestingSchema>;
 

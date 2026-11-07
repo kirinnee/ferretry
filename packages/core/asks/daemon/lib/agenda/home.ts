@@ -172,7 +172,7 @@ export const handsOnRaise = (request: RaiseAgendaRequest, actor: AgendaActor): b
 export const handsOnSource = (actor: AgendaActor): boolean =>
   actor.kind === 'daemon' && HANDS_ON_CAUSES.has(actor.cause);
 
-/** Whether an open item is a hands-on card, read from the item itself (the migration has no raiser to ask). */
+/** Whether an open item is a hands-on card, read from the item itself (there may be no raiser to ask). */
 export const handsOnItem = (item: AgendaItem): boolean =>
   item.source === 'question' ||
   item.input !== undefined ||
