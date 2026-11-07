@@ -1,3 +1,4 @@
+// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
 /** Hydrate and read this daemon's pickable runtime roster. */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';

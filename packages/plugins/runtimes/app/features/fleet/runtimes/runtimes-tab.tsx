@@ -3,6 +3,10 @@
  * plus a profile — and each runtime's own page: its login, its profile's layers newest on top, its
  * model set, the fixed layer Ferretry adds last for an agent runtime, and Launch.
  *
+ * GAP(conversation): today's "Import conversations…" button and screen are gone from this tab; the verb is now
+ * Conversation's `fy link` (V-0285), and its screen is Conversation's to draw. Recorded in `ports-pending.json`
+ * (`pendingReasons.runtimes`).
+ *
  * Launch never starts anything by itself. It opens the ordinary New session form with this runtime
  * picked, so the person still chooses the folder and says what they want; it is a click, never a load.
  */

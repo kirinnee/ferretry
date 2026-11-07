@@ -1,3 +1,5 @@
+// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
+// GAP(usage): a hand copy of Usage's contract; it must read Usage's contract when mounted.
 /**
  * PURE PROJECTION FOR THE RUNTIME PICKER.
  *

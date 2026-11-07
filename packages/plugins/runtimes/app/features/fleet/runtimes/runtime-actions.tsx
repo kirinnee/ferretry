@@ -323,6 +323,9 @@ export interface RemoveRuntimeDialogProps {
   /**
    * Moves one ferret onto another runtime, restarting it there with its conversation. The Ferrets app half
    * provides it; without it the dialog offers no move and a ferret simply keeps running until it ends.
+   *
+   * GAP(ferrets): Ferrets declares no migrate/move route yet (R-0355), so nothing supplies it today. Recorded in
+   * `ports-pending.json` (`pendingReasons.runtimes`).
    */
   readonly moveFerret?: MoveFerret;
   readonly onClose: () => void;

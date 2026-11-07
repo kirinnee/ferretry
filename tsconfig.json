@@ -46,6 +46,20 @@
     // pending app port: terminals shell daemon-client, grants and browser-link facilities
     "packages/plugins/terminals/tests/unit/app",
     // pending app port: terminals shell daemon-client, grants and browser-link facilities
-    "packages/plugins/terminals/tests/support/app"
+    "packages/plugins/terminals/tests/support/app",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page
+    "packages/plugins/runtimes/app/components/runtime-buttons.tsx",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page
+    "packages/plugins/runtimes/app/hooks/use-account-picker.ts",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page
+    "packages/plugins/runtimes/app/lib/account-picker-store.ts",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page
+    "packages/plugins/runtimes/app/lib/account-picker-catalog.ts",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page
+    "packages/plugins/runtimes/app/lib/account-health-view.ts",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page; AccountUsageRow is a hand copy of Usage's UsageAccountView and must read Usage's contract when mounted
+    "packages/plugins/runtimes/app/lib/daemon-picker-model.ts",
+    // pending app port: runtimes no mount point until Ferrets' new-ferret page; a hand copy of Usage's quota-readout, it must read Usage's contract when mounted
+    "packages/plugins/runtimes/app/components/quota-readout.tsx"
   ]
 }

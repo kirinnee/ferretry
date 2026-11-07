@@ -1,3 +1,4 @@
+// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
 /**
  * A RUNTIME'S HEALTH, IN WORDS: the status of the login it uses, as one row prints it.
  *

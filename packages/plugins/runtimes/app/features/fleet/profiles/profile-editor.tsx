@@ -88,6 +88,9 @@ export interface ProfileEditorProps {
   /**
    * The editor for a config file (`GET/PUT /v1/config/file`), drawn by whoever owns it. Absent: the profile's file is
    * named but offers no Edit as YAML.
+   *
+   * GAP(kernel): the kernel's `/v1/config/file` is not declared yet, so the settings host supplies none and Edit as
+   * YAML is not offered. Recorded in `ports-pending.json` (`pendingReasons.runtimes`).
    */
   readonly renderFileEditor?: (editor: FileEditorProps) => ReactNode;
   /** Buttons beside Save (Cancel, when building a new one). */

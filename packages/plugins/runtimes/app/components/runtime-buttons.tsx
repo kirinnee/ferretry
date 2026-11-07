@@ -1,3 +1,4 @@
+// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
 /**
  * THE NEW-SESSION RUNTIME CHOICE: one button per runtime, split Claude and Codex.
  *

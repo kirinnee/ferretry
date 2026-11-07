@@ -30,6 +30,15 @@
     "runtimes",
     "onboarding"
   ],
+  "pendingReasons": {
+    "runtimes": [
+      "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
+      "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet; the runtime picker, account health and quota readout wait for it (pendingAppPorts)",
+      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)",
+      "GAP(ferrets): removing a runtime cannot move its running ferrets, because Ferrets declares no migrate route yet (R-0355)",
+      "GAP(conversation): Import conversations is gone from the Runtimes tab; its verb is now Conversation's `fy link` (V-0285)"
+    ]
+  },
   "pendingHalves": {
     "agenda": ["app"],
     "browsers": ["app"],
@@ -70,6 +79,41 @@
       "plugin": "agenda",
       "path": "packages/plugins/agenda/tests/support/app",
       "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/components/runtime-buttons.tsx",
+      "reason": "no mount point until Ferrets' new-ferret page"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/hooks/use-account-picker.ts",
+      "reason": "no mount point until Ferrets' new-ferret page"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/lib/account-picker-store.ts",
+      "reason": "no mount point until Ferrets' new-ferret page"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/lib/account-picker-catalog.ts",
+      "reason": "no mount point until Ferrets' new-ferret page"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/lib/account-health-view.ts",
+      "reason": "no mount point until Ferrets' new-ferret page"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/lib/daemon-picker-model.ts",
+      "reason": "no mount point until Ferrets' new-ferret page; AccountUsageRow is a hand copy of Usage's UsageAccountView and must read Usage's contract when mounted"
+    },
+    {
+      "plugin": "runtimes",
+      "path": "packages/plugins/runtimes/app/components/quota-readout.tsx",
+      "reason": "no mount point until Ferrets' new-ferret page; a hand copy of Usage's quota-readout, it must read Usage's contract when mounted"
     }
   ]
 }

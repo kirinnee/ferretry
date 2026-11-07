@@ -1,3 +1,5 @@
+// GAP(ferrets): no mount point until Ferrets' new-ferret page (ports-pending.json › pendingAppPorts).
+// GAP(usage): a hand copy of Usage's contract; it must read Usage's contract when mounted.
 /**
  * A local copy of the Usage plugin's QuotaReadout (cross-plugin imports go through contracts only, so the view is not shared).
  * Account quota (5-hour + weekly window) for the wrapper a session runs under.
