@@ -165,6 +165,7 @@ export default implementDaemon(manifest, {
     });
     const writer = new GateConfigWriter(() => configFiles, target);
 
+    const grantHistory = new StateGrantHistory(kernel.state, GrantAuditFile);
     const security = new SecuritySettingsService({
       document: {
         read: () => {
@@ -180,7 +181,7 @@ export default implementDaemon(manifest, {
           await writer.write('security', { ...settings, memberUnlockDays: current.security.memberUnlockDays });
         },
       },
-      audit: record,
+      history: grantHistory,
       clock: { now: () => kernel.clock.now() },
       widenCommand: `${CLIENT_NAME} daemon security set`,
     });
@@ -191,7 +192,7 @@ export default implementDaemon(manifest, {
         written: () => namedGrants,
         write: async next => await writer.write('grants', next),
       },
-      history: new StateGrantHistory(kernel.state, GrantAuditFile),
+      history: grantHistory,
       clock: { now: () => kernel.clock.now() },
       clientName: CLIENT_NAME,
     });

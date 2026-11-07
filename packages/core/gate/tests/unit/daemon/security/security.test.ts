@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { type AuditDraft, DEFAULT_SECURITY_SETTINGS, type SecuritySettings } from '../../../../contract/index.ts';
+import {
+  AUDIT_KINDS,
+  DEFAULT_SECURITY_SETTINGS,
+  type GrantAuditEntryView,
+  type SecuritySettings,
+} from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
 import {
   DAMAGED_SECURITY_SETTINGS,
@@ -11,7 +16,7 @@ import {
 function service(start: SecurityDocument = { kind: 'defaults' }) {
   let document = start;
   const writes: SecuritySettings[] = [];
-  const audits: AuditDraft[] = [];
+  const audits: GrantAuditEntryView[] = [];
   const svc = new SecuritySettingsService({
     document: {
       read: () => document,
@@ -20,8 +25,11 @@ function service(start: SecurityDocument = { kind: 'defaults' }) {
         document = { kind: 'document', settings };
       },
     },
-    audit: async draft => {
-      audits.push(draft);
+    history: {
+      record: async entry => {
+        audits.push(entry);
+      },
+      recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
     },
     clock: { now: () => '2026-11-07T12:00:00.000Z' },
     widenCommand: 'fy daemon security set',
@@ -46,6 +54,20 @@ describe('security settings', () => {
     const route = routeOf('GET /v1/security');
     expect(route?.capability).toBeUndefined();
     expect(route).toMatchObject({ minimum: 'operator', caller: 'any', unlockExempt: true });
+  });
+
+  test('G115 PATCH /v1/security is recorded as security.changed for every outcome by its descriptor, and only there', () => {
+    expect(routeOf('PATCH /v1/security')?.audit).toEqual({ record: AUDIT_KINDS['security.changed'] });
+  });
+
+  test('G115 the service keeps its change lines in the grant journal, an attempt that moved nothing included, and refusals not at all', async () => {
+    const { svc, audits } = service();
+    await svc.patch({ stepUpWindowMinutes: 30 }, phone);
+    expect(audits).toEqual([]);
+    await svc.patch({}, host);
+    expect(audits.map(entry => ({ ...entry, at: String(entry.at) }))).toEqual([
+      { at: '2026-11-07T12:00:00.000Z', actor: 'admin-cli', changes: [] },
+    ]);
   });
 
   test('G169 GET /v1/audit is gated by pairing.configure', () => {
@@ -83,8 +105,8 @@ describe('security settings', () => {
     const outcome = await svc.patch({ unlockValidityHours: 24 }, { ...phone, freshPasskey: true });
     expect(outcome.ok && outcome.spentPasskey).toBe(true);
     expect(writes.at(-1)?.unlockValidityHours).toBe(24);
-    expect(Object.values(audits.at(-1)?.detail ?? {})).toContain(PASSKEY_WIDEN_JOURNAL_LINE);
-    expect(Object.values(audits.at(-1)?.detail ?? {})).toContain('security.unlockValidityHours=8->24');
+    expect(audits.at(-1)?.changes).toEqual(['security.unlockValidityHours=8->24', PASSKEY_WIDEN_JOURNAL_LINE]);
+    expect(audits.at(-1)?.actor).toBe('device:phone');
   });
 
   test('G115 without the proof a raise is refused naming the act; with it, it applies, spends the proof and is journaled', async () => {
@@ -95,9 +117,9 @@ describe('security settings', () => {
     const applied = await svc.patch({ unlockValidityHours: 12 }, { ...phone, freshPasskey: true });
     expect(applied.ok && applied.spentPasskey).toBe(true);
     expect(writes.at(-1)?.unlockValidityHours).toBe(12);
-    const detail = Object.values(audits.at(-1)?.detail ?? {});
-    expect(detail).toContain(PASSKEY_WIDEN_JOURNAL_LINE);
-    expect(detail).toContain('security.unlockValidityHours=8->12');
+    const changes = audits.at(-1)?.changes ?? [];
+    expect(changes).toContain(PASSKEY_WIDEN_JOURNAL_LINE);
+    expect(changes).toContain('security.unlockValidityHours=8->12');
   });
 
   test('G116 a raise combined with any other loosening is refused whole without asking a passkey; the host is not asked', async () => {

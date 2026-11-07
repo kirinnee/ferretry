@@ -16,6 +16,7 @@ import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { ok } from '@ferretry/std';
 import {
   AdminTokenFile,
+  AuditLogFile,
   type Admission,
   cap,
   Credentials,
@@ -28,7 +29,7 @@ import {
   WardenTokenFile,
 } from '../../../contract/index.ts';
 import gateDaemon from '../../../daemon/index.ts';
-import manifest, { GrantAuditFile } from '../../../manifest.ts';
+import manifest, { AuditKeptFile, GrantAuditFile } from '../../../manifest.ts';
 import { FakeDeviceProvider, holder } from '../../../contract/testing/index.ts';
 import { ADMIN, carried, descriptor, local, request, WARDEN } from './support.ts';
 
@@ -270,6 +271,10 @@ describe('config writes in the built daemon', () => {
     });
     // The route already decided this caller may make the change: the writer is told so, never asked to hold it.
     expect(write?.options).toEqual({ confirmedLoosening: true });
+    // The change lines go to the grant journal; `security.changed` is the kernel's one record of the call, not the handler's.
+    expect(built.folder.raw(GrantAuditFile)).toContain('security.unlockValidityHours=');
+    expect(built.folder.raw(AuditLogFile)).toBeUndefined();
+    expect(built.folder.raw(AuditKeptFile)).toBeUndefined();
   });
 
   test('R-0221 G123 PATCH /v1/grants writes the grants block, then records the change in the grant history', async () => {
