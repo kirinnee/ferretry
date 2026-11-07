@@ -13,10 +13,14 @@
  *   on its ferret when it holds answered asks or talk, and closes when it holds neither; one sealed and written on
  *   since stays where it is.
  * - **Answer.** The owner's answer is kept on the ask, with its receipt; the agenda RESTS, waiting on its ferret,
- *   unless another card ask on it is still open. It is never closed by the answer: the ferret marks it Done.
+ *   unless another card ask on it is still open, or the item still asks something of its OWN the owner has not
+ *   answered (a choice, permission, task or review, or a question in its own words: `itemAsksOwnQuestion`, the rule the
+ *   app reads too): that keeps it in Needs you until they answer it. It is never closed by the answer: the ferret marks
+ *   it Done.
  * - **Not yet.** The ask stays open, marked, and the agenda rests the same way.
  *
- * `gateAttached` mirrors the first open ask's gate on every write, for an app that predates card asks. Pure and total.
+ * `gateAttached` mirrors the first ask in the order they are asked (`askedCardAsks`: a Not yet goes behind the asks
+ * still waiting) on every write, for an app that predates card asks. Pure and total.
  */
 import { createHash } from 'node:crypto';
 import {
@@ -25,18 +29,22 @@ import {
   type AgendaCardAskWoke,
   type AgendaItem,
   agendaState,
-  asksOnlyCardAsks,
   canCarryCardAsk,
   cardAskReference,
   canonicalJson,
   cardAskStage,
   formatTaskRef,
+  awaitsOwnAnswer as protocolAwaitsOwnAnswer,
+  hasOpenCardAsk,
+  itemAsksOwnQuestion,
   isOpenCardAsk,
   MAX_AGENDA_CARD_ASKS,
   MAX_AGENDA_REPLY_LENGTH,
   mirroredCardAsk,
+  ownAskDigest,
   openCardAsks,
   parseCardAgendaReference,
+  repliedToOwnAsk,
 } from '@ferretry/protocol';
 
 /** What the gate engine does to one agenda's card asks. */
@@ -48,7 +56,12 @@ export type CardAskOperation =
   /** The owner answered and the card moved as they said: the answer is kept, and the agenda rests. */
   | { readonly kind: 'answered'; readonly reference: string; readonly answer: AgendaCardAskAnswer }
   /** The owner said Not yet: the ask stays open, and the agenda rests. */
-  | { readonly kind: 'not-yet'; readonly reference: string; readonly note?: string };
+  | { readonly kind: 'not-yet'; readonly reference: string; readonly note?: string }
+  /**
+   * ONE plain line of the daemon's on the agenda's activity, nothing else: no ask, no button, and the item's turn, stage
+   * and place in Needs you stay exactly as they were. The same line twice in a row is written once.
+   */
+  | { readonly kind: 'line'; readonly line: string };
 
 /** What an operation came to: the item to write and how it changed, or why nothing was written. */
 export type CardAskOutcome =
@@ -76,7 +89,8 @@ const bounded = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] => {
 export const LEGACY_REPLAY_MS = 2 * 60_000;
 
 /**
- * The item carrying exactly these asks, `gateAttached` mirroring the first open one; both absent when none is left.
+ * The item carrying exactly these asks, `gateAttached` mirroring the first one asked (`mirroredCardAsk`); both absent
+ * when none is left.
  * Given the time of the write (`at`), a mirror that comes to show a DIFFERENT ask than it did, or to show nothing, is
  * stamped (`gateAttachedChangedAt`): a screen of an older app may still draw the ask that went. One that shows the same
  * ask keeps its stamp, and so does one that comes from nothing — until the stamp is older than {@link LEGACY_REPLAY_MS}.
@@ -174,13 +188,63 @@ export const sealCardAsks = (item: AgendaItem): AgendaItem => {
 const untouched = (item: AgendaItem): boolean =>
   item.cardAsksSeal !== undefined && item.cardAsksSeal === fingerprint(item);
 
+/** The digest of the item's own ask: one spelling for both ends (`@ferretry/protocol`). */
+export { ownAskDigest };
+
 /** Whether an owner's answer to a card ask was recorded on the item after `at`. */
 const answeredSince = (item: AgendaItem, at: string): boolean =>
   (item.history ?? []).some(entry => entry.kind === 'gate-answered' && entry.at > at);
 
-/** The item resting on the owner's answer, waiting on its ferret, as every other answer rests one. */
-const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
+/**
+ * Whether the item still has an ask of its OWN for the owner, and no answer of theirs on it: a choice, yes/no,
+ * permission, task or review, or a question the item asks in its own words beside its card asks (`itemAsksOwnQuestion`
+ * — questions, fields or steps, or an ask line that is neither the daemon's generated card agenda ask nor one that only
+ * repeats a card ask). The ONE rule the app reads to keep that line on screen, so an item the app shows asking
+ * something stays in Needs you after its card ask's answer, and only the owner's answer (or reply) to it rests the item.
+ * A reply in words counts for the open question it answered, before or after the card ask came, for as long as that
+ * question stands unchanged (`ownAskRepliedTo`); a choice, permission, task or review takes its answer.
+ * A card agenda with its generated ask, and a reply thread whose line only repeats its card ask, asked nothing else.
+ * `held` is every card ask the item held when the operation began: one just withdrawn or moved away still wrote (or was
+ * repeated by) the line, so the line is read against it too.
+ */
+const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaCardAsk[]): boolean =>
+  protocolAwaitsOwnAnswer(
+    { ...item, cardAsks: held },
+    held.map(ask => ({ gate: ask.gate, howToTest: ask.howToTest ?? null })),
+  );
+
+/**
+ * Whether an agenda asks the owner NOTHING BUT its card asks: it carries one still open and nothing of its own to
+ * answer (`awaitsOwnAnswer`, the shared own-question rule and the reply digest). The ask made its push when it was put,
+ * which is then the item's whole signal: a stop never names it again and it has no deadline of its own. The card agenda
+ * the daemon opened is that while its subject is the one it wrote; a ferret's thread is, until its ferret asks (or
+ * rewords) a question of its own, which the owner has yet to answer. Total.
+ */
+export const asksOnlyCardAsks = (item: AgendaItem): boolean =>
+  hasOpenCardAsk(item) && !awaitsOwnAnswer(item, item.cardAsks ?? []);
+
+/**
+ * The item resting on the owner's answer, waiting on its ferret, as every other answer rests one — unless another
+ * card ask is still waiting on the owner, or the item's own ask is still unanswered: then it stays (or goes back to)
+ * the owner's turn, in Needs you, and only their answer to that ask rests it.
+ */
+const restedOnAnswer = (
+  item: AgendaItem,
+  at: string,
+  held: readonly AgendaCardAsk[] = item.cardAsks ?? [],
+): AgendaItem => {
   if (openCardAsks(item).some(ask => ask.notYet === undefined)) return item;
+  if (awaitsOwnAnswer(item, held)) {
+    const {
+      waitingOn: _waitingOn,
+      askedAt: _askedAt,
+      waitingFor: _waitingFor,
+      parked: _parked,
+      resting: _resting,
+      ...owners
+    } = item;
+    return owners;
+  }
   const {
     waitingOn: _waitingOn,
     askedAt: _askedAt,
@@ -196,6 +260,13 @@ const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
 /** Whether the daemon opened this agenda for its card (`card-agenda:`): it holds the card's asks and nothing of the ferret's. */
 const isCardAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
   item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined;
+
+/**
+ * Whether the owner has answered the item's OWN question (a choice, or words in reply) while it stood unchanged. Their
+ * answer kept the item in Needs you only because a card ask waited behind it (`ownFirst`); with that ask gone nothing is left
+ * for them, so the item rests on the answer they already gave.
+ */
+const ownQuestionAnswered = (item: AgendaItem): boolean => item.ownerAnswer !== undefined || repliedToOwnAsk(item);
 
 /**
  * Whether the owner or a ferret has said anything on a card's own agenda. A sealed one is read by its seal; one from
@@ -251,7 +322,7 @@ const operate = (
       return {
         kind: 'refused',
         code: 'full',
-        message: `${item.id} already carries ${String(MAX_AGENDA_CARD_ASKS)} open card asks`,
+        message: `${item.id} already carries ${String(MAX_AGENDA_CARD_ASKS)} open asks about cards`,
       };
     }
     // A ferret's thread remembers the turn this ask ends; a second ask joining a first the owner has yet to look at
@@ -270,6 +341,12 @@ const operate = (
       askedLine(added),
     );
     return { kind: 'changed', item: withCardAsks(woken, [...asks, added], at), change: 'woke' };
+  }
+  if (operation.kind === 'line') {
+    const last = item.history?.at(-1);
+    return last?.kind === 'updated' && last.note === operation.line
+      ? { kind: 'unchanged' }
+      : { kind: 'changed', item: effects.history(item, 'updated', operation.line), change: 'refreshed' };
   }
   const target = asks.find(ask => cardAskReference(ask) === operation.reference);
   if (operation.kind === 'withdraw') {
@@ -294,9 +371,11 @@ const operate = (
       // A ferret's thread goes back to the turn the ask woke it out of, or rests when the owner's answer to another ask
       // is the last thing on it; one anybody has written on since stays as it is, in Needs you.
       const settled = !asLeft
-        ? told
+        ? ownQuestionAnswered(item) && agendaState(told).state === 'needs-you'
+          ? restedOnAnswer(told, at, item.cardAsks)
+          : told
         : answeredSince(left, target.at)
-          ? restedOnAnswer(told, at)
+          ? restedOnAnswer(told, at, item.cardAsks)
           : backTo(told, target.woke);
       return { kind: 'changed', item: settled, change: 'refreshed' };
     }
@@ -305,18 +384,25 @@ const operate = (
     // A sealed card agenda somebody wrote on since stays where it is, as a ferret's thread does: the owner's reply
     // already rested it, and a ferret's answer is in front of the owner.
     if (isCardAgenda(left) && item.cardAsksSeal !== undefined && !asLeft) {
-      return { kind: 'changed', item: told, change: 'refreshed' };
+      return {
+        kind: 'changed',
+        item:
+          ownQuestionAnswered(item) && agendaState(told).state === 'needs-you'
+            ? restedOnAnswer(told, at, item.cardAsks)
+            : told,
+        change: 'refreshed',
+      };
     }
     const holdsAnswers = (left.cardAsks ?? []).length > 0 && (isCardAgenda(left) || asLeft);
     if (holdsAnswers || (isCardAgenda(left) && talkedOn(item))) {
-      return { kind: 'changed', item: restedOnAnswer(told, at), change: 'refreshed' };
+      return { kind: 'changed', item: restedOnAnswer(told, at, item.cardAsks), change: 'refreshed' };
     }
     return isCardAgenda(left)
       ? { kind: 'closed', item: told, note }
       : { kind: 'changed', item: left, change: 'refreshed' };
   }
   if (target === undefined) {
-    return { kind: 'refused', code: 'invalid', message: `${item.id} carries no card ask ${operation.reference}` };
+    return { kind: 'refused', code: 'invalid', message: `${item.id} has no open ask ${operation.reference}` };
   }
   if (!isOpenCardAsk(target)) {
     return operation.kind === 'answered' && target.answer?.receipt === operation.answer.receipt
@@ -413,7 +499,7 @@ export const joinCardAsks = (
     return {
       kind: 'refused',
       code: 'full',
-      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} card asks, answered or not: nothing is dropped to fit`,
+      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} asks about cards, answered or not: nothing is dropped to fit`,
     };
   }
   const waitingOn = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] =>
@@ -436,8 +522,10 @@ export const joinCardAsks = (
 
 /**
  * `item` once the asks of the cards `moves` names went to another item (a split): it keeps the rest. An item that asked
- * the owner NOTHING but those asks does not sit in Needs you with nothing to answer: a ferret's thread goes back to the
- * turn the first of them ended, and any other rests on its ferret.
+ * the owner NOTHING but those asks (`awaitsOwnAnswer`: no question of its own, or one the owner answered) does not sit
+ * in Needs you with nothing to answer: a ferret's thread nobody has written on since goes back to the turn the first of
+ * them ended, and any other rests on its ferret. An item with an outstanding question of its own, or a thread written
+ * on since, stays on the owner's turn.
  */
 export const leaveCardAsks = (
   item: AgendaItem,
@@ -452,9 +540,21 @@ export const leaveCardAsks = (
     at,
   );
   const stillWaiting = openCardAsks(left).some(ask => ask.notYet === undefined);
-  if (stillWaiting || !asksOnlyCardAsks(item) || agendaState(item).state !== 'needs-you') return { left, moved };
+  // An item that asks something of its own (a question a ferret added or reworded beside the ask) stays on the owner's
+  // turn: only their answer to it rests it. Nor is a thread somebody has written on since the ask was attached moved.
+  if (
+    stillWaiting ||
+    agendaState(item).state !== 'needs-you' ||
+    awaitsOwnAnswer(item, item.cardAsks ?? []) ||
+    (!isCardAgenda(item) && !untouched(item))
+  ) {
+    return { left, moved };
+  }
   const turn = moved.find(ask => isOpenCardAsk(ask) && ask.notYet === undefined)?.woke;
-  return { left: turn === undefined || isCardAgenda(item) ? restedOnAnswer(left, at) : backTo(left, turn), moved };
+  return {
+    left: turn === undefined || isCardAgenda(item) ? restedOnAnswer(left, at, item.cardAsks) : backTo(left, turn),
+    moved,
+  };
 };
 
 /**
@@ -479,4 +579,23 @@ export const applyCardAsk = (
   return untouched(item) || begins
     ? { ...outcome, item: sealCardAsks(effects.tidy({ ...outcome.item, cardAsksSeal: PLACEHOLDER_SEAL })) }
     : outcome;
+};
+
+/** Whether a card ask is waiting for the owner now: open, and not set aside with Not yet. */
+export const cardAskWaits = (item: AgendaItem): boolean => openCardAsks(item).some(ask => ask.notYet === undefined);
+
+/**
+ * Whether an owner's reply on this item leaves it the owner's turn: it carries a card ask still waiting for the owner and
+ * asks nothing of its own (`itemAsksOwnQuestion`, the rule `awaitsOwnAnswer` reads). Words typed about such an item — "works
+ * now" under a try-it — are logged and delivered to the ferret, but they are not the card ask's answer, so the item must
+ * not rest: the promised Good stays in Needs you. A thread that asks its own question is answered by the reply and rests.
+ */
+export const replyKeepsCardAskOpen = (item: AgendaItem): boolean => {
+  const open = openCardAsks(item);
+  if (open.length === 0) return false;
+  if (item.ask !== undefined && item.ask.kind !== 'open-question') return false;
+  return !itemAsksOwnQuestion(
+    item,
+    (item.cardAsks ?? []).map(ask => ({ gate: ask.gate, howToTest: ask.howToTest ?? null })),
+  );
 };

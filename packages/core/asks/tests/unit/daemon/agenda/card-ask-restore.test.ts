@@ -34,6 +34,7 @@ const gateFor = (cardId: string) => ({
   laneName: 'Try it',
   entry: 1,
   projectId: 'p1',
+  cardTitle: 'Badge',
   options: [
     { id: 'o0', label: 'Done', outcome: 'close' as const },
     { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' as const },
@@ -60,12 +61,14 @@ const play = (steps: readonly Step[], fill = 0): AgendaItem => {
       request: {
         source: 'agent-raised',
         sourceRef: null,
-        subject: 'Approve?',
+        // A line that only repeats the card ask (docs/agenda.md § One ask): the card asks are all the thread asks.
+        subject: 'Try it: Badge',
         why: 'Because.',
         context: 'ctx',
         premise: 'p',
         howToResolve: 'Approve',
-        ask: { kind: 'permission' },
+        ask: { kind: 'open-question' },
+        kind: 'reply',
       },
     }),
   ).ledger;
@@ -305,9 +308,11 @@ const rows: readonly Row[] = [
     ends: 'needs-you',
   },
   {
-    name: 'the owner replied after the ask woke it: the reply’s rest stays, not the one before the ask',
+    // A reply under a card ask the item asks nothing beside is not its answer, so it leaves the item in Needs you
+    // (`replyKeepsCardAskOpen`, &B165); a thread somebody wrote on since the ask is then left as it is.
+    name: 'the owner replied after the ask woke it: the reply kept it in Needs you, and it stays as it is',
     steps: [['attach', 'F2'], ['owner-replies'], ['withdraw', 'F2']],
-    ends: 'resting/waiting-on-ferret',
+    ends: 'needs-you',
   },
   {
     name: 'the ferret spoke after the ask woke it',
