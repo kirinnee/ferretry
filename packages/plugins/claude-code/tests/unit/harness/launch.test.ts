@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import { homeText, launchCommand, settingsDocument } from '../../../daemon/lib/harness/launch.ts';
+import {
+  API_KEY_SEED_NAME,
+  API_KEY_SEED_SCRIPT,
+  API_KEY_SEED_SHELL,
+} from '../../../daemon/lib/harness/api-key-seed.ts';
 import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harness/transcript.ts';
 import {
   CLAUDE_QUESTION_HOOK_COMMAND,
@@ -208,6 +213,10 @@ describe('launchCommand', () => {
     should(launchCommand(base)).eql([
       'env',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
+      API_KEY_SEED_SHELL,
+      '-c',
+      API_KEY_SEED_SCRIPT,
+      API_KEY_SEED_NAME,
       '/opt/bin/claude',
       '--settings',
       '/state/claude-code/agent-homes/f1/launch-settings.json',
@@ -226,7 +235,7 @@ describe('launchCommand', () => {
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-9' },
     });
-    should(argv.slice(5)).eql([
+    should(argv.slice(9)).eql([
       '--permission-mode',
       'bypassPermissions',
       '--mcp-config',
