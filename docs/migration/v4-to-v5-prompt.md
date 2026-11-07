@@ -23,8 +23,10 @@ steps in order. Stop and tell the owner at any step that fails; never improvise 
   `state/mcp-oauth-secrets.json`, `state/catalogs/link-keys.json`, `state/daemon-identity.json`,
   `state/push-vapid.json`, `state/push.json`, `state/session-message-token.key`, `state/sessions/*/environment.json`,
   `api-token`, `api-warden-token`, anything under `fleet/credentials/`, and any `auth.json`, `.credentials.json` or
-  `.claude.json`. You may only move them (`mv`) or copy them (`cp -p`). The converter moves them the same way and never
-  reads them. Never print a token, key, pairing code or secret, and never paste one into chat.
+  `.claude.json`. You may only move them (`mv`) or copy them (`cp -p`). The converter moves keys and identity files the same way,
+  byte for byte. For a sealed document (`secrets.json` and its siblings) it re-labels only the envelope (`"v": 1`
+  becomes `"format": 1`, as v5's Vault asks) and copies every sealed value unchanged: it never decrypts, prints or
+  logs anything from them. Never print a token, key, pairing code or secret, and never paste one into chat.
 - **Never touch the harness's own sign-in folders** outside the home (`~/.claude*`, `~/.codex*`, the macOS keychain).
 - **Never kill the tmux server** (`tmux … kill-server`, `pkill`, `killall`). Ferrets keep running in their panes the
   whole time; that is how they are kept.
