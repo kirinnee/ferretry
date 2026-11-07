@@ -46,7 +46,7 @@ import {
   useComposerAutocomplete,
 } from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
-import { createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
+import { type ComposerHarness, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { useComposerDockLayout } from './composer-dock-layout.ts';
 import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { useComposerHostWarmup } from './composer-host-warmup.ts';
@@ -207,6 +207,11 @@ export interface ComposerProps {
    * and `$` prefixes, shared with the transcript's reference proof). Absent, the menus read the catalogs themselves.
    */
   readonly referenceCatalogs?: ComposerReferenceCatalogs & { readonly settled: () => Promise<void> | undefined };
+  /**
+   * The ferret's harness, read from the ferret itself: how a picked skill is invoked (`/name` on Claude, `$name` on
+   * Codex) and which built-in commands the `/` menu offers. Absent, a menu offers what every harness accepts.
+   */
+  readonly harness?: ComposerHarness;
   /** The daemon's work search; absent on a machine that cannot search, which keeps both menus local-only. */
   readonly autocompleteWorkSearch?: WorkSearchPort;
   /** Project id to name for the cards that search finds. */
@@ -430,6 +435,7 @@ export function Composer({
   phoneEnterKeyPreference = null,
   readConversation,
   referenceCatalogs,
+  harness,
   autocompleteWorkSearch,
   autocompleteProjectNames,
   suggestions,
@@ -575,6 +581,7 @@ export function Composer({
         scope,
         client,
         suggestions: { mentionSuggestions, ladderSuggestions, directReferenceSuggestions, skillSuggestions },
+        ...(harness === undefined ? {} : { harness }),
         // THE GETTERS READ THE LIVE PROP through a ref rather than closing over one render's value: the first menu
         // of every ferret opens while the page's one read is still in flight, and a getter installed only "once the
         // value arrived" would offer an invented empty list there.
@@ -597,6 +604,7 @@ export function Composer({
       client,
       daemon,
       directReferenceSuggestions,
+      harness,
       hostWarmup,
       hosted,
       ladderSuggestions,

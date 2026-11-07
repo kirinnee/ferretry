@@ -70,7 +70,11 @@
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
     ],
     "conversation": [
-      "conversation app half: C1 landed (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app); the composer, chat and transcript, and the queue, questions, search and links bodies are still the one-line Pending surface until C2-C4 land",
+      "conversation app half: C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app) and C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel) have landed; the chat and transcript screen and the queue, compact-at, questions, search and links bodies are still the one-line Pending surface until C3 and C4 land",
+      "GAP(C3): ConversationOutbox is mounted nowhere yet (C3 mounts it around the chat screen), so a message the device kept unsent is not retried until the chat screen draws it; today's boot drain of every machine's saved messages stays a named GAP unless the shell offers a hook for it",
+      "GAP(C3): the Composer takes the ferret's harness as a prop (a Codex ferret's picked skill inserts $name); the chat screen passes it from the Ferrets read",
+      "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt)",
+      "GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes reference.catalog yet, so every composer menu answers provided:false and is empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
       "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
       "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
@@ -89,7 +93,7 @@
     {
       "plugin": "conversation",
       "path": "packages/plugins/conversation/app",
-      "reason": "surfaces, client context, fy-render and the prose kit have landed; the composer, chat, transcript, queue, questions, search and links bodies are in flight (C2-C4)"
+      "reason": "surfaces, client context, fy-render, the prose kit and the composer (with the attachments and chat-width panels and Conversation Settings) have landed; the chat, transcript, queue, compact-at, questions, search and links bodies are in flight (C3-C4)"
     },
     {
       "plugin": "agenda",

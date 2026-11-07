@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { loadAttachmentBlob } from '../../../../app/composer/attachment-source.ts';
 import { bytesToBase64 } from '../../../../app/composer/attachment-upload.ts';
+import { noteClientDaemon } from '@ferretry/app/testing';
 import { DaemonCallError, daemonConnection, daemonFerretScope } from '../../../../app/composer/seam.ts';
 import { fakeClient, refusal } from './fake-client.ts';
 
@@ -56,6 +57,15 @@ describe('loading an attachment blob', () => {
     await expect(
       loadAttachmentBlob(fakeClient(() => ({ ...download(PNG), base64: '***' })).client, scope, 'a1'),
     ).rejects.toThrow('unreadable bytes');
+  });
+
+  it('refuses a scope belonging to another daemon', async () => {
+    const { client, calls } = fakeClient(() => 'bytes');
+    noteClientDaemon(client, 'other-daemon');
+    await expect(loadAttachmentBlob(client, scope, 'a1')).rejects.toThrow(
+      'attachment scope must belong to the requested daemon',
+    );
+    expect(calls).toEqual([]);
   });
 
   it('passes a shaped daemon refusal on', async () => {
