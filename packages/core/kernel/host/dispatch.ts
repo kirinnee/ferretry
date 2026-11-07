@@ -1,4 +1,5 @@
 import type { Admission, AdmissionDecision, OutputGuard } from '../contract/bound.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type { Actor } from '../contract/act.ts';
 import type {
@@ -69,6 +70,8 @@ export interface DispatchBindings {
   /** Undefined, a throw or a damaged Vault: a `guard: 'secrets'` body is withheld. */
   outputGuard(): OutputGuard | undefined;
   readonly version: string;
+  /** Gzips an opted-in answer (`compress: true`); absent, every answer is plain. */
+  readonly compressor?: ResponseCompressor;
 }
 
 /**
@@ -259,7 +262,11 @@ export class Dispatcher {
         status: response.status,
         response,
       });
-    return response;
+    // Decided once, here, after the handler (and any 304 it chose): only an opted-in route's plain 200 JSON GET.
+    const packed = await compressed(request, response, this.bindings.compressor, found.route.compress === true).catch(
+      (): { readonly response: ApiResponse; readonly gzip?: Uint8Array } => ({ response }),
+    );
+    return packed.gzip === undefined ? packed.response : publishResponse({ ...packed.response, gzip: packed.gzip });
   }
 
   /** Tells Gate about one audited call after its handler settled (`Admission.recorded`); never changes the answer. */

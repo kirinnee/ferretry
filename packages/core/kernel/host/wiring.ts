@@ -6,6 +6,7 @@ import { platformRootPinner } from './adapters/pinned/index.ts';
 import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { scratchPort } from './scratch.ts';
 import { nodeHostFacts } from './adapters/host-facts.ts';
+import { NodeGzip } from './adapters/node-gzip.ts';
 import { updateHostFor } from './adapters/update-host.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
@@ -121,6 +122,7 @@ export function realAdapters(
     pinner: platformRootPinner(),
     scratch: scratchPort(),
     hostFacts: nodeHostFacts(),
+    compressor: new NodeGzip(),
     ...(options.release === undefined
       ? {}
       : { updateHost: updateHostFor({ home, binary: options.binary, release: options.release }) }),

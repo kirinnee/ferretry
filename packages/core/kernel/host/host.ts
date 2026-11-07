@@ -62,6 +62,7 @@ import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
 import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
+import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
@@ -158,6 +159,8 @@ export interface HostAdapters {
   readonly ownerHome?: () => string;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** Gzips an opted-in route's answer. Absent: every answer is plain. */
+  readonly compressor?: ResponseCompressor;
   /** `kernel.updateHost` per plugin. Absent: facts refuse, launches fail. */
   readonly updateHost?: (plugin: string) => UpdateHostPort;
   /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
@@ -760,6 +763,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     admission: () => bound.admission,
     outputGuard: () => bound.outputGuard,
     version: options.version,
+    ...(adapters.compressor === undefined ? {} : { compressor: adapters.compressor }),
   };
   const dispatcher = new Dispatcher(bindings, { routes, sockets, memberRoutes });
 
