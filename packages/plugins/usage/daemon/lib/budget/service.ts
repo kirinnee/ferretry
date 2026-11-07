@@ -21,6 +21,11 @@
  * fleet published in the meantime must not hand a held login back. So the holds last published are kept in
  * the state home too, and a new service starts from them (those whose reset is still ahead).
  *
+ * A TICK THAT COULD NOT MEASURE A LOGIN NEVER LIFTS ITS RESTORED PAUSE. A login whose amount reads PARTIAL (a ferret on it
+ * could not be read, or no reader exists yet) was judged on missing data, which reads as "nothing spent"; a pause the last
+ * daemon published for it stays until a tick has measured that login completely, or its reset passes, or its budget is
+ * removed from the configuration.
+ *
  * DECLARED: a tick can come up to a minute after the request that crossed a limit, and a turn in flight
  * finishes its current request before the interrupt lands — so the hard limit can be overshot by that much.
  */
@@ -113,6 +118,8 @@ const toldKey = (login: string, period: BudgetPeriod, startMs: number): string =
 export class BudgetService {
   #states: ReadonlyMap<string, LoginBudgetState> = new Map();
   #holds: Readonly<Record<string, Pause>> = {};
+  /** The pauses read back at boot that no complete measurement has confirmed or lifted yet. */
+  readonly #restored = new Map<string, Pause>();
   /** The holds last published; `undefined` until the first publish, so a restart publishes once. */
   #publishedKey: string | undefined;
   /**
@@ -132,6 +139,8 @@ export class BudgetService {
     if (this.#publishedKey !== undefined || Object.keys(this.#holds).length > 0) return;
     const now = this.ports.nowMs();
     this.#holds = Object.fromEntries(Object.entries(restored).filter(([, hold]) => hold.resetsAtMs > now));
+    this.#restored.clear();
+    for (const [login, hold] of Object.entries(this.#holds)) this.#restored.set(login, hold);
   }
 
   /** The logins their budget holds now, for a publish. */
@@ -175,9 +184,19 @@ export class BudgetService {
         ),
       ]),
     );
-    const holds = Object.fromEntries(
+    const holds: Record<string, Pause> = Object.fromEntries(
       [...states.values()].flatMap(state => (state.hold === undefined ? [] : [[state.id, state.hold] as const])),
     );
+    for (const [login, pause] of this.#restored) {
+      const state = states.get(login);
+      const unmeasured = Object.values(state?.periods ?? {}).some(period => period.partial);
+      if (state !== undefined && unmeasured && pause.resetsAtMs > now) {
+        holds[login] ??= pause;
+      } else {
+        // Measured completely, reset, or no longer budgeted: the measure (or the configuration) decides from here on.
+        this.#restored.delete(login);
+      }
+    }
     this.#states = states;
     this.#holds = holds;
 

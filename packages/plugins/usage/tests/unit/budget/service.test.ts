@@ -37,6 +37,8 @@ interface World {
   told: string[];
   /** A publish that throws, as the provisioner does when it refuses an unrelated runtime. */
   publishFails?: boolean;
+  /** The ferrets' turns cannot be read (no reader is bound, or every read fails). */
+  unreadable?: boolean;
   /** A told record that can be neither read nor written. */
   toldBroken?: boolean;
   /** Sessions the Warden moves to another login instead of their being stopped. Absent: no mover is wired. */
@@ -52,55 +54,56 @@ function serviceOver(
 ): BudgetService {
   const meter = new SpendMeter({
     ferrets: async () => [{ id: 's1', login: 'liftoff' }],
-    turns: async (_ferret, sinceIso) => ledger.turns.filter(turn => turn.at >= sinceIso),
+    turns: async (_ferret, sinceIso) =>
+      world.unreadable === true ? undefined : ledger.turns.filter(turn => turn.at >= sinceIso),
     pricing: async () => usage => usage.outputTokens ?? 0,
   });
   const service = new BudgetService({
-      config: async () => {
-        if (world.config === undefined) throw new Error('the fleet manifest could not be read');
-        return world.config;
+    config: async () => {
+      if (world.config === undefined) throw new Error('the fleet manifest could not be read');
+      return world.config;
+    },
+    hostTimeZone: () => 'UTC',
+    meter,
+    nowMs: () => world.now,
+    republish: async () => {
+      if (world.publishFails === true) throw new Error('fleet_change_refused: another runtime is broken');
+      world.republished += 1;
+    },
+    liveSessions: async agents => world.live.filter(session => agents.has(session.agent)),
+    recentSession: async () => ({ id: 's0', name: 'old', agent: 'liftoff' }),
+    ...(world.movable === undefined
+      ? {}
+      : {
+          relocate: async (session: BudgetSession) => {
+            if (!world.movable?.has(session.id)) return false;
+            world.relocated?.push(session.id);
+            world.live = world.live.filter(entry => entry.id !== session.id);
+            return true;
+          },
+        }),
+    stop: async session => {
+      if (world.failing.has(session.id)) throw new Error('pane refused to die');
+      world.stopped.push(session.id);
+      world.live = world.live.filter(entry => entry.id !== session.id);
+    },
+    alternative: async () => 'home',
+    notify: async notice => {
+      world.notices.push(notice);
+    },
+    told: {
+      read: async () => {
+        if (world.toldBroken === true) throw new Error('EACCES');
+        return world.told;
       },
-      hostTimeZone: () => 'UTC',
-      meter,
-      nowMs: () => world.now,
-      republish: async () => {
-        if (world.publishFails === true) throw new Error('fleet_change_refused: another runtime is broken');
-        world.republished += 1;
+      write: async keys => {
+        if (world.toldBroken === true) throw new Error('EACCES');
+        world.told = [...keys];
       },
-      liveSessions: async agents => world.live.filter(session => agents.has(session.agent)),
-      recentSession: async () => ({ id: 's0', name: 'old', agent: 'liftoff' }),
-      ...(world.movable === undefined
-        ? {}
-        : {
-            relocate: async (session: BudgetSession) => {
-              if (!world.movable?.has(session.id)) return false;
-              world.relocated?.push(session.id);
-              world.live = world.live.filter(entry => entry.id !== session.id);
-              return true;
-            },
-          }),
-      stop: async session => {
-        if (world.failing.has(session.id)) throw new Error('pane refused to die');
-        world.stopped.push(session.id);
-        world.live = world.live.filter(entry => entry.id !== session.id);
-      },
-      alternative: async () => 'home',
-      notify: async notice => {
-        world.notices.push(notice);
-      },
-      told: {
-        read: async () => {
-          if (world.toldBroken === true) throw new Error('EACCES');
-          return world.told;
-        },
-        write: async keys => {
-          if (world.toldBroken === true) throw new Error('EACCES');
-          world.told = [...keys];
-        },
-      },
-      remember: async holds => {
-        remembered.push(holds);
-      },
+    },
+    remember: async holds => {
+      remembered.push(holds);
+    },
   });
   service.restore(restored);
   return service;
@@ -121,6 +124,70 @@ const freshWorld = (): World => ({
   failing: new Set(),
   notices: [],
   told: [],
+});
+
+const RESTORED: Pause = {
+  period: 'daily',
+  level: 'over_trigger',
+  limitUsd: 40,
+  resetsAtMs: Date.parse('2026-10-31T00:00:00Z'),
+  timeZone: 'UTC',
+};
+
+describe('BudgetService, a tick that could not measure', () => {
+  it('should keep a restored pause and read the amount as partial when the ferrets cannot be read', async () => {
+    const world = { ...freshWorld(), unreadable: true };
+    const remembered: Readonly<Record<string, Pause>>[] = [];
+    const service = serviceOver(world, new Ledger(), { liftoff: RESTORED }, remembered);
+
+    await service.tick();
+    await service.tick();
+
+    should(service.holds()).eql({ liftoff: RESTORED });
+    should(service.view('liftoff')).match({ partial: true, measured: true });
+    should(remembered.at(-1)).eql({ liftoff: RESTORED });
+  });
+
+  it('should lift a restored pause once a tick has measured the login completely and it is under its limits', async () => {
+    const world = { ...freshWorld(), unreadable: true };
+    const service = serviceOver(world, new Ledger(), { liftoff: RESTORED });
+    await service.tick();
+    should(service.holds()).eql({ liftoff: RESTORED });
+
+    world.unreadable = false;
+    await service.tick();
+
+    should(service.holds()).eql({});
+    should(service.view('liftoff')?.partial).equal(undefined);
+    // And a later unreadable tick does not bring the old pause back.
+    world.unreadable = true;
+    await service.tick();
+    should(service.holds()).eql({});
+  });
+
+  it('should not keep a restored pause past its reset, nor for a login whose budget was removed', async () => {
+    const reset = { ...freshWorld(), unreadable: true, now: Date.parse('2026-10-31T00:30:00Z') };
+    const afterReset = serviceOver(reset, new Ledger(), {
+      liftoff: { ...RESTORED, resetsAtMs: Date.parse('2026-10-31T00:00:00Z') },
+    });
+    await afterReset.tick();
+    should(afterReset.holds()).eql({});
+
+    const removed = { ...freshWorld(), unreadable: true };
+    const service = serviceOver(removed, new Ledger(), { liftoff: RESTORED });
+    removed.config = { logins: [] };
+    await service.tick();
+    should(service.holds()).eql({});
+  });
+
+  it('should still raise a new hold on a partial amount that already crosses a limit', async () => {
+    const world = freshWorld();
+    const ledger = new Ledger();
+    ledger.spend('2026-10-30T09:00:00Z', 45);
+    const service = serviceOver(world, ledger, { liftoff: { ...RESTORED, level: 'over_hard', limitUsd: 60 } });
+    await service.tick();
+    should(service.holds().liftoff).match({ level: 'over_trigger', limitUsd: 40 });
+  });
 });
 
 describe('BudgetService', () => {
