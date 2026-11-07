@@ -7,7 +7,12 @@ import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import { isCore } from '../gen/lib/graph.ts';
 import type { ImportEdge } from '../gen/lib/imports.ts';
 
-export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set(['usage→logins', 'packs→runtimes']);
+export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set([
+  'usage→logins',
+  'packs→runtimes',
+  // Lead-approved optional use: Catalogs shares pairing's advertised address and directory facts (P80).
+  'catalogs→connections',
+]);
 
 export function contractEdges(edges: readonly ImportEdge[]): Map<string, Set<string>> {
   const graph = new Map<string, Set<string>>();

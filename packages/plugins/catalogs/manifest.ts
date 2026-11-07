@@ -4,6 +4,7 @@ import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from '@ferretry/plugin-access/contract';
+import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
@@ -38,6 +39,7 @@ export default definePlugin({
   words: CATALOGS_WORDS,
 
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
+  uses: { connections: ConnectionsPort },
   provides: { catalogs: CatalogsPort },
 
   actions: {

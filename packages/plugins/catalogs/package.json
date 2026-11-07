@@ -22,7 +22,8 @@
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
     "@ferretry/core-vault": "workspace:*",
-    "@ferretry/plugin-access": "workspace:*"
+    "@ferretry/plugin-access": "workspace:*",
+    "@ferretry/plugin-connections": "workspace:*"
   },
   "sideEffects": false
 }
