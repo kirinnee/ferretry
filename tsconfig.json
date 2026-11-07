@@ -7,9 +7,6 @@
     "allowJs": true,
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
-    "paths": {
-      "@ferretry/relay/adapters": ["./packages/relay/src/adapters/index.ts"]
-    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -20,16 +17,16 @@
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
     "types": ["bun"]
   },
   "include": [
-    "packages/*/bin",
-    "packages/*/src",
-    "packages/*/tests",
-    "scripts/validate",
-    "scripts/local",
-    "scripts/ci",
-    "scripts/release"
+    "packages/std",
+    "packages/core/*/**/*",
+    "packages/plugins/*/**/*",
+    "packages/cli/bin",
+    "packages/cli/src",
+    "packages/cli/tests"
   ],
-  "exclude": ["packages/pwa"]
+  "exclude": ["packages/app", "**/node_modules"]
 }

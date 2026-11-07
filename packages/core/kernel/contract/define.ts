@@ -1,0 +1,275 @@
+import type { z } from 'zod';
+import type { CoreId } from './ids.ts';
+import type { CapabilityAxis } from './policy.ts';
+
+// ─── Ports ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A port token: a typed interface a subsystem offers, named in its contract (§7.4). A manifest lists tokens in
+ * `needs`, `uses` and `provides`; `build` receives the implementations typed by them.
+ */
+export interface PortToken<Api> {
+  readonly kind: 'port';
+  readonly name: string;
+  /** Kernel-bound ports are provided only by the named core piece and bound by the kernel after build. */
+  readonly boundBy?: CoreId;
+  /** Phantom: carries the API type. Never read at run time. */
+  readonly __api?: (api: Api) => Api;
+}
+
+export type ApiOf<T> = T extends PortToken<infer Api> ? Api : never;
+
+export function definePort<Api>(name: string): PortToken<Api> {
+  return Object.freeze({ kind: 'port', name });
+}
+
+/** A kernel-bound port (§7.4): `Admission` (gate), `InputHolds`, `OutputGuard`, `Redaction` (vault), `WorkFolders` (ferrets). */
+export function defineBoundPort<Api>(name: string, boundBy: CoreId): PortToken<Api> {
+  return Object.freeze({ kind: 'port', name, boundBy });
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A wake-up a subsystem publishes after its write landed (§7.4 rule 3): in-process, at most once, possibly lost in a
+ * crash. No correctness depends on one; the truth is the owner's state, read through its port.
+ */
+export interface EventDef<Name extends string = string, Payload = unknown> {
+  readonly kind: 'event';
+  readonly name: Name;
+  readonly schema: z.ZodType<Payload>;
+}
+
+export type PayloadOf<E> = E extends EventDef<string, infer P> ? P : never;
+
+export function defineEvent<const Name extends string, Payload>(
+  name: Name,
+  schema: z.ZodType<Payload>,
+): EventDef<Name, Payload> {
+  return Object.freeze({ kind: 'event', name, schema });
+}
+
+// ─── Hooks ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The five hook modes (§3.5). */
+export type HookMode = 'observe' | 'decide' | 'transform' | 'provide' | 'contribute';
+
+/** A decide taker's answer. The first `no` wins, with its reason; a throw or timeout is a `no`. */
+export type HookDecision = { readonly allow: true } | { readonly allow: false; readonly reason: string };
+
+export const ALLOW: HookDecision = Object.freeze({ allow: true });
+
+interface HookBase<Name extends string, Mode extends HookMode> {
+  readonly kind: 'hook';
+  readonly name: Name;
+  readonly mode: Mode;
+}
+
+/** Takers hear that something happened, unordered, after the offerer's write. A failing taker is logged. */
+export interface ObserveHook<Name extends string = string, Payload = unknown> extends HookBase<Name, 'observe'> {
+  readonly payload?: z.ZodType<Payload>;
+}
+
+/**
+ * Takers say yes or no to something about to happen; priority high first, then start order, then id. Synchronous or
+ * bounded by `timeoutMs` (default 200). `securityPath`: only core offers or takes it (§3.5).
+ */
+export interface DecideHook<Name extends string = string, Input = unknown> extends HookBase<Name, 'decide'> {
+  readonly input?: z.ZodType<Input>;
+  readonly timeoutMs: number;
+  readonly securityPath: boolean;
+}
+
+/** Takers change a value on its way; each sees the previous output; a failing taker refuses the whole operation. */
+export interface TransformHook<Name extends string = string, Value = unknown> extends HookBase<Name, 'transform'> {
+  readonly value?: z.ZodType<Value>;
+  readonly timeoutMs: number;
+}
+
+/**
+ * One taker per key is THE implementation for it; two takers of one key refuse the build. A security-path provide
+ * hook names its allowed takers (`takers`); the build refuses any other (§3.5).
+ */
+export interface ProvideHook<Name extends string = string, Key extends string = string, Value = unknown>
+  extends HookBase<Name, 'provide'> {
+  readonly key: z.ZodType<Key>;
+  readonly value?: z.ZodType<Value>;
+  readonly takers?: readonly string[];
+}
+
+/** Takers add items to a list, ordered by the item's `order`, then id; duplicate ids refuse the build. */
+export interface ContributeHook<Name extends string = string, Item = unknown> extends HookBase<Name, 'contribute'> {
+  readonly item?: z.ZodType<Item>;
+}
+
+export type HookDef =
+  | ObserveHook<string, any>
+  | DecideHook<string, any>
+  | TransformHook<string, any>
+  | ProvideHook<string, string, any>
+  | ContributeHook<string, any>;
+
+/** A contributed item: an id unique within the hook, and an order. */
+export interface Contribution<Item> {
+  readonly id: string;
+  readonly order?: number;
+  readonly item: Item;
+}
+
+/** What a daemon half supplies for one taken hook, by mode. */
+export type HookHandlerOf<H> =
+  H extends ObserveHook<string, infer P>
+    ? (payload: P) => void | Promise<void>
+    : H extends DecideHook<string, infer I>
+      ? (input: I) => HookDecision | Promise<HookDecision>
+      : H extends TransformHook<string, infer V>
+        ? (value: V) => V | Promise<V>
+        : H extends ProvideHook<string, string, infer V>
+          ? V
+          : H extends ContributeHook<string, infer I>
+            ? () => readonly Contribution<I>[]
+            : never;
+
+/** Uses `z.custom<T>()` for a value with functions (an interface), a real schema for data. */
+export function defineHook<const Name extends string, Payload = unknown>(
+  name: Name,
+  spec: { readonly mode: 'observe'; readonly payload?: z.ZodType<Payload> },
+): ObserveHook<Name, Payload>;
+export function defineHook<const Name extends string, Input = unknown>(
+  name: Name,
+  spec: {
+    readonly mode: 'decide';
+    readonly input?: z.ZodType<Input>;
+    readonly timeoutMs?: number;
+    readonly securityPath?: boolean;
+  },
+): DecideHook<Name, Input>;
+export function defineHook<const Name extends string, Value = unknown>(
+  name: Name,
+  spec: { readonly mode: 'transform'; readonly value?: z.ZodType<Value>; readonly timeoutMs?: number },
+): TransformHook<Name, Value>;
+export function defineHook<const Name extends string, Key extends string, Value = unknown>(
+  name: Name,
+  spec: {
+    readonly mode: 'provide';
+    readonly key: z.ZodType<Key>;
+    readonly value?: z.ZodType<Value>;
+    readonly takers?: readonly string[];
+  },
+): ProvideHook<Name, Key, Value>;
+export function defineHook<const Name extends string, Item = unknown>(
+  name: Name,
+  spec: { readonly mode: 'contribute'; readonly item?: z.ZodType<Item> },
+): ContributeHook<Name, Item>;
+export function defineHook(name: string, spec: { readonly mode: HookMode } & Record<string, unknown>): HookDef {
+  const base = { kind: 'hook' as const, name, ...spec };
+  if (spec.mode === 'decide')
+    return Object.freeze({
+      ...base,
+      timeoutMs: spec.timeoutMs ?? 200,
+      securityPath: spec.securityPath ?? false,
+    }) as HookDef;
+  if (spec.mode === 'transform') return Object.freeze({ ...base, timeoutMs: spec.timeoutMs ?? 200 }) as HookDef;
+  return Object.freeze(base) as HookDef;
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** How a declared file is stored. A `sqlite-cache` is dropped and rebuilt on mismatch (a cache rule). */
+export type StateStore = 'json' | 'jsonl' | 'sqlite' | 'sqlite-cache' | 'secret' | 'opaque';
+
+/**
+ * What a file does when it is damaged (§9.3): the whole subsystem fails closed (`subsystem`), or a narrower, reviewed
+ * reading that still refuses whatever the file grants (`sign-in-rules.json` reads as zero rules).
+ */
+export type DamagedPolicy = 'subsystem' | { readonly narrower: string };
+
+/**
+ * One declared file under `state/<id>/` (§9.2, §9.3). Every JSON document has `"format": <n>` first, starting at 1;
+ * a reader accepts exactly one format (the `one-format` check). `path` may hold one `*` segment for a collection
+ * (`cards/*.json`).
+ */
+export interface StateFileDef<Name extends string = string, Shape = unknown> {
+  readonly kind: 'state';
+  readonly name: Name;
+  readonly path: string;
+  readonly store: StateStore;
+  readonly format: number;
+  readonly schema?: z.ZodType<Shape>;
+  readonly onDamaged: DamagedPolicy;
+  /** Missing is damaged rather than empty. */
+  readonly required?: true;
+  /** File mode; secrets are `0o600`. */
+  readonly mode?: number;
+}
+
+export function defineState<const Name extends string, Shape = unknown>(spec: {
+  readonly name: Name;
+  readonly path: string;
+  readonly store: StateStore;
+  readonly format: number;
+  readonly schema?: z.ZodType<Shape>;
+  readonly onDamaged?: DamagedPolicy;
+  readonly required?: true;
+  readonly mode?: number;
+}): StateFileDef<Name, Shape> {
+  if (!Number.isInteger(spec.format) || spec.format < 1) throw new TypeError(`state ${spec.name}: format starts at 1`);
+  return Object.freeze({ kind: 'state', ...spec, onDamaged: spec.onDamaged ?? 'subsystem' });
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Which edits loosen spend or authority (§7.2). An empty list = not loosening; a loosening edit is held for the owner.
+ * Each entry is a plain sentence naming what widened.
+ */
+export type Loosens<Shape> = (before: Shape | undefined, after: Shape) => readonly string[];
+
+interface ConfigBase<Shape> {
+  readonly kind: 'config';
+  readonly schema: z.ZodType<Shape>;
+  /** The grant axis a remote editor needs; Gate applies it to `fy config write` and the app's editor. */
+  readonly axis: CapabilityAxis;
+  readonly loosens: Loosens<Shape>;
+  /** Person-only and passkey-checked (`plugins.yaml`, `gate.yaml`). */
+  readonly personOnly?: true;
+}
+
+/** One path under `config/` (YAML). */
+export interface ConfigFileDef<Shape = unknown> extends ConfigBase<Shape> {
+  readonly shape: 'file';
+  readonly file: string;
+}
+
+/** A folder of `<name>.yaml` files with one schema. */
+export interface ConfigCollectionDef<Shape = unknown> extends ConfigBase<Shape> {
+  readonly shape: 'collection';
+  readonly collection: string;
+  readonly name: RegExp;
+}
+
+export type ConfigDef<Shape = unknown> = ConfigFileDef<Shape> | ConfigCollectionDef<Shape>;
+
+export function defineConfig<Shape>(spec: {
+  readonly file: string;
+  readonly schema: z.ZodType<Shape>;
+  readonly axis: CapabilityAxis;
+  readonly loosens: Loosens<Shape>;
+  readonly personOnly?: true;
+}): ConfigFileDef<Shape>;
+export function defineConfig<Shape>(spec: {
+  readonly collection: string;
+  readonly name: RegExp;
+  readonly schema: z.ZodType<Shape>;
+  readonly axis: CapabilityAxis;
+  readonly loosens: Loosens<Shape>;
+  readonly personOnly?: true;
+}): ConfigCollectionDef<Shape>;
+export function defineConfig(spec: Record<string, unknown>): ConfigDef {
+  return Object.freeze(
+    'file' in spec ? { kind: 'config', shape: 'file', ...spec } : { kind: 'config', shape: 'collection', ...spec },
+  ) as ConfigDef;
+}
+
+/** A `loosens` for a file nothing in which can widen authority or spend. */
+export const neverLoosens = (): readonly string[] => [];
