@@ -58,6 +58,8 @@ export class DaemonCallError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** The refusal's JSON body, when the daemon sent one: where it attaches data to a refusal (an in-flight inventory, a size). */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'DaemonCallError';

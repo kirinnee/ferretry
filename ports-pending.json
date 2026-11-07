@@ -29,11 +29,7 @@
   "pendingReasons": {
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
-      "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
-    ],
-    "ferrets": [
-      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
     ],
     "warden": [
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
@@ -70,11 +66,21 @@
     ]
   },
   "pendingHalves": {
-    "agenda": ["app"],
-    "browsers": ["app"],
-    "conversation": ["app"],
-    "terminals": ["app"],
-    "warden": ["app"]
+    "agenda": [
+      "app"
+    ],
+    "browsers": [
+      "app"
+    ],
+    "conversation": [
+      "app"
+    ],
+    "terminals": [
+      "app"
+    ],
+    "warden": [
+      "app"
+    ]
   },
   "pendingAppPorts": [
     {

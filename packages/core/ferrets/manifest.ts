@@ -427,7 +427,7 @@ export default definePlugin({
   // contributes its runtime picker to; neither half imports the other. The header is panels on `ferret.toolbar`, the
   // file browser a panel on `ferret.side`; the screen that hosts them (Conversation's chat) mounts the slots.
   ui: {
-    screens: [screen('new-ferret', { path: '/new' }), screen('move', { path: '/ferrets/:ferret/move' })],
+    screens: [screen('new-ferret', { path: 'new' }), screen('move', { path: 'ferrets/:ferret/move' })],
     panels: [
       panel('ferret.toolbar', { id: 'name', order: 10 }),
       panel('ferret.toolbar', { id: 'status', order: 20 }),
@@ -465,6 +465,7 @@ export default definePlugin({
       FerretWaitFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
+    // biome-ignore lint/suspicious/noExplicitAny: the leaf cast named above
     config: [LimitsConfigFile as ConfigDef<any>],
     publishes: [FerretsChanged],
   },

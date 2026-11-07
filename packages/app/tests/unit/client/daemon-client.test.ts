@@ -97,6 +97,7 @@ describe('the guard', () => {
       .call('GET /v1/agenda')
       .catch(e => e)) as DaemonCallError;
     expect([failure.status, failure.code, failure.message]).toEqual([404, 'not_found', 'No such thing.']);
+    expect(failure.body).toEqual({ error: 'No such thing.', code: 'not_found' });
   });
 
   test('a socket of a blocked package is refused, and an open one closes when it becomes blocked', async () => {
