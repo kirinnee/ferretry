@@ -9,7 +9,11 @@ test('through the port, a live ferret keeps its pane and runtime even when a plu
   const port = ferretsPort(f.service);
   // A plugin that builds or spreads the options at runtime gets past the types; the port drops what is not its own.
   const sneaky = { replaceLiveTerminal: true, target: { runtime: 'codex-two', harness: 'codex' } };
-  const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean }>)(f.id, undefined, sneaky);
+  const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean }>)(
+    f.id,
+    undefined,
+    sneaky,
+  );
   expect(answer.ok).toBe(true);
   expect(await f.service.handle(f.id)).toBe(before);
   expect(await f.runner.alive(before)).toBe(true);
@@ -43,8 +47,23 @@ test('through the port, the service’s own members are not there: revokeToken, 
   // Exactly the FerretsApi members the service implements are there.
   expect(Object.keys(port).sort()).toEqual(
     [
-      'agentControl', 'attach', 'children', 'get', 'handle', 'harness', 'harnesses', 'list', 'managedWorktrees', 'mayTouch',
-      'move', 'resume', 'sitrep', 'start', 'stop', 'summary', 'workFolder',
+      'agentControl',
+      'attach',
+      'children',
+      'get',
+      'handle',
+      'harness',
+      'harnesses',
+      'list',
+      'managedWorktrees',
+      'mayTouch',
+      'move',
+      'resume',
+      'sitrep',
+      'start',
+      'stop',
+      'summary',
+      'workFolder',
     ].sort(),
   );
 });

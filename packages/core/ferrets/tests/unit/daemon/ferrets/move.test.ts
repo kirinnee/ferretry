@@ -136,10 +136,14 @@ test('a move asks the start gate about the TARGET, not the old runtime', async (
 test('a move never carries the previous login: the moves module records none, so the target has none', async () => {
   const f = onOldRuntime();
   await f.service.resume(f.id);
-  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
-    runtime: 'codex-two',
-    harness: 'codex' as const,
-  }));
+  const resume = ferretsMoveResume(
+    f.service,
+    ferret => f.registry.get(ferret),
+    async () => ({
+      runtime: 'codex-two',
+      harness: 'codex' as const,
+    }),
+  );
   await resume.resume({ id: f.id as never, policy });
   expect(f.registry.get(f.id)?.login).toBeUndefined();
   expect(f.codex.launched[0]?.login).toBeUndefined();
@@ -204,10 +208,14 @@ test('a fresh move starts the target with no conversation and drops the old one 
     resumed.push(conversation);
     return await original(spec, runner, env, conversation);
   };
-  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
-    runtime: 'codex-two',
-    harness: 'codex' as const,
-  }));
+  const resume = ferretsMoveResume(
+    f.service,
+    ferret => f.registry.get(ferret),
+    async () => ({
+      runtime: 'codex-two',
+      harness: 'codex' as const,
+    }),
+  );
   await resume.resume({ id: f.id as never, policy });
   expect(resumed).toEqual([]);
   expect(f.codex.launched).toHaveLength(1);
@@ -221,12 +229,16 @@ test('the move’s model is the launch spec’s model; a same-harness move keeps
   f.registry.putDetails(f.id, { options: { model: 'old-model', effort: 'high' } });
   await f.service.resume(f.id);
   expect(f.harness.launched.at(-1)).toMatchObject({ model: 'old-model', effort: 'high' });
-  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
-    runtime: 'claude-two',
-    harness: 'claude-code' as const,
-    model: 'new-model',
-    effort: 'high',
-  }));
+  const resume = ferretsMoveResume(
+    f.service,
+    ferret => f.registry.get(ferret),
+    async () => ({
+      runtime: 'claude-two',
+      harness: 'claude-code' as const,
+      model: 'new-model',
+      effort: 'high',
+    }),
+  );
   await resume.resume({ id: f.id as never, policy });
   expect(f.harness.launched.at(-1)).toMatchObject({ model: 'new-model', effort: 'high' });
   expect(f.registry.detailsOf(f.id)?.options).toEqual({ model: 'new-model', effort: 'high' });
@@ -247,10 +259,14 @@ test('a cross-harness move that recorded an effort of its own launches with that
   const f = onOldRuntime();
   f.registry.putDetails(f.id, { options: { model: 'opus', effort: 'max' } });
   await f.service.resume(f.id);
-  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
-    ...(await codexTarget()),
-    effort: 'medium',
-  }));
+  const resume = ferretsMoveResume(
+    f.service,
+    ferret => f.registry.get(ferret),
+    async () => ({
+      ...(await codexTarget()),
+      effort: 'medium',
+    }),
+  );
   await resume.resume({ id: f.id as never, policy });
   expect(f.codex.launched[0]).toMatchObject({ model: 'gpt-9', effort: 'medium' });
   expect(f.registry.detailsOf(f.id)?.options).toEqual({ model: 'gpt-9', effort: 'medium' });
@@ -321,10 +337,14 @@ test('a failed move launch whose new process could not be stopped keeps the TARG
     if (handle !== oldPane) throw new Error('cannot stop');
     return await stop(handle);
   };
-  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => ({
-    runtime: 'codex-two',
-    harness: 'codex' as const,
-  }));
+  const resume = ferretsMoveResume(
+    f.service,
+    ferret => f.registry.get(ferret),
+    async () => ({
+      runtime: 'codex-two',
+      harness: 'codex' as const,
+    }),
+  );
   await expect(resume.resume({ id: f.id as never, policy })).rejects.toThrow();
   const after = f.registry.get(f.id)!;
   expect(f.codex.launched).toHaveLength(1);
@@ -340,9 +360,13 @@ test('a move whose recorded target cannot be read back refuses before anything i
   const f = onOldRuntime();
   await f.service.resume(f.id);
   const before = (await f.service.handle(f.id))!;
-  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), async () => {
-    throw new Error('unreadable');
-  });
+  const resume = ferretsMoveResume(
+    f.service,
+    ferret => f.registry.get(ferret),
+    async () => {
+      throw new Error('unreadable');
+    },
+  );
   await expect(resume.resume({ id: f.id as never, policy })).rejects.toThrow();
   expect(await f.service.handle(f.id)).toBe(before);
   expect(f.registry.get(f.id)).toMatchObject({ state: 'working', runtime: 'claude-one' });
