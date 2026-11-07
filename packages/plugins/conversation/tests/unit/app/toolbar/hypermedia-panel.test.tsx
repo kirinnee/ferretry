@@ -38,6 +38,13 @@ const settle = (ready: () => boolean, what: string) => settleUntil(ready, what, 
 const switchOf = (root: HTMLElement) => root.querySelector<HTMLButtonElement>('[data-hypermedia-switch]');
 
 describe('Hypermedia in the ferret toolbar', () => {
+  it('offers nothing to a reader who cannot control this ferret, and asks the daemon nothing', async () => {
+    const client = fakeClient({ [READ_ROUTE]: () => SUMMARY, [PATCH_ROUTE]: answering });
+    mounted = await mount(withClient(client, <HypermediaPanel subject="ferret-hadi" canControl={false} />));
+    expect(switchOf(mounted.container)).toBeNull();
+    expect(client.calls).toEqual([]);
+  });
+
   it('reads an untouched interactive ferret as on, switches it off for the next launch, and says so', async () => {
     const client = fakeClient({ [READ_ROUTE]: () => SUMMARY, [PATCH_ROUTE]: answering });
     mounted = await mount(withClient(client, <HypermediaPanel subject="ferret-hadi" />));

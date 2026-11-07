@@ -70,8 +70,8 @@ import {
   REINSERT_TRANSCRIPTION_EVENT,
   referencesOf,
   reinsertTranscriptionText,
-  type WorkSearchPort,
 } from './seam.ts';
+import type { WorkSearchPort } from '../search/work-search.ts';
 import { useSendOutbox } from './send-outbox-wiring.ts';
 import { STILL_UNCONFIRMED_LINE, type UnconfirmedAction, unconfirmedSendOf } from './unconfirmed-send.ts';
 import { UnconfirmedSendNotice } from './unconfirmed-send-notice.tsx';

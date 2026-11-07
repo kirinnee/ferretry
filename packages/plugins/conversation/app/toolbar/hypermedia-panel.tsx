@@ -18,10 +18,20 @@ import { useConversationClient } from '../client.ts';
 import '../compact-at/compact-at.css';
 import { hypermediaOn, patchFerretHypermedia, readFerretHypermedia } from './hypermedia-api.ts';
 
-/** The panel for one ferret; nothing without one. */
-export function HypermediaPanel({ subject }: { readonly subject?: string }) {
+/**
+ * The panel for one ferret; nothing without one, and nothing for a connection that cannot control it (today's
+ * `if (!context.canControl) return null`). GAP(app-shell): the kernel's `PanelProps` carries only `subject`, so the shell
+ * passes no `canControl` and it stays true; the daemon still refuses at `operator`.
+ */
+export function HypermediaPanel({
+  subject,
+  canControl = true,
+}: {
+  readonly subject?: string;
+  readonly canControl?: boolean;
+}) {
   const client = useConversationClient();
-  return subject === undefined ? null : <HypermediaSwitch client={client} ferretId={subject} />;
+  return subject === undefined || !canControl ? null : <HypermediaSwitch client={client} ferretId={subject} />;
 }
 
 export function HypermediaSwitch({

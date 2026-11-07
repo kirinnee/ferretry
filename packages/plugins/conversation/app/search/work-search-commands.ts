@@ -18,11 +18,15 @@ import {
   type WorkSearchPort,
   workHitDescription,
   workHitKey,
+  workProjectLabel,
   workSearchPort,
 } from './work-search.ts';
 
 /** How many hits one search asks for (today's palette asked the same). */
 export const WORK_SEARCH_LIMIT = 20;
+
+/** The most rows of each kind the bar lists (today's palette showed six of each while both kinds were listed). */
+export const MAX_WORK_ROWS_PER_KIND = 6;
 
 /** The heading each kind is listed under. */
 export const WORK_GROUPS = { card: 'Cards', ask: 'Asks' } as const;
@@ -47,12 +51,17 @@ export const workHitEntry = (
   const reference = formatReference(
     hit.kind === 'card' ? { kind: 'task', id: hit.id } : { kind: 'attention', id: hit.id },
   );
-  const description = workHitDescription(hit);
+  const matched = workHitDescription(hit);
+  // The project a card is filed under, as today's palette named it under the row ('Unfiled', or nothing for a project
+  // whose name this source does not have). GAP: the project names and an ask's owner need the Board's and Ferrets'
+  // lists, which no contract hands this source yet (app/NEEDS-APP-SHELL.txt).
+  const project = hit.kind === 'card' ? workProjectLabel(hit.project, undefined) : '';
+  const description = [hit.standing, matched, project].filter(part => part !== '').join(' · ');
   return {
     id: `work-${workHitKey(hit)}`,
     group: WORK_GROUPS[hit.kind],
     label: `${reference} ${hit.title}`,
-    description: description === '' ? hit.standing : `${hit.standing} · ${description}`,
+    description,
     keywords: [query.trim(), hit.id],
     run: () => context.navigate(href),
   };
@@ -87,7 +96,8 @@ export function workSearchCommandSource(
     cancel?.();
     const controller = new AbortController();
     const unschedule = schedule(() => {
-      port.search({ q: query, limit: WORK_SEARCH_LIMIT }, controller.signal).then(
+      // "Everything": also closed work older than the daemon's 30-day window, as today's palette asked by default.
+      port.search({ q: query, all: true, limit: WORK_SEARCH_LIMIT }, controller.signal).then(
         response => {
           if (controller.signal.aborted) return;
           answer = { query, response };
@@ -118,9 +128,13 @@ export function workSearchCommandSource(
     }
     if (answer === null) return [];
     const shown = answer;
+    const listed = { card: 0, ask: 0 };
     return shown.response.hits.flatMap(hit => {
+      if (listed[hit.kind] >= MAX_WORK_ROWS_PER_KIND) return [];
       const entry = workHitEntry(hit, shown.query, context);
-      return entry === undefined ? [] : [entry];
+      if (entry === undefined) return [];
+      listed[hit.kind] += 1;
+      return [entry];
     });
   };
 }

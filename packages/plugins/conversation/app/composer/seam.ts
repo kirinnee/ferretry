@@ -17,8 +17,6 @@
  *     `agenda-reply.ts`, `answer-chip.ts`): the composer stores the chips beside an unsent message.
  *   - FerretContext ......................................... GAP(C3, Q0): today's `SessionContext`, until the Ferrets
  *     contract exports the ferret view schemas.
- *   - WorkSearchPort ........................................ GAP(C4): the work-search port's shape, until C4's
- *     `app/search/work-search.ts` lands; the composer's pickers read it.
  *   - canSubmitComposer ..................................... copy of today's `session-screens.ts` one-liner (C3's split).
  */
 
@@ -35,7 +33,6 @@ export {
   setForegroundPinScope,
 } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type { WorkSearchQuery, WorkSearchResponse } from '../../contract/index.ts';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 
@@ -146,11 +143,6 @@ export const withReferencePrefix = <T extends { readonly send: (...args: never[]
 
 /** GAP(ferrets, Q0): today's `SessionContext` — `@ferretry/app`'s `ContextUsage` until the Ferrets contract exports it. */
 export type { ContextUsage as FerretContext } from '@ferretry/app';
-
-/** GAP(C4): the work search port, until `app/search/work-search.ts` lands. */
-export interface WorkSearchPort {
-  search(request: WorkSearchQuery, signal?: AbortSignal): Promise<WorkSearchResponse>;
-}
 
 /** Copy of today's `session-screens.ts` `canSubmitComposer` (C3 ports the rest of that file). */
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
