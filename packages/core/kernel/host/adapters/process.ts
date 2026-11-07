@@ -190,7 +190,12 @@ export function globalFetch(): FetchPort {
 export function bunWorkers(): WorkersPort {
   return {
     start: (moduleUrl, options): WorkerHandle => {
-      const worker = new Worker(moduleUrl, options?.name === undefined ? {} : { name: options.name });
+      // `workerData` carries only what the host put there (the resolved sqlite grants); `state` itself is the host's.
+      const data = (options as { readonly workerData?: unknown } | undefined)?.workerData;
+      const worker = new Worker(moduleUrl, {
+        ...(options?.name === undefined ? {} : { name: options.name }),
+        ...(data === undefined ? {} : { workerData: data }),
+      } as WorkerOptions);
       return {
         post: (message, transfer) => worker.postMessage(message, [...(transfer ?? [])]),
         onMessage: listener => {

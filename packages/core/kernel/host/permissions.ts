@@ -1,5 +1,7 @@
 import type { ChildEnvironmentOpener, FencedPath } from '../contract/bound.ts';
-import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort } from '../contract/ports.ts';
+import type { StateFileDef } from '../contract/define.ts';
+import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort, WorkersPort } from '../contract/ports.ts';
+import { WORKER_STATE_KEY } from '../worker.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
 import type { PinRegistry } from './pins.ts';
 
@@ -119,6 +121,39 @@ export function openChildEnvironments(base: SpawnPort, opener: () => ChildEnviro
     run: async (program, args, options) => await base.run(program, args, resolved(options)),
     runBytes: async (program, args, options) => await base.runBytes(program, args, resolved(options)),
     start: (program, args, options) => base.start(program, args, resolved(options)),
+  };
+}
+
+/**
+ * Workers for one plugin: each `state` grant is resolved by that plugin's own state port (declared, sqlite only, in
+ * its folder) and handed to the worker as `workerData`; an ungrantable one refuses the start before a thread exists.
+ */
+export function workersFor(
+  base: WorkersPort,
+  grant: () => ((def: StateFileDef, name?: string) => { readonly path: string; readonly label: string }) | undefined,
+): WorkersPort {
+  return {
+    start: (moduleUrl, options) => {
+      const wanted = options?.state ?? [];
+      const resolve = grant();
+      if (wanted.length > 0 && resolve === undefined) throw new TypeError('this plugin has no state to grant a worker');
+      const grants = wanted.map(entry => {
+        const def = 'def' in entry ? entry.def : entry;
+        const name = 'def' in entry ? entry.name : undefined;
+        const at = (resolve as NonNullable<typeof resolve>)(def, name);
+        return {
+          file: { name: def.name, path: def.path, store: def.store, format: def.format },
+          ...(name === undefined ? {} : { name }),
+          path: at.path,
+          label: at.label,
+        };
+      });
+      const forward = {
+        ...(options?.name === undefined ? {} : { name: options.name }),
+        ...(grants.length === 0 ? {} : { workerData: { [WORKER_STATE_KEY]: grants } }),
+      };
+      return base.start(moduleUrl, forward);
+    },
   };
 }
 

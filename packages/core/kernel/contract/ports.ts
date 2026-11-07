@@ -356,9 +356,22 @@ export interface WorkerHandle {
   terminate(): Promise<void>;
 }
 
+/** A declared `sqlite` / `sqlite-cache` state file a worker may open (a collection member names its `name`). */
+export type WorkerStateGrant = StateFileDef | { readonly def: StateFileDef; readonly name: string };
+
+export interface WorkerStartOptions {
+  readonly name?: string;
+  /**
+   * Declared sqlite state files the worker opens itself with `workerState().sqlite(def, name?)` from
+   * `@ferretry/kernel/worker` (today's version archive runs bun:sqlite on a worker thread). The kernel resolves each
+   * inside this plugin's state folder; an undeclared or non-sqlite file refuses the start. No path is passed in.
+   */
+  readonly state?: readonly WorkerStateGrant[];
+}
+
 export interface WorkersPort {
   /** A Bun worker thread from the subsystem's own package (a module URL resolved from the half). */
-  start(moduleUrl: URL, options?: { readonly name?: string }): WorkerHandle;
+  start(moduleUrl: URL, options?: WorkerStartOptions): WorkerHandle;
 }
 
 // spawn ────────────────────────────────────────────────────────────────────────────────────────────────────────────

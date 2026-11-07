@@ -63,7 +63,8 @@ import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
-import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
+import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket, workersFor } from './permissions.ts';
+import type { HostStatePort } from './state/state-port.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { PinRegistry } from './pins.ts';
@@ -398,7 +399,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     ),
     events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
     jobs: jobs.portFor(manifest.id),
-    workers: adapters.workers,
+    workers: workersFor(adapters.workers, () => {
+      const port = records.get(manifest.id)?.state?.port as HostStatePort | undefined;
+      return port === undefined ? undefined : (def, name) => port.sqliteGrant(def, name);
+    }),
     spawn: restrictSpawn(
       manifest.id,
       manifest.permissions?.spawn ?? [],

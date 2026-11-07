@@ -49,6 +49,8 @@ export interface StatePortOptions {
 export interface HostStatePort extends StatePort {
   /** Files that are damaged but read as their narrower value (`onDamaged: { narrower }`): never the subsystem. */
   narrowed(): readonly StateDamage[];
+  /** Where a DECLARED sqlite file lives, for a worker to open itself; anything else throws. */
+  sqliteGrant(def: StateFileDef, name?: string): { readonly path: string; readonly label: string };
 }
 
 interface Located {
@@ -160,6 +162,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
   };
 
   const port: HostStatePort = {
+    sqliteGrant(def: StateFileDef, name?: string) {
+      const at = locate(def, name);
+      if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')
+        throw new TypeError(`state ${def.name}: only a sqlite file is opened on a worker`);
+      return { path: at.path, label: at.label };
+    },
     async read<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> {
       const at = locate(def, name);
       const result = await readRaw(def, at);
