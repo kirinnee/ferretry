@@ -43,7 +43,8 @@ import {
   CardActorViaSchema,
   FerretRefSchema,
 } from './refs.ts';
-import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
+import { NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
+import { BoardInstantSchema as InstantSchema } from './refs.ts';
 import {
   CARD_KIND_PREFIX,
   type CardKind,

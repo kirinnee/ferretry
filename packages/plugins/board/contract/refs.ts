@@ -113,3 +113,6 @@ export const BoardReopenAttachmentsSchema = z.strictObject({
     .refine(ids => new Set(ids).size === ids.length, 'an attachment is named once'),
 });
 export type BoardReopenAttachments = z.infer<typeof BoardReopenAttachmentsSchema>;
+
+/** An instant as the board stores it: an ISO-8601 datetime with an offset, plain text (today's `InstantSchema`). */
+export const BoardInstantSchema = z.iso.datetime({ offset: true });

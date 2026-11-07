@@ -38,7 +38,7 @@ export const boardEventActor = (
     : { actor: event.reportedBy, via: event.reportedVia };
 
 /** One history event's wording; the closed union means every event this build can read is spelled here. */
-export function describeBoardEvent(event: CardEvent, lane: BoardNamer, names: BoardNamer): string {
+export function describeCardEvent(event: CardEvent, lane: BoardNamer, names: BoardNamer): string {
   switch (event.type) {
     case 'created':
       return `created in ${lane(event.laneId)}`;
