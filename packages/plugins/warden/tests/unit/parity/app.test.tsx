@@ -227,6 +227,36 @@ describe('app half: the screen and the Settings tab', () => {
     expect(Object.keys(half.settings)).toEqual(manifest.ui.settings.map(tab => tab.id));
   });
 
+  test('the dashboard strip and verdicts are declared in today’s place (daemon.status) and implemented as lazy panels', async () => {
+    expect(manifest.ui.panels).toEqual([
+      { slot: 'daemon.status', id: 'warden-strip', order: 60 },
+      { slot: 'daemon.status', id: 'warden-verdicts', order: 61 },
+    ]);
+    expect(Object.keys(half.panels)).toEqual(manifest.ui.panels.map(panel => panel.id));
+    for (const panel of [half.panels['warden-strip'], half.panels['warden-verdicts']]) {
+      let thrown: unknown;
+      try {
+        panel({});
+      } catch (reason) {
+        thrown = reason;
+      }
+      expect(typeof (thrown as PromiseLike<unknown>).then).toBe('function');
+      await (thrown as Promise<unknown>);
+    }
+  });
+
+  test('Ask the Warden is declared as today’s ferret action, calling the investigate route', () => {
+    expect(manifest.actions.app).toEqual([
+      {
+        id: 'ask-warden',
+        on: 'ferret',
+        label: 'Ask the Warden to investigate now…',
+        calls: 'POST /v1/warden/investigate',
+      },
+    ]);
+    expect(manifest.actions.routes.some(route => route.key === 'POST /v1/warden/investigate')).toBe(true);
+  });
+
   test('S-0359 PAGE_SLOTS Warden is the shell page-slot map; the plugin gives it the warden screen and its nav entry', () => {
     expect(screenDecl?.nav).toMatchObject({ label: 'Warden', icon: 'shield' });
     expect(typeof half.screens.warden).toBe('function');

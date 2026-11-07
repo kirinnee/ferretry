@@ -1,5 +1,5 @@
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
-import { definePlugin, route, screen, settingsTab } from '@ferretry/kernel/manifest';
+import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { UsagePort } from './contract/others.ts';
@@ -127,10 +127,24 @@ export default definePlugin({
         guard: { none: 'settings only' },
       }),
     ],
+    // Today's ferret Actions menu row ("Ask the Warden to investigate now…"), contributed rather than written in.
+    app: [
+      appAction('ask-warden', {
+        on: 'ferret',
+        label: 'Ask the Warden to investigate now…',
+        calls: 'POST /v1/warden/investigate',
+      }),
+    ],
   },
 
+  // Today's PWA drew the pack-health strip and the recent verdicts on the ferrets dashboard (`session-dashboard.tsx`):
+  // here they are the dashboard's `daemon.status` panels.
   ui: {
     screens: [screen('warden', { path: '/warden', nav: { label: 'Warden', icon: 'shield', order: 60 } })],
+    panels: [
+      panel('daemon.status', { id: 'warden-strip', order: 60 }),
+      panel('daemon.status', { id: 'warden-verdicts', order: 61 }),
+    ],
     settings: [settingsTab('warden', { label: 'Warden', order: 60 })],
   },
 
