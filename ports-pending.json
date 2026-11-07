@@ -83,10 +83,17 @@
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
       "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
       "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
+    ],
+    "browsers": [
+      "GAP(kernel): Settings › Browser reads and writes browsers.yaml through the kernel's /v1/config/file, which no manifest declares yet (D2 #3); until it is declared the tab says the settings did not load and still shows the status, the user agent and Test proxy",
+      "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
+      "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
+      "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
+      "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ]
   },
   "pendingHalves": {
-    "browsers": ["app"],
     "conversation": ["app"],
     "terminals": ["app"],
     "warden": ["app"]
@@ -96,11 +103,6 @@
       "plugin": "conversation",
       "path": "packages/plugins/conversation/app",
       "reason": "surfaces, client context, fy-render and the prose kit have landed; the composer, chat, transcript, queue, questions, search and links bodies are in flight (C2-C4)"
-    },
-    {
-      "plugin": "browsers",
-      "path": "packages/plugins/browsers/app",
-      "reason": "separate app port in flight"
     },
     {
       "plugin": "terminals",

@@ -32,12 +32,15 @@ import { workerCommand } from './worker/program.ts';
 const BROWSER_IDLE_TIMEOUT_MS = 15 * 60_000;
 
 /** `surface.*` event types mapped onto the published `PageChanged` change (a wake-up; the port is the truth). */
-const PAGE_CHANGES: Readonly<Record<string, 'opened' | 'taken-over' | 'handed-back' | 'handed-over' | 'asked'>> = {
+const PAGE_CHANGES: Readonly<
+  Record<string, 'opened' | 'taken-over' | 'handed-back' | 'handed-over' | 'asked' | 'driving'>
+> = {
   'surface.opened': 'opened',
   'surface.takeover': 'taken-over',
   'surface.handback': 'handed-back',
   'surface.handed': 'handed-over',
   'surface.asked': 'asked',
+  'surface.driving': 'driving',
 };
 
 /**

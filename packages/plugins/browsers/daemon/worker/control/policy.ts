@@ -1,4 +1,4 @@
-import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../pages/wire/browser.ts';
+import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../contract/wire/browser.ts';
 import { type BrowserMode } from '../../../contract/index.ts';
 
 export const browserLoginDefaultMinutes = 15;

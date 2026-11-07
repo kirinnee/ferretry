@@ -11,7 +11,7 @@ import {
   pendingDialogOf,
 } from '../pages/service.ts';
 import { NON_TYPING_KEYS } from '../target/sign-in/watch.ts';
-import type { BrowserActionResult, BrowserDownloadNotice, BrowserStatus } from '../pages/wire/browser.ts';
+import type { BrowserActionResult, BrowserDownloadNotice, BrowserStatus } from '../../contract/wire/browser.ts';
 import {
   BROWSER_WAIT_DEFAULT_MS,
   BROWSER_WAIT_SLICE_MS,
@@ -19,18 +19,18 @@ import {
   type BrowserEmulation,
   type BrowserPageLifecycleRequest,
   type BrowserWaitCondition,
-} from '../pages/wire/page-lifecycle.ts';
-import type { SurfaceOpener } from '../pages/wire/surface.ts';
+} from '../../contract/wire/page-lifecycle.ts';
+import type { SurfaceOpener } from '../../contract/wire/surface.ts';
 import {
   type BrowserElementTarget,
   type BrowserTargetFields,
   browserReadModeOf,
   browserTargetOf,
-} from '../pages/wire/target.ts';
+} from '../../contract/wire/target.ts';
 import { BrowserTransportError } from '../worker/protocol.ts';
 import type { SurfaceControl } from './control.ts';
 import type { SurfaceControlRequest } from '../../contract/index.ts';
-import type { AgentSurface, SurfaceControlView, SurfaceController } from './control-wire.ts';
+import type { AgentSurface, SurfaceControlView, SurfaceController } from '../../contract/wire/control.ts';
 import type { BrowserFiles } from './files.ts';
 import { sizeWords } from './files-policy.ts';
 import { AGENT_TOOL_MAX_OUTPUT_CHARS } from './limits.ts';

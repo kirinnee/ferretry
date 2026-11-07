@@ -37,8 +37,6 @@
     // test tier has not got; they are never run locally (app/NEEDS-APP-SHELL.txt).
     "packages/plugins/conversation/tests/integration/app",
     "packages/plugins/conversation/tests/realworld/app",
-    // pending app port: browsers separate app port in flight
-    "packages/plugins/browsers/app",
     // pending app port: terminals shell daemon-client, grants and browser-link facilities
     "packages/plugins/terminals/app",
     // pending app port: terminals shell daemon-client, grants and browser-link facilities

@@ -14,14 +14,14 @@ import {
   BrowserPageSnapshotSchema,
   type BrowserPageSummary,
   type BrowserScreencastFrame,
-} from '../pages/wire/browser.ts';
+} from '../../contract/wire/browser.ts';
 import {
   BROWSER_DIALOG_MESSAGE_MAX_CHARS,
   type BrowserDialogInfo,
   BrowserDialogInfoSchema,
   BrowserDialogTypeSchema,
   type BrowserPageLifecycleReply,
-} from '../pages/wire/page-lifecycle.ts';
+} from '../../contract/wire/page-lifecycle.ts';
 
 /** A page with no URL of its own is a blank tab; the wire schema has no room for an empty string. */
 export const BLANK_PAGE_URL = 'about:blank';

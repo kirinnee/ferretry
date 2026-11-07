@@ -21,6 +21,7 @@ export * from './picker-combobox.tsx';
 export * from './picker-model.ts';
 export * from './pull-to-palette-region.tsx';
 export * from './route-link.tsx';
+export * from './setup-ui.tsx';
 export * from './sheet-tabs.tsx';
 export * from './spinner.tsx';
 export * from './underline-tabs.tsx';
