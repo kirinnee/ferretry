@@ -3,7 +3,7 @@ import {
   type SystemCallsignPrefix,
   systemCallsignName,
   systemCallsignSequence,
-} from '@ferretry/protocol';
+} from '../protocol/system-callsigns.ts';
 import type { SerialExecutor } from '../ports.ts';
 
 /**

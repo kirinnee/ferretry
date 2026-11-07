@@ -1,8 +1,8 @@
 import { AsksPort } from '@ferretry/core-asks/contract';
-import { Bearers, GatePort } from '@ferretry/core-gate/contract';
+import { AUDIT_KINDS, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
-import { definePlugin } from '@ferretry/kernel/manifest';
+import { definePlugin, route } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
   AutoResumeFile,
@@ -53,6 +53,82 @@ export default definePlugin({
   ],
   needs: { gate: GatePort, vault: VaultPort, asks: AsksPort },
   provides: { ferrets: FerretsPort, workFolders: WorkFoldersPort },
+  actions: {
+    // Today's descriptors (packages/daemon/src/lib/runtime/mounts/{sessions,session-control,session-resume,
+    // session-rename,session-credential,names,session-filesystem}.ts), paths renamed by the parity table.
+    routes: [
+      // R-0134: conditional (R501, R503); registered before the pattern below.
+      route('GET /v1/ferrets', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        compress: true,
+        audit: { skip: 'a fleet read records nothing' },
+        guard: { none: 'ferret identity records: names, lineage, folders and states, no pane or vault text' },
+      }),
+      // R-0135
+      route('GET /v1/ferrets/:sessionId', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a ferret read records nothing' },
+        guard: { none: 'one ferret identity record' },
+      }),
+      // R-0332
+      route('POST /v1/ferrets', {
+        minimum: 'operator',
+        caller: 'any',
+        audit: { skip: 'a start is recorded in the ferret history, as today' },
+        guard: { none: 'answers the new ferret id only' },
+      }),
+      // R-0372
+      route('POST /v1/ferrets/:sessionId/stop', {
+        minimum: 'operator',
+        caller: 'any',
+        audit: { skip: 'a stop is recorded in the ferret history, as today' },
+        guard: { none: 'answers the new state only' },
+      }),
+      // R-0363
+      route('POST /v1/ferrets/:sessionId/resume', {
+        minimum: 'operator',
+        caller: 'any',
+        consultsGrants: true,
+        audit: { skip: 'a resume is recorded in the ferret history, as today' },
+        guard: { none: 'answers the ferret id only' },
+      }),
+      // R-0362
+      route('POST /v1/ferrets/:sessionId/rename', {
+        minimum: 'operator',
+        caller: 'any',
+        audit: { skip: 'a rename records nothing, as today' },
+        guard: { none: 'one ferret identity record' },
+      }),
+      // R-0364
+      route('POST /v1/ferrets/:sessionId/revoke-credential', {
+        minimum: 'operator',
+        caller: 'person',
+        audit: { record: AUDIT_KINDS['ferret.credential-revoked'] },
+        guard: { none: 'answers whether a token was live, never a token or digest' },
+      }),
+      // R-0114
+      route('GET /v1/names', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a name suggestion records nothing' },
+        guard: { none: 'names from the callsign pool' },
+      }),
+      // R-0151 (S47)
+      route('GET /v1/ferrets/:sessionId/fs/file', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+        audit: { skip: 'a file read records nothing, as today' },
+        guard: 'secrets',
+      }),
+    ],
+  },
   data: {
     state: [
       FerretFiles,

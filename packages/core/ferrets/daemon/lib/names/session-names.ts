@@ -1,4 +1,4 @@
-import { displaySystemCallsign, isSystemCallsign } from '@ferretry/protocol';
+import { displaySystemCallsign, isSystemCallsign } from '../protocol/system-callsigns.ts';
 import { formatSessionTitle, normalizeCallsign } from './policy.ts';
 import {
   CALLSIGN_WINDOW_MS,

@@ -1,4 +1,4 @@
-import { type AgentAddressCandidate, resolveAgentAddress } from '@ferretry/protocol';
+import { type AgentAddressCandidate, resolveAgentAddress } from '../protocol/agent-address.ts';
 import { MAX_CALLSIGN_LENGTH, MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
 
 const CALLSIGN_PATTERN = /^[a-z][a-z0-9-]*$/;
