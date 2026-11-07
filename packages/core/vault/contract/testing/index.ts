@@ -23,7 +23,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import type { InputRaise, InputRequestId, InputRequestState } from '../inputs.ts';
-import type { ChildEnvironment, VaultApi } from '../port.ts';
+import type { ActedPage, ChildEnvironment, PageActNote, VaultApi } from '../port.ts';
 import {
   type SealedDocumentDef,
   type SealedDocumentHandle,
@@ -378,6 +378,12 @@ export type FakeTransport = (request: OutboundHttpRequest) => AuthorizedOutcome;
 /** An in-memory Vault port: values held privately, names out, masked output, the same refusals as today. */
 export class FakeVault implements VaultApi {
   readonly #values = new Map<SecretName, { value: string; createdAt: string; updatedAt: string }>();
+  /** Every page act Browsers told (`pageActed`), and the page it was placed on once the call ended (`null`: none). */
+  readonly pageActs: { ferret: FerretId; script: boolean; placed?: ActedPage | null }[] = [];
+  /** Every host a page script was told to have run on (`undefined`: one that could not be read). */
+  readonly scriptedHosts: (string | undefined)[] = [];
+  /** Page scripts running now (`scriptRunning` not yet ended). */
+  scriptsRunning = 0;
   readonly #inputs = new Map<InputRequestId, InputRequestState>();
   #nextInput = 0;
 
@@ -386,6 +392,27 @@ export class FakeVault implements VaultApi {
     private readonly transport: FakeTransport = () => ({ kind: 'completion', payload: {} }),
   ) {}
 
+  pageActed(ferret: FerretId, script: boolean): PageActNote {
+    const act: { ferret: FerretId; script: boolean; placed?: ActedPage | null } = { ferret, script };
+    this.pageActs.push(act);
+    return {
+      placed: page => {
+        act.placed = page ?? null;
+      },
+    };
+  }
+  scriptRunning(): () => void {
+    this.scriptsRunning += 1;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.scriptsRunning -= 1;
+    };
+  }
+  scriptedOn(host: string | undefined): void {
+    this.scriptedHosts.push(host);
+  }
   async names(): Promise<readonly SecretSummary[]> {
     return [...this.#values].map(
       ([name, entry]) => ({ name, createdAt: entry.createdAt, updatedAt: entry.updatedAt }) as SecretSummary,

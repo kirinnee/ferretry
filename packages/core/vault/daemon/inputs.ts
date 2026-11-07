@@ -10,6 +10,7 @@ import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapte
 import { InputStateJournal } from './adapters/inputs/journal.ts';
 import { PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
 import type { SignInGrantSource } from './lib/inputs/borrowed-grants.ts';
+import { MachineScripts } from './lib/inputs/machine-scripts.ts';
 import type { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { type LoginFactSink, LoginObserver, type LoginProbePort } from './lib/inputs/login-observer.ts';
 import type { InputChoicePort, InputLoginPort, InputPasteRules, InputSealedPort } from './lib/inputs/ports.ts';
@@ -66,6 +67,8 @@ export interface Inputs {
   readonly service: InputRequestService;
   readonly identities: TypedIdentities;
   readonly observer?: LoginObserver;
+  /** Where page scripts ran across the machine (`VaultApi.scriptRunning` / `scriptedOn`, I98). */
+  readonly scripts: MachineScripts;
   /** The owner's input routes, by the keys `manifest.ts` declares: Vault's build spreads them into its `routes`. */
   readonly routes: ReturnType<typeof inputRequestRoutes>;
   /** The agent tools, by the names `manifest.ts` declares (`input_wait`): spread into Vault's `tools`. */
@@ -123,9 +126,12 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     now: () => clock.nowMs(),
     sleep: async ms => await clock.sleep(milliseconds(ms)),
   });
+  // Where page scripts ran across the machine, as Browsers tells it (VaultApi.scriptRunning / scriptedOn).
+  const scripts = new MachineScripts(() => clock.nowMs());
   const acts = new HeardActs(observer, () => [...service.openSessions(), ...deps.quarantine.sessions()]);
   const service: InputRequestService = new InputRequestService({
     observer: acts.view(observer),
+    scripts,
     identities,
     target: new InputTargetRouter(
       new TerminalTargetThroughHook(provider),
@@ -167,6 +173,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     service,
     identities,
     observer,
+    scripts,
     routes: inputRequestRoutes(service),
     tools: inputTools(service),
     holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs(), acts),
