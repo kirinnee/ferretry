@@ -42,7 +42,6 @@ import type { FleetSetupService } from './lib/service/setup-service.ts';
 import { ferretRuntimeRoutes } from './routes/ferret-runtime.ts';
 import { fleetCatalogRoutes } from './routes/fleet-catalog.ts';
 import { fleetSetupRoutes } from './routes/fleet-setup.ts';
-import { RecommendError, type RecommendSubsystem, recommendRoutes } from './routes/recommend.ts';
 
 // The contract widens its config defs so `manifest.data.config` accepts them (`contract/config-def.ts`); these put the shapes back.
 const runtimeItems = RUNTIME_ITEMS as unknown as ConfigCollectionDef<RuntimeFile>;
@@ -68,27 +67,17 @@ export interface RuntimesAssembly {
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
   >;
-  readonly recommend: RecommendSubsystem;
   /** Running-ferret model discovery and controls. Pending until Ferrets exposes these operations. */
   readonly runtime?: import('./routes/ferret-runtime.ts').FerretRuntimeSubsystem;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
 
-/** What `fy recommend` is told when no recommender is wired. GAP(packs): the routing catalog and the engine are not in this plugin. */
-export const RECOMMENDER_NOT_WIRED =
-  'this build has no routing catalog to recommend from yet; start a ferret on a runtime you pick';
-
 /** The assembly of a daemon whose host seams are not wired: every read and change answers in a sentence. */
 export const unavailableAssembly: RuntimesAssembler = ctx => {
   const catalogDeps = unavailableCatalogDeps(() => ctx.kernel.clock.nowMs(), ctx.needs.logins);
   const services = assembleServices(catalogDeps, unavailableSetupDeps);
-  return {
-    ...services,
-    recommend: {
-      recommend: async () => await Promise.reject(new RecommendError('unconfigured', RECOMMENDER_NOT_WIRED)),
-    },
-  };
+  return services;
 };
 
 /** The names whose parsed value differs between two readings of a collection. */
@@ -158,7 +147,6 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         routes: {
           ...fleetCatalogRoutes(assembly.catalog),
           ...fleetSetupRoutes(assembly.setup),
-          ...recommendRoutes(assembly.recommend),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
         provides: { runtimes: api },

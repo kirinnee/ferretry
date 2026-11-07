@@ -4,6 +4,7 @@ import type { TransportRequest } from '../../../src/client/transport.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { App } from '../../../src/shell/app.tsx';
+import { PanelSlot } from '../../../src/shell/views.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
@@ -65,6 +66,78 @@ const usageManifest = {
   ui: { screens: [{ id: 'insights', path: 'insights' }] },
 } as unknown as Manifest;
 
+const multiManifest = {
+  id: 'multi',
+  title: 'Multi',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: {
+    settings: [
+      { id: 'first', label: 'First tab', order: 30 },
+      { id: 'second', label: 'Second tab', order: 31 },
+      { id: 'third', label: 'Third tab', order: 32 },
+    ],
+  },
+} as unknown as Manifest;
+
+const multiApp = implementApp(multiManifest, {
+  build: () => ({
+    screens: {},
+    settings: {
+      first: () => <p data-testid="tab">The first tab</p>,
+      second: () => <p data-testid="tab">The second tab</p>,
+      third: () => <p data-testid="tab">The third tab</p>,
+    },
+  }),
+});
+
+// A plugin screen that OFFERS a slot (`form.field`), and another plugin that contributes a panel to it.
+const picked: string[] = [];
+const formManifest = {
+  id: 'form',
+  title: 'Form',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: { screens: [{ id: 'form', path: 'form' }] },
+} as unknown as Manifest;
+const formApp = implementApp(formManifest, {
+  build: () => ({
+    screens: {
+      form: () => (
+        <PanelSlot
+          daemon="d1"
+          props={{ value: 'draft', onValueChange: (next: string) => picked.push(next) }}
+          slot="form.field"
+        />
+      ),
+    },
+  }),
+});
+const fillerManifest = {
+  id: 'filler',
+  title: 'Filler',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: { panels: [{ id: 'field-filler', slot: 'form.field', order: 1 }] },
+} as unknown as Manifest;
+const fillerApp = implementApp(fillerManifest, {
+  build: () => ({
+    panels: {
+      'field-filler': (props: { readonly value?: string; readonly onValueChange?: (next: string) => void }) => (
+        <button data-testid="filler" onClick={() => props.onValueChange?.(`${props.value ?? ''}!`)} type="button">
+          {props.value}
+        </button>
+      ),
+    },
+  }),
+});
+
 const entry = (manifest: Manifest, app: SurfaceEntry['app'], contract: string): SurfaceEntry => ({
   id: manifest.id,
   title: manifest.title,
@@ -80,6 +153,9 @@ const surfaces: SurfaceEntry[] = [
   entry(boardManifest, boardApp, 'h-board'),
   entry(agendaManifest, skeletonApp(agendaManifest), 'h-agenda'),
   entry(usageManifest, skeletonApp(usageManifest), 'h-usage'),
+  entry(multiManifest, multiApp, 'h-multi'),
+  entry(formManifest, formApp, 'h-form'),
+  entry(fillerManifest, fillerApp, 'h-filler'),
 ];
 
 const browser: ShellWindow = {
@@ -207,6 +283,61 @@ describe('the app shell', () => {
     );
     await settle();
     expect(view.container.querySelector('main')?.textContent).toContain('This daemon needs an update');
+    await view.unmount();
+  });
+
+  test('a plugin that declares several settings tabs draws each one at its own address', async () => {
+    const drawn: Record<string, string> = {};
+    for (const [path, want] of [
+      ['/d/d1/settings/multi', 'The first tab'],
+      ['/d/d1/settings/multi/first', 'The first tab'],
+      ['/d/d1/settings/multi/second', 'The second tab'],
+      ['/d/d1/settings/multi/third', 'The third tab'],
+    ] as const) {
+      go(path);
+      const { runtime, storage } = setup({});
+      const view = await mount(
+        <App
+          runtime={runtime}
+          themes={new ThemePreferenceStore(storage)}
+          layouts={new DeviceLayoutStore(storage)}
+          browser={browser}
+          scroll={new ScrollMemory(null)}
+        />,
+      );
+      await settle();
+      drawn[path] = view.container.querySelector('[data-testid="tab"]')?.textContent ?? '(nothing)';
+      expect(drawn[path]).toBe(want);
+      const links = [...view.container.querySelectorAll('nav[aria-label="Plugin settings"] a')];
+      expect(links.map(link => link.getAttribute('href'))).toEqual([
+        '/d/d1/settings/multi/first',
+        '/d/d1/settings/multi/second',
+        '/d/d1/settings/multi/third',
+      ]);
+      await view.unmount();
+    }
+  });
+
+  test('a slot a plugin screen offers draws the panels others contribute, with the props the screen hands it', async () => {
+    go('/d/d1/form');
+    picked.length = 0;
+    const { runtime, storage } = setup({});
+    const view = await mount(
+      <App
+        runtime={runtime}
+        themes={new ThemePreferenceStore(storage)}
+        layouts={new DeviceLayoutStore(storage)}
+        browser={browser}
+        scroll={new ScrollMemory(null)}
+      />,
+    );
+    await settle();
+    const slot = view.container.querySelector('[data-slot="form.field"]');
+    expect(slot?.querySelector('[data-panel="filler.field-filler"]')).not.toBeNull();
+    const button = view.container.querySelector('[data-testid="filler"]') as HTMLButtonElement | null;
+    expect(button?.textContent).toBe('draft');
+    await interact(() => button?.click());
+    expect(picked).toEqual(['draft!']);
     await view.unmount();
   });
 

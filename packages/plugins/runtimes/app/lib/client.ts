@@ -17,3 +17,9 @@ export interface CallFailure {
 
 export const callFailure = (failure: unknown): CallFailure | null =>
   typeof failure === 'object' && failure !== null ? (failure as CallFailure) : null;
+
+/**
+ * The client a screen that re-reads on a change talks through: `call`, and `subscribe` when the shell hands one. A
+ * screen under test is handed `call` alone and simply hears no events.
+ */
+export type LiveRuntimesClient = RuntimesClient & Partial<Pick<PluginClient, 'subscribe'>>;

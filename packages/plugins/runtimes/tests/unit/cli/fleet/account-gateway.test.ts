@@ -3,7 +3,7 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { ClientRuntimesGateway, ROUTES } from '../../../../cli/lib/fleet/account-gateway.ts';
 import manifest from '../../../../manifest.ts';
-import { CHANGE_ID, changeView, committed, machine, recommendation, scan } from './account-fakes.ts';
+import { CHANGE_ID, changeView, committed, machine, scan } from './account-fakes.ts';
 
 interface Sent {
   readonly route: string;
@@ -82,25 +82,6 @@ describe('ClientRuntimesGateway', () => {
     should(actual.machine).equal('studio');
   });
 
-  it('should post the task and read the guide back', async () => {
-    // Arrange
-    const { sent, fake } = client({ [ROUTES.recommend]: recommendation() });
-
-    // Act
-    const actual = await new ClientRuntimesGateway(fake).recommend({ task: 'port the CLI groups', usage: true });
-
-    // Assert
-    should(sent[0]?.route).equal('POST /v1/recommend');
-    should(sent[0]?.init?.body).eql({ task: 'port the CLI groups', usage: true });
-    should(actual.roles[0]?.primary.agent).equal('codex');
-  });
-
-  it('should refuse an empty task before it reaches the daemon', async () => {
-    const { sent, fake } = client({ [ROUTES.recommend]: recommendation() });
-    await should(new ClientRuntimesGateway(fake).recommend({ task: '', usage: true })).be.rejected();
-    should(sent).be.empty();
-  });
-
   it('should refuse a change the route would refuse, before sending it', async () => {
     const { sent, fake } = client({});
     await should(
@@ -110,9 +91,7 @@ describe('ClientRuntimesGateway', () => {
   });
 
   it('should fail loudly when the daemon answers with something that is not the shape it promised', async () => {
-    const { fake } = client({ [ROUTES.recommend]: { error: 'no routing catalog' }, [ROUTES.machine]: { name: 'x' } });
-    const gateway = new ClientRuntimesGateway(fake);
-    await should(gateway.recommend({ task: 'anything', usage: false })).be.rejected();
-    await should(gateway.machine()).be.rejected();
+    const { fake } = client({ [ROUTES.machine]: { name: 'x' } });
+    await should(new ClientRuntimesGateway(fake).machine()).be.rejected();
   });
 });

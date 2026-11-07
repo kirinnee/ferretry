@@ -48,5 +48,5 @@ What you may run
 
 4. Pair my phone: hand me fy pair as a "Run this" for my own terminal, not this chat, so the code never reaches you. What I'll see: a QR code to scan with my phone's camera within two minutes.
 
-5. Stop. Afterwards, only when I ask: fy daemon status, fy login ls, fy runtime ls, fy runtime import claude or fy runtime import codex, and fy onboard (it asks questions, so I run it in my own terminal).
+5. Stop. Afterwards, only when I ask: fy daemon status, fy login ls, fy runtime ls, fy runtime link claude or fy runtime link codex, and fy onboard (it asks questions, so I run it in my own terminal).
    To update later: fy update, or the Update button in the app.

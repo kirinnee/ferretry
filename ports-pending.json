@@ -16,11 +16,8 @@
     "conversation",
     "agenda",
     "board",
-    "packs",
     "warden",
     "usage",
-    "lessons",
-    "voice",
     "catalogs",
     "mcp",
     "skills",
@@ -30,6 +27,18 @@
     "runtimes",
     "onboarding"
   ],
+  "pendingReasons": {
+    "runtimes": [
+      "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
+      "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",
+      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)",
+      "GAP(ferrets): removing a runtime cannot move its running ferrets, because Ferrets declares no migrate route yet (R-0355)",
+      "GAP(conversation): Import conversations is gone from the Runtimes tab; its verb is now Conversation's `fy link` (V-0285)"
+    ],
+    "ferrets": [
+      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
+    ]
+  },
   "pendingHalves": {
     "agenda": ["app"],
     "browsers": ["app"],
@@ -68,31 +77,6 @@
       "reason": "shell daemon-client, grants and browser-link facilities"
     },
     {
-      "plugin": "runtimes",
-      "path": "packages/plugins/runtimes/app/components/runtime-buttons.tsx",
-      "reason": "Logins roster/health, Usage quota readout and shell daemon picker"
-    },
-    {
-      "plugin": "runtimes",
-      "path": "packages/plugins/runtimes/app/hooks/use-account-picker.ts",
-      "reason": "Logins account-picker store/catalog and shell roster polling"
-    },
-    {
-      "plugin": "runtimes",
-      "path": "packages/plugins/runtimes/app/features/fleet/runtimes/runtime-actions.tsx",
-      "reason": "Runtimes reviewed apply-change screens and machine settings"
-    },
-    {
-      "plugin": "runtimes",
-      "path": "packages/plugins/runtimes/tests/unit/app/use-account-picker.test.tsx",
-      "reason": "Logins account-picker store/catalog and shell roster polling"
-    },
-    {
-      "plugin": "runtimes",
-      "path": "packages/plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-actions.test.tsx",
-      "reason": "Runtimes reviewed apply-change screens and machine settings"
-    },
-    {
       "plugin": "agenda",
       "path": "packages/plugins/agenda/tests/unit/app",
       "reason": "app-shell-fill React runtime and app test harness"
@@ -101,6 +85,26 @@
       "plugin": "agenda",
       "path": "packages/plugins/agenda/tests/support/app",
       "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/settings/use-machine-voice-cleanup.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/fleet/setup/voice-default.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/app/components/pack-call.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/tests/unit/app/pack-call.test.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
     }
   ]
 }
