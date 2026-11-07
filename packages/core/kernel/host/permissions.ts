@@ -104,7 +104,7 @@ export function hostPermitted(
   return named.includes(WILDCARD) || hostAllowed(hostname, named) || resolverAllows(declared, resolve, hostname, host);
 }
 
-/** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone (plugin-graph refuses it). */
+/** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone: `effectivePermissions` drops it from any other manifest. */
 export const WILDCARD = '*';
 
 /** What the host hands the restrict wrappers: a non-core manifest's `'*'` is dropped, so it grants nothing. */

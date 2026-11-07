@@ -62,7 +62,7 @@ export default definePlugin({
   /**
    * A run spawns the program the owner or a ferret named in a `${secret:NAME}` command, and an authorized fetch reaches
    * whichever host a secret's own allowlist names, so neither can be listed here. `'*'` is the kernel's to admit and it
-   * admits it from a core piece alone (`effectivePermissions`; plugin-graph refuses it from anything else).
+   * admits it from a core piece alone: `effectivePermissions` drops it from any other manifest at run time.
    */
   permissions: { spawn: ['*'], network: ['*'] },
   needs: { gate: GatePort, asks: AsksPort },
