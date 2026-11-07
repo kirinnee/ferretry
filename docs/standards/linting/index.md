@@ -48,6 +48,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers                                    |
 | `a-no-pattern-kill`         | test code never kills processes by pattern (`pkill`, `killall`)                                   |
 | `a-no-sync-io`              | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`      |
+| `a-pending-tags`            | every `@pending`/`@public` and knip `ignore` names an open gap, a kept row or a declared surface  |
 | `a-pages-config`            | the PWA build and the Pages deployment publish the same directory                                 |
 | `a-relay-config`            | relay code, bindings, discovery and deployment configuration agree                                |
 | `a-rebuild-checks`          | the Ferretry 5.0 checks (redesign §7.9) through their one entry, `scripts/gen/check.ts`           |
