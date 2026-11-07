@@ -180,6 +180,29 @@ describe('relay-protocol rows on the kernel wire', () => {
     expect(client.end).toBeUndefined();
   });
 
+  test('R533 the daemon ends a session when more than one credit window of whole answers waits; parts of a large answer do not count', async () => {
+    // a peer that never credits: whole answers pile up past a window, and the session ends 4400
+    const fx = await fixture();
+    const { client } = await serving(fx);
+    for (let id = 1; id <= 3 * CREDIT_WINDOW_FRAMES; id += 1) {
+      await client.send({ t: 'req', id, method: 'GET', path: '/v1/health' });
+      if (id % 8 === 0) await client.pump();
+    }
+    await client.pump();
+    expect(client.end).toEqual({ code: 4400, reason: 'this session cannot carry its own answer' });
+    // one answer in more parts than a window, never credited: still open
+    const large = await fixture();
+    large.dispatch = async () => ({
+      status: 200,
+      headers: new Map([['content-type', 'application/json']]),
+      body: JSON.stringify({ blob: 'y'.repeat(3 * 1024 * 1024) }),
+    });
+    const big = await serving(large);
+    await big.client.send({ t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    await big.client.pump();
+    expect(big.client.end).toBeUndefined();
+  });
+
   test('R69 the transcript is SHA-256 of the label and the length-prefixed session id, hs1 epk/nonce/daemonId and hs2 epk/nonce/spki, as text', async () => {
     const { sessionId, pending, answered, keys } = await keyed();
     const expected = await sha256(
