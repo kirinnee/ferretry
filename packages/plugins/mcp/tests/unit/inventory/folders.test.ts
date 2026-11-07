@@ -9,7 +9,6 @@ import type { SecretName } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  type ClaudeLocalScope,
   combinedMcpOAuthServers,
   type McpInventoryFolder,
   McpInventoryService,
@@ -21,7 +20,16 @@ import {
 } from '../../../daemon/lib/inventory/index.ts';
 import { McpOAuthRefusal, McpOAuthService } from '../../../daemon/lib/oauth/index.ts';
 import { PWA_REDIRECT, testCrypto, world } from '../oauth/support.ts';
-import { ACCOUNTS, FOLDERS, knownFolders, MemoryDocuments, PROJECT, session, WORKTREE } from './support.ts';
+import {
+  ACCOUNTS,
+  documentApprovals,
+  FOLDERS,
+  knownFolders,
+  MemoryDocuments,
+  PROJECT,
+  session,
+  WORKTREE,
+} from './support.ts';
 
 const LONE = '/Users/someone/Workspace/work/PE';
 const NESTED = `${LONE}/tools/inner`;
@@ -80,8 +88,6 @@ function machineFiles(): Map<string, unknown> {
   return files;
 }
 
-const NO_LOCAL_SCOPE: ClaudeLocalScope = { reconcile: async () => undefined };
-
 describe('one derivation of a project server’s subject', () => {
   const ferrets = [LONE, NESTED, `${PROJECT}/src`, `${WORKTREE}/lib`, `${OTHER}/`];
 
@@ -105,7 +111,7 @@ describe('one derivation of a project server’s subject', () => {
         documents,
         secrets: { held: async () => new Set() },
         renewal: { refreshForLaunch: async names => void renewed.push(...names) },
-        localScope: NO_LOCAL_SCOPE,
+        approvals: documentApprovals(machineFiles()),
       });
 
       // Act

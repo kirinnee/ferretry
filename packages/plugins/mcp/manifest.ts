@@ -2,6 +2,9 @@ import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
+import { CodexPort } from '@ferretry/plugin-codex/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -37,6 +40,11 @@ export default definePlugin({
 
   // `sealed`: the sign-in's own refresh tokens and client secrets (MCP_OAUTH_SECRETS), never another plugin's.
   needs: { ferrets: FerretsPort, vault: VaultPort, sealed: SealedDocumentsPort },
+
+  // Optional (lead ruling): each harness answers which project servers it approved for a ferret, read from its OWN
+  // home (MCP has no root there); Projects answers the registered roots a launch folder belongs to. Off = fail closed
+  // (no project server bound) and each folder its own project. None of them uses MCP, so the graph stays acyclic.
+  uses: { claudeCode: ClaudeCodePort, codex: CodexPort, projects: ProjectsPort },
 
   provides: { mcp: McpPort },
 
