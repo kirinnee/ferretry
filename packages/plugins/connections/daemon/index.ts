@@ -23,6 +23,8 @@ import { nativeRelaySocket, randomSessionBytes } from './adapters/relay/native.t
 import { DirectCarrier } from './lib/relay/direct.ts';
 import {
   chooseRelayCarrierSources,
+  describeAbsentRelayCarrier,
+  dialledRelayUrl,
   NO_RELAY_DIRECTORY,
   relayCarriersNeedDiscovery,
   type RelayCarrierSource,
@@ -121,21 +123,36 @@ export function buildConnections(
       await initialise();
       if (signal.aborted) return;
       if (bindings === undefined) return;
-      held = sources
-        .filter(s => s.kind !== 'direct-only')
-        .map(
-          source =>
-            new RelayCarrier({
-              config: source.config,
-              identity: bindings.identity,
-              scheduler,
-              now: () => ctx.kernel.clock.nowMs(),
-              random: Math.random,
-              socketFactory: bindings.socketFactory ?? nativeRelaySocket,
-              log: line => ctx.kernel.log.info(line),
-            }),
-        );
-      for (const carrier of held) await carrier.start(layer, signal);
+      const dialled = sources.flatMap(source =>
+        source.kind === 'direct-only'
+          ? []
+          : [
+              {
+                source,
+                carrier: new RelayCarrier({
+                  config: source.config,
+                  identity: bindings.identity,
+                  scheduler,
+                  now: () => ctx.kernel.clock.nowMs(),
+                  random: Math.random,
+                  socketFactory: bindings.socketFactory ?? nativeRelaySocket,
+                  log: line => ctx.kernel.log.info(line),
+                }),
+              },
+            ],
+      );
+      held = dialled.map(entry => entry.carrier);
+      const started = new Map<string, CarrierStatus>();
+      for (const { carrier, source } of dialled) {
+        await carrier.start(layer, signal);
+        const relayUrl = dialledRelayUrl(source);
+        if (relayUrl !== undefined) started.set(relayUrl, carrier.status());
+      }
+      for (const line of relayBootTrail(sources, started, {
+        configFile: configFile.file,
+        host: bindings.host ?? config?.direct?.host ?? '127.0.0.1',
+      }))
+        ctx.kernel.log.info(line);
     },
     status: () => {
       if (bindings === undefined) return { state: 'failed', sentence: 'The relay carrier is unavailable.' };
@@ -197,11 +214,59 @@ export function buildConnections(
     },
   };
 }
+/**
+ * What the boot trail says about the relay set once every carrier has started (copied from today's boot).
+ *
+ * A REFUSAL IS SAID OUT LOUD AND THE DAEMON KEEPS SERVING. The consequence and remedy are GLOBAL and therefore
+ * emitted once, only when the entire set dials nothing. An inactive entry beside a working relay receives the
+ * specific line instead.
+ */
+function relayBootTrail(
+  sources: readonly RelayCarrierSource[],
+  started: ReadonlyMap<string, CarrierStatus>,
+  where: { readonly configFile: string; readonly host: string },
+): readonly string[] {
+  const lines: string[] = [];
+  const activeCount = [...started.values()].filter(status => status.state !== 'off').length;
+  const inactiveDetail = (source: RelayCarrierSource, detail?: string): string => {
+    if (detail !== undefined) return detail;
+    if (source.kind === 'direct-only') return source.reason;
+    if (!source.config.enabled)
+      return `the configured relay ${source.config.url} is switched off in this daemon's configuration`;
+    return `the relay ${source.config.url} did not produce an active carrier`;
+  };
+  let globalAbsenceReported = false;
+  for (const source of sources) {
+    const relayUrl = dialledRelayUrl(source);
+    const status = relayUrl === undefined ? undefined : started.get(relayUrl);
+    if (status === undefined || status.state === 'off') {
+      const detail = inactiveDetail(source, status?.sentence);
+      if (activeCount > 0 || globalAbsenceReported) {
+        lines.push(`relay carrier inactive — ${detail}`);
+        continue;
+      }
+      lines.push(
+        ...describeAbsentRelayCarrier({
+          source,
+          carrierDetail: detail,
+          configFile: where.configFile,
+          host: where.host,
+        }),
+      );
+      globalAbsenceReported = true;
+      continue;
+    }
+    lines.push(`dialling the relay — ${relayUrl}`);
+  }
+  return lines;
+}
+/** The production session opener: the Kernel calls `proved` only after it verified a device or member proof. */
+export const openKernelSession: OpenCarrierSession = (layer, key, peer, proved) => layer.open(key, { ...peer, proved });
 export function kernelConnectionBindings(kernel: KernelPorts): ConnectionBindings {
   const config = kernel.config.file(configFile);
   return {
     identity: { daemonId: kernel.identity.daemonId, sign: request => kernel.signer.sign(request) },
-    openSession: (layer, key, peer, proved) => layer.open(key, { ...peer, proved }),
+    openSession: openKernelSession,
     socketFactory: url => kernel.websocket.connect(url),
     ...(config?.direct?.host === undefined ? {} : { host: config.direct.host }),
     ...(config?.direct?.port === undefined ? {} : { port: config.direct.port }),

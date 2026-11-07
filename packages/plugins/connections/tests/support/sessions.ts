@@ -60,4 +60,17 @@ export class FakeSessions implements SessionLayer {
     this.peers.push(peer);
     return link;
   }
+  /** Every shared connection a carrier asked for (one per rendezvous socket), with the links opened on it. */
+  readonly connections: { readonly carrier: CarrierKey; readonly links: FakeLink[] }[] = [];
+  connection(carrier: CarrierKey): { open(peer?: CarrierPeer): FakeLink } {
+    const record = { carrier, links: [] as FakeLink[] };
+    this.connections.push(record);
+    return {
+      open: peer => {
+        const link = this.open(carrier, peer);
+        record.links.push(link);
+        return link;
+      },
+    };
+  }
 }

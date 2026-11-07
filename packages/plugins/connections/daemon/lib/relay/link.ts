@@ -1,5 +1,11 @@
 /** Carrier half of today’s relay/link.ts. The Kernel owns each sealed session. */
-import { isSessionEnd, type CarrierKey, type CarrierLink, type SessionLayer } from '@ferretry/kernel/contract';
+import {
+  isSessionEnd,
+  type CarrierConnection,
+  type CarrierKey,
+  type CarrierLink,
+  type SessionLayer,
+} from '@ferretry/kernel/contract';
 import {
   claimContextForChallenge,
   decodeFrame,
@@ -44,7 +50,11 @@ export class RelayLink {
   #handover: string | undefined;
   #lastRefusal: string | undefined;
   #closed = false;
-  constructor(private readonly deps: RelayLinkDependencies) {}
+  /** One rendezvous socket is one connection: its sessions share today's per-link pre-credential bound. */
+  readonly #connection: CarrierConnection;
+  constructor(private readonly deps: RelayLinkDependencies) {
+    this.#connection = deps.layer.connection('relay' as CarrierKey);
+  }
   report() {
     return {
       claimed: this.#claimed,
@@ -96,7 +106,7 @@ export class RelayLink {
     }
     this.#ended.get(sessionId.text)?.cancel();
     this.#ended.delete(sessionId.text);
-    const link = this.deps.layer.open('relay' as CarrierKey);
+    const link = this.#connection.open();
     let draining = false;
     const session: LinkSession = { link, sessionId, stop: () => undefined };
     const drain = (): void => {
