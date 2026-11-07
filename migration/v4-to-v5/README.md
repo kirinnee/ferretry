@@ -126,7 +126,7 @@ with what v4 enforced and any widening fails the step. Carriers → `connections
 `webrtc`; an owner's `enabled: false` stays false; two relays switched on fail, since v5 dials one). `harness` paths →
 both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. A catalog link store
 turned off or a shorter member unlock waits for a Catalogs schema (`pending`); `secretEnvironment`, `usage.url`, CORS,
-`publicUrl`, tuning keys and `routing.json` (Packs has no routing schema yet) are listed in `notCarried`, by key only.
+`publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` leaves the step pending until Packs declares a routing config.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,

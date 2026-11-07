@@ -106,7 +106,7 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   },
   {
     what: 'state/config-accepted.json (for gate.yaml and connections.yaml)',
-    why: 'v5 keeps the accepted record in host-private kernel state: a v4 grant or carrier that v5 reads as a loosening against its defaults is held until the owner confirms it in v5 (it is never applied wider)',
+    why: 'v5 keeps the accepted record in host-private kernel state; until the kernel exports it (lead decision 2026-11-07: carry it), a v4 grant or carrier that v5 reads as a loosening against its defaults is held until the owner confirms it in v5 (it is never applied wider)',
   },
 ];
 
@@ -379,11 +379,11 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
     if (document[key as keyof V4DaemonDocument] !== undefined)
       plan.dropped.push({ what: `${V4_DAEMON_JSON} ${key}`, why });
 
+  // The owner's routing choices are waited for, not dropped: v5 Packs owns routing (§2 Packs) but declares no config
+  // file or schema yet (packages/plugins/packs is a stub). When it does, accounts[].accountId (runtime uuids) are
+  // re-keyed to runtime names (M7).
   if (await present(home, V4_ROUTING_JSON))
-    plan.dropped.push({
-      what: V4_ROUTING_JSON,
-      why: 'v5 Packs owns routing (§2 Packs) but declares no config file or schema yet (packages/plugins/packs is a stub); its accounts[].accountId are runtime uuids that would be re-keyed to runtime names (M7) when it does. The v4 file stays in the v4 home',
-    });
+    plan.waiting.push(`${V4_ROUTING_JSON} (v5 Packs declares no routing config yet)`);
   if (await present(home, V4_OPERATOR_PASSWORD))
     plan.dropped.push({
       what: V4_OPERATOR_PASSWORD,
