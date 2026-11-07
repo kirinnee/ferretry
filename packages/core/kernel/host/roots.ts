@@ -46,7 +46,11 @@ const windowOk = (offset: number, length: number): boolean =>
 /** Every handle the kernel made, with the plugin it was made for and its fenced resolver (for `copyTree`). */
 const HANDLES = new WeakMap<
   object,
-  { readonly plugin: string; readonly real: (path: FencedPath) => Promise<FencedPath> }
+  {
+    readonly plugin: string;
+    readonly real: (path: FencedPath) => Promise<FencedPath>;
+    readonly realParent: (path: FencedPath) => Promise<FencedPath>;
+  }
 >();
 
 export interface RootLayout {
@@ -174,16 +178,31 @@ function rootHandle(
     else await fs.writeAtomic(await real(path), data, mode);
   };
   /** Copies `from` (a real, fenced source folder) into `to`: off the disk, never through a link or a hard link. */
-  const copyInto = async (from: string, to: string, budget: { left: number }): Promise<void> => {
-    await fs.mkdirp(to, 0o700);
-    for (const name of await fs.list(from)) {
+  const copyInto = async (
+    source: NonNullable<ReturnType<typeof HANDLES.get>>,
+    from: FencedPath,
+    to: FencedPath,
+    budget: { left: number },
+  ): Promise<void> => {
+    const sourceFolder = await source.real(from);
+    const targetFolder = await realParent(to);
+    await fs.mkdirp(targetFolder, 0o700);
+    for (const name of await fs.list(sourceFolder)) {
       budget.left -= 1;
       if (budget.left < 0) throw new RootError('outside');
-      const info = await fs.lstat(`${from}/${name}`);
+      const sourceName = `${from}/${name}` as FencedPath;
+      const targetName = `${to}/${name}` as FencedPath;
+      // Check each name against its source handle's fence, even when it will be skipped as a link.
+      const leaf = await source.realParent(sourceName);
+      const info = await fs.lstat(leaf);
       if (info === undefined) continue;
-      if (info.kind === 'directory') await copyInto(`${from}/${name}`, `${to}/${name}`, budget);
+      if (info.kind === 'directory') await copyInto(source, sourceName, targetName, budget);
       else if (info.kind === 'file' && (info.links ?? 1) <= 1)
-        await fs.writeAtomic(`${to}/${name}`, await fs.readBytes(`${from}/${name}`), (info.mode ?? 0o600) & 0o777);
+        await fs.writeAtomic(
+          await realParent(targetName),
+          await fs.readBytes(await source.real(sourceName)),
+          (info.mode ?? 0o600) & 0o777,
+        );
       // a link is left alone (never entered), a device or a hard-linked file is never read
     }
   };
@@ -228,7 +247,7 @@ function rootHandle(
       // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
       const destination = await realParent(to);
       if ((await fs.lstat(destination)) !== undefined) throw new RootError('outside');
-      await copyInto(sourceReal, destination, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
     },
     ensurePrivateDirectory: async path => {
       writable();
@@ -298,7 +317,7 @@ function rootHandle(
       return pinned;
     },
   };
-  HANDLES.set(handle, { plugin, real });
+  HANDLES.set(handle, { plugin, real, realParent });
   return handle;
 }
 

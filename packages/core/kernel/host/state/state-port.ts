@@ -176,7 +176,52 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     throw new TypeError(`state ${def.name}: a ${def.store} file is not read with read()`);
   };
 
+  const locateTree = (def: StateFileDef, name: string): Located => {
+    const at = locate(def, name);
+    if (def.store !== 'opaque' || !def.path.endsWith('/*'))
+      throw new TypeError('state operation needs an opaque named tree');
+    return at;
+  };
+
+  /** Check every parent with lstat; a planted link never becomes a route into another folder. */
+  const treeParents = async (path: string, create: boolean): Promise<boolean> => {
+    const parts = path
+      .slice(home.length + 1)
+      .split('/')
+      .slice(0, -1);
+    let parent = home;
+    for (const part of ['', ...parts]) {
+      if (part !== '') parent += `/${part}`;
+      const info = await fs.info(parent);
+      if (info === undefined) {
+        if (!create) return false;
+        await fs.ensureDirectory(parent, PRIVATE_DIRECTORY_MODE);
+      } else if (!info.directory) throw new TypeError('state parent is not a directory');
+    }
+    return true;
+  };
+
   const port: HostStatePort = {
+    async stat(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return undefined;
+      const info = await fs.info(at.path);
+      if (info === undefined) return undefined;
+      const kind =
+        info.symlink === true ? 'symlink' : info.directory ? 'directory' : info.regularFile ? 'file' : undefined;
+      if (kind === undefined) throw new TypeError('state entry is not a file, directory or symlink');
+      return { kind, modifiedMs: info.modifiedAtMs };
+    },
+    async createPrivateDirectory(def, name) {
+      const at = locateTree(def, name);
+      await treeParents(at.path, true);
+      await fs.createPrivateDirectory(at.path);
+    },
+    async removeEmptyDirectory(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return;
+      await fs.removeEmptyDirectory(at.path);
+    },
     sqliteGrant(def: StateFileDef, name?: string) {
       const at = locate(def, name);
       if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')

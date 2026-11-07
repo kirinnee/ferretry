@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { chmod, lstat, mkdir, open, readdir, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import { AtomicFileWriter } from './atomic-file.ts';
 import type { FileOperations, TempNameSource } from './file-operations.ts';
 import { NodeFileOperations, RandomTempNameSource } from './file-operations.ts';
@@ -13,6 +13,7 @@ export interface HostFileInfo {
   /** An ordinary file: not a link, a directory or a device. */
   readonly regularFile: boolean;
   readonly directory: boolean;
+  readonly symlink?: boolean;
 }
 
 export interface HostDirEntry {
@@ -45,6 +46,8 @@ export interface HostFs {
   /** Appends one record on a line of its own: a complete last record is closed with a newline, a torn one (cut short by a crash) is cut off first. */
   appendLine(path: string, line: string, mode: number): Promise<void>;
   ensureDirectory(path: string, mode: number): Promise<void>;
+  createPrivateDirectory(path: string): Promise<void>;
+  removeEmptyDirectory(path: string): Promise<void>;
   /** Removes a file or a whole folder; a path already gone is no error. */
   remove(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
@@ -126,6 +129,7 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
           inode: stats.ino,
           regularFile: stats.isFile(),
           directory: stats.isDirectory(),
+          symlink: stats.isSymbolicLink(),
         };
       } catch (error) {
         if (isMissing(error)) return undefined;
@@ -179,6 +183,16 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
     },
     async ensureDirectory(path, mode) {
       await mkdir(path, { recursive: true, mode });
+    },
+    async createPrivateDirectory(path) {
+      await mkdir(path, { mode: 0o700 });
+    },
+    async removeEmptyDirectory(path) {
+      try {
+        await rmdir(path);
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
     },
     async remove(path) {
       await rm(path, { recursive: true, force: true });

@@ -209,16 +209,16 @@ describe('BB wildcard reach: core only', () => {
   const fetchPort: FetchPort = { request: async () => new Response('') };
 
   test("a core piece's '*' runs any program and reaches any host", async () => {
-    await restrictSpawn('vault', effectivePermissions(true, ['*']), spawn).run('/opt/owner/tool', []);
-    await restrictFetch('vault', effectivePermissions(true, ['*']), fetchPort).request('https://anything.example/');
+    await restrictSpawn('vault', effectivePermissions('vault', ['*']), spawn).run('/opt/owner/tool', []);
+    await restrictFetch('vault', effectivePermissions('vault', ['*']), fetchPort).request('https://anything.example/');
   });
 
   test("a plugin's '*' grants nothing (and plugin-graph refuses it)", async () => {
-    await expect(restrictSpawn('mcp', effectivePermissions(false, ['*']), spawn).run('ls', [])).rejects.toThrow(
+    await expect(restrictSpawn('mcp', effectivePermissions('mcp', ['*']), spawn).run('ls', [])).rejects.toThrow(
       PermissionError,
     );
     await expect(
-      restrictFetch('mcp', effectivePermissions(false, ['*']), fetchPort).request('https://anything.example/'),
+      restrictFetch('mcp', effectivePermissions('mcp', ['*']), fetchPort).request('https://anything.example/'),
     ).rejects.toThrow(PermissionError);
   });
 });

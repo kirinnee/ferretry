@@ -166,6 +166,15 @@ export interface StatePort {
     options: { readonly maxBytes: number; readonly name?: string },
   ): Promise<JsonlRecords<Shape>>;
   list(file: StateFileDef): Promise<readonly string[]>;
+  /** Own opaque named trees only. Metadata of the entry itself via lstat; a symlink is never followed. */
+  stat(
+    file: StateFileDef,
+    name: string,
+  ): Promise<{ readonly kind: 'file' | 'directory' | 'symlink'; readonly modifiedMs: number } | undefined>;
+  /** Own opaque named trees only. Plain rmdir: never recursive, refuses links and nonempty directories. */
+  removeEmptyDirectory(file: StateFileDef, name: string): Promise<void>;
+  /** Own opaque named trees only. Exclusive mkdir, mode 0700; any existing entry is refused. */
+  createPrivateDirectory(file: StateFileDef, name: string): Promise<void>;
   remove(file: StateFileDef, name?: string): Promise<void>;
   sqlite(file: StateFileDef, name?: string): SqliteHandle;
   /**

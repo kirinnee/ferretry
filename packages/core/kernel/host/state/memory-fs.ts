@@ -105,6 +105,17 @@ export function createMemoryHostFs(clock: () => number = () => 0): MemoryHostFs 
     async ensureDirectory(path, mode) {
       if (!directories.has(path)) directories.set(path, mode);
     },
+    async createPrivateDirectory(path) {
+      if (files.has(path) || isDirectory(path)) throw new Error('directory entry already exists');
+      directories.set(path, 0o700);
+    },
+    async removeEmptyDirectory(path) {
+      if (files.has(path)) throw new Error('not a directory');
+      const prefix = `${path}/`;
+      if ([...files.keys(), ...directories.keys()].some(key => key.startsWith(prefix)))
+        throw new Error('directory is not empty');
+      directories.delete(path);
+    },
     async remove(path) {
       files.delete(path);
       directories.delete(path);

@@ -17,6 +17,8 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
+import { beforeListen } from './before-listen.ts';
+import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
 import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
   Clock,
@@ -137,6 +139,8 @@ export type ConfigJudge = (input: {
 }) => boolean;
 
 export interface HostAdapters {
+  /** Production claims the home before state is read, holds it through serving, releases it on stop. */
+  readonly lockHome?: () => Promise<HomeLockLease>;
   readonly clock: Clock;
   readonly logSink: LogSink;
   readonly fs: HostFs;
@@ -287,14 +291,46 @@ function deadlineFrom(clock: Clock): Deadline {
 export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { adapters, home } = options;
   const trace: string[] = [];
-  const log = scopedLog(adapters.logSink, 'kernel');
   const clock = adapters.clock;
-  const deadline = deadlineFrom(clock);
 
   // 2. Home and fence, identity (before anything is read from the home).
   trace.push('home');
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
   if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  let lease: HomeLockLease | undefined;
+  try {
+    lease = await adapters.lockHome?.();
+  } catch (error) {
+    if (error instanceof StateHomeLockedError) return { kind: 'refused', sentence: error.message, trace };
+    throw error;
+  }
+  try {
+    const outcome = await bootClaimedHome(options, trace);
+    if (outcome.kind === 'refused') await lease?.release();
+    else {
+      const stop = outcome.host.stop;
+      let stopped: Promise<void> | undefined;
+      outcome.host.stop = () =>
+        (stopped ??= (async () => {
+          try {
+            await stop();
+          } finally {
+            await lease?.release();
+          }
+        })());
+    }
+    return outcome;
+  } catch (error) {
+    await lease?.release();
+    throw error;
+  }
+}
+
+async function bootClaimedHome(options: HostOptions, trace: string[]): Promise<BootOutcome> {
+  const { adapters, home } = options;
+  const clock = adapters.clock;
+  const log = scopedLog(adapters.logSink, 'kernel');
+  const deadline = deadlineFrom(clock);
   trace.push('identity');
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
@@ -338,6 +374,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       manifests.filter(manifest => on(manifest.id)),
       log,
       deadline,
+      manifests,
     );
     const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
     const hookEdges = (manifest: Manifest): readonly string[] =>
@@ -461,6 +498,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   };
   let frozen: PostBuildSnapshot | undefined;
   let phase: 'building' | 'bound' | 'started' = 'building';
+  const bootContexts = new Map<string, DaemonContext<Manifest>>();
   const providerHalf = (token: PortToken<unknown>): { record: PluginRecord; key: string } | undefined => {
     const provider = graph.providers.get(token.name);
     const record = provider === undefined ? undefined : records.get(provider);
@@ -497,7 +535,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     }),
     spawn: restrictSpawn(
       manifest.id,
-      effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
+      effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
       items,
       pins,
@@ -505,14 +543,14 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     scratch: adapters.scratch ?? NO_SCRATCH,
     fetch: restrictFetch(
       manifest.id,
-      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
       adapters.fetch,
       items,
       resolversOf(manifest.id),
     ),
     websocket: restrictWebSocket(
       manifest.id,
-      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
       websockets,
       items,
       resolversOf(manifest.id),
@@ -617,6 +655,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       if (built === null || typeof built !== 'object' || typeof (built as { then?: unknown }).then === 'function')
         throw new TypeError('build must return the half synchronously');
       record.half = built;
+      bootContexts.set(manifest.id, ctx);
       record.status = record.damage.length > 0 ? 'damaged' : 'serving';
       hooks.attach(manifest.id, built.hooks as Readonly<Record<string, unknown>> | undefined, 'live');
       for (const event of manifest.data?.subscribes ?? []) {
@@ -842,6 +881,14 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     doctor: async () => [...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))],
     stop: () => stopHost(),
   };
+
+  for (const [id, ctx] of bootContexts) {
+    const record = records.get(id);
+    const run = record?.half?.beforeListen;
+    if (record?.status !== 'serving' || run === undefined) continue;
+    trace.push(`beforeListen:${id}`);
+    await beforeListen(() => run(ctx), id, clock, log);
+  }
 
   // 7. Listen: the local listener and every carrier.
   trace.push('listen');

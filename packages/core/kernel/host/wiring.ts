@@ -14,6 +14,7 @@ import { type LogSink, scopedLog } from './log.ts';
 import {
   createNodeHostFs,
   createStatePort,
+  acquireHomeLock,
   type HostFs as StateFs,
   moveStateAside,
   openPluginState,
@@ -85,6 +86,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
     });
     return {
       port: plugin => service.port(plugin),
+      secretReferences: plugin => service.secretReferences(plugin),
       writer: () => service.writer(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
@@ -113,6 +115,7 @@ export function realAdapters(
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
     config: configService(home, stateFs, clock, log.child('config'), options.binary),
+    lockHome: () => acquireHomeLock({ home, binary: options.binary }),
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),

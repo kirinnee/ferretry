@@ -14,7 +14,7 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
-import type { Cancel, KernelPorts } from '../contract/ports.ts';
+import type { Cancel, KernelPorts, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import type { Manifest } from './types.ts';
@@ -92,6 +92,8 @@ export interface HookInvoker {
   decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision>;
   transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>>;
   provider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): V | 'unavailable';
+  /** The declaring plugin id, even when off, failed or skeleton; undefined when nobody declares that key. */
+  declaredProvider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): string | undefined;
   providers<K extends string, V>(hook: ProvideHook<string, K, V>): ReadonlyMap<K, V>;
   contributions<I>(hook: ContributeHook<string, I>): readonly Contribution<I>[];
 }
@@ -129,7 +131,10 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'hooks', HookImplsOf<M>> &
   Section<'subscribers', SubscribersOf<M>> &
   Section<'doctor', { readonly [K in DoctorIdsOf<M>]: DoctorRun }> &
-  Section<'resolvers', { readonly [K in ResolverIdsOf<M>]: NetworkResolver }>;
+  Section<'resolvers', { readonly [K in ResolverIdsOf<M>]: NetworkResolver }> & {
+    /** Once per boot after state and ports are ready, under the home lock, before listeners. Best effort; at most 5 seconds. */
+    readonly beforeListen?: (ctx: DaemonContext<M>) => Promise<void>;
+  };
 
 export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly half: 'daemon';
@@ -273,6 +278,17 @@ export interface CliContext<M extends Manifest> {
   readonly manifest: M;
   readonly client: PluginClient;
   readonly io: TerminalIo;
+  /**
+   * UTF-8 text from a path (relative to the CLI working directory); '-' reads stdin.
+   * As today's readRecipe (Bun.file/Bun.stdin.text): no reader size cap. The caller validates length
+   * (a sign-in recipe, for example, must be 1–4000 characters).
+   */
+  readText?(path: string): Promise<string>;
+  /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
+  readonly ownState?: Pick<
+    StatePort,
+    'write' | 'pathOf' | 'stat' | 'remove' | 'list' | 'removeEmptyDirectory' | 'createPrivateDirectory'
+  >;
   /** The time, for a verb that reports or waits. Optional until the fy shell fills it in. */
   readonly clock?: { now(): Instant; nowMs(): number };
   /** Waits, cancellable (a poll loop). */

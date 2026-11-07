@@ -18,6 +18,7 @@ export type Protocol = typeof PROTOCOL;
  */
 export interface SessionPrincipal {
   readonly kind: 'device' | 'member';
+  /** For a Catalogs member session: the member KEY id (SessionMember.keyId), for per-key tracking, unlock and revoke. */
   readonly holder: HolderId;
   readonly session: SessionId;
   /** The access lease (15 min from proof, renewed; R241). */
@@ -262,6 +263,18 @@ export interface HolderWatch {
   /** The holder's grants changed: an open stream is asked again and ends `1008` if no longer allowed. */
   regranted(): void;
 }
+
+/** The member-mode proof body; the signature itself is checked through ModeRedemption.prove. */
+export type MemberRedemptionBody =
+  | {
+      readonly act: 'join';
+      readonly code: string;
+      readonly clientName: string;
+      readonly memberKey: string;
+      readonly boxKey: string;
+      readonly passkey?: unknown;
+    }
+  | { readonly act: 'join-options'; readonly code: string; readonly memberKey: string; readonly origin: string };
 
 /** One redemption of a one-time record (a pairing code, a share code), as the kernel hands it to the mode. */
 export interface ModeRedemption {
