@@ -342,10 +342,10 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
   ];
 
   for (const row of rows) {
-    it(`check ${row.check}: ${row.reason} (a plan line)`, () => {
+    it(`I210 check ${row.check}: ${row.reason} (a plan line)`, () => {
       should(reasonOf(grant(row.grant), sighting(row.seen, row.listing))).equal(row.reason);
     });
-    it(`check ${row.check}: ${row.rule ?? row.reason} (a standing rule)`, () => {
+    it(`I210 I221 check ${row.check}: ${row.rule ?? row.reason} (a standing rule)`, () => {
       should(reasonOf(ruleGrant(row.grant), sighting(row.seen, row.listing))).equal(row.rule ?? row.reason);
     });
   }
@@ -379,7 +379,7 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
     should(reasonOf(ticked, noKey)).equal('account-lacks-field');
   });
 
-  it('check 17: the first fill pins the form; a later one with another form misses, the same one fills', () => {
+  it('I211 check 17: the first fill pins the form; a later one with another form misses, the same one fills', () => {
     const first = matchSignInGrant(grant(), sighting(), new Map());
     if (!first.ok) throw new Error('expected a fill');
     const pinned = new Map([[first.fieldSet, first.identity]]);
@@ -425,7 +425,7 @@ for (const source of ['plan', 'rule'] as const)
     const sudoSeen = (facts: TerminalFacts, matchKey = 'sudo@kirin-box'): GrantSighting =>
       sighting({ facts, matchKey, fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }] }, sudoListing);
 
-    it('should fill a proved, setuid-root sudo prompt in line mode with echo off', () => {
+    it('S124 should fill a proved, setuid-root sudo prompt in line mode with echo off', () => {
       should(reasonOf(sudoGrant(), sudoSeen(terminal()))).equal('filled');
     });
 
@@ -446,7 +446,7 @@ for (const source of ['plan', 'rule'] as const)
       },
     ];
     for (const row of rows)
-      it(`should not fill ${row.name}: ${row.reason}`, () => {
+      it(`S124 I229 should not fill ${row.name}: ${row.reason}`, () => {
         // The match key follows the PROVED program, so a renamed shell and passwd would not even be at sudo@kirin-box;
         // the row still proves the checks behind it on their own.
         should(reasonOf(sudoGrant(), sudoSeen(row.facts))).equal(row.reason);
@@ -471,7 +471,7 @@ for (const source of ['plan', 'rule'] as const)
       ).equal('not-here');
     });
 
-    it('should not type a username or a code into sudo, even under a grant that names them', () => {
+    it('S113 I229 should not type a username or a code into sudo, even under a grant that names them', () => {
       const wide = { ...sudoGrant(), fields: new Set(['username', 'password'] as const) } as SignInGrant;
       const seen = sighting(
         {
@@ -556,7 +556,7 @@ describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
     should(reasonOf(grant(), added)).equal('filled');
   });
 
-  it('8: the code comes from the PINNED key, never the first key by `verified` order (secrev-1241 I1)', () => {
+  it('I221 S116 8: the code comes from the PINNED key, never the first key by `verified` order (secrev-1241 I1)', () => {
     const pinned = key('tf_00000000000b', '2026-09-01T00:00:00.000Z', false);
     const steered = key('tf_00000000000a', '2026-08-01T00:00:00.000Z', true);
     const factors = [steered, pinned];
@@ -593,7 +593,7 @@ describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
     should(reasonOf(ruleWith([pinned]), seenWith([pinned]))).equal('factor-changed');
   });
 
-  it('15b: a page script on one of its login domains since it was approved, in ANY session, stops it', () => {
+  it('I224 S121 15b: a page script on one of its login domains since it was approved, in ANY session, stops it', () => {
     const at = (hosts: [string, number][], everywhere?: number): Partial<GrantSighting> => ({
       scriptedOrigins: { hosts: new Map(hosts), ...(everywhere === undefined ? {} : { everywhere }) },
     });
@@ -636,7 +636,7 @@ describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
     should(reasonOf(grant(), sighting({ facts: renamed }), new Map())).equal('filled');
   });
 
-  it('17: a username-only step outside the history asks, and is no suspension; a lone code box may only join', () => {
+  it('I233 17: a username-only step outside the history asks, and is no suspension; a lone code box may only join', () => {
     const userOnly = page({}, [pageField('user')]);
     should(
       reasonOf(

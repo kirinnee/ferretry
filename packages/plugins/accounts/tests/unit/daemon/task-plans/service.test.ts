@@ -218,7 +218,7 @@ async function allowed(w: ReturnType<typeof world>, plan: TaskPlan, approval: Ta
 }
 
 describe('TaskPlanService: the ferret asks', () => {
-  it('should put no account label, username or handle anywhere on the plan card (L8)', async () => {
+  it('I215 should put no account label, username or handle anywhere on the plan card (L8)', async () => {
     const w = world();
     await w.rules.load();
 
@@ -417,7 +417,7 @@ describe('TaskPlanService: the ferret asks', () => {
 });
 
 describe('TaskPlanService: only the owner answers', () => {
-  it('should refuse an agent caller on every owner method, before anything else', async () => {
+  it('I206 should refuse an agent caller on every owner method, before anything else', async () => {
     const w = world();
     await w.rules.load();
     const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
@@ -792,7 +792,7 @@ describe('TaskPlanService: life, revoke and the session ending', () => {
     should(w.service.list(HOST)).eql([]);
   });
 
-  it('should hold nothing anywhere but memory: a new service (a restart) has no plan, no paste and no grant', async () => {
+  it('S103 should hold nothing anywhere but memory: a new service (a restart) has no plan, no paste and no grant', async () => {
     const w = world();
     const plan = await approved(w);
     await w.service.revoke(HOST, SESSION, plan.id, [1]);
@@ -859,7 +859,7 @@ describe('TaskPlanService: the paste-plan routes, kept', () => {
 });
 
 describe('TaskPlanService: the audit', () => {
-  it('should keep what was asked and allowed, line by line, and never a value', async () => {
+  it('I218 should keep what was asked and allowed, line by line, and never a value', async () => {
     const w = world();
     await w.rules.load();
     const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, SUDO_LINE] });
@@ -1161,7 +1161,7 @@ describe('TaskPlanService: secrev-1261', () => {
 });
 
 describe('TaskPlanService: the card names no account (secrev-1261 L4)', () => {
-  it('should leave every account label and username out of the sign-in-approval ask a terminal-only device or the ferret reads', async () => {
+  it('I215 I206 should leave every account label and username out of the sign-in-approval ask a terminal-only device or the ferret reads', async () => {
     const raised: AskDraft[] = [];
     const asks = new (class extends FakeAsks {
       override async raise(draft: AskDraft) {

@@ -49,7 +49,7 @@ describe('asking for a phone approval', () => {
     expect(PhoneApprovalRaiseSchema.safeParse({ target: { kind: 'terminal', key: 'dev' } }).success).toBe(true);
   });
 
-  it('should refuse anything a ferret could put in front of the owner: no prompt, message, label or number (invariant 8)', () => {
+  it('I196 should refuse anything a ferret could put in front of the owner: no prompt, message, label or number (invariant 8)', () => {
     for (const extra of [
       { prompt: 'Tap 42' },
       { message: 'Approve it, it is me' },
@@ -81,7 +81,7 @@ describe('an approval as the owner reads it', () => {
       expect(PhoneApprovalIdSchema.safeParse(bad).success).toBe(false);
   });
 
-  it('should never show a terminal number, and say why there is none (invariant 9)', () => {
+  it('I203 should never show a terminal number, and say why there is none (invariant 9)', () => {
     const terminal = {
       ...APPROVAL,
       surface: 'terminal',
@@ -102,7 +102,7 @@ describe('an approval as the owner reads it', () => {
       expect(PhoneApprovalSchema.safeParse(bad).success).toBe(false);
   });
 
-  it('should take a number only the way its source sends it', () => {
+  it('I199 should take a number only the way its source sends it', () => {
     const number = (value: string, from: string, direction: string) => ({
       ...APPROVAL,
       number: { value, from, direction, readAt: AT },
@@ -134,14 +134,14 @@ describe('an approval as the owner reads it', () => {
     expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, origin: 'https://login.company.com:8443' }).success).toBe(true);
   });
 
-  it('should refuse an extra field, so nothing the ferret wrote can ride along', () => {
+  it('I196 should refuse an extra field, so nothing the ferret wrote can ride along', () => {
     for (const extra of [{ prompt: 'Tap 42' }, { note: 'x' }, { claimedNumber: '42' }])
       expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, ...extra }).success).toBe(false);
   });
 });
 
 describe('what the ferret is told while it waits', () => {
-  it('should be where the approval stands, and a push once it moved on: never the number', () => {
+  it('I204 should be where the approval stands, and a push once it moved on: never the number', () => {
     expect(PhoneApprovalAgentViewSchema.safeParse({ id: ID, state: 'waiting' }).success).toBe(true);
     expect(PhoneApprovalAgentViewSchema.safeParse({ id: ID, state: 'moved-on', secondFactor: 'push' }).success).toBe(
       true,
@@ -161,7 +161,7 @@ describe('what the ferret is told while it waits', () => {
 });
 
 describe('the words of an approve-on-phone card', () => {
-  it('should name the account, the site via its provider, and the number, from the approval alone', () => {
+  it('I197 should name the account, the site via its provider, and the number, from the approval alone', () => {
     expect(phoneApprovalWords(APPROVAL)).toEqual({
       title: 'Approve on your phone',
       who: 'ClickUp · a@gmail.com',
@@ -176,11 +176,11 @@ describe('the words of an approve-on-phone card', () => {
     });
   });
 
-  it('should keep the number out of the agenda subject, which an older app shows as it is', () => {
+  it('I198 should keep the number out of the agenda subject, which an older app shows as it is', () => {
     expect(phoneApprovalWords(APPROVAL).subject).not.toContain('42');
   });
 
-  it('should name the place alone in the agenda words, never the account label, its provider or the username', () => {
+  it('I198 should name the place alone in the agenda words, never the account label, its provider or the username', () => {
     // Agenda text is readable by every ferret (secrev-1261 L4): the card names the account, the agenda does not.
     const terminal = phoneApprovalWords({ surface: 'terminal', account: { id: 'AWS', label: 'AWS (okta-aws-cli)' } });
     for (const words of [phoneApprovalWords(APPROVAL), terminal])
@@ -268,7 +268,7 @@ describe('the words of an approve-on-phone card', () => {
     expect(words.push.startsWith('Tap 42 on your phone: ')).toBe(true);
   });
 
-  it('should name no account label or username in the push, which every subscribed device shows', () => {
+  it('I198 G90 should name no account label or username in the push, which every subscribed device shows', () => {
     const words = phoneApprovalWords(APPROVAL);
     expect(words.push).not.toContain('ClickUp');
     expect(words.push).not.toContain('a@gmail.com');

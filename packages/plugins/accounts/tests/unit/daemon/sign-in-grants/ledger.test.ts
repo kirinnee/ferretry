@@ -36,7 +36,7 @@ const fill = (
   );
 
 describe('SignInGrantLedger: uses are spent synchronously', () => {
-  it('should let only one of two reservations in one tick take a line’s last use', () => {
+  it('I213 should let only one of two reservations in one tick take a line’s last use', () => {
     const ledger = new SignInGrantLedger();
     should(typeof fill(ledger, ['username', 'password'], 1, NOW)).equal('object');
     should(fill(ledger, ['username', 'password'], 1, NOW)).equal('used-up');
@@ -101,7 +101,7 @@ describe('SignInGrantLedger: one use is one sign-in attempt, and each role is ty
     should(fill(ledger, ['totp'], 0, NOW + 181_000)).equal('used-up');
   });
 
-  it('should pin each field set to the identity of its first fill, and forget it with the grant', () => {
+  it('I211 should pin each field set to the identity of its first fill, and forget it with the grant', () => {
     const ledger = new SignInGrantLedger();
     ledger.spent(reserved(fill(ledger, ['password'], 2, NOW)), 'first');
     ledger.spent(reserved(fill(ledger, ['password'], 1, NOW + 1_000)), 'second');
@@ -113,7 +113,7 @@ describe('SignInGrantLedger: one use is one sign-in attempt, and each role is ty
 });
 
 describe('SignInGrantLedger: the rate limit', () => {
-  it(`should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in within an hour, across grants`, () => {
+  it(`I220 should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in within an hour, across grants`, () => {
     const ledger = new SignInGrantLedger();
     for (let index = 0; index < FILLS_PER_HOUR_PER_SIGN_IN; index++)
       ledger.spent(
@@ -175,7 +175,7 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
       },
     );
 
-  it('should type a code only as a later step of a sign-in the rule typed the password of', () => {
+  it('I232 should type a code only as a later step of a sign-in the rule typed the password of', () => {
     const ledger = new SignInGrantLedger();
     // No attempt at all: a "confirm with 2FA" form outside a sign-in.
     should(ruleFill(ledger, ['totp'], NOW)).equal('code-without-sign-in');
@@ -196,7 +196,7 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
     should(reserved(ruleFill(ledger, ['totp'], NOW + 2_000)).opens).be.false();
   });
 
-  it('should let a code join only as the next step of that sign-in: its tab, a new document, the ferret idle (delta F2)', () => {
+  it('I232 should let a code join only as the next step of that sign-in: its tab, a new document, the ferret idle (delta F2)', () => {
     const ledger = new SignInGrantLedger();
     ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
     const asked = (over: Partial<GrantTarget>) =>
@@ -238,7 +238,7 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
     should(ruleFill(ledger, ['totp'], NOW + 202_000)).equal('code-without-sign-in');
   });
 
-  it('should keep one session’s attempt to itself: another ferret’s code never joins it, its steps never share a use', () => {
+  it('I223 should keep one session’s attempt to itself: another ferret’s code never joins it, its steps never share a use', () => {
     const ledger = new SignInGrantLedger();
     ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
     should(ledger.joinable(RULE, SESSION, NOW + 1_000)).be.true();

@@ -52,7 +52,7 @@ function rulesOver(files: SpyDocument) {
 }
 
 describe('a standing rule is on disk, in one file', () => {
-  it('should write only sign-in-rules.json for a commit, and find the rule again after a restart', async () => {
+  it('S103 should write only sign-in-rules.json for a commit, and find the rule again after a restart', async () => {
     // Arrange
     const files = new SpyDocument();
     const rules = rulesOver(files);
@@ -73,7 +73,7 @@ describe('a standing rule is on disk, in one file', () => {
 });
 
 describe('a task plan’s sign-in line is in memory only', () => {
-  it('should write no file when a sign-in line is raised, staged and committed', async () => {
+  it('S103 should write no file when a sign-in line is raised, staged and committed', async () => {
     // Arrange
     const pasteWrites: unknown[] = [];
     const rules = new PasteRuleService({

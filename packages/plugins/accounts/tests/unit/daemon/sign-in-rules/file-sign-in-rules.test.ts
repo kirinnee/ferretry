@@ -49,7 +49,7 @@ describe('the standing rules file', () => {
     should(await new FileSignInRuleStore(new MemoryDocument()).read()).be.undefined();
   });
 
-  it('should refuse every damaged document whole: zero rules, damaged, audited, never a default', async () => {
+  it('S128 should refuse every damaged document whole: zero rules, damaged, audited, never a default', async () => {
     for (const [name, text] of await damages()) {
       // Arrange
       const file = new MemoryDocument(text);

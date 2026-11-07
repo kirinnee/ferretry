@@ -219,7 +219,7 @@ describe('RuleSignInGrants: the synchronous last check before typing', () => {
     should(scoped.holds(projectGrant, LOGIN)).be.false();
   });
 
-  it('should refuse the moment a page script runs on its place, before the suspension is even written', async () => {
+  it('S121 should refuse the moment a page script runs on its place, before the suspension is even written', async () => {
     const w = await world();
     await approved(w);
     const { source } = grants(w);
@@ -237,7 +237,7 @@ describe('RuleSignInGrants: the synchronous last check before typing', () => {
     should(w.store.document?.rules[0]?.suspended?.because).equal('scripted-origin');
   });
 
-  it('should refuse EVERY rule when a script ran where its origin could not be read, and suspend them on disk', async () => {
+  it('S121 I224 should refuse EVERY rule when a script ran where its origin could not be read, and suspend them on disk', async () => {
     const w = await world();
     await approved(w);
     const { source } = grants(w);
@@ -299,7 +299,7 @@ describe('RuleSignInGrants: the offline re-check before the second match', () =>
     should(w.store.document?.rules[0]?.suspended?.because).equal('recipe-changed');
   });
 
-  it('should fill nothing and suspend nothing while the registry or the accounts cannot be read', async () => {
+  it('I222 should fill nothing and suspend nothing while the registry or the accounts cannot be read', async () => {
     const w = await world();
     await approved(w);
     const { source } = grants(w);
@@ -325,7 +325,7 @@ describe('RuleSignInGrants: the offline re-check before the second match', () =>
 });
 
 describe('RuleSignInGrants: uses, stops and the stamped project', () => {
-  it('should count a use the moment it is spent, before the rule service has written it (invariant 21)', async () => {
+  it('I213 should count a use the moment it is spent, before the rule service has written it (invariant 21)', async () => {
     const w = await world();
     await approved(w, { signIn: GITHUB, fields: ['username', 'password'], uses: 1 });
     const { source } = grants(w);
@@ -539,7 +539,7 @@ describe('RuleSignInGrants: terminal rules only while sign-in-rules-terminal.1 i
     should(sudo === undefined ? false : built.holds(sudo, PASSWORD_ONLY)).be.true();
   });
 
-  it('should offer a terminal rule on disk to no fill, and hold it at no write, while the gate is off or not wired', async () => {
+  it('S126 should offer a terminal rule on disk to no fill, and hold it at no write, while the gate is off or not wired', async () => {
     // Arrange — a sudo rule approved and on disk, beside a page rule
     const w = await world();
     await approved(w, { signIn: SUDO, fields: ['password'] });

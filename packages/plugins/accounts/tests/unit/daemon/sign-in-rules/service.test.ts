@@ -56,7 +56,7 @@ const refusal = async (work: Promise<unknown> | (() => unknown)): Promise<SignIn
 const rules = (w: World): readonly SignInRuleRecord[] => w.store.document?.rules ?? [];
 
 describe('only the owner makes, reads or changes a rule (invariant 2)', () => {
-  it('should refuse a ferret on every owner method before anything is read or written', async () => {
+  it('S130 should refuse a ferret on every owner method before anything is read or written', async () => {
     // Arrange
     const w = await world();
     const { staged, view } = await approved(w);
@@ -91,7 +91,7 @@ describe('only the owner makes, reads or changes a rule (invariant 2)', () => {
 });
 
 describe('stage and commit: a fresh passkey bound to the bytes written (invariants 3, 35)', () => {
-  it('should write the rule with its proof, check it again, audit it, and name no username in the audit', async () => {
+  it('S106 I231 should write the rule with its proof, check it again, audit it, and name no username in the audit', async () => {
     // Arrange
     const w = await world();
 
@@ -120,7 +120,7 @@ describe('stage and commit: a fresh passkey bound to the bytes written (invarian
     should(JSON.stringify(w.audits)).not.containEql(USERNAME);
   });
 
-  it('should hand the claim the challenge derived again from the staged body, and keep waiting without a proof', async () => {
+  it('S107 S108 should hand the claim the challenge derived again from the staged body, and keep waiting without a proof', async () => {
     // Arrange
     const w = await world();
     const staged = await w.service.stage(deviceOwner(), DRAFT);
@@ -165,7 +165,7 @@ describe('stage and commit: a fresh passkey bound to the bytes written (invarian
     should(rules(w)).eql([]);
   });
 
-  it('should refuse a commit whose sign-in changed after the stage: 409 conflict, no rule, the proof spent', async () => {
+  it('S108 should refuse a commit whose sign-in changed after the stage: 409 conflict, no rule, the proof spent', async () => {
     // Arrange
     const w = await world();
     const staged = await w.service.stage(deviceOwner(), DRAFT);
@@ -194,7 +194,7 @@ describe('stage and commit: a fresh passkey bound to the bytes written (invarian
     should(w.service.viewStage(deviceOwner(), staged.stage).state).equal('denied');
   });
 
-  it('should answer a stage only to the device it waits on: another device gets no challenge and cannot commit', async () => {
+  it('S107 should answer a stage only to the device it waits on: another device gets no challenge and cannot commit', async () => {
     // Arrange
     const w = await world();
     const staged = await w.service.stage(deviceOwner(), DRAFT);
@@ -272,7 +272,7 @@ describe('stage and commit: a fresh passkey bound to the bytes written (invarian
 });
 
 describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 36)', () => {
-  it('should refuse a terminal program but sudo, su or doas, a provider sign-in and one never tapped in, before any passkey', async () => {
+  it('S111 I229 should refuse a terminal program but sudo, su or doas, a provider sign-in and one never tapped in, before any passkey', async () => {
     // Arrange — ssh and npm on this machine, both with the owner's terminal taps
     const base = listing();
     const tool = (id: string, place: object) =>
@@ -349,7 +349,7 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     should([keyless.status, keyless.code]).eql([409, 'no_code_key']);
   });
 
-  it('should pin the NEWEST key by when it was added, never the one whose code went through', async () => {
+  it('S116 should pin the NEWEST key by when it was added, never the one whose code went through', async () => {
     // Arrange — the older key is the one a code "worked" for; the newer one never was
     const base = listing();
     const keys = [totpKey('tf_000000000001', '2026-09-01T00:00:00.000Z', true), totpKey('tf_000000000002', T)];
@@ -391,7 +391,7 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     should(listed.rules[0]?.codeKey).equal('Key no longer listed');
   });
 
-  it('should refuse a lifetime past 90 days or under an hour (the draft schema)', async () => {
+  it('I220 should refuse a lifetime past 90 days or under an hour (the draft schema)', async () => {
     const w = await world();
     for (const lifetimeSeconds of [91 * 86_400, 3_599]) {
       const refused = await refusal(w.service.stage(deviceOwner(), { ...DRAFT, lifetimeSeconds }));
@@ -425,7 +425,7 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     should(rules(w)).eql([]);
   });
 
-  it('should keep one rule per sign-in: a second approval must name the rule it replaces', async () => {
+  it('S112 should keep one rule per sign-in: a second approval must name the rule it replaces', async () => {
     const w = await world();
     const { view } = await approved(w);
     const again = await refusal(w.service.stage(deviceOwner(), DRAFT));
@@ -464,7 +464,7 @@ describe('narrow and revoke: no passkey, only ever take away (invariant 20)', ()
     should(w.store.writes).equal(writes);
   });
 
-  it('should write a strictly narrower overlay with no passkey and audit it', async () => {
+  it('S110 should write a strictly narrower overlay with no passkey and audit it', async () => {
     const w = await world();
     const { view } = await approved(w, { ...DRAFT, uses: 5 });
     const end = new Date(NOW + 86_400_000).toISOString();
@@ -474,7 +474,7 @@ describe('narrow and revoke: no passkey, only ever take away (invariant 20)', ()
     should(actions(w)).eql(['sign-in-rule-created', 'sign-in-rule-narrowed']);
   });
 
-  it('should revoke one rule, or every rule of an account, with no passkey', async () => {
+  it('S110 should revoke one rule, or every rule of an account, with no passkey', async () => {
     const w = await world();
     const { view } = await approved(w);
     should(await w.service.revokeAccount(HOST_OWNER, 'GITHUB_WORK' as never)).eql({ revoked: 1 });
@@ -485,7 +485,7 @@ describe('narrow and revoke: no passkey, only ever take away (invariant 20)', ()
 });
 
 describe('suspension: drift, sticky, never silent (invariants 16, 17, 18)', () => {
-  it('should suspend on a pinned fact that drifted, stay suspended when it drifts back, and resume only with a new passkey', async () => {
+  it('S117 S118 should suspend on a pinned fact that drifted, stay suspended when it drifts back, and resume only with a new passkey', async () => {
     // Arrange
     const w = await world();
     const { view } = await approved(w);
@@ -512,7 +512,7 @@ describe('suspension: drift, sticky, never silent (invariants 16, 17, 18)', () =
     should(w.audits[1]?.detail).containDeep({ because: 'place-changed', revision: 1 });
   });
 
-  it('should audit a suspension from every trigger: a passkey gone, a device revoked, a script, a fill', async () => {
+  it('S122 I231 should audit a suspension from every trigger: a passkey gone, a device revoked, a script, a fill', async () => {
     // Arrange — four sign-ins, one rule each
     const base = listing();
     const extra = ['a5', 'a6', 'a7'].map((suffix, index) =>
@@ -547,7 +547,7 @@ describe('suspension: drift, sticky, never silent (invariants 16, 17, 18)', () =
     });
   });
 
-  it('should suspend every rule a revoked device approved, whatever the passkey purge does after', async () => {
+  it('S119 P124 should suspend every rule a revoked device approved, whatever the passkey purge does after', async () => {
     const w = await world();
     const { view } = await approved(w);
     await w.service.forgetDevice(DEVICE);
@@ -566,7 +566,7 @@ describe('suspension: drift, sticky, never silent (invariants 16, 17, 18)', () =
     should((await w.service.list(HOST_OWNER)).rules[0]?.status).equal('active');
   });
 
-  it('should keep a suspension in memory when the file cannot be written', async () => {
+  it('S123 should keep a suspension in memory when the file cannot be written', async () => {
     const w = await world();
     const { view } = await approved(w);
     w.store.failWrites = true;
@@ -600,7 +600,7 @@ describe('suspension: drift, sticky, never silent (invariants 16, 17, 18)', () =
 });
 
 describe('load: strict, fails closed, checks every proof again (invariants 5, 8, 9)', () => {
-  it('should hold zero rules when the file is damaged, audit it, and move it aside before the next write', async () => {
+  it('S128 should hold zero rules when the file is damaged, audit it, and move it aside before the next write', async () => {
     // Arrange
     const store = new MemoryRuleStore();
     store.damaged = 'v: 2';
@@ -627,7 +627,7 @@ describe('load: strict, fails closed, checks every proof again (invariants 5, 8,
     should(again.proofs.checks).equal(1);
   });
 
-  it('should suspend a record whose signed body was edited on disk (proof-invalid)', async () => {
+  it('S120 should suspend a record whose signed body was edited on disk (proof-invalid)', async () => {
     // Arrange
     const first = await world();
     await approved(first);
@@ -752,7 +752,7 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
     should(actions(w)).eql(['sign-in-rule-created']);
   });
 
-  it('should take up to 7 days, never more, and refuse a username or a code', async () => {
+  it('S113 I220 should take up to 7 days, never more, and refuse a username or a code', async () => {
     // Arrange
     const w = await world();
 

@@ -113,7 +113,7 @@ describe('the service before it has read its file', () => {
     should((await again.service.list(HOST_OWNER)).rules[0]?.unverified).be.undefined();
   });
 
-  it('should answer 503 to the list while load is still checking the rules, never show them as active', async () => {
+  it('S120 should answer 503 to the list while load is still checking the rules, never show them as active', async () => {
     // Arrange — a registry that answers only when the test lets it
     const first = await world();
     await approved(first);

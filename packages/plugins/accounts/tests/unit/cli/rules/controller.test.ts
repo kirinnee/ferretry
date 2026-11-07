@@ -175,7 +175,7 @@ function rig(overrides: Partial<RulesPorts> = {}) {
 }
 
 describe('fy rules (controller)', () => {
-  it('should refuse every command inside a ferret pane or with an agent credential, before any call', async () => {
+  it('S132 should refuse every command inside a ferret pane or with an agent credential, before any call', async () => {
     for (const caller of [{ ownSessionId: 's1' }, { agentCredential: 'cap' }]) {
       const { controller, gateway } = rig(caller);
       for (const run of [

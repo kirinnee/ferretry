@@ -136,7 +136,7 @@ describe('CombinedSignInGrants', () => {
     should(ledger.pinned('rule:sr_1:1').size).equal(0);
   });
 
-  it(`should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in in an hour across a plan line and a rule`, () => {
+  it(`I220 should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in in an hour across a plan line and a rule`, () => {
     const ledger = new SignInGrantLedger();
     for (let index = 0; index < FILLS_PER_HOUR_PER_SIGN_IN; index++) {
       const id = index % 2 === 0 ? 'plan:ab:0' : 'rule:sr_1:1';

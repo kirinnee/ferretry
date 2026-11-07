@@ -130,7 +130,7 @@ describe('drift suspends, with the reason (invariant 16)', () => {
     ],
   ];
   for (const [name, change, because] of cases)
-    it(`should suspend on ${name}`, () => {
+    it(`S117 should suspend on ${name}`, () => {
       const world = base();
       should(ruleDrift(bodyOver(world), change(world))).equal(because);
     });

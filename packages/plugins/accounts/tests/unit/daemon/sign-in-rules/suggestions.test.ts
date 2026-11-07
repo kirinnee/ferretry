@@ -91,7 +91,7 @@ const refusal = async (promise: Promise<unknown>): Promise<SignInRuleSuggestionE
 };
 
 describe('SignInRuleSuggestions — what a ferret may ask', () => {
-  it('should raise one card that names the host and nothing the ferret or the owner wrote', async () => {
+  it('S131 should raise one card that names the host and nothing the ferret or the owner wrote', async () => {
     // Arrange
     const w = world();
 
@@ -127,7 +127,7 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
     should(view?.why).not.containEql('\n');
   });
 
-  it('should keep nothing a rule needs: no stage, no draft, and no way for a plain answer to approve it', async () => {
+  it('S131 I230 should keep nothing a rule needs: no stage, no draft, and no way for a plain answer to approve it', async () => {
     // Arrange
     const w = world();
 

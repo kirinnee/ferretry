@@ -197,7 +197,7 @@ describe('a suspension whose write failed is written later (secrev-1274b L3)', (
 });
 
 describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-1271 L6)', () => {
-  it('should have no agenda, notice or message port at all, so it cannot', () => {
+  it('S122 I227 should have no agenda, notice or message port at all, so it cannot', () => {
     // A port the service could raise a card or tell a session through would have to be one of these.
     const ports: readonly (keyof SignInRulePorts)[] = [
       'store',
@@ -227,7 +227,7 @@ describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-
     should(Object.keys(every)).eql([...ports]);
   });
 
-  it('should record a fill-caused suspension only in the owner’s audit, with the session as a detail', async () => {
+  it('S122 I231 should record a fill-caused suspension only in the owner’s audit, with the session as a detail', async () => {
     const w = await world();
     const { view } = await approved(w);
     await w.service.suspend(view.id, 'did-not-move-on', { sessionId: 'mvv6b4qw-49d0158d' });
