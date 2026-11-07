@@ -229,7 +229,9 @@ test('nothing secret appears in the report: recipes, a collector address and ret
   await raw('state/operator-password.json', JSON.stringify({ verifier: marker }));
   await raw('config/routing.json', JSON.stringify({ accounts: [{ accountId: marker }] }));
   const report = await daemonSettingsStep.run(f.ctx());
-  expect(report.status).toBe('converted');
+  // routing.json waits for Packs: the step is pending, and its file is named, never its contents.
+  expect(report.status).toBe('pending');
+  expect(report.note).toContain('config/routing.json');
   const shown = JSON.stringify(report);
   expect(shown).not.toContain(marker);
   expect(shown).not.toContain('own-app.example.com');
@@ -238,7 +240,6 @@ test('nothing secret appears in the report: recipes, a collector address and ret
     'config/daemon.json secretEnvironment',
     'config/daemon.json usage',
     'config/daemon.json terminals',
-    'config/routing.json',
     'state/operator-password.json',
   ])
     expect(dropped).toContain(what);
