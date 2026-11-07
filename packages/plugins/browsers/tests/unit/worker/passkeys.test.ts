@@ -19,7 +19,7 @@ function recording(
   };
 }
 
-describe('disablePasskeys', () => {
+describe('I123 disablePasskeys', () => {
   it('enables WebAuthn without its UI, adds a virtual authenticator that cannot verify, and makes every touch bad', async () => {
     const session = recording({ 'WebAuthn.addVirtualAuthenticator': { authenticatorId: 'auth-1' } });
     await disablePasskeys(session);

@@ -877,7 +877,7 @@ describe('the machine agent browser — a page’s lifecycle', () => {
     should(tabs.calls.filter(call => call.startsWith('lifecycle'))).deepEqual([]);
   });
 
-  it('should run the input bridge on the session’s own named page, in its queue, and refuse another session’s', async () => {
+  it('I111 should run the input bridge on the session’s own named page, in its queue, and refuse another session’s', async () => {
     // Arrange
     const { tabs, service } = harness();
     const app = await service.openPage('s1', 'app');
@@ -1044,7 +1044,7 @@ describe('the machine agent browser — a page’s lifecycle', () => {
   });
 });
 
-describe('the machine agent browser — who a page signs in (secrev-1331-delta N1)', () => {
+describe('I154 I155 the machine agent browser — who a page signs in (secrev-1331-delta N1)', () => {
   const HOST = 'accounts.google.com';
   /** The browser with the daemon's real record of who each page signs in, the ferret having typed kirinnee97 on `app`. */
   async function signingIn(tabs = new Tabs()) {

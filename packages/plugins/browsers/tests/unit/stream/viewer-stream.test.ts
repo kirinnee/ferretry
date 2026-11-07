@@ -178,7 +178,7 @@ describe('browser viewer stream — downstream frames', () => {
     should(stream.finished).be.true();
   });
 
-  it('should retain only the newest frame while the transport is congested', async () => {
+  it('R553 should retain only the newest frame while the transport is congested', async () => {
     // Arrange
     const { host, downstream, clock } = await connect();
     downstream.buffered = 1;
@@ -214,7 +214,7 @@ describe('browser viewer stream — downstream frames', () => {
     should(jpegTextOf(envelopesIn(downstream.sent)[0])).equal(pixels);
   });
 
-  it('should not send a frame identical to the last one the transport accepted', async () => {
+  it('R553 should not send a frame identical to the last one the transport accepted', async () => {
     // Arrange
     const { host, downstream } = await connect();
     host.onFrame?.(frame());
@@ -243,7 +243,7 @@ describe('browser viewer stream — downstream frames', () => {
     should(envelopesIn(downstream.sent).map(jpegTextOf)).eql(['jpeg-bytes']);
   });
 
-  it('should resend a frame whole, under a new serial, when the transport drops one of its chunks', async () => {
+  it('R553 should resend a frame whole, under a new serial, when the transport drops one of its chunks', async () => {
     // Arrange
     const { host, downstream, clock } = await connect({ options: { chunkBytes: 40 } });
     const pixels = 'y'.repeat(100);
@@ -370,7 +370,7 @@ describe('browser viewer stream — downstream frames', () => {
 });
 
 describe('browser viewer stream — upstream input', () => {
-  it('should dispatch normalized input from text and binary messages in arrival order', async () => {
+  it('R549 should dispatch normalized input from text and binary messages in arrival order', async () => {
     // Arrange
     const { host, stream } = await connect();
 

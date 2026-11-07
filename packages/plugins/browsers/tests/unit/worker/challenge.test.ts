@@ -9,7 +9,7 @@ const page = (overrides: Partial<{ url: string; title: string; frameUrls: readon
   ...overrides,
 });
 
-describe('recogniseBrowserChallenge', () => {
+describe('I124 recogniseBrowserChallenge', () => {
   it('should see nothing on an ordinary page', () => {
     // Act + Assert
     should(recogniseBrowserChallenge(page())).be.undefined();

@@ -487,7 +487,7 @@ describe('observeInputFields', () => {
     should(password?.field).eql({ tag: 'input', type: 'password', autocomplete: 'current-password', name: 'pw' });
   });
 
-  it('asks the handle which node it holds, never the page, and disposes every handle', async () => {
+  it('I110 asks the handle which node it holds, never the page, and disposes every handle', async () => {
     const { world } = loginWorld();
     await observed(world, ['#user', '#pw']);
     const session = world.session('page-target');
@@ -603,7 +603,7 @@ describe('observeInputFields', () => {
     ).containEql({ x: 25, y: 25 });
   });
 
-  it('names a field whose element is not on the page, for a stale ref and for a selector alike', async () => {
+  it('I111 names a field whose element is not on the page, for a stale ref and for a selector alike', async () => {
     const { world } = loginWorld();
     const stale = await observeInputFields(world.subject, [
       target('#user'),

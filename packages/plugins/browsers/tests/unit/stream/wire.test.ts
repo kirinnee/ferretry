@@ -39,7 +39,7 @@ const concat = (parts: readonly Uint8Array[]): Uint8Array => {
   return whole;
 };
 
-describe('browser stream chunks', () => {
+describe('R548 browser stream chunks', () => {
   it('cuts an envelope into chunks no larger than one record, and reassembles it exactly', () => {
     const envelope = envelopeOf(250);
     const chunks = encodeBrowserStreamChunks(7, envelope, BROWSER_STREAM_CHUNK_HEADER_BYTES + 100);
@@ -85,7 +85,7 @@ describe('browser stream chunks', () => {
     should(envelopes.map(envelope => [...envelope])).eql([[...resent]]);
   });
 
-  it('abandons a partial frame when a new one starts, and ignores a continuation of another serial', () => {
+  it('R548 abandons a partial frame when a new one starts, and ignores a continuation of another serial', () => {
     const partial = encodeBrowserStreamChunks(8, envelopeOf(60, 6), BROWSER_STREAM_CHUNK_HEADER_BYTES + 32);
     const stranger = encodeBrowserStreamChunks(9, envelopeOf(60, 7), BROWSER_STREAM_CHUNK_HEADER_BYTES + 32);
     const whole = envelopeOf(20, 8);
@@ -100,7 +100,7 @@ describe('browser stream chunks', () => {
     should(feed([stranger[1] as Uint8Array]).envelopes).have.length(0);
   });
 
-  it('fails closed on a stream that lost its framing', () => {
+  it('R548 fails closed on a stream that lost its framing', () => {
     const chunk = encodeBrowserStreamChunks(1, envelopeOf(10), 1_000)[0] as Uint8Array;
     const corrupt = (mutate: (copy: Uint8Array, view: DataView) => void): string => {
       const copy = chunk.slice();

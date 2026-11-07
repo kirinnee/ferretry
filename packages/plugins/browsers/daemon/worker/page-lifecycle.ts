@@ -1,6 +1,6 @@
-import { BROWSER_CONSOLE_BUFFER, BROWSER_CONSOLE_DEFAULT_LIMIT, BROWSER_CONSOLE_LEVELS, BROWSER_CONSOLE_MESSAGE_MAX_CHARS, BROWSER_DIALOG_HOLD_MS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_NETWORK_BODY_MAX_BYTES, BROWSER_NETWORK_BUFFER, BROWSER_NETWORK_LIST_LIMIT, type BrowserConsoleLevel, type BrowserDialogAction, type BrowserDialogInfo, BrowserDialogTypeSchema, type BrowserEmulation, type BrowserPageLifecycleReply, type BrowserPageLifecycleRequest, type BrowserResourceType, type BrowserWaitCondition } from './wire/page-lifecycle.ts';
-import { type BrowserElementTarget } from './wire/target.ts';
-import { browserSelectorOf } from './page-acts.ts';
+import { BROWSER_CONSOLE_BUFFER, BROWSER_CONSOLE_DEFAULT_LIMIT, BROWSER_CONSOLE_LEVELS, BROWSER_CONSOLE_MESSAGE_MAX_CHARS, BROWSER_DIALOG_HOLD_MS, BROWSER_DIALOG_MESSAGE_MAX_CHARS, BROWSER_NETWORK_BODY_MAX_BYTES, BROWSER_NETWORK_BUFFER, BROWSER_NETWORK_LIST_LIMIT, type BrowserConsoleLevel, type BrowserDialogAction, type BrowserDialogInfo, BrowserDialogTypeSchema, type BrowserEmulation, type BrowserPageLifecycleReply, type BrowserPageLifecycleRequest, type BrowserResourceType, type BrowserWaitCondition } from '../pages/wire/page-lifecycle.ts';
+import { type BrowserElementTarget } from '../pages/wire/target.ts';
+import { browserSelectorOf } from '../pages/page-acts.ts';
 
 /**
  * WHAT THE BROWSER WORKER KEEPS OF A PAGE'S LIFE, over the few Playwright calls it needs.

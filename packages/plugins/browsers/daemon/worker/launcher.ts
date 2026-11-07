@@ -1,4 +1,4 @@
-import { closeSync, existsSync } from 'node:fs';
+import { close, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import type { BrowserMode, BrowserProxyStatus } from '../../contract/index.ts';
 import type { ResolvedBrowserPorts } from '../proxy/wire/ports.ts';
@@ -485,8 +485,8 @@ function cdpPipeEnds(chrome: ReturnType<typeof Bun.spawn>): CdpPipeEnds {
 
 /** Closes the daemon's ends of the pipe. Called exactly once per launch, never on a descriptor reused since. */
 function closePipe(pipe: CdpPipeEnds): void {
-  closeSync(pipe.toChrome);
-  closeSync(pipe.fromChrome);
+  close(pipe.toChrome, () => undefined);
+  close(pipe.fromChrome, () => undefined);
 }
 
 /**

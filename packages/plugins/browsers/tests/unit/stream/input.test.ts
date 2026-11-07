@@ -174,7 +174,7 @@ describe('browser input normalization', () => {
     ).deepEqual({ ok: false, message: 'key input carries a non-numeric field' });
   });
 
-  it('should accept bounded inserted text and reject anything larger or non-textual', () => {
+  it('R549 should accept bounded inserted text and reject anything larger or non-textual', () => {
     // Arrange
     const text = 'hello world';
 

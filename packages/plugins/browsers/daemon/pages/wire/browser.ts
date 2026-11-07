@@ -462,8 +462,7 @@ export const BrowserActionResultSchema = z.union([
     status: RunningBrowserStatusSchema,
     result: BrowserResultPageSchema.safeExtend({
       screenshotBase64: z.string().min(1),
-      /** Absent from an older worker, whose screenshots are always PNG. */
-      screenshotFormat: BrowserScreenshotFormatSchema.optional(),
+      screenshotFormat: BrowserScreenshotFormatSchema,
     }),
   }),
   z.strictObject({ status: RunningBrowserStatusSchema, result: BrowserResultPageSchema }),

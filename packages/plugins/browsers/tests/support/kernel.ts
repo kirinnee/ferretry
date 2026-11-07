@@ -1,6 +1,6 @@
 import type { ActRecord } from '@ferretry/kernel/testing';
 import { TestMintedIds, testActRunner } from '@ferretry/kernel/testing';
-import type { Actor, Clock, KernelPorts, RefusalCode, TargetRef } from '@ferretry/kernel/contract';
+import type { Actor, Clock, KernelPorts, Op, RefusalCode, TargetRef } from '@ferretry/kernel/contract';
 import { wallClock } from './wall-clock.ts';
 
 /** Same-width `*` over each secret, the way the Vault's redaction masks a read (S16). */
@@ -14,15 +14,16 @@ const mask = (secrets: readonly string[]) => (text: string): string =>
  */
 export function browserKernel(options: { readonly secrets?: readonly string[]; readonly clock?: Clock; readonly actor?: Actor } = {}) {
   const acts: ActRecord[] = [];
-  const held = new Map<string, RefusalCode>();
+  const held = new Map<string, { readonly code: RefusalCode; readonly ops?: readonly Op[] }>();
   const keyOf = (target: TargetRef): string => `${target.kind}\u0000${target.key}`;
   const scope = mask(options.secrets ?? []);
   const kernel: Pick<KernelPorts, 'act' | 'redaction' | 'clock'> = {
     act: testActRunner({
       holds: () => ({
-        decide: target => {
-          const code = held.get(keyOf(target));
-          return code === undefined ? 'allow' : { refused: code };
+        decide: (target, op) => {
+          const hold = held.get(keyOf(target));
+          if (hold === undefined || (hold.ops !== undefined && !hold.ops.includes(op))) return 'allow';
+          return { refused: hold.code };
         },
       }),
       actor: () => options.actor ?? 'ferret',
@@ -37,7 +38,9 @@ export function browserKernel(options: { readonly secrets?: readonly string[]; r
   return {
     kernel,
     acts,
-    hold: (target: TargetRef, code: RefusalCode) => held.set(keyOf(target), code),
+    /** Refuses `ops` (every op when none are named) on `target` until released. */
+    hold: (target: TargetRef, code: RefusalCode, ops?: readonly Op[]) =>
+      held.set(keyOf(target), ops === undefined ? { code } : { code, ops }),
     release: (target: TargetRef) => held.delete(keyOf(target)),
   };
 }

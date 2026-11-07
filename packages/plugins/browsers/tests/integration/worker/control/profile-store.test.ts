@@ -24,10 +24,10 @@ async function profile(alive: (pid: number) => boolean = () => false): Promise<B
 afterEach(async () => await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))));
 
 describe('BrowserProfileStore', () => {
-  it('should turn password saving off in the profile on every lease, keeping its other preferences', async () => {
+  it('I122 should turn password saving off in the profile on every lease, keeping its other preferences', async () => {
     // Arrange — a profile made before this rule, with its own preferences and saving switched on.
     const subject = await profile();
-    const preferences = path.join(subject.browserDirectory, 'profile', 'Default', 'Preferences');
+    const preferences = path.join(subject.browserDirectory, 'data', 'agent', 'Default', 'Preferences');
     await mkdir(path.dirname(preferences), { recursive: true });
     await writeFile(
       preferences,
@@ -55,7 +55,7 @@ describe('BrowserProfileStore', () => {
     // Arrange
     const fresh = await profile();
     const damaged = await profile();
-    const damagedFile = path.join(damaged.browserDirectory, 'profile', 'Default', 'Preferences');
+    const damagedFile = path.join(damaged.browserDirectory, 'data', 'agent', 'Default', 'Preferences');
     await mkdir(path.dirname(damagedFile), { recursive: true });
     await writeFile(damagedFile, '{ not json');
 
@@ -64,17 +64,17 @@ describe('BrowserProfileStore', () => {
     await (await damaged.acquire({ sessionId: 'first' })).release();
 
     // Assert
-    for (const file of [path.join(fresh.browserDirectory, 'profile', 'Default', 'Preferences'), damagedFile])
+    for (const file of [path.join(fresh.browserDirectory, 'data', 'agent', 'Default', 'Preferences'), damagedFile])
       should(JSON.parse(await readFile(file, 'utf8'))).match({
         credentials_enable_service: false,
         profile: { password_manager_enabled: false },
       });
   });
 
-  it('should refuse the lease, and leave none behind, when password saving cannot be turned off', async () => {
+  it('I122 should refuse the lease, and leave none behind, when password saving cannot be turned off', async () => {
     // Arrange — the preferences file's place is taken by a directory, so it cannot be written.
     const subject = await profile();
-    await mkdir(path.join(subject.browserDirectory, 'profile', 'Default', 'Preferences'), { recursive: true });
+    await mkdir(path.join(subject.browserDirectory, 'data', 'agent', 'Default', 'Preferences'), { recursive: true });
 
     // Act
     let refused: unknown;
@@ -87,7 +87,7 @@ describe('BrowserProfileStore', () => {
     // Assert
     should(refused).instanceOf(BrowserControlError);
     should((refused as Error).message).containEql('could not turn off password saving');
-    await rm(path.join(subject.browserDirectory, 'profile', 'Default', 'Preferences'), { recursive: true });
+    await rm(path.join(subject.browserDirectory, 'data', 'agent', 'Default', 'Preferences'), { recursive: true });
     await (await subject.acquire({ sessionId: 'again' })).release();
   });
 
@@ -102,7 +102,7 @@ describe('BrowserProfileStore', () => {
     await lease.markPrimed('Chrome 151.0.0.0');
 
     // Assert
-    should(lease.profile).equal(path.join(subject.browserDirectory, 'profile'));
+    should(lease.profile).equal(path.join(subject.browserDirectory, 'data', 'agent'));
     should(await subject.isPrimed()).be.true();
     await subject.assertChromeVersionCompatible('Chrome 151.0.0.0');
     let downgrade: unknown;

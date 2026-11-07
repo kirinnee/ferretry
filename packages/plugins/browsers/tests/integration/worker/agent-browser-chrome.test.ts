@@ -5,11 +5,17 @@ import { join } from 'node:path';
 import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
-import { NodeAgentFilesystem } from '../../../../src/adapters/agent-files/index.ts'; // PORT: unresolved
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
-import { AgentFiles, type AgentToolCaller, AgentToolError, AgentToolService, NO_REDACTION, SurfaceControl } from '../../../../src/lib/index.ts'; // PORT: unresolved
-import { FakeTerminals } from '../../../unit/runtime/mounts/support.ts';
+import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
+import { SurfaceControl } from '../../../daemon/tools/control.ts';
+import { rootFiles } from '../../../daemon/tools/files.ts';
+import { BrowserToolError as AgentToolError, BrowserTools as AgentToolService } from '../../../daemon/tools/service.ts';
+import type { ToolCaller as AgentToolCaller } from '../../../daemon/tools/types.ts';
+import { browserKernel } from '../../support/kernel.ts';
+import { threadWorkers } from '../../support/thread-workers.ts';
+import { wallClock } from '../../support/wall-clock.ts';
+import { workRoots } from '../../support/work-root.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 /**
@@ -23,7 +29,8 @@ import { waitFor } from '../../support/wait-for.ts';
  */
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-const WORKER = join(import.meta.dir, '../../../../bin/browser-worker.ts');
+/** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
+const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
 const sessions = new Set(['s1', 's2']);
 
 /** A page with one thing for each pointer-and-keys tool to do, each writing what it saw into a log. */
@@ -57,12 +64,6 @@ let tools: AgentToolService;
 let base = '';
 
 const agent = (sessionId: string): AgentToolCaller => ({ kind: 'agent', sessionId });
-const person: AgentToolCaller & { readonly kind: 'person' } = {
-  kind: 'person',
-  sessionId: 's1',
-  actor: { kind: 'host' },
-  openedBy: { by: 'local' },
-};
 
 /** The cookie a page's own server saw, read back out of the page's text. */
 async function cookieSeenBy(sessionId: string, page: string): Promise<string> {
@@ -146,8 +147,8 @@ beforeAll(async () => {
     { get: async id => (sessions.has(id) ? {} : undefined) },
     new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      { kind: 'source', entry: WORKER },
-      node,
+      WORKERS.start,
+      wallClock(),
       {
         FY_CHROME_BIN: chrome,
         PATH: process.env.PATH,
@@ -159,26 +160,15 @@ beforeAll(async () => {
     () => Date.now(),
   );
   tools = new AgentToolService({
-    terminals: new FakeTerminals(['s1', 's2']),
     browser,
     control: new SurfaceControl({ publish: async () => undefined, history: async () => [] }, { now: () => Date.now() }),
+    kernel: browserKernel().kernel,
     policy: { allows: async () => true },
-    files: new AgentFiles({
-      fs: new NodeAgentFilesystem(),
-      folderOf: async () => join(root, 'work'),
-      readAttachment: async () => {
-        throw new Error('this test has no attachments');
-      },
-      uploadDirectory: join(root, 'upload'),
-      stateHomes: [join(root, 'work', '.fy')],
-      token: () => crypto.randomUUID().replaceAll('-', ''),
-      now: () => Date.now(),
-    }),
-    audit: { record: async () => undefined },
-    redactor: NO_REDACTION,
+    files: rootFiles(
+      workRoots(join(root, 'work'), join(root, 'work', '.fy')),
+      nodeStagedFiles(join(root, 'upload'), wallClock()),
+    ),
     binaryName: 'fy',
-    clock: { now: () => Date.now() },
-    sleep: async milliseconds => await Bun.sleep(milliseconds),
   });
 }, 60_000);
 
@@ -264,7 +254,7 @@ describe('the machine agent browser, in a real Chrome', () => {
     should((stale as AgentToolError).message).containEql('latest snapshot');
     should(back.summary).containEql(`(now at ${base}/form)`);
     should(reloaded.output).equal('idle');
-    should(shot.screenshotFormat).equal('jpeg');
+    should(shot.picture?.mime).equal('image/jpeg');
     await tools.call(agent('s1'), { tool: 'browser.close', name: 'refs' });
   }, 60_000);
 
@@ -335,7 +325,7 @@ describe('the machine agent browser, in a real Chrome', () => {
     // that failed before it opened one must not fail this one too.
     await tools.call(agent('s1'), { tool: 'browser.open', name: 'work', url: `${base}/read` });
     await tools.call(agent('s1'), { tool: 'browser.open', name: 'login', url: `${base}/read` });
-    await tools.control('s1', 'browser', { action: 'takeover', key: 'login' }, { by: 'local' }, person);
+    await tools.control('s1', { action: 'takeover', key: 'login' }, { by: 'local' });
 
     // Act
     const held = await tools

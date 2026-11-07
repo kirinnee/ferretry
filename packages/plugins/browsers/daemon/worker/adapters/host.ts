@@ -11,6 +11,8 @@ export interface BrowserHost {
   readonly stateDirectory: string;
   /** Where the worker stages a page's downloads until the agent saves them (or fifteen minutes pass). */
   readonly stageDirectory: string;
+  /** Where the daemon keeps its own copies of the files a page was handed, for the staging time. */
+  readonly uploadDirectory: string;
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly platform: NodeJS.Platform;
   /** A program on this host's PATH at the moment of use, or `undefined`. */
@@ -23,6 +25,7 @@ export function processHost(): BrowserHost {
   return {
     stateDirectory: join(home, 'state', 'browsers'),
     stageDirectory: join(home, 'tmp', 'browser-stage'),
+    uploadDirectory: join(home, 'tmp', 'browser-upload'),
     environment,
     platform: process.platform,
     which: name => Bun.which(name, { PATH: process.env.PATH ?? '' }) ?? undefined,

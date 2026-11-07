@@ -18,7 +18,7 @@
  * An INCOGNITO page gets its own browser context (its own cookies and storage, shared with nothing),
  * closed with the page.
  */
-import { closeSync } from 'node:fs';
+import { close } from 'node:fs';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { BROWSER_MODIFIERS, type BrowserElementTarget, type BrowserModifier, type BrowserMouseButton, type BrowserTarget } from '../pages/wire/target.ts';
 import { type BrowserInputEvent } from '../pages/wire/browser.ts';
@@ -81,7 +81,7 @@ import {
   PageEmulation,
   runLifecycleRequest,
   type WaitablePage,
-} from '../pages/page-lifecycle.ts';
+} from './page-lifecycle.ts';
 import { runPageScript } from './page-script.ts';
 import { disablePasskeys } from './passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/pointer.ts';
@@ -181,7 +181,7 @@ function chromePipe(pipe: { readonly toChrome: number; readonly fromChrome: numb
     close: () => {
       void Promise.resolve(toChrome.end())
         .catch(() => undefined)
-        .finally(() => closeSync(pipe.toChrome));
+        .finally(() => close(pipe.toChrome, () => undefined));
     },
   });
   void (async () => {

@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { PASSWORD_SAVING_OFF, passwordSavingOff } from '../../../../daemon/worker/control/profile.ts';
 
-describe('passwordSavingOff', () => {
+describe('I122 passwordSavingOff', () => {
   it('should force every password-saving switch off and keep every other preference', () => {
     const merged = passwordSavingOff({
       credentials_enable_service: true,

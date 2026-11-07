@@ -116,7 +116,7 @@ const readResult = {
 
 const screenshotResult = {
   status: runningStatus,
-  result: { ...actionSnapshot, screenshotBase64: 'aGVsbG8=' },
+  result: { ...actionSnapshot, screenshotBase64: 'aGVsbG8=', screenshotFormat: 'png' },
 } satisfies BrowserActionResult;
 
 const navigateResult = { status: runningStatus, result: actionSnapshot } satisfies BrowserActionResult;

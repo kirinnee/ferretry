@@ -114,10 +114,10 @@ export const SurfaceControlViewSchema = z.strictObject({
   driving: z.array(SurfaceDrivingSchema),
   takeovers: z.array(SurfaceTakeoverSchema),
   handed: z.array(SurfaceHandedSchema),
-  /** Surfaces an agent opened and that are still alive. Absent from an older daemon. */
-  opened: z.array(SurfaceOpenedSchema).default([]),
+  /** Surfaces an agent opened and that are still alive. */
+  opened: z.array(SurfaceOpenedSchema),
   /** Surfaces an agent handed to the owner and that the owner has not taken over since. */
-  asked: z.array(SurfaceAskedSchema).default([]),
+  asked: z.array(SurfaceAskedSchema),
 });
 export type SurfaceControlView = z.infer<typeof SurfaceControlViewSchema>;
 
