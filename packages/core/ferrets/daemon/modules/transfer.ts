@@ -52,7 +52,7 @@ export interface TransferNeeds {
 }
 
 /** What {@link TransferProvides.transferPorts} is built from: the two fork-side path facts the ports address. */
-interface TransferPortsParts {
+export interface TransferPortsParts {
   /** The foundation paths: the target plan and the brief live in the session's own private directory. */
   readonly paths: FoundationPaths;
   /** The ONE resolver for the attachment tree (`TransferProvides.originals`) the copier writes into. */
@@ -60,7 +60,7 @@ interface TransferPortsParts {
 }
 
 /** The transfer-only ports the fork composition hands its binder. */
-interface TransferPorts {
+export interface TransferPorts {
   readonly planStore: FileSessionTransferTargetPlanStore;
   readonly briefWriter: FileSessionTransferBriefWriter;
   readonly attachmentCopier: FileSessionAttachmentCopier;
@@ -83,7 +83,7 @@ export interface TransferProvides {
 }
 
 /** The moved fork wiring, verbatim; see {@link TransferProvides.transferPorts}. */
-function transferPorts(parts: TransferPortsParts): TransferPorts {
+export function transferPorts(parts: TransferPortsParts): TransferPorts {
   /**
    * The target's own `transfer-plan.json`, installed before import and re-read on every replay.
    *

@@ -284,6 +284,11 @@ export interface SessionHandoverNeeds {
   readonly clientName: string;
   /** The housekeeping ledger the reconcile loop's passes run inside, or none. */
   readonly activities: ActivityLedger | undefined;
+  /**
+   * The repeating timer the reconcile loop runs on: the kernel clock's `every` (5.0 has no `setInterval` in a
+   * subsystem). Called only when the loop is armed; returns its disarm.
+   */
+  readonly every: (intervalMs: number, tick: () => void) => () => void;
 }
 
 /** What other code uses of the session-handover module. */
@@ -307,7 +312,7 @@ export const sessionHandoverModule: DaemonModule<
 > = {
   id: 'sessionHandover',
   build: (needs, _seams, _lifecycle) => {
-    const { paths, storage, sessions, accounts, executables, planner, clock, clientName, activities } = needs;
+    const { paths, storage, sessions, accounts, executables, planner, clock, clientName, activities, every } = needs;
     // ONE receipt store for both readers of it: the service that writes a receipt and the loop that
     // rosters the ones which are not yet terminal. Two handles over one directory would be two
     // answers to "what is still in flight".
@@ -340,10 +345,7 @@ export const sessionHandoverModule: DaemonModule<
     // fact. Errors inside a pass are swallowed by the loop itself and surface as a receipt that
     // has not advanced, which is the honest reading of a supervision failure.
     const reconcile = new HandoverReconcileLoop(handover, handoverReceipts, {
-      every: (intervalMs, tick) => {
-        const handle = setInterval(asActivity(activities, 'handover reconcile', tick), intervalMs);
-        return () => clearInterval(handle);
-      },
+      every: (intervalMs, tick) => every(intervalMs, asActivity(activities, 'handover reconcile', tick)),
     });
     return {
       id: 'sessionHandover',

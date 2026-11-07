@@ -43,6 +43,9 @@ export function sessionHandoverNeedsForTest(overrides: Partial<SessionHandoverNe
     clock: new SystemClock(),
     clientName: 'fy',
     activities: undefined,
+    every: () => {
+      throw new Error('the reconcile timer is not armed by the session-handover fixture');
+    },
     ...overrides,
   };
 }
