@@ -1,0 +1,305 @@
+import { describe, expect, it } from 'bun:test';
+import type { SessionFileIndexResponse } from '@ferretry/protocol';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import {
+  changesUrl,
+  codeReferenceRelativePath,
+  describeFsError,
+  diffUrl,
+  fileUrl,
+  fsApi,
+  fsTabAvailable,
+  indexUrl,
+  isAbort,
+  isUnknownRoute,
+  listUrl,
+  loadFsChanges,
+  readFsProbe,
+  resetFsProbes,
+  resolveFsFilePaths,
+  useFsProbe,
+} from '../../src/components/files-api.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { browserFetch, DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { render, runAsync } from '../support/react.ts';
+
+const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'b-token' });
+const scopeA = daemonSessionScope(daemonA, 'same/session');
+const scopeB = daemonSessionScope(daemonB, 'same/session');
+
+describe('files API', () => {
+  it('uses a paired daemon URL and credentials rather than the page origin', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const listing = await fsApi.list(daemonA, scopeA, 'src', undefined, async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ root: '/work', path: '', entries: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    expect(listing.entries).toEqual([]);
+    expect(listUrl(scopeA, 'src')).toBe('/v1/sessions/same%2Fsession/fs?path=src');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
+    expect(() => fsApi.list(daemonA, scopeB, '', undefined, browserFetch)).toThrow('file scope must belong');
+  });
+
+  /**
+   * The whole-tree file index, which is this file's ONLY caller-visible answer to
+   * "what can this session search".
+   *
+   * It is a sibling of `changes`, not of `list`: there is no `path`, so the URL
+   * must not go through `query()` and must never acquire a `?path=` — a browser
+   * walking the tree one directory at a time is the exact fan-out the index
+   * replaced. The route is `fs/index`, which deliberately does NOT end in `/fs`,
+   * and every fixture ladder in the suite has to branch on it first for that
+   * reason.
+   */
+  it('reads the whole-session file index over one credentialled request with no path parameter', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    // `satisfies` rather than a bare literal: without it `v` widens to `number`
+    // and `coverage` to `string`, and the fixture stops being assignable to the
+    // document this route actually returns.
+    const document = {
+      v: 1,
+      sessionId: 'same/session',
+      root: '/work/same-session',
+      files: [{ name: 'needle.ts', path: 'src/needle.ts' }],
+      coverage: 'complete',
+      skipped: [{ reason: 'denied', count: 1 }],
+    } satisfies SessionFileIndexResponse;
+    const index = await fsApi.index(daemonA, scopeA, undefined, async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify(document), { headers: { 'content-type': 'application/json' } });
+    });
+
+    expect(index).toEqual(document);
+    expect(indexUrl(scopeA)).toBe('/v1/sessions/same%2Fsession/fs/index');
+    // No `?path=`, and it is NOT the listing route with a suffix.
+    expect(indexUrl(scopeA)).not.toContain('?');
+    expect(indexUrl(scopeA).endsWith('/fs')).toBe(false);
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs/index');
+    expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
+    // The reader's own question is never answered from a cache: the daemon walks
+    // the tree inside the request, so a stale index is a wrong answer.
+    expect(calls[0]?.init?.cache).toBe('no-store');
+  });
+
+  it('refuses an index read for another daemon and preserves the daemon’s own refusal', async () => {
+    // A session id is daemon-local, so the same id on two daemons names two
+    // different sessions. Reading beta's index through alpha's credentials would
+    // hand a reader another machine's file names.
+    expect(() => fsApi.index(daemonA, scopeB, undefined, browserFetch)).toThrow('file scope must belong');
+    await expect(
+      fsApi.index(
+        daemonA,
+        scopeA,
+        undefined,
+        async () =>
+          new Response(JSON.stringify({ error: 'filesystem access is switched off', code: 'grant_denied' }), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    ).rejects.toMatchObject({ status: 403, message: 'filesystem access is switched off', code: 'grant_denied' });
+  });
+
+  it('does not share an in-flight code-reference directory lookup across daemons', async () => {
+    resetFsProbes();
+    const seen: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify({ root: '/work', path: 'src', entries: [{ name: 'a.ts', type: 'file' }] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const [a, b] = await Promise.all([
+        resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch),
+        resolveFsFilePaths(daemonB, scopeB, ['src/a.ts'], undefined, browserFetch),
+      ]);
+      expect(a.get('src/a.ts')).toBe('src/a.ts');
+      expect(b.get('src/a.ts')).toBe('src/a.ts');
+      expect(seen).toEqual([
+        'https://a.example.test/v1/sessions/same%2Fsession/fs?path=src',
+        'https://b.example.test/v1/sessions/same%2Fsession/fs?path=src',
+      ]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('uses every filesystem endpoint, preserves daemon errors, and validates reference candidates', async () => {
+    const fetcher = async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/diff')) return new Response('diff text', { headers: { 'content-type': 'text/plain' } });
+      if (url.includes('/file'))
+        return new Response(JSON.stringify({ path: 'a.ts', size: 0 }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      if (url.includes('/changes'))
+        return new Response(JSON.stringify({ repo: true, changes: [{ path: 'fresh.ts', status: '??' }] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      return new Response(JSON.stringify({ root: '/work', path: '', entries: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    expect(fileUrl(scopeA, 'a.ts', 'head')).toContain('/file?rev=head&path=a.ts');
+    expect(changesUrl(scopeA)).toContain('/changes');
+    expect(diffUrl(scopeA, 'a.ts')).toContain('/diff?path=a.ts');
+    expect(await fsApi.file(daemonA, scopeA, 'a.ts', 'head', undefined, fetcher)).toMatchObject({ path: 'a.ts' });
+    // An untracked row is the daemon's authoritative status. The PWA must pass
+    // it through unchanged so a new file is visible in the Changes view.
+    expect(await fsApi.changes(daemonA, scopeA, undefined, fetcher)).toEqual({
+      repo: true,
+      changes: [{ path: 'fresh.ts', status: '??' }],
+    });
+    expect(await fsApi.diff(daemonA, scopeA, 'a.ts', undefined, fetcher)).toBe('diff text');
+    await expect(
+      fsApi.list(daemonA, scopeA, '', undefined, async () => new Response('nope', { status: 500 })),
+    ).rejects.toMatchObject({ status: 500, message: 'HTTP 500' });
+    expect(codeReferenceRelativePath('/work/src/a.ts', '/work/')).toBe('src/a.ts');
+    expect(codeReferenceRelativePath('/other/a.ts', '/work')).toBeNull();
+    expect(codeReferenceRelativePath('/work/a.ts')).toBeNull();
+    expect(codeReferenceRelativePath('/work/a.ts')).toBeNull();
+    expect(codeReferenceRelativePath('./src/a.ts')).toBe('src/a.ts');
+    expect(isAbort(new DOMException('', 'AbortError'))).toBeTrue();
+    expect(isAbort(new Error('no'))).toBeFalse();
+    expect(describeFsError(new TypeError('offline'))).toBe('could not reach the daemon');
+    expect(describeFsError(new Error('offline'))).toBe('offline');
+    expect(describeFsError('offline')).toBe('offline');
+    expect(fsTabAvailable('ready')).toBeTrue();
+    expect(fsTabAvailable('error')).toBeTrue();
+    expect(fsTabAvailable('absent')).toBeFalse();
+    // A daemon that cannot serve the surface KEEPS the tab: the reason has to be stated somewhere,
+    // and a silently missing tab states nothing.
+    expect(fsTabAvailable('unsupported')).toBeTrue();
+  });
+
+  it('words a grant refusal as one, with the daemon’s own sentence after the guidance when it has one', () => {
+    const bare = describeFsError(new DaemonResponseError(403, '', 'grant_not_granted'));
+    expect(bare.length).toBeGreaterThan(0);
+    expect(describeFsError(new DaemonResponseError(403, 'grant it on the host.', 'grant_not_granted'))).toBe(
+      `${bare} grant it on the host.`,
+    );
+  });
+
+  it('reads its probe from the same record when rendered without a browser', () => {
+    resetFsProbes();
+    const seen: string[] = [];
+    const Probe = () => {
+      seen.push(useFsProbe(daemonA, scopeA).state);
+      return null;
+    };
+    renderToStaticMarkup(createElement(Probe));
+    expect(seen).toEqual(['probing']);
+  });
+
+  it('settles on unsupported and keeps the daemon’s own reason for the disclosure', async () => {
+    resetFsProbes();
+    const original = globalThis.fetch;
+    let asked = 0;
+    globalThis.fetch = (async () => {
+      asked += 1;
+      return new Response(
+        JSON.stringify({ error: 'file browsing is not available on macOS yet', code: 'unsupported' }),
+        {
+          status: 501,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      await loadFsChanges(daemonA, scopeA, browserFetch);
+      expect(readFsProbe(scopeA)).toMatchObject({
+        state: 'unsupported',
+        changes: null,
+        error: 'file browsing is not available on macOS yet',
+      });
+      // Settled, not merely failed: re-asking a machine what it is spends a request to hear the same
+      // answer, so only a forced refresh may repeat it.
+      await loadFsChanges(daemonA, scopeA, browserFetch);
+      expect(asked).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+      resetFsProbes();
+    }
+  });
+
+  it('keeps failed lookups absent and supports cancellable proof resolution', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+    try {
+      expect(await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch)).toEqual(new Map());
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ root: '/work', path: '', entries: [] }), {
+          headers: { 'content-type': 'application/json' },
+        })) as unknown as typeof fetch;
+      const liveController = new AbortController();
+      expect(
+        await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch, liveController.signal),
+      ).toEqual(new Map());
+      globalThis.fetch = (async () => {
+        throw new Error('offline again');
+      }) as unknown as typeof fetch;
+      expect(
+        await resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch, new AbortController().signal),
+      ).toEqual(new Map());
+      const controller = new AbortController();
+      controller.abort('stopped');
+      await expect(
+        resolveFsFilePaths(daemonA, scopeA, ['src/a.ts'], undefined, browserFetch, controller.signal),
+      ).rejects.toBe('stopped');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('publishes daemon-scoped probes and exposes the subscribed hook snapshot', async () => {
+    resetFsProbes();
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ repo: true, changes: [] }), {
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    try {
+      await loadFsChanges(daemonA, scopeA, browserFetch);
+      expect(readFsProbe(scopeA)).toMatchObject({ state: 'ready', refreshing: false });
+      await loadFsChanges(daemonA, scopeA, browserFetch);
+      let probe!: ReturnType<typeof useFsProbe>;
+      const Probe = () => {
+        probe = useFsProbe(daemonA, scopeA);
+        return null;
+      };
+      render(createElement(Probe));
+      await runAsync(async () => {
+        probe.refresh();
+        await Promise.resolve();
+      });
+      expect(probe.state).toBe('ready');
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ code: 'unknown_route' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        })) as unknown as typeof fetch;
+      await loadFsChanges(daemonA, scopeA, browserFetch, true);
+      expect(readFsProbe(scopeA).state).toBe('absent');
+      expect(isUnknownRoute({})).toBeFalse();
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ error: 'denied' }), {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+        })) as unknown as typeof fetch;
+      await loadFsChanges(daemonA, scopeA, browserFetch, true);
+      expect(readFsProbe(scopeA)).toMatchObject({ state: 'error', error: 'denied' });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
