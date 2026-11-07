@@ -5,6 +5,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
+import { BrowsersPort } from '../../contract/port.ts';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
 import { TypedIdentities } from '../../daemon/target/sign-in/identities.ts';
 import { Tabs } from '../support/tabs.ts';
@@ -67,6 +68,18 @@ describe('the browsers daemon half', () => {
     // Assert
     should(state.status).equal(200);
     should(state.json()).containEql({ state: 'stopped' });
+  });
+
+  it('should provide no browserPorts reading while it has no read of the machine’s ports (GAP), so Logins treats the host as shared', async () => {
+    // Arrange
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault() } });
+
+    // Act
+    const browsers = host.provided(BrowsersPort);
+
+    // Assert — absent, never a guess: an absent method fails closed for its user (lead decision 19, L2).
+    should(browsers.browserPorts).be.undefined();
+    should(typeof browsers.pagesOf).equal('function');
   });
 
   it('should type into the ferret’s own page through browser_type, as one type act on the page, and answer Done', async () => {

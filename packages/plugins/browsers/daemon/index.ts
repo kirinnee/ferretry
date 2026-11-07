@@ -107,6 +107,13 @@ export function buildBrowsers(
         },
         display,
         stageDirectory: host.stageDirectory,
+        // GAP (card F1931, finding 10): no `ports`, `checkFirewall` or `limits` (today's fyd.ts 8728-8736).
+        // - `ports`/`checkFirewall`: 5.0 serves Browsers no read of the machine's `browserPorts` or
+        //   `browserFirewallFailure` (Runtimes keeps them, no contract serves them), so every launch takes random
+        //   ports. That fails safe: nothing is bound at a fixed port, so there is nothing for the loopback firewall to
+        //   fence and nothing for its check to refuse.
+        // - `limits`: there is no kernel ferret-limits port that wraps a program in the shared browser slice, so the
+        //   agent Chrome runs outside the shared browser memory slice docs/ferret-limits.md promises.
       },
     );
   // Who each page signs in, in memory only (I154): ONE ledger, cleared by the runtime whenever an act may have changed
