@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { ArrowRightLeft, Cog } from 'lucide-react';
 import type { FerretView } from '@ferretry/core-ferrets/contract';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { ReferenceSurfaceProvider, ScreenHrefProvider } from '@ferretry/app';
@@ -268,7 +269,7 @@ describe('a notice from Ferretry itself', () => {
 });
 
 describe('a Ferretry message from any part of Ferretry', () => {
-  const FEATURES = ['Warden', 'Agenda', 'Monitor', 'Lessons', 'Migrate', 'Restart', 'Delivery'];
+  const FEATURES = ['Warden', 'Agenda', 'Monitor', 'Lessons', 'Move', 'Restart', 'Delivery'];
   const entryFor = (feature: string, text: string) => ({
     id: `f-${feature}`,
     kind: 'user' as const,
@@ -294,6 +295,15 @@ describe('a Ferretry message from any part of Ferretry', () => {
       expect(textOf(view)).toContain('Still with us?');
       expect(view.root.findAllByProps({ className: 'fy-system-details' })).toHaveLength(0);
     }
+  });
+
+  test('a move notice wears the arrows icon, and a part with no icon of its own the cog', () => {
+    const iconOf = (feature: string) =>
+      render(<TranscriptRow entry={entryFor(feature, 'Moving you.')} />).root.findByProps({
+        className: 'fy-system-icon',
+      }).type;
+    expect(iconOf('Move')).toBe(ArrowRightLeft);
+    expect(iconOf('Unknown part')).toBe(Cog);
   });
 
   test('keeps long text behind Show', () => {

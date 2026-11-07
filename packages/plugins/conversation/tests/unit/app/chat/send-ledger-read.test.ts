@@ -93,7 +93,7 @@ describe('reading a ferret ledger', () => {
       matchedTurn: 4,
       shapeVersion: 1,
     });
-    expect(client.calls).toEqual([{ route: SENDS, init: { params: { ferretId: 'fy_s_one' } } }]);
+    expect(client.calls).toMatchObject([{ route: SENDS, params: { ferretId: 'fy_s_one' } }]);
   });
 
   it('should hand the rows back unparsed, so what the daemon sent is what the chat reads', async () => {
@@ -105,7 +105,7 @@ describe('reading a ferret ledger', () => {
 
     // Assert
     expect(rows).toEqual([{ sendId: 'a', acceptedAt: at(0) }]);
-    expect(client.calls[0]?.init.params).toEqual({ ferretId: 'fy s/1' });
+    expect(client.calls[0]?.params).toEqual({ ferretId: 'fy s/1' });
   });
 });
 

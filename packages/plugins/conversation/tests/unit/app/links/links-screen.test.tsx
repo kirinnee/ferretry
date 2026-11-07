@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, RouterProvider } from '@ferretry/app/testing';
 import { LinksScreen } from '../../../../app/links/links-screen.tsx';
-import { type FakeClient, fakeClient, withClient } from '../../../support/app/client.tsx';
+import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/client.tsx';
 import { conversation, ferret, hoursAgo, listing, settle, type } from '../../../support/app/links.ts';
 
 const RESUME = 'POST /v1/ferrets/:ferretId/resume';
@@ -13,22 +14,28 @@ const FERRETS = [
 ];
 
 const daemon = (): FakeClient =>
-  fakeClient({
-    'GET /v1/ferrets': () => FERRETS,
-    // Continue searches the synced listing; Keep reads one CLI’s, which is empty here so no runtime slot is drawn.
-    'GET /v1/links/conversations': call =>
-      call.query.harness === undefined
-        ? listing([conversation('shop-cart', { keptBy: 'run-ferret' }), conversation('new-idea')])
-        : listing([]),
-    'GET /v1/links/conversations/:harness/:conversationId/preview': call => ({
-      id: call.params.conversationId,
-      harness: call.params.harness,
-      messages: [],
-    }),
-    'GET /v1/links/history': () => ({ entries: [] }),
-    [RESUME]: () => ({}),
-    [KEEP]: () => ({ kept: [{ id: 'new-idea', ferret: 'idea-ferret', name: 'idea', state: 'starting' }], refused: [] }),
-  });
+  fakeClient(
+    {
+      'GET /v1/ferrets': () => FERRETS,
+      // Continue searches the synced listing; Keep reads one CLI’s, which is empty here so no runtime slot is drawn.
+      'GET /v1/links/conversations': call =>
+        call.query.harness === undefined
+          ? listing([conversation('shop-cart', { keptBy: 'run-ferret' }), conversation('new-idea')])
+          : listing([]),
+      'GET /v1/links/conversations/:harness/:conversationId/preview': call => ({
+        id: call.params.conversationId,
+        harness: call.params.harness,
+        messages: [],
+      }),
+      'GET /v1/links/history': () => ({ entries: [] }),
+      [RESUME]: () => ({}),
+      [KEEP]: () => ({
+        kept: [{ id: 'new-idea', ferret: 'idea-ferret', name: 'idea', state: 'starting' }],
+        refused: [],
+      }),
+    },
+    'd1',
+  );
 
 let view: Mounted | null = null;
 let client: FakeClient = daemon();

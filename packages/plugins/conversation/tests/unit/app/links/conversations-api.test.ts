@@ -4,7 +4,7 @@ import {
   readConversationPreview,
   readLinkableConversations,
 } from '../../../../app/links/conversations-api.ts';
-import { fakeClient } from '../../../support/app/client.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
 import { conversation, listing } from '../../../support/app/links.ts';
 
 const LISTING = 'GET /v1/links/conversations';

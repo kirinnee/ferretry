@@ -3,7 +3,8 @@ import { DaemonCallError } from '@ferretry/app';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import { hypermediaOn, patchFerretHypermedia, readFerretHypermedia } from '../../../../app/toolbar/hypermedia-api.ts';
 import { HypermediaPanel } from '../../../../app/toolbar/hypermedia-panel.tsx';
-import { type CallHandler, fakeClient, refusal, withClient } from '../../../support/app/client.tsx';
+import { type CallHandler, fakeClient, refusal } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/client.tsx';
 
 const READ_ROUTE = 'GET /v1/ferrets/:ferretId';
 const PATCH_ROUTE = 'PATCH /v1/ferrets/:ferretId/hypermedia';

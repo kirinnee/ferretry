@@ -112,11 +112,6 @@
   },
   "pendingAppPorts": [
     {
-      "plugin": "conversation",
-      "path": "packages/plugins/conversation/app",
-      "reason": "surfaces, client context, fy-render, the prose kit and the composer (with the attachments and chat-width panels and Conversation Settings) have landed; the chat, transcript, queue, compact-at, questions, search and links bodies are in flight (C3-C4)"
-    },
-    {
       "plugin": "agenda",
       "path": "packages/plugins/agenda/app",
       "reason": "separate app port in flight"

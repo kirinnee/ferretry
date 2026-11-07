@@ -43,7 +43,7 @@ import {
 import { accessConformance } from '../../../contract/testing/index.ts';
 import { toBase64Url } from '../../../daemon/lib/proof/binary.ts';
 import { type AccessHost, AccessRuntime, type AccessRuntimeDeps } from '../../../daemon/runtime.ts';
-import { call, jsonBody } from '../../support/daemon/call.ts';
+import { call, jsonBody, oneFreshProof } from '../../support/daemon/call.ts';
 import {
   assertion,
   clientData,
@@ -897,7 +897,12 @@ test('G137 a full code minted by a device is refused unless that device holds ev
       'POST /v1/pair/code',
       device.deviceId,
       { grants },
-      { deviceGrants: device.grants, presentation: { stepUp: true, freshStepUp: true } },
+      {
+        deviceGrants: device.grants,
+        presentation: { stepUp: true, freshStepUp: true },
+        // Each mint is its own request, admitted on its own fresh proof, which the route TAKES.
+        standing: { claimFreshStepUp: oneFreshProof().claim },
+      },
     );
   const everything = await holder();
   const fleetOnly = await holder('limited');

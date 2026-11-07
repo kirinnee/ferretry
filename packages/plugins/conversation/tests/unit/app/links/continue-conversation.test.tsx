@@ -4,7 +4,7 @@ import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { LinkableConversation, LinkPreview } from '../../../../contract/index.ts';
 import { ContinueConversation } from '../../../../app/links/continue-conversation.tsx';
 import type { RuntimeField } from '../../../../app/links/conversation-picker.tsx';
-import { type CallHandler, type FakeClient, fakeClient, refusal } from '../../../support/app/client.tsx';
+import { type CallHandler, type FakeClient, fakeClient, refusal } from '../../../support/app/fake-client.ts';
 import {
   conversation,
   ferret,

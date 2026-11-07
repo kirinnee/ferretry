@@ -23,12 +23,12 @@ import { readLiveDocument } from '@ferretry/app';
 import { daemonConnection, daemonFerretScope, withReferencePrefix } from '../../../../app/composer/seam.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../../../app/composer/drafts.ts';
 import {
-  fakeClient,
   socketOf,
   type SuiteStreamOpener as DaemonStreamOpener,
   type SuiteStreamSession,
   withClient,
 } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
 import { writeMdComposePref } from '@ferretry/app';
 import { MemoryOutboxBackend, SendOutbox } from '../../../../app/composer/send-outbox.ts';
 import { SendOutboxProvider } from '../../../../app/composer/send-outbox-wiring.ts';
@@ -245,7 +245,7 @@ const chat = async (
       >
         <Composer api={api as never} daemon={daemon} draftStore={drafts} ferretId="s1" />
       </SendOutboxProvider>,
-      fakeClient(undefined, socketOf(machine.open)),
+      fakeClient({}, { more: socketOf(machine.open) }),
     ),
   );
   await settle();

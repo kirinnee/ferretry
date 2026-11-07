@@ -9,7 +9,7 @@ import { ChevronDown, X } from 'lucide-react';
 import { clockOfInstant } from '@ferretry/app';
 import { peerFrom } from './peer-message.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
-import { sendReceipt } from './send-receipt.ts';
+import { sendReceipt } from './send-receipt-model.ts';
 import { ReceiptMark } from '@ferretry/app';
 
 /** Stops showing a send on this device. */

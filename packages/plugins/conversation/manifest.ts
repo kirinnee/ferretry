@@ -282,8 +282,9 @@ export default definePlugin({
   ui: {
     screens: [
       // The chat offers two slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row and
-      // `conversation.row-actions` in a row's actions, each with `{ entry }` and the ferret as subject — Packs' tool
-      // card and Voice's read-aloud draw there. It mounts `ferret.toolbar` and `ferret.side` with the ferret as subject.
+      // `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?}; no
+      // tool calls) and the ferret as subject — Voice's read-aloud draws there. It mounts `ferret.toolbar` and
+      // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
       screen('links', { path: 'links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
     ],

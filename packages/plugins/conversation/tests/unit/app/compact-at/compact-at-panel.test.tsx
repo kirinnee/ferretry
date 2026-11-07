@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import { CompactAtLoader, CompactAtPanel } from '../../../../app/compact-at/compact-at-panel.tsx';
 import type { CompactAtFormHost } from '../../../../app/compact-at/compact-at-form.tsx';
-import { type CallHandler, fakeClient, refusal, withClient } from '../../../support/app/client.tsx';
+import { type CallHandler, fakeClient, refusal } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/client.tsx';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

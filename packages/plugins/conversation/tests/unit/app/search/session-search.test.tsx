@@ -25,7 +25,8 @@ import {
   sessionSearchResultKey,
   useSessionSearch,
 } from '../../../../app/search/session-search.tsx';
-import { type CallHandler, type FakeClient, fakeClient, withClient } from '../../../support/app/client.tsx';
+import { type CallHandler, type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/client.tsx';
 
 ensureDom();
 

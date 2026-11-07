@@ -7,7 +7,7 @@
  */
 
 import { ReceiptMark } from '@ferretry/app';
-import { RECEIPT_LEGEND } from './send-receipt.ts';
+import { RECEIPT_LEGEND } from './send-receipt-model.ts';
 
 export function MessageMarksLegend() {
   return (

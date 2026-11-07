@@ -8,7 +8,7 @@ import {
   noRuntimeSentence,
   type RuntimeField,
 } from '../../../../app/links/conversation-picker.tsx';
-import { type CallHandler, type FakeClient, fakeClient, refusal } from '../../../support/app/client.tsx';
+import { type CallHandler, type FakeClient, fakeClient, refusal } from '../../../support/app/fake-client.ts';
 import { conversation, listing, NOW, runtimeField, settle, type } from '../../../support/app/links.ts';
 
 const LIST = 'GET /v1/links/conversations';

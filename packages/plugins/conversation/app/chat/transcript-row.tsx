@@ -12,7 +12,7 @@ import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy }
 import { clockOfInstant } from '@ferretry/app';
 import { stripFraming } from './message-framing.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
-import type { SendReceipt } from './send-receipt.ts';
+import type { SendReceipt } from './send-receipt-model.ts';
 import type { AgentRunMark, TranscriptEntry } from './transcript-entries.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './seam.ts';
 import {

@@ -3,13 +3,13 @@ import { cap, DEFAULT_GATE_CONFIG, DEFAULT_GATE_SECURITY, FULL_DEVICE_GRANTS } f
 import { ADMIN, admit, declaredRoute, local, world } from '../support.ts';
 
 const MENUS = 'GET /v1/ferrets/:ferretId/references';
-const without = (name: 'filesystem' | 'terminal' | 'browser') => ({
+const without = (name: 'filesystem' | 'terminal' | 'browser' | 'fleet') => ({
   ...FULL_DEVICE_GRANTS,
   [name]: { use: false, configure: false },
 });
 
 /**
- * Conversation's reference menus list files, terminals and pages through ONE route. The route is ungoverned itself and
+ * Conversation's reference menus list files, terminals, pages and cards through ONE route. The route is ungoverned itself and
  * `consultsGrants`, so Gate hands its handler the caller's governance; the handler asks each provider's demand. These
  * rows prove the real admission does that for the route exactly as Conversation's manifest declares it.
  */
@@ -48,6 +48,22 @@ describe('the composer reference menus keep the grants of the facts they list', 
     expect(terminal.standing.governance?.decide(cap('terminal', 'use')).allowed).toBe(false);
     expect(terminal.standing.governance?.decide(cap('browser', 'use')).allowed).toBe(true);
     expect(browser.standing.governance?.decide(cap('browser', 'use')).allowed).toBe(false);
+  });
+
+  test('a device without fleet use is refused the cards list, and one that has it is not', async () => {
+    const route = await declaredRoute(MENUS);
+    const w = world();
+    w.enrol('no-fleet', without('fleet'));
+    w.enrol('full');
+    const refused = admit(w, route, { device: 'no-fleet' }).decision;
+    const granted = admit(w, route, { device: 'full' }).decision;
+    if (refused.outcome !== 'admitted' || granted.outcome !== 'admitted') throw new Error('expected admitted');
+    expect(refused.standing.governance?.decide(cap('fleet', 'use'))).toMatchObject({
+      allowed: false,
+      refusal: 'device-not-granted',
+    });
+    expect(refused.standing.governance?.decide(cap('filesystem', 'use')).allowed).toBe(true);
+    expect(granted.standing.governance?.decide(cap('fleet', 'use')).allowed).toBe(true);
   });
 
   test('the daemon-wide document refuses too, and a step-up the machine asks for is the refusal named', async () => {

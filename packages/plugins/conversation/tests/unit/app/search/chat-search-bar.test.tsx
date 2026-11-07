@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { LogSearch } from '../../../../contract/index.ts';
 import { useRef } from 'react';
 import { ChatSearch, type ChatSearchPort, logSearchOf } from '../../../../app/search/chat-search.tsx';
-import { fakeClient } from '../../../support/app/client.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
 import { CHAT_SEARCH_SETTLE_MS } from '../../../../app/search/chat-search-model.ts';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 

@@ -58,7 +58,10 @@ export interface Caller {
   readonly governed?: boolean;
   /** What the grants answer for every demand; `granted` unless the case says otherwise. */
   readonly refusal?: GrantRefusal;
+  /** What the admission snapshot says (`freshStepUp`): a fresh proof was held when the call was admitted. */
   readonly fresh?: boolean;
+  /** The one proof this caller's claim takes; shared by several callers, it is ONE proof for all of them. */
+  readonly proof?: OneProof;
   /** The ferret an `agent` caller is. */
   readonly ferret?: string;
 }
@@ -73,8 +76,28 @@ export interface Call {
 export interface Answer {
   readonly status: number;
   readonly body: Record<string, unknown>;
-  /** How many times the handler spent the caller's fresh proof. */
-  readonly spent: number;
+  /** How many fresh proofs this call took (claimed and won). */
+  readonly taken: number;
+}
+
+/** ONE fresh passkey proof: `claim` takes it in one step (Gate's registry), so exactly one claim ever wins. */
+export interface OneProof {
+  readonly claim: () => boolean;
+  readonly taken: () => number;
+}
+
+export function oneProof(): OneProof {
+  let held = true;
+  let taken = 0;
+  return {
+    claim: () => {
+      if (!held) return false;
+      held = false;
+      taken += 1;
+      return true;
+    },
+    taken: () => taken,
+  };
 }
 
 export const HOST: Caller = { kind: 'host', governed: false };
@@ -130,7 +153,8 @@ function requestOf(input: Call): ApiRequest {
 /** Drives one lesson route as `caller`; an `ApiError` is read back as the response the kernel would make. */
 export async function drive(subsystem: LessonsSubsystem, input: Call, caller: Caller = HOST): Promise<Answer> {
   const found = lookup(input.method, input.path);
-  let spent = 0;
+  let taken = 0;
+  const proof = caller.proof ?? (caller.fresh === true ? oneProof() : undefined);
   const refusal = caller.refusal ?? 'granted';
   const governance: CallerGovernance | undefined =
     caller.governed === undefined
@@ -149,8 +173,11 @@ export async function drive(subsystem: LessonsSubsystem, input: Call, caller: Ca
       stepUp: caller.fresh === true,
       freshStepUp: caller.fresh === true,
     },
-    spendFreshStepUp: () => {
-      spent += 1;
+    // A call with no fresh proof claims nothing; with one, a claim takes it (and counts only the claim that won).
+    claimFreshStepUp: () => {
+      const won = proof?.claim() === true;
+      if (won) taken += 1;
+      return won;
     },
   } as unknown as CallContext;
   const handler = (lessonsRoutes(subsystem) as Record<string, (call: CallContext) => Promise<ApiResponse>>)[found.key];
@@ -160,7 +187,7 @@ export async function drive(subsystem: LessonsSubsystem, input: Call, caller: Ca
     response = await handler(context);
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
-    return { status: error.status, body: { error: error.message, code: error.code }, spent };
+    return { status: error.status, body: { error: error.message, code: error.code }, taken };
   }
-  return { status: response.status, body: jsonBody(response), spent };
+  return { status: response.status, body: jsonBody(response), taken };
 }

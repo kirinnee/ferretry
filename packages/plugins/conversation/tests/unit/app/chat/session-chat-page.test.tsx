@@ -82,7 +82,7 @@ describe('SessionChatPage', () => {
     expect(source.daemon.daemonId).toBe('alpha');
     expect(source.sessionId).toBe('shared');
     expect(await source.read('turn-008')).toMatchObject({ name: 'turn-008', message: 'look at this' });
-    expect(client.calls).toEqual([{ route: HANDOFF, init: { params: { ferretId: 'shared', name: 'turn-008' } } }]);
+    expect(client.calls).toMatchObject([{ route: HANDOFF, params: { ferretId: 'shared', name: 'turn-008' } }]);
   });
 
   test('a send returns the transcript to the tail and still refreshes the chat', () => {
@@ -134,8 +134,8 @@ describe('the question the ferret is asking', () => {
   test('mounts the structured form in place of the composer and answers through the daemon, then refreshes', async () => {
     const answered: unknown[] = [];
     const client = fakeClient({
-      [ANSWER]: init => {
-        answered.push([init.params?.['ferretId'], init.body, init.headers]);
+      [ANSWER]: call => {
+        answered.push([call.params['ferretId'], call.body, call.headers]);
         return { ok: true };
       },
     });

@@ -9,7 +9,7 @@
 import {
   CAPABILITIES,
   type CallerGovernance,
-  type CapabilityPresentation,
+  claimOwnerOnly,
   grantRefusalCode,
   isFerretCall,
   ferretOf,
@@ -289,18 +289,21 @@ function widenRefusal(governance: CallerGovernance | undefined): ApiResponse | u
 /**
  * Adding or changing a line in a config file a person reads in the owner's name: from a governed device, a passkey
  * proved for `loosen-config` (today's `heldEditRefusal(…, 'confirm')`); at the machine, nothing more (S79).
+ *
+ * THE PROOF IS CLAIMED HERE, before the write, never read off the admission snapshot and spent after: of two requests
+ * admitted on one proof exactly one writes. No restore — a write that then fails has used the proof up. Gate's
+ * `claimOwnerOnly` takes it, because the write below is itself a loosening that Gate's config judge rules on, and that
+ * judge accepts a standing whose proof an owner-only act already claimed without taking a second one (the loosening
+ * rides on this claim). The refusal is still today's, naming `loosen-config`; the machine claims nothing.
  */
-function heldEditRefusal(
-  governance: CallerGovernance | undefined,
-  presentation: CapabilityPresentation | undefined,
-): ApiResponse | undefined {
-  if (governance?.governed === true && presentation?.freshStepUp !== true)
-    return stepUpRequired(`putting this change to ${ACCOUNT_DEFAULTS_FILE} into effect needs a passkey confirmation`, {
-      capability: 'secrets',
-      axis: 'configure',
-      act: 'loosen-config',
-    });
-  return undefined;
+function heldEditRefusal(call: Call): ApiResponse | undefined {
+  if (call.governance?.governed !== true) return undefined;
+  if (claimOwnerOnly(call, `put a default account into ${ACCOUNT_DEFAULTS_FILE}`) === undefined) return undefined;
+  return stepUpRequired(`putting this change to ${ACCOUNT_DEFAULTS_FILE} into effect needs a passkey confirmation`, {
+    capability: 'secrets',
+    axis: 'configure',
+    act: 'loosen-config',
+  });
 }
 
 /**
@@ -433,13 +436,10 @@ export function accountRoutes(deps: AccountRoutesDeps) {
             if (isFerretCall(call)) throw new ApiError(403, ACCOUNT_DEFAULT_OWNER_ONLY, OWNER_ONLY_CODE);
             const change = await parseBody(call.request, PutAccountDefaultRequestSchema);
             const removes = change.account === null;
-            const refused = removes
-              ? undefined
-              : (widenRefusal(call.governance) ?? heldEditRefusal(call.governance, call.presentation));
+            const refused = removes ? undefined : (widenRefusal(call.governance) ?? heldEditRefusal(call));
             if (refused !== undefined) return refused;
             try {
               const written = await defaults.set(change, change.account);
-              if (!removes && call.governance?.governed === true) call.spendFreshStepUp?.();
               return jsonResponse({ defaults: written } satisfies PutAccountDefaultResult);
             } catch (error) {
               if (error instanceof AccountDefaultsFileBroken)

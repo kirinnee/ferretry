@@ -4,7 +4,7 @@ import type { EventDef } from '@ferretry/kernel/contract';
 import { ChatScreen } from '../../../../app/chat/chat-screen.tsx';
 import { ConversationClientProvider } from '../../../../app/client.ts';
 import { QueueChanged } from '../../../../contract/index.ts';
-import { type FakeClient, fakeClient } from '../../../support/app/client.tsx';
+import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
 import { ferretView } from '../../../support/app/ferret-view.ts';
 
 ensureDom();

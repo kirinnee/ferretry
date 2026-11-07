@@ -65,7 +65,7 @@ describe('loading a transcript image', () => {
     const blob = await loadTranscriptImageBlob(client, 'shots/ferret', handle);
     expect(blob.type).toBe('image/webp');
     expect(await bytesOf(blob)).toEqual(PNG);
-    expect(client.calls).toEqual([{ route: IMAGE, init: { params: { ferretId: 'shots/ferret', handle: spelled } } }]);
+    expect(client.calls).toMatchObject([{ route: IMAGE, params: { ferretId: 'shots/ferret', handle: spelled } }]);
   });
 
   it('decodes a payload over 1 MiB byte for byte across several slices', async () => {

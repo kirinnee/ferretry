@@ -9,7 +9,8 @@ import {
   workSearchCommandSource,
 } from '../../../../app/search/work-search-commands.ts';
 import type { WorkSearchPort, WorkSearchRequest } from '../../../../app/search/work-search.ts';
-import { fakeClient, testHref } from '../../../support/app/client.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
+import { testHref } from '../../../support/app/client.tsx';
 
 /**
  * Today's palette asked the daemon's work search itself; in 5.0 Conversation hands the shell's command bar a source

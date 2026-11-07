@@ -1,7 +1,7 @@
 import { describe, test } from 'bun:test';
 import type { ChartConfiguration } from 'chart.js';
 import should from 'should';
-import { type ChartSpec, readChart } from '../../../../app/render/fy-render-chart.ts';
+import { type ChartSpec, readChart } from '../../../../app/render/fy-render-chart-model.ts';
 import { chartConfiguration } from '../../../../app/render/fy-render-chart-config.ts';
 import {
   CHART_PALETTE_SLOTS,

@@ -746,8 +746,8 @@ describe('sendRetrier', () => {
     const calls: unknown[] = [];
     let refreshed = 0;
     const client = fakeClient({
-      'POST /v1/ferrets/:ferretId/sends/:sendId/retry': init => {
-        calls.push([init.params?.['ferretId'], init.params?.['sendId'], init.body]);
+      'POST /v1/ferrets/:ferretId/sends/:sendId/retry': call => {
+        calls.push([call.params['ferretId'], call.params['sendId'], call.body]);
         return SEND_RECORD;
       },
     });
@@ -925,12 +925,12 @@ describe('sendCanceller and sendSubmitter', () => {
     const calls: unknown[] = [];
     let refreshed = 0;
     const client = fakeClient({
-      'POST /v1/ferrets/:ferretId/sends/:sendId/cancel': init => {
-        calls.push(['cancel', init.params?.['ferretId'], init.params?.['sendId']]);
+      'POST /v1/ferrets/:ferretId/sends/:sendId/cancel': call => {
+        calls.push(['cancel', call.params['ferretId'], call.params['sendId']]);
         return SEND_RECORD;
       },
-      'POST /v1/ferrets/:ferretId/sends/:sendId/enter': init => {
-        calls.push(['enter', init.params?.['ferretId'], init.params?.['sendId']]);
+      'POST /v1/ferrets/:ferretId/sends/:sendId/enter': call => {
+        calls.push(['enter', call.params['ferretId'], call.params['sendId']]);
         return SEND_RECORD;
       },
     });

@@ -1,10 +1,13 @@
 import {
+  asksStepUpPerAction,
   type CapabilityGrants,
+  coreCapabilityName,
   DEFAULT_GATE_CONFIG,
   type GateConfig,
   type GrantRefusal,
   GRANT_REFUSALS,
   STEP_UP_REQUIRED_CODE,
+  STEP_UP_USE_CAPABILITIES,
 } from '@ferretry/core-gate/contract';
 import { deviceStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { Admission, AdmissionDecision, ApiRequest, CallStanding } from '@ferretry/kernel/contract';
@@ -22,6 +25,10 @@ export class GovernedAdmission implements Admission {
   readonly #stand: StandInAdmission;
   /** Each enrolled device's own grants. */
   readonly devices = new Map<string, CapabilityGrants>();
+  /** The devices holding one unspent step-up; a spend (the handler's `spendStepUp`) takes it away, as Gate's ledger does. */
+  readonly stepUps = new Set<string>();
+  /** How many times a handler spent a step-up on this stand-in. */
+  spent = 0;
   policy: GateConfig = DEFAULT_GATE_CONFIG;
 
   constructor() {
@@ -31,15 +38,16 @@ export class GovernedAdmission implements Admission {
     );
   }
 
-  enrol(device: string, grants: CapabilityGrants): void {
+  enrol(device: string, grants: CapabilityGrants, options: { stepUp?: true } = {}): void {
     this.devices.set(device, grants);
+    if (options.stepUp === true) this.stepUps.add(device);
   }
 
   #standing(request: ApiRequest): CallStanding | undefined {
     const principal = request.principal;
     if (principal?.kind === 'device') {
       const grants = this.devices.get(principal.holder);
-      return deviceStanding(principal.holder, grants);
+      return deviceStanding(principal.holder, grants, this.stepUps.has(principal.holder));
     }
     if (request.arrival.kind === 'local') return ownerStanding();
     return undefined;
@@ -50,10 +58,15 @@ export class GovernedAdmission implements Admission {
     if (decided.outcome !== 'admitted' || input.descriptor.consultsGrants !== true) return decided;
     const presentation = decided.standing.presentation;
     const governed = presentation?.local !== true;
+    const holder = input.request.principal?.kind === 'device' ? input.request.principal.holder : undefined;
     return {
       ...decided,
       standing: {
         ...decided.standing,
+        spendStepUp: () => {
+          this.spent += 1;
+          if (holder !== undefined) this.stepUps.delete(holder);
+        },
         governance: {
           governed,
           decide: demand => {
@@ -61,7 +74,18 @@ export class GovernedAdmission implements Admission {
               ...input,
               descriptor: { ...input.descriptor, capability: demand },
             });
-            if (asked.outcome === 'admitted') return { allowed: true, refusal: 'granted' };
+            if (asked.outcome === 'admitted') {
+              // An admitted demand that wanted a step-up was admitted ON the device's held one: say so, as Gate does.
+              const name = coreCapabilityName(demand.capability);
+              const wantsStepUp =
+                demand.narrowing !== true &&
+                governed &&
+                asksStepUpPerAction(this.policy.security) &&
+                (demand.axis === 'configure' || (name !== undefined && STEP_UP_USE_CAPABILITIES.includes(name)));
+              return wantsStepUp
+                ? { allowed: true, refusal: 'granted', steppedUp: true }
+                : { allowed: true, refusal: 'granted' };
+            }
             const code = (JSON.parse(String(asked.response.body)) as { code?: string }).code ?? '';
             if (code === STEP_UP_REQUIRED_CODE) return { allowed: false, refusal: 'step-up-required' };
             const refusal = GRANT_REFUSALS.find(name => code === `grant_${name.replaceAll('-', '_')}`);

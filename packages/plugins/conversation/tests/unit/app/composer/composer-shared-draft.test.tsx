@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { DraftServerFrame as SharedDraftServerFrame } from '../../../../contract/index.ts';
 import {
-  fakeClient,
   socketOf,
   type SuiteStreamOpener as DaemonStreamOpener,
   type SuiteStreamSession,
   withClient,
 } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
 import type { Instant } from '@ferretry/std';
 import { useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
@@ -70,7 +70,7 @@ const mount = (stream: ReturnType<typeof streamOf>, stored = '') => {
   const view: ReactTestRenderer = render(
     withClient(
       <Composer api={{ send: async () => ({}) } as never} daemon={daemon} draftStore={drafts} ferretId="s1" />,
-      fakeClient(undefined, socketOf(stream.open)),
+      fakeClient({}, { more: socketOf(stream.open) }),
     ),
     {
       createNodeMock: node =>
@@ -169,7 +169,7 @@ describe('the composer, sharing its draft', () => {
           draftStore={new DaemonDraftStore(new MemoryStorage())}
           ferretId="s1"
         />,
-        fakeClient(undefined, socketOf(stream.open)),
+        fakeClient({}, { more: socketOf(stream.open) }),
       ),
     );
     await settle();
@@ -192,7 +192,7 @@ describe('a send finishing after the person moved on (review H1, acceptance step
     const streams: Record<string, ReturnType<typeof streamOf>> = { s1: streamOf(), s2: streamOf() };
     const open: DaemonStreamOpener = request =>
       (request.ferretId === 's1' ? streams.s1 : streams.s2)?.open(request) as SuiteStreamSession;
-    const client = fakeClient(undefined, socketOf(open));
+    const client = fakeClient({}, { more: socketOf(open) });
     let release: (() => void) | undefined;
     const send = async () => {
       await new Promise<void>(resolve => {
@@ -261,7 +261,7 @@ describe('a send finishing after the person moved on (review H1, acceptance step
           draftStore={new DaemonDraftStore(new MemoryStorage())}
           ferretId="s1"
         />,
-        fakeClient(undefined, socketOf(stream.open)),
+        fakeClient({}, { more: socketOf(stream.open) }),
       ),
     );
     await settle();

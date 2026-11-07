@@ -15,8 +15,8 @@ import type {
   SettingsProps,
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
-import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ChatScreen } from './chat/chat-screen.tsx';
+import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ConversationClientProvider } from './client.ts';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
 import { ConversationSettings } from './composer/conversation-settings.tsx';

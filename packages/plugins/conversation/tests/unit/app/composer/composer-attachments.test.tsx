@@ -23,7 +23,8 @@ import {
 import { daemonConnection, DaemonCallError } from '../../../../app/composer/seam.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../../../app/composer/drafts.ts';
 import { writeMdComposePref } from '@ferretry/app';
-import { fakeClient, withClient } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/composer-host.tsx';
 import { ensureDom, render, run, runAsync, settleUntil } from '@ferretry/app/testing';
 
 ensureDom();
@@ -273,8 +274,8 @@ describe('composer attachments', () => {
 
   test('with no uploader of its own the composer uploads through the half’s client', async () => {
     const calls: { route: string; ferretId: string | undefined }[] = [];
-    const client = fakeClient(async (route, init) => {
-      calls.push({ route, ferretId: init?.params?.ferretId });
+    const client = fakeClient(async call => {
+      calls.push({ route: call.route, ferretId: call.params.ferretId });
       return { ...view('att_c', png()), mime: 'image/png' };
     });
     const composer = render(
