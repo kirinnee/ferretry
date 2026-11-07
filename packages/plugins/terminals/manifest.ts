@@ -1,5 +1,43 @@
-import { definePlugin } from '@ferretry/kernel/manifest';
+import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
+import { InputTargets } from '@ferretry/core-vault/contract';
+import { Runners } from '@ferretry/core-ferrets/contract';
+import {
+  AUDIT,
+  GUARD_ACK,
+  GUARD_NONE,
+  SKIP_READ,
+  SKIP_UNRECORDED,
+  TERMINALS_WORDS,
+  TerminalAskOwnerInputSchema,
+  TerminalChanged,
+  TerminalCloseInputSchema,
+  TerminalListInputSchema,
+  TerminalOpenInputSchema,
+  TerminalReadInputSchema,
+  TerminalSendInputSchema,
+  TerminalsConfigSchema,
+  TerminalsPort,
+  TerminalWaitInputSchema,
+  USE,
+} from './contract/index.ts';
 
+/** Every terminal tool: a ferret's call (or the owner's tools), on `terminal.use`, kept as one `agent.tool` entry. */
+const TOOL = {
+  minimum: 'authenticated',
+  caller: 'any',
+  capability: USE.terminal,
+  audit: { record: AUDIT.agentTool },
+} as const;
+
+/**
+ * Terminals (§2.3): gives ferrets terminals to drive, lets you watch them, and is the default place ferrets run.
+ *
+ * Routes copied from today's `runtime/mounts/{terminals,session-processes,session-console-input,session-attach,
+ * cgroups}.ts` and the terminal surface control and owner-tools routes of `agent-tools.ts` (placed with Ferrets
+ * by file; declared here because they act on terminals — see the slice report). Every act goes through the
+ * kernel's act runner, so a hold can never be skipped (§4.7).
+ */
 export default definePlugin({
   id: 'terminals',
   title: 'Terminals',
@@ -7,4 +45,262 @@ export default definePlugin({
   api: 5,
   core: false,
   kinds: ['tool', 'runner', 'command', 'view'],
+  words: TERMINALS_WORDS,
+
+  provides: { terminals: TerminalsPort },
+
+  actions: {
+    routes: [
+      route('GET /v1/cgroups/config', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.fleet,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
+      route('GET /v1/sessions/:sessionId/attach', {
+        minimum: 'operator',
+        caller: 'person',
+        privilegedOnly: true,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
+      route('POST /v1/sessions/:sessionId/console/input', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.terminalInput },
+        guard: GUARD_NONE,
+      }),
+      route('GET /v1/sessions/:sessionId/processes', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('GET /v1/sessions/:sessionId/processes/:processId/output', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('POST /v1/sessions/:sessionId/processes/:processId/stop', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.terminalInput },
+        guard: GUARD_NONE,
+      }),
+      route('GET /v1/sessions/:sessionId/surfaces/terminals/control', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
+      route('POST /v1/sessions/:sessionId/surfaces/terminals/control', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.surfaceControl },
+        guard: GUARD_NONE,
+      }),
+      route('POST /v1/sessions/:sessionId/surfaces/terminals/tools', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.agentTool },
+        guard: 'secrets',
+      }),
+      route('GET /v1/sessions/:sessionId/terminals', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('POST /v1/sessions/:sessionId/terminals', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.terminalOpened },
+        guard: 'secrets',
+      }),
+      route('DELETE /v1/sessions/:sessionId/terminals/:terminalId', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: GUARD_NONE,
+      }),
+      route('GET /v1/sessions/:sessionId/terminals/:terminalId', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('PATCH /v1/sessions/:sessionId/terminals/:terminalId', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: 'secrets',
+      }),
+      route('GET /v1/terminals', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('POST /v1/terminals/close-finished', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: GUARD_NONE,
+      }),
+    ],
+    sockets: [
+      socket('GET /v1/sessions/:sessionId/terminals/:terminalId/stream', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        audit: { record: AUDIT.terminalOpened },
+        guard: 'secrets',
+      }),
+    ],
+    agentTools: [
+      tool('terminal_list', {
+        ...TOOL,
+        op: 'read',
+        guard: 'secrets',
+        input: TerminalListInputSchema,
+        summary: 'list the terminals in the session',
+      }),
+      tool('terminal_open', {
+        ...TOOL,
+        op: 'open',
+        guard: GUARD_ACK,
+        input: TerminalOpenInputSchema,
+        summary: 'open a named terminal, optionally running a command in it',
+      }),
+      tool('terminal_send', {
+        ...TOOL,
+        op: 'keys',
+        guard: GUARD_ACK,
+        input: TerminalSendInputSchema,
+        summary: 'type text and press keys in a terminal',
+      }),
+      tool('terminal_read', {
+        ...TOOL,
+        op: 'read',
+        guard: 'secrets',
+        input: TerminalReadInputSchema,
+        summary: 'read the last lines of a terminal',
+      }),
+      tool('terminal_wait', {
+        ...TOOL,
+        op: 'wait',
+        guard: 'secrets',
+        input: TerminalWaitInputSchema,
+        summary: 'wait until text appears or the running command ends',
+      }),
+      tool('terminal_close', {
+        ...TOOL,
+        op: 'close',
+        guard: GUARD_ACK,
+        input: TerminalCloseInputSchema,
+        summary: 'close a terminal',
+      }),
+      tool('terminal_ask_owner', {
+        ...TOOL,
+        guard: GUARD_NONE,
+        input: TerminalAskOwnerInputSchema,
+        summary: 'hand a terminal to the owner',
+      }),
+      tool('terminal_request_input', {
+        ...TOOL,
+        guard: { none: 'raises an input card through the Vault; answers its state, never a value' },
+        summary: 'ask the owner to type a password or code into a terminal',
+      }),
+    ],
+    cli: [
+      verb('terminal list', { summary: 'list the terminals in the session' }),
+      verb('terminal open', { summary: 'open a named terminal, optionally running a command in it' }),
+      verb('terminal send', { summary: 'type text and press keys in a terminal' }),
+      verb('terminal read', { summary: 'print the last lines of a terminal' }),
+      verb('terminal wait', { summary: 'wait until text appears or the running command ends; exits 1 on timeout' }),
+      verb('terminal close', {
+        summary: 'close a terminal, or with --all-finished every terminal a finished ferret left open',
+      }),
+      verb('terminal slots', { summary: 'show who holds the open terminals, across every ferret, against the limit' }),
+      verb('terminal ask', { summary: 'hand a terminal to the owner' }),
+      verb('terminal takeover', { summary: 'take a terminal over from the ferret until you hand it back' }),
+      verb('terminal handback', { summary: 'hand a terminal you took over back to the ferret' }),
+      verb('terminal handover', { summary: 'let the ferret use a terminal you opened' }),
+      verb('terminal control', { summary: 'show which terminals a ferret is driving, taken over, or handed to it' }),
+      verb('attach', { summary: "attach this terminal to a ferret's pane (Ctrl-b d detaches)" }),
+    ],
+  },
+
+  ui: {
+    panels: [panel('ferret.side', { id: 'terminals', order: 20 })],
+    settings: [settingsTab('terminals', { label: 'Terminals', order: 50 })],
+    renderers: [renderer('reference', { prefix: '%terminal' })],
+  },
+
+  data: {
+    state: [
+      /** tmux's own server socket: not a document, never parsed by Ferretry. */
+      defineState({
+        name: 'tmux',
+        path: 'tmux.sock',
+        store: 'opaque',
+        format: 1,
+        onDamaged: { narrower: 'a new tmux server is started; no pane is adopted' },
+      }),
+      defineState({ name: 'terminals', path: 'terminals.json', store: 'json', format: 1 }),
+    ],
+    config: [
+      defineConfig({
+        file: 'terminals.yaml',
+        schema: TerminalsConfigSchema,
+        axis: 'configure',
+        loosens: neverLoosens,
+      }) as ConfigDef,
+    ],
+    readModels: ['terminals', 'holders'],
+    publishes: [TerminalChanged],
+  },
+
+  hooks: {
+    takes: [
+      { hook: InputTargets, key: 'terminal' },
+      { hook: Runners, key: 'tmux' },
+    ],
+  },
+
+  doctor: ['tmux', 'user-slice'],
+
+  permissions: { spawn: ['tmux', 'systemd-run', 'systemctl'] },
 });

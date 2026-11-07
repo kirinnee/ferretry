@@ -95,6 +95,7 @@
       "name": "@ferretry/plugin-access",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -104,6 +105,9 @@
       "name": "@ferretry/plugin-accounts",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -131,6 +135,8 @@
       "name": "@ferretry/plugin-browsers",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -140,7 +146,9 @@
       "name": "@ferretry/plugin-catalogs",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-access": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
@@ -167,6 +175,7 @@
       "name": "@ferretry/plugin-connections",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -275,6 +284,9 @@
       "name": "@ferretry/plugin-terminals",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -293,6 +305,8 @@
       "name": "@ferretry/plugin-updates",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
