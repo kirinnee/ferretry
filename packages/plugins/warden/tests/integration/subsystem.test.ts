@@ -41,9 +41,12 @@ function warden(options: { readonly config?: unknown; readonly written?: ConfigW
   return { ...fake, ferrets, conversation, asks, subsystem, routes: wardenRoutes(subsystem) };
 }
 
-/** A helper that asked a question nobody has answered: the one trouble Ferrets and Asks can show together. */
+/**
+ * A helper that asked a question nobody has answered: the one trouble Ferrets and Asks can show together. It was
+ * started in `auto` mode: a ferret with no recorded mode is read as a person's terminal, which the sweep never flags.
+ */
 async function ask(world: ReturnType<typeof warden>, id: string): Promise<void> {
-  world.ferrets.add({ id: ferretId(id), parent: ferretId('lead'), state: 'idle', stateAt: T0 });
+  world.ferrets.add({ id: ferretId(id), parent: ferretId('lead'), mode: 'auto', state: 'idle', stateAt: T0 });
   await world.asks.raise({
     source: sourceKey('ferret'),
     entry: entryId(`${id}-q`),
