@@ -6,12 +6,12 @@ import { type BrowserElementTarget, type BrowserTarget, type BrowserTargetFields
 import { type SurfaceOpener } from './wire/surface.ts';
 import type { BrowserAutomation, BrowserPageActed } from './automation.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
-import type { BrowserInputFieldsPort } from './input-contracts.ts';
+import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
 import type { BrowserUploadMode } from './page-acts.ts';
 import type { PageScript } from '../worker/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../worker/protocol.ts';
-import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in-watch.ts';
+import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from '../target/sign-in/watch.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
 
@@ -260,7 +260,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly launcher: BrowserSessionLauncher,
     private readonly now: () => number,
     private readonly idle?: BrowserIdlePolicy,
-    /** Told when an act may have changed who a page signs in, whoever made it (sign-in-watch.ts). */
+    /** Told when an act may have changed who a page signs in, whoever made it (`../target/sign-in/watch.ts`). */
     private readonly signIns?: BrowserSignInWatch,
   ) {}
 

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { disablePasskeys } from '../../../daemon/worker/passkeys.ts';
-import { type InputCdpSession } from '../../../daemon/worker/input-fields.ts';
+import { type InputCdpSession } from '../../../daemon/target/lib/fields.ts';
 
 /** A session that records each call as `[method, params]` and answers from a table. */
 function recording(

@@ -3,7 +3,7 @@ import type { BrowserElementTarget, BrowserScreenshotFormat, BrowserTarget } fro
 import type { BrowserInputEvent, BrowserPageActionSnapshot, BrowserPageSnapshot, BrowserScreencastFrame, BrowserViewport } from './wire/browser.ts';
 import type { BrowserProxyStatus } from '../../contract/index.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
-import type { BrowserInputFieldsPort } from './input-contracts.ts';
+import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
 import type {
   BrowserClickOptions,
   BrowserReadOptions,

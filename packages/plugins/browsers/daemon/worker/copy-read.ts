@@ -1,7 +1,7 @@
 import { type BrowserElementTarget } from '../pages/wire/target.ts';
 import { COPY_VALUE_MAX_BYTES, type CopyElementPart } from '../pages/copy-contracts.ts';
 import type { BrowserCopyRead } from '../pages/copy-contracts.ts';
-import { originOfUrl } from './input-fields.ts';
+import { originOfUrl } from '../target/lib/fields.ts';
 import { browserSelectorOf } from '../pages/page-acts.ts';
 
 /** The slice of an element handle a copy read uses: its frame, one read inside the page, and letting it go. */

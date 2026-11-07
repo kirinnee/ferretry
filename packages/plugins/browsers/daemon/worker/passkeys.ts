@@ -1,4 +1,4 @@
-import type { InputCdpSession } from './input-fields.ts';
+import type { InputCdpSession } from '../target/lib/fields.ts';
 
 /**
  * KEEPS THE AGENT BROWSER FROM OFFERING A PASSKEY. A page that is asked for a passkey either shows a

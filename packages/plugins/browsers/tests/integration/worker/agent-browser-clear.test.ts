@@ -8,7 +8,7 @@ import { wallClock } from '../../support/wall-clock.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { type BrowserAutomation } from '../../../daemon/pages/automation.ts';
-import { type BrowserInputFacts, type BrowserInputFieldsPort } from '../../../daemon/pages/input-contracts.ts';
+import { type BrowserInputFacts, type BrowserInputFieldsPort } from '../../../daemon/target/lib/contracts.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 
 /**

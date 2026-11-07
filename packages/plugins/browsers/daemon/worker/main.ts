@@ -20,10 +20,9 @@
  */
 import { close } from 'node:fs';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { BROWSER_MODIFIERS, type BrowserElementTarget, type BrowserModifier, type BrowserMouseButton, type BrowserTarget } from '../pages/wire/target.ts';
+import { BROWSER_MODIFIERS, type BrowserModifier, type BrowserMouseButton, type BrowserTarget } from '../pages/wire/target.ts';
 import { type BrowserInputEvent } from '../pages/wire/browser.ts';
 import { BrowserPageLifecycleRequestSchema } from '../pages/wire/page-lifecycle.ts';
-import { InputTargetFactsSchema } from '@ferretry/core-vault/contract';
 import {
   type Browser,
   type BrowserContext,
@@ -38,17 +37,10 @@ import {
   CDP_PIPE_ENDPOINT,
   CdpPipeTransport,
 } from './cdp-pipe.ts';
-import { recogniseBrowserChallenge } from './challenge.ts';
+import { recogniseBrowserChallenge } from '../challenges/recognise.ts';
 import { type CopyablePage, readCopyElement } from './copy-read.ts';
 import { DownloadStage } from './download-stage.ts';
-import type {
-  BrowserInputClearJob,
-  BrowserInputFacts,
-  BrowserInputValue,
-} from '../pages/input-contracts.ts';
 import {
-  armInputFields,
-  clearInputFields,
   describeInputDocument,
   type InputablePage,
   type InputCdpSession,
@@ -56,14 +48,9 @@ import {
   type InputHandle,
   type InputLocator,
   type InputSubject,
-  observeInputFields,
   playwrightNodeOf,
-  probeInputFields,
-  readInputText,
-  refindInputFields,
-  shootInputFields,
-  typeInputFields,
-} from './input-fields.ts';
+} from '../target/lib/fields.ts';
+import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../target/lib/worker-serve.ts';
 import {
   browserElementParam,
   browserTargetParam,
@@ -86,7 +73,7 @@ import { runPageScript } from './page-script.ts';
 import { disablePasskeys } from './passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/pointer.ts';
 import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
-import { type PushNumberPage, readPushNumber } from './push-number-read.ts';
+import type { PushNumberPage } from '../challenges/push-number-read.ts';
 
 /** How this thread reaches Chrome, from the `start` message. */
 let endpoint: string | undefined;
@@ -519,127 +506,17 @@ function inputSubject(page: Page): InputSubject {
       frame: async frame => (await page.context().newCDPSession(frame as never)) as unknown as InputCdpSession,
     },
     sessions,
+    // The bounded wait for a title and the probe's second look (the thread's own timer).
+    wait: async ms => await new Promise(resolve => setTimeout(resolve, ms)),
   };
 }
 
-/** The input bridge's browser facts or values, as the worker receives them: parsed, because it trusts no line. */
-function browserFactsParam(value: unknown): BrowserInputFacts {
-  const parsed = InputTargetFactsSchema.safeParse(value);
-  if (!parsed.success || parsed.data.kind !== 'page') throw new Error('facts are not page facts');
-  return parsed.data;
-}
-
-function inputPointers(value: unknown): { readonly id: string; readonly target: BrowserElementTarget }[] {
-  if (!Array.isArray(value) || value.length === 0) throw new Error('fields are required');
-  return value.map(item => {
-    const raw = (item ?? {}) as Record<string, unknown>;
-    const target = browserElementParam(raw.target);
-    if (typeof raw.id !== 'string' || raw.id === '' || target === undefined)
-      throw new Error('a field needs an id and a target');
-    return { id: raw.id, target };
-  });
-}
-
-/**
- * The one write of an owner's values. EVERYTHING is caught here and answers a word, because `answer` would
- * put an error's first line on the wire and a value must never ride in one.
- */
-async function inputType(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  let page: Page;
-  try {
-    page = targetPage(params.pageId);
-  } catch {
-    return { outcome: 'target_gone' };
-  }
-  let expected: BrowserInputFacts;
-  let values: BrowserInputValue[];
-  try {
-    expected = browserFactsParam(params.expected);
-    if (!Array.isArray(params.values)) throw new Error('values are required');
-    values = params.values.map(item => {
-      const raw = (item ?? {}) as Record<string, unknown>;
-      if (typeof raw.field !== 'string' || typeof raw.text !== 'string')
-        throw new Error('a value needs a field and text');
-      return { field: raw.field, text: raw.text };
-    });
-  } catch {
-    return { outcome: 'target_changed' };
-  }
-  try {
-    return {
-      outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true),
-    };
-  } catch {
-    return { outcome: 'uncertain' };
-  }
-}
-
-/** A grant fill arms its `pagehide` clear before the write: anything malformed or failing is `refused`, so nothing is typed. */
-async function inputArm(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  try {
-    const page = targetPage(params.pageId);
-    const expected = browserFactsParam(params.expected);
-    if (!Array.isArray(params.fieldIds) || !params.fieldIds.every(id => typeof id === 'string'))
-      return { outcome: 'refused' };
-    return { outcome: await armInputFields(inputSubject(page), expected, params.fieldIds as string[]) };
-  } catch {
-    return { outcome: 'refused' };
-  }
-}
-
-/**
- * A grant fill's check before its page hold ends. A page that is gone holds nothing (`moved`); anything malformed or
- * failing is `unknown`, which stops the line. The job names nodes, never a value.
- */
-async function inputClear(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  let page: Page;
-  try {
-    page = targetPage(params.pageId);
-  } catch {
-    return { outcome: 'moved' };
-  }
-  try {
-    return { outcome: await clearInputFields(inputSubject(page), clearJobParam(params.job)) };
-  } catch {
-    return { outcome: 'unknown' };
-  }
-}
-
-/** A clear job as the daemon sent it, checked field by field: a frame and a node each, and nothing else. */
-function clearJobParam(raw: unknown): BrowserInputClearJob {
-  const job = (raw ?? {}) as Record<string, unknown>;
-  if (typeof job.navigationId !== 'string' || job.navigationId === '' || !Array.isArray(job.fields))
-    throw new Error('a clear job needs a document and fields');
-  const fields = job.fields.map(item => {
-    const field = (item ?? {}) as Record<string, unknown>;
-    if (
-      typeof field.frameId !== 'string' ||
-      typeof field.backendNodeId !== 'number' ||
-      !Number.isInteger(field.backendNodeId) ||
-      field.backendNodeId <= 0
-    )
-      throw new Error('a clear field needs a frame and a node');
-    return { frameId: field.frameId, backendNodeId: field.backendNodeId };
-  });
-  if (fields.length === 0 || fields.length > 8) throw new Error('a clear job names 1 to 8 fields');
-  return { navigationId: job.navigationId, fields };
-}
-
-/** The dummy probe: anything malformed or failing is `aborted`, which only ever makes the lock longer. */
-async function inputProbe(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  try {
-    const page = targetPage(params.pageId);
-    const expected = browserFactsParam(params.expected);
-    if (!Array.isArray(params.fieldIds) || !params.fieldIds.every(id => typeof id === 'string'))
-      return { outcome: 'aborted' };
-    if (typeof params.dummy !== 'string' || params.dummy === '') return { outcome: 'aborted' };
-    return {
-      outcome: await probeInputFields(inputSubject(page), expected, params.fieldIds as string[], params.dummy),
-    };
-  } catch {
-    return { outcome: 'aborted' };
-  }
-}
+/** How the one page input seam (`../target/lib/worker-serve.ts`) reaches the page a request names. */
+const INPUT_PAGES: InputWorkerPages = {
+  subject: id => inputSubject(targetPage(id)),
+  session: async id => (await pageSession(targetPage(id))) as unknown as InputCdpSession,
+  pushPage: id => targetPage(id) as unknown as PushNumberPage,
+};
 
 /** A page that always exists, so a listing is never empty: Chrome's own first tab, or a new one. */
 async function anyPage(): Promise<Page> {
@@ -913,6 +790,8 @@ async function run(request: Request): Promise<Record<string, unknown>> {
 
 async function act(request: Request): Promise<Record<string, unknown>> {
   const params = request.params;
+  // The page input seam is one copy (`../target/lib/worker-serve.ts`): it parses every parameter and answers a word.
+  if (isInputMethod(request.method)) return await serveInputMethod(INPUT_PAGES, request.method, params);
   switch (request.method) {
     case 'navigate': {
       const page = targetPage(params.pageId);
@@ -974,48 +853,6 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ),
       };
     }
-    case 'pushNumberRead': {
-      const page = targetPage(params.pageId);
-      return {
-        read: await readPushNumber(
-          page as unknown as PushNumberPage,
-          async () => await describeInputDocument(inputSubject(page)),
-        ),
-      };
-    }
-    case 'inputDocument':
-      return { document: await describeInputDocument(inputSubject(targetPage(params.pageId))) };
-    case 'inputText':
-      return { text: await readInputText(inputSubject(targetPage(params.pageId))) };
-    case 'inputObserve':
-      return {
-        observation: await observeInputFields(inputSubject(targetPage(params.pageId)), inputPointers(params.fields)),
-      };
-    case 'inputRefind':
-      return {
-        observation: await refindInputFields(
-          inputSubject(targetPage(params.pageId)),
-          browserFactsParam(params.expected),
-          inputPointers(params.fields),
-        ),
-      };
-    case 'inputShot': {
-      const page = targetPage(params.pageId);
-      return {
-        shot: await shootInputFields(
-          (await pageSession(page)) as unknown as InputCdpSession,
-          browserFactsParam(params.facts),
-        ),
-      };
-    }
-    case 'inputType':
-      return await inputType(params);
-    case 'inputProbe':
-      return await inputProbe(params);
-    case 'inputArm':
-      return await inputArm(params);
-    case 'inputClear':
-      return await inputClear(params);
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));

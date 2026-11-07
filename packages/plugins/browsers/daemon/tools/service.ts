@@ -9,7 +9,7 @@ import {
   type BrowserSubsystem,
   pendingDialogOf,
 } from '../pages/service.ts';
-import { NON_TYPING_KEYS } from '../pages/sign-in-watch.ts';
+import { NON_TYPING_KEYS } from '../target/sign-in/watch.ts';
 import type { BrowserActionResult, BrowserDownloadNotice, BrowserStatus } from '../pages/wire/browser.ts';
 import {
   BROWSER_WAIT_DEFAULT_MS,

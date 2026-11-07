@@ -18,6 +18,7 @@ import {
   isSecureUrl,
   observeInputFields,
   originOfUrl,
+  PLAYWRIGHT_REACHED_VERSION,
   playwrightNodeOf,
   refindInputFields,
   PROBE_SECOND_LOOK_MS,
@@ -1450,6 +1451,16 @@ describe('playwrightNodeOf', () => {
         () => should.fail(undefined, undefined, 'it should reject'),
         error => should((error as Error).message).equal('the browser could not identify that field on the page'),
       );
+  });
+});
+
+describe('the Playwright release the identity reach was written against', () => {
+  it('is the one installed: a bump must check the private reach in playwrightNodeOf again', async () => {
+    const manifest = Bun.resolveSync('playwright-core/package.json', import.meta.dir);
+    const installed = (JSON.parse(await Bun.file(manifest).text()) as { version: string }).version;
+    // A failure here is the cue: re-read toImpl, _sessionForHandle, _targetId and _objectId in the new release,
+    // then move PLAYWRIGHT_REACHED_VERSION.
+    should(installed).equal(PLAYWRIGHT_REACHED_VERSION);
   });
 });
 
