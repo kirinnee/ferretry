@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { withPinned } from '../../../../daemon/lib/agent-pins/view.ts';
-import { sessionView } from '../runtime/mounts/support.ts';
+import { ferretSummary } from '../support/calls.ts';
 
 describe('withPinned', () => {
-  it('should answer the same view object while the view and its pin are unchanged', async () => {
+  it('should answer the same ferret object while the ferret and its pin are unchanged', async () => {
     // Arrange
-    const held = [sessionView('a'), sessionView('b')];
+    const held = [ferretSummary('a'), ferretSummary('b')];
     let pins = new Map([['a', '2026-11-01T00:00:00.000Z']]);
     const subject = withPinned({ list: async () => held, get: async () => undefined }, { pinnedAt: async () => pins });
     const first = await subject.list();

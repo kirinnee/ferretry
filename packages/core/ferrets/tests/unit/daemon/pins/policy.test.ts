@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { MAX_PIN_PREVIEW_LENGTH, type Pin } from '@ferretry/protocol';
+import { MAX_PIN_PREVIEW_LENGTH, type Pin } from '../../../../daemon/lib/protocol/pins.ts';
 import {
   capPins,
   deduplicatePins,

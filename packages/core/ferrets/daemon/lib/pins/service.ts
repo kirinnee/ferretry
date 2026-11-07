@@ -1,4 +1,4 @@
-import type { Pin, PinSnapshot } from '@ferretry/protocol';
+import type { Pin, PinSnapshot } from '../protocol/pins.ts';
 import {
   isPinBlockKind,
   isSafePinSessionId,
