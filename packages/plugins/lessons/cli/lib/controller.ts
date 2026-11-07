@@ -1,15 +1,18 @@
 import {
   AgentLessonToolCallSchema,
+  globalLessonRules,
   type LessonsScanRequest,
   type LessonsScanScope,
   ProposalCategorySchema,
   type ProposalState,
   ProposalStateSchema,
   type ProposalView,
+  withGlobalLessonRule,
 } from '../../contract/index.ts';
 import type { z } from 'zod';
 import type { ILessonsGateway, ILessonsOutput } from './ports.ts';
 import {
+  renderGlobalRules,
   renderLessonsApplyPreview,
   renderLessonsConfig,
   renderLessonsPatch,
@@ -112,6 +115,36 @@ export class LessonsController {
     const state = this.#state(options);
     const proposals = await this.gateway.proposals(state);
     this.#report(proposals, options, () => renderProposalList(proposals, state));
+  }
+
+  /** `fy lesson global`: the Global lessons document's rules, numbered for `edit` and `remove`. */
+  async global(options: LessonsCommandOptions): Promise<void> {
+    const document = await this.gateway.globalDocument();
+    this.#report(document, options, () => renderGlobalRules(document));
+  }
+
+  /**
+   * `fy lesson global edit <n> <rule...>` / `fy lesson global remove <n>`: rewrite one rule of the Global document — how
+   * an applied Global lesson is changed or removed (today: edit the file). Read, change, write against that read's etag.
+   */
+  async globalRule(
+    number: string,
+    words: readonly string[] | undefined,
+    options: LessonsCommandOptions,
+  ): Promise<void> {
+    const index = Number(number);
+    const rule = words === undefined ? undefined : words.join(' ').trim();
+    if (rule === '') throw new Error('give the new wording of the rule');
+    const document = await this.gateway.globalDocument();
+    const text = withGlobalLessonRule(document.text, index, rule);
+    if (text === undefined) {
+      const count = globalLessonRules(document.text).length;
+      throw new Error(`there is no Global rule ${number}; ${this.bin} lesson global lists ${String(count)}`);
+    }
+    const written = await this.gateway.writeGlobalDocument(text, document.etag);
+    this.#report(written, options, () =>
+      rule === undefined ? `Removed Global rule ${String(index)}.` : `Global rule ${String(index)} now reads: ${rule}`,
+    );
   }
 
   async show(id: string, options: LessonsCommandOptions): Promise<void> {

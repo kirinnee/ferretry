@@ -3,6 +3,8 @@ import should from 'should';
 import {
   AgentLessonToolResultSchema,
   LESSONS_APPLY_CONFLICT_CODE,
+  LESSONS_CONFIG_WRITE_GAP,
+  LESSONS_CONFIG_WRITE_GAP_CODE,
   LessonsApplyPreviewSchema,
   LessonsConfigSchema,
   LessonsPatchResponseSchema,
@@ -532,21 +534,23 @@ async function etagOf(subject: Lessons, id: string): Promise<string> {
 
 describe('the lessons mount', () => {
   describe('the machine default', () => {
-    it('should write passiveDefault and answer the configuration now in effect', async () => {
+    it('should refuse to write the machine default until the kernel config write port lands, keeping no copy (D2 #16)', async () => {
       // Arrange
       const subject = lessons();
+      const before = { ...subject.world.config };
 
       // Act
       const answer = await drive(subject.subsystem, {
         method: 'PATCH',
         path: '/v1/lessons/config',
-        body: { passiveDefault: true },
+        body: { passiveDefault: !before.passiveDefault },
       });
 
       // Assert
-      should(answer.status).equal(200);
-      should(LessonsConfigSchema.parse(answer.body).passiveDefault).be.true();
-      should(subject.world.config.passiveDefault).be.true();
+      should(answer.status).equal(503);
+      should(answer.body).containEql({ code: LESSONS_CONFIG_WRITE_GAP_CODE, error: LESSONS_CONFIG_WRITE_GAP });
+      should(subject.world.config).deepEqual(before);
+      should(JSON.stringify(await subject.store.loadState())).not.containEql('passiveDefault');
     });
 
     it('should report the passive default on the status read', async () => {

@@ -216,6 +216,24 @@ export type LessonsPatchResponse = z.infer<typeof LessonsPatchResponseSchema>;
 export const LessonsConfigPatchSchema = z.strictObject({ passiveDefault: z.boolean() });
 export type LessonsConfigPatch = z.infer<typeof LessonsConfigPatchSchema>;
 
+/**
+ * DECLARED GAP (D2 #16): the write goes through the kernel's config write port, which is not on this base. Until it is,
+ * `PATCH /v1/lessons/config` answers `503` with this code and sentence; `lessons.yaml` stays the only place the switch
+ * lives, and nothing keeps a second copy of it.
+ */
+export const LESSONS_CONFIG_WRITE_GAP_CODE = 'config_write_unavailable';
+export const LESSONS_CONFIG_WRITE_GAP =
+  'Ferretry cannot write config/lessons.yaml from here yet. Set passiveDefault in config/lessons.yaml by hand: new ferrets follow that file.';
+
+/**
+ * DECLARED GAP (D2 #19): a miner needs a work folder of Lessons' own (today's daemon home and `runs/` folder), and no
+ * such folder can be given to a ferret on this base. Until it can, starting a miner answers `503` with this code and
+ * sentence; it never falls back to running in, or writing into, an owner's project.
+ */
+export const LESSONS_MINER_GAP_CODE = 'miner_unavailable';
+export const LESSONS_MINER_GAP =
+  'A lesson scan cannot start yet: Ferretry has no folder of its own to run the miner in, and it never runs one inside your projects. Filing, reviewing and applying lessons still work.';
+
 // ── Passive learning, per ferret ─────────────────────────────────────────────────────────────────
 
 /**

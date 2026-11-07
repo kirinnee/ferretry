@@ -4,6 +4,7 @@
  * and the Apply that writes it into the Global lessons document or a project's AGENTS.md / CLAUDE.md.
  */
 export * from './config.ts';
+export * from './global.ts';
 export * from './policy.ts';
 export * from './port.ts';
 export * from './state.ts';

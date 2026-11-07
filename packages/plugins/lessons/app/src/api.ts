@@ -24,6 +24,8 @@ import {
   LessonsApplyPreviewSchema,
   type LessonsConfig,
   type LessonsConfigPatch,
+  type LessonsGlobalDocument,
+  LessonsGlobalDocumentSchema,
   LessonsConfigSchema,
   type LessonsScanEstimate,
   LessonsScanEstimateSchema,
@@ -62,9 +64,21 @@ const lessonsCall = async <Value>(
 export const fetchLessonsConfig = (connection: LessonsConnection): Promise<LessonsConfig> =>
   lessonsCall(connection, 'GET /v1/lessons/config', LessonsConfigSchema);
 
-/** Writes the machine default for new ferrets. */
+/** Asks the daemon to write the machine default; refused (`config_write_unavailable`) until the kernel config write port lands. */
 export const patchLessonsConfig = (connection: LessonsConnection, patch: LessonsConfigPatch): Promise<LessonsConfig> =>
   lessonsCall(connection, 'PATCH /v1/lessons/config', LessonsConfigSchema, { body: patch });
+
+/** The Global lessons document every ferret reads, and the etag a rewrite names. */
+export const fetchGlobalLessons = (connection: LessonsConnection): Promise<LessonsGlobalDocument> =>
+  lessonsCall(connection, 'GET /v1/lessons/global', LessonsGlobalDocumentSchema);
+
+/** Rewrites the whole Global document (how an applied Global lesson is changed or removed); `409` if it moved. */
+export const putGlobalLessons = (
+  connection: LessonsConnection,
+  text: string,
+  etag: string,
+): Promise<LessonsGlobalDocument> =>
+  lessonsCall(connection, 'PUT /v1/lessons/global', LessonsGlobalDocumentSchema, { body: { text, etag } });
 
 /** Every lesson, or those in one state. */
 export const fetchLessonsProposals = (

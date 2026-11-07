@@ -21,10 +21,6 @@ export function lessonsSubsystem(store: FakeLessonsStore, world: LessonsWorld = 
     serial: new SerialSection(),
     config: async () => world.config,
     now: () => AT,
-    writeConfig: async patch => {
-      world.config = { ...world.config, ...patch };
-      return world.config;
-    },
     changed: () => {},
     run: async (spawn): Promise<RunManifest> => ({
       runId: 'run-1',
@@ -61,7 +57,7 @@ export interface Caller {
 }
 
 export interface Call {
-  readonly method: 'GET' | 'POST' | 'PATCH';
+  readonly method: 'GET' | 'POST' | 'PATCH' | 'PUT';
   readonly path: string;
   readonly query?: readonly (readonly [string, string])[];
   readonly body?: unknown;

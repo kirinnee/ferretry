@@ -22,9 +22,6 @@ export interface LessonsStorePort {
   /** Which ferrets are instructed to learn, one record per ferret. */
   loadFerretLessons(): Promise<readonly StoredFerretLessons[]>;
   saveFerretLessons(records: readonly StoredFerretLessons[]): Promise<void>;
-  /** The machine default the owner switched (`PATCH /v1/lessons/config`); absent = what `lessons.yaml` says. */
-  passiveDefault(): Promise<boolean | undefined>;
-  setPassiveDefault(value: boolean): Promise<void>;
   /** The Global lessons document, `undefined` until the first Apply. */
   readGlobal(): Promise<string | undefined>;
   writeGlobal(text: string): Promise<void>;

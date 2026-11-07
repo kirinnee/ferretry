@@ -92,7 +92,6 @@ export class FakeLessonsStore implements LessonsStorePort {
   sessionLessons: readonly StoredFerretLessons[] = [];
 
   readonly digests = new Map<string, readonly SessionDigest[]>();
-  machineDefault: boolean | undefined;
   global: string | undefined;
 
   async runIds(): Promise<readonly string[]> {
@@ -105,14 +104,6 @@ export class FakeLessonsStore implements LessonsStorePort {
 
   async readDigests(runId: string): Promise<readonly SessionDigest[] | undefined> {
     return this.digests.get(runId);
-  }
-
-  async passiveDefault(): Promise<boolean | undefined> {
-    return this.machineDefault;
-  }
-
-  async setPassiveDefault(value: boolean): Promise<void> {
-    this.machineDefault = value;
   }
 
   async readGlobal(): Promise<string | undefined> {

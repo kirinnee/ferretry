@@ -20,10 +20,15 @@ import {
   AgentLessonToolCallSchema,
   type FerretLessonsPatchResult,
   LESSONS_APPLY_CONFLICT_CODE,
+  LESSONS_CONFIG_WRITE_GAP,
+  LESSONS_CONFIG_WRITE_GAP_CODE,
+  LESSONS_MINER_GAP_CODE,
   type LessonsActionRequest,
   LessonsActionRequestSchema,
   LessonsApplyRequestSchema,
   LessonsConfigPatchSchema,
+  type LessonsGlobalDocument,
+  LessonsGlobalWriteSchema,
   type LessonsConfig,
   LessonsRunRequestSchema,
   type LessonsPatchResponse,
@@ -54,7 +59,7 @@ export interface LessonsSubsystem {
   readonly store: LessonsStorePort;
   /** One read-decide-rewrite of the board as a single critical section. */
   readonly serial: SerialSection;
-  /** The mining schedule and the agent that will perform it, with the owner's machine switch applied. */
+  /** The mining schedule, the agent that will perform it and the machine switch, all from `lessons.yaml`. */
   config(): Promise<LessonsConfig>;
   /** The instant a verdict is stamped with. */
   now(): string;
@@ -62,8 +67,6 @@ export interface LessonsSubsystem {
   run(spawn: boolean): Promise<import('../contract/index.ts').RunManifest>;
   /** Passive lessons, the per-ferret switch, Apply and the explicit scan. */
   readonly lessons: LessonsService;
-  /** Writes the machine default for new ferrets; answers what is in effect. */
-  writeConfig(patch: { readonly passiveDefault: boolean }): Promise<LessonsConfig>;
   /** Tells the app the board changed. */
   changed(): void;
 }
@@ -204,6 +207,7 @@ const LESSONS_REFUSALS: Readonly<Record<LessonsError['reason'], { readonly statu
   conflict: { status: 409, code: LESSONS_APPLY_CONFLICT_CODE },
   'not-accepted': { status: 409, code: 'not_accepted' },
   'scan-running': { status: 409, code: 'scan_running' },
+  unavailable: { status: 503, code: LESSONS_MINER_GAP_CODE },
 };
 
 /** Restates a lessons refusal in the HTTP vocabulary; anything else is rethrown untouched. */
@@ -236,7 +240,13 @@ function decide(
     throw new ApiError(409, `proposal ${proposal.id} was already rejected`, 'already-rejected');
   // An applied lesson is in its file: changing it here would make the inbox disagree with the file.
   if (proposal.state === 'applied')
-    throw new ApiError(409, `lesson ${proposal.id} is already applied; edit its file instead`, 'already-applied');
+    throw new ApiError(
+      409,
+      proposal.category === 'global'
+        ? `lesson ${proposal.id} is already applied; change or remove it in the Global lessons document (Settings › Lessons, or fy lesson global)`
+        : `lesson ${proposal.id} is already applied; edit ${proposal.applied?.path ?? 'its file'} instead`,
+      'already-applied',
+    );
   const history = (event: string, note?: string) => [
     ...proposal.history,
     { at, event, by: 'user' as const, ...(note === undefined ? {} : { note }) },
@@ -403,16 +413,33 @@ export function lessonsRoutes(subsystem: LessonsSubsystem) {
       const proposal = locate(await subsystem.store.loadProposals(), pathProposalId(call));
       return jsonResponse(renderPatch(proposal));
     },
+    'GET /v1/lessons/global': async () =>
+      jsonResponse((await subsystem.lessons.globalDocument().catch(lessonsRefusal)) satisfies LessonsGlobalDocument),
+    // A PERSON'S ACT (`fleet.configure`, Gate): the owner rewrites the Global document — edits or removes an applied rule.
+    'PUT /v1/lessons/global': async call => {
+      if (isFerretCall(call))
+        throw new ApiError(403, 'a ferret cannot change the Global lessons; the owner does', 'forbidden');
+      const request = await parseBody(call.request, LessonsGlobalWriteSchema);
+      const written = await subsystem.serial
+        .run(async () => await subsystem.lessons.writeGlobalDocument(request.text, request.etag))
+        .catch(lessonsRefusal);
+      subsystem.changed();
+      return jsonResponse(written satisfies LessonsGlobalDocument);
+    },
     'POST /v1/lessons/run': async call => {
       const { spawn } = await parseBody(call.request, LessonsRunRequestSchema);
       // A run that LAUNCHES miners starts ferrets with no parent, so only a person asks for one; a ferret may still ask
       // for the run's manifest. No ferret starts a ferret that is not its own child.
       if (spawn && isFerretCall(call))
         throw new ApiError(403, 'a ferret cannot launch lesson miners; ask the owner', OWNER_ONLY_CODE);
-      return jsonResponse(await subsystem.serial.run(async () => await subsystem.run(spawn)));
+      return jsonResponse(await subsystem.serial.run(async () => await subsystem.run(spawn)).catch(lessonsRefusal));
     },
-    'PATCH /v1/lessons/config': async call =>
-      jsonResponse(await subsystem.writeConfig(await parseBody(call.request, LessonsConfigPatchSchema))),
+    // D2 #16: the write goes through the kernel's config write port, which this base does not have. Refuse, naming the
+    // file, rather than keep a second copy of the switch: `lessons.yaml` stays the one source of truth.
+    'PATCH /v1/lessons/config': async call => {
+      await parseBody(call.request, LessonsConfigPatchSchema);
+      throw new ApiError(503, LESSONS_CONFIG_WRITE_GAP, LESSONS_CONFIG_WRITE_GAP_CODE);
+    },
     'GET /v1/lessons/proposals/:id/apply-preview': async call =>
       jsonResponse(await subsystem.lessons.applyPreview(pathProposalId(call)).catch(lessonsRefusal)),
     'POST /v1/lessons/proposals/:id/apply': async call => await apply(subsystem, call),

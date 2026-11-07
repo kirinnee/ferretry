@@ -133,8 +133,6 @@ export const DigestSchema = z.object({
 /** `state.json`: the mining watermark, the newest scan, and which ferrets are instructed to learn. */
 export const LessonsStateFileSchema = LessonsStateSchema.extend({
   ferrets: z.array(StoredFerretLessonsSchema),
-  /** The owner's machine switch (`PATCH /v1/lessons/config`); absent = what `lessons.yaml` says. */
-  passiveDefault: z.boolean().optional(),
 });
 export type LessonsStateFile = z.infer<typeof LessonsStateFileSchema>;
 export const STATE_FILE = defineState({

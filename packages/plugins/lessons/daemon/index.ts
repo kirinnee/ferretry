@@ -1,6 +1,5 @@
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { CallContext } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import {
@@ -32,12 +31,15 @@ const BINARY_NAME = 'fy';
  * switch and the explicit scan.
  *
  * DECLARED GAPS (each says what is missing, in words, rather than guess):
- *  - `ConfigPort` has no write, so `PATCH /v1/lessons/config` keeps the owner's machine switch in `state.json`, where it
- *    overrides `lessons.yaml`.
+ *  - `ConfigPort` has no write (D2 #16: the kernel's config write port is not on this base), so
+ *    `PATCH /v1/lessons/config` REFUSES with a sentence naming `config/lessons.yaml`, the one source of truth. It never
+ *    keeps a second copy of the switch anywhere else.
  *  - A scan's price comes from Usage's price list, which Lessons may not import: an estimate carries no `usd`.
- *  - A miner is started by `FerretsApi.start`, which takes no model; the scan's model is not passed on.
- *  - A miner ferret runs in the folder of the first ferret it reads and writes its answer there as a dotfile the ingest
- *    removes; there is no folder of Lessons' own a ferret may work in.
+ *  - There is no work folder of Lessons' own a ferret may be started in (D2 #19's additive Ferrets start work folder and
+ *    kernel WorkFolders are not on this base), so starting a miner — a scan, or `POST /v1/lessons/run {spawn: true}` —
+ *    REFUSES. Today's miner runs in the daemon's home and writes under `state/learning/runs/`; it never runs in or
+ *    writes to an owner's project, so falling back to one is not an option. An estimate, an ingest-only run and the
+ *    board keep working.
  *  - A transcript carries no tool results or interrupts, so a digest counts neither.
  */
 export default implementDaemon(manifest, {
@@ -48,19 +50,8 @@ export default implementDaemon(manifest, {
     const serial = new SerialSection();
     const now = () => kernel.clock.now();
 
-    // ── the machine switch: lessons.yaml, with the owner's switch laid over it ────────────────────────────────────────
-    let machineDefault: boolean | undefined;
-    let loaded: Promise<void> | undefined;
-    const load = (): Promise<void> => {
-      loaded ??= store.passiveDefault().then(value => {
-        machineDefault = value;
-      });
-      return loaded;
-    };
-    const config = (): LessonsConfig => {
-      const file = lessonsConfigFromFile(kernel.config.file(LESSONS_CONFIG));
-      return machineDefault === undefined ? file : { ...file, passiveDefault: machineDefault };
-    };
+    // ── the machine switch: lessons.yaml alone, the one source of truth (docs/config-files.md) ────────────────────────
+    const config = (): LessonsConfig => lessonsConfigFromFile(kernel.config.file(LESSONS_CONFIG));
 
     const miner = new LessonsMiner({ store, ferrets, conversation, roots: kernel.roots, config, now });
     const lessons = new LessonsService({
@@ -85,39 +76,14 @@ export default implementDaemon(manifest, {
     const subsystem = {
       store,
       serial,
-      config: async () => {
-        await load();
-        return config();
-      },
+      config: async () => config(),
       now,
-      run: async (spawn: boolean) => {
-        await load();
-        return await miner.run(spawn);
-      },
+      run: async (spawn: boolean) => await miner.run(spawn),
       lessons,
-      writeConfig: async (patch: { readonly passiveDefault: boolean }) => {
-        await load();
-        await store.setPassiveDefault(patch.passiveDefault);
-        machineDefault = patch.passiveDefault;
-        changed();
-        return config();
-      },
       changed,
     };
 
-    // Every route reads a loaded machine switch first.
-    const loadedRoutes = Object.fromEntries(
-      Object.entries(lessonsRoutes(subsystem)).map(([key, handler]) => [
-        key,
-        async (call: CallContext) => {
-          await load();
-          return await handler(call);
-        },
-      ]),
-    ) as ReturnType<typeof lessonsRoutes>;
-
     const adopt = async (ferret: string, name: string): Promise<boolean> => {
-      await load();
       // A miner is never instructed to learn.
       if (name === LESSONS_MINER_NAME) return false;
       const existing = (await store.loadFerretLessons()).find(entry => entry.ferretId === ferret);
@@ -131,7 +97,7 @@ export default implementDaemon(manifest, {
     });
 
     return {
-      routes: loadedRoutes,
+      routes: lessonsRoutes(subsystem),
       tools: {
         lessons_suggest: async (call, input) => {
           const ferret = ferretOf(call);
@@ -169,7 +135,6 @@ export default implementDaemon(manifest, {
           void (async () => {
             const ferret = await ferrets.get(payload.ferret as FerretId);
             if (ferret?.name !== LESSONS_MINER_NAME) return;
-            await load();
             await serial.run(async () => await lessons.scanProgress());
             changed();
           })().catch(error => kernel.log.warn('a miner turn could not be folded in', { error: String(error) }));

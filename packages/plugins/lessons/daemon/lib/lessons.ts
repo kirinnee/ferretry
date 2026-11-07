@@ -10,7 +10,8 @@ import type {
   FerretLessons,
   LessonsFerret,
 } from '../../contract/index.ts';
-import type { AgentLessonToolResult } from '../../contract/index.ts';
+import type { AgentLessonToolResult, LessonsGlobalDocument } from '../../contract/index.ts';
+import { GLOBAL_LESSONS_DOCUMENT } from '../../contract/index.ts';
 import { insertLesson, lessonFileEtag, repoInstructionsFileName, unifiedDiff } from './apply.ts';
 import { batchesOf, estimateScan, scanProgress, selectScanSessions } from './scan.ts';
 import type { LessonsStorePort } from './store.ts';
@@ -121,7 +122,7 @@ export interface LessonsDependencies {
 /** A refusal in this domain's own words; the route restates it in HTTP. */
 export class LessonsError extends Error {
   constructor(
-    readonly reason: 'not-found' | 'invalid' | 'conflict' | 'not-accepted' | 'scan-running',
+    readonly reason: 'not-found' | 'invalid' | 'conflict' | 'not-accepted' | 'scan-running' | 'unavailable',
     message: string,
   ) {
     super(message);
@@ -358,6 +359,30 @@ export class LessonsService {
     const proposals = await this.deps.store.loadProposals();
     await this.deps.store.saveProposals(proposals.map(entry => (entry.id === proposal.id ? applied : entry)));
     return applied;
+  }
+
+  // ── The Global document: the owner reads it and rewrites it (today: the file in any editor) ──────
+
+  /** The Global document as it is now, with the etag a rewrite must name. Empty before the first Apply. */
+  async globalDocument(): Promise<LessonsGlobalDocument> {
+    const located = await this.deps.global.locate();
+    const text = await this.deps.files.read(located.path);
+    return { name: GLOBAL_LESSONS_DOCUMENT, text: text ?? '', etag: lessonFileEtag(text), notes: [...located.notes] };
+  }
+
+  /**
+   * The owner's whole new Global document — how an applied Global lesson is changed or removed. Written only if the
+   * document still has the etag the owner read; every later launch reads the new text.
+   */
+  async writeGlobalDocument(text: string, etag: string): Promise<LessonsGlobalDocument> {
+    const located = await this.deps.global.locate();
+    if (lessonFileEtag(await this.deps.files.read(located.path)) !== etag)
+      throw new LessonsError(
+        'conflict',
+        `the ${GLOBAL_LESSONS_DOCUMENT} changed since you read it; read it again and make your change there`,
+      );
+    await this.deps.files.write(located.path, text);
+    return { name: GLOBAL_LESSONS_DOCUMENT, text, etag: lessonFileEtag(text), notes: [...located.notes] };
   }
 
   /** Changes where a lesson goes. A repo lesson needs the project it came from. */

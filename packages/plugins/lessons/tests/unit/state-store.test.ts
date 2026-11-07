@@ -14,18 +14,17 @@ describe('StateLessonsStore', () => {
     expect(await lessons.loadTombstones()).toEqual([]);
     expect(await lessons.readObservations()).toEqual([]);
     expect(await lessons.readGlobal()).toBeUndefined();
-    expect(await lessons.passiveDefault()).toBeUndefined();
   });
 
-  it('keeps the machine switch and each ferret’s switch in one file without losing either', async () => {
+  it('keeps each ferret’s switch and the board state in one file, and no machine switch (lessons.yaml owns it)', async () => {
     const folder = new MemoryStateFolder();
     const lessons = store(folder);
-    await lessons.setPassiveDefault(false);
     await lessons.saveFerretLessons([{ ferretId: 'f1', passive: true, since: AT, setBy: 'owner' }]);
-    await lessons.saveState({ ...(await lessons.loadState()) });
-    expect(await lessons.passiveDefault()).toBe(false);
+    await lessons.saveState({ ...(await lessons.loadState()), lastRunAt: AT });
     expect((await lessons.loadFerretLessons()).map(entry => entry.ferretId)).toEqual(['f1']);
+    expect((await lessons.loadState()).lastRunAt).toBe(AT);
     expect(folder.raw(STATE_FILE)).toContain('"format":1');
+    expect(folder.raw(STATE_FILE)).not.toContain('passiveDefault');
   });
 
   it('stores proposals and evidence, and appends observations without duplicating', async () => {

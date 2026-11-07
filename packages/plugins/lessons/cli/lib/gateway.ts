@@ -9,6 +9,9 @@ import {
   LessonsApplyPreviewSchema,
   LessonsApplyRequestSchema,
   type LessonsConfig,
+  type LessonsGlobalDocument,
+  LessonsGlobalDocumentSchema,
+  LessonsGlobalWriteSchema,
   LessonsConfigSchema,
   type LessonsPatchResponse,
   LessonsPatchResponseSchema,
@@ -100,6 +103,16 @@ export class ClientLessonsGateway implements ILessonsGateway {
   async scan(request: LessonsScanRequest): Promise<LessonsScanProgress> {
     return LessonsScanProgressSchema.parse(
       await this.client.call('POST /v1/lessons/scan', { body: LessonsScanRequestSchema.parse(request) }),
+    );
+  }
+
+  async globalDocument(): Promise<LessonsGlobalDocument> {
+    return LessonsGlobalDocumentSchema.parse(await this.client.call('GET /v1/lessons/global'));
+  }
+
+  async writeGlobalDocument(text: string, etag: string): Promise<LessonsGlobalDocument> {
+    return LessonsGlobalDocumentSchema.parse(
+      await this.client.call('PUT /v1/lessons/global', { body: LessonsGlobalWriteSchema.parse({ text, etag }) }),
     );
   }
 

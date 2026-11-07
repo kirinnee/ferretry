@@ -33,16 +33,19 @@ export default implementCli(manifest, {
     const options = (invocation: VerbInvocation) => ({ json: flag(invocation, 'json') });
     const verbs = (work: (invocation: VerbInvocation) => Promise<void>) => async (invocation: VerbInvocation) =>
       await run(() => work(invocation))();
+    // Bare `fy lesson` and `fy lesson ls` are the one listing (today's `ls` is the default verb).
+    const list = verbs(
+      async invocation =>
+        await controller.list({
+          ...options(invocation),
+          ...(value(invocation, 'state') === undefined ? {} : { state: value(invocation, 'state') as string }),
+          all: flag(invocation, 'all'),
+        }),
+    );
     return {
       verbs: {
-        lesson: verbs(
-          async invocation =>
-            await controller.list({
-              ...options(invocation),
-              ...(value(invocation, 'state') === undefined ? {} : { state: value(invocation, 'state') as string }),
-              all: flag(invocation, 'all'),
-            }),
-        ),
+        lesson: list,
+        'lesson ls': list,
         'lesson show': verbs(async invocation => await controller.show(argument(invocation, 0), options(invocation))),
         'lesson accept': verbs(
           async invocation => await controller.accept(argument(invocation, 0), options(invocation)),
@@ -88,6 +91,14 @@ export default implementCli(manifest, {
         ),
         'lesson status': verbs(async invocation => await controller.status(options(invocation))),
         'lesson config': verbs(async invocation => await controller.config(options(invocation))),
+        'lesson global': verbs(async invocation => await controller.global(options(invocation))),
+        'lesson global edit': verbs(
+          async invocation =>
+            await controller.globalRule(argument(invocation, 0), invocation.args.slice(1), options(invocation)),
+        ),
+        'lesson global remove': verbs(
+          async invocation => await controller.globalRule(argument(invocation, 0), undefined, options(invocation)),
+        ),
         'lesson suggest': verbs(
           async invocation =>
             await controller.suggest(argument(invocation, 0), value(invocation, 'scope') ?? '', options(invocation)),

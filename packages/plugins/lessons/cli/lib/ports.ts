@@ -3,6 +3,7 @@ import type {
   LessonsActionRequest,
   LessonsApplyPreview,
   LessonsConfig,
+  LessonsGlobalDocument,
   LessonsPatchResponse,
   LessonsScanEstimate,
   LessonsScanProgress,
@@ -46,6 +47,10 @@ export interface ILessonsGateway {
   scanEstimate(request: LessonsScanRequest): Promise<LessonsScanEstimate>;
   /** Starts a scan. Explicit only: nothing here ever starts one by itself. */
   scan(request: LessonsScanRequest): Promise<LessonsScanProgress>;
+  /** The Global lessons document and the etag a rewrite names. */
+  globalDocument(): Promise<LessonsGlobalDocument>;
+  /** Rewrites the whole Global document, only if it still has `etag`. */
+  writeGlobalDocument(text: string, etag: string): Promise<LessonsGlobalDocument>;
   /** A ferret files one lesson as itself. */
   suggest(rule: string, scope: string): Promise<AgentLessonToolResult>;
 }

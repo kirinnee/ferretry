@@ -356,3 +356,5 @@ route	GET /v1/ferrets/:id/runtime-models	added	moved from GET /v1/sessions/:sess
 route	POST /v1/ferrets/:id/runtime	added	moved from POST /v1/sessions/:sessionId/runtime; Runtimes owns runtime controls; descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/subtree	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/subtree	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/lessons/global	added	new in 5.0: the Global lessons document is the plugin's own state, not a file the owner opens in an editor (today <assets>/instructions/lessons.md), so the owner reads it here
+route	PUT /v1/lessons/global	added	new in 5.0: how the owner changes or removes an applied Global lesson (today: edit the file); the whole document against its etag, fleet.configure, a person only

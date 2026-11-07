@@ -5,6 +5,7 @@
  */
 
 import { DaemonCallError } from '@ferretry/app';
+import { GLOBAL_LESSONS_DOCUMENT } from '../../../contract/index.ts';
 import type {
   EvidenceView,
   FerretLessons,
@@ -129,6 +130,7 @@ export interface FakeLessonsDaemon {
     config: LessonsConfig;
     estimate: LessonsScanEstimate;
     directory: readonly LessonsFerret[];
+    global: { text: string; etag: string };
   };
 }
 
@@ -144,6 +146,7 @@ export const fakeLessonsDaemon = (lessons: readonly ProposalView[] = [lesson()])
     ferrets: [],
     config: config(),
     estimate: estimate(),
+    global: { text: '', etag: 'absent' },
     directory,
   };
   const fallback = (route: string, params: Record<string, string>, body: Record<string, unknown>): Answer => {
@@ -155,6 +158,14 @@ export const fakeLessonsDaemon = (lessons: readonly ProposalView[] = [lesson()])
       case 'PATCH /v1/lessons/config':
         state.config = { ...state.config, passiveDefault: body.passiveDefault === true };
         return { body: state.config };
+      case 'GET /v1/lessons/global':
+        return { body: { name: GLOBAL_LESSONS_DOCUMENT, ...state.global, notes: [] } };
+      case 'PUT /v1/lessons/global': {
+        if (body.etag !== state.global.etag)
+          return { refuse: { status: 409, code: 'apply_conflict', message: 'the Global lessons document changed' } };
+        state.global = { text: String(body.text ?? ''), etag: `etag-${String(calls.length)}` };
+        return { body: { name: GLOBAL_LESSONS_DOCUMENT, ...state.global, notes: [] } };
+      }
       case 'GET /v1/lessons/ferrets':
         return { body: state.ferrets };
       case 'GET /v1/lessons/directory':

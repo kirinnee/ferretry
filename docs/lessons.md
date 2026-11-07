@@ -21,9 +21,11 @@ owner may change, its strength (how many times it was filed: `9×`) and its evid
 
 The **only** thing the passive switch controls is whether a ferret is _instructed_ to file lessons.
 
-- `lessons.yaml` `passiveDefault` (default `true`) decides it for every NEW ferret; Settings › Lessons
-  edits that choice. A miner or a warden is never instructed. The daemon keeps the owner's choice in its
-  own state, which wins over the file (the config port is read-only; GAP).
+- `lessons.yaml` `passiveDefault` (default `true`) decides it for every NEW ferret, and that file is the
+  only place it lives. Writing it from Settings › Lessons needs the kernel's config write port (D2 #16),
+  which is not built yet: until it is, `PATCH /v1/lessons/config` answers `503 config_write_unavailable`
+  with a sentence naming the file to edit by hand, and keeps no copy of the switch anywhere else (GAP).
+  A miner or a warden is never instructed.
 - `PATCH /v1/ferrets/:ferretId/lessons {passive}` switches one ferret.
 - The teaching is a per-ferret part of the launch, contributed through the `launch.parts` hook: Lessons
   answers the hook with the teaching when the ferret is instructed, and nothing otherwise.
@@ -56,12 +58,31 @@ folder. **Apply** is the one write outside it, and it is guarded twice:
 
 | Type   | Target                                                                                                                                              | Grant                                                        |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Global | the global lessons document, the `instructions/lessons` item (kept in the plugin's state; the first Apply creates it)                               | `fleet.configure`                                            |
+| Global | the **Global lessons document**, kept in the plugin's own state (not a file on disk); every ferret reads it at its next launch                      | `fleet.configure`                                            |
 | Repo   | the project root's `AGENTS.md` if present, else `CLAUDE.md` if present, else the one the ferret's CLI reads (Claude → CLAUDE.md, Codex → AGENTS.md) | `filesystem.configure`, and a remote device proves a passkey |
 
 The lesson is appended as a bullet under a `## Lessons` heading (created when absent); nothing else in
-the file moves. A ferret can never apply a lesson. The project root is the ferret's working folder's git
-root. The Repo write goes through the `work` root handle.
+the file moves. A ferret can never apply a lesson.
+
+The project root is today's walk: up from the filing ferret's folder to the nearest `.git`. A plugin sees
+the disk only through a ferret's `work` root, so each step looks through any ferret whose folder holds it:
+a ferret started in `repo/packages/daemon` finds `repo/` whenever some ferret's folder reaches it. A git
+root above every ferret's folder is out of sight, and the walk then answers the filing folder (GAP:
+reaching higher needs a kernel root or a Projects read). The Repo write goes through that `work` root; a
+target no ferret's folder holds any more is refused (`404`, with a sentence), never a server error.
+
+### Changing or removing an applied Global lesson
+
+Today the Global document is a file the owner edits in any editor. Here it is the plugin's state, so the
+owner reads and rewrites it through Lessons:
+
+- `GET /v1/lessons/global` answers the document and an **etag**.
+- `PUT /v1/lessons/global {text, etag}` replaces it whole, only if it still has that etag (otherwise
+  `409 apply_conflict`). A person only, `fleet.configure`. Empty text removes every rule.
+- Settings › Lessons › Global lessons edits it in place; `fy lesson global` lists the rules numbered, and
+  `fy lesson global edit <n> <rule…>` / `fy lesson global remove <n>` reword or remove one.
+
+An applied lesson's card refuses a further verdict (`409 already-applied`) and says where to change it.
 
 ## Scan
 
@@ -75,19 +96,28 @@ range, projects, or specific ferrets.
 time (`409 scan_running`). Each batch of `batchSize` ferrets gets one miner. `GET /v1/lessons/scan`
 reports progress and folds in any miner that has finished (also on `turn.ended`);
 `POST /v1/lessons/scan/cancel` stops the miners still running, and what already landed stays. Results
-carry the **scan** source chip and the same Global/Repo type.
+carry the **scan** source chip and the same Global/Repo type. A miner runs on the model the scan names.
+
+**A miner never runs in, or writes to, an owner's project.** Today it runs in the daemon's home and writes
+its answer under `state/learning/runs/<run>/`. A ferret here can be started only in a folder `WorkFolders`
+lets it work in, and no folder of Lessons' own can be given to one yet (D2 #19). So, until it can, starting
+a miner — `POST /v1/lessons/scan`, or `POST /v1/lessons/run {spawn: true}` — answers
+`503 miner_unavailable` with a sentence, before anything is written (GAP). The estimate, an ingest-only
+run and the board keep working. A scan is a real spend, so it stays the owner's act only.
 
 ## Routes
 
-| Route                                                                   | Who                                  |
-| ----------------------------------------------------------------------- | ------------------------------------ |
-| `GET /v1/lessons/status`, `config`, `proposals`, `ferrets`, `directory` | operator                             |
-| `PATCH /v1/lessons/config`                                              | operator, `fleet.configure`          |
-| `POST /v1/lessons/proposals/:id`                                        | operator                             |
-| `GET /v1/lessons/proposals/:id/apply-preview`, `patch`                  | operator                             |
-| `POST /v1/lessons/proposals/:id/apply`                                  | operator; the target's grant (above) |
-| `PATCH /v1/ferrets/:ferretId/lessons`                                   | operator                             |
-| `POST /v1/lessons/run`                                                  | operator                             |
-| `POST /v1/lessons/scan/estimate`, `scan`, `cancel`                      | operator (a person)                  |
-| `GET /v1/lessons/scan`                                                  | operator                             |
-| `POST /v1/lessons/suggest`                                              | a ferret, by its own credential only |
+| Route                                                                   | Who                                                   |
+| ----------------------------------------------------------------------- | ----------------------------------------------------- |
+| `GET /v1/lessons/status`, `config`, `proposals`, `ferrets`, `directory` | operator                                              |
+| `PATCH /v1/lessons/config`                                              | operator, `fleet.configure` (GAP: refused, see above) |
+| `GET /v1/lessons/global`                                                | operator                                              |
+| `PUT /v1/lessons/global`                                                | operator (a person), `fleet.configure`                |
+| `POST /v1/lessons/proposals/:id`                                        | operator                                              |
+| `GET /v1/lessons/proposals/:id/apply-preview`, `patch`                  | operator                                              |
+| `POST /v1/lessons/proposals/:id/apply`                                  | operator; the target's grant (above)                  |
+| `PATCH /v1/ferrets/:ferretId/lessons`                                   | operator                                              |
+| `POST /v1/lessons/run`                                                  | operator                                              |
+| `POST /v1/lessons/scan/estimate`, `scan`, `cancel`                      | operator (a person)                                   |
+| `GET /v1/lessons/scan`                                                  | operator                                              |
+| `POST /v1/lessons/suggest`                                              | a ferret, by its own credential only                  |

@@ -2,7 +2,8 @@
  * SETTINGS › LEARNING, on one machine: whether NEW ferrets are instructed to learn, and each current
  * ferret's own switch.
  *
- * The machine default is `lessons.yaml`'s `passiveDefault`, written by the daemon (comments kept). It
+ * The machine default is `lessons.yaml`'s `passiveDefault`. Until the kernel's config write port lands the daemon refuses
+ * to write it (the sentence names the file to edit by hand), and the switch shows that refusal. It
  * only decides what a new ferret's fixed instructions say; a running ferret is switched on its own,
  * which re-instructs it.
  */
@@ -15,6 +16,7 @@ import { fetchLessonsConfig, lessonsErrorMessage, patchLessonsConfig } from './a
 import { Badge, Button } from '@ferretry/app/ui';
 import { basename, sessionName } from './model.ts';
 import { usePassiveLessons } from './passive.tsx';
+import { GlobalLessonsEditor } from './global-lessons.tsx';
 
 export interface LessonsSettingsSurfaceProps {
   readonly connection: LessonsConnection;
@@ -167,6 +169,7 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
           </ul>
         )}
       </section>
+      <GlobalLessonsEditor connection={connection} />
     </div>
   );
 }

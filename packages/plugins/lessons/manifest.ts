@@ -12,6 +12,10 @@ const configured = audit('fleet.configured');
 const QUOTES = { none: 'the owner’s own words and the rules drawn from them; no pane, page or vault text' } as const;
 const READ = { skip: 'a read of the lessons board' } as const;
 const NOT_RECORDED = { skip: 'not recorded today (no rule in the audit table)' } as const;
+/** The Global lessons document: rules the owner applied or wrote; no pane, page or vault text. */
+const GLOBAL_TEXT = {
+  none: 'the owner’s Global rules, applied or written by the owner; no pane, page or vault text',
+} as const;
 
 /**
  * Lessons (§2.3): rules learned when you correct a ferret, given to every ferret after. Today's `learning`
@@ -22,9 +26,11 @@ const NOT_RECORDED = { skip: 'not recorded today (no rule in the audit table)' }
  * Ownership calls:
  *  - The Global lessons document is this plugin's own state (`global.json`), read by every launch through
  *    `launch.parts`; today's `instructions/lessons` component file and the profile that includes it are Setup's, now
- *    Skills'/Runtimes', and are not reachable from here.
- *  - A project's AGENTS.md / CLAUDE.md is written through the `work` root of the ferret that filed the lesson, after the
- *    route asked `filesystem.configure` (and a step-up for a remote device), exactly as today.
+ *    Skills'/Runtimes', and are not reachable from here. Because the owner can no longer open it in an editor, they read
+ *    and rewrite it through `GET` / `PUT /v1/lessons/global` (Settings › Lessons, `fy lesson global`).
+ *  - A project's AGENTS.md / CLAUDE.md is written through the `work` root of a ferret whose folder holds the project's
+ *    git root (today's walk up to `.git`), after the route asked `filesystem.configure` (and a step-up for a remote
+ *    device), exactly as today.
  */
 export default definePlugin({
   id: 'lessons',
@@ -98,6 +104,23 @@ export default definePlugin({
         noStore: true,
         audit: configured,
         guard: QUOTES,
+      }),
+      // The Global lessons document (today a file the owner edits in any editor): read it, and rewrite it whole against
+      // the etag just read — how the owner changes or removes an applied Global lesson.
+      route('GET /v1/lessons/global', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: READ,
+        guard: GLOBAL_TEXT,
+      }),
+      route('PUT /v1/lessons/global', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: fleetConfigure,
+        noStore: true,
+        audit: configured,
+        guard: GLOBAL_TEXT,
       }),
       route('POST /v1/lessons/run', {
         minimum: 'operator',
@@ -177,6 +200,7 @@ export default definePlugin({
     ],
     cli: [
       verb('lesson', { summary: 'the lessons board: what was learned from your corrections (pending ones first)' }),
+      verb('lesson ls', { summary: 'the lessons board, pending ones first (the same as bare lesson)' }),
       verb('lesson show', { summary: 'one lesson in full, with every quote behind it' }),
       verb('lesson accept', { summary: 'accept a lesson; it writes nothing until you apply it' }),
       verb('lesson reject', { summary: 'reject a lesson; it is not suggested again' }),
@@ -190,6 +214,9 @@ export default definePlugin({
       verb('lesson status', { summary: 'whether mining is on, what is pending, how the last run went' }),
       verb('lesson config', { summary: 'the mining schedule and the agent that performs it' }),
       verb('lesson suggest', { summary: 'file one lesson for the owner to review' }),
+      verb('lesson global', { summary: 'the Global lessons every ferret reads, numbered' }),
+      verb('lesson global edit', { summary: 'reword one Global lesson by its number' }),
+      verb('lesson global remove', { summary: 'remove one Global lesson by its number' }),
     ],
   },
 

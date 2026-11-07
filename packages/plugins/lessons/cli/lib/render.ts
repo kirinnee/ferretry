@@ -1,8 +1,10 @@
+import { globalLessonRules } from '../../contract/index.ts';
 import type {
   AgentLessonToolResult,
   EvidenceView,
   LessonsApplyPreview,
   LessonsConfig,
+  LessonsGlobalDocument,
   LessonsPatchResponse,
   LessonsScanEstimate,
   LessonsScanProgress,
@@ -200,4 +202,14 @@ export function renderLessonsScanProgress(progress: LessonsScanProgress): string
  */
 export function renderLessonSuggestion(result: AgentLessonToolResult): string {
   return result.summary;
+}
+
+/** The Global lessons document's rules, numbered for `fy lesson global edit|remove`, and what the owner should know. */
+export function renderGlobalRules(document: LessonsGlobalDocument): string {
+  const rules = globalLessonRules(document.text);
+  return [
+    `${document.name}: ${plural(rules.length, 'rule')}`,
+    ...rules.map((rule, index) => `  ${String(index + 1)}. ${rule}`),
+    ...document.notes.map(note => `  ${note}`),
+  ].join('\n');
 }

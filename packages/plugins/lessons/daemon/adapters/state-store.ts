@@ -32,7 +32,7 @@ function runName(runId: string): string {
 const EMPTY: LessonsStateFile = { ferrets: [] };
 
 /** A damaged file is the subsystem's to report (`store_damaged`); this never turns it into an empty board. */
-function valueOf<Shape>(read: {
+function readValue<Shape>(read: {
   readonly ok: boolean;
   readonly value?: Shape | undefined;
   readonly error?: { readonly sentence: string };
@@ -46,19 +46,16 @@ export class StateLessonsStore implements LessonsStorePort {
   constructor(private readonly kernel: Pick<KernelPorts, 'state' | 'clock'>) {}
 
   private async file(): Promise<LessonsStateFile> {
-    return valueOf(await this.kernel.state.read(STATE_FILE)) ?? EMPTY;
+    return readValue(await this.kernel.state.read(STATE_FILE)) ?? EMPTY;
   }
 
   async loadState(): Promise<LessonsState> {
-    const { ferrets: _ferrets, passiveDefault: _passive, ...state } = await this.file();
+    const { ferrets: _ferrets, ...state } = await this.file();
     return state;
   }
 
   async saveState(state: LessonsState): Promise<void> {
-    await this.kernel.state.update(STATE_FILE, current => {
-      const { ferrets, passiveDefault } = current ?? EMPTY;
-      return { ...state, ferrets, ...(passiveDefault === undefined ? {} : { passiveDefault }) };
-    });
+    await this.kernel.state.update(STATE_FILE, current => ({ ...state, ferrets: (current ?? EMPTY).ferrets }));
   }
 
   async loadFerretLessons(): Promise<readonly StoredFerretLessons[]> {
@@ -67,14 +64,6 @@ export class StateLessonsStore implements LessonsStorePort {
 
   async saveFerretLessons(records: readonly StoredFerretLessons[]): Promise<void> {
     await this.kernel.state.update(STATE_FILE, current => ({ ...(current ?? EMPTY), ferrets: [...records] }));
-  }
-
-  async passiveDefault(): Promise<boolean | undefined> {
-    return (await this.file()).passiveDefault;
-  }
-
-  async setPassiveDefault(value: boolean): Promise<void> {
-    await this.kernel.state.update(STATE_FILE, current => ({ ...(current ?? EMPTY), passiveDefault: value }));
   }
 
   async readObservations(): Promise<readonly Observation[]> {
@@ -100,7 +89,7 @@ export class StateLessonsStore implements LessonsStorePort {
   }
 
   async loadProposals(): Promise<readonly Proposal[]> {
-    return valueOf(await this.kernel.state.read(SUGGESTED_FILE))?.proposals ?? [];
+    return readValue(await this.kernel.state.read(SUGGESTED_FILE))?.proposals ?? [];
   }
 
   async saveProposals(proposals: readonly Proposal[]): Promise<void> {
@@ -108,7 +97,7 @@ export class StateLessonsStore implements LessonsStorePort {
   }
 
   async loadTombstones(): Promise<readonly Tombstone[]> {
-    return valueOf(await this.kernel.state.read(DISMISSED_FILE))?.tombstones ?? [];
+    return readValue(await this.kernel.state.read(DISMISSED_FILE))?.tombstones ?? [];
   }
 
   async saveTombstones(tombstones: readonly Tombstone[]): Promise<void> {
@@ -120,7 +109,7 @@ export class StateLessonsStore implements LessonsStorePort {
   }
 
   async readRunManifest(runId: string): Promise<RunManifest | undefined> {
-    return valueOf(await this.kernel.state.read(RUN_FILE, runName(runId)));
+    return readValue(await this.kernel.state.read(RUN_FILE, runName(runId)));
   }
 
   async runIds(): Promise<readonly string[]> {
@@ -137,7 +126,7 @@ export class StateLessonsStore implements LessonsStorePort {
   }
 
   async readDigests(runId: string): Promise<readonly SessionDigest[] | undefined> {
-    return valueOf(await this.kernel.state.read(DIGESTS_FILE, runName(runId)))?.digests;
+    return readValue(await this.kernel.state.read(DIGESTS_FILE, runName(runId)))?.digests;
   }
 
   async writePatch(id: string, contents: string): Promise<string> {
@@ -147,7 +136,7 @@ export class StateLessonsStore implements LessonsStorePort {
   }
 
   async readGlobal(): Promise<string | undefined> {
-    return valueOf(await this.kernel.state.read(GLOBAL_FILE))?.text;
+    return readValue(await this.kernel.state.read(GLOBAL_FILE))?.text;
   }
 
   async writeGlobal(text: string): Promise<void> {

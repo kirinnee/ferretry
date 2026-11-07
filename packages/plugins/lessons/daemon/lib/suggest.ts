@@ -1,4 +1,10 @@
-import type { ObservationSource, Proposal, ProposalCategory, ProposalTarget } from '../../contract/index.ts';
+import {
+  GLOBAL_LESSONS_DOCUMENT,
+  type ObservationSource,
+  type Proposal,
+  type ProposalCategory,
+  type ProposalTarget,
+} from '../../contract/index.ts';
 import { matchesTombstone, observationId, sameRule, slugify } from './policy.ts';
 import type { Observation, Tombstone } from './types.ts';
 
@@ -10,8 +16,8 @@ import type { Observation, Tombstone } from './types.ts';
  * open — in which case its count and its evidence grow — or one the owner already rejected.
  */
 
-/** Its document, relative to the fleet asset tree. */
-export const GLOBAL_LESSONS_FILE = 'instructions/lessons.md';
+/** The Global lessons document: this plugin's own state, named for the owner, never a path on disk. */
+export const GLOBAL_LESSONS_FILE = GLOBAL_LESSONS_DOCUMENT;
 
 /** Where a lesson of `category` points before it is applied: the target is resolved again at apply. */
 export function lessonTarget(category: ProposalCategory, project: string | undefined): ProposalTarget {

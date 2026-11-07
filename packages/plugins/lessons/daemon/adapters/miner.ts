@@ -1,11 +1,12 @@
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type { FerretId, FerretSummary, FerretsApi, HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { RootsPort } from '@ferretry/kernel/contract';
-import type { LessonsConfig, RunManifest } from '../../contract/index.ts';
+import { LESSONS_MINER_GAP, type LessonsConfig, type RunManifest } from '../../contract/index.ts';
 import {
   applyMinerOutput,
   extractSession,
   type InboxSendLike,
+  LessonsError,
   type NormalizedRecordLike,
   parseMinerOutput,
   type RawSessionInput,
@@ -36,6 +37,12 @@ export interface MinerDependencies {
   readonly roots: Pick<RootsPort, 'root'>;
   readonly config: () => LessonsConfig;
   readonly now: () => string;
+  /**
+   * A folder of Lessons' OWN that a miner for `run` is started in and writes its answer to — never an owner's project
+   * (today: the daemon's home, the answer under `state/learning/runs/<run>/`). Absent on this base (DECLARED GAP,
+   * D2 #19: no additive Ferrets start work folder / kernel WorkFolders), so every miner start refuses.
+   */
+  readonly minerFolder?: (run: string) => string | undefined;
 }
 
 /**
@@ -52,6 +59,8 @@ export class LessonsMiner implements ScanMinerPort {
     const { store, config, now } = this.deps;
     await this.ingest();
     if (!spawn) return (await store.latestRunManifest()) ?? this.emptyManifest('ingest-only run (no spawn requested)');
+    // A spawn starts a miner, which needs a folder of Lessons' own: refuse before the watermark moves (GAP, D2 #19).
+    this.folderFor('spawn');
 
     const state = await store.loadState();
     const watermark = `${state.watermarkAt ?? ''} ${state.watermarkId ?? ''}`;
@@ -101,7 +110,7 @@ export class LessonsMiner implements ScanMinerPort {
     }
 
     const batch = digests.slice(0, config().batchSize);
-    const started = await this.launch(manifest.runId, batch, config().agent, candidates);
+    const started = await this.launch(manifest.runId, batch, config().agent, config().model);
     const pending = {
       ...manifest,
       ferretsWithSignal: batch.length,
@@ -169,17 +178,25 @@ export class LessonsMiner implements ScanMinerPort {
     };
   }
 
-  /** Starts one miner ferret over `digests`, writing its brief; answers the miner's id. */
+  /** The folder of Lessons' own a miner for `run` works in; refuses (GAP, D2 #19) when there is none. */
+  private folderFor(run: string): string {
+    const folder = this.deps.minerFolder?.(run);
+    if (folder === undefined) throw new LessonsError('unavailable', LESSONS_MINER_GAP);
+    return folder;
+  }
+
+  /**
+   * Starts one miner ferret over `digests`, writing its brief; answers the miner's id. It runs in Lessons' own folder,
+   * never an owner's project (today: the daemon's home), on the model the scan names (today's `--model`).
+   */
   private async launch(
     run: string,
     digests: readonly SessionDigest[],
     agent: string,
-    near: readonly FerretSummary[],
+    model: string | undefined,
   ): Promise<string> {
     const { store, ferrets } = this.deps;
-    const folder =
-      near.find(ferret => digests.some(digest => digest.ferretId === ferret.id))?.folder ?? near[0]?.folder;
-    if (folder === undefined) throw new Error('a lesson miner needs a ferret folder to run in');
+    const folder = this.folderFor(run);
     await store.writeDigests(run, digests);
     const started = await ferrets.start({
       name: LESSONS_MINER_NAME,
@@ -188,6 +205,7 @@ export class LessonsMiner implements ScanMinerPort {
       folder,
       prompt: this.prompt(digests, minerOutputPath(folder, run)),
       by: 'owner',
+      ...(model === undefined ? {} : { options: { model } }),
     });
     if (!started.ok) throw new Error(`the lesson miner could not start: ${started.error.reason}`);
     return started.value;
@@ -276,15 +294,14 @@ export class LessonsMiner implements ScanMinerPort {
     batch: number,
     ferretIds: readonly string[],
     agent: string,
-    _model: string | undefined,
+    model: string | undefined,
   ): Promise<string | undefined> {
     const digests = (await Promise.all(ferretIds.map(async id => await this.digestOf(id)))).filter(
       (digest): digest is SessionDigest => digest !== undefined,
     );
     if (digests.length === 0) return undefined;
     const name = LessonsMiner.batchRun(runId, batch);
-    const near = (await this.deps.ferrets.list()).filter(ferret => ferretIds.includes(ferret.id));
-    const miner = await this.launch(name, digests, agent, near);
+    const miner = await this.launch(name, digests, agent, model);
     await this.deps.store.writeRunManifest({
       ...this.emptyManifest(undefined, ferretIds.length),
       runId: name,

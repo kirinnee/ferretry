@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { GLOBAL_LESSONS_DOCUMENT } from '../../../contract/index.ts';
 import type { Proposal } from '../../../daemon/lib/index.ts';
 import {
   applyMinerOutput,
@@ -352,7 +353,7 @@ describe('learning aggregation', () => {
       // Assert
       should(actual.proposals[0]).match({
         category: 'global',
-        target: { kind: 'global-instructions', path: 'instructions/lessons.md' },
+        target: { kind: 'global-instructions', path: GLOBAL_LESSONS_DOCUMENT },
         suggestedCategory: 'global',
       });
     });

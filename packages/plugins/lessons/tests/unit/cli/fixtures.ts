@@ -1,9 +1,11 @@
+import { GLOBAL_LESSONS_DOCUMENT } from '../../../contract/index.ts';
 import type {
   AgentLessonToolResult,
   EvidenceView,
   LessonsActionRequest,
   LessonsApplyPreview,
   LessonsConfig,
+  LessonsGlobalDocument,
   LessonsPatchResponse,
   LessonsScanEstimate,
   LessonsScanProgress,
@@ -251,5 +253,25 @@ export class RecordingLessonsGateway implements ILessonsGateway {
   scan(request: LessonsScanRequest): Promise<LessonsScanProgress> {
     this.scanned.push(request);
     return Promise.resolve(this.scanView);
+  }
+
+  /** The Global document this fake holds; `writeGlobalDocument` replaces it when the etag matches. */
+  globalView: LessonsGlobalDocument = {
+    name: GLOBAL_LESSONS_DOCUMENT,
+    text: '## Lessons\n\n- Use bun, not Python.\n- Run commands through direnv exec.\n',
+    etag: 'etag-1',
+    notes: [],
+  };
+  readonly globalWrites: Array<{ readonly text: string; readonly etag: string }> = [];
+
+  globalDocument(): Promise<LessonsGlobalDocument> {
+    return Promise.resolve(this.globalView);
+  }
+
+  writeGlobalDocument(text: string, etag: string): Promise<LessonsGlobalDocument> {
+    this.globalWrites.push({ text, etag });
+    if (etag !== this.globalView.etag) return Promise.reject(new Error('the Global lessons document changed'));
+    this.globalView = { ...this.globalView, text, etag: `etag-${String(this.globalWrites.length + 1)}` };
+    return Promise.resolve(this.globalView);
   }
 }
