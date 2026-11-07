@@ -58,7 +58,10 @@ function gate() {
           const bearer = headerValue(input.request, 'authorization')?.replace(/^Bearer /, '') ?? '';
           const ferret = directory === 'unavailable' ? undefined : directory.ferretFor(`digest:${bearer}`);
           return ferret === undefined
-            ? { outcome: 'refused', response: { status: 401, headers: new Map(), body: '{"error":"no","code":"unauthorized"}' } }
+            ? {
+                outcome: 'refused',
+                response: { status: 401, headers: new Map(), body: '{"error":"no","code":"unauthorized"}' },
+              }
             : { outcome: 'admitted', standing: { ferret } as never, actor: 'ferret' };
         },
         admitMember: () => ({ outcome: 'refused', response: { status: 403, headers: new Map(), body: '{}' } }),
@@ -110,7 +113,15 @@ describe('decision 8: Gate checks ferret bearers through Ferrets (bearers:ferret
   test('a plugin other than Ferrets taking bearers is refused at boot; the rest boots', async () => {
     const home = await freshHome();
     const rogue = implementDaemon(
-      definePlugin({ id: 'board', title: 'Board', version: '5.0.0', api: 5, core: false, kinds: [], hooks: { takes: [{ hook: Bearers, key: 'ferret' }] } }),
+      definePlugin({
+        id: 'board',
+        title: 'Board',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: Bearers, key: 'ferret' }] },
+      }),
       { build: () => ({ hooks: { 'bearers:ferret': { ferretFor: () => 'F-anything' } } }) },
     );
     const outcome = await bootHost({
@@ -154,7 +165,15 @@ describe('decision 9: a ChildEnvironment is opened by the kernel at exec time', 
   test('the host binds the opener only from Vault, and a plugin spawn uses it', async () => {
     const home = await freshHome();
     const vault = implementDaemon(
-      definePlugin({ id: 'vault', title: 'Vault', version: '5.0.0', api: 5, core: true, kinds: [], provides: { childEnvironments: ChildEnvironmentPort } }),
+      definePlugin({
+        id: 'vault',
+        title: 'Vault',
+        version: '5.0.0',
+        api: 5,
+        core: true,
+        kinds: [],
+        provides: { childEnvironments: ChildEnvironmentPort },
+      }),
       { build: () => ({ provides: { childEnvironments: opener } }) },
     );
     let seen = '';
@@ -183,7 +202,12 @@ describe('decision 9: a ChildEnvironment is opened by the kernel at exec time', 
         }),
       },
     );
-    const outcome = await bootHost({ home, version: '5.0.0', implementations: [vault, runner], adapters: realAdapters(home, () => {}, { binary: 'fy', childEnv: { PATH: process.env.PATH ?? '' } }) });
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [vault, runner],
+      adapters: realAdapters(home, () => {}, { binary: 'fy', childEnv: { PATH: process.env.PATH ?? '' } }),
+    });
     if (outcome.kind !== 'running') throw new Error(outcome.sentence);
     hosts.push(outcome.host);
     await outcome.host.dispatch(request('GET', '/v1/run'));

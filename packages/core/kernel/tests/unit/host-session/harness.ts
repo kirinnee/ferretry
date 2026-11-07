@@ -94,7 +94,11 @@ export class FakeDeviceMode implements SessionMode {
     const list = this.watches.get(holder) ?? [];
     list.push(watch);
     this.watches.set(holder, list);
-    return () => this.watches.set(holder, (this.watches.get(holder) ?? []).filter(item => item !== watch));
+    return () =>
+      this.watches.set(
+        holder,
+        (this.watches.get(holder) ?? []).filter(item => item !== watch),
+      );
   }
 
   seen(holder: HolderId): void {
@@ -111,7 +115,9 @@ class FakePairMode implements SessionMode {
   async redeem(attempt: ModeRedemption): Promise<ModeRedeemed | 'refused'> {
     this.attempts.push(attempt);
     if (!(await attempt.prove())) return 'refused';
-    return this.answer === 'paired' ? { outcome: 'paired', fields: { response: { deviceId: 'fy_device_id_new' } } } : 'refused';
+    return this.answer === 'paired'
+      ? { outcome: 'paired', fields: { response: { deviceId: 'fy_device_id_new' } } }
+      : 'refused';
   }
 }
 
@@ -223,7 +229,10 @@ export class TestClient {
   }
 
   /** hs1 → hs2, keyed. */
-  async handshake(daemonId: string, hello?: (hello: Record<string, unknown>) => Record<string, unknown>): Promise<void> {
+  async handshake(
+    daemonId: string,
+    hello?: (hello: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<void> {
     const pending = await startClientHandshake(relayCrypto, this.sessionId, daemonId);
     const sent = hello === undefined ? pending.hello : hello({ ...pending.hello });
     this.link.inbound(
@@ -270,11 +279,20 @@ export class TestClient {
   /** Give the daemon more credit. */
   credit(frames: number): void {
     this.link.inbound(
-      encodeFrame({ kind: FRAME_KINDS.credit, sessionId: this.sessionId, sequence: 0, payload: encodeCreditPayload(frames) }),
+      encodeFrame({
+        kind: FRAME_KINDS.credit,
+        sessionId: this.sessionId,
+        sequence: 0,
+        payload: encodeCreditPayload(frames),
+      }),
     );
   }
 
-  async auth(device: TestDevice, overrides: Record<string, unknown> = {}, kind: 'auth' | 'stream' = 'auth'): Promise<void> {
+  async auth(
+    device: TestDevice,
+    overrides: Record<string, unknown> = {},
+    kind: 'auth' | 'stream' = 'auth',
+  ): Promise<void> {
     const transcript = this.transcript;
     if (transcript === undefined) throw new Error('not keyed');
     const proof = await signDeviceProof(
@@ -359,12 +377,14 @@ export class TestClient {
 }
 
 /** A keyed, authenticated request session. */
-export async function serving(fx: Fixture, carrier = 'relay', peer?: CarrierPeer): Promise<{ client: TestClient; device: TestDevice }> {
+export async function serving(
+  fx: Fixture,
+  carrier = 'relay',
+  peer?: CarrierPeer,
+): Promise<{ client: TestClient; device: TestDevice }> {
   const device = await pairedDevice(fx.device);
   const client = TestClient.open(fx, carrier, peer);
   await client.handshake(fx.daemonId);
   await client.auth(device);
   return { client, device };
 }
-
-;

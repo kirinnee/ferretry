@@ -27,7 +27,13 @@ import type {
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS } from '../contract/refusals.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
-import type { DaemonContext, DaemonHalf, DaemonImplementation, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import type {
+  DaemonContext,
+  DaemonHalf,
+  DaemonImplementation,
+  ToolHandler,
+  ToolResult,
+} from '../manifest/implement.ts';
 import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
@@ -56,7 +62,12 @@ import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { type DaemonIdentity, loadIdentity } from './identity.ts';
-import { createSessionLayer, type SessionCrypto, type SessionLayerHost, WebCryptoSessionCrypto } from './session/index.ts';
+import {
+  createSessionLayer,
+  type SessionCrypto,
+  type SessionLayerHost,
+  WebCryptoSessionCrypto,
+} from './session/index.ts';
 
 /** What the store opens for one plugin (the store slice's `openPluginState`). */
 export interface PluginStateHandle {
@@ -226,8 +237,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
 
   // 1. Check the enabled graph.
   trace.push('check');
-  const enabled = (id: string): boolean =>
-    isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
+  const enabled = (id: string): boolean => isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
   const enabledManifests = manifests.filter(manifest => enabled(manifest.id));
   const planned = HookEngine.plan(enabledManifests, log, deadline);
   const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
@@ -244,12 +254,15 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const refusals: GraphRefusal[] = [
     ...graph.refused,
     ...planned.refusals.flatMap(refusal =>
-      refusal.plugins.filter(plugin => !isCore(plugin)).map(plugin => ({ plugin, reason: 'hook' as const, sentence: refusal.sentence })),
+      refusal.plugins
+        .filter(plugin => !isCore(plugin))
+        .map(plugin => ({ plugin, reason: 'hook' as const, sentence: refusal.sentence })),
     ),
   ];
-  const coreRefusal = [...refusals, ...planned.refusals.map(r => ({ plugin: r.plugins[0] ?? '', sentence: r.sentence }))].find(
-    refusal => isCore(refusal.plugin),
-  );
+  const coreRefusal = [
+    ...refusals,
+    ...planned.refusals.map(r => ({ plugin: r.plugins[0] ?? '', sentence: r.sentence })),
+  ].find(refusal => isCore(refusal.plugin));
   if (coreRefusal !== undefined) return { kind: 'refused', sentence: coreRefusal.sentence, trace };
   // The engine is re-planned over the started set, so a refused plugin's takes do not exist.
   const order = graph.order;
@@ -294,7 +307,8 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const act = createActRunner(() => bound.holds, ids);
   const redaction: Redaction = {
     read: async fn => {
-      if (bound.redaction === undefined) throw new ApiError(503, 'Masking is unavailable, so nothing is shown.', 'redaction_unavailable');
+      if (bound.redaction === undefined)
+        throw new ApiError(503, 'Masking is unavailable, so nothing is shown.', 'redaction_unavailable');
       return await bound.redaction.read(fn);
     },
   };
@@ -451,7 +465,11 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   });
   // A failed plugin stays mounted so its routes answer `plugin_failed` (§3.4); off and refused ones are not.
   const mountable = order.filter(manifest => records.get(manifest.id)?.status !== 'refused');
-  frozen = buildSnapshot(started, data.accepted as readonly DataPluginManifest[], options.instructionText ?? (() => undefined));
+  frozen = buildSnapshot(
+    started,
+    data.accepted as readonly DataPluginManifest[],
+    options.instructionText ?? (() => undefined),
+  );
 
   // 6. Mount behind admission, by specificity.
   trace.push('mount');
@@ -524,15 +542,21 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       routes.push({ ...decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
     for (const decl of manifest.actions?.sockets ?? []) {
-      const accept = (half?.sockets as Readonly<Record<string, unknown>> | undefined)?.[decl.key] as MountedSocket['accept'];
+      const accept = (half?.sockets as Readonly<Record<string, unknown>> | undefined)?.[
+        decl.key
+      ] as MountedSocket['accept'];
       sockets.push({ ...decl, owner, ...(accept === undefined ? {} : { accept }) });
     }
     for (const decl of manifest.actions?.memberRoutes ?? []) {
-      const handle = (half?.memberRoutes as Readonly<Record<string, unknown>> | undefined)?.[decl.key] as MountedMemberRoute['handle'];
+      const handle = (half?.memberRoutes as Readonly<Record<string, unknown>> | undefined)?.[
+        decl.key
+      ] as MountedMemberRoute['handle'];
       memberRoutes.push({ ...decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
-      const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as ToolHandler | undefined;
+      const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
+        | ToolHandler
+        | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }
@@ -572,7 +596,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       return provided === 'unavailable' ? undefined : provided;
     },
     dispatch: request => dispatcher.dispatch(request),
-    sockets: { upgrade: request => dispatcher.upgrade(request), reauthorize: request => dispatcher.reauthorize(request) },
+    sockets: {
+      upgrade: request => dispatcher.upgrade(request),
+      reauthorize: request => dispatcher.reauthorize(request),
+    },
     clock,
   });
   let stopHost = async (): Promise<void> => undefined;
@@ -665,7 +692,11 @@ async function doctorLines(
   }
   for (const report of jobs.reports())
     if (report.failures > 0)
-      lines.push({ plugin: report.plugin, state: 'warn', detail: `The job ${report.id} failed ${report.failures} times.` });
+      lines.push({
+        plugin: report.plugin,
+        state: 'warn',
+        detail: `The job ${report.id} failed ${report.failures} times.`,
+      });
   for (const note of hooks.notes) lines.push({ plugin: 'kernel', state: 'warn', detail: note });
   for (const refused of dataRefused) lines.push({ plugin: refused.folder, state: 'fail', detail: refused.sentence });
   const checks: readonly { readonly id: string; readonly item: DoctorCheck }[] = hooks.contributions(DoctorChecks);

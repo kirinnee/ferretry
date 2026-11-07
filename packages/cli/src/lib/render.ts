@@ -13,4 +13,3 @@ export function renderTable(header: readonly string[], rows: readonly (readonly 
     )
     .join('\n');
 }
-

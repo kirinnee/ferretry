@@ -1,6 +1,15 @@
 import type { Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
-import type { ActPermit, ActRunner, HoldDecision, MintedIds, OpaqueId, Op, ResultOf, TargetRef } from '../contract/act.ts';
+import type {
+  ActPermit,
+  ActRunner,
+  HoldDecision,
+  MintedIds,
+  OpaqueId,
+  Op,
+  ResultOf,
+  TargetRef,
+} from '../contract/act.ts';
 import { closeAck, isOp, showsSomething } from '../contract/act.ts';
 import type { InputHolds } from '../contract/bound.ts';
 import { currentActor } from './call-scope.ts';

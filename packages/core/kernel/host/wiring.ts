@@ -5,7 +5,13 @@ import { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
-import { createNodeHostFs, createStatePort, type HostFs as StateFs, moveStateAside, openPluginState } from './state/index.ts';
+import {
+  createNodeHostFs,
+  createStatePort,
+  type HostFs as StateFs,
+  moveStateAside,
+  openPluginState,
+} from './state/index.ts';
 import type { Clock, Log } from '../contract/ports.ts';
 import type { ConfigDef } from '../contract/define.ts';
 
@@ -20,7 +26,12 @@ const mayHaveLiveTargets = (manifest: Manifest): boolean =>
  * plugin with no live targets, move `state/<id>` aside (fenced, `0700`) and start empty; otherwise the plugin is
  * damaged and answers `store_damaged` naming each file.
  */
-export function stateOpener(home: string, fs: StateFs, clock: Clock, log: Log): (manifest: Manifest) => PluginStateHandle {
+export function stateOpener(
+  home: string,
+  fs: StateFs,
+  clock: Clock,
+  log: Log,
+): (manifest: Manifest) => PluginStateHandle {
   return manifest => {
     const files = manifest.data?.state ?? [];
     let port = createStatePort({ home, pluginId: manifest.id, files, fs, clock });
@@ -30,7 +41,15 @@ export function stateOpener(home: string, fs: StateFs, clock: Clock, log: Log): 
       },
       open: async () => {
         const kind = manifest.core ? 'core' : 'plugin';
-        let opening = await openPluginState({ home, pluginId: manifest.id, files, fs, clock, kind, liveTargets: mayHaveLiveTargets(manifest) });
+        let opening = await openPluginState({
+          home,
+          pluginId: manifest.id,
+          files,
+          fs,
+          clock,
+          kind,
+          liveTargets: mayHaveLiveTargets(manifest),
+        });
         if (opening.moveAside !== undefined) {
           await moveStateAside(fs, opening.moveAside);
           log.warn('a plugin folder in an older format was moved aside', { plugin: manifest.id });

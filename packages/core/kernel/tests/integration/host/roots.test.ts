@@ -44,8 +44,14 @@ describe('roots and the fence (§7.7, §9.3)', () => {
   test('S41 a symlink or .. cannot get past the fence: checks run on the real path', async () => {
     const { home, work } = await layout();
     await symlink(`${home}/state/vault`, `${work}/innocent`);
-    expect(await resolveInRoot(fs, home, work, true, 'innocent/vault.key')).toEqual({ ok: false, error: 'link_escape' });
-    expect(await resolveInRoot(fs, home, work, true, '../home/state/vault/vault.key')).toEqual({ ok: false, error: 'outside' });
+    expect(await resolveInRoot(fs, home, work, true, 'innocent/vault.key')).toEqual({
+      ok: false,
+      error: 'link_escape',
+    });
+    expect(await resolveInRoot(fs, home, work, true, '../home/state/vault/vault.key')).toEqual({
+      ok: false,
+      error: 'outside',
+    });
     expect(await resolveInRoot(fs, home, work, true, 'notes.md\0')).toEqual({ ok: false, error: 'outside' });
     const fine = await resolveInRoot(fs, home, work, true, 'notes.md');
     expect(fine.ok).toBe(true);
@@ -53,7 +59,9 @@ describe('roots and the fence (§7.7, §9.3)', () => {
 
   test('S41 a link swapped in after resolve is refused at read time', async () => {
     const { home, work } = await layout();
-    const roots = rootsPortFor(fs, { home, plugin: 'terminals', worktrees: `${home}-worktrees` }, ['work'], () => workFolders(work));
+    const roots = rootsPortFor(fs, { home, plugin: 'terminals', worktrees: `${home}-worktrees` }, ['work'], () =>
+      workFolders(work),
+    );
     const root = roots.root('work', { ferret: 'F1' as FerretId });
     const resolved = root.resolve('later.txt');
     expect(resolved.ok).toBe(true);
@@ -65,7 +73,12 @@ describe('roots and the fence (§7.7, §9.3)', () => {
 
   test('a root the manifest did not declare throws; a read-only owner root refuses writes', async () => {
     const { home, work } = await layout();
-    const roots = rootsPortFor(fs, { home, plugin: 'skills', worktrees: `${home}-worktrees` }, ['imports'], () => undefined);
+    const roots = rootsPortFor(
+      fs,
+      { home, plugin: 'skills', worktrees: `${home}-worktrees` },
+      ['imports'],
+      () => undefined,
+    );
     expect(() => roots.root('work')).toThrow(RootError);
     const imports = roots.root('imports', { subfolder: work });
     const path = imports.resolve('notes.md');
@@ -77,7 +90,9 @@ describe('roots and the fence (§7.7, §9.3)', () => {
     const { home, parent } = await layout();
     await mkdir(`${home}/state/board-before-2026-11-02-1000`, { recursive: true, mode: 0o755 });
     const fenced = await fenceFolders(fs, home);
-    expect([...fenced].sort()).toEqual([`${home}/state/board-before-2026-11-02-1000`, `${parent}/home-before-2026-11-01-0900`].sort());
+    expect([...fenced].sort()).toEqual(
+      [`${home}/state/board-before-2026-11-02-1000`, `${parent}/home-before-2026-11-01-0900`].sort(),
+    );
     expect((await Bun.file(`${home}/state/board-before-2026-11-02-1000`).stat()).mode & 0o777).toBe(0o700);
   });
 });

@@ -1,5 +1,10 @@
 import { WebCryptoSessionCrypto } from '../../../host/session/adapters/web-crypto.ts';
-import { type DaemonIdentity, type DaemonSigningKey, type SessionCrypto, signingKey } from '../../../host/session/wire/index.ts';
+import {
+  type DaemonIdentity,
+  type DaemonSigningKey,
+  type SessionCrypto,
+  signingKey,
+} from '../../../host/session/wire/index.ts';
 
 /** One adapter for every test, because the protocol is only ever proved against real primitives. */
 export const relayCrypto = new WebCryptoSessionCrypto();
@@ -37,6 +42,8 @@ export async function newDaemonIdentity(): Promise<DaemonIdentity & DaemonSignin
     'sign',
     'verify',
   ])) as unknown as CryptoKeyPair;
-  const identity = await relayCrypto.importDaemonIdentity(toPem(await crypto.subtle.exportKey('pkcs8', pair.privateKey)));
+  const identity = await relayCrypto.importDaemonIdentity(
+    toPem(await crypto.subtle.exportKey('pkcs8', pair.privateKey)),
+  );
   return { ...identity, sign: signingKey(relayCrypto, identity).sign };
 }

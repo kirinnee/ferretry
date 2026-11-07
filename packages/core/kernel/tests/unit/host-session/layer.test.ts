@@ -43,10 +43,9 @@ describe('the session layer: arrival and principal', () => {
     }
     expect(fx.requests).toHaveLength(2);
     for (const request of fx.requests) expect(request.arrival.kind).toBe('carried');
-    expect(fx.requests.map(request => String(request.arrival.kind === 'carried' ? request.arrival.carrier : 'local'))).toEqual([
-      'relay',
-      'direct',
-    ]);
+    expect(
+      fx.requests.map(request => String(request.arrival.kind === 'carried' ? request.arrival.carrier : 'local')),
+    ).toEqual(['relay', 'direct']);
   });
 
   test('R625 a relayed arrival is never local and neither is a direct one (5.0: only the local listener makes local)', async () => {
@@ -155,7 +154,14 @@ describe('the session layer: frames and the handshake', () => {
   test('R26 control frames are hop-by-hop: one that reaches a session ends it', async () => {
     const fx = await fixture();
     const { client } = await serving(fx);
-    client.raw(encodeFrame({ kind: FRAME_KINDS.control, sessionId: client.sessionId, sequence: 0, payload: utf8Bytes('{"t":"ready"}') }));
+    client.raw(
+      encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: client.sessionId,
+        sequence: 0,
+        payload: utf8Bytes('{"t":"ready"}'),
+      }),
+    );
     await client.pump();
     expect(client.end?.code).toBe(4400);
   });
@@ -213,7 +219,12 @@ describe('the session layer: frames and the handshake', () => {
     const fx = await fixture();
     const { client } = await serving(fx);
     client.raw(
-      encodeFrame({ kind: FRAME_KINDS.credit, sessionId: TestClient.open(fx).sessionId, sequence: 0, payload: new Uint8Array(4) }),
+      encodeFrame({
+        kind: FRAME_KINDS.credit,
+        sessionId: TestClient.open(fx).sessionId,
+        sequence: 0,
+        payload: new Uint8Array(4),
+      }),
     );
     await client.pump();
     expect(client.end?.code).toBe(4400);
@@ -232,14 +243,22 @@ describe('the session layer: frames and the handshake', () => {
       relayCrypto.deviceKeyHandle(device.privateKey),
       deviceAuthMessage(first.transcript ?? new Uint8Array(), 'auth', device.deviceId, device.appSession),
     );
-    await second.send({ t: 'auth', protocol: SESSION_PROTOCOL_ID, deviceId: device.deviceId, appSession: device.appSession, proof });
+    await second.send({
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: device.deviceId,
+      appSession: device.appSession,
+      proof,
+    });
     await second.pump();
     expect(second.end?.code).toBe(4403);
   });
 
   test('R82 R545 R628 the plaintext cap is 65492 and the data byte budget is derived from it by one function', () => {
     expect(MAX_PLAINTEXT_BYTES).toBe(65_492);
-    expect(relayDataByteBudget(MAX_PLAINTEXT_BYTES)).toBe(Math.floor(((65_492 - '{"t":"data","bytes":""}'.length) * 3) / 4));
+    expect(relayDataByteBudget(MAX_PLAINTEXT_BYTES)).toBe(
+      Math.floor(((65_492 - '{"t":"data","bytes":""}'.length) * 3) / 4),
+    );
   });
 
   test('R627 4440 and its reason are one exported constant pair', () => {
@@ -403,7 +422,16 @@ describe('the session layer: requests', () => {
   test('R256 R260 a req needs id, method and path; repeated query keys survive and headers are lowercase', async () => {
     const fx = await fixture();
     const { client } = await serving(fx);
-    await client.send(req(1, { query: [['a', '1'], ['a', '2']], headers: { 'x-thing': 'v' }, body: 'hi' }));
+    await client.send(
+      req(1, {
+        query: [
+          ['a', '1'],
+          ['a', '2'],
+        ],
+        headers: { 'x-thing': 'v' },
+        body: 'hi',
+      }),
+    );
     await client.pump();
     const request = fx.requests[0];
     expect(request?.query.get('a')).toEqual(['1', '2']);
@@ -500,7 +528,12 @@ describe('the session layer: requests', () => {
   test('R508 R510 a compressed answer crosses as base64url gzip bytes under the two encoding headers', async () => {
     const fx = await fixture();
     const gzip = Bun.gzipSync(new Uint8Array(utf8Bytes('{"a":1}')));
-    fx.dispatch = async () => ({ status: 200, headers: new Map([['content-type', 'application/json']]), body: '{"a":1}', gzip });
+    fx.dispatch = async () => ({
+      status: 200,
+      headers: new Map([['content-type', 'application/json']]),
+      body: '{"a":1}',
+      gzip,
+    });
     const { client } = await serving(fx);
     await client.send(req(1));
     await client.pump();
@@ -678,7 +711,10 @@ describe('the session layer: streams', () => {
     handler.downstream?.close(1000, 'the terminal exited');
     await client.pump();
     expect(client.last('stream-close')).toMatchObject({ code: 1000, reason: 'the terminal exited' });
-    expect(client.end).toEqual({ code: RELAY_SESSION_CONCLUDED_CLOSE_CODE, reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON });
+    expect(client.end).toEqual({
+      code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+      reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+    });
   });
 
   test('R558 a client stream-close releases the handler and concludes with no sealed answer of its own', async () => {

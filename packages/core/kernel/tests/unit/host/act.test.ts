@@ -48,14 +48,30 @@ describe('kernel.act (§4.7)', () => {
 
   test('no InputHolds bound, or one that throws, fails closed', async () => {
     const missing = createActRunner(() => undefined, new MintedIdRegistry(() => 'x'));
-    expect(await missing(target, 'read', async () => ({ kind: 'content' }))).toEqual({ ok: false, error: { refused: 'holds_unavailable' } });
-    const throwing = createActRunner(() => ({ decide: () => { throw new Error('x'); } }), new MintedIdRegistry(() => 'x'));
-    expect(await throwing(target, 'read', async () => ({ kind: 'content' }))).toEqual({ ok: false, error: { refused: 'holds_unavailable' } });
+    expect(await missing(target, 'read', async () => ({ kind: 'content' }))).toEqual({
+      ok: false,
+      error: { refused: 'holds_unavailable' },
+    });
+    const throwing = createActRunner(
+      () => ({
+        decide: () => {
+          throw new Error('x');
+        },
+      }),
+      new MintedIdRegistry(() => 'x'),
+    );
+    expect(await throwing(target, 'read', async () => ({ kind: 'content' }))).toEqual({
+      ok: false,
+      error: { refused: 'holds_unavailable' },
+    });
   });
 
   test('an op not in OP_EFFECTS is refused from its runtime value', async () => {
     const act = createActRunner(() => holdsSaying('allow'), new MintedIdRegistry(() => 'x'));
-    expect(await act(target, 'teleport' as Op, async () => ({ status: 'done' }) as never)).toEqual({ ok: false, error: { refused: 'unknown_op' } });
+    expect(await act(target, 'teleport' as Op, async () => ({ status: 'done' }) as never)).toEqual({
+      ok: false,
+      error: { refused: 'unknown_op' },
+    });
   });
 
   test('a write-only result is closed to a fresh Ack: no URL, no title, only minted ids', async () => {
@@ -65,7 +81,11 @@ describe('kernel.act (§4.7)', () => {
     const leaky = { status: 'done', url: 'https://bank.test/?token=abc', title: 'Bank', ids: [minted] };
     const result = await act(target, 'navigate', async () => leaky as unknown as Ack);
     expect(result).toEqual({ ok: true, value: { status: 'done', ids: [minted] } });
-    const forged = await act(target, 'open', async () => ({ status: 'done', ids: ['https://evil.test/'] }) as unknown as Ack);
+    const forged = await act(
+      target,
+      'open',
+      async () => ({ status: 'done', ids: ['https://evil.test/'] }) as unknown as Ack,
+    );
     expect(forged).toEqual({ ok: true, value: { status: 'refused', code: 'unminted_id' } });
   });
 

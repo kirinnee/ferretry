@@ -20,10 +20,7 @@ export function request(method: string, path: string, init: { local?: boolean; b
     path,
     query: queryFrom([]),
     headers: headersFrom({}),
-    arrival:
-      init.local === false
-        ? { kind: 'carried', carrier: 'relay' as CarrierKey }
-        : localArrival(true),
+    arrival: init.local === false ? { kind: 'carried', carrier: 'relay' as CarrierKey } : localArrival(true),
     text: async () => init.body ?? '',
   };
 }

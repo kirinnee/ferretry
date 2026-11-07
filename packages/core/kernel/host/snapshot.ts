@@ -58,9 +58,7 @@ export function buildSnapshot(
       .sort((a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin)),
     doctor: started.flatMap(manifest => (manifest.doctor ?? []).map(check => ({ plugin: id(manifest.id), id: check }))),
     onboarding: [
-      ...started.flatMap(manifest =>
-        (manifest.onboarding ?? []).map(step => ({ plugin: id(manifest.id), ...step })),
-      ),
+      ...started.flatMap(manifest => (manifest.onboarding ?? []).map(step => ({ plugin: id(manifest.id), ...step }))),
       ...data.flatMap(plugin => (plugin.onboarding ?? []).map(step => ({ plugin: id(plugin.id), ...step }))),
     ].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
   };

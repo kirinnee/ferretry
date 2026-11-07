@@ -171,7 +171,11 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     launch: async () => options.launch ?? { started: true, baseUrl: probe.baseUrl },
     connect: async ({ asOwner }): Promise<Connection> => {
       connects.push({ asOwner });
-      return { baseUrl: probe.baseUrl, transport, inventory: new InventoryCache(options.readInventory ?? (async () => inventory)) };
+      return {
+        baseUrl: probe.baseUrl,
+        transport,
+        inventory: new InventoryCache(options.readInventory ?? (async () => inventory)),
+      };
     },
   };
   return { world, io, transport, connects };

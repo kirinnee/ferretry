@@ -27,12 +27,16 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
     'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
     'GET /healthz': async () => {
       const live = sources.liveness();
-      return jsonResponse({ ...live, version: sources.version, protocol: PROTOCOL }, live.status === 'starting' ? 503 : 200);
+      return jsonResponse(
+        { ...live, version: sources.version, protocol: PROTOCOL },
+        live.status === 'starting' ? 503 : 200,
+      );
     },
     'GET /v1/plugins': async call => {
       const entries = sources.inventory();
       const projected =
-        sources.project(call.request, entries) ?? entries.filter(entry => (CORE_IDS as readonly string[]).includes(entry.id));
+        sources.project(call.request, entries) ??
+        entries.filter(entry => (CORE_IDS as readonly string[]).includes(entry.id));
       return jsonResponse({
         protocol: PROTOCOL,
         plugins: projected.map(entry => ({ id: entry.id, on: entry.on, contract: entry.contract })),

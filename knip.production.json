@@ -7,53 +7,28 @@
     },
     "packages/std": {
       "entry": [],
-      "project": [
-        "src/**/*.ts"
-      ]
+      "project": ["src/**/*.ts"]
     },
     "packages/core/kernel": {
       "entry": [],
-      "project": [
-        "**/*.{ts,tsx}",
-        "!tests/**",
-        "!testing/**"
-      ]
+      "project": ["**/*.{ts,tsx}", "!tests/**", "!testing/**"]
     },
     "packages/core/*": {
       "entry": [],
-      "project": [
-        "**/*.{ts,tsx}",
-        "!tests/**"
-      ]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/*": {
       "entry": [],
-      "project": [
-        "**/*.{ts,tsx}",
-        "!tests/**"
-      ]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/cli": {
-      "entry": [
-        "bin/*.ts",
-        "src/index.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "bin/**/*.ts"
-      ],
-      "ignore": [
-        "src/lib/tool-client.ts"
-      ]
+      "entry": ["bin/*.ts", "src/index.ts"],
+      "project": ["src/**/*.ts", "bin/**/*.ts"],
+      "ignore": ["src/lib/tool-client.ts"]
     },
     "packages/app": {
-      "entry": [
-        "src/index.ts",
-        "src/main.tsx"
-      ],
-      "project": [
-        "src/**/*.{ts,tsx}"
-      ]
+      "entry": ["src/index.ts", "src/main.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
     }
   },
   "bun": false,

@@ -32,7 +32,8 @@ export async function openHome(fs: HostFs, home: string, createdBy: string, now:
   const created = decision.kind === 'create';
   if (created) {
     await fs.mkdirp(home, 0o700);
-    for (const folder of ['config', 'state', 'state/kernel', 'run', 'logs']) await fs.mkdirp(`${home}/${folder}`, 0o700);
+    for (const folder of ['config', 'state', 'state/kernel', 'run', 'logs'])
+      await fs.mkdirp(`${home}/${folder}`, 0o700);
     await fs.writeAtomic(
       `${home}/home.json`,
       `${JSON.stringify({ format: HOME_FORMAT, createdBy, createdAt: now }, null, 2)}\n`,
@@ -52,7 +53,8 @@ export async function fenceFolders(fs: HostFs, home: string): Promise<readonly s
   const name = home.slice(slash + 1);
   for (const entry of await fs.list(parent))
     if (entry.startsWith(`${name}-before-`) && BEFORE_SUFFIX.test(entry)) fenced.push(`${parent}/${entry}`);
-  for (const entry of await fs.list(`${home}/state`)) if (BEFORE_SUFFIX.test(entry)) fenced.push(`${home}/state/${entry}`);
+  for (const entry of await fs.list(`${home}/state`))
+    if (BEFORE_SUFFIX.test(entry)) fenced.push(`${home}/state/${entry}`);
   for (const folder of fenced) {
     const info = await fs.lstat(folder);
     if (info?.kind === 'directory') await fs.chmod(folder, 0o700);
