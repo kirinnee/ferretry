@@ -14,11 +14,14 @@ import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
 import { conversationStep } from './conversation.ts';
 import { ferretsStep } from './ferrets.ts';
+import { gateStep } from './gate.ts';
 import { harnessHomesStep } from './harness-homes.ts';
 import { loginsStep } from './logins.ts';
+import { mcpStep } from './mcp.ts';
 import { projectsStep } from './projects.ts';
 import { terminalsStep } from './terminals.ts';
 import { identityStep, vaultStep } from './secrets.ts';
+import { usageStep } from './usage.ts';
 import { wardenStep } from './warden.ts';
 
 export interface StepContext {
@@ -55,11 +58,6 @@ function pending(step: Omit<Step, 'run'>, waitsFor: string): Step {
   };
 }
 
-const CACHE: NotCarried = {
-  what: 'derived indexes (SQLite caches)',
-  why: 'v5 rebuilds every cache from the kept files',
-};
-
 export const STEPS: readonly Step[] = [
   ferretsStep,
   conversationStep,
@@ -79,35 +77,21 @@ export const STEPS: readonly Step[] = [
     },
     'the Lessons state and config schemas',
   ),
-  pending(
-    {
-      id: 'usage',
-      title: 'Usage history and budgets',
-      owner: ['plugin-usage'],
-      reads: [
-        'state/budget-holds.json',
-        'state/budget-told.json',
-        'config/daemon.json (analyticsPricing keys)',
-        'fleet/credentials/<login>/usage.json',
-      ],
-      sealed: [],
-      notCarried: [CACHE],
-    },
-    'the Usage state schema',
-  ),
+  usageStep,
   wardenStep,
+  mcpStep,
   pending(
     {
       id: 'catalogs',
       title: 'Catalogs and shares (published catalogs, links, members, installs)',
-      owner: ['plugin-catalogs', 'plugin-skills', 'plugin-mcp'],
+      owner: ['plugin-catalogs', 'plugin-skills'],
       reads: ['state/catalogs/**', 'state/catalog-installs.json', 'state/local-skill-installs.json'],
-      sealed: ['state/catalogs/link-keys.json', 'state/mcp-oauth-secrets.json'],
+      sealed: ['state/catalogs/link-keys.json'],
       notCarried: [
         { what: 'catalogs.v1.json, catalogs.v2.json, members.before-unique-names.json', why: 'v4 upgrade backups' },
       ],
     },
-    'the Catalogs, Skills and MCP state schemas',
+    'the Catalogs and Skills state schemas',
   ),
   pending(
     {
@@ -151,4 +135,5 @@ export const STEPS: readonly Step[] = [
     'the Accounts state schema and its sealed-document declaration',
   ),
   accessStep,
+  gateStep,
 ];
