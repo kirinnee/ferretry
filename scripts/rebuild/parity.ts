@@ -183,7 +183,7 @@ function ownerOf(file: string, what = ''): string {
   if (/settings panel about/.test(semantic)) return 'updates';
   if (/agent-clis/.test(semantic)) return 'claude-code';
   if (
-    /\bfy (?:new|start|stop|ps|status|rename|resume|restart|wait|interrupt|migrate|session)\b/.test(semantic) &&
+    /\bfy (?:new|start|stop|ps|status|rename|resume|restart|wait|stream|interrupt|migrate|session)\b/.test(semantic) &&
     !/subtree/.test(semantic)
   )
     return 'ferrets';

@@ -24,6 +24,8 @@ import { SessionStatusController } from './lib/session/status-controller.ts';
 import { SessionSubtreeController } from './lib/session/subtree-controller.ts';
 import { BulkStopController } from './lib/stop/controller.ts';
 import type { BulkStopSelector } from './lib/stop/types.ts';
+import { runCancellableStream, StreamController } from './lib/stream/controller.ts';
+import { ClientEventStream } from './lib/stream/gateway.ts';
 import { choice, count, guarded, joined, list as listOf, on, PLAIN, text, typed, VerbIo } from './lib/verb-io.ts';
 import { WaitController } from './lib/wait/controller.ts';
 import { WorktreeController } from './lib/worktrees/controller.ts';
@@ -299,6 +301,19 @@ export default implementCli(manifest, {
       });
     });
 
+    // `fy stream [id]`: one ferret from `--after`, or the fleet's recent tail; ends on SIGINT/SIGTERM (today's rules).
+    const stream = verb(async (invocation, _presenter, io) => {
+      const raw = text(invocation, 'after');
+      if (raw === undefined && typed(invocation, 'after')) throw new SessionCommandError('--after needs a sequence');
+      const id = invocation.args[0]?.trim();
+      await runCancellableStream(
+        new StreamController(new ClientEventStream(client), io, BINARY),
+        id === '' ? undefined : id,
+        { ...(raw === undefined ? {} : { after: Number(raw) }), ...(on(invocation, 'json') ? { json: true } : {}) },
+        process,
+      );
+    });
+
     const instructions = verb(async (invocation, presenter) => {
       const report = instructionsReport(env ?? {});
       if (on(invocation, 'json')) presenter.json(report);
@@ -377,6 +392,7 @@ export default implementCli(manifest, {
         name: names,
         'resume <id> [message...]': resume,
         'restart [ids...]': restart,
+        'stream [id]': stream,
         'wait <id>': wait,
         instructions,
         'signal <kind> [message...]': signal,

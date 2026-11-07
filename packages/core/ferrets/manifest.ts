@@ -402,6 +402,8 @@ export default definePlugin({
         summary:
           'restart ferrets on the same runtime, keeping the conversation; a busy one waits for its next idle moment',
       }),
+      // V-0452: today's `fy stream [id]`: the journal socket `GET /v1/events`, followed until interrupted.
+      verb('stream [id]', { summary: "follow one ferret or this daemon's whole fleet until interrupted" }),
       verb('wait <id>', {
         summary:
           'block until a ferret settles; exits 0 finished, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
