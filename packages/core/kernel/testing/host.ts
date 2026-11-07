@@ -10,7 +10,7 @@ import type {
   RedactionScope,
   WorkFolders,
 } from '../contract/bound.ts';
-import { WITHHELD_SENTENCE } from '../contract/bound.ts';
+import { KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type {
   ConfigCollectionDef,
   ConfigFileDef,
@@ -739,6 +739,11 @@ async function start(world: World): Promise<TestHost> {
       built.push({ impl, manifest, half: undefined });
       continue;
     }
+    const kernelOnly = [...Object.values(manifest.needs ?? {}), ...Object.values(manifest.uses ?? {})].find(token =>
+      KERNEL_ONLY_PORTS.includes(token.name),
+    );
+    if (kernelOnly !== undefined)
+      throw new Error(`testHost: ${manifest.id} asks for ${kernelOnly.name}, which only the kernel may hold`);
     const needs: Record<string, unknown> = {};
     for (const [field, token] of Object.entries(manifest.needs ?? {})) {
       const value = lookup(options.fakes ?? {}, field, token) ?? providedBy.get(token.name);

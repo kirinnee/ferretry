@@ -1,5 +1,6 @@
 /** `plugin-graph`: a `'*'` in permissions.spawn / network is a core piece's alone (lead decision 5). */
 import { describe, expect, test } from 'bun:test';
+import { ChildEnvironmentPort } from '../../../packages/core/kernel/contract/index.ts';
 import type { Manifest } from '../../../packages/core/kernel/manifest/index.ts';
 import { pluginGraphFindings, type StartGraph } from '../lib/graph.ts';
 
@@ -39,6 +40,23 @@ describe('plugin-graph: wildcard reach', () => {
     expect(messages).toEqual([
       "mcp: declares permissions.spawn '*'; only a core piece may",
       "relay: declares permissions.network '*'; only a core piece may",
+    ]);
+  });
+});
+
+describe('plugin-graph: kernel-only ports', () => {
+  test('a manifest needing or using the ChildEnvironment opener is refused', () => {
+    const thief = {
+      ...manifest('thief', false, [], []),
+      needs: { opener: ChildEnvironmentPort },
+      uses: { other: ChildEnvironmentPort },
+    } as unknown as Manifest;
+    const messages = pluginGraphFindings(graphOf(thief))
+      .filter(f => f.message.includes('only the kernel'))
+      .map(f => f.message);
+    expect(messages).toEqual([
+      'asks for "child-environment", which only the kernel may hold',
+      'asks for "child-environment", which only the kernel may hold',
     ]);
   });
 });

@@ -213,6 +213,13 @@ export interface ChildEnvironmentOpener {
 
 export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');
 
+/**
+ * Kernel-bound ports no half may hold, not even through `needs` or `uses`: the kernel binds them into its own
+ * adapters only (the ChildEnvironment opener into the spawn adapter, lead decision 8). A manifest that asks for one
+ * is refused at plan, and plugin-graph refuses it in CI.
+ */
+export const KERNEL_ONLY_PORTS: readonly string[] = Object.freeze([ChildEnvironmentPort.name]);
+
 export const KERNEL_BOUND_PORTS = [
   AdmissionPort,
   OutputGuardPort,
