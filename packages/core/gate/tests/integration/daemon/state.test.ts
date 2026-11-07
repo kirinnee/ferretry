@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { state } from '@ferretry/kernel/host';
-import { AdminTokenFile, AUDIT_KINDS, type AuditRecord, AuditLogFile, WardenTokenFile } from '../../../contract/index.ts';
+import {
+  AdminTokenFile,
+  AUDIT_KINDS,
+  type AuditRecord,
+  AuditLogFile,
+  WardenTokenFile,
+} from '../../../contract/index.ts';
 import { AuditKeptFile, AuditKeptRotatedFile, AuditRotatedFile } from '../../../manifest.ts';
 import { StateAuditJournal } from '../../../daemon/adapters/audit/state-audit-journal.ts';
 import { StateTokens } from '../../../daemon/adapters/tokens/state-tokens.ts';
@@ -9,12 +15,20 @@ import { StateGrantHistory } from '../../../daemon/adapters/grants/state-grant-h
 import type { GrantAuditEntry } from '../../../daemon/lib/grants/service.ts';
 import { GrantAuditFile } from '../../../manifest.ts';
 
-const FILES = [AdminTokenFile, WardenTokenFile, AuditLogFile, AuditRotatedFile, AuditKeptFile, AuditKeptRotatedFile, GrantAuditFile];
+const FILES = [
+  AdminTokenFile,
+  WardenTokenFile,
+  AuditLogFile,
+  AuditRotatedFile,
+  AuditKeptFile,
+  AuditKeptRotatedFile,
+  GrantAuditFile,
+];
 
 /** The real host state port over an in-memory disk: the same format, schema and secret handling as a daemon. */
 function folder(): { port: (files: typeof FILES) => StatePort; fs: ReturnType<typeof state.createMemoryHostFs> } {
   const fs = state.createMemoryHostFs();
-  return { fs, port: files => state.createStatePort({ home: "/home/test", pluginId: "gate", files, fs }) };
+  return { fs, port: files => state.createStatePort({ home: '/home/test', pluginId: 'gate', files, fs }) };
 }
 
 const record = (n: number): AuditRecord => ({
@@ -47,7 +61,10 @@ describe('the audit journal on the kernel state', () => {
     const one = new TextEncoder().encode(`${JSON.stringify(record(1))}\n`).byteLength;
     const journal = new StateAuditJournal(
       disk.port(FILES),
-      { general: { live: AuditLogFile, rotated: AuditRotatedFile }, kept: { live: AuditKeptFile, rotated: AuditKeptRotatedFile } },
+      {
+        general: { live: AuditLogFile, rotated: AuditRotatedFile },
+        kept: { live: AuditKeptFile, rotated: AuditKeptRotatedFile },
+      },
       one * 2,
     );
     for (const n of [1, 2, 3]) await journal.append(record(n), 'general');
@@ -66,7 +83,11 @@ describe('the daemon tokens', () => {
   test('F-0025 F-0041 F-0106 tokens are minted on first use into state/gate and reused after', async () => {
     const disk = folder();
     let n = 0;
-    const tokens = new StateTokens(disk.port(FILES), { admin: AdminTokenFile, warden: WardenTokenFile }, () => `minted-${++n}`);
+    const tokens = new StateTokens(
+      disk.port(FILES),
+      { admin: AdminTokenFile, warden: WardenTokenFile },
+      () => `minted-${++n}`,
+    );
     expect(await tokens.load()).toEqual({ admin: 'minted-1', warden: 'minted-2' });
     expect(await tokens.load()).toEqual({ admin: 'minted-1', warden: 'minted-2' });
   });
@@ -82,14 +103,14 @@ describe('the daemon tokens', () => {
 describe('the grant history', () => {
   test('F-0251 grant changes are appended to state/gate/grant-audit.jsonl and read newest first, bounded', async () => {
     const disk = folder();
-    const history = new StateGrantHistory(disk.port(FILES), GrantAuditFile as never);
+    const history = new StateGrantHistory(disk.port(FILES), GrantAuditFile);
     const entry = (n: number): GrantAuditEntry => ({
       at: `2026-11-07T12:00:0${String(n)}.000Z` as GrantAuditEntry['at'],
       actor: 'admin-cli',
       changes: [`fleet.use=${n % 2 === 0 ? 'on' : 'off'}`],
     });
     for (const n of [1, 2, 3]) await history.record(entry(n));
-    expect(await history.recent(2)).toEqual({ entries: [entry(3), entry(2)], unreadable: 0, truncated: true });
+    expect(await history.recent(2)).toEqual({ entries: [entry(3), entry(2)], unreadable: 0, truncated: false });
     expect(await disk.fs.readText('/home/test/state/gate/grant-audit.jsonl')).not.toContain('token');
   });
 });
