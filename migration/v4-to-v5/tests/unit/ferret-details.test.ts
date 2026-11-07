@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { SESSION_CONFIG_KEYS, SESSION_STATE_KEYS } from '../../src/steps/ferret-details.ts';
 import { ferretsStep } from '../../src/steps/ferrets.ts';
 import { agentHomesRoot } from '../../src/v5/harness-paths.ts';
 import { AT, FAKE_HASH, fixture, RUNTIME } from './ferret-fixture.ts';
@@ -96,7 +97,7 @@ const v4State = (id: string, extra: Json = {}): Json => ({
   turnState: 'your-turn',
   turnStateAt: LATER,
   launchInstructions: { sections: [{ id: 'tools', chars: 10, digest: 'abc' }], mode: 'auto', questions: true },
-  queue: [{ internal: 'kept by the loose schema' }],
+  queue: [{ internal: 'an undeclared v4 payload' }],
   ...extra,
 });
 
@@ -129,7 +130,8 @@ const exists = async (path: string) => (await stat(out(path)).catch(() => undefi
 
 /**
  * v5's REAL readers, run in a subprocess that imports nothing from this tool: each file is decoded exactly as the
- * kernel's state port decodes it (format check, then the Ferrets daemon's own declared schema).
+ * kernel's state port decodes it (format check, then the Ferrets daemon's own declared schema). config.json and
+ * state.json are read STRICT (the Ferrets contract will export them strict), so an undeclared key fails here.
  */
 async function readWithV5(ferrets: string[]): Promise<Json> {
   const script = join(f.root, 'verify-v5.ts');
@@ -139,6 +141,9 @@ async function readWithV5(ferrets: string[]): Promise<Json> {
 const [repo, home, ...ferrets] = process.argv.slice(2);
 const { decodeJson } = await import(repo + '/packages/core/kernel/host/state/format.ts');
 const files = await import(repo + '/packages/core/ferrets/daemon/lib/state.ts');
+const { SessionConfigSchema, SessionStateSchema } = await import(repo + '/packages/core/ferrets/daemon/lib/protocol/session.ts');
+const strictConfig = { ...files.SessionConfigFiles, schema: SessionConfigSchema.strict() };
+const strictState = { ...files.SessionStateFiles, schema: SessionStateSchema.strict() };
 const { existsSync, readFileSync } = await import('node:fs');
 const read = (def, path) => {
   if (!existsSync(path)) return null;
@@ -147,12 +152,14 @@ const read = (def, path) => {
   if (!decoded.ok) throw new Error(decoded.error.sentence);
   return { formatFirst: Object.keys(JSON.parse(text))[0] === 'format', value: decoded.value };
 };
-const result = { agentPins: read(files.AgentPinsFile, home + '/state/ferrets/agent-pins.json') };
+const result = {
+  keys: { config: Object.keys(SessionConfigSchema.shape), state: Object.keys(SessionStateSchema.shape) },
+  agentPins: read(files.AgentPinsFile, home + '/state/ferrets/agent-pins.json') };
 for (const ferret of ferrets) {
   const dir = home + '/state/ferrets/' + ferret;
   result[ferret] = {
-    config: read(files.SessionConfigFiles, dir + '/config.json'),
-    state: read(files.SessionStateFiles, dir + '/state.json'),
+    config: read(strictConfig, dir + '/config.json'),
+    state: read(strictState, dir + '/state.json'),
     pins: read(files.FerretPinFiles, dir + '/pins.json'),
     details: read(files.FerretDetailsFiles, dir + '/details.json'),
   };
@@ -175,7 +182,10 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
     pins: [pin(PIN_A, 'b1'), note(PIN_B)],
     updatedAt: AT,
   });
-  await f.put('state/sessions/child/config.json', v4Config('child', { parent: 'lead', name: 'Fake helper' }));
+  await f.put(
+    'state/sessions/child/config.json',
+    v4Config('child', { parent: 'lead', name: 'Fake helper', agent: join(f.from, 'fleet/bin/claude-work') }),
+  );
   await f.put('state/sessions/child/state.json', v4State('child', { status: 'completed', finishedAt: LATER }));
   await f.put('state/agent-pins.json', {
     version: 1,
@@ -200,6 +210,10 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
   );
 
   const v5 = (await readWithV5(['lead', 'child'])) as Record<string, Record<string, V5Read>>;
+  // The tool's declared-key lists are exactly v5's.
+  const keys = v5.keys as unknown as { config: string[]; state: string[] };
+  expect<string[]>([...SESSION_CONFIG_KEYS]).toEqual(keys.config);
+  expect<string[]>([...SESSION_STATE_KEYS]).toEqual(keys.state);
   for (const ferret of ['lead', 'child'])
     for (const kind of ['config', 'state', 'details']) expect(v5[ferret]?.[kind]?.formatFirst).toBe(true);
   expect(v5.lead?.pins?.formatFirst).toBe(true);
@@ -216,22 +230,27 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
 
   const config = v5.lead?.config?.value as Json;
   const ferret = await readJson('lead/ferret.json');
-  // The two renamed keys moved; nothing else of the v4 document is lost.
+  // The two renamed keys moved; every declared key is kept, every undeclared one is named in the report.
   expect(config.move).toEqual({ from: 'claude-old', to: 'claude-work', at: AT });
   expect(config.moves).toEqual([{ from: 'claude-old', to: 'claude-work', at: AT }]);
   expect(config).not.toHaveProperty('migration');
   expect(config).not.toHaveProperty('migrations');
   expect(config).toMatchObject({
     teammate: 'quill',
-    prompt: 'FAKE task brief',
     focusTask: { id: 'F12' },
     boardSkip: { reason: 'fake skip', at: AT },
-    sessionCapabilityHash: FAKE_HASH,
     retry: { transientAttempts: 3, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
   });
   // Old-home paths now point into the new home; the transcript is the pointer ferret.json carries.
   expect(config.agent).toBe('claude-work');
-  expect((config.command as string[])[0]).toBe(join(f.to, 'fleet/bin/claude-work'));
+  expect((v5.child?.config?.value as Json).agent).toBe(join(f.to, 'fleet/bin/claude-work'));
+  for (const key of ['command', 'prompt', 'tmuxSession', 'sessionCapabilityHash'])
+    expect(config).not.toHaveProperty(key);
+  expect(report.notCarried).toContainEqual({
+    what: 'config.json keys found in this home: command, prompt, sessionCapabilityHash, tmuxSession',
+    why: 'v5 SessionConfigSchema does not declare them and the Ferrets contract document is strict',
+  });
+  expect(report.notCarried.some(item => item.what === 'state.json keys found in this home: queue')).toBe(true);
   expect(config.transcript).toEqual(ferret.transcript);
   expect(JSON.stringify(config)).not.toContain(f.from);
   expect((config.conversion as Json).fromFile).toBe(
@@ -240,11 +259,8 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
 
   // state.json keeps the v4 status ferret.json's state was decided from, and the loose internal keys.
   const state = v5.lead?.state?.value as Json;
-  expect(state).toMatchObject({
-    status: 'awaiting_user',
-    pid: 4242,
-    queue: [{ internal: 'kept by the loose schema' }],
-  });
+  expect(state).toMatchObject({ status: 'awaiting_user', pid: 4242, turnState: 'your-turn' });
+  expect(state).not.toHaveProperty('queue');
   expect(ferret.state).toBe('idle');
   expect((v5.child?.state?.value as Json).status).toBe('completed');
   expect((await readJson('child/ferret.json')).state).toBe('stopped');
@@ -333,7 +349,7 @@ test('a state.json naming another session fails the step before anything is writ
   expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
 });
 
-test('notCarried no longer lists what config.json and state.json now carry, and still names environment.json', () => {
+test('notCarried no longer lists what config.json and state.json carry, names each dropped key, and environment.json', () => {
   const listed = ferretsStep.notCarried.map(item => item.what).join(' | ');
   for (const carried of ['nameSource', 'focusTask', 'migration/migrations', 'state.turn', 'exact v4 state.status'])
     expect(listed).not.toContain(carried);

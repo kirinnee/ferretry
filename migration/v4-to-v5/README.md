@@ -54,14 +54,15 @@ and shared pools; the transcript bytes are never parsed. Journals become history
 and archive entries, worktree records/intents and fork receipts retain their schema-backed fields. The kernel's
 declared `format: 1` stamp is added to document bodies; fork receipts also retain their original `v: 1`.
 
-Beside each `ferret.json` (`src/steps/ferret-details.ts`): `config.json` and `state.json` are the v4 documents whole
-(v5 keeps them loose), with `migration`/`migrations` renamed `move`/`moves` and old-home paths (runtime wrapper,
-transcript, a pooled conversion source) pointed into the new home; `state.json` keeps the v4 status `ferret.json`'s
-state was decided from. `pins.json` becomes `{format: 1, pins}`, `state/agent-pins.json` becomes
-`state/ferrets/agent-pins.json` (pins of converted ferrets only), and `details.json` holds the start options
-(`StartOptionsSchema`) and the v4 `name` as the title. A damaged pin file reads as no pins, as v4 read it. Those v5
-schemas are private to the Ferrets daemon, so `tests/unit/ferret-details.test.ts` reads every file back with v5's
-real schemas in a subprocess.
+Beside each `ferret.json` (`src/steps/ferret-details.ts`): `config.json` and `state.json` keep only the keys v5's
+`SessionConfigSchema` / `SessionStateSchema` declare (the Ferrets contract exports them strict), `format` first, with
+`migration`/`migrations` renamed `move`/`moves` and old-home paths (runtime wrapper, transcript, a pooled conversion
+source) pointed into the new home; every v4 key left out (`command`, `prompt`, `tmuxSession`, `sessionCapabilityHash`,
+internal state payloads) is named in `notCarried`. `state.json` keeps the v4 status `ferret.json`'s state was decided
+from. `pins.json` becomes `{format: 1, pins}`, `state/agent-pins.json` becomes `state/ferrets/agent-pins.json` (pins
+of converted ferrets only), and `details.json` holds the start options (`StartOptionsSchema`) and the v4 `name` as the
+title. A damaged pin file reads as no pins, as v4 read it. Those v5 schemas are private to the Ferrets daemon, so
+`tests/unit/ferret-details.test.ts` reads every file back with v5's real schemas, strict, in a subprocess.
 
 Declared files without a v5 schema are **not written**: moves, auto-resume, restarts and terminals.json. Runtime
 `formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The card a session

@@ -56,6 +56,26 @@ export const ferretsStep: Step = {
       why: 'cannot point at a copied agent home safely; resume id is still kept in harnessConversation, and config.json drops the pointer as ferret.json does',
     },
     {
+      what: 'config.command and config.tmuxSession (v4 lifecycle fields)',
+      why: 'v5 SessionConfigSchema does not declare them and the Ferrets contract document is strict; the wrapper is the runtime and the pane is ferret.json handle',
+    },
+    {
+      what: 'config.prompt (the task brief a ferret was started with)',
+      why: 'v5 SessionConfigSchema does not declare it and the Ferrets contract document is strict; the brief stays in the copied transcript',
+    },
+    {
+      what: 'config.sessionCapabilityHash',
+      why: 'v5 SessionConfigSchema does not declare it; the hash is carried in state/ferrets/tokens.json instead',
+    },
+    {
+      what: 'config.boardAccess',
+      why: 'the retired task-board ACL; v4 itself ignored it and v5 SessionConfigSchema does not declare it',
+    },
+    {
+      what: 'state.json keys SessionStateSchema does not declare (v4 internal queue payloads and filesystem proofs)',
+      why: 'the Ferrets contract document is strict; each one found is listed by name in this report',
+    },
+    {
       what: 'conversion.fromFile outside the shared transcript pool',
       why: 'kept verbatim in config.json (a display pointer to the original transcript); only a pooled path has a known place in the new home',
     },
@@ -177,6 +197,7 @@ export const ferretsStep: Step = {
           ...ledgers.kept,
           ...documents.kept,
         ],
+        notCarried: [...this.notCarried, ...documents.notCarried],
       };
     } catch {
       return {
