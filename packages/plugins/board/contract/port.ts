@@ -11,10 +11,17 @@ import type {
   CardView,
   Progress,
 } from './wire.ts';
+import type { LaneSet } from './lanes.ts';
 
 export interface BoardRefusal {
   readonly code: 'invalid' | 'not-found' | 'forbidden' | 'board-off' | 'owner-only' | 'refused';
   readonly message: string;
+}
+
+/** One page of cards and where the next one starts: `nextCursor` is `null` on the last page. */
+export interface CardPage {
+  readonly cards: readonly CardView[];
+  readonly nextCursor: string | null;
 }
 
 /**
@@ -24,6 +31,22 @@ export interface BoardRefusal {
 export interface BoardApi {
   card(id: CardId): Promise<CardView | undefined>;
   cards(query: BoardQuery): Promise<readonly CardView[]>;
+  /**
+   * The same read as {@link cards} with the cursor of the next page, so a caller can read past one page (up to
+   * `MAX_BOARD_PAGE` cards): pass `nextCursor` back as the query's `cursor` until it is `null`.
+   */
+  cardsPage(query: BoardQuery): Promise<CardPage>;
+  /**
+   * The lane set of every project that has a card, so a consumer can name a lane (`laneName`) from a card's
+   * `projectId` and `laneId`. A project with no lane set is not listed.
+   */
+  laneSets(): Promise<readonly LaneSet[]>;
+  /**
+   * The card a ferret works on (its focus), or `undefined` when it has none, the card is not on this machine, or it
+   * is gone. A daemon-side read of the ferret's own card, answered whatever the card's visibility (as the Warden's
+   * resume brief did); it is no route and no caller reads another person's board through it.
+   */
+  focusOf(ferret: FerretId): Promise<CardView | undefined>;
   create(by: FerretId | 'owner', request: CardCreateRequest): Promise<Result<Card, BoardRefusal>>;
   act(by: FerretId | 'owner', id: CardId, request: CardActionRequest): Promise<Result<Card, BoardRefusal>>;
   /** `fy card progress`: replaces the parts named, keeps the rest. */

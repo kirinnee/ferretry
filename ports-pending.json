@@ -49,7 +49,6 @@
       "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
       "PATCH /v1/warden/config answers 503 plugin_unavailable: needs the kernel config write port (D2 #16)",
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
-      "Board (an optional use) gives the orphaned cards but no lane-set or focus read: an orphaned card’s lane reads as its id, and a ferret the Warden resumes is told no card; needs Board additives for both",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)"
     ]

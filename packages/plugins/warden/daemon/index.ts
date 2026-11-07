@@ -25,8 +25,8 @@ import { createWardenSubsystem } from './subsystem.ts';
  * - A nudge is sent as the owner until Conversation has a `warden` caller; a standing notice cannot be refreshed in
  *   place (Asks has no update); unattended is the ferret's own start mode, as today.
  * - Board is an optional use: on, a card Board calls orphaned is flagged `orphaned_card` (read through Board's
- *   contract); off, that flag does not run. Board's contract has no lane-set or focus read, so a lane reads as its id
- *   and a resumed ferret is told no card (`daemon/board.ts`).
+ *   contract, every page of them, with each lane named from Board's lane sets); off, that flag does not run. A
+ *   resumed auto ferret is told its focus card from Board's `focusOf` (`daemon/board.ts`).
  * - The stuck-input/inbox acts are absent, so their flags do not occur; the machine lists and the declared-wait
  *   watcher of today are not part of this port (an orphaned card is told by a notice on one ferret's board instead).
  */
