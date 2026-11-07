@@ -28,7 +28,6 @@ import {
 } from './commands/daemon.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
-import { streamVerb } from './commands/reads.ts';
 import {
   machineCloneVerb,
   machineExportVerb,
@@ -70,7 +69,6 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'machine install': machineInstallVerb,
   'machine export': machineExportVerb,
   'machine clone': machineCloneVerb,
-  stream: streamVerb,
   update: updateVerb,
 };
 

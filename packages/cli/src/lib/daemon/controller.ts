@@ -332,9 +332,12 @@ export class DaemonController {
     // Locate the executable BEFORE stopping the incumbent: an operator must learn that a host has no daemon on its
     // PATH while the healthy daemon is still serving, never only after the restart created downtime it cannot undo.
     const daemon = this.deps.installedDaemon();
+    // Who owns the daemon, and whether that definition serves THIS home, are judged BEFORE anything is launched: a
+    // refusal must leave the host untouched, as it does for `install`.
+    const owner = await this.#owner();
+    await owner.assertServes(undefined);
     // After a reset the home is gone; the restart then has a daemon to stop, which is the one that makes the home.
     await this.#ensureHome();
-    const owner = await this.#owner();
     const health = await this.deps.health.probe();
     await owner.assertServes(health?.pid);
     const ready = await this.#restartUnder(owner, daemon.path, health, note);
@@ -442,6 +445,13 @@ export class DaemonController {
       why: `${this.#name} cannot be started here to create ${home}`,
     };
     if (!launched.started) throw new DaemonStartupFailedError(launched.why);
+    // The launcher's "up" only says a daemon answers: with no run record yet it may be another home's daemon on the
+    // default address. The home is made only when it now carries the marker.
+    if ((await this.deps.claims.inspect(home)) !== 'claimed')
+      throw new DaemonStartupFailedError(
+        `${this.#name} was started but ${home} is still not a ${this.#name} home: the daemon that answered is ` +
+          `serving another home, so nothing was changed here`,
+      );
   }
 
   /** Refuse to reset a state home that exists but carries no Ferretry marker. */

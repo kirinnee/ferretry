@@ -49,11 +49,6 @@ const SHELL_VERB_LINES = [
     summary:
       'copy a setup exported from another machine; a repeat copy is an update that shows only what differs (--dry-run to look first)',
   },
-  {
-    verb: 'stream',
-    summary:
-      'stream [id]: follow one ferret, or every ferret, as its state changes, until interrupted (--json for one event per line)',
-  },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 

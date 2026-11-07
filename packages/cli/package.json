@@ -12,7 +12,6 @@
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
     "@ferretry/plugin-updates": "workspace:*",
-    "@ferretry/plugin-runtimes": "workspace:*",
-    "@ferretry/core-ferrets": "workspace:*"
+    "@ferretry/plugin-runtimes": "workspace:*"
   }
 }

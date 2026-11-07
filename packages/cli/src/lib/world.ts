@@ -51,11 +51,6 @@ export interface CliWorld {
   daemon?(reads: DaemonControlReads): { readonly controller: DaemonController; exitCode(): number };
   /** Asks a person one question on the terminal and reads the line they type. Never used off a terminal. */
   readonly prompt?: IDaemonPrompt;
-  /**
-   * Listens for an interrupt (SIGINT, SIGTERM) for as long as a verb follows something. `release` gives the listeners
-   * back. Absent where nothing can interrupt (a test), in which case a follower ends only when its feed does.
-   */
-  interrupt?(): { readonly signal: AbortSignal; release(): void };
   /** A local file's text; throws when it cannot be read. */
   readText?(path: string): Promise<string>;
   /** The shell's local update transaction. Never depends on an enabled plugin. */

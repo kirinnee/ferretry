@@ -201,7 +201,7 @@ describe('the event feed goes through the same checks as a request (S57)', () =>
       () => {},
     );
     await settle();
-    expect(opened).toEqual([{ url: 'ws://127.0.0.1:7431/v1/events', authorization: CREDENTIAL }]);
+    expect(opened).toEqual([{ url: 'ws://127.0.0.1:7431/v1/bus', authorization: CREDENTIAL }]);
     expect(rig.checked).toEqual(['http://127.0.0.1:7431']);
     socket.onmessage?.({ data: JSON.stringify({ name: 'ferrets.changed', payload: { ferret: 'ada' } }) });
     socket.onmessage?.({ data: 'not json' });

@@ -211,8 +211,6 @@ export interface FakeWorldOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly launch?: LaunchResult;
   readonly transport?: RecordingTransport;
-  /** An interrupt the test raises by hand; absent, the world offers none. */
-  readonly interrupt?: AbortController;
   /** Reads the inventory through the connection, instead of answering `inventory`. */
   readonly readInventory?: () => Promise<PluginInventory>;
 }
@@ -239,9 +237,6 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     registry: options.registry ?? registryOf(),
     probe: async () => probe,
     launch: async () => options.launch ?? { started: true, baseUrl: probe.baseUrl },
-    ...(options.interrupt === undefined
-      ? {}
-      : { interrupt: () => ({ signal: options.interrupt?.signal as AbortSignal, release: () => undefined }) }),
     connect: async ({ asOwner }): Promise<Connection> => {
       connects.push({ asOwner });
       return {

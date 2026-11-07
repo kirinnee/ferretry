@@ -175,6 +175,7 @@ describe('the guarded client', () => {
     const heard: string[] = [];
     const first = pluginClient(deps, 'board').subscribe(moved, payload => heard.push('a:' + payload.id));
     const second = pluginClient(deps, 'board').subscribe(moved, payload => heard.push('b:' + payload.id));
+    await Bun.sleep(10);
     should(transport.opened).equal(1);
     transport.push('board.moved', { id: '1' });
     transport.push('board.moved', { id: 2 });
@@ -191,9 +192,111 @@ describe('the guarded client', () => {
     const { deps, reads } = depsOf(registry, healthy, { transport });
     await deps.inventory.current();
     pluginClient(deps, 'board').subscribe(defineEvent('board.moved', z.strictObject({})), () => undefined);
+    await Bun.sleep(10);
     transport.push('kernel.plugins-changed', { generation: 2 });
     await deps.inventory.current();
     should(reads.count).equal(2);
+  });
+
+  it('§9.6 a subscription to a package that is off ends with the paused sentence and never opens the feed', async () => {
+    // Arrange
+    const transport = new FeedingTransport();
+    const { deps, reads } = depsOf(registry, inventoryOf({ id: 'board', on: false, contract: 'h-board' }), {
+      transport,
+    });
+    const moved = defineEvent('board.moved', z.strictObject({}));
+    const ended: string[] = [];
+
+    // Act
+    const cancel = pluginClient(deps, 'board').follow(
+      moved,
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+
+    // Assert
+    should(transport.opened).equal(0);
+    should(ended.length).equal(1);
+    should(ended[0]).match(/off/iu);
+    should(reads.count).equal(2); // the one re-read before it was blocked
+    cancel();
+    should(transport.cancelled).equal(0);
+  });
+
+  it('§9.6 a subscription whose event owner is blocked is refused though the caller is allowed', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(
+      registry,
+      inventoryOf({ id: 'board', contract: 'h-board' }, { id: 'ferrets', on: false, contract: 'h-ferrets' }),
+      {
+        transport,
+      },
+    );
+    const ended: string[] = [];
+    pluginClient(deps, 'board').follow(
+      defineEvent('ferrets.changed', z.strictObject({})),
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+    should(ended.length).equal(1);
+  });
+
+  it('§9.6 a daemon on another contract refuses the subscription with the restart sentence, feed unopened', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, inventoryOf({ id: 'board', contract: 'other' }), { transport });
+    const ended: string[] = [];
+    pluginClient(deps, 'board').follow(
+      defineEvent('board.moved', z.strictObject({})),
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+    should(ended.length).equal(1);
+    should(ended[0]).not.equal('');
+  });
+
+  it('§9.6 a subscription cancelled before the check finishes never opens the feed', async () => {
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, healthy, { transport });
+    const cancel = pluginClient(deps, 'board').subscribe(
+      defineEvent('board.moved', z.strictObject({})),
+      () => undefined,
+    );
+    cancel();
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+  });
+
+  it('§9.6 a frame is dropped when the package went off since the check, with no inventory read per frame', async () => {
+    // Arrange
+    const transport = new FeedingTransport();
+    let current = healthy;
+    const { deps, reads } = depsOf(registry, () => current, { transport });
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    const heard: string[] = [];
+    pluginClient(deps, 'board').subscribe(moved, payload => heard.push(payload.id));
+    await Bun.sleep(10);
+    transport.push('board.moved', { id: '1' });
+    await Bun.sleep(10);
+    const readsWhileOn = reads.count;
+
+    // Act: the held inventory now says the package is off; the next frames are judged by it alone
+    current = inventoryOf({ id: 'board', on: false, contract: 'h-board' });
+    deps.inventory.invalidate();
+    await deps.inventory.current();
+    const readsBefore = reads.count;
+    transport.push('board.moved', { id: '2' });
+    transport.push('board.moved', { id: '3' });
+    await Bun.sleep(10);
+
+    // Assert
+    should(heard).deepEqual(['1']);
+    should(readsWhileOn).equal(1);
+    should(reads.count).equal(readsBefore);
   });
 });
 

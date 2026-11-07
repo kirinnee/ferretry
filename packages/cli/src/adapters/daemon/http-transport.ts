@@ -30,8 +30,14 @@ const bunSocket: FeedSocketOpener = (url, headers) =>
     headers: { ...headers },
   });
 
-/** The daemon's event feed: a socket that sends one `{ name, payload }` JSON frame per event. */
-const EVENTS_PATH = '/v1/events';
+/**
+ * The daemon's event BUS feed: a socket that sends one `{ name, payload }` JSON frame per event. `/v1/events` is the
+ * session journal stream (Ferrets declares it, the kernel serves it) and is not this socket.
+ *
+ * GAP(kernel): /v1/bus is declared by the kernel - pending. Until it is, a v5 daemon answers it `unclaimed` and the
+ * feed ends with "the event feed failed".
+ */
+const BUS_PATH = '/v1/bus';
 const MAX_EVENT_NAME = 128;
 
 export interface RestartWaiting {
@@ -150,7 +156,7 @@ export class HttpTransport implements DaemonTransport {
         for (const name of Object.keys(headers)) if (name.toLowerCase() === 'authorization') delete headers[name];
         const authorization = await this.options.authorization();
         if (authorization !== undefined) headers.authorization = authorization;
-        const url = new URL(EVENTS_PATH, base);
+        const url = new URL(BUS_PATH, base);
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
         if (cancelled) return;
         const open = this.options.feedSocket ?? bunSocket;
@@ -165,6 +171,7 @@ export class HttpTransport implements DaemonTransport {
             return;
           }
           if (typeof value !== 'object' || value === null) return;
+          // GAP(kernel): /v1/bus is declared by the kernel - pending.
           const { name, payload } = value as { name?: unknown; payload?: unknown };
           if (typeof name === 'string' && name.length <= MAX_EVENT_NAME) listener({ name, payload });
         };

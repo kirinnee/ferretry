@@ -41,7 +41,7 @@ export interface SendOptions {
 export interface DaemonTransport {
   send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply>;
   /**
-   * Opens the daemon's event feed (`/v1/events`): every event is handed over raw, and `onClose` says why it ended.
+   * Opens the daemon's event bus feed (`/v1/bus`): every event is handed over raw, and `onClose` says why it ended.
    * Returns the cancel. Absent where a transport cannot hold a feed open.
    */
   events?(listener: (event: RawEvent) => void, onClose: (reason: string) => void): Cancel;
@@ -160,6 +160,13 @@ export async function ensureAllowed(deps: ClientDeps, id: string): Promise<void>
   );
 }
 
+/** True while every package in `ids` is judged allowed by the HELD inventory: no re-read, so a frame costs no request. */
+async function allowedNow(deps: ClientDeps, ids: readonly string[]): Promise<boolean> {
+  const inventory = await deps.inventory.current();
+  for (const id of new Set(ids)) if (!judgeCall(inventory, deps.surfaces.compiled, id).ok) return false;
+  return true;
+}
+
 /** The guard for every package one request needs; also what is asked again before a resend after a restart. */
 async function ensureAllAllowed(deps: ClientDeps, ids: readonly string[]): Promise<void> {
   for (const id of new Set(ids)) await ensureAllowed(deps, id);
@@ -228,9 +235,7 @@ class EventFeed {
   constructor(private readonly deps: ClientDeps) {}
 
   add(following: Following): Cancel {
-    const open = this.deps.transport.events;
-    if (open === undefined)
-      throw new ShellError(`${this.deps.binary} does not subscribe to events on this connection`, EXIT.unavailable);
+    const open = eventsOf(this.deps);
     this.#following.add(following);
     if (this.#stop === undefined) {
       this.#stop = open.call(
@@ -265,6 +270,14 @@ class EventFeed {
   }
 }
 
+/** The transport's feed opener; a transport that cannot hold a feed open is refused here, before anything is checked. */
+function eventsOf(deps: ClientDeps): NonNullable<DaemonTransport['events']> {
+  const open = deps.transport.events;
+  if (open === undefined)
+    throw new ShellError(`${deps.binary} does not subscribe to events on this connection`, EXIT.unavailable);
+  return open;
+}
+
 const feeds = new WeakMap<ClientDeps, EventFeed>();
 const feedOf = (deps: ClientDeps): EventFeed => {
   let feed = feeds.get(deps);
@@ -276,36 +289,48 @@ const feedOf = (deps: ClientDeps): EventFeed => {
 };
 
 /**
- * The client a plugin's half gets as `ctx.client`. An event is HEARD only while the caller and the event's owner are
- * allowed, asked again for every frame; a frame that fails the check is dropped, unseen.
+ * The client a plugin's half gets as `ctx.client`. A subscription is made only when the caller and the event's owner
+ * are allowed (§9.6): the check, with its one re-read, comes BEFORE the feed is opened, and a refused package ends the
+ * follow with the `PluginPausedError` sentence, the feed never opened. After that an event is heard only while both stay
+ * allowed by the held inventory; a frame that fails the check is dropped, unseen, and costs no request.
  */
 export function pluginClient(deps: ClientDeps, caller: Manifest['id']): FollowingClient {
   const follow: FollowingClient['follow'] = (event, listener, onEnd) => {
+    eventsOf(deps);
     const ids = [caller, eventOwner(event.name)];
     // One chain per listener, so frames reach it in the order they arrived even though each is checked asynchronously.
     let chain: Promise<void> = Promise.resolve();
     let live = true;
-    const cancel = feedOf(deps).add({
-      event,
-      deliver: payload => {
-        chain = chain.then(async () => {
-          try {
-            await ensureAllAllowed(deps, ids);
-          } catch {
-            return;
-          }
-          if (live) listener(payload as never);
-        });
+    let cancel: Cancel | undefined;
+    void ensureAllAllowed(deps, ids).then(
+      () => {
+        if (!live) return;
+        try {
+          cancel = feedOf(deps).add({
+            event,
+            deliver: payload => {
+              chain = chain.then(async () => {
+                const allowed = await allowedNow(deps, ids).catch(() => false);
+                if (allowed && live) listener(payload as never);
+              });
+            },
+            end: reason => {
+              chain = chain.then(() => {
+                if (live) onEnd(reason);
+              });
+            },
+          });
+        } catch (error) {
+          onEnd(error instanceof Error ? error.message : String(error));
+        }
       },
-      end: reason => {
-        chain = chain.then(() => {
-          if (live) onEnd(reason);
-        });
+      (error: unknown) => {
+        if (live) onEnd(error instanceof Error ? error.message : String(error));
       },
-    });
+    );
     return () => {
       live = false;
-      cancel();
+      cancel?.();
     };
   };
   return {

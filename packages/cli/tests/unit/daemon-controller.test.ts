@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { RunRecordDaemonHealth } from '../../src/adapters/daemon/health.ts';
 import { DaemonController, DaemonResetRefusedError } from '../../src/lib/daemon/controller.ts';
 import { resolveDaemonLayout } from '../../src/lib/daemon/layout.ts';
 import type {
@@ -22,7 +23,7 @@ interface Options {
   /** What the process port answers to "does this pid hold the daemon lock": absent means yes. */
   readonly holdsOpen?: boolean | undefined;
   /** What the shell launcher comes to when a verb needs the home made. */
-  readonly launch?: 'ok' | 'fails';
+  readonly launch?: 'ok' | 'fails' | 'up-but-no-home';
   /** A nix-shell offer answering with this alternative executable. */
   readonly nixOffer?: string;
   /** The protocol the serving daemon reports. */
@@ -85,7 +86,8 @@ async function harness(options: Options = {}) {
     },
     ensureDirectory: async () => {},
   };
-  let homeState = options.home ?? 'claimed';
+  // A service definition can only be written under a home that exists; the requested state is applied after it.
+  let homeState = options.installed === true ? 'claimed' : (options.home ?? 'claimed');
   const claims: IStateHomeClaimPort = {
     // As in production: a supervisor cannot claim a home the daemon has not made.
     claim: async () => {
@@ -96,6 +98,7 @@ async function harness(options: Options = {}) {
   };
   const service = new SystemdSupervisor(layout, processes, files, claims);
   if (options.installed === true) await service.install('/fake/bin/old-fyd');
+  homeState = options.home ?? 'claimed';
   trail.length = 0;
   const out = new CapturedOutput();
   const prompt = new FakePrompt(options.answer ?? 'reset');
@@ -106,7 +109,18 @@ async function harness(options: Options = {}) {
     layout,
     service,
     direct: new DirectSupervisor(layout, processes, files, claims),
-    health: { probe: async () => current },
+    // The real health read, over a fake wire: what the daemon `current` says on /healthz is what the verbs see, so the
+    // protocol a test sets goes through the same schema production uses.
+    health: new RunRecordDaemonHealth(
+      async () => 'http://127.0.0.1:7457',
+      async () =>
+        current === undefined
+          ? Promise.reject(new Error('ECONNREFUSED'))
+          : new Response(JSON.stringify({ status: 'ok', uptimeSeconds: 5, ...current }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+    ),
     logs: {
       exists: async () => disk.has(layout.logFile),
       show: async (file, follow) => {
@@ -153,7 +167,8 @@ async function harness(options: Options = {}) {
     launcher: async () => {
       trail.push('launch');
       if (options.launch === 'fails') return { started: false, why: 'cannot find fyd beside this program' };
-      homeState = 'claimed';
+      // A launcher that comes to "up" without making this home: another home's daemon answered on the default address.
+      if (options.launch !== 'up-but-no-home') homeState = 'claimed';
       current = { protocol: 1, version: '5.0.0', pid: 4399 };
       return { started: true };
     },
@@ -421,6 +436,35 @@ describe('a home the daemon has not made yet (fresh machine, or after a reset)',
     expect(at(h.trail, 'launch')).toBeLessThan(at(h.trail, 'spawn'));
     expect(h.trail).toContain('signal:4399:SIGTERM');
     expect(h.out.text).toContain('ok: fyd restarted (pid 4322)');
+  });
+
+  test('V-0237 a unit that supervises another FY_HOME refuses restart on an absent home with no launch in the trail', async () => {
+    // The home is gone, as after a reset: the refusal must come before anything is launched to make it.
+    const absent = await harness({ installed: true, running: false, home: 'absent' });
+    absent.disk.set(
+      absent.layout.systemdUnitFile,
+      (absent.disk.get(absent.layout.systemdUnitFile) ?? '').replaceAll(absent.layout.stateHome, '/other/home'),
+    );
+    await expect(absent.controller.restart()).rejects.toThrow('/other/home');
+    expect(absent.trail).not.toContain('launch');
+    expect(
+      absent.trail.filter(line => /^(spawn|signal|run:systemctl --user (start|stop|restart))/u.test(line)),
+    ).toEqual([]);
+    expect(absent.home()).toBe('absent');
+  });
+
+  test('V-0237 a launcher whose "up" did not make this home is refused: restart goes no further', async () => {
+    const h = await harness({ running: false, home: 'absent', launch: 'up-but-no-home' });
+    await expect(h.controller.restart()).rejects.toThrow('still not a fyd home');
+    expect(h.trail.filter(line => line === 'launch')).toEqual(['launch']);
+    expect(h.trail).not.toContain('spawn');
+    expect(h.home()).toBe('absent');
+  });
+
+  test('V-0233 a launcher whose "up" did not make this home is refused by install, writing no definition', async () => {
+    const h = await harness({ running: false, home: 'absent', launch: 'up-but-no-home' });
+    await expect(h.controller.install()).rejects.toThrow('still not a fyd home');
+    expect(h.disk.has(h.layout.systemdUnitFile)).toBe(false);
   });
 
   test('V-0237 restart on a home that is ours does not launch', async () => {
