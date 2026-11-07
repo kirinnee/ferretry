@@ -252,7 +252,7 @@ describe('laneFromFacts: a card the owner sent back', () => {
       : {
           seq: 2,
           at: when,
-          actor: { kind: 'ferret', ferret: 'lead' },
+          actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
           type: 'moved',
           from: 'review',
           to: 'implement',

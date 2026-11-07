@@ -205,43 +205,37 @@ const queuedNote = (clash: Clash): string =>
 const unqueuedNote = (clash: Clash & { readonly why: string }): string =>
   `clashes with ${formatCardRef(clash.card)} (${overlap(clash)}) but was not queued: ${clash.why}`;
 
-type NewEvent = CardEvent extends infer E
-  ? E extends CardEvent
-    ? Omit<E, 'seq' | 'at' | 'actor' | 'actorVia'>
-    : never
-  : never;
+type NewEvent = CardEvent extends infer E ? (E extends CardEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
 
 const appended = (card: Card, event: NewEvent, at: string, actor: CardActor): Card => ({
   ...card,
   history: [...card.history, { ...event, seq: card.history.length + 1, at, actor } as CardEvent],
 });
 
-/** The facts a queue write needs: the board as read in the dependency section, the time, and who made the claim. */
+/** The facts a queue write needs: the board as read in the dependency section, and the time. */
 export interface ClashContext {
   readonly index: BoardIndex;
   readonly laneSets: LaneSets;
   readonly now: string;
-  /** Who made the claim; the dependency is recorded as the daemon's, acting for that session. */
-  readonly actor: CardActor;
 }
+
+/** Who a queue's events are recorded as: the daemon, whoever made the claim (their own `file-claimed` says who). */
+const DAEMON: CardActor = { kind: 'daemon' };
 
 /**
  * The card with its claims queued: one `depended` event and one note per card it now waits on, and a note per clash
- * that could not be queued. The events are the daemon's, for the session that made the claim. Unchanged when
- * nothing clashes.
+ * that could not be queued. The events are the daemon's. Unchanged when nothing clashes.
  */
 export const queueBehindClashes = (card: Card, claimed: readonly string[], context: ClashContext): Card => {
   const plan = planClashes(card, claimed, context.index, context.laneSets);
-  const daemon: CardActor =
-    context.actor.ferret === undefined ? { kind: 'daemon' } : { kind: 'daemon', ferret: context.actor.ferret };
   let queued = card;
   for (const clash of plan.waits) {
-    queued = appended(queued, { type: 'depended', task: clash.card, until: 'shipped' }, context.now, daemon);
-    queued = appended(queued, { type: 'note', text: queuedNote(clash) }, context.now, daemon);
+    queued = appended(queued, { type: 'depended', task: clash.card, until: 'shipped' }, context.now, DAEMON);
+    queued = appended(queued, { type: 'note', text: queuedNote(clash) }, context.now, DAEMON);
     queued = { ...queued, dependsOn: [...queued.dependsOn, { task: clash.card, until: 'shipped' }] };
   }
   for (const clash of plan.unqueued) {
-    queued = appended(queued, { type: 'note', text: unqueuedNote(clash) }, context.now, daemon);
+    queued = appended(queued, { type: 'note', text: unqueuedNote(clash) }, context.now, DAEMON);
   }
   return queued;
 };

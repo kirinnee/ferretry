@@ -32,7 +32,7 @@ import {
   AsksOptIn,
   AsksThreads,
 } from './adapters/asks.ts';
-import { FerretsHelpers, FerretsLiveness, FerretsParents } from './adapters/ferrets.ts';
+import { FerretsHelpers, FerretsLiveness, FerretsNames, FerretsParents } from './adapters/ferrets.ts';
 import { GhSpawnRunner, GitSpawnCopies } from './adapters/github.ts';
 import {
   BoardFiles,
@@ -259,6 +259,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     store,
     lanes,
     parents,
+    names: new FerretsNames(ferrets),
     focus,
     reopen,
     done,

@@ -12,7 +12,6 @@ import {
   ADMIN_TOKEN_ACTOR_WORDS,
   attachmentsPhrase,
   type CardActor,
-  type CardActorVia,
   type BoardEditableField,
   type CardEvent,
   type CardView,
@@ -102,8 +101,8 @@ export interface HistoryContext {
   readonly laneName: (laneId: string) => string;
 }
 
-const actorName = (actor: CardActor, via: CardActorVia | undefined, names: FerretNames): string => {
-  if (actor.kind === 'owner') return via === 'admin-token' ? 'Admin token' : 'You';
+const actorName = (actor: CardActor, names: FerretNames): string => {
+  if (actor.kind === 'owner') return actor.via === 'admin-token' ? 'Admin token' : 'You';
   if (actor.kind === 'daemon') return 'Ferretry';
   return names(actor.ferret);
 };
@@ -238,12 +237,12 @@ export const historyRows = (history: readonly CardEvent[], context: HistoryConte
   [...history]
     .sort((a, b) => b.seq - a.seq)
     .map(event => {
-      const { actor, via } = boardEventActor(event);
+      const actor = boardEventActor(event);
       return {
         seq: event.seq,
         at: event.at,
-        actor: actorName(actor, via, context.names),
-        actorNote: actor.kind === 'owner' && via === 'admin-token' ? ADMIN_TOKEN_ACTOR_NOTE : null,
+        actor: actorName(actor, context.names),
+        actorNote: actor.kind === 'owner' && actor.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_NOTE : null,
         type: event.type,
         ...describe(event, context),
       };
@@ -381,7 +380,7 @@ export interface AskOrigin {
 const SESSION_SOURCE = 'session:';
 
 export const askOrigin = (
-  task: Pick<CardView, 'ask' | 'createdBy' | 'createdByVia' | 'createdAt'>,
+  task: Pick<CardView, 'ask' | 'createdBy' | 'createdAt'>,
   names: FerretNames,
   age: string | null,
 ): AskOrigin => {
@@ -389,7 +388,7 @@ export const askOrigin = (
   const sessionId = source.startsWith(SESSION_SOURCE) ? source.slice(SESSION_SOURCE.length) : null;
   const author = task.createdBy;
   return {
-    who: askAuthor(author, task.createdByVia, names),
+    who: askAuthor(author, names),
     sessionId,
     chat: sessionId === null ? null : `${names(sessionId)}'s chat`,
     via: sessionId === null && !/^owner/iu.test(source) ? source : null,
@@ -398,8 +397,8 @@ export const askOrigin = (
 };
 
 /** Who opened a card, as its byline says it. The admin token is said for what it is: it may be either. */
-const askAuthor = (author: CardActor, via: CardActorVia | undefined, names: FerretNames): string => {
-  if (author.kind === 'owner') return via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'you';
+const askAuthor = (author: CardActor, names: FerretNames): string => {
+  if (author.kind === 'owner') return author.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'you';
   if (author.kind === 'ferret') return names(author.ferret);
   return 'the daemon';
 };

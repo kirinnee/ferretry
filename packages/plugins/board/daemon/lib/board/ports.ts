@@ -22,7 +22,6 @@ import type {
   Card,
   CardActivity,
   CardActor,
-  CardActorVia,
   CardId,
   CardKind,
   CardRef,
@@ -80,6 +79,14 @@ export interface LaneSetSource {
 /** One step of lineage: the session that started this one (`config.parent`). */
 export interface FerretParents {
   parentOf(ferret: string): Promise<string | undefined>;
+}
+
+/**
+ * The name a ferret is recorded by on a card it acts on, as Ferrets knows it at that moment. Total: a ferret
+ * Ferrets does not know reads as its id, so a recorded name is never empty.
+ */
+export interface FerretNames {
+  nameOf(ferret: string): Promise<string>;
 }
 
 /**
@@ -160,9 +167,8 @@ export interface ReopenNotice {
   readonly from: string;
   readonly to: string;
   readonly reason: string;
+  /** Who sent it back; an owner on the host's admin token says so in its `via`. */
   readonly by: CardActor;
-  /** `admin-token` when the owner actor was the host's token with no ferret's credential (`CardActorVia`). */
-  readonly byVia?: CardActorVia;
   /** The files the owner sent with it, still in `from`'s session; the delivery carries them to whoever is told. */
   readonly attachments?: BoardReopenAttachments;
 }

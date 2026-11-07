@@ -189,7 +189,8 @@ const latest = (left: Touch | null, right: Touch | null): Touch | null => {
 /** The card's own touch: its history, its merged PRs and the sessions focused on it. */
 const ownTouch = (card: Card, focused: readonly FerretLiveness[]): Touch | null => {
   let touch: Touch | null = null;
-  for (const event of card.history) touch = latest(touch, { at: event.at, by: event.actor.ferret ?? null });
+  for (const event of card.history)
+    touch = latest(touch, { at: event.at, by: event.actor.kind === 'ferret' ? event.actor.ferret : null });
   for (const pr of card.links.prs) if (pr.mergedAt !== null) touch = latest(touch, { at: pr.mergedAt, by: null });
   for (const session of focused) {
     const at = strongSignalAt(session);

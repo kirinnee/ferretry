@@ -1,5 +1,16 @@
 import { describe, it } from 'bun:test';
-import { BoardQuerySchema, type Card, type CardId, type CardActionRequestInput, CardActionRequestSchema, type CardCreateRequestInput, CardCreateRequestSchema, cardRevision, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  BoardQuerySchema,
+  type Card,
+  type CardId,
+  type CardActionRequestInput,
+  CardActionRequestSchema,
+  type CardCreateRequestInput,
+  CardCreateRequestSchema,
+  cardRevision,
+  type PrLink,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   CardAskLinks,
@@ -30,6 +41,7 @@ import {
   lanes,
   MACHINE,
   MemoryBoardStore,
+  NAMES,
   NOW,
   OTHER_PROJECT,
   PROJECT,
@@ -91,9 +103,9 @@ describe('creating a card', () => {
       laneId: 'todo',
       machineId: 'machine-1',
     });
-    should(response.card.createdBy).eql({ kind: 'ferret', ferret: 'lead' });
+    should(response.card.createdBy).eql({ kind: 'ferret', name: 'lead', ferret: 'lead' });
     should(response.card.history).eql([
-      { seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'lead' }, type: 'created', laneId: 'todo' },
+      { seq: 1, at: NOW, actor: { kind: 'ferret', name: 'lead', ferret: 'lead' }, type: 'created', laneId: 'todo' },
     ]);
     should(response.laneSet?.projectId).equal(PROJECT);
     should(ports.focus.focused.get('lead')).eql({ id: 'F1' });
@@ -308,7 +320,7 @@ describe('moving a card', () => {
 
     // Assert — … and is recorded as what the daemon actually knows, beside an actor every reader can parse.
     should(stored(ports).laneId).equal('implement');
-    should(lastEvent(ports)).match({ actor: { kind: 'owner' }, actorVia: 'admin-token' });
+    should(lastEvent(ports)?.actor).eql({ kind: 'owner', via: 'admin-token' });
   });
 
   it('should let only the owner close a card on a board that has a verify lane', async () => {
@@ -488,7 +500,7 @@ describe('reopening a card', () => {
     should(stored(ports).clarifications[0]).match({
       text: 'it broke again',
       source: 'owner in chat',
-      by: { kind: 'ferret', ferret: 'lead' },
+      by: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     });
     should(ports.reopen.notices.length).equal(1);
   });
@@ -791,7 +803,7 @@ describe('everything else on a card', () => {
 
     // Assert
     should(stored(ports).clarifications).eql([
-      { text: 'also the phone', source: 'owner, chat', at: NOW, by: { kind: 'ferret', ferret: 'lead' } },
+      { text: 'also the phone', source: 'owner, chat', at: NOW, by: { kind: 'ferret', name: 'lead', ferret: 'lead' } },
     ]);
     should(lastEvent(ports)).match({ type: 'clarified', text: 'also the phone' });
   });
@@ -1116,7 +1128,7 @@ describe('everything else on a card', () => {
         from: null,
         to: { id: 'F2' },
         reason: 'it is part of the board work',
-        actor: { kind: 'ferret', ferret: 'lead' },
+        actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
       });
     });
 
@@ -1365,7 +1377,7 @@ describe('an assignee handing its card down', () => {
       from: 'child',
       to: 'grandchild',
       handedDown: true,
-      actor: { kind: 'ferret', ferret: 'child' },
+      actor: { kind: 'ferret', name: 'child', ferret: 'child' },
     });
   });
 
@@ -1590,7 +1602,7 @@ describe('a daemon trigger', () => {
       auto: true,
       trigger: 'pr.opened',
       reason: 'PR #930 opened',
-      actor: { kind: 'daemon', ferret: 'child' },
+      actor: { kind: 'daemon' },
     });
     should(ports.changes.events[0]?.ferret).equal('child');
   });
@@ -1755,10 +1767,7 @@ describe('reading the board', () => {
     const ask = { ferret: 'stranger', id: 'A1' };
     const agenda = new CardAskLinks(
       {
-        open: async ferret =>
-          ferret === 'stranger'
-            ? [{ id: 'A1', cards: [], gateOf: ['F1'] }]
-            : [],
+        open: async ferret => (ferret === 'stranger' ? [{ id: 'A1', cards: [], gateOf: ['F1'] }] : []),
       },
       { warn: () => undefined },
     );
@@ -1927,7 +1936,7 @@ describe('what follows a write', () => {
 describe('the reopen message and actors', () => {
   it.each([
     { by: { kind: 'owner' as const }, expected: '&F412 was reopened by the owner: not good' },
-    { by: { kind: 'ferret' as const, ferret: 'lead' }, expected: '&F412 was reopened by lead: not good' },
+    { by: { kind: 'ferret' as const, name: 'lead', ferret: 'lead' }, expected: '&F412 was reopened by lead: not good' },
     { by: { kind: 'daemon' as const }, expected: '&F412 was reopened by the daemon: not good' },
   ])('should say who reopened it', ({ by, expected }) => {
     // Assert
@@ -1936,17 +1945,18 @@ describe('the reopen message and actors', () => {
 
   it('should say the admin token for an owner actor that acted on it, never the owner', () => {
     // Assert
-    should(reopenMessage({ id: 'F412' }, { kind: 'owner' }, 'not good', 'admin-token')).equal(
+    should(reopenMessage({ id: 'F412' }, { kind: 'owner', via: 'admin-token' }, 'not good')).equal(
       '&F412 was reopened by the admin token (the owner at this machine, or a ferret without its own credential): not good',
     );
   });
 
-  it('should record each caller as its actor', () => {
+  it('should record each caller as its actor, a ferret by its name and the daemon as nobody else', async () => {
     // Assert
-    should(actorOf(owner)).eql({ kind: 'owner' });
-    should(actorOf(lead)).eql({ kind: 'ferret', ferret: 'lead' });
-    should(actorOf(daemon)).eql({ kind: 'daemon' });
-    should(actorOf({ kind: 'daemon', ferret: 'child' })).eql({ kind: 'daemon', ferret: 'child' });
+    should(await actorOf(owner, NAMES)).eql({ kind: 'owner' });
+    should(await actorOf({ kind: 'owner', via: 'admin-token' }, NAMES)).eql({ kind: 'owner', via: 'admin-token' });
+    should(await actorOf(lead, NAMES)).eql({ kind: 'ferret', name: 'lead', ferret: 'lead' });
+    should(await actorOf(daemon, NAMES)).eql({ kind: 'daemon' });
+    should(await actorOf({ kind: 'daemon', ferret: 'child' }, NAMES)).eql({ kind: 'daemon' });
   });
 });
 
@@ -2056,7 +2066,6 @@ describe("relocating a removed lane's cards", () => {
     ).be.true();
   });
 
-
   it('should move the cards of the owner’s relocation as the owner’s, closing them when it says so', async () => {
     // Arrange
     const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' }), card({ id: 'F2', laneId: 'plan' })]);
@@ -2069,8 +2078,8 @@ describe("relocating a removed lane's cards", () => {
     should(moved).eql(['F1']);
     should(stored(ports, 'F1').laneId).equal('closed');
     should(lastEvent(ports, 'F1')).match({ type: 'moved', to: 'closed', actor: { kind: 'owner' } });
-    should(lastEvent(ports, 'F1')).not.have.property('actorVia');
-    should(lastEvent(ports, 'F2')).match({ actor: { kind: 'owner' }, actorVia: 'admin-token' });
+    should(lastEvent(ports, 'F1')?.actor).eql({ kind: 'owner' });
+    should(lastEvent(ports, 'F2')?.actor).eql({ kind: 'owner', via: 'admin-token' });
   });
 
   it('should skip a card that vanished and a relocation onto its own lane', async () => {
@@ -2426,9 +2435,7 @@ describe('creating a card for a thread (--thread)', () => {
     should((await refusal(withThread('throws').service.create(forThread, lead))).message).match(
       /not an open ask of yours/,
     );
-    should((await refusal(serviceWith([]).service.create(forThread, lead))).message).match(
-      /not an open ask of yours/,
-    );
+    should((await refusal(serviceWith([]).service.create(forThread, lead))).message).match(/not an open ask of yours/);
   });
 
   it('refuses an item the caller did not raise, a gate item and a notice', async () => {
@@ -2436,8 +2443,7 @@ describe('creating a card for a thread (--thread)', () => {
       /not an ask you raised/,
     );
     should(
-      (await refusal(withThread(thread({ raisedByFerret: 'other' })).service.create(forThread, lead)))
-        .message,
+      (await refusal(withThread(thread({ raisedByFerret: 'other' })).service.create(forThread, lead))).message,
     ).match(/not an ask you raised/);
     should((await refusal(withThread(thread({ notice: true })).service.create(forThread, lead))).message).match(
       /not a thread/,

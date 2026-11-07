@@ -125,7 +125,9 @@ describe('refileTargets', () => {
   it('should leave a card someone put on the Unfiled board on purpose, but not one the daemon put there', () => {
     should(unfiledOnPurpose(refiledToUnfiled({ kind: 'owner' }))).be.true();
     should(refileTargets([refiledToUnfiled({ kind: 'owner' })], laneSets, owners)).be.empty();
-    should(refileTargets([refiledToUnfiled({ kind: 'ferret', ferret: 'lead' })], laneSets, owners)).be.empty();
+    should(
+      refileTargets([refiledToUnfiled({ kind: 'ferret', name: 'lead', ferret: 'lead' })], laneSets, owners),
+    ).be.empty();
     should(unfiledOnPurpose(refiledToUnfiled({ kind: 'daemon' }))).be.false();
     should(refileTargets([refiledToUnfiled({ kind: 'daemon' })], laneSets, owners)).have.length(1);
     should(isRefilable(unfiled(), laneSets)).be.true();

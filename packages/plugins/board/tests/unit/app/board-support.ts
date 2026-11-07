@@ -112,8 +112,10 @@ export const card = (id: string, extra: Record<string, unknown> = {}): CardView 
     files: [],
     order: null,
     createdAt: INSTANT,
-    createdBy: { kind: 'ferret', ferret: LEAD },
-    history: [{ seq: 1, at: INSTANT, actor: { kind: 'ferret', ferret: LEAD }, type: 'created', laneId: 'todo' }],
+    createdBy: { kind: 'ferret', name: LEAD, ferret: LEAD },
+    history: [
+      { seq: 1, at: INSTANT, actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'created', laneId: 'todo' },
+    ],
     lastTouchedAt: LATER,
     touchedBy: LEAD,
     activity: 'active',
@@ -145,8 +147,7 @@ export const originCard = (
   );
 
 /** The cards as an older daemon serves them: nothing says who asked for any of them. */
-export const unasked = (cards: readonly CardView[]): CardView[] =>
-  cards.map(({ askedBy: _askedBy, ...rest }) => rest);
+export const unasked = (cards: readonly CardView[]): CardView[] => cards.map(({ askedBy: _askedBy, ...rest }) => rest);
 
 export const boardAnswer = (cards: readonly CardView[], extra: Partial<BoardResponse> = {}): BoardResponse => ({
   projectId: null,

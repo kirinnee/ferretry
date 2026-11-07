@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type BoardProjectId, type Card, type LaneSet, MAX_CARD_BRIEF_LENGTH, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  type LaneSet,
+  MAX_CARD_BRIEF_LENGTH,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   askOf,
@@ -167,7 +173,7 @@ describe('a session started with a brief', () => {
       to: 'implement',
       auto: true,
       trigger: 'work.started',
-      actor: { kind: 'daemon', ferret: 'worker' },
+      actor: { kind: 'daemon' },
     });
     should(focus.focused.get('worker')).deepEqual({ id: 'F1' });
   });
@@ -444,7 +450,7 @@ describe('a session started with a brief', () => {
       should(focus.focused.get('child')).deepEqual({ id: 'F2' });
       should(focus.anchors.get('child')).deepEqual({ id: 'F2' });
       should(focus.focused.get('lead')).deepEqual({ id: 'F1' });
-      should(stored(ports, 'F2').createdBy).deepEqual({ kind: 'daemon', ferret: 'lead' });
+      should(stored(ports, 'F2').createdBy).deepEqual({ kind: 'daemon' });
     });
 
     it("should prefer the card the brief names over the lead's anchor", async () => {
@@ -654,7 +660,7 @@ describe('a session started with a brief', () => {
         to: 'plan',
         auto: true,
         trigger: 'work.started',
-        actor: { kind: 'daemon', ferret: 'child' },
+        actor: { kind: 'daemon' },
       });
       should(opened.card).match({ laneId: 'plan' });
       should([...ports.store.cards.keys()].sort()).deepEqual(['F1', 'F9']);
@@ -703,7 +709,7 @@ describe('a session started with a brief', () => {
       should(stored(ports, 'F9').history.find(event => event.type === 'assigned')).match({
         from: null,
         to: 'child',
-        actor: { kind: 'ferret', ferret: 'lead' },
+        actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
       });
       should([...ports.store.cards.keys()]).deepEqual(['F9']);
       should(focus.focused.get('child')).deepEqual({ id: 'F9' });
@@ -1087,9 +1093,7 @@ describe('a session started with a brief', () => {
     // Assert
     should(proposals).deepEqual([[BARE_PROJECT, 'worker']]);
     should(opened.card?.projectId).equal(BARE_PROJECT);
-    should(opened.notes).deepEqual([
-      'Notes had no lanes, so they were proposed for the owner to confirm (an ask).',
-    ]);
+    should(opened.notes).deepEqual(['Notes had no lanes, so they were proposed for the owner to confirm (an ask).']);
   });
 
   it('should fall back to the Unfiled board, saying how to move the card, when proposing fails', async () => {

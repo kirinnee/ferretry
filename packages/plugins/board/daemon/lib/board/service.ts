@@ -13,7 +13,6 @@
 import {
   ADMIN_TOKEN_ACTOR_WORDS,
   type CardActor,
-  type CardActorVia,
   type BoardEditableField,
   BoardEditableFieldSchema,
   type BoardIdsResponse,
@@ -95,6 +94,7 @@ import type {
   ProjectAdopter,
   ReopenNotifier,
   FerretFocus,
+  FerretNames,
   FerretParents,
 } from './ports.ts';
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
@@ -113,6 +113,8 @@ export interface BoardServiceDependencies {
   readonly store: BoardStore;
   readonly lanes: LaneSetSource;
   readonly parents: FerretParents;
+  /** The name a ferret's act is recorded by (`CardActor`), looked up once per act. */
+  readonly names: FerretNames;
   readonly focus: FerretFocus;
   readonly reopen: ReopenNotifier;
   /** Tells a card's ferret the owner marked it done. */
@@ -209,12 +211,12 @@ export interface SignalDoneOutcome {
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
 /** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
-export const reopenMessage = (task: Pick<Card, 'id'>, by: CardActor, reason: string, byVia?: CardActorVia): string =>
-  `${formatCardRef(task)} was reopened by ${reopenerWords(by, byVia)}: ${reason}`;
+export const reopenMessage = (task: Pick<Card, 'id'>, by: CardActor, reason: string): string =>
+  `${formatCardRef(task)} was reopened by ${reopenerWords(by)}: ${reason}`;
 
-const reopenerWords = (by: CardActor, byVia: CardActorVia | undefined): string => {
-  if (by.kind === 'owner') return byVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'the owner';
-  return by.ferret ?? `the ${by.kind}`;
+const reopenerWords = (by: CardActor): string => {
+  if (by.kind === 'owner') return by.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'the owner';
+  return by.kind === 'ferret' ? by.name : 'the daemon';
 };
 
 /**
@@ -229,13 +231,6 @@ export const doneMessage = (tasks: readonly Pick<Card, 'id' | 'title'>[], by: Do
     : `${who} marked these cards done: ${named.join(', ')}.`;
 };
 
-/**
- * How a caller that acts as the owner is recorded beside its actor: `admin-token` for the host's token with no
- * ferret's credential, so no surface shows it as the owner (`CardActorVia`). Nothing for anyone else.
- */
-const viaOf = (caller: BoardCaller): { readonly actorVia?: CardActorVia } =>
-  caller.kind === 'owner' && caller.via === 'admin-token' ? { actorVia: 'admin-token' } : {};
-
 /** Who a relocation is recorded as: the owner (with how they acted), or the daemon. */
 const callerOf = (by: RelocationAuthority): BoardCaller =>
   by.kind === 'owner'
@@ -244,11 +239,17 @@ const callerOf = (by: RelocationAuthority): BoardCaller =>
       : { kind: 'owner', via: by.via }
     : { kind: 'daemon' };
 
-/** The board actor a caller is recorded as. */
-export const actorOf = (caller: BoardCaller): CardActor => {
-  if (caller.kind === 'owner') return { kind: 'owner' };
-  if (caller.kind === 'ferret') return { kind: 'ferret', ferret: caller.ferret };
-  return caller.ferret === undefined ? { kind: 'daemon' } : { kind: 'daemon', ferret: caller.ferret };
+/**
+ * The board actor a caller is recorded as: the owner (with `via: 'admin-token'` for the host's token with no
+ * ferret's credential, so no surface shows it as the owner), a ferret by the name Ferrets knows it by now, or
+ * the daemon — which records nobody it acted for.
+ */
+export const actorOf = async (caller: BoardCaller, names: FerretNames): Promise<CardActor> => {
+  if (caller.kind === 'owner')
+    return caller.via === 'admin-token' ? { kind: 'owner', via: 'admin-token' } : { kind: 'owner' };
+  if (caller.kind === 'ferret')
+    return { kind: 'ferret', name: await names.nameOf(caller.ferret), ferret: caller.ferret };
+  return { kind: 'daemon' };
 };
 
 const ferretOf = (caller: BoardCaller): string | undefined => (caller.kind === 'owner' ? undefined : caller.ferret);
@@ -727,7 +728,7 @@ export class BoardService {
       const blockers = blockedBy(current, context.index, context.laneSets);
       const move = doneMove(noted, target, context.laneSet, blockers, message, {
         now: context.now,
-        actor: { kind: 'daemon', ferret },
+        actor: { kind: 'daemon' },
       });
       if ('held' in move) {
         return { task: requireValidCard(noted), result: { task: noted, moved: null, held: move.held } };
@@ -888,7 +889,7 @@ export class BoardService {
             backward: false,
             reason: reason ?? `lane ${current.laneId} was removed from the board`,
           },
-          { now: this.ports.clock.now(), actor: actorOf(callerOf(by)), ...viaOf(callerOf(by)) },
+          { now: this.ports.clock.now(), actor: await actorOf(callerOf(by), this.ports.names) },
         );
         const valid = requireValidCard({ ...next, laneId: to });
         return { task: valid, result: valid };
@@ -961,8 +962,7 @@ export class BoardService {
       id,
       machineId: facts.machineId,
       now: this.ports.clock.now(),
-      actor: actorOf(facts.caller),
-      ...viaOf(facts.caller),
+      actor: await actorOf(facts.caller, this.ports.names),
       standing: facts.caller.kind === 'owner' ? 'owner-human' : 'owner',
       owner: facts.owner,
       projectId: facts.projectId,
@@ -1008,7 +1008,6 @@ export class BoardService {
         index,
         laneSets,
         now: card.createdAt,
-        actor: actorOf(facts.caller),
       });
       return await persist(requireValidCard(queued));
     });
@@ -1284,8 +1283,7 @@ export class BoardService {
     return {
       now: this.ports.clock.now(),
       runningVersion: this.ports.runningVersion?.() ?? null,
-      actor: actorOf(caller),
-      ...viaOf(caller),
+      actor: await actorOf(caller, this.ports.names),
       standing,
       ...(handsDown ? { handsDown } : {}),
       audience: await this.audienceOf(card),
@@ -1573,8 +1571,7 @@ export class BoardService {
       .reopened({
         task,
         ...reopened,
-        by: actorOf(caller),
-        ...(viaOf(caller).actorVia === undefined ? {} : { byVia: 'admin-token' as const }),
+        by: await actorOf(caller, this.ports.names),
       })
       .catch((error: unknown) => this.warn(`could not deliver the reopen of ${formatCardRef(task)}`, error));
   }

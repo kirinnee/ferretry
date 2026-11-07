@@ -81,8 +81,7 @@ export type BoardSkip = z.infer<typeof BoardSkipSchema>;
  * ferret's own credential behind it. The daemon cannot tell the owner at the machine from a ferret that called `fy`
  * without its credential, so it says which one it KNOWS — the token — and a surface never shows it as the owner.
  *
- * IT IS A SIBLING FIELD ON PURPOSE — `actorVia` on an event, `createdByVia` on a card, `byVia` on a clarification,
- * `confirmedVia` on a lane set — never a member of the actor union.
+ * A card's actor carries it as the owner actor's own `via`; a lane set records it as `confirmedVia`.
  */
 export const CardActorViaSchema = z.literal('admin-token');
 export type CardActorVia = z.infer<typeof CardActorViaSchema>;

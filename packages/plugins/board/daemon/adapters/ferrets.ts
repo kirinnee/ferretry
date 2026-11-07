@@ -5,6 +5,7 @@ import type {
   FerretLiveness,
   FerretLivenessGuard,
   FerretLivenessSource,
+  FerretNames,
   FerretParents,
   FerretRoster,
   HelperDirectory,
@@ -33,6 +34,15 @@ export class FerretsHelpers implements HelperDirectory {
   async addressOf(ferret: string): Promise<string> {
     const found = await this.ferrets.get(asId(ferret)).catch(() => undefined);
     return found?.name ?? ferret;
+  }
+}
+
+/** The name a ferret's act is recorded by: `FerretsApi.get(ferret).name`, its id when Ferrets does not know it. */
+export class FerretsNames implements FerretNames {
+  constructor(private readonly ferrets: Pick<FerretsApi, 'get'>) {}
+
+  async nameOf(ferret: string): Promise<string> {
+    return (await this.ferrets.get(asId(ferret)).catch(() => undefined))?.name ?? ferret;
   }
 }
 

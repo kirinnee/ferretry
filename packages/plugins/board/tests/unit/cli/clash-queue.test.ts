@@ -17,9 +17,9 @@ const QUEUED =
   'queued behind &F18 to merge: both claim knip.json. It can be built now; its PR merges after &F18 ships.';
 
 const event = (seq: number, rest: Record<string, unknown>): CardEvent =>
-  ({ seq, at: AT, actor: { kind: 'ferret', ferret: DENISHA }, ...rest }) as CardEvent;
+  ({ seq, at: AT, actor: { kind: 'ferret', name: DENISHA, ferret: DENISHA }, ...rest }) as CardEvent;
 const daemonNote = (seq: number, text: string): CardEvent =>
-  ({ seq, at: AT, actor: { kind: 'daemon', ferret: DENISHA }, type: 'note', text }) as CardEvent;
+  ({ seq, at: AT, actor: { kind: 'daemon' }, type: 'note', text }) as CardEvent;
 
 class Io {
   readonly reports: string[] = [];

@@ -138,10 +138,11 @@ export const decideAskedBy = async (
   said: (ferret: string) => Promise<readonly string[]>,
 ): Promise<CardAskedBy> => {
   if (ownerApp || cardAskedBy(card) === 'person') return 'person';
-  // A card the daemon wrote for a session it started (`fy new`, `fy start`) is that ferret's errand: the brief is a
-  // ferret's words, so a long quote of the owner inside it proves nothing. Only a source naming the owner (the app's
-  // New session) makes it a person's, and that was decided above.
-  if (card.createdBy.kind === 'daemon' && card.createdBy.ferret !== undefined) return 'agent';
+  // A card the daemon wrote is one it wrote for a session it started (`fy new`, `fy start`: `BoardService.spawn`, the
+  // only writer of a daemon-made card), so it is that ferret's errand: the brief is a ferret's words, and a long quote
+  // of the owner inside it proves nothing. Only a source naming the owner (the app's New session) makes it a person's,
+  // and that was decided above.
+  if (card.createdBy.kind === 'daemon') return 'agent';
   const session = wordsFerretOf(card);
   return session !== undefined && ownerWordsMatch(card.ask.text, await said(session)) ? 'person' : 'agent';
 };

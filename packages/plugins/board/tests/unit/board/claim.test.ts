@@ -85,7 +85,7 @@ describe('claiming a card', () => {
       from: null,
       to: 'child',
       claimedFrom: 'lead',
-      actor: { kind: 'ferret', ferret: 'child' },
+      actor: { kind: 'ferret', name: 'child', ferret: 'child' },
     });
   });
 
@@ -183,7 +183,9 @@ describe('claiming a card', () => {
 
     // Assert
     should(moved.card.laneId).equal('plan');
-    should(ports.store.cards.get('F1')?.history.at(-1)).match({ actor: { kind: 'ferret', ferret: 'child' } });
+    should(ports.store.cards.get('F1')?.history.at(-1)).match({
+      actor: { kind: 'ferret', name: 'child', ferret: 'child' },
+    });
   });
 
   it('should let the claimer focus on and link a commit or doc to the card it now holds', async () => {

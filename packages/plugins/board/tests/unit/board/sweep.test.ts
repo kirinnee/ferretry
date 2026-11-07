@@ -23,7 +23,7 @@ const ago = (ms: number): string => new Date(NOW_MS - ms).toISOString();
 const EARLIER = ago(MINUTE);
 
 const laneSets = new Map([[PROJECT, lanes(PROJECT)]]);
-const ferret = (ferret: string): CardActor => ({ kind: 'ferret', ferret });
+const ferret = (ferret: string): CardActor => ({ kind: 'ferret', name: ferret, ferret });
 
 const view = (stored: Partial<Card> = {}, derived: Partial<CardView> = {}): CardView => ({
   ...card(stored),
@@ -37,7 +37,7 @@ const view = (stored: Partial<Card> = {}, derived: Partial<CardView> = {}): Card
     lastTouchedAt: null,
   },
   suggestedLane: null,
-  
+
   openAsks: [],
   blockedBy: [],
   blocks: [],
@@ -221,10 +221,7 @@ describe('the sweep plan: nudges', () => {
       seen: {},
     };
     const swept = board(
-      view(
-        { id: 'F1', laneId: 'implement' },
-        { blockedBy: [{ id: 'F7' }] },
-      ),
+      view({ id: 'F1', laneId: 'implement' }, { blockedBy: [{ id: 'F7' }] }),
       view({ id: 'F2', laneId: 'closed' }),
       view({ id: 'F3', dropped: { reason: 'superseded', at: EARLIER } }),
     );

@@ -170,11 +170,17 @@ describe('mergeGateOf', () => {
         id: id as Card['id'],
         files: claims.map(([path]) => path),
         history: [
-          { seq: 1, at: at(0), actor: { kind: 'ferret', ferret: 'lead' }, type: 'created', laneId: 'todo' },
+          {
+            seq: 1,
+            at: at(0),
+            actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
+            type: 'created',
+            laneId: 'todo',
+          },
           ...claims.map(([path, minute], n) => ({
             seq: n + 2,
             at: at(minute),
-            actor: { kind: 'ferret' as const, ferret: 'lead' },
+            actor: { kind: 'ferret' as const, name: 'lead', ferret: 'lead' },
             type: 'file-claimed' as const,
             path,
           })),
@@ -235,7 +241,7 @@ describe('mergeGateOf', () => {
           {
             seq: 3,
             at: at(2),
-            actor: { kind: 'daemon' as const, ferret: 'lead' },
+            actor: { kind: 'daemon' as const },
             type: 'depended' as const,
             task: { id: 'F1' as Card['id'] },
             until: 'shipped' as const,
@@ -257,7 +263,7 @@ describe('mergeGateOf', () => {
           {
             seq: 3,
             at: at(3),
-            actor: { kind: 'ferret' as const, ferret: 'lead' },
+            actor: { kind: 'ferret' as const, name: 'lead', ferret: 'lead' },
             type: 'undepended' as const,
             task: { id: 'F2' as Card['id'] },
             reason: 'F3 goes first',

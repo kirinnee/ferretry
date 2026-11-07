@@ -52,14 +52,14 @@ const cardFor = (audience: CardAudience, laneId: string): Card =>
     laneId,
     owner: 'child',
     assignee: 'grandchild',
-    createdBy: { kind: 'ferret', ferret: 'child' },
+    createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     ask:
       audience === 'external' ? { text: 'build it', source: 'owner' } : { text: 'build it', source: 'session:child' },
     history: [
       {
         seq: 1,
         at: '2026-10-30T10:00:00.000Z',
-        actor: { kind: 'ferret', ferret: 'child' },
+        actor: { kind: 'ferret', name: 'child', ferret: 'child' },
         type: 'created',
         laneId,
       },
@@ -162,7 +162,7 @@ describe('moving a card through a gate, by standing and audience', () => {
       type: 'moved',
       from: 'tested',
       to: 'closed',
-      actor: { kind: 'ferret', ferret: 'lead' },
+      actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     });
   });
 });

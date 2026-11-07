@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type Card, type CardCreateRequestInput, CardCreateRequestSchema, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  type Card,
+  type CardCreateRequestInput,
+  CardCreateRequestSchema,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError, BoardService, BoardUnavailableError } from '../../../daemon/lib/board/index.ts';
 import {
@@ -69,9 +74,9 @@ describe("a start's card", () => {
     // Assert
     should(made).match({ id: 'F2', owner: 'lead', assignee: 'child', parent: { id: 'F1' }, laneId: 'todo' });
     should(stored(ports, 'F2').history).deepEqual([
-      { seq: 1, at: NOW, actor: { kind: 'daemon', ferret: 'lead' }, type: 'created', laneId: 'todo' },
+      { seq: 1, at: NOW, actor: { kind: 'daemon' }, type: 'created', laneId: 'todo' },
     ]);
-    should(made.createdBy).deepEqual({ kind: 'daemon', ferret: 'lead' });
+    should(made.createdBy).deepEqual({ kind: 'daemon' });
     should(ports.focus.focused.get('child')).deepEqual({ id: 'F2' });
     should(ports.focus.focused.has('lead')).be.false();
     should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, cardIds: ['F2'] } }]);
@@ -123,13 +128,13 @@ describe('signal done on the card', () => {
     should(done?.moved?.id).equal('review');
     should(stored(ports, 'F2').laneId).equal('review');
     should(stored(ports, 'F2').history.slice(1)).match([
-      { type: 'note', text: 'done: built and tested', actor: { kind: 'ferret', ferret: 'child' } },
+      { type: 'note', text: 'done: built and tested', actor: { kind: 'ferret', name: 'child', ferret: 'child' } },
       {
         type: 'moved',
         to: 'review',
         auto: true,
         trigger: 'signal.done',
-        actor: { kind: 'daemon', ferret: 'child' },
+        actor: { kind: 'daemon' },
       },
     ]);
     should(ports.store.writes).have.length(1);

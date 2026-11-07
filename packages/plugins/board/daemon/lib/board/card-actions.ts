@@ -17,7 +17,6 @@
  */
 import {
   type CardActor,
-  type CardActorVia,
   cardRevision,
   type BoardAttachment,
   type BoardClarification,
@@ -70,24 +69,11 @@ import { laneFromFacts } from './lane-facts.ts';
 import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
 import { cardVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
-/** An event's actor and, beside it, how an owner actor acted (`CardActorVia`). */
-const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
-  actor: context.actor,
-  ...(context.actorVia === undefined ? {} : { actorVia: context.actorVia }),
-});
-
-/** A clarification's author and, beside it, how an owner author acted. */
-const byFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
-  by: context.actor,
-  ...(context.actorVia === undefined ? {} : { byVia: context.actorVia }),
-});
-
 /** The facts every rule may consult, gathered by the service before it calls one. */
 export interface CardContext {
   readonly now: string;
+  /** Who acts, as the card records them: an owner on the admin token says so in its `via`. */
   readonly actor: CardActor;
-  /** Recorded beside the actor, never inside it (`CardActorVia`); absent for anyone but the admin token. */
-  readonly actorVia?: CardActorVia;
   readonly standing: BoardStanding;
   /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
   readonly handsDown?: boolean;
@@ -135,15 +121,11 @@ export const OWNER_MOVE_SOURCE = 'owner (board move)';
 type NewEvent = CardEvent extends infer E ? (E extends CardEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
 
 /** The card with one more history event: next seq, this instant, this actor. */
-export const withEvent = (
-  card: Card,
-  event: NewEvent,
-  context: Pick<CardContext, 'now' | 'actor' | 'actorVia'>,
-): Card => ({
+export const withEvent = (card: Card, event: NewEvent, context: Pick<CardContext, 'now' | 'actor'>): Card => ({
   ...card,
   history: [
     ...card.history,
-    { ...event, seq: card.history.length + 1, at: context.now, ...actorFields(context) } as CardEvent,
+    { ...event, seq: card.history.length + 1, at: context.now, actor: context.actor } as CardEvent,
   ],
 });
 
@@ -303,7 +285,7 @@ const reopenTo = (
     text: ask.text,
     source: ask.source,
     at: context.now,
-    ...byFields(context),
+    by: context.actor,
   };
   const files = context.attachments;
   const reopened = withEvent(
@@ -483,12 +465,11 @@ const report = (
       `${ref} is blocked by ${blockers.map(formatCardRef).join(', ')}: a report does not move it on to ${target.name} until they ship (only the owner may override a dependency)`,
     );
   }
-  const { actorVia: _via, ...rest } = context;
   const moved = triggerMove(
     card,
     action.event,
     action.reason,
-    { ...rest, actor: { kind: 'daemon' }, standing: 'daemon' },
+    { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
     false,
     context.standing === 'owner-human',
   );
@@ -497,16 +478,10 @@ const report = (
 };
 
 /** The move just made, with who reported the trigger beside the daemon that made it. */
-const reportedBy = (moved: Card, context: Pick<CardContext, 'actor' | 'actorVia'>): Card => ({
+const reportedBy = (moved: Card, context: Pick<CardContext, 'actor'>): Card => ({
   ...moved,
   history: moved.history.map((event, index) =>
-    index === moved.history.length - 1 && event.type === 'moved'
-      ? {
-          ...event,
-          reportedBy: context.actor,
-          ...(context.actorVia === undefined ? {} : { reportedVia: context.actorVia }),
-        }
-      : event,
+    index === moved.history.length - 1 && event.type === 'moved' ? { ...event, reportedBy: context.actor } : event,
   ),
 });
 
@@ -552,7 +527,6 @@ const closeTrigger = (card: Card, reason: string): LaneTrigger =>
 export const closeAsDaemon = (card: Card, reason: string, context: CardContext): Card | null => {
   const target = closedLaneOf(context.laneSet);
   if (target === undefined || target.id === card.laneId) return null;
-  const { actorVia: _via, ...rest } = context;
   return {
     ...withEvent(
       card,
@@ -565,7 +539,7 @@ export const closeAsDaemon = (card: Card, reason: string, context: CardContext):
         auto: true,
         trigger: closeTrigger(card, reason),
       },
-      { ...rest, actor: { kind: 'daemon' } },
+      { ...context, actor: { kind: 'daemon' } },
     ),
     laneId: target.id,
   };
@@ -586,12 +560,11 @@ export const closeNothingToTry = (card: Card, reason: string, context: CardConte
   if (!from.ok || !gateOptions(from.value).some(option => option.outcome.kind === 'reopen-with-ask')) return null;
   const target = closedLaneOf(context.laneSet);
   if (target === undefined || target.id === card.laneId) return null;
-  const { actorVia: _via, ...rest } = context;
   return {
     ...withEvent(
       card,
       { type: 'moved', from: card.laneId, to: target.id, backward: false, reason, auto: true, trigger: 'signal.done' },
-      { ...rest, actor: { kind: 'daemon' } },
+      { ...context, actor: { kind: 'daemon' } },
     ),
     laneId: target.id,
   };
@@ -1128,7 +1101,7 @@ export const applyAction = (
         text: action.text,
         source: action.source,
         at: context.now,
-        ...byFields(context),
+        by: context.actor,
       };
       return {
         task: {
@@ -1254,7 +1227,6 @@ export interface NewCardContext {
   readonly machineId: string;
   readonly now: string;
   readonly actor: CardActor;
-  readonly actorVia?: CardActorVia;
   readonly standing: BoardStanding;
   /** The accountable ferret: the creating session, or the assignee the owner named. */
   readonly owner: string;
@@ -1300,7 +1272,6 @@ export const newCard = (request: CardCreateRequest, context: NewCardContext): Ca
     order: null,
     createdAt: context.now,
     createdBy: context.actor,
-    ...(context.actorVia === undefined ? {} : { createdByVia: context.actorVia }),
-    history: [{ seq: 1, at: context.now, ...actorFields(context), type: 'created', laneId: lane.id }],
+    history: [{ seq: 1, at: context.now, actor: context.actor, type: 'created', laneId: lane.id }],
   };
 };

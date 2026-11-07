@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type Card, CardActionRequestSchema, CardCreateRequestSchema, type LaneSet, type PrLink } from '../../../contract/index.ts';
+import {
+  type Card,
+  CardActionRequestSchema,
+  CardCreateRequestSchema,
+  type LaneSet,
+  type PrLink,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
@@ -50,10 +56,10 @@ const cardFor = (audience: CardAudience, laneId: string, overrides: Partial<Card
     laneId,
     owner: 'child',
     assignee: 'grandchild',
-    createdBy: { kind: 'ferret', ferret: 'child' },
+    createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     ask:
       audience === 'external' ? { text: 'build it', source: 'owner' } : { text: 'build it', source: 'session:child' },
-    history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'child' }, type: 'created', laneId }],
+    history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', name: 'child', ferret: 'child' }, type: 'created', laneId }],
     ...overrides,
   });
 
@@ -394,11 +400,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
   it('refuses a drop and a reopen past the lane it was dropped from, and reopens it there', async () => {
     // Arrange — the review's exploit: the owner ferret drops a card at Plan, then reopens it in Released
     const world = serviceOver([cardFor('external', 'plan')]);
-    await world.service.act(
-      'F1',
-      CardActionRequestSchema.parse({ action: 'drop', reason: 'parked' }),
-      CALLERS.owner,
-    );
+    await world.service.act('F1', CardActionRequestSchema.parse({ action: 'drop', reason: 'parked' }), CALLERS.owner);
     const reopen = (to: string) =>
       CardActionRequestSchema.parse({
         action: 'reopen',
@@ -443,7 +445,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
       cardFor('external', 'plan', {
         owner: 'lead',
         assignee: null,
-        createdBy: { kind: 'ferret', ferret: 'lead' },
+        createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
         ask: { text: 'Build X', source: 'session:lead' },
         askedBy: 'agent',
       }),
@@ -489,7 +491,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
       cardFor('external', 'plan', {
         owner: 'lead',
         assignee: null,
-        createdBy: { kind: 'ferret', ferret: 'lead' },
+        createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
         ask: { text: 'Build X', source: 'session:child' },
         askedBy: 'agent',
       }),
@@ -507,7 +509,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
   it('reads a sub-lead’s own card as internal: a ferret-started session wrote it', async () => {
     // Arrange — child was started by lead
     const world = serviceOver([
-      cardFor('external', 'plan', { createdBy: { kind: 'ferret', ferret: 'child' }, askedBy: 'agent' }),
+      cardFor('external', 'plan', { createdBy: { kind: 'ferret', name: 'child', ferret: 'child' }, askedBy: 'agent' }),
     ]);
 
     // Act

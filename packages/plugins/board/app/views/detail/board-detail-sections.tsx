@@ -159,7 +159,7 @@ export function AskSection({
                 Clarified by{' '}
                 {clarification.by.kind !== 'owner'
                   ? 'a ferret'
-                  : clarification.byVia === 'admin-token'
+                  : clarification.by.via === 'admin-token'
                     ? 'the admin token'
                     : 'you'}
                 {clarification.by.kind === 'ferret' ? ` (${names(clarification.by.ferret)})` : ''}:{' '}
@@ -228,13 +228,7 @@ export function ChildrenList({
   );
 }
 
-export function DependencyChips({
-  task,
-  onOpen,
-}: {
-  readonly task: CardView;
-  readonly onOpen: (id: string) => void;
-}) {
+export function DependencyChips({ task, onOpen }: { readonly task: CardView; readonly onOpen: (id: string) => void }) {
   const waiting = new Set(task.blockedBy.map(ref => formatCardRef(ref)));
   if (task.dependsOn.length === 0 && task.blocks.length === 0) return null;
   return (

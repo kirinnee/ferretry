@@ -1,5 +1,13 @@
 import { describe, it } from 'bun:test';
-import { type CardActor, BoardQuerySchema, type Card, type CardCreateRequestInput, CardCreateRequestSchema, type CardVisibility, type PrLink } from '../../../contract/index.ts';
+import {
+  type CardActor,
+  BoardQuerySchema,
+  type Card,
+  type CardCreateRequestInput,
+  CardCreateRequestSchema,
+  type CardVisibility,
+  type PrLink,
+} from '../../../contract/index.ts';
 import should from 'should';
 import type { BoardStanding } from '../../../daemon/lib/board/authority.ts';
 import type { OwnerWords } from '../../../daemon/lib/board/index.ts';
@@ -215,7 +223,7 @@ describe('the visibility action', () => {
   });
 
   it('should refuse a helper, which may only note and link', async () => {
-    const sub: CardActor = { kind: 'ferret', ferret: 'child' };
+    const sub: CardActor = { kind: 'ferret', name: 'child', ferret: 'child' };
     const { service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK, owner: 'child', createdBy: sub })], {
       helpers: { leadOf: async id => (id === 'child' ? 'lead' : undefined), addressOf: async id => id },
     });
@@ -240,7 +248,7 @@ const lead_made = (id: string, overrides: Partial<Card> = {}) =>
   card({
     id,
     ask: { text: OWNER_SAID, source: 'session:lead' },
-    createdBy: { kind: 'ferret', ferret: 'lead' },
+    createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     ...overrides,
   });
 

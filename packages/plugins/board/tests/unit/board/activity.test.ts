@@ -28,7 +28,7 @@ const laneSets = new Map([[PROJECT, lanes(PROJECT)]]);
 const created = (at: string, ferret = 'lead'): CardEvent => ({
   seq: 1,
   at,
-  actor: { kind: 'ferret', ferret },
+  actor: { kind: 'ferret', name: ferret, ferret },
   type: 'created',
   laneId: 'todo',
 });
@@ -45,11 +45,8 @@ const inputsFor = (
 
 const everyoneIdle = rosterOf(['lead', 'child', 'grandchild'].map(id => liveSession(id)));
 
-const derive = (
-  cards: readonly Card[],
-  roster: FerretRoster = everyoneIdle,
-  asks?: ReadonlyMap<string, CardAsks>,
-) => deriveActivities(inputsFor(cards, asks), roster, NOW_MS);
+const derive = (cards: readonly Card[], roster: FerretRoster = everyoneIdle, asks?: ReadonlyMap<string, CardAsks>) =>
+  deriveActivities(inputsFor(cards, asks), roster, NOW_MS);
 
 const merged = (mergedAt: string): PrLink => ({
   url: 'https://github.com/kirinnee/ferretry/pull/930',

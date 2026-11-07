@@ -58,7 +58,6 @@ describe('activityText', () => {
     expect(activityText(task('stale'), null)).toMatch(/^Stale/u);
     expect(activityText(task('orphaned'), null)).toBe('No ferret is left on it');
   });
-
 });
 
 describe('prLine', () => {
@@ -148,7 +147,7 @@ describe('history', () => {
 
   it('names a move on the admin token as the token, never as you', () => {
     const rows = historyRows(
-      [event(2, 'note', { text: 'hi', actorVia: 'admin-token' }, { kind: 'owner' }), event(1, 'note', { text: 'yo' })],
+      [event(2, 'note', { text: 'hi' }, { kind: 'owner', via: 'admin-token' }), event(1, 'note', { text: 'yo' })],
       context,
     );
     expect(rows.map(row => [row.actor, row.actorNote])).toEqual([
@@ -162,7 +161,7 @@ describe('history', () => {
     const daemon = { kind: 'daemon' };
     const rows = historyRows(
       [
-        event(2, 'moved', { ...moved, reportedBy: { kind: 'owner' }, reportedVia: 'admin-token' }, daemon),
+        event(2, 'moved', { ...moved, reportedBy: { kind: 'owner', via: 'admin-token' } }, daemon),
         event(1, 'moved', { ...moved, reportedBy: ferret }, daemon),
       ],
       context,
@@ -420,7 +419,7 @@ describe('askOrigin', () => {
 
   it('says a ferret by name, and keeps a source that is neither a session nor the owner', () => {
     const origin = askOrigin(
-      { ...base, createdBy: { kind: 'ferret', ferret: 's2' }, ask: { text: 't', source: 'cli' } },
+      { ...base, createdBy: { kind: 'ferret', name: 's2', ferret: 's2' }, ask: { text: 't', source: 'cli' } },
       names,
       null,
     );
@@ -429,7 +428,7 @@ describe('askOrigin', () => {
 
   it('says the admin token for what it is when it opened the card: the owner, or a ferret', () => {
     const origin = askOrigin(
-      { ...base, createdBy: { kind: 'owner' }, createdByVia: 'admin-token', ask: { text: 't', source: 'cli' } },
+      { ...base, createdBy: { kind: 'owner', via: 'admin-token' }, ask: { text: 't', source: 'cli' } },
       names,
       null,
     );

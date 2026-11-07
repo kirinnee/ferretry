@@ -20,13 +20,13 @@ const facts: OriginFacts = { startedByFerret: session => session === CHILD };
 const by = (createdBy: CardActor, source: string, extra: Partial<Card> = {}): Card =>
   card({ createdBy, ask: { text: 'do the thing', source }, ...extra });
 
-const ferret = (ferret: string): CardActor => ({ kind: 'ferret', ferret });
+const ferret = (ferret: string): CardActor => ({ kind: 'ferret', name: ferret, ferret });
 
 describe('cardOrigin: the owner asked', () => {
   it.each([
     ['the owner made it on the Board page', by({ kind: 'owner' }, 'board')],
-    ['the owner made it from a chat', by({ kind: 'owner', ferret: LEAD }, `session:${LEAD}`)],
-    ['the daemon started a session the owner briefed', by({ kind: 'daemon', ferret: LEAD }, 'owner')],
+    ['the owner made it from a chat', by({ kind: 'owner' }, `session:${LEAD}`)],
+    ['the daemon started a session the owner briefed', by({ kind: 'daemon' }, 'owner')],
     ['a helper recorded words relayed from the owner', by(ferret(CHILD), 'owner via lead denisha, turn-001')],
     ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy card reopen)')],
     ['a top-level ferret recorded its own chat', by(ferret(LEAD), `session:${LEAD}`)],
@@ -40,7 +40,7 @@ describe('cardOrigin: the owner asked', () => {
 
 describe('cardOrigin: an agent made it', () => {
   it.each([
-    ['a lead started a helper (fy new)', by({ kind: 'daemon', ferret: LEAD }, `session:${LEAD}`)],
+    ['a lead started a helper (fy new)', by({ kind: 'daemon' }, `session:${LEAD}`)],
     ['the board import filed untriaged asks', by({ kind: 'daemon' }, 'board import')],
     ['a helper recorded its own brief', by(ferret(CHILD), `session:${CHILD}`)],
     ['a helper wrote a lead message as the source', by(ferret(CHILD), 'lead message queued-47a7847b')],
@@ -64,14 +64,14 @@ describe('askFerretOf', () => {
 
   it('should need no session when the card decides without one', () => {
     should(askFerretOf(by({ kind: 'owner' }, `session:${CHILD}`))).be.undefined();
-    should(askFerretOf(by({ kind: 'daemon', ferret: LEAD }, `session:${LEAD}`))).be.undefined();
+    should(askFerretOf(by({ kind: 'daemon' }, `session:${LEAD}`))).be.undefined();
     should(askFerretOf(by(ferret(CHILD), 'owner'))).be.undefined();
   });
 });
 
 describe('humanParentOf', () => {
   const human = by({ kind: 'owner' }, 'board', { id: 'F1' });
-  const delegated = by({ kind: 'daemon', ferret: LEAD }, `session:${LEAD}`, { id: 'F2', parent: { id: 'F1' } });
+  const delegated = by({ kind: 'daemon' }, `session:${LEAD}`, { id: 'F2', parent: { id: 'F1' } });
   const grandchild = by(ferret(CHILD), `session:${CHILD}`, { id: 'F3', parent: { id: 'F2' } });
   const originOf = (subject: Card) => cardOrigin(subject, facts);
 
@@ -105,7 +105,7 @@ describe('cardAskedBy: a person asked', () => {
     ['the Board page filed it as the owner', by({ kind: 'owner' }, 'owner (board)')],
     ['a ferret recorded words relayed from the owner', by(ferret(CHILD), 'owner via lead denisha, turn-001')],
     ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy card reopen)')],
-    ['the daemon started a session the owner briefed', by({ kind: 'daemon', ferret: LEAD }, 'owner')],
+    ['the daemon started a session the owner briefed', by({ kind: 'daemon' }, 'owner')],
     [
       'a lead brief carries the owner as its source',
       by({ kind: 'owner' }, 'lead mvkm41oz turn-001 brief (owner 2026-10-23)'),
@@ -119,7 +119,7 @@ describe('cardAskedBy: an agent made it', () => {
   it.each([
     ['a lead followed up a review in its own chat', by(ferret(LEAD), `session:${LEAD}`)],
     ['a ferret recorded its own chat as the owner-kind caller', by({ kind: 'owner' }, `session:${LEAD}`)],
-    ['a lead started a helper (fy new)', by({ kind: 'daemon', ferret: LEAD }, `session:${LEAD}`)],
+    ['a lead started a helper (fy new)', by({ kind: 'daemon' }, `session:${LEAD}`)],
     ['the board import filed untriaged asks', by({ kind: 'daemon' }, 'board import')],
     ['a ferret wrote a brief path as the source', by(ferret(LEAD), '/tmp/briefs/kt-board-v3.md')],
     ['a ferret this daemon does not know recorded it', by(ferret('mvzzzzzz-00000000'), 'lead message turn-003')],

@@ -27,7 +27,7 @@ const notice = (overrides: Partial<ReopenNotice['task']> = {}): ReopenNotice => 
     assignee: 'child',
     laneId: 'implement',
     history: [
-      { seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'lead' }, type: 'created', laneId: 'todo' },
+      { seq: 1, at: NOW, actor: { kind: 'ferret', name: 'lead', ferret: 'lead' }, type: 'created', laneId: 'todo' },
       {
         seq: 2,
         at: NOW,
@@ -137,7 +137,7 @@ describe('delivering a reopen', () => {
 
     // Act
     await subject.reopened(notice());
-    await subject.reopened({ ...notice(), by: { kind: 'ferret', ferret: 'lead' } });
+    await subject.reopened({ ...notice(), by: { kind: 'ferret', name: 'lead', ferret: 'lead' } });
 
     // Assert
     should(owned.sent.map(([to]) => to)).deepEqual(['child']);

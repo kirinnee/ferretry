@@ -72,11 +72,7 @@ const withPr = (pr: Partial<PrLink>, overrides: Partial<Card> = {}): Card =>
     ...overrides,
   });
 
-const context = (
-  subject: Card,
-  overrides: Partial<CardContext> = {},
-  laneSet: LaneSet = lanes(),
-): CardContext => ({
+const context = (subject: Card, overrides: Partial<CardContext> = {}, laneSet: LaneSet = lanes()): CardContext => ({
   now: NOW,
   actor: { kind: 'daemon' },
   standing: 'daemon',
@@ -106,9 +102,9 @@ describe('samePr', () => {
 describe('applyPrUpdate', () => {
   it('should refuse anyone but the daemon', () => {
     const subject = withPr({});
-    should(() => apply(subject, {}, { standing: 'owner', actor: { kind: 'ferret', ferret: 'lead' } })).throw(
-      BoardError,
-    );
+    should(() =>
+      apply(subject, {}, { standing: 'owner', actor: { kind: 'ferret', name: 'lead', ferret: 'lead' } }),
+    ).throw(BoardError);
   });
 
   it('should change nothing when the poll learned nothing', () => {

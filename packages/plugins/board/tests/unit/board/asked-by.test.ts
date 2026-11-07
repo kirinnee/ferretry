@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type CardActor, type Card, type CardCreateRequestInput, CardCreateRequestSchema } from '../../../contract/index.ts';
+import {
+  type CardActor,
+  type Card,
+  type CardCreateRequestInput,
+  CardCreateRequestSchema,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
@@ -98,13 +103,13 @@ describe('wordsFerretOf', () => {
   });
 
   it("should fall back to the recording ferret's own session, and to none for anyone else", () => {
-    should(of('a brief', { kind: 'ferret', ferret: 'lead' })).equal('lead');
+    should(of('a brief', { kind: 'ferret', name: 'lead', ferret: 'lead' })).equal('lead');
     should(of('board import', { kind: 'daemon' })).be.undefined();
     should(of('a brief')).be.undefined();
   });
 });
 
-const ferretActor = (ferret: string): CardActor => ({ kind: 'ferret', ferret });
+const ferretActor = (ferret: string): CardActor => ({ kind: 'ferret', name: ferret, ferret });
 const ferretMade = (source: string, text = OWNER_ASK) =>
   ({ createdBy: ferretActor('lead'), ask: { text, source } }) as const;
 
@@ -148,10 +153,20 @@ describe('decideAskedBy', () => {
     should(await decideAskedBy({ createdBy: { kind: 'owner' }, ask: { text: OWNER_ASK, source } }, false, words)).equal(
       'person',
     );
+    should(asked).eql(['mvgt2oz9-04e28935']);
+  });
+
+  it('should say agent for a card the daemon wrote, which is only ever for a session it started, reading no words', async () => {
+    const asked: string[] = [];
+    const words = async (id: string) => {
+      asked.push(id);
+      return [OWNER_ASK];
+    };
+    const source = 'session:mvgt2oz9-04e28935';
     should(
       await decideAskedBy({ createdBy: { kind: 'daemon' }, ask: { text: OWNER_ASK, source } }, false, words),
-    ).equal('person');
-    should(asked).eql(['mvgt2oz9-04e28935', 'mvgt2oz9-04e28935']);
+    ).equal('agent');
+    should(asked).eql([]);
   });
 
   it('should say agent when nothing matches, or the card has no session to look in', async () => {
@@ -247,7 +262,10 @@ describe('creating a card decides who asked, once', () => {
 
   it('should store person when the source names the owner', async () => {
     const { ports, service } = serviceWith([]);
-    const { card: task } = await service.create(create({ ask: { text: 'do it', source: 'owner via lead jaeda' } }), lead);
+    const { card: task } = await service.create(
+      create({ ask: { text: 'do it', source: 'owner via lead jaeda' } }),
+      lead,
+    );
     should(stored(ports, task.id).askedBy).equal('person');
   });
 

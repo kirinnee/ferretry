@@ -6,7 +6,7 @@
  * session directory.
  */
 import type { CardActor, BoardAttachment, CardEvent } from './wire.ts';
-import { type CardActorVia, formatCardRef } from './refs.ts';
+import { formatCardRef } from './refs.ts';
 
 /** How a lane id or a session id reads to whoever is shown the line. */
 export type BoardNamer = (id: string) => string;
@@ -24,18 +24,11 @@ export function attachmentsPhrase(files: readonly Pick<BoardAttachment, 'mime'>[
 
 /**
  * Who a history line is BY: its actor, except a move on a trigger somebody reported, which reads as by whoever
- * reported it (`reportedBy`, with `reportedVia` for its `actorVia`) — the daemon only carried out their word,
- * and a ferret's report must never read as a fact Ferretry saw for itself.
+ * reported it (`reportedBy`) — the daemon only carried out their word, and a ferret's report must never read as a
+ * fact Ferretry saw for itself.
  */
-export const boardEventActor = (
-  event: Pick<CardEvent, 'actor' | 'actorVia'> & {
-    readonly reportedBy?: CardActor;
-    readonly reportedVia?: CardActorVia;
-  },
-): { readonly actor: CardActor; readonly via: CardActorVia | undefined } =>
-  event.reportedBy === undefined
-    ? { actor: event.actor, via: event.actorVia }
-    : { actor: event.reportedBy, via: event.reportedVia };
+export const boardEventActor = (event: Pick<CardEvent, 'actor'> & { readonly reportedBy?: CardActor }): CardActor =>
+  event.reportedBy ?? event.actor;
 
 /** One history event's wording; the closed union means every event this build can read is spelled here. */
 export function describeCardEvent(event: CardEvent, lane: BoardNamer, names: BoardNamer): string {
@@ -70,7 +63,7 @@ export function describeCardEvent(event: CardEvent, lane: BoardNamer, names: Boa
         return `returned to ${names(event.to)}: ${names(event.returnedFrom)} finished`;
       }
       return `assigned ${event.from === null ? 'nobody' : names(event.from)} → ${event.to === null ? 'nobody' : names(event.to)}${
-        event.handedDown === true && event.actor.ferret !== undefined
+        event.handedDown === true && event.actor.kind === 'ferret'
           ? ` (handed down by ${names(event.actor.ferret)})`
           : ''
       }`;

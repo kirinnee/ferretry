@@ -1,9 +1,25 @@
 import { describe, it } from 'bun:test';
-import { type Card, type CardActionRequestInput, CardActionRequestSchema, type Lane, type LaneSet, LaneSetSchema } from '../../../contract/index.ts';
+import {
+  type Card,
+  type CardActionRequestInput,
+  CardActionRequestSchema,
+  type Lane,
+  type LaneSet,
+  LaneSetSchema,
+} from '../../../contract/index.ts';
 import should from 'should';
 import { type BoardCaller, BoardError, BoardService, gateOnTheWay } from '../../../daemon/lib/board/index.ts';
 
-import { card, DIRECTORY, FakeLanes, MemoryBoardStore, PROJECT, type ServiceWorld, templateLanes, world } from './support.ts';
+import {
+  card,
+  DIRECTORY,
+  FakeLanes,
+  MemoryBoardStore,
+  PROJECT,
+  type ServiceWorld,
+  templateLanes,
+  world,
+} from './support.ts';
 
 const owner: BoardCaller = { kind: 'owner' };
 const ferret = (ferret: string): BoardCaller => ({ kind: 'ferret', ferret });
@@ -148,9 +164,9 @@ describe('a reported trigger', () => {
       trigger: 'deploy.done',
       reason: 'deployed to production',
       actor: { kind: 'daemon' },
-      reportedBy: { kind: 'ferret', ferret: 'child' },
+      reportedBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     });
-    should(lastEvent(ports)).not.have.property('reportedVia');
+    should(lastEvent(ports)).have.property('reportedBy').eql({ kind: 'ferret', name: 'child', ferret: 'child' });
   });
 
   it('should take the report of the owner, the owner ferret and its leads', async () => {
@@ -180,12 +196,8 @@ describe('a reported trigger', () => {
     await service.act('F1', report('deploy.done'), { kind: 'owner', via: 'admin-token' });
 
     // Assert
-    should(lastEvent(ports)).match({
-      actor: { kind: 'daemon' },
-      reportedBy: { kind: 'owner' },
-      reportedVia: 'admin-token',
-    });
-    should(lastEvent(ports)).not.have.property('actorVia');
+    should(lastEvent(ports)).match({ actor: { kind: 'daemon' }, reportedBy: { kind: 'owner', via: 'admin-token' } });
+    should(lastEvent(ports)?.actor).eql({ kind: 'daemon' });
   });
 
   it('should refuse a ferret with no standing on the card', async () => {
@@ -464,7 +476,7 @@ describe('a helper reporting a trigger', () => {
 
     // Assert
     should(stored(ports).laneId).equal('deployed');
-    should(lastEvent(ports)).match({ reportedBy: { kind: 'ferret', ferret: 'child' } });
+    should(lastEvent(ports)).match({ reportedBy: { kind: 'ferret', name: 'child', ferret: 'child' } });
   });
 
   it('should be refused on a card it owns but is not doing, and told whom to tell', async () => {

@@ -1,4 +1,21 @@
-import { type CardActor, type BoardChangedEvent, type BoardProjectId, type BoardQuarantinedCard, type BoardSkip, type Card, type CardId, defaultLaneTargets, LANE_TEMPLATES, type Lane, type LaneSet, type LaneTemplateName, type CardKind, type CardRef, WorkflowSchema, cardIdPrefix } from '../../../contract/index.ts';
+import {
+  type CardActor,
+  type BoardChangedEvent,
+  type BoardProjectId,
+  type BoardQuarantinedCard,
+  type BoardSkip,
+  type Card,
+  type CardId,
+  defaultLaneTargets,
+  LANE_TEMPLATES,
+  type Lane,
+  type LaneSet,
+  type LaneTemplateName,
+  type CardKind,
+  type CardRef,
+  WorkflowSchema,
+  cardIdPrefix,
+} from '../../../contract/index.ts';
 import {
   type CardAskLinkSource,
   type HelperDirectory,
@@ -16,6 +33,7 @@ import {
   type FerretFocus,
   type FerretLiveness,
   type FerretLivenessSource,
+  type FerretNames,
   type FerretParents,
   type FerretRoster,
 } from '../../../daemon/lib/board/index.ts';
@@ -126,7 +144,17 @@ export const lanes = (
   return { projectId, version: 1, confirmedBy: 'owner', proposedBy: 'lead', ...layout, ...targets };
 };
 
-const ferret = (ferret: string): CardActor => ({ kind: 'ferret', ferret });
+/** The names fake every world uses: a ferret is named by its id, so a recorded actor is predictable. */
+export const NAMES: FerretNames = { nameOf: async ferret => ferret };
+
+/** A ferret as a card records it, named as {@link NAMES} names it. */
+export const ferretActor = (ferret: string): Extract<CardActor, { kind: 'ferret' }> => ({
+  kind: 'ferret',
+  name: ferret,
+  ferret,
+});
+
+const ferret = ferretActor;
 
 /** A stored card: `F1` by ferret `lead`, in Todo, unless told otherwise. */
 export const card = (overrides: Partial<Card> = {}): Card => {
@@ -367,6 +395,7 @@ export const world = (overrides: Partial<ServiceWorld> = {}): ServiceWorld => {
     store: new MemoryBoardStore(),
     lanes: new FakeLanes(),
     parents: new FakeParents({ child: 'lead', grandchild: 'child' }),
+    names: NAMES,
     focus: new FakeFocus(),
     reopen: new FakeReopen(),
     done: new FakeDone(),

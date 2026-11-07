@@ -126,16 +126,17 @@ export const formatAskRef = (ref: AskRef): string => `${ASK_REF_SIGIL}${ref.id}`
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * Who did something to a card. A ferret is always a session; the owner may have acted from one (a chat)
- * or from nowhere in particular (the Board page); the daemon names the session it acted for, if any.
+ * Who did something to a card: the owner, a ferret, or the daemon. The owner's `via` says how they acted when it
+ * was not their own app ({@link CardActorVia}: the host's admin token, which a ferret without its own credential can
+ * hold too). A ferret is recorded with the name Ferrets knew it by when it acted, beside its id. The daemon is
+ * itself and nobody else: what it did for a ferret is recorded as the daemon's.
  *
- * The union is CLOSED and each member strict, so it never grows: an older reader would refuse a whole board
- * over one member it does not know. What the daemon knows beyond it travels beside it ({@link CardActorVia}).
+ * The union is CLOSED and each member strict, so a stored actor is exactly one of these three shapes.
  */
 export const CardActorSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('ferret'), ferret: FerretRefSchema }),
-  z.strictObject({ kind: z.literal('owner'), ferret: FerretRefSchema.optional() }),
-  z.strictObject({ kind: z.literal('daemon'), ferret: FerretRefSchema.optional() }),
+  z.strictObject({ kind: z.literal('owner'), via: CardActorViaSchema.optional() }),
+  z.strictObject({ kind: z.literal('ferret'), name: z.string().min(1), ferret: FerretRefSchema }),
+  z.strictObject({ kind: z.literal('daemon') }),
 ]);
 export type CardActor = z.infer<typeof CardActorSchema>;
 
@@ -144,13 +145,11 @@ export type CardActor = z.infer<typeof CardActorSchema>;
 // ---------------------------------------------------------------------------------------------------
 
 /** One more thing the owner said about the ask, verbatim. */
-export const BoardClarificationSchema = z.object({
+export const BoardClarificationSchema = z.strictObject({
   text: z.string().min(1).max(MAX_CARD_BRIEF_LENGTH),
   source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   at: InstantSchema,
   by: CardActorSchema,
-  /** {@link CardActorVia}: absent unless the owner actor was the admin token. */
-  byVia: CardActorViaSchema.optional(),
 });
 export type BoardClarification = z.infer<typeof BoardClarificationSchema>;
 
@@ -311,18 +310,16 @@ const EventBase = {
   seq: PositiveIntegerSchema,
   at: InstantSchema,
   actor: CardActorSchema,
-  /** {@link CardActorVia}: absent unless the owner actor was the admin token. */
-  actorVia: CardActorViaSchema.optional(),
 };
 
 /**
  * A lane move. `backward` is recorded by the writer, which had the lane set in hand, so the event can
  * enforce on its own that a move back says why. A daemon move is `auto` and names its trigger. A move on an
  * external trigger somebody reported (the task action `trigger`) is still the daemon's, and `reportedBy`
- * says who reported it (`reportedVia` beside it, as `actorVia` is beside the actor).
+ * says who reported it.
  */
 const MovedEventSchema = z
-  .object({
+  .strictObject({
     ...EventBase,
     type: z.literal('moved'),
     from: LaneIdSchema,
@@ -332,7 +329,6 @@ const MovedEventSchema = z
     auto: z.literal(true).optional(),
     trigger: LaneTriggerSchema.optional(),
     reportedBy: CardActorSchema.optional(),
-    reportedVia: CardActorViaSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.from === value.to) context.addIssue({ code: 'custom', message: 'a move changes lane', path: ['to'] });
@@ -348,9 +344,6 @@ const MovedEventSchema = z
     if (value.reportedBy !== undefined && (value.trigger === undefined || !isExternalTrigger(value.trigger))) {
       context.addIssue({ code: 'custom', message: 'only an external trigger is reported', path: ['reportedBy'] });
     }
-    if (value.reportedVia !== undefined && value.reportedBy === undefined) {
-      context.addIssue({ code: 'custom', message: 'how it was reported needs who reported it', path: ['reportedVia'] });
-    }
   });
 
 /**
@@ -358,10 +351,10 @@ const MovedEventSchema = z
  * know is refused rather than half-read.
  */
 export const CardEventSchema = z.discriminatedUnion('type', [
-  z.object({ ...EventBase, type: z.literal('created'), laneId: LaneIdSchema }),
+  z.strictObject({ ...EventBase, type: z.literal('created'), laneId: LaneIdSchema }),
   MovedEventSchema,
   /** The owner's words that reopened it are ALSO appended to the card's clarifications: they are a new ask. */
-  z.object({
+  z.strictObject({
     ...EventBase,
     type: z.literal('reopened'),
     from: LaneIdSchema,
@@ -371,15 +364,15 @@ export const CardEventSchema = z.discriminatedUnion('type', [
     /** The files the owner sent with it; absent when there were none. */
     attachments: z.array(BoardAttachmentSchema).min(1).max(MAX_BOARD_REOPEN_ATTACHMENTS).optional(),
   }),
-  z.object({ ...EventBase, type: z.literal('note'), text: z.string().trim().min(1).max(MAX_CARD_NOTE_LENGTH) }),
-  z.object({
+  z.strictObject({ ...EventBase, type: z.literal('note'), text: z.string().trim().min(1).max(MAX_CARD_NOTE_LENGTH) }),
+  z.strictObject({
     ...EventBase,
     type: z.literal('clarified'),
     text: z.string().min(1).max(MAX_CARD_BRIEF_LENGTH),
     source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   }),
-  z.object({ ...EventBase, type: z.literal('linked'), field: BoardLinkFieldSchema, value: linkValue }),
-  z.object({
+  z.strictObject({ ...EventBase, type: z.literal('linked'), field: BoardLinkFieldSchema, value: linkValue }),
+  z.strictObject({
     ...EventBase,
     type: z.literal('assigned'),
     from: FerretRefSchema.nullable(),
@@ -393,33 +386,33 @@ export const CardEventSchema = z.discriminatedUnion('type', [
     /** Present when a live lead adopted the card because its owner ferret and its assignee had both ended (`fy card adopt`): the owner ferret it took the card from, and why. The actor is the adopter. */
     adopted: z.strictObject({ from: FerretRefSchema, reason }).optional(),
   }),
-  z.object({
+  z.strictObject({
     ...EventBase,
     type: z.literal('depended'),
     task: CardRefSchema,
     until: DependencyUntilSchema,
     override: DependencyOverrideSchema.optional(),
   }),
-  z.object({ ...EventBase, type: z.literal('undepended'), task: CardRefSchema, reason }),
-  z.object({ ...EventBase, type: z.literal('blocked'), reason }),
-  z.object({ ...EventBase, type: z.literal('unblocked'), reason: reason.nullable() }),
-  z.object({ ...EventBase, type: z.literal('field-edited'), field: BoardEditableFieldSchema }),
-  z.object({ ...EventBase, type: z.literal('file-claimed'), path: z.string().min(1).max(MAX_BOARD_FILE_LENGTH) }),
-  z.object({
+  z.strictObject({ ...EventBase, type: z.literal('undepended'), task: CardRefSchema, reason }),
+  z.strictObject({ ...EventBase, type: z.literal('blocked'), reason }),
+  z.strictObject({ ...EventBase, type: z.literal('unblocked'), reason: reason.nullable() }),
+  z.strictObject({ ...EventBase, type: z.literal('field-edited'), field: BoardEditableFieldSchema }),
+  z.strictObject({ ...EventBase, type: z.literal('file-claimed'), path: z.string().min(1).max(MAX_BOARD_FILE_LENGTH) }),
+  z.strictObject({
     ...EventBase,
     type: z.literal('file-released'),
     path: z.string().min(1).max(MAX_BOARD_FILE_LENGTH),
     reason: reason.nullable(),
   }),
-  z.object({
+  z.strictObject({
     ...EventBase,
     type: z.literal('ordered'),
     from: NonNegativeIntegerSchema.nullable(),
     to: NonNegativeIntegerSchema.nullable(),
   }),
   /** The owner put the card aside until `until`, or woke it early (`until: null`). */
-  z.object({ ...EventBase, type: z.literal('snoozed'), until: InstantSchema.nullable() }),
-  z.object({
+  z.strictObject({ ...EventBase, type: z.literal('snoozed'), until: InstantSchema.nullable() }),
+  z.strictObject({
     ...EventBase,
     type: z.literal('refiled'),
     fromProject: BoardProjectIdSchema,
@@ -427,14 +420,14 @@ export const CardEventSchema = z.discriminatedUnion('type', [
     toLane: LaneIdSchema,
     reason: reason.nullable(),
   }),
-  z.object({
+  z.strictObject({
     ...EventBase,
     type: z.literal('reparented'),
     from: CardRefSchema.nullable(),
     to: CardRefSchema.nullable(),
     reason: reason.nullable(),
   }),
-  z.object({ ...EventBase, type: z.literal('dropped'), reason }),
+  z.strictObject({ ...EventBase, type: z.literal('dropped'), reason }),
 ]);
 export type CardEvent = z.infer<typeof CardEventSchema>;
 export type CardEventType = CardEvent['type'];
@@ -541,8 +534,6 @@ const CardShape = {
   snoozed: z.strictObject({ until: InstantSchema, laneId: LaneIdSchema }).nullable().optional(),
   createdAt: InstantSchema,
   createdBy: CardActorSchema,
-  /** {@link CardActorVia}: absent unless the card was opened on the admin token. */
-  createdByVia: CardActorViaSchema.optional(),
   history: z.array(CardEventSchema).min(1),
   /**
    * Whether a PERSON asked for the card, decided by the daemon once (at creation, or at the first boot that

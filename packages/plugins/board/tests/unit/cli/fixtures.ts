@@ -112,7 +112,7 @@ export const mergedPr = (overrides: Partial<PrLink> = {}): PrLink =>
 const created = (): CardEvent => ({
   seq: 1,
   at: AT,
-  actor: { kind: 'ferret', ferret: DENISHA },
+  actor: { kind: 'ferret', name: DENISHA, ferret: DENISHA },
   type: 'created',
   laneId: 'todo',
 });
@@ -145,7 +145,7 @@ export const card = (overrides: Partial<CardView> = {}): CardView =>
     files: [],
     order: null,
     createdAt: AT,
-    createdBy: { kind: 'ferret', ferret: DENISHA },
+    createdBy: { kind: 'ferret', name: DENISHA, ferret: DENISHA },
     history: [created()],
     lastTouchedAt: null,
     touchedBy: null,

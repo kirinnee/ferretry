@@ -46,7 +46,7 @@ export function fakeBoard(): BoardApi {
     create: async (by, request) => {
       counters[request.kind] += 1;
       const id = `${CARD_KIND_PREFIX[request.kind]}${counters[request.kind]}`;
-      const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', ferret: by } as const);
+      const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', name: by, ferret: by } as const);
       const laneId = request.laneId ?? 'todo';
       return ok(
         store({
@@ -86,7 +86,7 @@ export function fakeBoard(): BoardApi {
       const card = cards.get(id);
       if (card === undefined) return err({ code: 'not-found', message: `no card ${id}` });
       if (request.action !== 'move') return err({ code: 'refused', message: `the fake does not do ${request.action}` });
-      const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', ferret: by } as const);
+      const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', name: by, ferret: by } as const);
       return ok(
         store({
           ...card,

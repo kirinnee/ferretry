@@ -191,10 +191,9 @@ export function renderBoardMarkdown(
 
 /** Who a line is by: the reporter of a reported trigger, else the actor (`boardEventActor`). */
 const actorLabel = (event: CardEvent, names: FerretNames): string => {
-  const { actor, via: actorVia } = boardEventActor(event);
+  const actor = boardEventActor(event);
   if (actor.kind === 'ferret') return names(actor.ferret);
-  const via = actor.ferret === undefined ? '' : ` via ${names(actor.ferret)}`;
-  return `${actorVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind}${via}`;
+  return actor.kind === 'owner' && actor.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind;
 };
 
 /** One history line's wording, as the protocol spells it for every surface. */

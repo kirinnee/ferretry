@@ -1,5 +1,15 @@
 import { describe, it } from 'bun:test';
-import { type BoardProjectId, type Card, type CardActionRequestInput, CardActionRequestSchema, CardCreateRequestSchema, type LaneSet, MAX_BOARD_DEPENDENCIES, type PrLink, PrLinkSchema } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  type CardActionRequestInput,
+  CardActionRequestSchema,
+  CardCreateRequestSchema,
+  type LaneSet,
+  MAX_BOARD_DEPENDENCIES,
+  type PrLink,
+  PrLinkSchema,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
@@ -124,11 +134,11 @@ describe('planClashes', () => {
     const subject = card({
       dependsOn: [{ task: { id: 'F2' }, until: 'released' }],
       history: [
-        { seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'lead' }, type: 'created', laneId: 'todo' },
+        { seq: 1, at: NOW, actor: { kind: 'ferret', name: 'lead', ferret: 'lead' }, type: 'created', laneId: 'todo' },
         {
           seq: 2,
           at: NOW,
-          actor: { kind: 'ferret', ferret: 'lead' },
+          actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
           type: 'undepended',
           task: { id: 'F3' },
           reason: 'F1 goes first',
@@ -149,11 +159,11 @@ describe('planClashes', () => {
     const subject = card({
       id: 'F3',
       history: [
-        { seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'lead' }, type: 'created', laneId: 'todo' },
+        { seq: 1, at: NOW, actor: { kind: 'ferret', name: 'lead', ferret: 'lead' }, type: 'created', laneId: 'todo' },
         {
           seq: 2,
           at: NOW,
-          actor: { kind: 'ferret', ferret: 'lead' },
+          actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
           type: 'undepended',
           task: { id: 'F2', machineId: 'machine-2' },
           reason: 'that one is elsewhere',
@@ -421,7 +431,6 @@ describe('queueBehindClashes', () => {
       index: new BoardIndex([subject, first], MACHINE),
       laneSets,
       now: NOW,
-      actor: { kind: 'ferret', ferret: 'lead' },
     });
 
     // Assert
@@ -430,7 +439,7 @@ describe('queueBehindClashes', () => {
       {
         seq: 2,
         at: NOW,
-        actor: { kind: 'daemon', ferret: 'lead' },
+        actor: { kind: 'daemon' },
         type: 'depended',
         task: { id: 'F2' },
         until: 'shipped',
@@ -438,7 +447,7 @@ describe('queueBehindClashes', () => {
       {
         seq: 3,
         at: NOW,
-        actor: { kind: 'daemon', ferret: 'lead' },
+        actor: { kind: 'daemon' },
         type: 'note',
         text: `${CLASH_QUEUED_PREFIX} &F2 to merge: both claim knip.json. It can be built now; its PR merges after &F2 ships.`,
       },
@@ -451,7 +460,6 @@ describe('queueBehindClashes', () => {
       index: new BoardIndex([subject], MACHINE),
       laneSets,
       now: NOW,
-      actor: { kind: 'owner' },
     });
     should(queued).equal(subject);
   });
@@ -510,7 +518,7 @@ describe('the board service queues clashing claims', () => {
     should(response.card.id).equal('F2');
     should(response.card.dependsOn).eql([{ task: { id: 'F1' }, until: 'shipped' }]);
     should(response.card.blockedBy).eql([{ id: 'F1' }]);
-    should(stored(ports, 'F2').history.at(-1)).match({ type: 'note', actor: { kind: 'daemon', ferret: 'lead' } });
+    should(stored(ports, 'F2').history.at(-1)).match({ type: 'note', actor: { kind: 'daemon' } });
     should(ports.sections).eql([DEPENDENCY_SECTION]);
   });
 

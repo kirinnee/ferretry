@@ -46,7 +46,7 @@ const orphan = (overrides: Partial<Card> = {}): Card =>
     laneId: 'implement',
     owner: 'gone',
     assignee: 'gone2',
-    createdBy: { kind: 'daemon', ferret: 'gone' },
+    createdBy: { kind: 'daemon' },
     ask: { text: 'review the screenshots', source: 'fy new' },
     askedBy: 'agent',
     ...overrides,
@@ -104,7 +104,7 @@ describe('adopting an orphaned card', () => {
       from: 'gone2',
       to: 'lead',
       adopted: { from: 'gone', reason: 'nobody is left on it' },
-      actor: { kind: 'ferret', ferret: 'lead' },
+      actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     });
   });
 
@@ -141,11 +141,7 @@ describe('adopting an orphaned card', () => {
 
     // Act
     await service.act('F1', CardActionRequestSchema.parse({ action: 'assign', assignee: 'kid' }), ferret('lead'));
-    await service.act(
-      'F2',
-      CardActionRequestSchema.parse({ action: 'drop', reason: 'not needed' }),
-      ferret('lead'),
-    );
+    await service.act('F2', CardActionRequestSchema.parse({ action: 'drop', reason: 'not needed' }), ferret('lead'));
     await service.act('F3', CardActionRequestSchema.parse({ action: 'move', to: 'closed' }), ferret('lead'));
 
     // Assert
@@ -382,7 +378,7 @@ describe('adopting an orphaned card', () => {
 describe('the adopt rule itself', () => {
   const context = (overrides: Partial<CardContext>): CardContext => ({
     now: NOW,
-    actor: { kind: 'ferret', ferret: 'lead' },
+    actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     standing: 'reader',
     laneSet: lanes(PROJECT),
     index: new BoardIndex([], MACHINE),

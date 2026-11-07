@@ -433,13 +433,13 @@ describe('who a card is for, in its view', () => {
   const spawned = card({
     id: 'F2',
     parent: { id: 'F1' },
-    createdBy: { kind: 'daemon', ferret: 'lead' },
+    createdBy: { kind: 'daemon' },
     ask: { text: 'a brief', source: 'session:lead' },
   });
   const childOwn = card({
     id: 'F3',
     parent: { id: 'F2' },
-    createdBy: { kind: 'ferret', ferret: 'child' },
+    createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     ask: { text: 'a follow-up', source: 'session:child' },
   });
   const cards = [owners, spawned, childOwn];

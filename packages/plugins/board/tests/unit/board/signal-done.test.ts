@@ -1,7 +1,14 @@
 import { describe, it } from 'bun:test';
 import { MAX_CARD_NOTE_LENGTH, MAX_BOARD_REASON_LENGTH, type PrLink } from '../../../contract/index.ts';
 import should from 'should';
-import { clip, DONE_WITHOUT_MESSAGE, doneLane, doneMove, doneNote, doneReason } from '../../../daemon/lib/board/index.ts';
+import {
+  clip,
+  DONE_WITHOUT_MESSAGE,
+  doneLane,
+  doneMove,
+  doneNote,
+  doneReason,
+} from '../../../daemon/lib/board/index.ts';
 import { card, lanes, NOW, oldQuickLanes, PROJECT, templateLanes } from './support.ts';
 
 const PR: PrLink = {
@@ -17,7 +24,7 @@ const PR: PrLink = {
   polledAt: null,
 };
 
-const daemon = { now: NOW, actor: { kind: 'daemon' as const, ferret: 'child' } };
+const daemon = { now: NOW, actor: { kind: 'daemon' as const } };
 
 describe('the done message on a card', () => {
   it('should say done with the message, or that it was signalled, cut at the field', () => {
@@ -165,7 +172,7 @@ describe('the done move', () => {
       reason: 'all green',
       auto: true,
       trigger: 'signal.done',
-      actor: { kind: 'daemon', ferret: 'child' },
+      actor: { kind: 'daemon' },
     });
   });
 

@@ -36,7 +36,7 @@ const NAMES: Readonly<Record<string, string>> = { [DENISHA]: 'denisha', [KIRIN]:
 const names: FerretNames = id => NAMES[id] ?? id;
 const lanes = laneSet();
 
-const ferret = (id: string) => ({ kind: 'ferret' as const, ferret: id });
+const ferret = (id: string) => ({ kind: 'ferret' as const, name: id, ferret: id });
 
 /** An event checked against the wire schema, so a test can never describe an event the daemon would not send. */
 const event = (fields: Record<string, unknown>): CardEvent =>
@@ -449,9 +449,9 @@ describe('renderCard', () => {
         event({ seq: 1, type: 'created', laneId: 'todo' }),
         event({ seq: 2, type: 'moved', from: 'todo', to: 'implement', backward: false, reason: null }),
         event({ seq: 3, type: 'note', text: 'started', actor: { kind: 'owner' } }),
-        event({ seq: 4, type: 'note', text: 'from chat', actor: { kind: 'owner', ferret: KIRIN } }),
+        event({ seq: 4, type: 'note', text: 'from chat', actor: { kind: 'owner' } }),
         event({ seq: 5, type: 'blocked', reason: 'vendor', actor: { kind: 'daemon' } }),
-        event({ seq: 6, type: 'note', text: 'checked', actor: { kind: 'owner' }, actorVia: 'admin-token' }),
+        event({ seq: 6, type: 'note', text: 'checked', actor: { kind: 'owner', via: 'admin-token' } }),
       ],
     });
 
@@ -603,7 +603,7 @@ describe('renderCard', () => {
     should(lines).containEql(`    1  ${AT}  denisha  created in Todo`);
     should(lines).containEql(`    2  ${AT}  denisha  moved Todo → Implement`);
     should(lines).containEql(`    3  ${AT}  owner  note: started`);
-    should(lines).containEql(`    4  ${AT}  owner via kirin  note: from chat`);
+    should(lines).containEql(`    4  ${AT}  owner  note: from chat`);
     should(lines).containEql(`    5  ${AT}  daemon  blocked: vendor`);
     // The admin token is said for what it is: never "owner".
     should(lines).containEql(
@@ -622,7 +622,7 @@ describe('renderCard', () => {
           seq: 2,
           trigger: 'deploy.done',
           actor: { kind: 'daemon' },
-          reportedBy: { kind: 'ferret', ferret: DENISHA },
+          reportedBy: { kind: 'ferret', name: DENISHA, ferret: DENISHA },
         }),
         event({
           ...moved,
@@ -632,8 +632,7 @@ describe('renderCard', () => {
           backward: true,
           trigger: 'pr.review_approved',
           actor: { kind: 'daemon' },
-          reportedBy: { kind: 'owner' },
-          reportedVia: 'admin-token',
+          reportedBy: { kind: 'owner', via: 'admin-token' },
         }),
       ],
     });

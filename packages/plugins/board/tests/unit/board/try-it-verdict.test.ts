@@ -30,7 +30,7 @@ const pr = (number: number, changes?: PrLink['changes'], state: PrLink['state'] 
 const tryable = (overrides: Partial<Card> = {}): Card =>
   card({
     ask: { text: 'make it', source: 'owner' },
-    createdBy: { kind: 'ferret', ferret: 'lead' },
+    createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     howToTest: '1. Open the Inbox\n2. Tap Done',
     ...overrides,
   });

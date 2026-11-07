@@ -165,15 +165,14 @@ describe('S-0033 AskSection', () => {
           text: 'Behind a flag',
           source: 'chat',
           at: '2026-08-01T09:20:00.000Z',
-          by: { kind: 'ferret', ferret: LEAD },
+          by: { kind: 'ferret', name: LEAD, ferret: LEAD },
         },
         // The admin token with no ferret's credential: it may be you or a ferret, so it is said as the token.
         {
           text: 'Also tablets',
           source: 'cli',
           at: '2026-08-01T09:30:00.000Z',
-          by: { kind: 'owner' },
-          byVia: 'admin-token',
+          by: { kind: 'owner', via: 'admin-token' },
         },
       ],
     });
@@ -391,7 +390,7 @@ describe('S-0112 HistorySection', () => {
   it('draws the newest event first with who did it and why', async () => {
     const task = card('F1', {
       history: [
-        { seq: 1, at: at(0), actor: { kind: 'ferret', ferret: LEAD }, type: 'created', laneId: 'todo' },
+        { seq: 1, at: at(0), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'created', laneId: 'todo' },
         {
           seq: 2,
           at: at(30),
@@ -416,9 +415,7 @@ describe('S-0112 HistorySection', () => {
 
   it('says what the admin token may be, as a tooltip on its name and in words a phone shows too', async () => {
     const task = card('F1', {
-      history: [
-        { seq: 1, at: at(0), actor: { kind: 'owner' }, actorVia: 'admin-token', type: 'created', laneId: 'todo' },
-      ],
+      history: [{ seq: 1, at: at(0), actor: { kind: 'owner', via: 'admin-token' }, type: 'created', laneId: 'todo' }],
     });
     const root = await show(<HistorySection context={context} now={NOW} task={task} />);
     const name = must(root.querySelector('.fy-board-timeline__row strong'), 'the actor');
@@ -441,10 +438,10 @@ describe('S-0112 HistorySection', () => {
   it('shows small changes inline as muted rows, with nothing that folds', async () => {
     const task = card('F1', {
       history: [
-        { seq: 1, at: at(0), actor: { kind: 'ferret', ferret: LEAD }, type: 'created', laneId: 'todo' },
-        { seq: 2, at: at(1), actor: { kind: 'ferret', ferret: LEAD }, type: 'file-claimed', path: 'a.ts' },
-        { seq: 3, at: at(2), actor: { kind: 'ferret', ferret: LEAD }, type: 'file-claimed', path: 'b.ts' },
-        { seq: 4, at: at(3), actor: { kind: 'ferret', ferret: LEAD }, type: 'file-claimed', path: 'c.ts' },
+        { seq: 1, at: at(0), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'created', laneId: 'todo' },
+        { seq: 2, at: at(1), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'file-claimed', path: 'a.ts' },
+        { seq: 3, at: at(2), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'file-claimed', path: 'b.ts' },
+        { seq: 4, at: at(3), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'file-claimed', path: 'c.ts' },
       ],
     });
     const root = await show(<HistorySection context={context} now={NOW} task={task} />);

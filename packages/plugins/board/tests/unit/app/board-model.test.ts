@@ -11,7 +11,6 @@ import {
   inDateRange,
   inLane,
   isMine,
-
   NO_BOARD_FILTERS,
   NO_DATE_RANGE,
   parseBoardFilters,
@@ -112,8 +111,8 @@ describe('mergeBoard', () => {
     ).toEqual(['F4']);
     expect(mergeBoard(machines, { ...NO_BOARD_FILTERS, mine: true }).cards.map(entry => entry.task.id)).toEqual(['F1']);
     expect(isMine(card('F2'))).toBe(false);
-    // A card opened on the admin token is an owner card underneath (`createdByVia` only labels it): still mine.
-    expect(isMine({ ...card('F5'), createdBy: { kind: 'owner' } })).toBe(true);
+    // A card opened on the admin token is an owner card underneath (its `via` only labels it): still mine.
+    expect(isMine({ ...card('F5'), createdBy: { kind: 'owner', via: 'admin-token' } })).toBe(true);
   });
 
   it('hides agent cards unless asked, or unless a ferret or an activity is chosen', () => {
@@ -130,10 +129,7 @@ describe('mergeBoard', () => {
   it('takes the agent cards the board is not showing out of the header counts, so a pill and its cards agree', () => {
     const laneSet = laneSetFor();
     const counted = (cards: ReturnType<typeof originCard>[]) =>
-      mergeBoard(
-        [{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, active: 4 } }],
-        NO_BOARD_FILTERS,
-      ).counts;
+      mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, active: 4 } }], NO_BOARD_FILTERS).counts;
     expect(laneSet.lanes.some(lane => lane.id === 'tested' && lane.category === 'verify')).toBe(true);
     const cards = [
       originCard('F1', 'human', null, { laneId: 'tested' }),

@@ -113,11 +113,11 @@ const external = (overrides: Partial<Card> = {}): Card => {
   return card({
     owner: 'child',
     assignee: 'grandchild',
-    createdBy: { kind: 'ferret', ferret: 'child' },
+    createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     ask: { text: 'make the gates ask me', source: 'owner' },
     summary: 'Gates raise one ask',
     howToTest: '1. Open the Inbox\n2. Answer the card',
-    history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'child' }, type: 'created', laneId }],
+    history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', name: 'child', ferret: 'child' }, type: 'created', laneId }],
     ...overrides,
     laneId,
   });
@@ -404,7 +404,15 @@ describe('the boot backfill and the sweep', () => {
     const w = fixture([
       external({
         laneId: 'tested',
-        history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'child' }, type: 'created', laneId: 'tested' }],
+        history: [
+          {
+            seq: 1,
+            at: NOW,
+            actor: { kind: 'ferret', name: 'child', ferret: 'child' },
+            type: 'created',
+            laneId: 'tested',
+          },
+        ],
       }),
     ]);
 
