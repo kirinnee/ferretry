@@ -66,6 +66,11 @@ class FakeClock {
     return () => this.#timers.delete(id);
   }
 
+  /** Moves the clock WITHOUT firing anything: a timer that fires late (R245). */
+  skew(ms: number): void {
+    this.#now += ms;
+  }
+
   advance(ms: number): void {
     this.#now += ms;
     for (const [id, timer] of [...this.#timers].sort((a, b) => a[1].at - b[1].at)) {
@@ -135,7 +140,9 @@ export interface Fixture {
   modesOff: Set<string>;
 }
 
-export async function fixture(options: { lease?: AccessLeasePolicy } = {}): Promise<Fixture> {
+export async function fixture(
+  options: { lease?: AccessLeasePolicy; crypto?: typeof relayCrypto } = {},
+): Promise<Fixture> {
   const identity = await newDaemonIdentity();
   const clock = new FakeClock();
   const device = new FakeDeviceMode();
@@ -164,7 +171,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy } = {}): Prom
     modesOff: new Set(),
   };
   const layer = createSessionLayer({
-    crypto: relayCrypto,
+    crypto: options.crypto ?? relayCrypto,
     identity,
     modes: key => {
       if (state.modesOff.has(key)) return undefined;
