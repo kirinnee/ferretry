@@ -5,6 +5,7 @@ import { failureResponse } from '../host/responses.ts';
 import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
+import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
@@ -259,7 +260,8 @@ interface Built {
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
   const throwaway = await testIdentity();
   const identity: IdentityPort =
-    options.identity ?? Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon' });
+    options.identity ??
+    Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon', binaries: PRODUCT_BINARIES });
   const identitySigner = createIdentitySigner(throwaway.key);
   const world: World = {
     options,

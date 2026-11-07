@@ -6,6 +6,7 @@ import { appendFileSync } from 'node:fs';
 import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
+import { PRODUCT_BINARIES } from './binaries.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
@@ -21,8 +22,8 @@ interface GeneratedRegistry {
 const REGISTRY = '../src/generated/plugins.ts';
 const VERSION = '5.0.0';
 const DEFAULT_PORT = 7457;
-/** The binary name is single-sourced from `packages/cli/package.json` `bin`; the release build replaces this. */
-const BINARY = process.env.FY_BINARY_NAME ?? 'fy';
+/** The client's binary name: the `bin` key of `packages/cli/package.json` (see `binaries.ts`), unless the operator names it. */
+const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -64,6 +65,7 @@ async function main(): Promise<number> {
   const outcome = await bootHost({
     home,
     version: VERSION,
+    binaries: { ...PRODUCT_BINARIES, client: BINARY },
     implementations: registry.daemonImplementations,
     adapters: realAdapters(home, sink, {
       binary: BINARY,

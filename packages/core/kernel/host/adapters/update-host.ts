@@ -9,10 +9,13 @@ import { dirname, isAbsolute, join } from 'node:path';
 import type { ExecutableFacts, UpdateHostPort } from '../../contract/ports.ts';
 
 /**
- * The client verb the launch runs, today's `daemon update` (`update-files.ts` CliUpdateLauncher). One constant, so
- * the 5.0 verb the Updates plugin declares is a one-line change.
+ * The client verb the launch runs: `<fy> update --run --to <target> --report <file>` (lead decision, batch 2 #1).
+ * `update` is the fy shell's own verb, so it works with Updates off; `--run` is the transaction itself, not the plan.
  */
-export const UPDATE_LAUNCH_VERB: readonly string[] = Object.freeze(['daemon', 'update']);
+export const UPDATE_LAUNCH_VERB: readonly string[] = Object.freeze(['update', '--run']);
+
+/** The operator / CI switch that keeps a compiled daemon off GitHub (`docs/updating.md`, `scripts/ci/test.sh`). */
+export const UPDATE_CHECK_SWITCH = 'FY_UPDATE_CHECK';
 
 /** A release number as GitHub tags it: `5.1.0`, `v5.1.0`, `5.1.0-rc.1`. */
 const RELEASE = /^v?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:-[0-9A-Za-z.]{1,40})?$/u;
@@ -43,6 +46,15 @@ function spawnDetached(
   }
 }
 
+/**
+ * Where the plugin's own declared files are, as paths INSIDE its state folder (the `path` of its declared state defs
+ * `report` and `log`). The host never spells either path itself: it takes what the plugin declared.
+ */
+export interface UpdateHostFiles {
+  readonly report: string;
+  readonly log: string;
+}
+
 export interface UpdateHostOptions {
   readonly home: string;
   /** The client's binary name (single-sourced, `fy`): it sits beside the daemon's executable. */
@@ -54,8 +66,8 @@ export interface UpdateHostOptions {
   readonly resolveLink?: (path: string) => Promise<string>;
 }
 
-/** The port for one plugin: its report and log live in its own state folder. */
-export function updateHostFor(options: UpdateHostOptions): (plugin: string) => UpdateHostPort {
+/** The port for one plugin: its report and log live where its declared state files say, in its own state folder. */
+export function updateHostFor(options: UpdateHostOptions): (plugin: string, files: UpdateHostFiles) => UpdateHostPort {
   const facts = options.process ?? {
     argv0: process.argv0,
     execPath: process.execPath,
@@ -65,11 +77,15 @@ export function updateHostFor(options: UpdateHostOptions): (plugin: string) => U
   };
   const spawn = options.spawn ?? spawnDetached;
   const resolveLink = options.resolveLink ?? (async (path: string) => await realpath(path));
-  return plugin => {
+  const environment = options.environment ?? process.env;
+  return (plugin, files) => {
     const directory = join(options.home, 'state', plugin);
+    const compiled = facts.main.startsWith('/$bunfs/');
     const port: UpdateHostPort = {
       release: options.release,
-      compiled: facts.main.startsWith('/$bunfs/'),
+      compiled,
+      // Today's rule (`update.ts`): checks run only for a compiled build, and the switch turns them off.
+      checks: compiled && environment[UPDATE_CHECK_SWITCH] !== 'off',
       executable: async () => ({
         ...facts,
         resolvedExecPath: await resolveLink(facts.execPath).catch(() => facts.execPath),
@@ -79,13 +95,15 @@ export function updateHostFor(options: UpdateHostOptions): (plugin: string) => U
         // THE LAUNCHED PATH IS argv0 when absolute: the install's link, not the store path behind it.
         const launched = isAbsolute(facts.argv0) ? facts.argv0 : facts.execPath;
         const client = join(dirname(launched), options.binary);
-        const report = join(directory, 'report.json');
+        const report = join(directory, files.report);
         try {
           // today's ensureDirectory(dirname(report), 0o700)
+          const logFile = join(directory, files.log);
           await mkdir(dirname(report), { recursive: true, mode: 0o700 });
-          spawn([client, ...UPDATE_LAUNCH_VERB, '--yes', '--to', target, '--report', report], {
-            environment: { ...(options.environment ?? process.env), FY_HOME: options.home },
-            logFile: join(directory, 'update.log'),
+          await mkdir(dirname(logFile), { recursive: true, mode: 0o700 });
+          spawn([client, ...UPDATE_LAUNCH_VERB, '--to', target, '--report', report], {
+            environment: { ...environment, FY_HOME: options.home },
+            logFile,
           });
           return { kind: 'started' };
         } catch (error) {
@@ -98,11 +116,15 @@ export function updateHostFor(options: UpdateHostOptions): (plugin: string) => U
 }
 
 /** What a plugin without `permissions.updateHost` (or a host without the adapter) holds: facts refuse, launches fail. */
-export function undeclaredUpdateHost(plugin: string, release: string): UpdateHostPort {
-  const why = `${plugin} did not declare permissions.updateHost.`;
+export function undeclaredUpdateHost(
+  plugin: string,
+  release: string,
+  why = `${plugin} did not declare permissions.updateHost.`,
+): UpdateHostPort {
   return Object.freeze({
     release,
     compiled: false,
+    checks: false,
     executable: async () => {
       throw new Error(why);
     },

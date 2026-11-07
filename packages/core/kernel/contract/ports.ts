@@ -714,16 +714,21 @@ export type UpdateLaunchOutcome = { readonly kind: 'started' } | { readonly kind
 
 /**
  * The daemon's own update seam (today's `DaemonUpdateService` host parts): the release this build carries, what the
- * running executable is, and one launch: `<client> daemon update --yes --to <target> --report <report>` (the verb is
- * the host's `UPDATE_LAUNCH_VERB`), detached in
- * its own process group so it survives the daemon's restart, its output appended to the plugin's `update.log` and
- * its report written to the plugin's `report.json` (both in the plugin's own state folder). No other command.
+ * running executable is, and one launch: `<fy> update --run --to <target> --report <report>` (the verb is the host's
+ * `UPDATE_LAUNCH_VERB`), detached in its own process group so it survives the daemon's restart. The plugin's declared
+ * state files `report` and `log` (its manifest `data.state`) say where the report is written and the output is
+ * appended; the host spells neither path. No other command.
  */
 export interface UpdateHostPort {
   /** The release number this build carries. */
   readonly release: string;
   /** Whether this is a compiled release (a source run has no release to compare with). */
   readonly compiled: boolean;
+  /**
+   * Whether the daemon asks GitHub for a newer release: a compiled build AND `FY_UPDATE_CHECK` not `off` (the
+   * operator / CI switch). The kernel reads the switch, so the plugin never reads the environment.
+   */
+  readonly checks: boolean;
   executable(): Promise<ExecutableFacts>;
   /** `target` is a release number (`5.1.0`, `v5.1.0-rc.1`); anything else is refused without a launch. */
   launchUpdate(target: string): Promise<UpdateLaunchOutcome>;
@@ -757,6 +762,18 @@ export interface IdentityPort {
   readonly daemonId: string;
   /** The host name with control and format characters removed, trimmed, at most 100 characters. */
   readonly daemonName: string;
+  /**
+   * The product's binary names, single-sourced from the `bin` keys of `packages/cli/package.json` and this package:
+   * the client the owner types (`fy`) and the daemon (`fyd`). Plugins name them in sentences and requests from here,
+   * never as a literal.
+   */
+  readonly binaries: BinaryNames;
+}
+
+/** The names of the two programs the product ships. */
+export interface BinaryNames {
+  readonly client: string;
+  readonly daemon: string;
 }
 
 // snapshot / lifecycle ─────────────────────────────────────────────────────────────────────────────────────────────

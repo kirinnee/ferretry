@@ -1,4 +1,4 @@
-import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { BinaryNames, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
@@ -75,7 +75,8 @@ import { noWebSockets } from './adapters/process.ts';
 import { ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
-import { undeclaredUpdateHost } from './adapters/update-host.ts';
+import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
+import { PRODUCT_BINARIES } from './binaries.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
@@ -169,8 +170,11 @@ export interface HostAdapters {
   readonly hostFacts?: HostFactsPort;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
   readonly compressor?: ResponseCompressor;
-  /** `kernel.updateHost` per plugin. Absent: facts refuse, launches fail. */
-  readonly updateHost?: (plugin: string) => UpdateHostPort;
+  /**
+   * `kernel.updateHost` per plugin, over the plugin's own declared `report` and `log` state files (their paths inside
+   * its state folder). Absent: facts refuse, launches fail.
+   */
+  readonly updateHost?: (plugin: string, files: UpdateHostFiles) => UpdateHostPort;
   /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
   readonly pinner?: SessionRootPinner;
   /** Private scratch folders. Absent: every open is refused. */
@@ -210,6 +214,8 @@ export interface HostOptions {
   readonly timings?: DaemonTimings;
   /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
   readonly backgroundDelayMs?: number;
+  /** The product's binary names for `kernel.identity`. Default: read from the repo's `bin` keys. */
+  readonly binaries?: BinaryNames;
 }
 
 export type PluginStatus = 'serving' | 'skeleton' | 'failed' | 'damaged' | 'off' | 'refused';
@@ -254,6 +260,21 @@ export interface RunningHost {
 export type BootOutcome =
   | { readonly kind: 'running'; readonly host: RunningHost }
   | { readonly kind: 'refused'; readonly sentence: string; readonly trace: readonly string[] };
+
+/**
+ * The plugin's update seam: the real one only for a plugin that declared `permissions.updateHost` AND the state files
+ * `report` and `log` the launch writes to. Their paths are the plugin's declared ones, never a second spelling.
+ */
+function updateHostOf(manifest: Manifest, adapters: HostAdapters, version: string): UpdateHostPort {
+  if (manifest.permissions?.updateHost !== true || adapters.updateHost === undefined)
+    return undeclaredUpdateHost(manifest.id, version);
+  const declared = (name: string): string | undefined => manifest.data?.state?.find(def => def.name === name)?.path;
+  const report = declared('report');
+  const log = declared('log');
+  if (report === undefined || log === undefined)
+    return undeclaredUpdateHost(manifest.id, version, `${manifest.id} did not declare the state files report and log.`);
+  return adapters.updateHost(manifest.id, { report, log });
+}
 
 const isCore = (id: string): boolean => (CORE_IDS as readonly string[]).includes(id);
 
@@ -357,6 +378,7 @@ async function bootLocked(
   const identityPort = Object.freeze({
     daemonId: identity.daemonId,
     daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
+    binaries: options.binaries ?? PRODUCT_BINARIES,
   });
   const websockets = adapters.websocket ?? noWebSockets();
   const sessionSigner = createIdentitySigner(identity);
@@ -603,10 +625,7 @@ async function bootLocked(
     ),
     identity: identityPort,
     paths: ownerPaths,
-    updateHost:
-      manifest.permissions?.updateHost === true && adapters.updateHost !== undefined
-        ? adapters.updateHost(manifest.id)
-        : undeclaredUpdateHost(manifest.id, options.version),
+    updateHost: updateHostOf(manifest, adapters, options.version),
     hostFacts:
       manifest.permissions?.hostFacts === true
         ? (adapters.hostFacts ?? NO_HOST_FACTS)
