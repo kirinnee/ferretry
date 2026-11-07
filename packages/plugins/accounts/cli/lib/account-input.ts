@@ -1,5 +1,7 @@
+import { FyHttpError } from '../shell.ts';
 import {
   AccountIdSchema,
+  LoginRecipeProposalIdSchema,
   LOGIN_METHODS,
   LOGIN_PASSWORD_MAX_LENGTH,
   LOGIN_PASSWORD_MIN_LENGTH,
@@ -161,4 +163,26 @@ export function methodOf(current: LoginMethod | undefined, options: MethodFlags)
   });
   if (!parsed.success) throw new Error(parsed.error.issues.map(issue => issue.message).join('; '));
   return parsed.data;
+}
+
+export function proposalHandle(value: string): string {
+  const parsed = LoginRecipeProposalIdSchema.safeParse(value.trim());
+  if (!parsed.success) throw new Error(`"${value}" is not a proposal id: they look like rp_0123456789abcdef`);
+  return parsed.data;
+}
+
+/** The owner's words for what the daemon refused about a recipe, by its code. */
+export function recipeRefusal(error: unknown): unknown {
+  if (!(error instanceof FyHttpError)) return error;
+  if (error.code === 'recipe_holds_value')
+    return new Error(
+      'that recipe holds a saved or vaulted value, which a recipe never may: name the account with [[ID]] and describe the step instead. Nothing was changed',
+    );
+  if (error.code === 'stale_proposal')
+    return new Error(
+      'the recipe changed after the ferret proposed this one, so approving it would undo that change unseen: decline it (`site recipe decline`) or edit the recipe yourself',
+    );
+  if (error.code === 'unknown_proposal')
+    return new Error('there is no such proposal: it was already answered or replaced (see `account site recipe show`)');
+  return error;
 }

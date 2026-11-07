@@ -38,6 +38,7 @@ export interface IAccountGateway {
   addSignIn(account: string, body: AddSignInRequest): Promise<SignInSummary>;
   putSignIn(signIn: string, body: PutSignInRequest): Promise<SignInSummary>;
   removeSignIn(signIn: string): Promise<RemovedSignIn>;
+  decideRecipe(signIn: string, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary>;
   /** The owner route: one line of `config/account-defaults.yaml`, or `account: null` to remove it. */
   putDefault(body: PutAccountDefaultRequest): Promise<PutAccountDefaultResult>;
   /** A 2FA key with no value (sms, email, push, security key, an authenticator only the owner holds). */
@@ -68,4 +69,5 @@ export interface AccountPorts {
   readonly prompt: IAccountPrompt;
   /** Whether stdin and stdout are a terminal a person is typing at. */
   readonly interactive: boolean;
+  readonly readRecipe: (file: string) => Promise<string>;
 }

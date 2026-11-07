@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AskDraft, AskId, CloseReason } from '@ferretry/core-asks/contract';
+import type { AskDraft, AskRef, CloseReason } from '@ferretry/core-asks/contract';
 import { askSourceConformance, FakeAsks } from '@ferretry/core-asks/contract/testing';
 import should from 'should';
 import {
@@ -23,18 +23,22 @@ const PROPOSAL = `rp_${'d'.repeat(16)}`;
 
 class Recording extends FakeAsks {
   readonly raised: AskDraft[] = [];
-  readonly closed: [AskId, CloseReason][] = [];
-  override async raise(draft: AskDraft): Promise<AskId> {
+  readonly closed: [AskRef, CloseReason][] = [];
+  override async raise(draft: AskDraft): Promise<AskRef> {
     this.raised.push(draft);
     return await super.raise(draft);
   }
-  override async close(id: AskId, reason: CloseReason): Promise<void> {
+  override async close(id: AskRef, reason: CloseReason): Promise<void> {
     this.closed.push([id, reason]);
     await super.close(id, reason);
   }
 }
 
-const card = { ask: 'Approve the sign-ins for this task?', context: 'The ferret says: deploy', howToResolve: 'Open it' };
+const card = {
+  ask: 'Approve the sign-ins for this task?',
+  context: 'The ferret says: deploy',
+  howToResolve: 'Open it',
+};
 
 askSourceConformance('sign-in-approval', signInApprovalSource, {
   valid: [

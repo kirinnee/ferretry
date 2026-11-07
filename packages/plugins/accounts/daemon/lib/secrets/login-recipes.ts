@@ -54,11 +54,8 @@ export interface RecipeAccounts {
  *   that is audited. Every applied change bumps the sign-in's `recipeVersion`.
  */
 
-/**
- * Which sign-in a proposal is for: named (`{ signIn }`), or an account's ONLY sign-in (the older `{ login }`, from
- * `login.propose` and `account.propose { login }`). Both go through {@link LoginRecipeService.propose}, ONE path.
- */
-export type RecipeProposalTarget = { readonly signIn: SignInId } | { readonly login: AccountId };
+/** A proposal always names one canonical sign-in. */
+export type RecipeProposalTarget = { readonly signIn: SignInId };
 
 /** Whether a text holds any value the daemon masks: the redactor would change it. Rejects when it cannot tell. */
 export interface RecipeValueCheck {
@@ -127,27 +124,16 @@ export class LoginRecipeService {
     if (scrubbed !== recipe) throw new RecipeValueError(HOLDS_VALUE);
   }
 
-  /**
-   * WHICH SIGN-IN a proposal is for, and its account: the one named, or — for the older `{ login }` — the account's ONLY
-   * sign-in. An account that signs in nowhere, or at several places, is refused: the ferret names the sign-in.
-   */
+  /** Resolve the canonical sign-in and its account. */
   async resolve(
     target: RecipeProposalTarget,
   ): Promise<{ readonly signIn: SignInSummary; readonly account: AccountSummary }> {
-    const found = proposalTarget(
-      await this.ports.accounts.list(),
-      'signIn' in target ? { signIn: target.signIn } : { login: target.login },
-    );
+    const found = proposalTarget(await this.ports.accounts.list(), target);
     if (!found.ok) throw this.ports.refuse(found.refusal, found.words);
     return { signIn: found.signIn, account: found.account };
   }
 
-  /**
-   * A FERRET proposes a recipe for one SIGN-IN after signing in there: the older `{ login }` is resolved to the
-   * account's only sign-in FIRST ({@link resolve}), and every check below runs once, on that canonical sign-in. The text
-   * is checked for values; then it applies at once only if the owner allowed that for THIS sign-in, and otherwise
-   * waits on a card.
-   */
+  /** A ferret proposes steps for one sign-in; only its explicit auto-apply permission applies them. */
   async propose(
     sessionId: string,
     target: RecipeProposalTarget,

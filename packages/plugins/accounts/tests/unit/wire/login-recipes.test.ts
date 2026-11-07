@@ -3,14 +3,16 @@ import {
   foldObservation,
   hidesCharacters,
   LoginRecipeProposeRequestSchema,
-  LoginEntrySummarySchema,
-  LoginHintSchema,
+  AccountSummarySchema,
+  SignInSummarySchema,
+  type SignInSummary,
+  accountHintsFor,
+  accountHintSummary,
+  AccountHintSchema,
   LoginObservedSchema,
   LoginRecipeSchema,
-  loginHintsFor,
-  loginHintSummary,
   observedWords,
-  PutLoginEntryRequestSchema,
+  PutSignInRequestSchema,
   recipeDiff,
   recipeDiffText,
   recipeReferences,
@@ -18,15 +20,33 @@ import {
 } from '../../../contract/routes/index.ts';
 
 const AT = '2026-10-31T09:00:00.000Z';
-const entry = (id: string, extra: Record<string, unknown> = {}) =>
-  LoginEntrySummarySchema.parse({
-    id,
-    label: id.toLowerCase(),
-    match: [],
-    fields: { password: true, totp: false },
+let nextSignIn = 0;
+const entry = (id: string, extra: Record<string, unknown> = {}): SignInSummary => {
+  const { domains, match, ...fields } = extra;
+  return SignInSummarySchema.parse({
+    id: 'si_' + (++nextSignIn).toString(16).padStart(16, '0'),
+    account: id,
+    place: { kind: 'site', domains: domains ?? [], match: match ?? [id.toLowerCase() + '.test'] },
+    method: { kind: 'password' },
     createdAt: AT,
     updatedAt: AT,
-    ...extra,
+    ...fields,
+  });
+};
+const hintsFor = (site: string, signIns: readonly SignInSummary[]) =>
+  accountHintsFor(site, {
+    accounts: [...new Set(signIns.map(s => s.account))].map(id =>
+      AccountSummarySchema.parse({
+        id,
+        label: id.toLowerCase(),
+        fields: { password: true },
+        factors: [],
+        signIns: signIns.filter(s => s.account === id).map(s => s.id),
+        createdAt: AT,
+        updatedAt: AT,
+      }),
+    ),
+    signIns,
   });
 
 describe('a recipe', () => {
@@ -48,9 +68,9 @@ describe('a recipe', () => {
   });
 
   it('should travel in a change, and null removes it', () => {
-    expect(PutLoginEntryRequestSchema.safeParse({ recipe: 'steps', autoApplyRecipe: true }).success).toBe(true);
-    expect(PutLoginEntryRequestSchema.safeParse({ recipe: null }).success).toBe(true);
-    expect(PutLoginEntryRequestSchema.safeParse({ recipe: 'a\u0000b' }).success).toBe(false);
+    expect(PutSignInRequestSchema.safeParse({ recipe: 'steps', autoApplyRecipe: true }).success).toBe(true);
+    expect(PutSignInRequestSchema.safeParse({ recipe: null }).success).toBe(true);
+    expect(PutSignInRequestSchema.safeParse({ recipe: 'a\u0000b' }).success).toBe(false);
   });
 });
 
@@ -126,27 +146,27 @@ describe('the hint carries recipes', () => {
   });
 
   it('should list a login its recipe names as a provider, once', () => {
-    const hints = loginHintsFor('vercel.com', [google, okta, vercel]);
-    expect(hints.map(hint => [hint.id, hint.role])).toEqual([
+    const hints = hintsFor('vercel.com', [google, okta, vercel]);
+    expect(hints.map(hint => [hint.account.id, hint.role])).toEqual([
       ['VERCEL', 'site'],
       ['GOOGLE', 'provider'],
       ['OKTA', 'provider'],
     ]);
     expect(hints[1]?.recipe).toBe('Type the email, then the password.');
-    for (const hint of hints) expect(LoginHintSchema.safeParse(hint).success).toBe(true);
+    for (const hint of hints) expect(AccountHintSchema.safeParse(hint).success).toBe(true);
   });
 
   it('should tell the ferret the steps and how to propose better ones', () => {
-    const summary = loginHintSummary('vercel.com', loginHintsFor('vercel.com', [google, okta, vercel]));
+    const summary = accountHintSummary('vercel.com', hintsFor('vercel.com', [google, okta, vercel]));
     expect(summary).toContain("Recipe (the owner's steps), between the markers:\n<<<recipe\nOpen vercel.com");
     expect(summary).toContain('[[OKTA]]\nrecipe>>>');
     expect(summary).toContain('account_propose');
-    expect(loginHintSummary('nothing.com', [])).not.toContain('account_propose');
+    expect(accountHintSummary('nothing.com', [])).not.toContain('account_propose');
   });
 
   it('I133 should still have no field for a value', () => {
-    const [hint] = loginHintsFor('vercel.com', [vercel]);
-    expect(LoginHintSchema.safeParse({ ...hint, password: 'hunter2' }).success).toBe(false);
+    const [hint] = hintsFor('vercel.com', [vercel]);
+    expect(AccountHintSchema.safeParse({ ...hint, password: 'hunter2' }).success).toBe(false);
   });
 });
 
@@ -191,8 +211,8 @@ describe('what the daemon saw, said the other way', () => {
 
   it('should tell the ferret what the daemon saw in its hint', () => {
     const observed = [seen('page', true)];
-    const [hint] = loginHintsFor('x.test', [entry('X', { match: ['x.test'], observed })]);
-    expect(loginHintSummary('x.test', hint === undefined ? [] : [hint])).toContain('Seen: x.test: password field');
+    const [hint] = hintsFor('x.test', [entry('X', { match: ['x.test'], observed })]);
+    expect(accountHintSummary('x.test', hint === undefined ? [] : [hint])).toContain('Seen: x.test: password field');
   });
 });
 
@@ -226,9 +246,9 @@ describe('a recipe hides nothing from the owner', () => {
 
   it('I134 S138 should tell the ferret when the steps are an unreviewed ferret’s, not the owner’s', () => {
     const auto = entry('X', { match: ['x.test'], recipe: 'run this', recipeBy: 'ferret' });
-    const summary = loginHintSummary('x.test', loginHintsFor('x.test', [auto]));
+    const summary = accountHintSummary('x.test', hintsFor('x.test', [auto]));
     expect(summary).toContain("a ferret's unreviewed steps, NOT the owner's");
-    const [hint] = loginHintsFor('x.test', [{ ...auto, recipe: undefined }]);
+    const [hint] = hintsFor('x.test', [{ ...auto, recipe: undefined }]);
     expect(hint).not.toHaveProperty('recipeBy');
   });
 });

@@ -1,6 +1,7 @@
 import {
   type AccountList,
   type AddSignInRequest,
+  LoginRecipeSchema,
   type PutSignInRequest,
   type SignInSummary,
 } from '../../contract/routes/index.ts';
@@ -12,10 +13,12 @@ import {
   onOrOff,
   placeOf,
   type PlaceFlags,
+  proposalHandle,
+  recipeRefusal,
   signInHandle,
 } from './account-input.ts';
 import type { AccountPorts } from './account-ports.ts';
-import { renderSignInLine, renderSignInList } from './account-render.ts';
+import { renderSignInLine, renderSignInList, renderSignInRecipe } from './account-render.ts';
 
 export interface SignInListOptions {
   readonly json?: boolean | undefined;
@@ -29,6 +32,10 @@ export interface SignInAddOptions extends PlaceFlags, MethodFlags {
 /** `fy account site edit`: each flag names a part to change; a part not named is kept. */
 export interface SignInEditOptions extends PlaceFlags, MethodFlags {
   readonly autoApplyRecipe?: string | undefined;
+}
+
+export interface SignInRecipeSetOptions {
+  readonly file?: string | undefined;
 }
 
 export interface SignInRemoveOptions {
@@ -97,6 +104,60 @@ export class SignInController {
     }
     await this.ports.gateway.removeSignIn(id);
     this.ports.out.success(`Removed ${id} from ${current.account}.`);
+  }
+
+  /** The recipe, what the daemon saw, and each ferret's proposal as the diff it would make. */
+  async recipeShow(signIn: string, options: SignInListOptions): Promise<void> {
+    const list = await this.#list();
+    const current = this.#in(list, signInHandle(signIn));
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify(current, null, 2)
+        : renderSignInRecipe(
+            current,
+            list.accounts.find(account => account.id === current.account),
+          ),
+    );
+  }
+
+  /** Replaces the whole recipe with Markdown from a file or standard input. A recipe never holds a value. */
+  async recipeSet(signIn: string, options: SignInRecipeSetOptions): Promise<void> {
+    const id = signInHandle(signIn);
+    if (options.file === undefined)
+      throw new Error('name the Markdown: --file <path>, or --file - to read standard input');
+    const text = await this.ports.readRecipe(options.file);
+    const parsed = LoginRecipeSchema.safeParse(text);
+    if (!parsed.success)
+      throw new Error(
+        `that is not a usable recipe: ${parsed.error.issues.map(issue => issue.message).join('; ')} (1 to 4000 characters of plain lines)`,
+      );
+    await this.#signIn(id);
+    const saved = await this.ports.gateway.putSignIn(id, { recipe: parsed.data }).catch((error: unknown) => {
+      throw recipeRefusal(error);
+    });
+    this.ports.out.success(`Saved the recipe of ${renderSignInLine(saved)}`);
+  }
+
+  async recipeClear(signIn: string): Promise<void> {
+    const id = signInHandle(signIn);
+    const current = await this.#signIn(id);
+    if (current.recipe === undefined) return void this.ports.out.success(`${id} has no recipe to clear.`);
+    await this.ports.gateway.putSignIn(id, { recipe: null });
+    this.ports.out.success(`Cleared the recipe of ${id}.`);
+  }
+
+  /** Makes the ferret's proposal the recipe, unless the recipe changed since it was made. */
+  async recipeDecide(signIn: string, proposalId: string, decision: 'approve' | 'decline'): Promise<void> {
+    const id = signInHandle(signIn);
+    const proposal = proposalHandle(proposalId);
+    const saved = await this.ports.gateway.decideRecipe(id, proposal, decision).catch((error: unknown) => {
+      throw recipeRefusal(error);
+    });
+    this.ports.out.success(
+      decision === 'approve'
+        ? `Approved ${proposal}: that is now the recipe of ${renderSignInLine(saved)}`
+        : `Declined ${proposal}: the recipe of ${id} is as it was.`,
+    );
   }
 
   async #signIn(id: string): Promise<SignInSummary> {

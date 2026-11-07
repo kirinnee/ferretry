@@ -1,7 +1,7 @@
 import { implementCli, type VerbHandler } from '@ferretry/kernel/manifest';
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import manifest from '../manifest.ts';
-import { nowMs, ownSessionId, sleep, TerminalPrompt } from './adapters/terminal.ts';
+import { nowMs, ownSessionId, recipeReader, sleep, TerminalPrompt } from './adapters/terminal.ts';
 import { AccountController } from './lib/account-controller.ts';
 import { ProtocolAccountGateway } from './lib/account-gateway.ts';
 import { accountVerbs } from './lib/commands.ts';
@@ -19,12 +19,19 @@ import { ExitStatus } from './shell.ts';
  * neither half answers says the skeleton sentence and exits 1.
  */
 export default implementCli(manifest, {
-  build({ client, io }) {
+  build(ctx) {
+    const { client, io } = ctx;
     const exit = new ExitStatus();
     const out = { success: (message: string) => io.out(`${message}\n`) };
     const prompt = new TerminalPrompt();
     const gateway = new ProtocolAccountGateway(client);
-    const ports = { gateway, out, prompt, interactive: io.isTty };
+    const ports = {
+      gateway,
+      out,
+      prompt,
+      interactive: io.isTty,
+      readRecipe: recipeReader(ctx as typeof ctx & { readText?: (path: string) => Promise<string> }),
+    };
     const controllers = () => ({
       accounts: new AccountController(ports),
       signIns: new SignInController(ports),

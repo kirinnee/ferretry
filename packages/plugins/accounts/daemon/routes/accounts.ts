@@ -31,6 +31,9 @@ import {
   type AccountHintList,
   type AccountId,
   AccountIdSchema,
+  LoginRecipeProposalIdSchema,
+  LoginRecipeDecisionSchema,
+  type SignInSummary,
   type AccountList,
   type AccountLookAlike,
   AccountPairRequestSchema,
@@ -91,7 +94,9 @@ export interface RecipeMasking {
 export interface AccountRoutesDeps {
   /** Management only: it seals and never opens. */
   readonly accounts: AccountDirectory;
-  readonly recipes?: RecipeMasking;
+  readonly recipes?: RecipeMasking & {
+    decideSignIn?(id: SignInId, proposal: string, decision: 'approve' | 'decline'): Promise<SignInSummary>;
+  };
   /** The vault's one look-alike answer (handles only): the only part of it a route holds. */
   readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
   readonly defaults?: AccountDefaults;
@@ -200,6 +205,13 @@ async function servedAccounts(accounts: AccountDirectory, recipes: RecipeMasking
       ({ recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...signIn }) => signIn,
     ),
   };
+}
+
+/** Metadata-only writes are reads too: never answer an unchecked stored recipe when its provider is absent. */
+async function servedSignIn(signIn: SignInSummary, recipes: RecipeMasking | undefined): Promise<SignInSummary> {
+  if (recipes !== undefined) return (await recipes.scrubbedAccounts({ accounts: [], signIns: [signIn] })).signIns[0]!;
+  const { recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...bare } = signIn;
+  return bare;
 }
 
 async function listAccounts(accounts: AccountDirectory, recipes: RecipeMasking | undefined): Promise<ApiResponse> {
@@ -352,13 +364,13 @@ const unavailable =
 
 /** The `/v1/accounts` routes of half a, keyed as the manifest declares them. */
 export function accountRoutes(deps: AccountRoutesDeps) {
-  const { accounts, recipes, lookAlike, defaults, seeds } = deps;
+  const { accounts, lookAlike, defaults, seeds } = deps;
   return {
     // The OWNER's view: which fields each account holds, which 2FA keys Ferretry makes codes for and whether they
     // worked, every username and place. A ferret reads `/v1/accounts/hint` instead.
     'GET /v1/accounts': async (call: Call) => {
       ownerOnly(call, 'list the accounts');
-      return await listAccounts(accounts, recipes);
+      return await listAccounts(accounts, deps.recipes);
     },
     'GET /v1/accounts/hint': async (call: Call) =>
       jsonResponse(await accountHint(deps, call.request.query.get('site')?.[0] ?? '', callingSession(call))),
@@ -374,12 +386,25 @@ export function accountRoutes(deps: AccountRoutesDeps) {
     'PUT /v1/accounts/sign-ins/:signIn': owned('change a sign-in', async call => {
       const signIn = pathSignInId(call);
       const change = await parseBody(call.request, PutSignInRequestSchema);
-      await checkedRecipe(recipes, change.recipe);
+      await checkedRecipe(deps.recipes, change.recipe);
       const changed = await accounts.putSignIn(signIn, change);
-      return recipes === undefined
-        ? changed
-        : (await recipes.scrubbedAccounts({ accounts: [], signIns: [changed] })).signIns[0];
+      return await servedSignIn(changed, deps.recipes);
     }),
+    'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId': owned(
+      'approve or decline a recipe proposal',
+      async call => {
+        const signIn = pathSignInId(call);
+        const proposal = LoginRecipeProposalIdSchema.safeParse(
+          decodeParameter(call.params.get('proposalId') ?? '') ?? '',
+        );
+        if (!proposal.success) throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
+        const { decision } = await parseBody(call.request, LoginRecipeDecisionSchema);
+        const recipes = deps.recipes;
+        if (recipes?.decideSignIn === undefined)
+          throw new ApiError(503, 'this daemon cannot answer recipes yet', 'unavailable');
+        return await recipes.decideSignIn(signIn, proposal.data, decision);
+      },
+    ),
     'DELETE /v1/accounts/sign-ins/:signIn': owned('remove a sign-in', async call => {
       const signIn = pathSignInId(call);
       if (!(await accounts.removeSignIn(signIn)))
@@ -431,11 +456,9 @@ export function accountRoutes(deps: AccountRoutesDeps) {
     'POST /v1/accounts/:id/sign-ins': owned('add a sign-in', async call => {
       const id = pathAccountId(call);
       const add = await parseBody(call.request, AddSignInRequestSchema);
-      await checkedRecipe(recipes, add.recipe);
+      await checkedRecipe(deps.recipes, add.recipe);
       const added = await accounts.addSignIn(id, add);
-      return recipes === undefined
-        ? added
-        : (await recipes.scrubbedAccounts({ accounts: [], signIns: [added] })).signIns[0];
+      return await servedSignIn(added, deps.recipes);
     }),
     'POST /v1/accounts/:id/merge': owned('merge accounts', async call => {
       const id = pathAccountId(call);

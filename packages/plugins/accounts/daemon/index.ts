@@ -45,7 +45,10 @@ export default implementDaemon(manifest, {
       subscribers: b.subscribers,
       // One source for every Accounts card: a plan, a rule suggestion or suspension, a phone approval, a recipe
       // proposal, a staged 2FA seed. Its refs name an id only; Asks' generic answer creates nothing.
-      hooks: { [SIGN_IN_APPROVAL_HOOK]: b.hooks['ask.sources:sign-in-approval'] } as Half['hooks'],
+      hooks: {
+        [SIGN_IN_APPROVAL_HOOK]: b.hooks['ask.sources:sign-in-approval'],
+        'redaction.sources:source': a.masks,
+      } as Half['hooks'],
     } satisfies Half;
   },
 });

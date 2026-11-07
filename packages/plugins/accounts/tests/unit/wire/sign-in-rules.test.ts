@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SignInRuleStageIdSchema, type TaskPlanStageId, type TwoFactorStageId } from '../../../contract/routes/account-ids.ts';
+import {
+  SignInRuleStageIdSchema,
+  type TaskPlanStageId,
+  type TwoFactorStageId,
+} from '../../../contract/routes/account-ids.ts';
 import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../../contract/routes/accounts.ts';
 import { sha256Hex } from '../../../contract/routes/sha256.ts';
 import * as rules from '../../../contract/routes/sign-in-rules.ts';
@@ -787,7 +791,7 @@ describe('standing sign-in rules: the 2FA key fingerprint', () => {
 });
 
 describe('standing sign-in rules: the record on disk', () => {
-  it('should refuse a record whose unsigned overlay would widen the signed body', () => {
+  it('S129 should refuse a record whose unsigned overlay would widen the signed body', () => {
     assertRejects([
       {
         name: 'a proof from another device',

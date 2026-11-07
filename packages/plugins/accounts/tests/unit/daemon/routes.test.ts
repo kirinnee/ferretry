@@ -25,7 +25,12 @@ const host = async (uses?: Readonly<Record<string, unknown>>, gate?: StandInAdmi
     plugins: [accounts],
     ...(uses === undefined ? {} : { uses }),
     ...(gate === undefined ? {} : { gate }),
-    fakes: { vault: new FakeVault(), asks: new FakeAsks(), sealed: new FakeSealedDocuments() },
+    fakes: {
+      gate: { audit: async () => undefined },
+      vault: new FakeVault(),
+      asks: new FakeAsks(),
+      sealed: new FakeSealedDocuments(),
+    },
   });
 
 const F1 = 'F1' as FerretId;
@@ -135,8 +140,11 @@ describe('the account routes through the kernel', () => {
     should(unusable.json<{ code: string }>().code).equal('no_sign_in_here');
   });
 
-  it('S79 S81 should write the owner’s line through the kernel, take it away again, and move it with a rename', async () => {
-    const h = await host();
+  it('S81 S79 should write the owner’s line through the kernel, take it away again, and move it with a rename', async () => {
+    const gate = Object.assign(new StandInAdmission(() => ownerStanding()), {
+      judgeConfigWrite: () => 'apply' as const,
+    });
+    const h = await host(undefined, gate);
     await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
     await h.request('POST', '/v1/accounts/GITHUB/sign-ins', {
       body: { place: { kind: 'site', domains: ['github.com'], match: ['github.com'] } },

@@ -9,8 +9,7 @@ import type { BrowserElementTarget } from './vault-inputs.ts';
 
 // ─── audit (today's `lib/audit/types.ts`) ─────────────────────────────────────────────────────────────────────────
 
-// TODO(contract): Accounts' manifest needs only Vault and Asks; the sink is bound to `GateApi.audit` once Gate is in
-// `needs` (or a `uses`). Today's shape is kept so the services' calls are byte for byte.
+// Today's service shape is bound to GateApi.audit at composition; Gate stamps the kept record.
 
 /** One thing that happened, as an emitter describes it. The instant is the log's to stamp. */
 export interface AuditEntry {

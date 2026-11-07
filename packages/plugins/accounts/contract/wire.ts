@@ -10,6 +10,7 @@
 import { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema } from '@ferretry/core-gate/contract';
 import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
+import { LoginRecipeProposalIdSchema } from './routes/login-recipes.ts';
 
 export { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema };
 
@@ -150,6 +151,7 @@ export const SignInApprovalRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('rule-suggestion'), suggestion: SignInRuleSuggestionIdSchema }),
   z.strictObject({ kind: z.literal('rule-suspended'), rule: SignInRuleIdSchema }),
   z.strictObject({ kind: z.literal('phone-approval'), id: PhoneApprovalIdSchema }),
+  z.strictObject({ kind: z.literal('recipe-proposal'), signIn: SignInIdSchema, proposal: LoginRecipeProposalIdSchema }),
   /** A staged 2FA seed waiting for the owner's passkey (S101): the stage alone, never the account. */
   z.strictObject({ kind: z.literal('two-factor-seed'), stage: TwoFactorStageIdSchema }),
 ]);

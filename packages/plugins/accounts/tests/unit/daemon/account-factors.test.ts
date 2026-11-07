@@ -59,7 +59,7 @@ describe('2FA keys in the account store', () => {
     ).equal('no_such_field');
   });
 
-  it('S10 should mask every seed an account keeps, by its key', async () => {
+  it('should label every sealed seed and password for the redactor source', async () => {
     // Arrange
     const w = await world();
 

@@ -4,6 +4,7 @@ import type { AccountIndexDocument } from '../../../contract/routes/index.ts';
 import { MemoryCipher, vaultSealedStore } from '../../../daemon/adapters/vault-sealed.ts';
 import { AccountDirectory, AccountVault } from './lib.ts';
 import { CLOCK, MemoryLoginIndex, NamedSealedDocuments } from './support.ts';
+import manifest from '../../../manifest.ts';
 
 /**
  * The account store over the Vault's sealed-document handle (`daemon/adapters/vault-sealed.ts`): the copied store
@@ -38,6 +39,21 @@ const sealedNames = (index: MemoryLoginIndex): string[] =>
   Object.values(index.accounts.accounts).flatMap(account => Object.values(account.seals ?? {}) as string[]);
 
 describe('the account store over the Vault', () => {
+  it('I125 keeps password and seed values in Vault sealed handles and only their names in a private index', async () => {
+    const w = world();
+    await w.directory.putAccount('GITHUB', { label: 'GitHub', password: PASSWORD });
+    const target = await w.directory.seedTarget('GITHUB');
+    const seed = 'JBSWY3DPEHPK3PXP';
+    await w.directory.addSeed(target.key, seed, { params: { algorithm: 'SHA1', digits: 6, period: 30 } });
+    should([...w.vault.values.values()])
+      .containEql(PASSWORD)
+      .and.containEql(seed);
+    const index = JSON.stringify(w.index.accounts);
+    should(index).not.containEql(PASSWORD);
+    should(index).not.containEql(seed);
+    should(manifest.data.state.find(file => file.name === 'accounts')?.mode).equal(0o600);
+    should(manifest.data.state.find(file => file.name === 'login-secrets')?.mode).equal(0o600);
+  });
   it('S9 I125 S68 should keep the value in the Vault under its sealed name, and only the name in the index', async () => {
     const w = world();
     await w.directory.putAccount('GITHUB', { label: 'GitHub', password: PASSWORD });
@@ -47,7 +63,7 @@ describe('the account store over the Vault', () => {
     should(JSON.stringify(w.index.accounts)).not.containEql(PASSWORD);
   });
 
-  it('S10 should open the values for the redactor alone, from the Vault', async () => {
+  it('should expose sealed values only through the redactor source', async () => {
     const w = world();
     await w.directory.putAccount('GITHUB', { label: 'GitHub', password: PASSWORD });
     should([...(await w.values.values()).values()]).containEql(PASSWORD);

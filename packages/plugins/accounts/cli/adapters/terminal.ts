@@ -2,6 +2,17 @@ import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
 import type { IAccountPrompt } from '../lib/account-ports.ts';
 
+/** TODO(kernel contract): lead-approved CliContext.readText(path), with '-' reading stdin. */
+export function recipeReader(ctx: { readText?: (path: string) => Promise<string> }): (path: string) => Promise<string> {
+  return async path => {
+    if (ctx.readText === undefined)
+      throw new Error(
+        'this fy shell cannot read recipe files yet; update fy, or edit the recipe in Settings › Accounts',
+      );
+    return await ctx.readText(path);
+  };
+}
+
 /**
  * The host facilities `fy account` needs that the 5.0 CLI context does not offer yet (REPLACE WITH CliContext ports):
  * a terminal prompt, with a hidden read that echoes NOTHING (not even `*`) so a password or seed never reaches

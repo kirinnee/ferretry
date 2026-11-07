@@ -227,7 +227,7 @@ describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-
     should(Object.keys(every)).eql([...ports]);
   });
 
-  it('S122 I231 should record a fill-caused suspension only in the owner’s audit, with the session as a detail', async () => {
+  it('I231 S122 should record a fill-caused suspension only in the owner’s audit, with the session as a detail', async () => {
     const w = await world();
     const { view } = await approved(w);
     await w.service.suspend(view.id, 'did-not-move-on', { sessionId: 'mvv6b4qw-49d0158d' });

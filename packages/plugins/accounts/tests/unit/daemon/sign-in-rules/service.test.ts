@@ -485,7 +485,7 @@ describe('narrow and revoke: no passkey, only ever take away (invariant 20)', ()
 });
 
 describe('suspension: drift, sticky, never silent (invariants 16, 17, 18)', () => {
-  it('S117 S118 should suspend on a pinned fact that drifted, stay suspended when it drifts back, and resume only with a new passkey', async () => {
+  it('S118 S117 should suspend on a pinned fact that drifted, stay suspended when it drifts back, and resume only with a new passkey', async () => {
     // Arrange
     const w = await world();
     const { view } = await approved(w);

@@ -5,12 +5,13 @@
  * copied, with each port bound to what 5.0 offers.
  *
  * WHERE A PORT'S OWNER IS NOT ON THIS BASE YET, ITS STAND-IN FAILS CLOSED, and each is a seam in the report:
- * - passkeys and stored proofs (Access's `holdsPasskey`, Gate's stored-proof check): no device holds one, no proof
- *   verifies, so no rule or plan can be approved and every kept rule reads as suspended.
- * - the audit sink (Gate is not in `needs`): each record is a log line of names and ids only.
+ * - passkeys and stored proofs use Access's approved additive reads (a local adapter until its port reaches the base).
+ *   A missing or unreadable provider verifies nothing. Gate keeps the service's complete audit evidence.
  * - secure copies (the Vault's child runner and folders): no copy exists, so the copy routes list none.
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
+import { auditKind } from '@ferretry/core-gate/contract';
+import { accountSecurity } from './adapters/pending-security.ts';
 import { randomUUID } from 'node:crypto';
 import type { StateFileDef } from '@ferretry/kernel/contract';
 import { seconds } from '@ferretry/std';
@@ -58,15 +59,11 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
   const isoClock = { now: () => kernel.clock.now() as string };
   const redact = async (text: string): Promise<string> => await kernel.redaction.read(scope => scope.text(text));
   const audit: AuditSink = {
-    record: async entry =>
-      kernel.log.info('accounts audit', {
-        event: entry.event,
-        subject: entry.subject,
-        outcome: typeof entry.outcome === 'string' ? entry.outcome : JSON.stringify(entry.outcome),
-      }),
+    // TODO(gate contract): cause is approved additively; preserve it at the call until Gate accepts it.
+    record: async entry => await ctx.needs.gate.audit({ ...entry, event: auditKind(entry.event) }),
   };
   const id = (): string => randomUUID().replaceAll('-', '');
-  const noPasskeys = { any: async () => false, of: async () => false };
+  const security = accountSecurity(ctx.uses.access);
   const terminalRules = () => TERMINAL_RULES_OFFERED;
   const asks = new SignInApprovalAsks(ctx.needs.asks);
 
@@ -86,7 +83,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
         return key.success ? key.data : undefined;
       },
     },
-    passkeys: noPasskeys,
+    passkeys: security.passkeys,
     redact,
     // Asks takes no reply note on a raised ask yet: the plan's own words stay in its context.
     tell: async () => undefined,
@@ -97,8 +94,8 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
   const rules = new SignInRuleService({
     store: new FileSignInRuleStore(kernelStateDocument(kernel.state, stateFile(ctx, 'sign-in-rules'))),
     accounts: { listing: async () => await accounts.keyedList() },
-    proofs: { holds: async () => false, verify: async () => false },
-    passkeys: noPasskeys,
+    proofs: security.proofs,
+    passkeys: security.passkeys,
     audit,
     clock,
     warn: message => kernel.log.warn(`sign-in rules: ${message}`),

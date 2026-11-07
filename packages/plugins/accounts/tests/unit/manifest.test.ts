@@ -29,7 +29,10 @@ describe('accounts manifest', () => {
     for (const entry of manifest.actions.agentTools) expect(entry.guard).not.toBe('secrets');
   });
   test('needs the Vault, its sealed documents and Asks, and takes the sign-in-approval ask source', () => {
-    expect(Object.keys(manifest.needs ?? {}).sort()).toEqual(['asks', 'sealed', 'vault']);
-    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual(['ask.sources:sign-in-approval']);
+    expect(Object.keys(manifest.needs ?? {}).sort()).toEqual(['asks', 'gate', 'sealed', 'vault']);
+    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
+      'redaction.sources:source',
+      'ask.sources:sign-in-approval',
+    ]);
   });
 });

@@ -1,10 +1,13 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
+import { GatePort } from '@ferretry/core-gate/contract';
+import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
+import { RedactionSources } from './contract/pending-mask-source.ts';
 import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ACCOUNTS_WORDS,
@@ -45,7 +48,7 @@ export default definePlugin({
   words: ACCOUNTS_WORDS,
 
   /** `sealed`: the passwords and 2FA seeds, in Accounts' own sealed document (`login-secrets.json`). */
-  needs: { vault: VaultPort, asks: AsksPort, sealed: SealedDocumentsPort },
+  needs: { vault: VaultPort, asks: AsksPort, sealed: SealedDocumentsPort, gate: GatePort },
   /** Optional: a revoked or expired device's standing sign-in rules are suspended (P124, S119). */
   /**
    * `browsers`: the address of a page a ferret names (`account_hint` by page). `ferrets`: where a ferret works, which
@@ -584,7 +587,7 @@ export default definePlugin({
         ...TOOL,
         capability: USE.terminal,
         guard: NO_VALUE,
-        summary: 'ask the owner to approve the sign-ins and pastes a task needs',
+        summary: 'ask the owner to approve planned sign-ins and pastes',
       }),
     ],
     cli: [
@@ -611,7 +614,7 @@ export default definePlugin({
       verb('rules narrow', { summary: 'take something away from a rule: the 2FA code, time or uses; no passkey' }),
       verb('rules rm', { summary: 'revoke a rule now, or every rule of an account; no passkey' }),
       verb('account ls', { summary: 'list the accounts, with their 2FA keys and sign-ins' }),
-      verb('account add', { summary: 'save a new account; the password is typed at a hidden prompt' }),
+      verb('account add', { summary: 'save a new account; type the password with echo off' }),
       verb('account edit', { summary: 'change the fields named; the rest are kept' }),
       verb('account rename', { summary: 'change a handle; the values follow it' }),
       verb('account rm', { summary: 'delete an account with its sign-ins and 2FA keys' }),
@@ -675,7 +678,7 @@ export default definePlugin({
         file: 'accounts.yaml',
         schema: AccountsConfigSchema,
         axis: 'configure',
-        loosens: neverLoosens,
+        loosens: (before, after) => accountDefaultsDifferences(before ?? {}, after),
       }) as ConfigDef,
     ],
     readModels: ['sign-ins'],
@@ -686,6 +689,7 @@ export default definePlugin({
 
   hooks: {
     takes: [
+      { hook: RedactionSources, key: 'source' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
     ],
   },

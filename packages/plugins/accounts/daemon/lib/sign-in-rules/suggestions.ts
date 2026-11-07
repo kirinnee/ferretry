@@ -1,5 +1,17 @@
 import { randomBytes } from 'node:crypto';
-import { type AccountId, type Place, placeKeys, SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS, SIGN_IN_RULE_SUGGESTIONS_PER_HOUR, signInRuleKeysFit, type SignInId, type SignInRuleSuggestionId, type SignInRuleSuggestionList, type SignInRuleSuggestionView, type SignInSummary } from '../../../contract/routes/index.ts';
+import {
+  type Place,
+  placeKeys,
+  SIGN_IN_RULE_SUGGESTION_TTL_SECONDS,
+  SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS,
+  SIGN_IN_RULE_SUGGESTIONS_PER_HOUR,
+  signInRuleKeysFit,
+  type SignInId,
+  type SignInRuleSuggestionId,
+  type SignInRuleSuggestionList,
+  type SignInRuleSuggestionView,
+  type SignInSummary,
+} from '../../../contract/routes/index.ts';
 import { OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
 import type { AuditSink } from '../local-ports.ts';
 import { proposalTarget } from '../secrets/proposal-target.ts';
@@ -8,7 +20,7 @@ import type { RuleListing } from './drift.ts';
 import { ruleSurfaceOf } from './eligibility.ts';
 import { SignInRuleError } from './service.ts';
 import { auditText } from './words.ts';
-import { type AuditDetail } from '@ferretry/core-gate/contract';
+import type { AuditDetail } from '@ferretry/core-gate/contract';
 
 /**
  * A FERRET'S SUGGESTION OF A STANDING RULE (docs/secrets.md, "Standing sign-in rules"; plan §10). A ferret may ASK the
@@ -85,10 +97,9 @@ export class SignInRuleSuggestionError extends Error {
   }
 }
 
-/** What a ferret asks: one sign-in (or, in the older spelling, the account whose only sign-in it is) and why. */
+/** What a ferret asks: one canonical sign-in and why. */
 export interface SignInRuleSuggestionAsk {
-  readonly signIn?: SignInId | undefined;
-  readonly login?: AccountId | undefined;
+  readonly signIn: SignInId;
   readonly why: string;
 }
 
@@ -262,7 +273,7 @@ export class SignInRuleSuggestions {
 
   /** The same decision, codes and words as a recipe's (`proposalTarget`): one `account.propose`, one answer. */
   #resolve(listing: RuleListing, ask: SignInRuleSuggestionAsk): SignInSummary {
-    const found = proposalTarget(listing, ask);
+    const found = proposalTarget(listing, { signIn: ask.signIn });
     if (!found.ok) throw new SignInRuleSuggestionError(found.code, found.words);
     return found.signIn;
   }

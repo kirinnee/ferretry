@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import {
   type AccountHintList,
   AccountHintListSchema,
+  LoginRecipeDecisionSchema,
   type AccountList,
   AccountListSchema,
   type AccountLookAlike,
@@ -119,6 +120,13 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async removeSignIn(signIn: string): Promise<RemovedSignIn> {
     return await this.#call('DELETE /v1/accounts/sign-ins/:signIn', RemovedSignInSchema, { params: { signIn } });
+  }
+
+  async decideRecipe(signIn: string, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
+    return await this.#call('POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId', SignInSummarySchema, {
+      params: { signIn, proposalId },
+      body: LoginRecipeDecisionSchema.parse({ decision }),
+    });
   }
 
   async putDefault(body: PutAccountDefaultRequest): Promise<PutAccountDefaultResult> {

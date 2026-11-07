@@ -16,24 +16,26 @@ export class TwoFactorSeedAgendaAdapter implements TwoFactorSeedAgendaPort {
   constructor(private readonly asks: Pick<AsksApi, 'raise' | 'close'>) {}
 
   async raise(sessionId: string, card: TwoFactorSeedCard): Promise<AskId> {
-    return await this.asks.raise({
-      source: SIGN_IN_APPROVAL_SOURCE,
-      ref: { kind: 'two-factor-seed', stage: card.stage },
-      entry: `two-factor-seed:${card.stage}` as EntryId,
-      kind: 'permission',
-      subject: card.subject,
-      why: card.why,
-      context: card.context,
-      howToResolve:
-        'Allow on this card in the Ferretry app, then confirm with your passkey; Deny drops it. Nothing is saved without your passkey.',
-      raisedBy: { kind: 'daemon' },
-      ferret: sessionId,
-    });
+    return (
+      await this.asks.raise({
+        source: SIGN_IN_APPROVAL_SOURCE,
+        ref: { kind: 'two-factor-seed', stage: card.stage },
+        entry: `two-factor-seed:${card.stage}` as EntryId,
+        kind: 'permission',
+        subject: card.subject,
+        why: card.why,
+        context: card.context,
+        howToResolve:
+          'Allow on this card in the Ferretry app, then confirm with your passkey; Deny drops it. Nothing is saved without your passkey.',
+        raisedBy: { kind: 'daemon' },
+        ferret: sessionId,
+      })
+    ).id;
   }
 
-  async close(_sessionId: string, id: AskId, _note: string): Promise<void> {
+  async close(sessionId: string, id: AskId, _note: string): Promise<void> {
     const parsed = AskIdSchema.safeParse(id);
     if (!parsed.success) return;
-    await this.asks.close(parsed.data, 'withdrawn').catch(() => undefined);
+    await this.asks.close({ ferret: sessionId, id: parsed.data }, 'withdrawn').catch(() => undefined);
   }
 }

@@ -1,5 +1,7 @@
 import {
   type AccountHint,
+  observedWords,
+  recipeDiffText,
   type AccountHintList,
   type AccountList,
   type AccountSummary,
@@ -11,6 +13,7 @@ import {
   LOGIN_HINT_PASSKEYS_OFF,
   loginMethodSentence,
   type Place,
+  placeWords,
   type SignInSummary,
   type TwoFactorKeySummary,
 } from '../../contract/routes/index.ts';
@@ -130,4 +133,24 @@ export function renderDefaults(file: AccountDefaultsFile): string {
   const lines = accountDefaultLines(file);
   if (lines.length === 0) return 'No default accounts are set.';
   return lines.map(line => `${line.key} -> ${line.account}  (${accountDefaultScopeWords(line)})`).join('\n');
+}
+
+/** `fy account site recipe show`: the owner's steps, what the daemon saw, and each proposal as the change it would make. */
+export function renderSignInRecipe(signIn: SignInSummary, account: AccountSummary | undefined): string {
+  const seen = signIn.observed ?? [];
+  const proposals = signIn.proposals ?? [];
+  return [
+    `${account?.label ?? signIn.account}  [${signIn.account}]  ${signIn.id}  ${placeWords(signIn.place)}`,
+    `auto-apply a ferret's proposal: ${signIn.autoApplyRecipe === true ? 'on' : 'off'}`,
+    '',
+    signIn.recipe ?? "(no recipe yet: write one with `site recipe set`, or approve a ferret's proposal)",
+    '',
+    ...(seen.length === 0 ? ['Seen: nothing yet'] : ['Seen:', ...seen.map(row => `  ${observedWords(row)}`)]),
+    ...proposals.flatMap(proposal => [
+      '',
+      `${proposal.id}  ${proposal.proposedAt.slice(0, 10)}`,
+      `The ferret says: ${proposal.why}`,
+      recipeDiffText(proposal.base, proposal.recipe),
+    ]),
+  ].join('\n');
 }

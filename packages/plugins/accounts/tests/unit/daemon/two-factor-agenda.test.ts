@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AskDraft, AskId } from '@ferretry/core-asks/contract';
+import type { AskDraft, AskId, AskRef } from '@ferretry/core-asks/contract';
 import { askSourceConformance, FakeAsks } from '@ferretry/core-asks/contract/testing';
 import should from 'should';
 import { SignInApprovalRefSchema } from '../../../contract/index.ts';
@@ -10,7 +10,7 @@ const STAGE = `st_${'a'.repeat(24)}` as const;
 /** An Asks port that keeps every draft it was handed, so a test reads the card as raised. */
 class RecordingAsks extends FakeAsks {
   readonly drafts: AskDraft[] = [];
-  override async raise(ask: AskDraft): Promise<AskId> {
+  override async raise(ask: AskDraft): Promise<AskRef> {
     this.drafts.push(ask);
     return await super.raise(ask);
   }
@@ -50,7 +50,7 @@ describe('a staged 2FA seed card on the owner’s asks', () => {
     should(JSON.stringify(draft)).not.containEql('GITHUB');
     should(draft).match({ kind: 'permission', raisedBy: { kind: 'daemon' }, ferret: 's1' });
     should(again).equal(id);
-    should((await asks.get(id))?.state).equal('closed');
+    should((await asks.get({ ferret: 's1', id }))?.state).equal('closed');
   });
 
   it('should close nothing for an id that is not an ask', async () => {

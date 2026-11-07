@@ -21,7 +21,7 @@ import {
   EntryIdSchema,
   type SourceKey,
 } from '@ferretry/core-asks/contract';
-import { z } from 'zod';
+import type { z } from 'zod';
 import { SignInApprovalRefSchema } from '../../../contract/index.ts';
 import { LoginRecipeProposalIdSchema, SignInIdSchema } from '../../../contract/routes/index.ts';
 import type { RecipeAgendaPort } from '../secrets/login-recipes.ts';
@@ -30,23 +30,11 @@ import type { TaskPlanAgendaPort, TaskPlanCard } from '../task-plans/service.ts'
 
 export const SIGN_IN_APPROVAL_SOURCE = 'sign-in-approval' as SourceKey;
 
-/**
- * The refs this source raises: the contract's, plus a ferret's recipe proposal (F640: "approve a suggested sign-in recipe
- * in chat"), which names the sign-in and the proposal only.
- *
- * TODO(contract): `SignInApprovalRefSchema` has no `recipe-proposal` kind; add
- * `{ kind: 'recipe-proposal', signIn, proposal }` to Accounts' contract and the manifest's `ask.sources` take, then
- * register the contract schema alone.
- */
-export const SignInApprovalAskRefSchema = z.union([
-  SignInApprovalRefSchema,
-  z.strictObject({ kind: z.literal('recipe-proposal'), signIn: SignInIdSchema, proposal: LoginRecipeProposalIdSchema }),
-]);
-export type SignInApprovalAskRef = z.infer<typeof SignInApprovalAskRefSchema>;
+export type SignInApprovalAskRef = z.infer<typeof SignInApprovalRefSchema>;
 
 /** What Accounts registers under `ask.sources:sign-in-approval`. No form: an answer here approves nothing. */
 export const signInApprovalSource: AskSourceSpec = {
-  schema: SignInApprovalAskRefSchema,
+  schema: SignInApprovalRefSchema,
   title: 'Sign-in approval',
   form: false,
 };
@@ -83,7 +71,7 @@ export class SignInApprovalAsks {
       ferret,
     };
     try {
-      return { ok: true, id: await this.asks.raise(draft) };
+      return { ok: true, id: (await this.asks.raise(draft)).id };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'the ask could not be raised' };
     }
@@ -93,10 +81,10 @@ export class SignInApprovalAsks {
    * Closes one ask. TODO(contract): `AsksApi.close` takes a reason, not today's closing words ("Approved: the recipe
    * was updated."); the words are dropped until Asks takes a note.
    */
-  async close(id: string, reason: CloseReason): Promise<void> {
+  async close(ferret: string, id: string, reason: CloseReason): Promise<void> {
     const parsed = AskIdSchema.safeParse(id);
     if (!parsed.success) return;
-    await this.asks.close(parsed.data, reason).catch(() => undefined);
+    await this.asks.close({ ferret, id: parsed.data }, reason).catch(() => undefined);
   }
 }
 
@@ -116,8 +104,8 @@ export class TaskPlanAsksAdapter implements TaskPlanAgendaPort {
     });
   }
 
-  async close(_sessionId: string, id: string, note: string): Promise<void> {
-    await this.asks.close(id, note === 'The task plan expired.' ? 'expired' : 'withdrawn');
+  async close(sessionId: string, id: string, note: string): Promise<void> {
+    await this.asks.close(sessionId, id, note === 'The task plan expired.' ? 'expired' : 'withdrawn');
   }
 }
 
@@ -136,8 +124,8 @@ export class SignInRuleSuggestionAsksAdapter implements SignInRuleSuggestionAgen
     });
   }
 
-  async close(_sessionId: string, id: string, _note: string): Promise<void> {
-    await this.asks.close(id, 'expired');
+  async close(sessionId: string, id: string, _note: string): Promise<void> {
+    await this.asks.close(sessionId, id, 'expired');
   }
 }
 
@@ -168,7 +156,7 @@ export class RecipeAsksAdapter implements RecipeAgendaPort {
     });
   }
 
-  async close(_sessionId: string, id: string, note: string): Promise<void> {
-    await this.asks.close(id, note === 'Replaced by a newer recipe proposal.' ? 'superseded' : 'answered');
+  async close(sessionId: string, id: string, note: string): Promise<void> {
+    await this.asks.close(sessionId, id, note === 'Replaced by a newer recipe proposal.' ? 'superseded' : 'answered');
   }
 }

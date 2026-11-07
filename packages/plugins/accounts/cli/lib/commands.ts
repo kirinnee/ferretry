@@ -104,6 +104,22 @@ export function accountVerbs(
     'account site rm': verb({ command: 'rm', args: ['sign-in'], ...YES }, async (read, c) =>
       c.signIns.remove(arg(read, 0), bag(read)),
     ),
+    'account site recipe show': verb({ command: 'show', args: ['sign-in'], switches: JSON_SWITCH }, async (read, c) =>
+      c.signIns.recipeShow(arg(read, 0), bag(read)),
+    ),
+    'account site recipe set': verb(
+      { command: 'set', args: ['sign-in'], values: ['file'], required: ['file'] },
+      async (read, c) => c.signIns.recipeSet(arg(read, 0), bag(read)),
+    ),
+    'account site recipe clear': verb({ command: 'clear', args: ['sign-in'] }, async (read, c) =>
+      c.signIns.recipeClear(arg(read, 0)),
+    ),
+    'account site recipe approve': verb({ command: 'approve', args: ['sign-in', 'proposal-id'] }, async (read, c) =>
+      c.signIns.recipeDecide(arg(read, 0), arg(read, 1), 'approve'),
+    ),
+    'account site recipe decline': verb({ command: 'decline', args: ['sign-in', 'proposal-id'] }, async (read, c) =>
+      c.signIns.recipeDecide(arg(read, 0), arg(read, 1), 'decline'),
+    ),
     'account factor ls': verb(
       { command: 'ls', args: [], optional: 'account', switches: JSON_SWITCH },
       async (read, c) => c.factorKeys.list(read.args[0], bag(read)),

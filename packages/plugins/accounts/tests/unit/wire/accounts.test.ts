@@ -79,7 +79,7 @@ describe('a place and the keys it is matched on (invariant 9)', () => {
     expect(placeKeys(terminal('ssh', 'kirin-box', 'build.example.com'))).toEqual(['ssh@build.example.com']);
   });
 
-  it('should match exactly: no look-alike, no parent or child domain, no other program, no other destination', () => {
+  it('I129 should match exactly: no look-alike, no parent or child domain, no other program, no other destination', () => {
     // Arrange
     const github = site(['github.com']);
     const sudo = terminal('sudo', 'kirin-box');
@@ -410,7 +410,7 @@ const KEY_HERE = 'app.clickup.com';
 const FERRETRY = { id: 'p_ferretry', name: 'ferretry', nameIsUnique: true };
 
 describe('which sign-in a card offers first (invariants 10 and 11)', () => {
-  it('should offer no primary when two or more matched and nothing chose one', () => {
+  it('I159 should offer no primary when two or more matched and nothing chose one', () => {
     // On main the card promoted the first matched entry by label; now the owner picks.
     expect(chosenSignIn(KEY_HERE, ALL)).toBeUndefined();
     expect(pickOneWords(2)).toBe('Pick one: 2 accounts sign in here');
@@ -425,7 +425,7 @@ describe('which sign-in a card offers first (invariants 10 and 11)', () => {
     expect(chosenSignIn(KEY_HERE, ALL, { hint: SI(1) })).toEqual({ signIn: SI(1), why: 'ferret' });
   });
 
-  it('should never promote a sign-in the daemon did not match, whoever names it', () => {
+  it('I165 should never promote a sign-in the daemon did not match, whoever names it', () => {
     // Arrange — the hint, the project, the folder and the site line all name the account with no sign-in here
     const defaults: AccountDefaultsFile = {
       sites: { [KEY_HERE]: 'CLICKUP_C' },
@@ -628,7 +628,7 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(AccountHintListSchema.safeParse({ v: 1, site: 'vercel.com', hints, passkeys: 'off' }).success).toBe(true);
   });
 
-  it('should not change when the owner taps a sign-in in from a paired device: no owner-tap count (secrev-1271 L2)', () => {
+  it('S115 should not change when the owner taps a sign-in in from a paired device: no owner-tap count (secrev-1271 L2)', () => {
     // Arrange — the same sign-in before and after two owner taps that went through
     const tapped = AccountListSchema.parse({
       ...LIST,

@@ -26,6 +26,8 @@ import { TwoFactorSeedAgendaAdapter } from './lib/two-factor-agenda.ts';
 import { TwoFactorSeedStages } from './lib/two-factor-seeds.ts';
 import { accountHint, accountRoutes, type RecipeMasking } from './routes/accounts.ts';
 
+import { accountSecurity } from './adapters/pending-security.ts';
+
 export type AccountsContext = DaemonContext<typeof manifest>;
 
 /** What half b is handed: the one store (and its lock), and the one place recipes are masked. */
@@ -106,8 +108,8 @@ export function buildAccounts(
     // A staged seed rests sealed in THIS process's memory only (S89), under a key that is never written anywhere.
     cipher: new MemoryCipher(),
     clock: kernel.clock,
-    // TODO(contract): Access's `holdsPasskey` is not on this base yet: no seed can be saved ("add a passkey first").
-    anyPasskey: async () => false,
+    // Access supplies the paired-device/passkey read; an absent or unreadable provider refuses the stage.
+    anyPasskey: accountSecurity(ctx.uses.access).passkeys.any,
     hostName: machineName(),
     agenda: new TwoFactorSeedAgendaAdapter(ctx.needs.asks),
   });
@@ -177,5 +179,19 @@ export function buildAccounts(
   };
 
   const core: AccountsCore = { logins, lock, ...(vault === undefined ? {} : { vault }) };
-  return { routes, tools: { account_hint: accountHintTool }, provides: { accounts: port }, core };
+  return {
+    routes,
+    tools: { account_hint: accountHintTool },
+    provides: { accounts: port },
+    core,
+    masks: {
+      values: async () =>
+        new Map([
+          ...(await vault.values()),
+          ...[...(await seeds.values())].map(
+            ([label, value]) => [label.replace(/^login:stage:/u, '2fa:'), value] as const,
+          ),
+        ]),
+    },
+  };
 }
