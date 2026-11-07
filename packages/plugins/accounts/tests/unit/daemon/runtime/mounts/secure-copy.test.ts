@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type PasteRule, type PasteRuleCreate, type PasteRuleSettings, type PasteRuleStageId, RUNS_WHAT_IT_READS_WARNING } from '../../../../../wire/index.ts';
+import { type PasteRule, type PasteRuleCreate, type PasteRuleSettings, type PasteRuleStageId, RUNS_WHAT_IT_READS_WARNING } from '../../../../../contract/routes/index.ts';
 import should from 'should';
 import type { CallerGovernance, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

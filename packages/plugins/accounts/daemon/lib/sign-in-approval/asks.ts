@@ -23,7 +23,7 @@ import {
 } from '@ferretry/core-asks/contract';
 import { z } from 'zod';
 import { SignInApprovalRefSchema } from '../../../contract/index.ts';
-import { LoginRecipeProposalIdSchema, SignInIdSchema } from '../../../wire/index.ts';
+import { LoginRecipeProposalIdSchema, SignInIdSchema } from '../../../contract/routes/index.ts';
 import type { RecipeAgendaPort } from '../secrets/login-recipes.ts';
 import type { SignInRuleSuggestionAgendaPort, SignInRuleSuggestionCard } from '../sign-in-rules/suggestions.ts';
 import type { TaskPlanAgendaPort, TaskPlanCard } from '../task-plans/service.ts';

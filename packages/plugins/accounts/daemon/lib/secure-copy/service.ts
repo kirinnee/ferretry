@@ -18,7 +18,7 @@ import {
   type CopyState,
   copyHandle,
   copyMask,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import type { InputSealedPort } from '../vault-inputs.ts';
 import { SecureCopyError } from './errors.ts';
 import type { CopyPageGuard, CopyPorts } from './ports.ts';

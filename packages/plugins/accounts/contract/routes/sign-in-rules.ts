@@ -27,7 +27,7 @@ import { InstantSchema } from './foreign.ts';
 import { AUTOMATED_CODE_WARNING, LOGIN_MATCH_MAX, LOGIN_USERNAME_MAX_LENGTH, oneLine } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX } from './login-recipes.ts';
 import { sha256Hex } from './sha256.ts';
-import { type DaemonId, DaemonIdSchema, PairedDeviceIdSchema } from '@ferretry/plugin-access/contract';
+import { type DaemonId, DaemonIdSchema, PairedDeviceIdSchema } from './foreign.ts';
 import { PASSKEY_CHALLENGE_TTL_SECONDS, StoredStepUpProofSchema } from './foreign.ts';
 import {
   type GrantMissReason,

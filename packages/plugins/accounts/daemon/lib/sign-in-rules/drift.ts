@@ -11,7 +11,7 @@ import {
   type SignInRuleSuspension,
   type SignInSummary,
   type TwoFactorKeySummary,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import { ineligibleBecause, ruleSurfaceOf, tappedIdentities } from './eligibility.ts';
 
 /**

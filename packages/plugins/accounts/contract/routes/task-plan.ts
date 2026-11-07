@@ -20,7 +20,7 @@ import {
 } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX, LoginObservedSecondFactorSchema } from './login-recipes.ts';
 import { sha256Hex } from './sha256.ts';
-import { type DaemonId, DaemonIdSchema } from '@ferretry/plugin-access/contract';
+import { type DaemonId, DaemonIdSchema } from './foreign.ts';
 import {
   COPY_PLAN_DEFAULT_LIFETIME_SECONDS,
   COPY_PLAN_MAX_ITEMS,

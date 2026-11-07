@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as secureCopy from '../../../wire/secure-copy.ts';
+import * as secureCopy from '../../../contract/routes/secure-copy.ts';
 import { z } from 'zod';
 import {
   COPY_COMMAND_MAX_ARGS,
@@ -21,7 +21,7 @@ import {
   copyMask,
   PasteRuleCreateSchema,
   PasteRuleSchema,
-} from '../../../wire/secure-copy.ts';
+} from '../../../contract/routes/secure-copy.ts';
 
 const AT = '2026-10-31T09:00:00.000Z';
 
@@ -204,7 +204,7 @@ describe('pasting, rules and plans', () => {
 describe('the secure copy settings and the rule warnings', () => {
   it('should keep profile targets off by default, and leave the rules list exactly as an older app parses it', async () => {
     const { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleListSchema, PasteRuleSettingsSchema, PasteRuleSettingsViewSchema } =
-      await import('../../../wire/secure-copy.ts');
+      await import('../../../contract/routes/secure-copy.ts');
     should(DEFAULT_PASTE_RULE_SETTINGS).eql({ allowProfileTargets: false });
     should(PasteRuleSettingsSchema.safeParse({ allowProfileTargets: true, more: 1 }).success).be.false();
     should(PasteRuleListSchema.safeParse({ rules: [] }).success).be.true();
@@ -217,7 +217,7 @@ describe('the secure copy settings and the rule warnings', () => {
   });
 
   it('should call a shell or an interpreter a program that runs whatever it reads, and nothing else', async () => {
-    const { runsWhatItReads } = await import('../../../wire/secure-copy.ts');
+    const { runsWhatItReads } = await import('../../../contract/routes/secure-copy.ts');
     for (const program of [
       'bash',
       'sh',

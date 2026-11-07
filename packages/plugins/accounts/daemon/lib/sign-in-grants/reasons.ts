@@ -7,7 +7,7 @@ import {
   ruleMissSuspends,
   signInRuleSuspensionOf,
   TASK_PLAN_MISS_AGENT_NOTE,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import type { SignInGrant } from './matcher.ts';
 
 /**

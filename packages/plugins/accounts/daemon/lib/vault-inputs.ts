@@ -21,7 +21,7 @@ import {
   SignInRuleIdSchema,
   SignInRuleRevisionSchema,
   TaskPlanLineNumberSchema,
-} from '../../wire/index.ts';
+} from '../../contract/routes/index.ts';
 
 /** How long the daemon watches a page for the second factor after a submit (`login-observer.ts`). */
 export const SECOND_FACTOR_WINDOW_MS = 180_000;

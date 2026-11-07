@@ -25,7 +25,7 @@ import {
   signInRuleResumable,
   signInRuleScopeWords,
   signInRuleStatusWords,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { daemonNeedsUpdate } from '../daemon/features.ts';
 import { refuseOwnerCommandInPane } from '../daemon/owner-only.ts';

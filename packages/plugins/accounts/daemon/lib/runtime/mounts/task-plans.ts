@@ -1,14 +1,13 @@
-import { TASK_PLAN_ERROR_CODES, type TaskPlan, TaskPlanApprovalAnswerSchema, TaskPlanApprovalSchema, TaskPlanConfirmingSchema, type TaskPlanList, TaskPlanRevokeSchema, TaskPlanSchema, TaskPlanStageDroppedSchema, type TaskPlanStageId, TaskPlanStageIdSchema, TaskPlanStageViewSchema } from '../../../../wire/index.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import type { ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { TASK_PLAN_ERROR_CODES, type TaskPlan, TaskPlanApprovalAnswerSchema, TaskPlanApprovalSchema, TaskPlanConfirmingSchema, type TaskPlanList, TaskPlanRevokeSchema, TaskPlanSchema, TaskPlanStageDroppedSchema, type TaskPlanStageId, TaskPlanStageIdSchema, TaskPlanStageViewSchema } from '../../../../contract/routes/index.ts';
+import { parseBody } from '../../http/body.ts';
+import { ApiError, type ApiResponse, jsonResponse } from '@ferretry/kernel/contract';
+import type { RouteContext } from '../../http/grants.ts';
+import type { MountedRoute } from '../../http/routes.ts';
 import { SecureCopyError } from '../../secure-copy/errors.ts';
 import type { PasteRuleCaller } from '../../secure-copy/rules.ts';
 import { TaskPlanError, TaskPlanProofMissing, type TaskPlanService } from '../../task-plans/service.ts';
-import { ownerActorOf } from './input-requests.ts';
-import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { freshSubject, ownerActorOf } from '../../http/grants.ts';
+import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from '../../http/grants.ts';
 import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
 
 /**
@@ -116,30 +115,17 @@ const proofDemand = (): ApiResponse =>
     403,
   );
 
-const USE = {
-  minimum: 'operator',
-  caller: 'person',
-  capability: { capability: 'terminal', axis: 'use' },
-  noStore: true,
-} as const;
-const CONFIGURE = {
-  minimum: 'operator',
-  caller: 'person',
-  capability: { capability: 'terminal', axis: 'configure' },
-  noStore: true,
-} as const;
 
-export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
+export function taskPlanRoutes(plans: TaskPlanService): readonly MountedRoute[] {
   const at = (context: RouteContext) => ({
     caller: owner(context),
-    sessionId: param(context, 'sessionId', SESSION),
+    sessionId: param(context, 'ferretId', SESSION),
     planId: param(context, 'planId', ID),
   });
   return [
     {
       method: 'GET',
       path: '/v1/task-plans',
-      ...USE,
       handle: async context => {
         const names = refusedAccountNames(context);
         if (names !== undefined) return names;
@@ -152,8 +138,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     },
     {
       method: 'GET',
-      path: '/v1/sessions/:sessionId/task-plans/:planId',
-      ...USE,
+      path: '/v1/ferrets/:ferretId/task-plans/:planId',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const names = refusedAccountNames(context);
@@ -164,8 +149,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     {
       // STAGE: nothing ticked is a decline, answered at once; any ticked line is held for its passkey (owner ruling on !A244).
       method: 'POST',
-      path: '/v1/sessions/:sessionId/task-plans/:planId/approval',
-      ...CONFIGURE,
+      path: '/v1/ferrets/:ferretId/task-plans/:planId/approval',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const approval = await parseBody(context.request, TaskPlanApprovalSchema);
@@ -182,8 +166,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     },
     {
       method: 'GET',
-      path: '/v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
-      ...USE,
+      path: '/v1/ferrets/:ferretId/task-plans/:planId/approval/:stage',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const stage = stageOf(context);
@@ -197,8 +180,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     {
       // COMMIT: only a fresh `approve-task-plan` proof bound to this stage, from every caller, the machine included.
       method: 'POST',
-      path: '/v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit',
-      ...CONFIGURE,
+      path: '/v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/commit',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const stage = stageOf(context);
@@ -214,7 +196,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
             sessionId,
             planId,
             stage,
-            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approveTaskPlan, subject) === true,
+            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approveTaskPlan, freshSubject(STEP_UP_ACTS.approveTaskPlan, subject)) === true,
           );
           if (reach.store) spentSecretWrite(context);
           return jsonResponse(TaskPlanSchema.parse(settled));
@@ -227,8 +209,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     {
       // A selection staged at the machine (`fy plan approve`) shown on the plan's own card, for the passkey in the app.
       method: 'POST',
-      path: '/v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app',
-      ...CONFIGURE,
+      path: '/v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/confirm-in-app',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const stage = stageOf(context);
@@ -240,8 +221,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     },
     {
       method: 'DELETE',
-      path: '/v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
-      ...USE,
+      path: '/v1/ferrets/:ferretId/task-plans/:planId/approval/:stage',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const stage = stageOf(context);
@@ -252,10 +232,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
     {
       // REVOKE: one tap, no passkey; it only narrows.
       method: 'POST',
-      path: '/v1/sessions/:sessionId/task-plans/:planId/revoke',
-      ...USE,
-      // Revoking only takes away: the grant, never a per-act passkey (docs/grants.md § Narrowing never asks again).
-      capability: { ...USE.capability, narrowing: true },
+      path: '/v1/ferrets/:ferretId/task-plans/:planId/revoke',
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const names = refusedAccountNames(context);

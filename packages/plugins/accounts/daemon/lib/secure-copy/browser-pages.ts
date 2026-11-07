@@ -1,4 +1,4 @@
-import type { CopyElementPart } from '../../../wire/index.ts';
+import type { CopyElementPart } from '../../../contract/routes/index.ts';
 import type { BrowserCopyPort } from '../local-ports.ts';
 import type { CopyPageGuard, CopyPagePort, CopyPageQueue, CopyPageRead } from './ports.ts';
 import { type BrowserElementTarget } from '../vault-inputs.ts';

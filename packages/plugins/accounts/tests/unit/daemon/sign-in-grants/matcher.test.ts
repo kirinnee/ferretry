@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountId, type AccountKey, type AccountSummary, factorFingerprint, type SignInId, type SignInRuleId, type SignInSummary } from '../../../../wire/index.ts';
+import { type AccountId, type AccountKey, type AccountSummary, factorFingerprint, type SignInId, type SignInRuleId, type SignInSummary } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
 import {

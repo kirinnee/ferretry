@@ -1,9 +1,8 @@
-import { type CopyMeta, CopyPlanApproveSchema, type CopyPlanList, PASTE_RULE_ERROR_CODES, PASTE_RULE_REFUSAL_WORDS, type PasteRule, type PasteRuleCreate, PasteRuleCreateSchema, type PasteRuleList, PasteRuleSchema, type PasteRuleStageDropped, type PasteRuleStageId, PasteRuleStageIdSchema, type PasteRuleStageList, PasteRuleStageListSchema, PasteRuleStagedSchema, PasteRuleStageViewSchema, PasteRuleSettingsSchema, type PasteRuleSettingsView, taskPlanLineOfCopyItem } from '../../../../wire/index.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiResponse } from '../../api/http.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { type CopyMeta, CopyPlanApproveSchema, type CopyPlanList, PASTE_RULE_ERROR_CODES, PASTE_RULE_REFUSAL_WORDS, type PasteRule, type PasteRuleCreate, PasteRuleCreateSchema, type PasteRuleList, PasteRuleSchema, type PasteRuleStageDropped, type PasteRuleStageId, PasteRuleStageIdSchema, type PasteRuleStageList, PasteRuleStageListSchema, PasteRuleStagedSchema, PasteRuleStageViewSchema, PasteRuleSettingsSchema, type PasteRuleSettingsView, taskPlanLineOfCopyItem } from '../../../../contract/routes/index.ts';
+import { parseBody } from '../../http/body.ts';
+import { ApiError, type ApiResponse, jsonResponse } from '@ferretry/kernel/contract';
+import type { RouteContext } from '../../http/grants.ts';
+import type { MountedRoute } from '../../http/routes.ts';
 import {
   PasteRuleProofMissing,
   PasteRuleStageGone,
@@ -12,8 +11,8 @@ import {
 } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
-import { ownerActorOf } from './input-requests.ts';
-import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { freshSubject, ownerActorOf } from '../../http/grants.ts';
+import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from '../../http/grants.ts';
 import { taskPlanAnswered } from './task-plans.ts';
 import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
 
@@ -138,27 +137,19 @@ export function secureCopyRoutes(
   plans: TaskPlanService,
   stages: PasteRuleStages,
   homes?: RuleProgramHomes,
-): readonly ApiRoute[] {
+): readonly MountedRoute[] {
   return [
     {
       method: 'GET',
-      path: '/v1/sessions/:sessionId/copies',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
+      path: '/v1/ferrets/:ferretId/copies',
       handle: async context => {
         ruleOwner(context);
-        return jsonResponse({ copies: [...copies.list(param(context, 'sessionId', SESSION))] });
+        return jsonResponse({ copies: [...copies.list(param(context, 'ferretId', SESSION))] });
       },
     },
     {
       method: 'GET',
       path: '/v1/copy-rules',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const body: PasteRuleList = { rules: [...rules.list(caller)] };
@@ -168,10 +159,6 @@ export function secureCopyRoutes(
     {
       method: 'GET',
       path: '/v1/copy-rules/settings',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const body: PasteRuleSettingsView = {
@@ -184,10 +171,6 @@ export function secureCopyRoutes(
     {
       method: 'PUT',
       path: '/v1/copy-rules/settings',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const settings = await parseBody(context.request, PasteRuleSettingsSchema);
@@ -206,10 +189,6 @@ export function secureCopyRoutes(
       // STAGE turning profile targets on: rows are the rules it widens now. Nothing changes until its passkey commits it.
       method: 'POST',
       path: '/v1/copy-rules/settings/stages',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         if (rules.currentSettings(caller).allowProfileTargets)
@@ -222,10 +201,6 @@ export function secureCopyRoutes(
       // COMMIT: only a fresh `allow-profile-targets` proof bound to this stage and the rules it widens, from every caller.
       method: 'POST',
       path: '/v1/copy-rules/settings/stages/:stage/commit',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const stage = stageParam(context);
@@ -235,7 +210,7 @@ export function secureCopyRoutes(
             caller,
             stage,
             widensNow,
-            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.allowProfileTargets, subject) === true,
+            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.allowProfileTargets, freshSubject(STEP_UP_ACTS.allowProfileTargets, subject)) === true,
           );
           return jsonResponse(PasteRuleSettingsSchema.parse(settings));
         } catch (error) {
@@ -249,10 +224,6 @@ export function secureCopyRoutes(
       // or `fy` from before !A244 is told to update rather than looping on a step-up it can never satisfy.
       method: 'POST',
       path: '/v1/copy-rules',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
       handle: async context => {
         ruleOwner(context);
         throw new ApiError(
@@ -266,10 +237,6 @@ export function secureCopyRoutes(
       // STAGE: nothing is allowed yet. Answers the daemon's own line and rows, which the passkey prompt lists.
       method: 'POST',
       path: '/v1/copy-rules/stages',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const request = await parseBody(context.request, PasteRuleCreateSchema);
@@ -281,10 +248,6 @@ export function secureCopyRoutes(
     {
       method: 'GET',
       path: '/v1/copy-rules/stages',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
       handle: async context => {
         const body: PasteRuleStageList = { stages: [...stages.waiting(ruleOwner(context))] };
         return jsonResponse(PasteRuleStageListSchema.parse(body));
@@ -293,10 +256,6 @@ export function secureCopyRoutes(
     {
       method: 'GET',
       path: '/v1/copy-rules/stages/:stage',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         try {
@@ -310,10 +269,6 @@ export function secureCopyRoutes(
       // COMMIT: only a fresh `approve-paste-rule` proof bound to this stage, from every caller, the machine included.
       method: 'POST',
       path: '/v1/copy-rules/stages/:stage/commit',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const stage = stageParam(context);
@@ -330,7 +285,7 @@ export function secureCopyRoutes(
           const rule = await stages.commit(
             caller,
             stage,
-            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approvePasteRule, subject) === true,
+            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approvePasteRule, freshSubject(STEP_UP_ACTS.approvePasteRule, subject)) === true,
           );
           if (request.to.kind === 'secret') spentSecretWrite(context);
           return jsonResponse(PasteRuleSchema.parse(rule), 201);
@@ -345,10 +300,6 @@ export function secureCopyRoutes(
       // now on, and only it gets its challenge and may commit it (secrev-1334 L1). It approves nothing.
       method: 'POST',
       path: '/v1/copy-rules/stages/:stage/bind',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         try {
@@ -362,10 +313,6 @@ export function secureCopyRoutes(
       // DROP: the prompt was dismissed, or the owner denied it. Nothing is allowed, so it asks no more than `use`.
       method: 'DELETE',
       path: '/v1/copy-rules/stages/:stage',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use', narrowing: true },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         const stage = stageParam(context);
@@ -380,10 +327,6 @@ export function secureCopyRoutes(
     {
       method: 'DELETE',
       path: '/v1/copy-rules/:ruleId',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use', narrowing: true },
-      noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
         await rules.revoke(caller, param(context, 'ruleId', ID)).catch(taskPlanAnswered);
@@ -393,10 +336,6 @@ export function secureCopyRoutes(
     {
       method: 'GET',
       path: '/v1/copy-plans',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
-      noStore: true,
       handle: async context => {
         // The task plans waiting with paste lines, as paste plans: their paste lines only, numbered as items.
         const body: CopyPlanList = { plans: [...plans.copyPlans(ruleOwner(context))] };
@@ -405,15 +344,11 @@ export function secureCopyRoutes(
     },
     {
       method: 'POST',
-      path: '/v1/sessions/:sessionId/copy-plans/:planId/approve',
-      minimum: 'operator',
-      caller: 'person',
-      capability: { capability: 'terminal', axis: 'configure' },
-      noStore: true,
+      path: '/v1/ferrets/:ferretId/copy-plans/:planId/approve',
       handle: async context => {
         const caller = ruleOwner(context);
         const body = await parseBody(context.request, CopyPlanApproveSchema);
-        const sessionId = param(context, 'sessionId', SESSION);
+        const sessionId = param(context, 'ferretId', SESSION);
         const planId = param(context, 'planId', ID);
         // An item is a PASTE ITEM number, read back into its plan line, never a line number: item 0 is never line 0.
         const plan = plans.copyPlans(caller, sessionId).some(candidate => candidate.id === planId)

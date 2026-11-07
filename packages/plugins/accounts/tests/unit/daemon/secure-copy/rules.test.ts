@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { COPY_MAX_RULES, type PasteRule, PasteRuleListSchema, type PasteRuleSettings } from '../../../../wire/index.ts';
+import { COPY_MAX_RULES, type PasteRule, PasteRuleListSchema, type PasteRuleSettings } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';

@@ -6,7 +6,7 @@ import {
   type StoredStepUpProof,
   signInRuleChallenge,
   signInRuleSubject,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 
 /**
  * A STORED RULE'S PROOF, CHECKED OFFLINE (docs/design/zero-trust.md, "Stored passkey proofs"). The challenge is never

@@ -17,7 +17,7 @@ import {
   type SignInRuleStageState,
   type SignInRuleView,
   signInRuleSuspensionWords,
-} from '../../../../wire/index.ts';
+} from '../../../../contract/routes/index.ts';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';

@@ -19,7 +19,7 @@ import {
   type TwoFactorId,
   TwoFactorIdSchema,
   TwoFactorStageIdSchema,
-} from '../contract/index.ts';
+} from '../index.ts';
 
 export type { AccountId, AccountKey, SignInId, SignInRuleId, TwoFactorId };
 export {

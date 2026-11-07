@@ -34,7 +34,12 @@ const Base64UrlSchema = (max: number) =>
     .max(max)
     .regex(/^[A-Za-z0-9_-]+$/u, 'not unpadded base64url');
 
-const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
+// TODO(contract): Access's ids (`protocol/src/lib/pairing.ts`); a plugin contract may not import Access's contract.
+export const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
+export type PairedDeviceId = z.infer<typeof PairedDeviceIdSchema>;
+/** A daemon id is the SHA-256 fingerprint of its persisted Ed25519 public key. */
+export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
+export type DaemonId = z.infer<typeof DaemonIdSchema>;
 
 /**
  * A STORED PROOF: what the daemon keeps of a verified ceremony for a stored-proof act, so the assertion can be checked

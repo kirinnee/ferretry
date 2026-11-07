@@ -1,3 +1,4 @@
+import { DevicesChanged } from '@ferretry/plugin-access/contract';
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
@@ -667,6 +668,8 @@ export default definePlugin({
     ],
     readModels: ['sign-ins'],
     publishes: [SignInsChanged],
+    /** A revoked or idle-expired device's standing rules are suspended (P124); Access's event, read through its contract. */
+    subscribes: [DevicesChanged],
   },
 
   hooks: {

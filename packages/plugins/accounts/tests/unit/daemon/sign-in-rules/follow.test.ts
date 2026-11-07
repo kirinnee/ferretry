@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountId, type SignInId, type SignInRuleStageId, TotpParametersSchema } from '../../../../wire/index.ts';
+import { type AccountId, type SignInId, type SignInRuleStageId, TotpParametersSchema } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
 import { MemoryLoginIndex } from '../runtime/mounts/support.ts';

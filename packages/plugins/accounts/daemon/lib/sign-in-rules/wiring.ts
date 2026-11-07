@@ -1,3 +1,5 @@
+import type { DevicesChanged } from '@ferretry/plugin-access/contract';
+import type { PayloadOf } from '@ferretry/kernel/contract';
 import type { PasskeysChangedListener } from '../local-ports.ts';
 import type { RuleListing } from './drift.ts';
 import type { SignInRuleService } from './service.ts';
@@ -46,4 +48,24 @@ export function connectSignInRules(
   hooks.accounts.followRulesWith(async after => await rules.accountsChanged(after));
   hooks.passkeys.subscribe(async change => await rules.passkeysChanged(change));
   hooks.devices.attach(rules);
+}
+
+/** What Access publishes when a device changes (its contract's `DevicesChanged`). */
+export type DevicesChangedPayload = PayloadOf<typeof DevicesChanged>;
+
+/**
+ * A PAIRED DEVICE WAS REVOKED OR IDLE-EXPIRED (Access's `DevicesChanged`, lead decision for 5.0; today's pairing
+ * `deviceState` purge and the passkeys-changed signal after it): every rule that device approved is suspended, and every
+ * kept proof is checked again against the registry as it stands. EVERY PURGE IS ATTEMPTED even when an earlier one
+ * fails, and a failure is reported, never thrown back into Access's revocation.
+ */
+export function onDevicesChanged(
+  rules: Pick<SignInRuleService, 'forgetDevice' | 'passkeysChanged'>,
+  failed: (error: unknown) => void = () => undefined,
+): (payload: DevicesChangedPayload) => Promise<void> {
+  return async ({ device, change }) => {
+    if (change !== 'revoked' && change !== 'expired') return;
+    await rules.forgetDevice(device).catch(failed);
+    await rules.passkeysChanged({ cause: 'device-forgotten', deviceId: device }).catch(failed);
+  };
 }

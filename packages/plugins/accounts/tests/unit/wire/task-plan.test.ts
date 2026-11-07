@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import { addTwoFactorKeySubject } from '../../../wire/accounts.ts';
-import { sha256Hex } from '../../../wire/sha256.ts';
-import { CopyPlanSchema } from '../../../wire/secure-copy.ts';
-import * as plans from '../../../wire/task-plan.ts';
+import { addTwoFactorKeySubject } from '../../../contract/routes/accounts.ts';
+import { sha256Hex } from '../../../contract/routes/sha256.ts';
+import { CopyPlanSchema } from '../../../contract/routes/secure-copy.ts';
+import * as plans from '../../../contract/routes/task-plan.ts';
 import {
   canonicalTaskPlanApproval,
   copyPlanOf,
@@ -28,7 +28,7 @@ import {
   taskPlanSelection,
   taskPlanSelectionNeedsPasskey,
   TaskPlanStageIdSchema,
-} from '../../../wire/task-plan.ts';
+} from '../../../contract/routes/task-plan.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const PLAN_ID = 'a'.repeat(32);

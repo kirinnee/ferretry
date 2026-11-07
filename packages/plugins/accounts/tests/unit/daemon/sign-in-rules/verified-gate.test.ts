@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SignInId, SignInRuleId, StoredStepUpProof } from '../../../../wire/index.ts';
+import type { SignInId, SignInRuleId, StoredStepUpProof } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import {
   approved,

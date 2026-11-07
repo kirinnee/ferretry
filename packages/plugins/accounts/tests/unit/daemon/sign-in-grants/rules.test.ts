@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountKey, DAEMON_FEATURES, daemonFeatureList, type SignInRuleId } from '../../../../wire/index.ts';
+import { type AccountKey, DAEMON_FEATURES, daemonFeatureList, type SignInRuleId } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { RuleSignInGrants, stampedProjectOf } from '../../../src/lib/sign-in-grants/rules.ts';

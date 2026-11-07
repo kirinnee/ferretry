@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SignInRulesDocument } from '../../../../wire/index.ts';
+import type { SignInRulesDocument } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { FileSignInRuleStore } from '../../../src/adapters/index.ts';

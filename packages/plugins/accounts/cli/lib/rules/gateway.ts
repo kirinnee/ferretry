@@ -13,7 +13,7 @@ import {
   SignInRuleStageViewSchema,
   type SignInRuleView,
   SignInRuleViewSchema,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import { z } from 'zod';
 import { readDaemonFeatures, updateRefusal } from '../daemon/features.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME } from '../session/connection.ts';

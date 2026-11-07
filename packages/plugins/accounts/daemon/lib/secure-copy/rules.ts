@@ -1,4 +1,4 @@
-import { COPY_MAX_RULES, type CopyOrigin, DEFAULT_PASTE_RULE_SETTINGS, type CopyRouteFrom, type CopyRouteTo, type PasteRule, type PasteRuleCreate, type PasteRuleSettings } from '../../../wire/index.ts';
+import { COPY_MAX_RULES, type CopyOrigin, DEFAULT_PASTE_RULE_SETTINGS, type CopyRouteFrom, type CopyRouteTo, type PasteRule, type PasteRuleCreate, type PasteRuleSettings } from '../../../contract/routes/index.ts';
 import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../vault-inputs.ts';
 import type { InputPasteRules } from '../vault-inputs.ts';
 import { SecureCopyError } from './errors.ts';

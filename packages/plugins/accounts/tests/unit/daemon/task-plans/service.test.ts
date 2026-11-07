@@ -15,7 +15,7 @@ import {
   TaskPlanSchema,
   type TaskPlanStageId,
   taskPlanApprovalSubject,
-} from '../../../../wire/index.ts';
+} from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { namesOnCard } from '../../support/names-on-card.ts';
 import { type AgendaLedger, AgendaService } from '../../../src/lib/agenda/index.ts';

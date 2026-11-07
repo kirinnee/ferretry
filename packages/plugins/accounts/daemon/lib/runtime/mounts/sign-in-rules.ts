@@ -1,16 +1,20 @@
-import { type AccountId, AccountIdSchema, SIGN_IN_RULE_ERROR_CODES, SIGN_IN_RULE_REFUSAL_WORDS, type SignInId, SignInIdSchema, SignInRuleAccountRevokedSchema, SignInRuleDraftSchema, SignInRuleEligibilitySchema, type SignInRuleId, SignInRuleIdSchema, SignInRuleListSchema, SignInRuleNarrowSchema, SignInRuleRevokedSchema, SignInRuleStageDroppedSchema, SignInRuleStagedSchema, type SignInRuleStageId, SignInRuleStageIdSchema, SignInRuleStageViewSchema, SignInRuleSuggestionDismissedSchema, SignInRuleSuggestionIdSchema, SignInRuleSuggestionListSchema, SignInRuleViewSchema } from '../../../../wire/index.ts';
-import { parseBody } from '../../api/body.ts';
-import type { CapabilityDemand } from '../../api/capability.ts';
-import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { type AccountId, AccountIdSchema, SIGN_IN_RULE_ERROR_CODES, SIGN_IN_RULE_REFUSAL_WORDS, type SignInId, SignInIdSchema, SignInRuleAccountRevokedSchema, SignInRuleDraftSchema, SignInRuleEligibilitySchema, type SignInRuleId, SignInRuleIdSchema, SignInRuleListSchema, SignInRuleNarrowSchema, SignInRuleRevokedSchema, SignInRuleStageDroppedSchema, SignInRuleStagedSchema, type SignInRuleStageId, SignInRuleStageIdSchema, SignInRuleStageViewSchema, SignInRuleSuggestionDismissedSchema, SignInRuleSuggestionIdSchema, SignInRuleSuggestionListSchema, SignInRuleViewSchema } from '../../../../contract/routes/index.ts';
+import { parseBody } from '../../http/body.ts';
+import { ApiError, type ApiResponse, decodeParameter, jsonResponse } from '@ferretry/kernel/contract';
+import type { RouteContext } from '../../http/grants.ts';
+import type { MountedRoute } from '../../http/routes.ts';
 import type { PasteRuleCaller } from '../../secure-copy/rules.ts';
 import { SignInRuleError, SignInRuleProofMissing, type SignInRuleService } from '../../sign-in-rules/service.ts';
 import { SignInRuleSuggestionError, type SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
-import { ownerActorOf } from './input-requests.ts';
-import { refusedAccountNames, refusedPageInput } from './secret-write-grant.ts';
-import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
+import { ownerActorOf } from '../../http/grants.ts';
+import { refusedAccountNames, refusedPageInput } from '../../http/grants.ts';
+import {
+  type StoredStepUpProof as GateStoredProof,
+  STEP_UP_ACTS,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
+} from '@ferretry/core-gate/contract';
+import type { StoredStepUpProof } from '../../../../contract/routes/index.ts';
 
 /**
  * THE OWNER'S STANDING SIGN-IN RULE ROUTES (docs/secrets.md, "Standing sign-in rules"): read the rules, stage one,
@@ -32,12 +36,6 @@ import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@f
  * narrowing and revoking only take away and need `secrets.use`.
  */
 
-const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
-const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
-const USE = { minimum: 'operator', caller: 'person', capability: SECRETS_USE, noStore: true } as const;
-const CONFIGURE = { minimum: 'operator', caller: 'person', capability: SECRETS_CONFIGURE, noStore: true } as const;
-/** Narrowing and revoking: `secrets.use`, and never a per-act passkey, whatever "ask again for each act" says. */
-const TAKE_AWAY = { ...USE, capability: { ...SECRETS_USE, narrowing: true } } as const;
 
 /** Each suggestion refusal's status: a suggestion error is a refusal the person can act on, never a 500. */
 const SUGGESTION_STATUS = {
@@ -114,18 +112,17 @@ const proofDemand = (): ApiResponse =>
     {
       error: 'approving a standing sign-in rule needs a passkey confirmation for this one rule, from a paired device',
       code: STEP_UP_REQUIRED_CODE,
-      demand: { ...SECRETS_CONFIGURE, act: STEP_UP_ACTS.approveSignInRule },
+      demand: { capability: 'secrets', axis: 'configure', act: STEP_UP_ACTS.approveSignInRule },
     } satisfies StepUpRequiredBody,
     403,
   );
 
-export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRuleSuggestions): readonly ApiRoute[] {
+export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRuleSuggestions): readonly MountedRoute[] {
   return [
     ...suggestionRoutes(suggestions),
     {
       method: 'GET',
       path: '/v1/sign-in-rules',
-      ...USE,
       handle: async context => {
         const names = refusedAccountNames(context, 'read the standing sign-in rules');
         if (names !== undefined) return names;
@@ -136,7 +133,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
     {
       method: 'GET',
       path: '/v1/sign-in-rules/eligibility',
-      ...USE,
       handle: async context => {
         const names = refusedAccountNames(context, 'ask whether a sign-in can have a standing rule');
         if (names !== undefined) return names;
@@ -150,7 +146,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // STAGE: builds the body and holds it for its passkey. Approves nothing.
       method: 'POST',
       path: '/v1/sign-in-rules/stages',
-      ...CONFIGURE,
       handle: async context => {
         const caller = owner(context);
         const refused = refusedLoosening(context);
@@ -162,7 +157,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
     {
       method: 'GET',
       path: '/v1/sign-in-rules/stages/:stage',
-      ...USE,
       handle: async context => {
         const caller = owner(context);
         const stage = stageOf(context);
@@ -175,7 +169,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // A rule staged at the machine (`fy rules add`) shown in the app, for a paired device's passkey.
       method: 'POST',
       path: '/v1/sign-in-rules/stages/:stage/confirm-in-app',
-      ...CONFIGURE,
       handle: async context => {
         const caller = owner(context);
         const stage = stageOf(context);
@@ -189,7 +182,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // that could not commit can't take the stage from the owner's phone. Asking for passkey options binds nothing.
       method: 'POST',
       path: '/v1/sign-in-rules/stages/:stage/bind',
-      ...CONFIGURE,
       handle: async context => {
         const caller = owner(context);
         const stage = stageOf(context);
@@ -202,7 +194,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // COMMIT: only the KEPT `approve-sign-in-rule` assertion over this stage's bytes, from every caller.
       method: 'POST',
       path: '/v1/sign-in-rules/stages/:stage/commit',
-      ...CONFIGURE,
       handle: async context => {
         const caller = owner(context);
         const stage = stageOf(context);
@@ -212,7 +203,7 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
         try {
           // EVERY CALLER proves it: no `governance` read for the proof, so the machine's token skips nothing.
           const made = await rules.commit(caller, stage, challenge =>
-            context.claimStoredProof?.(STEP_UP_ACTS.approveSignInRule, stage, challenge),
+            storedProofOf(context.claimStoredProof?.(STEP_UP_ACTS.approveSignInRule, stage, challenge)),
           );
           // Answered on the owner's side only: a ferret's suggestion of it leaves the owner's list, its card unchanged.
           suggestions.approved(made.signIn);
@@ -226,7 +217,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
     {
       method: 'DELETE',
       path: '/v1/sign-in-rules/stages/:stage',
-      ...USE,
       handle: async context => {
         const caller = owner(context);
         const stage = stageOf(context);
@@ -238,7 +228,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // NARROW: drop the code, end earlier, lower the cap. No passkey: it only takes away.
       method: 'POST',
       path: '/v1/sign-in-rules/:id/narrow',
-      ...TAKE_AWAY,
       handle: async context => {
         const caller = owner(context);
         const id = ruleOf(context);
@@ -252,7 +241,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // REVOKE: one tap, no passkey.
       method: 'DELETE',
       path: '/v1/sign-in-rules/:id',
-      ...TAKE_AWAY,
       handle: async context => {
         const caller = owner(context);
         const id = ruleOf(context);
@@ -264,7 +252,6 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // REVOKE every rule of one account, one tap, no passkey.
       method: 'POST',
       path: '/v1/accounts/:id/sign-in-rules/revoke',
-      ...TAKE_AWAY,
       handle: async context => {
         const caller = owner(context);
         const account = accountOf(context);
@@ -276,12 +263,11 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
 }
 
 /** The ferret suggestions waiting on the owner: read them for the sheet, or dismiss one. Neither makes or widens a rule. */
-function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute[] {
+function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly MountedRoute[] {
   return [
     {
       method: 'GET',
       path: '/v1/sign-in-rules/suggestions',
-      ...USE,
       handle: async context => {
         const names = refusedAccountNames(context, 'read the standing rules ferrets suggested');
         if (names !== undefined) return names;
@@ -292,7 +278,6 @@ function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute
     {
       method: 'DELETE',
       path: '/v1/sign-in-rules/suggestions/:sid',
-      ...USE,
       handle: async context => {
         const caller = owner(context);
         const parsed = SignInRuleSuggestionIdSchema.safeParse(context.params.get('sid') ?? '');
@@ -302,4 +287,14 @@ function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute
       },
     },
   ];
+}
+
+/**
+ * Gate's kept proof (`holder`) as a rule stores it (`deviceId`): the rule's signed body names the approving device as
+ * `approvedBy.deviceId`, so the stored proof keeps today's field and the bytes a rule was approved over never change.
+ */
+function storedProofOf(proof: GateStoredProof | undefined): StoredStepUpProof | undefined {
+  if (proof === undefined) return undefined;
+  const { holder, ...assertion } = proof;
+  return { deviceId: holder, ...assertion };
 }

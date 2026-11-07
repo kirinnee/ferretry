@@ -9,7 +9,7 @@ import {
   PhoneApprovalRaiseSchema,
   PhoneApprovalSchema,
   phoneApprovalWords,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 
 const AT = '2026-10-31T14:02:00.000Z';
 const ID = `pa_${'0'.repeat(23)}1`;

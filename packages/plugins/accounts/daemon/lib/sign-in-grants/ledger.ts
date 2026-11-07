@@ -1,4 +1,4 @@
-import type { GrantMissReason, LoginFieldRole, SignInId } from '../../../wire/index.ts';
+import type { GrantMissReason, LoginFieldRole, SignInId } from '../../../contract/routes/index.ts';
 import { SECOND_FACTOR_WINDOW_MS } from '../vault-inputs.ts';
 
 /**

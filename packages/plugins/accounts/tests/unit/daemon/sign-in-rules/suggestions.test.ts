@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SignInId, SignInRuleSuggestionId } from '../../../../wire/index.ts';
+import type { SignInId, SignInRuleSuggestionId } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import {
   SignInRuleError,

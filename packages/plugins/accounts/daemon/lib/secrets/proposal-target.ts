@@ -1,4 +1,4 @@
-import type { AccountId, AccountSummary, SignInId, SignInSummary } from '../../../wire/index.ts';
+import type { AccountId, AccountSummary, SignInId, SignInSummary } from '../../../contract/routes/index.ts';
 
 /**
  * WHICH SIGN-IN AN `account.propose` CALL IS ABOUT, one decision for both halves of the call (a recipe, and a

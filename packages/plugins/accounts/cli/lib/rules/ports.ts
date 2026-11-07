@@ -8,7 +8,7 @@ import type {
   SignInRuleStaged,
   SignInRuleStageView,
   SignInRuleView,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 
 /** Presentation port for `fy rules`. */
 interface IRulesOutput {

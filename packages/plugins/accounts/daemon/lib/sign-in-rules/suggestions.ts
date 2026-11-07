@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type AccountId, type Place, placeKeys, SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS, SIGN_IN_RULE_SUGGESTIONS_PER_HOUR, signInRuleKeysFit, type SignInId, type SignInRuleSuggestionId, type SignInRuleSuggestionList, type SignInRuleSuggestionView, type SignInSummary } from '../../../wire/index.ts';
+import { type AccountId, type Place, placeKeys, SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS, SIGN_IN_RULE_SUGGESTIONS_PER_HOUR, signInRuleKeysFit, type SignInId, type SignInRuleSuggestionId, type SignInRuleSuggestionList, type SignInRuleSuggestionView, type SignInSummary } from '../../../contract/routes/index.ts';
 import { OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
 import type { AuditSink } from '../local-ports.ts';
 import { proposalTarget } from '../secrets/proposal-target.ts';

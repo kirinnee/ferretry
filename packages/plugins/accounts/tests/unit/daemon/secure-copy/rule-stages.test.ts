@@ -15,7 +15,7 @@ import {
   type PasteRuleStageId,
   pasteRuleApprovalSubject,
   profileTargetsApprovalSubject,
-} from '../../../../wire/index.ts';
+} from '../../../../contract/routes/index.ts';
 import should from 'should';
 import {
   type PasteRuleCaller,

@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SignInRuleStageIdSchema, type TaskPlanStageId, type TwoFactorStageId } from '../../../wire/account-ids.ts';
-import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../../wire/accounts.ts';
-import { sha256Hex } from '../../../wire/sha256.ts';
-import * as rules from '../../../wire/sign-in-rules.ts';
+import { SignInRuleStageIdSchema, type TaskPlanStageId, type TwoFactorStageId } from '../../../contract/routes/account-ids.ts';
+import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../../contract/routes/accounts.ts';
+import { sha256Hex } from '../../../contract/routes/sha256.ts';
+import * as rules from '../../../contract/routes/sign-in-rules.ts';
 import {
   canonicalSignInRule,
   factorFingerprint,
@@ -33,13 +33,13 @@ import {
   signInRuleSubject,
   signInRuleSuspensionOf,
   signInRuleSuspensionWords,
-} from '../../../wire/sign-in-rules.ts';
+} from '../../../contract/routes/sign-in-rules.ts';
 import {
   GRANT_MISS_REASONS,
   GRANT_STOPPING_REASONS,
   ruleMissSuspends,
   taskPlanApprovalSubject,
-} from '../../../wire/task-plan.ts';
+} from '../../../contract/routes/task-plan.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const DEVICE = `fy_device_id_${'d'.repeat(22)}`;

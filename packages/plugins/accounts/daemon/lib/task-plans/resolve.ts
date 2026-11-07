@@ -21,7 +21,7 @@ import {
   type TaskPlanSelectedLine,
   taskPlanCoversTool,
   taskPlanKeysFitLine,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 
 /**

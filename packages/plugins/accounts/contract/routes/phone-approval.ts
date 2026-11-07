@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { AccountRefSchema, PushAppSchema, TWO_FACTOR_LABEL_MAX_LENGTH } from './accounts.ts';
 import { MAX_ASK_SUBJECT_LENGTH as MAX_AGENDA_SUBJECT_LENGTH } from '@ferretry/core-asks/contract';
-import { PhoneApprovalIdSchema as ContractPhoneApprovalIdSchema } from '../contract/index.ts';
+import { PhoneApprovalIdSchema as ContractPhoneApprovalIdSchema } from '../index.ts';
 import { InstantSchema } from './foreign.ts';
 import { InputFieldElementSchema } from './foreign.ts';
 import { LOGIN_USERNAME_MAX_LENGTH, LoginEntryIdSchema, oneLine } from './login-entries.ts';

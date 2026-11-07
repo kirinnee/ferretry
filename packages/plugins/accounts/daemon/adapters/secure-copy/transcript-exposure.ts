@@ -1,5 +1,5 @@
-import type { CopyExposurePort, TranscriptFileResolver } from '../../lib/index.ts';
-import { transcriptExposure } from '../../lib/index.ts';
+import { type CopyExposurePort, transcriptExposure } from '../../lib/secure-copy/index.ts';
+import type { TranscriptFileResolver } from '../../lib/local-ports.ts';
 
 /** How much of a transcript's end is searched: enough for a long session, bounded so a capture stays quick. */
 export const TRANSCRIPT_EXPOSURE_BYTES = 32 * 1024 * 1024;

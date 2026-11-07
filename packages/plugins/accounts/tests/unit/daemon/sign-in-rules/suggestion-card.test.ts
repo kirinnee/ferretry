@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, type SignInRuleSuggestionId } from '../../../../wire/index.ts';
+import { SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, type SignInRuleSuggestionId } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { type AgendaLedger, type AgendaLedgerRepository, AgendaService } from '../../../src/lib/agenda/index.ts';
 import { parseAgendaLedger } from '../../../src/lib/agenda/state-machine.ts';

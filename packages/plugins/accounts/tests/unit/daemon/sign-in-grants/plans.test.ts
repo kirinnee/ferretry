@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AccountKey, SignInId } from '../../../../wire/index.ts';
+import type { AccountKey, SignInId } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { type PlanGrantLines, PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';

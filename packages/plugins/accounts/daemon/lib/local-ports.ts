@@ -4,7 +4,7 @@
  * composition (accounts-a owns `daemon/index.ts`) binds them.
  */
 import type { AuditActor, AuditDetail, AuditKindName, AuditOutcome } from '@ferretry/core-gate/contract';
-import type { CopyElementPart } from '../../wire/index.ts';
+import type { CopyElementPart } from '../../contract/routes/index.ts';
 import type { BrowserElementTarget } from './vault-inputs.ts';
 
 // ─── audit (today's `lib/audit/types.ts`) ─────────────────────────────────────────────────────────────────────────
@@ -124,4 +124,11 @@ export interface SecretChildOutcome {
 /** Spawning one child. THE ADAPTER NEVER PUTS THE COMMAND OR ITS ENVIRONMENT IN A LOG OR AN ERROR. */
 export interface SecretChildRunner {
   run(spec: SecretChildSpec): Promise<SecretChildOutcome>;
+}
+
+// ─── a ferret's transcript (today's `lib/session/transcript/reader.ts`) ──────────────────────────────────────────
+
+// TODO(contract): Ferrets' contract has `TranscriptReader` (entries), not the transcript FILE a secure copy searches raw.
+export interface TranscriptFileResolver {
+  file(sessionId: string): Promise<string | undefined>;
 }

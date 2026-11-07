@@ -23,7 +23,7 @@ import {
   pasteRuleWords,
   profileTargetsApprovalSubject,
   profileTargetsWords,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import type { PasteRuleCaller, PasteRuleService } from './rules.ts';
 
 /**

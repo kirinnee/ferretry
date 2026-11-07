@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AccountKey, SignInId } from '../../../../wire/index.ts';
+import type { AccountKey, SignInId } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { FILLS_PER_HOUR_PER_SIGN_IN, SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { NO_SCRIPTED_ORIGINS, type SignInGrant } from '../../../src/lib/sign-in-grants/matcher.ts';

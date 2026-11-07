@@ -11,7 +11,7 @@ import {
   recipeDiff,
   type SignInId,
   type SignInSummary,
-} from '../../../wire/index.ts';
+} from '../../../contract/routes/index.ts';
 import type { AuditSink, ClockPort } from '../local-ports.ts';
 import { proposalTarget } from './proposal-target.ts';
 

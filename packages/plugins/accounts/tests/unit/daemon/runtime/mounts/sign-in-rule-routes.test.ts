@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_REFUSAL_WORDS, type SignInRuleStageId } from '../../../../../wire/index.ts';
+import { SIGN_IN_RULE_REFUSAL_WORDS, type SignInRuleStageId } from '../../../../../contract/routes/index.ts';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';

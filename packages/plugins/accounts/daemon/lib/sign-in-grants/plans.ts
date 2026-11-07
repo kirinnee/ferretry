@@ -1,4 +1,4 @@
-import type { AccountId, AccountKey, GrantMissReason, LoginFieldRole, SignInField } from '../../../wire/index.ts';
+import type { AccountId, AccountKey, GrantMissReason, LoginFieldRole, SignInField } from '../../../contract/routes/index.ts';
 import type { ApprovedSignInLine } from '../task-plans/service.ts';
 import type { SignInGrantLedger } from './ledger.ts';
 import { NO_SCRIPTED_ORIGINS, type ScriptedOriginsView, type SignInGrant } from './matcher.ts';

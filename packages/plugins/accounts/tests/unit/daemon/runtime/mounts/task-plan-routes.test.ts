@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountId, type AccountKey, type AccountSummary, type SignInSummary, type TaskPlanStageId } from '../../../../../wire/index.ts';
+import { type AccountId, type AccountKey, type AccountSummary, type SignInSummary, type TaskPlanStageId } from '../../../../../contract/routes/index.ts';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';

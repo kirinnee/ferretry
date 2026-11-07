@@ -7,7 +7,7 @@ import {
   COPY_STDERR_MAX_CHARS,
   COPY_VALUE_MAX_BYTES,
   type CopyCapture,
-} from '../../../../wire/index.ts';
+} from '../../../../contract/routes/index.ts';
 import should from 'should';
 import {
   EphemeralValues,
