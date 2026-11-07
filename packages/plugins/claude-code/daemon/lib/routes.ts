@@ -3,11 +3,11 @@ import {
   type ApiResponse,
   decodeParameter,
   jsonResponse,
-  parseBody as parseBoundedBody,
+  parseBody,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
 import { claimOwnerOnly } from '@ferretry/core-gate/contract';
-import type { ZodType, z } from 'zod';
+import type { z } from 'zod';
 import {
   HARNESS_UPDATE_CODES,
   HarnessDialogAnswerRequestSchema,
@@ -18,20 +18,6 @@ import {
 import { DialogAnswerError, type DialogAnswerService } from './dialog/service.ts';
 import { PermissionAnswerError, type PermissionAnswerService } from './permission/service.ts';
 import { HarnessUpdateRefusal, type HarnessUpdateSubsystem } from './update/service.ts';
-
-/** The first route-level fact: a body that is not the schema is a 400 naming what is wrong. */
-async function parseBody<T>(call: Parameters<RouteHandler>[0], schema: ZodType<T>): Promise<T> {
-  let raw: unknown;
-  try {
-    const text = await call.request.text();
-    raw = text === '' ? {} : JSON.parse(text);
-  } catch {
-    throw new ApiError(400, 'the request body is not JSON', 'invalid_body');
-  }
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new ApiError(400, 'the request body is not what this route takes', 'invalid_body');
-  return parsed.data;
-}
 
 function ferretId(call: Parameters<RouteHandler>[0]): string {
   const decoded = decodeParameter(call.params.get('ferretId') ?? '');
@@ -51,7 +37,7 @@ function paneRefusal(error: unknown): never {
 export function permissionRoute(permission: PermissionAnswerService): RouteHandler {
   return async call => {
     const id = ferretId(call);
-    const request = await parseBody(call, PermissionAnswerRequestSchema);
+    const request = await parseBody(call.request, PermissionAnswerRequestSchema);
     try {
       return jsonResponse(await permission.answer(id, request));
     } catch (error) {
@@ -68,7 +54,7 @@ export function permissionRoute(permission: PermissionAnswerService): RouteHandl
 export function dialogRoute(dialog: DialogAnswerService): RouteHandler {
   return async call => {
     const id = ferretId(call);
-    const request = await parseBody(call, HarnessDialogAnswerRequestSchema);
+    const request = await parseBody(call.request, HarnessDialogAnswerRequestSchema);
     try {
       return jsonResponse(await dialog.answer(id, request));
     } catch (error) {
@@ -112,7 +98,7 @@ function refuseStart(error: unknown): ApiResponse {
  */
 export function updateStartRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async call => {
-    const request = await parseBoundedBody(call.request, HarnessUpdateStartRequestSchema, {
+    const request = await parseBody(call.request, HarnessUpdateStartRequestSchema, {
       maxBytes: MAX_START_BODY_BYTES,
     });
     const refused = claimOwnerOnly(call, 'update the agent CLIs on this machine');
