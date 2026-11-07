@@ -73,5 +73,10 @@ export interface BoardApi {
   /** The cards a ferret holds, for its sitrep line (one line per card, from its progress). */
   heldBy(ferret: FerretId): Promise<readonly CardView[]>;
   switchOf(project: string): Promise<BoardSwitch>;
+  /**
+   * The board a ferret works on, as the daemon knows it (its stamped board, else resolved from its folder and lineage;
+   * `unfiled` when it has none): a project's id, never a path. Accounts orders a sign-in card by it (I184). Additive.
+   */
+  projectOf?(ferret: FerretId): Promise<string>;
 }
 export const BoardPort = definePort<BoardApi>('board');
