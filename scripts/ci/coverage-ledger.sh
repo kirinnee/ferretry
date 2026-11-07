@@ -52,7 +52,9 @@ coverage_file="coverage/${mode}/lcov.info"
 if [[ $# -gt 1 || $1 != "${coverage_file}" ]]; then
   mkdir -p "coverage/${mode}"
   merged="$(mktemp)"
-  awk '
+  ledger_scope="lib/"
+  [[ ${mode} == "int" ]] && ledger_scope="adapters/"
+  awk -v scope="${ledger_scope}" '
     FNR == 1 { group = FILENAME; sub(/\/lcov\.info$/, "", group); sub(/^.*\//, "", group); sub(/^coverage-(unit|int)-/, "", group) }
     /^SF:/ { sf = substr($0, 4); record = $0 "\n"; lf = 0; lh = 0; next }
     /^end_of_record/ {
@@ -74,7 +76,8 @@ if [[ $# -gt 1 || $1 != "${coverage_file}" ]]; then
         # Nothing executable in ANY group (a types-only module): the serial ledger records it as 0/0
         # too. A 0/0 from one group never excuses unhit lines in another.
         if (most_lf[sf] == 0) { printf "%s", best[sf]; continue }
-        printf "❌ %s reaches 100%% in no single test group (lines hit/found:%s); test its missed lines in the group that owns it\n", sf, seen[sf] > "/dev/stderr"
+        # Only a file the tier judges (below) is reported; any other is carried for the record.
+        if (sf ~ ("(^|/)packages/.*/" scope)) printf "❌ %s reaches 100%% in no single test group (lines hit/found:%s); test its missed lines in the group that owns it\n", sf, seen[sf] > "/dev/stderr"
         printf "%s", best[sf]
       }
     }
