@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '../../../../contract/index.ts';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { DaemonCallError } from '@ferretry/app';
+import { type FakeRoute, fakeClient } from '../../../support/app/fake-client.ts';
 import type { LedgerSendRecord } from '../../../../app/chat/send-ledger.ts';
 import type { OutboxEntry } from '../../../../app/composer/send-outbox.ts';
 import {
@@ -11,26 +12,27 @@ import {
   extendQueueHistory,
   olderRequest,
   queueActions,
-  readSessionQueue,
-  readSessionQueuePage,
+  readFerretQueue,
+  readFerretQueuePage,
   refreshQueueHistory,
   startQueueHistory,
   withdrawQueued,
   withdrawReplyVia,
 } from '../../../../app/queue/send-queue.ts';
 
-const message = (overrides: Partial<QueuedMessage> = {}): QueuedMessage => ({
-  v: 1,
-  id: 'm1',
-  sender: 'human',
-  text: 'ship it',
-  attachmentIds: [],
-  enqueuedAt: '2026-10-30T10:00:00.000Z',
-  state: 'queued',
-  stateAt: '2026-10-30T10:00:00.000Z',
-  revision: 1,
-  ...overrides,
-});
+const message = (overrides: Partial<Record<keyof QueuedMessage, unknown>> = {}): QueuedMessage =>
+  ({
+    v: 1,
+    id: 'm1',
+    sender: 'human',
+    text: 'ship it',
+    attachmentIds: [],
+    enqueuedAt: '2026-10-30T10:00:00.000Z',
+    state: 'queued',
+    stateAt: '2026-10-30T10:00:00.000Z',
+    revision: 1,
+    ...overrides,
+  }) as QueuedMessage;
 
 const row = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
   sendId: 'm1',
@@ -238,66 +240,45 @@ describe('effectiveQueueState', () => {
   });
 });
 
-const failing = (status: number) => ({
-  request: async () => {
-    throw new FyHttpError('nope', status, undefined);
-  },
-});
+const QUEUE = 'GET /v1/ferrets/:ferretId/queue';
+const PATCH = 'PATCH /v1/ferrets/:ferretId/queue/:messageId';
+const DELETE = 'DELETE /v1/ferrets/:ferretId/queue/:messageId';
 
-describe('readSessionQueue', () => {
-  test('reads and parses the messages from the session’s queue route', async () => {
-    const seen: string[] = [];
-    const api = {
-      request: async (path: string) => {
-        seen.push(path);
-        return { messages: [message()] };
-      },
-    };
-    expect(await readSessionQueue(api as never, 'a/b')).toEqual([message()]);
-    expect(seen).toEqual(['/v1/sessions/a%2Fb/queue']);
-  });
-
-  test('an older daemon with no queue route (404 or 405) is no queue, not an error', async () => {
-    expect(await readSessionQueue(failing(404) as never, 's')).toEqual([]);
-    expect(await readSessionQueue(failing(405) as never, 's')).toEqual([]);
-  });
-
-  test('a page this build cannot read is no queue; any other failure is the caller’s to report', async () => {
-    expect(await readSessionQueue({ request: async () => ({ messages: [{ id: 1 }] }) } as never, 's')).toEqual([]);
-    expect(readSessionQueue(failing(500) as never, 's')).rejects.toThrow('nope');
-    expect(
-      readSessionQueue({ request: async () => Promise.reject(new Error('offline')) } as never, 's'),
-    ).rejects.toThrow('offline');
-  });
-});
-
-describe('readSessionQueuePage', () => {
-  const recording = (answer: unknown) => {
-    const seen: string[] = [];
-    return { seen, api: { request: async (path: string) => (seen.push(path), answer) } as never };
+/** A client every queue route of which refuses with `status`, as the daemon would. */
+const failing = (status: number) => {
+  const refuse: FakeRoute = () => {
+    throw new DaemonCallError(status, 'refused', 'server words');
   };
+  return fakeClient({ [QUEUE]: refuse, [PATCH]: refuse, [DELETE]: refuse });
+};
 
+describe('readFerretQueue', () => {
+  test('reads and parses the messages from the ferret’s queue route', async () => {
+    const client = fakeClient({ [QUEUE]: () => ({ messages: [message()] }) });
+    expect(await readFerretQueue(client, 'a-b')).toEqual([message()]);
+    expect(client.calls).toEqual([{ route: QUEUE, init: { params: { ferretId: 'a-b' }, query: {} } }]);
+  });
+
+  test('a failure, or a page this build cannot read, is the caller’s to report', async () => {
+    expect(readFerretQueue(failing(500), 's')).rejects.toThrow('server words');
+    expect(readFerretQueue(fakeClient({ [QUEUE]: () => ({ messages: [{ id: 1 }] }) }), 's')).rejects.toThrow();
+  });
+});
+
+describe('readFerretQueuePage', () => {
   test('asks the window with no parameters, and reads a daemon that names no cursor as having nothing older', async () => {
-    const { api, seen } = recording({ messages: [message()] });
-    expect(await readSessionQueuePage(api, 's')).toEqual({ messages: [message()], nextCursor: null });
-    expect(seen).toEqual(['/v1/sessions/s/queue']);
+    const client = fakeClient({ [QUEUE]: () => ({ messages: [message()] }) });
+    expect(await readFerretQueuePage(client, 's')).toEqual({ messages: [message()], nextCursor: null });
+    expect(client.calls[0]?.init.query).toEqual({});
   });
 
-  test('asks the next older page by its cursor and limit, encoded', async () => {
-    const { api, seen } = recording({ messages: [], nextCursor: 'm/9' });
-    expect(await readSessionQueuePage(api, 's', { before: 'm 1', limit: 50 })).toEqual({
+  test('asks the next older page by its cursor and limit', async () => {
+    const client = fakeClient({ [QUEUE]: () => ({ messages: [], nextCursor: 'm9' }) });
+    expect(await readFerretQueuePage(client, 's', { before: 'm 1', limit: 50 })).toEqual({
       messages: [],
-      nextCursor: 'm/9',
+      nextCursor: 'm9',
     });
-    expect(seen).toEqual(['/v1/sessions/s/queue?before=m+1&limit=50']);
-  });
-
-  test('an older daemon with no queue route, or a page this build cannot read, is an empty page', async () => {
-    const empty = { messages: [], nextCursor: null };
-    expect(await readSessionQueuePage(failing(404) as never, 's')).toEqual(empty);
-    expect(await readSessionQueuePage({ request: async () => ({ messages: [{ id: 1 }] }) } as never, 's')).toEqual(
-      empty,
-    );
+    expect(client.calls[0]?.init.query).toEqual({ before: 'm 1', limit: '50' });
   });
 });
 
@@ -519,29 +500,27 @@ describe('which look at a message is the later one', () => {
 
 describe('queueActions', () => {
   const recorder = (status?: number) => {
-    const calls: { path: string; init: RequestInit | undefined }[] = [];
-    const client = {
-      request: async (path: string, _schema: unknown, init?: RequestInit) => {
-        calls.push({ path, init });
-        if (status !== undefined) throw new FyHttpError('server words', status, undefined);
-        return message();
-      },
+    const record: FakeRoute = () => {
+      if (status !== undefined) throw new DaemonCallError(status, 'refused', 'server words');
+      return message();
     };
-    return { client, calls };
+    const client = fakeClient({ [PATCH]: record, [DELETE]: record });
+    return { client, calls: client.calls };
   };
 
   test('edit PATCHes the new words, cancel DELETEs, and each asks for a refresh', async () => {
     const { client, calls } = recorder();
     let refreshes = 0;
-    const actions = queueActions(client as never, 's/1', () => {
+    const actions = queueActions(client, 's-1', () => {
       refreshes += 1;
     });
     expect(await actions.edit({ sendId: 'm 1' }, '  new words ')).toBe(true);
     expect(await actions.cancel({ sendId: 'm 1' })).toBe(true);
-    expect(calls[0]?.path).toBe('/v1/sessions/s%2F1/queue/m%201');
-    expect(calls[0]?.init?.method).toBe('PATCH');
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ text: 'new words' });
-    expect(calls[1]?.init?.method).toBe('DELETE');
+    expect(calls[0]).toEqual({
+      route: PATCH,
+      init: { params: { ferretId: 's-1', messageId: 'm 1' }, body: { text: 'new words' } },
+    });
+    expect(calls[1]).toEqual({ route: DELETE, init: { params: { ferretId: 's-1', messageId: 'm 1' } } });
     expect(refreshes).toBe(2);
   });
 
@@ -552,7 +531,7 @@ describe('queueActions', () => {
     ] as const) {
       const { client } = recorder(status);
       let refreshes = 0;
-      const actions = queueActions(client as never, 's', () => {
+      const actions = queueActions(client, 's', () => {
         refreshes += 1;
       });
       const error = await actions.cancel({ sendId: 'm1' }).catch((reason: unknown) => reason);
@@ -567,7 +546,7 @@ describe('queueActions', () => {
 
   test('any other failure is passed on as it came, and no client answers false', async () => {
     const { client } = recorder(500);
-    const actions = queueActions(client as never, 's', () => undefined);
+    const actions = queueActions(client, 's', () => undefined);
     expect(actions.cancel({ sendId: 'm1' })).rejects.toThrow('server words');
     const none = queueActions(null, 's', () => undefined);
     expect(await none.edit({ sendId: 'm1' }, 'x')).toBe(false);
@@ -635,15 +614,12 @@ describe('queueActions with an outbox', () => {
         return 'cancelled' as const;
       },
     };
-    const client = {
-      request: async () => {
-        throw new Error('the machine must not be asked');
-      },
-    };
-    const actions = queueActions(client as never, 's', () => refreshed.push(1), outbox);
+    const client = fakeClient({});
+    const actions = queueActions(client, 's', () => refreshed.push(1), outbox);
     expect(await actions.edit(record, 'thank you!')).toBe(true);
     expect(await actions.cancel(record)).toBe(true);
     expect(calls).toEqual(['edit o1 thank you!', 'cancel o1']);
+    expect(client.calls).toEqual([]);
     expect(refreshed).toHaveLength(2);
   });
 
@@ -652,17 +628,14 @@ describe('queueActions with an outbox', () => {
       edit: async () => 'elsewhere' as const,
       cancel: async () => 'elsewhere' as const,
     };
-    const seen: string[] = [];
-    const client = {
-      request: async (path: string, _schema: unknown, init: RequestInit) => {
-        seen.push(`${init.method} ${path}`);
-        return {};
-      },
-    };
-    const actions = queueActions(client as never, 's', () => undefined, outbox);
+    const client = fakeClient({ [PATCH]: () => message(), [DELETE]: () => message() });
+    const actions = queueActions(client, 's', () => undefined, outbox);
     expect(await actions.edit(record, 'x')).toBe(true);
     expect(await actions.cancel(record)).toBe(true);
-    expect(seen).toEqual(['PATCH /v1/sessions/s/queue/o1', 'DELETE /v1/sessions/s/queue/o1']);
+    expect(client.calls.map(call => `${call.route} ${call.init.params?.['messageId']}`)).toEqual([
+      `${PATCH} o1`,
+      `${DELETE} o1`,
+    ]);
     const offline = queueActions(null, 's', () => undefined, outbox);
     expect(await offline.edit(record, 'x')).toBe(false);
     expect(await offline.cancel(record)).toBe(false);
@@ -670,78 +643,48 @@ describe('queueActions with an outbox', () => {
 });
 
 describe('withdrawQueued', () => {
-  const failing = (status: number) => ({
-    request: async () => {
-      throw new FyHttpError('server words', status, undefined);
-    },
-  });
-
   test('a message still waiting on the machine is taken back through the queue route', async () => {
-    const calls: { path: string; method: string | undefined }[] = [];
-    const client = {
-      request: async (path: string, _schema: unknown, init?: RequestInit) => {
-        calls.push({ path, method: init?.method });
-        return message();
-      },
-    };
-    expect(await withdrawQueued(client as never, 's/1', 'm1')).toBe('withdrawn');
-    expect(calls).toEqual([{ path: '/v1/sessions/s%2F1/queue/m1', method: 'DELETE' }]);
+    const client = fakeClient({ [DELETE]: () => message() });
+    expect(await withdrawQueued(client, 's-1', 'm1')).toBe('withdrawn');
+    expect(client.calls).toEqual([{ route: DELETE, init: { params: { ferretId: 's-1', messageId: 'm1' } } }]);
   });
 
   test('a message still on this device is cancelled there, without a request', async () => {
-    const calls: string[] = [];
-    const client = {
-      request: async () => {
-        calls.push('request');
-        return message();
-      },
-    };
+    const client = fakeClient({});
     const outbox = { edit: async () => 'gone' as const, cancel: async () => 'cancelled' as const };
-    expect(await withdrawQueued(client as never, 's', 'o1', outbox as never)).toBe('withdrawn');
-    expect(calls).toEqual([]);
+    expect(await withdrawQueued(client, 's', 'o1', outbox as never)).toBe('withdrawn');
+    expect(client.calls).toEqual([]);
   });
 
   test('the agent already typing it (409) or the queue not knowing it (404) is `taken`, not a failure', async () => {
-    expect(await withdrawQueued(failing(409) as never, 's', 'm1')).toBe('taken');
-    expect(await withdrawQueued(failing(404) as never, 's', 'm1')).toBe('taken');
+    expect(await withdrawQueued(failing(409), 's', 'm1')).toBe('taken');
+    expect(await withdrawQueued(failing(404), 's', 'm1')).toBe('taken');
   });
 
   test('any other refusal, or no way to reach the machine, throws so Undo can say the reply may still arrive', async () => {
-    expect(withdrawQueued(failing(500) as never, 's', 'm1')).rejects.toThrow('server words');
+    expect(withdrawQueued(failing(500), 's', 'm1')).rejects.toThrow('server words');
     expect(withdrawQueued(null, 's', 'm1')).rejects.toThrow('not reachable');
   });
 });
 
 describe('withdrawReplyVia', () => {
-  const card = { daemonId: 'studio', view: { config: { id: 's1' } } };
-  const studio = { daemonId: 'studio' };
+  const card = { daemon: 'studio', ferret: 's1' };
 
   test('takes the reply back from the machine it went to, through that machine’s client', async () => {
     const asked: string[] = [];
-    const clients = {
-      client: async (connection: { daemonId: string }) => {
-        asked.push(connection.daemonId);
-        return {
-          request: async (path: string) => {
-            asked.push(path);
-            return message();
-          },
-        } as never;
-      },
-    };
+    const studio = fakeClient({ [DELETE]: () => message() });
     const outbox = { edit: async () => 'gone' as const, cancel: async () => 'gone' as const };
-    const take = withdrawReplyVia([{ connection: studio }], clients, outbox as never);
+    const take = withdrawReplyVia(daemon => {
+      asked.push(daemon);
+      return daemon === 'studio' ? studio : undefined;
+    }, outbox as never);
     expect(await take(card, 'm1')).toBe('withdrawn');
-    expect(asked).toEqual(['studio', '/v1/sessions/s1/queue/m1']);
+    expect(asked).toEqual(['studio']);
+    expect(studio.calls).toEqual([{ route: DELETE, init: { params: { ferretId: 's1', messageId: 'm1' } } }]);
   });
 
   test('refuses a machine that is no longer paired, without asking anyone', async () => {
-    const clients = {
-      client: async () => {
-        throw new Error('never asked');
-      },
-    };
-    const take = withdrawReplyVia([{ connection: { daemonId: 'laptop' } }], clients, {} as never);
-    expect(take(card, 'm1')).rejects.toThrow('no longer paired');
+    const take = withdrawReplyVia(() => undefined, {} as never);
+    expect(take({ daemon: 'laptop', ferret: 's1' }, 'm1')).rejects.toThrow('no longer paired');
   });
 });

@@ -18,8 +18,6 @@ import { type FerretView, FerretViewSchema } from '@ferretry/core-ferrets/contra
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   AskedQuestionViewSchema,
-  type FerretQueue,
-  FerretQueueSchema,
   type HandoffDocument,
   HandoffDocumentSchema,
   HandoffNameSchema,
@@ -33,6 +31,7 @@ import {
   type TranscriptImageDownload,
   TranscriptImageDownloadSchema,
 } from '../../contract/index.ts';
+import { readFerretQueue } from '../queue/send-queue.ts';
 import type { ChatReadApi } from './chat-refresh.ts';
 import { readLedgerSends } from './send-ledger.ts';
 
@@ -135,12 +134,6 @@ export const readFerretView = async (client: Pick<PluginClient, 'call'>, ferretI
 export const readSends = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<SendRecord[]> =>
   SendListResponseSchema.parse(await client.call('GET /v1/ferrets/:ferretId/sends', { params: { ferretId } })).sends;
 
-export const readQueue = async (
-  client: Pick<PluginClient, 'call'>,
-  ferretId: string,
-): Promise<FerretQueue['messages']> =>
-  FerretQueueSchema.parse(await client.call('GET /v1/ferrets/:ferretId/queue', { params: { ferretId } })).messages;
-
 /** The question the ferret is waiting on, as Conversation proved it against the transcript, or null. */
 export const readQuestion = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<Question | null> =>
   AskedQuestionViewSchema.parse(await client.call('GET /v1/ferrets/:ferretId/question', { params: { ferretId } }))
@@ -203,5 +196,6 @@ export const chatReadApi = (client: Pick<PluginClient, 'call' | 'conditional'>):
   logPage: (id, options) => readLogPage(client, id, options),
   // The ledger is read UNPARSED and degraded field by field (`send-ledger.ts`): one unknown value never drops a row.
   sends: id => readLedgerSends(client, id),
-  queue: id => readQueue(client, id),
+  // The queue's window, as the queue page reads it (`queue/send-queue.ts`).
+  queue: id => readFerretQueue(client, id),
 });
