@@ -58,7 +58,6 @@ const Base64UrlSchema = (max: number) =>
     .max(max)
     .regex(/^[A-Za-z0-9_-]+$/u, 'not unpadded base64url');
 
-
 /** What the browser asks for: options for THIS app origin, which becomes the relying-party id. */
 export const PasskeyOptionsRequestSchema = z.strictObject({ origin: AppOriginSchema });
 export type PasskeyOptionsRequest = z.infer<typeof PasskeyOptionsRequestSchema>;
@@ -82,8 +81,9 @@ export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
   request =>
     request.act === undefined || stepUpSkippableAtMachine(request.act)
       ? request.subject === undefined
-      : STEP_UP_SUBJECTS[request.act as EveryCallerStepUpAct as keyof typeof STEP_UP_SUBJECTS].safeParse(request.subject)
-          .success,
+      : STEP_UP_SUBJECTS[request.act as EveryCallerStepUpAct as keyof typeof STEP_UP_SUBJECTS].safeParse(
+          request.subject,
+        ).success,
   { path: ['subject'], message: "name the act's own staged subject exactly when the act is bound to one" },
 );
 export type StepUpOptionsRequest = z.infer<typeof StepUpOptionsRequestSchema>;
