@@ -23,27 +23,6 @@ export type CompactAt = z.infer<typeof CompactAtSchema>;
 /** The choices a surface offers beside a custom value. */
 export const COMPACT_AT_PRESETS = [200_000, 250_000, 400_000] as const;
 
-/** What a person typed (`auto`, `250k`, `250000`, `1m`, `0.4m`) as a value, or the reason it is not one. */
-export type CompactAtParse =
-  | { readonly ok: true; readonly value: CompactAt }
-  | { readonly ok: false; readonly reason: string };
-
-const WORDS = /^(?<number>\d+(?:\.\d+)?)\s*(?<unit>[km]?)$/iu;
-
-export function parseCompactAt(text: string): CompactAtParse {
-  const trimmed = text.trim().toLowerCase().replaceAll(',', '').replaceAll('_', '');
-  if (trimmed === 'auto') return { ok: true, value: 'auto' };
-  const match = WORDS.exec(trimmed);
-  const number = match?.groups?.number;
-  if (match === null || number === undefined)
-    return { ok: false, reason: `“${text.trim()}” is not a size. Use auto, or a token count like 250k or 250000.` };
-  const unit = match.groups?.unit ?? '';
-  const tokens = Math.round(Number(number) * (unit === 'm' ? 1_000_000 : unit === 'k' ? 1_000 : 1));
-  if (!Number.isSafeInteger(tokens)) return { ok: false, reason: `“${text.trim()}” is not a size.` };
-  const floor = compactAtFloorRefusal(tokens);
-  return floor === undefined ? { ok: true, value: tokens } : { ok: false, reason: floor };
-}
-
 /** The refusal for a value below the floor, in plain words; `undefined` when it clears it. */
 export function compactAtFloorRefusal(tokens: number): string | undefined {
   return tokens >= COMPACT_AT_MIN_TOKENS

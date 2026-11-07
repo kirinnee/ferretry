@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { Instant } from '@ferretry/std';
-import { SessionCompactAtController } from '../../../../cli/lib/session/compact-at.ts';
 import { renderFerret, renderSessionTable } from '../../../../cli/lib/session/display.ts';
 import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
 import { ResumeSessionController } from '../../../../cli/lib/session/lifecycle-controllers.ts';
@@ -26,11 +25,21 @@ const fleet = [
   sessionView({ id: 'lead', name: 'wren' }),
   sessionView({ id: 'mid', name: 'fern', parent: 'lead' }),
   sessionView({ id: 'kid', name: 'ash', parent: 'mid', runtime: undefined }),
-  sessionView({ id: 'old', name: 'oak', parent: 'lead', state: 'stopped', stateAt: '2026-11-06T08:00:00.000Z' as never }),
+  sessionView({
+    id: 'old',
+    name: 'oak',
+    parent: 'lead',
+    state: 'stopped',
+    stateAt: '2026-11-06T08:00:00.000Z' as never,
+  }),
   sessionView({ id: 'solo', name: 'elm', pack: 'batch' as never }),
 ];
 
-const caught = async (work: Promise<unknown>): Promise<unknown> => await work.then(() => undefined, (error: unknown) => error);
+const caught = async (work: Promise<unknown>): Promise<unknown> =>
+  await work.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
 
 describe('fy ps', () => {
   test('V-0366 lists the running ferrets in a measured table; -a adds the stopped ones', async () => {
@@ -61,7 +70,10 @@ describe('fy ps', () => {
     const plain = renderSessionTable(fleet.slice(0, 3), AMBER);
     expect(plain[0]?.startsWith('TEAMMATE')).toBe(true);
     expect(plain[3]).toContain('<-');
-    const pinned = renderSessionTable([{ ...fleet[0]!, pinnedAt: '2026-11-01T10:00:00.000Z' as Instant }, fleet[1]!], PLAIN);
+    const pinned = renderSessionTable(
+      [{ ...fleet[0]!, pinnedAt: '2026-11-01T10:00:00.000Z' as Instant }, fleet[1]!],
+      PLAIN,
+    );
     expect(pinned[0]?.startsWith('PIN')).toBe(true);
     expect(pinned[1]?.startsWith('*')).toBe(true);
   });
@@ -81,9 +93,12 @@ describe('fy status', () => {
   test('V-0445 --subtree draws the helpers from parent links, indented, an ended one marked', async () => {
     const api = new RecordingApi({ list: fleet, get: fleet[0] });
     const { io, presenter } = capturedPresenter();
-    await new SessionSubtreeController(api, presenter, {}, { nowMs: () => Date.parse('2026-11-06T09:00:00.000Z') }).execute(
-      'wren',
-    );
+    await new SessionSubtreeController(
+      api,
+      presenter,
+      {},
+      { nowMs: () => Date.parse('2026-11-06T09:00:00.000Z') },
+    ).execute('wren');
     expect(io.out[0]).toBe('wren (lead): 3 descendants');
     expect(io.out.slice(2).map(line => line.trimEnd())).toEqual([
       expect.stringMatching(/^fern\s/u),
@@ -99,9 +114,9 @@ describe('fy status', () => {
       'wren (lead): 0 descendants; ended ones show for 120m',
     ]);
     const { presenter } = capturedPresenter();
-    expect(await caught(new SessionSubtreeController(new RecordingApi(), presenter, {}).execute(undefined))).toBeInstanceOf(
-      SessionCommandError,
-    );
+    expect(
+      await caught(new SessionSubtreeController(new RecordingApi(), presenter, {}).execute(undefined)),
+    ).toBeInstanceOf(SessionCommandError);
   });
 });
 
@@ -116,9 +131,9 @@ describe('fy name', () => {
       { method: 'suggestNames', args: [2] },
       { method: 'suggestNames', args: [1] },
     ]);
-    expect(await caught(new SuggestNamesController(api, presenter).execute({ count: Number('banana') }))).toBeInstanceOf(
-      SessionCommandError,
-    );
+    expect(
+      await caught(new SuggestNamesController(api, presenter).execute({ count: Number('banana') })),
+    ).toBeInstanceOf(SessionCommandError);
   });
 });
 
@@ -174,7 +189,9 @@ describe('fy resume', () => {
 
 describe('fy signal', () => {
   test('V-0437 records a signal for the named ferret, and a declared wait says what it waits for', async () => {
-    const api = new RecordingApi({ signal: { waiting: { peer: 'p1', peerName: 'fern', until: '2026-11-06T10:00:00.000Z' } } });
+    const api = new RecordingApi({
+      signal: { waiting: { peer: 'p1', peerName: 'fern', until: '2026-11-06T10:00:00.000Z' } },
+    });
     const { io, presenter } = capturedPresenter();
     const subject = new SignalSessionController(api, presenter, {});
     await subject.execute('waiting', undefined, { session: 'wren', peer: 'fern', until: '1h' });
@@ -213,9 +230,7 @@ describe('fy start', () => {
     });
     expect(api.calls[0]).toEqual({
       method: 'start',
-      args: [
-        { folder: '/work/repo/sub', runtime: 'claude-alpha', name: 'wren', prompt: 'fix the bug', mode: 'auto' },
-      ],
+      args: [{ folder: '/work/repo/sub', runtime: 'claude-alpha', name: 'wren', prompt: 'fix the bug', mode: 'auto' }],
     });
     expect(io.err).toEqual(['note: lead is still starting — watch it with `fy ps` or `fy status lead`']);
   });
@@ -278,7 +293,10 @@ describe('fy start', () => {
   test('V-0443 an auto start needs a prompt; an interactive one may start bare; with no folder it says how', () => {
     expect(() => buildStartRequest({ mode: 'auto' }, { cwd: '/w' })).toThrow(SessionCommandError);
     expect(buildStartRequest({ mode: 'interactive' }, { cwd: '/w' })).toEqual({ folder: '/w', mode: 'interactive' });
-    expect(buildStartRequest({ mode: 'interactive', cwd: '/abs' }, {})).toEqual({ folder: '/abs', mode: 'interactive' });
+    expect(buildStartRequest({ mode: 'interactive', cwd: '/abs' }, {})).toEqual({
+      folder: '/abs',
+      mode: 'interactive',
+    });
     expect(() => buildStartRequest({ mode: 'interactive', cwd: 'rel' }, {})).toThrow(/--cwd <absolute path>/u);
   });
 });
@@ -329,33 +347,5 @@ describe('fy session', () => {
     expect(asked).toEqual(['pin wren', 'unpin lead']);
     expect(io.out).toEqual(['pinned wren (lead) to the top of the sidebar', 'unpinned wren (lead)']);
     expect(await caught(subject.pin(' '))).toBeInstanceOf(SessionCommandError);
-  });
-
-  test('V-0432 compact-at reads with no value, sends a size or inherit, and refuses a bad size', async () => {
-    const asked: string[] = [];
-    const { io, presenter } = capturedPresenter();
-    const subject = new SessionCompactAtController(
-      {
-        read: async session => {
-          asked.push(`read ${session}`);
-          return { effective: 250_000, own: 250_000, note: 'Memory is compacted at 250k tokens.' };
-        },
-        write: async (session, change) => {
-          asked.push(`write ${session} ${JSON.stringify(change)}`);
-          return { restartRequired: true, note: 'It takes effect when the ferret restarts.' };
-        },
-      },
-      presenter,
-    );
-    await subject.run(' wren ', undefined);
-    await subject.run('wren', '400k');
-    await subject.run('wren', 'inherit');
-    expect(asked).toEqual([
-      'read wren',
-      'write wren {"compactAt":400000}',
-      'write wren {"compactAt":"inherit"}',
-    ]);
-    expect(io.out[0]).toBe('compact at 250k');
-    expect(await caught(subject.run('wren', 'lots'))).toBeInstanceOf(SessionCommandError);
   });
 });

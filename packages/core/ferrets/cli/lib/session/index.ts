@@ -1,4 +1,3 @@
-export * from './compact-at.ts';
 export * from './display.ts';
 export * from './errors.ts';
 export * from './held-list.ts';

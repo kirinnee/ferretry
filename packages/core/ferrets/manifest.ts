@@ -315,9 +315,6 @@ export default definePlugin({
       }),
       verb('session pin <session>', { summary: 'pin a ferret to the top of the sidebar' }),
       verb('session unpin <session>', { summary: 'unpin a ferret from the top of the sidebar' }),
-      verb('session compact-at <session> [value]', {
-        summary: 'show or set where a ferret squeezes its conversation (a size like 250k, auto, or inherit)',
-      }),
       verb('worktree', { summary: 'inspect and remove the checkouts the daemon created for ferrets' }),
       verb('worktrees', { summary: 'alias of fy worktree' }),
       verb('worktree ls', { summary: 'every managed worktree, live ones first' }),

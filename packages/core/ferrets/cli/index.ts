@@ -2,7 +2,6 @@ import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
 import { RestartController } from './lib/restart/controller.ts';
-import { SessionCompactAtController } from './lib/session/compact-at.ts';
 import { SessionCommandError } from './lib/session/errors.ts';
 import { ResumeSessionController } from './lib/session/lifecycle-controllers.ts';
 import { SuggestNamesController } from './lib/session/name-controller.ts';
@@ -39,7 +38,6 @@ const SESSION_USAGE = [
   `  ${BINARY} session revoke-credential <ferret>`,
   `  ${BINARY} session pin <ferret>`,
   `  ${BINARY} session unpin <ferret>`,
-  `  ${BINARY} session compact-at <ferret> [tokens|auto|inherit]`,
 ];
 
 /**
@@ -248,13 +246,6 @@ export default implementCli(manifest, {
       verb(async (invocation, presenter) => {
         await new PinAgentController(api, presenter)[how](invocation.args[0] ?? '', json(invocation));
       });
-    const compactAt = verb(async (invocation, presenter) => {
-      await new SessionCompactAtController(api, presenter).run(
-        invocation.args[0] ?? '',
-        invocation.args[1],
-        json(invocation),
-      );
-    });
 
     const worktrees = (io: VerbIo) =>
       new WorktreeController(
@@ -315,7 +306,6 @@ export default implementCli(manifest, {
         'session revoke-credential <session>': revoke,
         'session pin <session>': pin('pin'),
         'session unpin <session>': pin('unpin'),
-        'session compact-at <session> [value]': compactAt,
         worktree: worktreeList,
         worktrees: worktreeList,
         'worktree ls': worktreeList,

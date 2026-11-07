@@ -48,6 +48,11 @@ describe('the ferrets cli half', () => {
     expect(Object.keys(run().verbs).sort()).toEqual(declared);
   });
 
+  test('Z1 Conversation owns compact-at: Ferrets declares and implements no session compact-at verb', () => {
+    expect(Object.keys(run().verbs).some(verb => verb.includes('compact-at'))).toBe(false);
+    expect(manifest.actions.cli?.some(decl => decl.verb.includes('compact-at'))).toBe(false);
+  });
+
   test('V-0366 ps reads GET /v1/ferrets; -a shows stopped ones; -l (a label) is refused with the word that replaced it', async () => {
     const stopped = sessionView({ id: 'old', name: 'oak', state: 'stopped' });
     const { verb, calls, out, err } = run({ [FERRET_ROUTES.list]: [ferret, stopped] });
@@ -70,10 +75,15 @@ describe('the ferrets cli half', () => {
 
   test('V-0443 start posts the body Ferrets start takes and refuses, by name, a flag another plugin decides now', async () => {
     const { verb, calls, err } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
-    expect(await verb('start [prompt...]', ['fix', 'it'], { a: 'claude-alpha', cwd: '/abs', teammate: 'wren' })).toBe(0);
+    expect(await verb('start [prompt...]', ['fix', 'it'], { a: 'claude-alpha', cwd: '/abs', teammate: 'wren' })).toBe(
+      0,
+    );
     expect(calls[0]).toEqual({
       route: 'POST /v1/ferrets',
-      init: { body: { folder: '/abs', runtime: 'claude-alpha', name: 'wren', prompt: 'fix it', mode: 'auto' } },
+      init: {
+        body: { folder: '/abs', runtime: 'claude-alpha', name: 'wren', prompt: 'fix it', mode: 'auto' },
+        headers: { 'x-fy-request-id': expect.any(String) },
+      },
     });
     expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k', 'prompt-file': 'brief.md' })).toBe(2);
     expect(err.at(-1)).toContain('--compact-at, --prompt-file');
@@ -103,6 +113,7 @@ describe('the ferrets cli half', () => {
       }),
     ).toBe(0);
     expect(calls[0]?.init).toEqual({
+      headers: { 'x-fy-request-id': expect.any(String) },
       body: {
         folder: '/abs',
         prompt: 'go',
@@ -133,13 +144,33 @@ describe('the ferrets cli half', () => {
     expect(await verb('new [words...]', ['look'], { runtime: 'codex-beta', cwd: '/abs' })).toBe(0);
     expect(calls[0]).toEqual({
       route: 'POST /v1/ferrets',
-      init: { body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto' } },
+      init: {
+        body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto' },
+        headers: { 'x-fy-request-id': expect.any(String) },
+      },
     });
     expect(
-      await verb('new [words...]', ['look'], { auto: true, model: 'opus', effort: 'high', name: 'Look', card: '&F3', cwd: '/abs' }),
+      await verb('new [words...]', ['look'], {
+        auto: true,
+        model: 'opus',
+        effort: 'high',
+        name: 'Look',
+        card: '&F3',
+        cwd: '/abs',
+      }),
     ).toBe(0);
     expect(calls.at(-2)?.init).toEqual({
-      body: { folder: '/abs', prompt: 'look', mode: 'auto', title: 'Look', card: 'F3', model: 'opus', effort: 'high', auto: true },
+      headers: { 'x-fy-request-id': expect.any(String) },
+      body: {
+        folder: '/abs',
+        prompt: 'look',
+        mode: 'auto',
+        title: 'Look',
+        card: 'F3',
+        model: 'opus',
+        effort: 'high',
+        auto: true,
+      },
     });
     const before = calls.length;
     expect(await verb('new [words...]', ['look'], { auto: true, runtime: 'codex-beta' })).toBe(2);
@@ -179,7 +210,9 @@ describe('the ferrets cli half', () => {
     expect(await dry.verb('stop orphan <session>', ['wren'], { n: true })).toBe(0);
     expect(dry.out.join('\n')).toContain('Dry run');
 
-    const byPack = run({ [FERRET_ROUTES.list]: [sessionView({ id: 'p1', pack: 'batch' as never })] });
+    const byPack = run({
+      [FERRET_ROUTES.list]: [{ ...sessionView({ id: 'p1', pack: 'separate-pack' as never }), label: 'batch' }],
+    });
     expect(await byPack.verb('stop label <label>', ['batch'], { yes: true })).toBe(0);
     expect(byPack.calls.at(-2)).toEqual({
       route: FERRET_ROUTES.stop,
@@ -253,27 +286,23 @@ describe('the ferrets cli half', () => {
     expect(await verb('restart [ids...]', [], { all: true, 'request-id': 'k' })).toBe(2);
   });
 
-  test('V-0431 V-0434 V-0433 V-0435 V-0432 the session verbs call their routes; a bare session prints them', async () => {
+  test('V-0431 V-0434 V-0433 V-0435 the session verbs call their routes; a bare session prints them', async () => {
     const { verb, calls, out } = run({
       [FERRET_ROUTES.revoke]: { id: 'lead', revoked: true },
       [FERRET_ROUTES.get]: ferret,
       [FERRET_ROUTES.pin]: { ...ferret, pinnedAt: '2026-11-01T10:00:00.000Z' },
       [FERRET_ROUTES.unpin]: ferret,
-      [FERRET_ROUTES.compactAt]: { effective: 'auto', note: 'the harness decides' },
     });
     expect(await verb('session')).toBe(2);
     expect(out[0]).toContain("act on a ferret's own standing");
     expect(await verb('session revoke-credential <session>', ['wren'])).toBe(0);
     expect(await verb('session pin <session>', ['wren'])).toBe(0);
     expect(await verb('session unpin <session>', ['wren'])).toBe(0);
-    expect(await verb('session compact-at <session> [value]', ['wren'])).toBe(0);
     expect(calls.map(call => call.route)).toEqual([
       'POST /v1/ferrets/:ferretId/revoke-credential',
       'GET /v1/ferrets/:ferretId',
       'POST /v1/ferrets/:ferretId/pin',
       'POST /v1/ferrets/:ferretId/unpin',
-      'GET /v1/ferrets/:ferretId',
-      'GET /v1/ferrets/:ferretId/compact-at',
     ]);
   });
 

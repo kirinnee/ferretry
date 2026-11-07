@@ -8,7 +8,6 @@ import type {
   RestartStatus,
 } from '../../daemon/lib/protocol/session-restart.ts';
 import type { IRestartGateway } from './restart/ports.ts';
-import type { CompactAtChange, ISessionCompactAtGateway, SessionCompactAt } from './session/compact-at.ts';
 import type { ListedFerret } from './session/display.ts';
 import type { PinnedView, ISessionPinGateway } from './session/pin-agent.ts';
 import type { ISessionApi, RenameChange, SignalAnswer, SignalKind, SignalOptions, StartBody } from './session/ports.ts';
@@ -33,8 +32,6 @@ export const FERRET_ROUTES = {
   signal: 'POST /v1/ferrets/:ferretId/signal',
   pin: 'POST /v1/ferrets/:ferretId/pin',
   unpin: 'POST /v1/ferrets/:ferretId/unpin',
-  compactAt: 'GET /v1/ferrets/:ferretId/compact-at',
-  setCompactAt: 'PATCH /v1/ferrets/:ferretId/compact-at',
   restarts: 'GET /v1/restarts',
   restart: 'POST /v1/restarts',
   cancelRestarts: 'DELETE /v1/restarts',
@@ -72,7 +69,7 @@ function lostStartAnswer(error: unknown): boolean {
  * against the contract's schema where the contract has one; the decisions live in the controllers.
  */
 export class ClientSessionApi
-  implements ISessionApi, IStopSessionGateway, ISessionPinGateway, ISessionCredentialGateway, ISessionCompactAtGateway
+  implements ISessionApi, IStopSessionGateway, ISessionPinGateway, ISessionCredentialGateway
 {
   constructor(private readonly client: PluginClient) {}
 
@@ -170,16 +167,6 @@ export class ClientSessionApi
 
   async state(reference: string): Promise<string> {
     return (await this.get(reference)).state;
-  }
-
-  async read(reference: string): Promise<SessionCompactAt> {
-    const { id } = await this.get(reference);
-    return await this.client.call<SessionCompactAt>(FERRET_ROUTES.compactAt, at(id));
-  }
-
-  async write(reference: string, change: { readonly compactAt: unknown }): Promise<CompactAtChange> {
-    const { id } = await this.get(reference);
-    return await this.client.call<CompactAtChange>(FERRET_ROUTES.setCompactAt, { ...at(id), body: change });
   }
 }
 
