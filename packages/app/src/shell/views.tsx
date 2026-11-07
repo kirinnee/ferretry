@@ -1,7 +1,7 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
-import { useRuntimeVersion, useShell } from './context.tsx';
+import { useOptionalShell, useRuntimeVersion, useShell } from './context.tsx';
 
 /**
  * WHERE PLUGIN VIEWS ARE DRAWN. Every plugin screen, panel and settings tab goes through {@link PluginView}, which
@@ -105,8 +105,10 @@ export function PanelSlot({
   readonly subject?: string;
   readonly props?: Readonly<Record<string, unknown>>;
 }) {
-  const { plan } = useShell();
-  const panels: readonly PanelRef[] = plan.panels(slot);
+  // Outside a shell (a plugin's own harness or suite) there is no layout, so no panel is placed.
+  const shell = useOptionalShell();
+  if (shell === null) return null;
+  const panels: readonly PanelRef[] = shell.plan.panels(slot);
   if (panels.length === 0) return null;
   return (
     <div className="fy-slot" data-slot={slot}>
@@ -123,4 +125,13 @@ export function PanelSlot({
       ))}
     </div>
   );
+}
+
+/**
+ * Whether the layout places any panel in `slot` here: false outside a shell. A screen that offers a slot draws its own
+ * fallback where no panel is placed (the composer its attach button, in a suite or a detached box).
+ */
+export function useSlotHasPanels(slot: string): boolean {
+  const shell = useOptionalShell();
+  return shell !== null && shell.plan.panels(slot).length > 0;
 }

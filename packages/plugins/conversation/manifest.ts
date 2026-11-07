@@ -35,6 +35,7 @@ import {
   QuestionAnswered,
   QuestionAsked,
   QuestionSchema,
+  ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
   RENDER_SAVED_AUDIT,
   SEND_CANCELLED_AUDIT,
@@ -133,6 +134,8 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
       route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
+      // The composer's reference menus (lead decision Q6): each prefix's owner provides its entries through `reference.catalog`.
+      route('GET /v1/ferrets/:ferretId/references', { ...FERRET, ...READ, ...SECRETS }),
       // R267 / G162: an image handle never changes for an append-only transcript, so no `noStore`.
       route('GET /v1/ferrets/:ferretId/transcript-images/:handle', {
         minimum: 'operator',
@@ -286,6 +289,8 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
       // Lead decision Q2: today's Actions-menu switch, a toolbar panel of its own (listed before Compact memory at, as today).
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
+      // This device's conversation width (lead decision Q11).
+      panel('device.settings', { id: 'chat-width', order: 20 }),
     ],
     settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],
@@ -308,7 +313,7 @@ export default definePlugin({
       // A stop is being attempted: the unlocked attachments are zeroed whether or not it then succeeds.
       { hook: FerretStopping },
     ],
-    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }],
+    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },
 
   // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner

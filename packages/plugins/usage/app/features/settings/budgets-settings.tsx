@@ -71,8 +71,8 @@ export function BudgetsSettings({ connection, client, deviceTimeZone }: BudgetsS
           Budgets
         </h3>
         <p className="m-0 text-cell leading-base text-muted">
-          A cap on what each login may spend here. Past its trigger nothing new starts on the login; past its hard
-          limit its ferrets are stopped.
+          A cap on what each login may spend here. Past its trigger nothing new starts on the login; past its hard limit
+          its ferrets are stopped.
         </p>
       </div>
       {state.status === 'loading' ? (

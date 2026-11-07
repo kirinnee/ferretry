@@ -3,7 +3,13 @@ import should from 'should';
 import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../daemon/stream/wire.ts';
 import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
-import { type BrowserViewerHost, type ViewerAttachment, type ViewerDownstream, type ViewerStreamOptions, type ViewerTerminalSignal } from '../../../daemon/stream/viewer-contracts.ts';
+import {
+  type BrowserViewerHost,
+  type ViewerAttachment,
+  type ViewerDownstream,
+  type ViewerStreamOptions,
+  type ViewerTerminalSignal,
+} from '../../../daemon/stream/viewer-contracts.ts';
 import { type FrameClock, type FrameTimer } from '../../../daemon/stream/contracts.ts';
 import { decodeFrameEnvelope } from '../../support/frame-envelope.ts';
 

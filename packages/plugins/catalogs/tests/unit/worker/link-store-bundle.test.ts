@@ -9,7 +9,7 @@ import {
   type LinkUploadMetadata,
   reduceBundle,
   toBase64Url,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 
 const DAY = 86_400_000;

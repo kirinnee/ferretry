@@ -19,7 +19,7 @@ import {
   toBase64Url,
   utf8Bytes,
   writeUint32,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 import { relayCrypto, stubbedCrypto } from '../../support/worker/identities.ts';
 import { linkWorld } from '../../support/worker/links.ts';

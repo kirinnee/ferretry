@@ -1,8 +1,4 @@
-import {
-  SessionConfigSchema,
-  SessionStateSchema,
-  type SessionView,
-} from '../../../daemon/lib/protocol/session.ts';
+import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../../../daemon/lib/protocol/session.ts';
 
 /**
  * TEST FIXTURE: today's `sessionView` from `packages/daemon/tests/unit/runtime/mounts/support.ts` (placed kernel), cut

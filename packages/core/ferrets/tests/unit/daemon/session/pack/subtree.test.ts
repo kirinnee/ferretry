@@ -18,7 +18,12 @@ const at = (minutesAgo: number): Instant => instantFromEpochMs(NOW - minutesAgo 
 
 const ferret = (
   id: string,
-  options: { readonly parent?: string; readonly name?: string; readonly state?: FerretRecord['state']; readonly stateAt?: Instant } = {},
+  options: {
+    readonly parent?: string;
+    readonly name?: string;
+    readonly state?: FerretRecord['state'];
+    readonly stateAt?: Instant;
+  } = {},
 ): FerretRecord => ({
   format: 1,
   id: id as FerretId,
@@ -81,9 +86,15 @@ describe('subtree members', () => {
     const registry = new FerretRegistry([
       ferret('root'),
       ferret('recent', { parent: 'root', state: 'stopped', stateAt: at(30) }),
-      ferret('old', { parent: 'root', state: 'stopped', stateAt: instantFromEpochMs(NOW - SUBTREE_ENDED_WINDOW_MS - 1) }),
+      ferret('old', {
+        parent: 'root',
+        state: 'stopped',
+        stateAt: instantFromEpochMs(NOW - SUBTREE_ENDED_WINDOW_MS - 1),
+      }),
     ]);
-    expect(subtreeMembers(registry, 'root' as FerretId, NOW).map(member => String(member.ferret.id))).toEqual(['recent']);
+    expect(subtreeMembers(registry, 'root' as FerretId, NOW).map(member => String(member.ferret.id))).toEqual([
+      'recent',
+    ]);
   });
 
   it('G24 lineage comes from the registry’s parent links: a cycle terminates and the root is not a row', () => {
@@ -109,7 +120,12 @@ describe('the subtree table', () => {
       ports({ a: [line('older', 10), line('newest\nmore', 2, 'card'), { kind: 'doing', text: 'undated' }] }),
     ).view('root' as FerretId);
     expect(view?.rows).toEqual([
-      expect.objectContaining({ id: 'a', depth: 1, state: 'running', last: { at: at(2), kind: 'card', text: 'newest' } }),
+      expect.objectContaining({
+        id: 'a',
+        depth: 1,
+        state: 'running',
+        last: { at: at(2), kind: 'card', text: 'newest' },
+      }),
     ]);
   });
 
@@ -162,15 +178,16 @@ describe('the subtree table', () => {
 
   it('G24 withholds when the redactor answers the wrong number of texts', async () => {
     const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
-    const view = await new SubtreeService(
-      registry,
-      ports({ a: [line('secret', 1)] }, { redact: async () => [] }),
-    ).view('root' as FerretId);
+    const view = await new SubtreeService(registry, ports({ a: [line('secret', 1)] }, { redact: async () => [] })).view(
+      'root' as FerretId,
+    );
     expect(view?.rows[0]?.last?.text).toBe(EXCERPT_WITHHELD);
   });
 
   it('G24 the line lookups are bounded: never more in flight than the limit, and rows past the budget get none', async () => {
-    const helpers = Array.from({ length: 12 }, (_, index) => ferret(`h${String(index).padStart(2, '0')}`, { parent: 'root' }));
+    const helpers = Array.from({ length: 12 }, (_, index) =>
+      ferret(`h${String(index).padStart(2, '0')}`, { parent: 'root' }),
+    );
     const registry = new FerretRegistry([ferret('root'), ...helpers]);
     let inFlight = 0;
     let peak = 0;

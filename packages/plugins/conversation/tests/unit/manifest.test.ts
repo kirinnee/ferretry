@@ -4,7 +4,8 @@ import manifest from '../../manifest.ts';
 describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
-    expect(routes).toHaveLength(38);
+    // Today's 38, and the composer's reference menus (lead decision Q6).
+    expect(routes).toHaveLength(39);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);
@@ -44,7 +45,7 @@ describe('conversation manifest', () => {
       expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });
     }
   });
-  test('takes the question source, sitrep lines, ferret.changed and ferret.stopping; offers message.before-send, turn.ended and search.sources', () => {
+  test('takes the question source, sitrep lines, ferret.changed and ferret.stopping; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
       'ask.sources',
       'sitrep.lines',
@@ -56,6 +57,7 @@ describe('conversation manifest', () => {
       'message.before-send',
       'turn.ended',
       'search.sources',
+      'reference.catalog',
     ]);
   });
   test('state files are format 1 and the two caches are marked as caches', () => {

@@ -170,7 +170,9 @@ describe('parseHarnessDialog — what is not a dialog', () => {
   });
 
   it('reads no dialog when the key-hint footer is not the last line', () => {
-    const frame = [RULE, '  Pick one', '', '❯ 1. A', '  2. B', '', '  Enter to confirm · Esc to cancel', 'more'].join('\n');
+    const frame = [RULE, '  Pick one', '', '❯ 1. A', '  2. B', '', '  Enter to confirm · Esc to cancel', 'more'].join(
+      '\n',
+    );
     should(parseHarnessDialog(frame)).be.undefined();
   });
 
@@ -206,7 +208,9 @@ describe('parseHarnessDialog — shapes no fixture draws', () => {
   });
 
   it('clips a long title to its limit, ending in an ellipsis', () => {
-    const frame = [RULE, `  ${'T'.repeat(400)}`, '', '❯ 1. A', '  2. B', '', '  Enter to confirm · Esc to cancel'].join('\n');
+    const frame = [RULE, `  ${'T'.repeat(400)}`, '', '❯ 1. A', '  2. B', '', '  Enter to confirm · Esc to cancel'].join(
+      '\n',
+    );
     const dialog = parseHarnessDialog(frame) as HarnessDialog;
     should(dialog.title).equal(`${'T'.repeat(299)}…`);
     should(HarnessDialogSchema.safeParse(dialog).success).be.true();
@@ -237,7 +241,11 @@ describe('parseHarnessDialog — what choosing a row grants', () => {
   });
 
   it('marks only the MCP choices that use the server', () => {
-    should(parsed('claude-2.1.220-mcp-servers').options.map(option => option.grantsTrust)).deepEqual([true, true, false]);
+    should(parsed('claude-2.1.220-mcp-servers').options.map(option => option.grantsTrust)).deepEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 });
 

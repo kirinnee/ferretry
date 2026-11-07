@@ -1,7 +1,7 @@
 /** The link-store Worker's deployment rules: its own Worker with no address, deployed only by a person. */
 import { describe, expect, it } from 'bun:test';
-import { LINK_WINDOW_MAX_KEYS } from '../../../worker/adapters/index.ts';
-import { SlidingWindows } from '../../../worker/lib/index.ts';
+import { LINK_WINDOW_MAX_KEYS } from '../../../worker/src/adapters/index.ts';
+import { SlidingWindows } from '../../../worker/src/lib/index.ts';
 
 const WORKER = new URL('../../../worker/', import.meta.url);
 const REPO = new URL('../../../../../../', import.meta.url);
@@ -25,11 +25,11 @@ describe('link-store Worker deployment', () => {
     expect(hosted['workers_dev']).toBe(false);
     expect(hosted['routes']).toBeUndefined();
     expect(hosted['route']).toBeUndefined();
-    expect(hosted['main']).toBe('adapters/link-store-worker.ts');
+    expect(hosted['main']).toBe('src/adapters/link-store-worker.ts');
     expect(await Bun.file(new URL(hosted['main'] as string, WORKER)).exists()).toBe(true);
     const selfHosted = await config('wrangler.link-store.jsonc');
     expect(selfHosted['name']).toBe('ferretry-link-store');
-    expect(selfHosted['main']).toBe('adapters/link-store-worker.ts');
+    expect(selfHosted['main']).toBe('src/adapters/link-store-worker.ts');
   });
 
   it('R695 a deploy is refused in CI unless the unattended flag is set', () => {

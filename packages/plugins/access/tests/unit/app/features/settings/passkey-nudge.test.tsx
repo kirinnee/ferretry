@@ -100,7 +100,11 @@ describe('PasskeyNudge', () => {
     // Arrange / Act
     const nudge = await mountNudge(
       answering(
-        view({ passkeys: [{ id: 'QUJD', origin: 'https://a.example.test', createdAt: '2025-12-20T18:22:00.000Z' as Instant }] }),
+        view({
+          passkeys: [
+            { id: 'QUJD', origin: 'https://a.example.test', createdAt: '2025-12-20T18:22:00.000Z' as Instant },
+          ],
+        }),
       ),
       memory(),
     );

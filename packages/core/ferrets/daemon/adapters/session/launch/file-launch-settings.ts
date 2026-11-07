@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  FIXED_SETTINGS_FILE,
-  type HarnessKind,
-  RUNTIME_STATE_DIRECTORY,
-} from '../../../lib/session/peers/fleet.ts';
+import { FIXED_SETTINGS_FILE, type HarnessKind, RUNTIME_STATE_DIRECTORY } from '../../../lib/session/peers/fleet.ts';
 import { type HarnessWrapperSource, harnessHomeFromWrapper } from '../../../lib/session/peers/transcript-launch.ts';
 
 /**

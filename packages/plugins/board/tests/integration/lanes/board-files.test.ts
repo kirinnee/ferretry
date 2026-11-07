@@ -98,10 +98,12 @@ describe('the lane-set files (one board file per project)', () => {
       () => undefined,
       (error: unknown) => error,
     );
-    const write = await lanes.transact(PROJECT, () => ({ next: proposal(1), result: undefined })).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const write = await lanes
+      .transact(PROJECT, () => ({ next: proposal(1), result: undefined }))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
     should(read).be.instanceOf(LaneSetUnavailableError);
     should((read as Error).message).equal(LANE_SET_UNAVAILABLE_MESSAGE);
@@ -111,7 +113,12 @@ describe('the lane-set files (one board file per project)', () => {
 
   it('should refuse a lane set its own strict schema refuses, though the stored shape reads', async () => {
     const { folder, lanes } = world();
-    const doc = { format: 1, project: PROJECT, switch: { projectId: PROJECT, on: false, setBy: 'default', setAt: null }, laneSet: { projectId: PROJECT, version: 1, confirmedBy: null, proposedBy: 'x', lanes: [{ id: 'Bad' }] } };
+    const doc = {
+      format: 1,
+      project: PROJECT,
+      switch: { projectId: PROJECT, on: false, setBy: 'default', setAt: null },
+      laneSet: { projectId: PROJECT, version: 1, confirmedBy: null, proposedBy: 'x', lanes: [{ id: 'Bad' }] },
+    };
     folder.plant(FILE, JSON.stringify(doc), PROJECT);
 
     await lanes.read(PROJECT).then(
@@ -124,7 +131,16 @@ describe('the lane-set files (one board file per project)', () => {
 
   it('should refuse a file that names another project', async () => {
     const { folder, lanes } = world();
-    folder.plant(FILE, JSON.stringify({ format: 1, project: OTHER, switch: { projectId: OTHER, on: false, setBy: 'default', setAt: null }, laneSet: null }), PROJECT);
+    folder.plant(
+      FILE,
+      JSON.stringify({
+        format: 1,
+        project: OTHER,
+        switch: { projectId: OTHER, on: false, setBy: 'default', setAt: null },
+        laneSet: null,
+      }),
+      PROJECT,
+    );
 
     await lanes.read(PROJECT).then(
       () => {

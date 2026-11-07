@@ -24,7 +24,8 @@ const PACK_CHILD_FINISHED_STATUSES: ReadonlySet<string> = new Set(['completed', 
 const runningChildCount = (
   parentId: string,
   sessions: readonly { readonly parent?: string | undefined; readonly status: string }[],
-): number => sessions.filter(child => child.parent === parentId && !PACK_CHILD_FINISHED_STATUSES.has(child.status)).length;
+): number =>
+  sessions.filter(child => child.parent === parentId && !PACK_CHILD_FINISHED_STATUSES.has(child.status)).length;
 
 const NOW = '2026-10-30T08:41:01.000Z';
 const STARTING = parseSessionId('mvun2vi2-e9bf27a2');

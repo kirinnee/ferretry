@@ -13,8 +13,7 @@ function rig() {
     plans: { boundSubjectOf: stage => (asked.push(['plan', stage]), stage === 'tps_1' ? 'plan-subject' : undefined) },
     pasteRules: {
       boundSubjectOf: (stage, kind, device) => (
-        asked.push(['paste', stage, kind, device]),
-        stage === 'prs_1' && device === 'd1' ? `paste-${kind}` : undefined
+        asked.push(['paste', stage, kind, device]), stage === 'prs_1' && device === 'd1' ? `paste-${kind}` : undefined
       ),
     },
     rules: {

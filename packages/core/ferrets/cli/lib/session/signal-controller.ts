@@ -1,5 +1,12 @@
 import { SessionCommandError } from './errors.ts';
-import { type ISessionApi, SIGNAL_KINDS, type SignalAnswer, type SignalKind, type SessionEnvironment, type SignalOptions } from './ports.ts';
+import {
+  type ISessionApi,
+  SIGNAL_KINDS,
+  type SignalAnswer,
+  type SignalKind,
+  type SessionEnvironment,
+  type SignalOptions,
+} from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
 
 /** Flags accepted by `fy signal`. */

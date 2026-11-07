@@ -8,11 +8,7 @@
  */
 import type { RootHandle } from '@ferretry/kernel/contract';
 import { McpProjectFileError } from '../lib/session/project-file.ts';
-import {
-  McpProjectFileChanged,
-  type McpProjectFileReading,
-  type McpProjectFiles,
-} from '../lib/session/service.ts';
+import { McpProjectFileChanged, type McpProjectFileReading, type McpProjectFiles } from '../lib/session/service.ts';
 
 /** The largest project file this reads. A real one is a few hundred bytes. */
 const MAX_PROJECT_FILE_BYTES = 1024 * 1024;

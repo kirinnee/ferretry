@@ -248,7 +248,11 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
     const cached = this.#probed;
     const now = this.#options.nowMs();
     const running = this.#job?.state === 'running';
-    if (cached !== undefined && cached.path === path && (running || (!fresh && now - cached.at < HARNESS_PROBE_REUSE_MS)))
+    if (
+      cached !== undefined &&
+      cached.path === path &&
+      (running || (!fresh && now - cached.at < HARNESS_PROBE_REUSE_MS))
+    )
       return cached;
     const [installed, facts] = await Promise.all([this.#options.probe.version(path), this.#options.facts.facts(path)]);
     const probed: Probed = { path, at: now, installed, method: classifyCodexInstall(facts) };
@@ -310,7 +314,10 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
       case 'npm': {
         // The npm of the prefix Codex lives in, so an nvm node's global is updated by THAT node's npm.
         const prefix = method.kind === 'npm-global' ? method.prefix : undefined;
-        return (prefix === undefined ? undefined : await first([`${prefix}/bin/npm`])) ?? (await locateManager('npm', executables));
+        return (
+          (prefix === undefined ? undefined : await first([`${prefix}/bin/npm`])) ??
+          (await locateManager('npm', executables))
+        );
       }
       case 'brew':
         return await locateManager('brew', executables);
@@ -324,7 +331,10 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
           ]))
         );
       case 'pnpm':
-        return (await executables.resolve('pnpm')) ?? (await first([`${home}/.local/share/pnpm/pnpm`, `${home}/Library/pnpm/pnpm`]));
+        return (
+          (await executables.resolve('pnpm')) ??
+          (await first([`${home}/.local/share/pnpm/pnpm`, `${home}/Library/pnpm/pnpm`]))
+        );
       case 'bun':
         return (await executables.resolve('bun')) ?? (await first([`${home}/.bun/bin/bun`]));
       case 'volta':

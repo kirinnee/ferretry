@@ -29,7 +29,11 @@ const LANES: LaneSet = {
 };
 
 /** An answered ask; by default the lane producer's own (Asks' `daemon` source), the owner choosing Accept. */
-const answer = (entry: string | null, choice: string | undefined = ' Accept ', source: string = LANE_PROPOSAL_SOURCE): LaneProposalAnswer => ({
+const answer = (
+  entry: string | null,
+  choice: string | undefined = ' Accept ',
+  source: string = LANE_PROPOSAL_SOURCE,
+): LaneProposalAnswer => ({
   source,
   entry: entry ?? '',
   effect: 'choose',
@@ -257,7 +261,11 @@ describe('LaneProposalAcceptance', () => {
       },
     });
 
-    await subject.answered({ source: LANE_PROPOSAL_SOURCE, entry: laneProposalReference(FERRETRY_ID, 2), effect: 'dismiss' });
+    await subject.answered({
+      source: LANE_PROPOSAL_SOURCE,
+      entry: laneProposalReference(FERRETRY_ID, 2),
+      effect: 'dismiss',
+    });
     await subject.answered(answer(null));
     await subject.answered(answer('task:F1'));
     await subject.answered(answer(laneProposalReference(FERRETRY_ID, 2), 'Accept', 'ferret'));

@@ -283,7 +283,11 @@ describe('pairing routes as declared (the boundary Gate enforces)', () => {
   });
 
   it('R589 redemption is credentialed by the code alone: no route takes a code, and only the mint is the pairing use that adds access', () => {
-    should(manifest.actions.routes.filter(route => route.method === 'POST' && route.path.startsWith('/v1/pair')).map(route => route.key)).deepEqual(['POST /v1/pair/code']);
+    should(
+      manifest.actions.routes
+        .filter(route => route.method === 'POST' && route.path.startsWith('/v1/pair'))
+        .map(route => route.key),
+    ).deepEqual(['POST /v1/pair/code']);
   });
 });
 

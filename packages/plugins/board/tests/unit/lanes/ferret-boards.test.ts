@@ -2,10 +2,7 @@ import { describe, it } from 'bun:test';
 
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';
-import {
-  FerretBoardResolver,
-  type FerretProjectFacts,
-} from '../../../daemon/lib/lanes/index.ts';
+import { FerretBoardResolver, type FerretProjectFacts } from '../../../daemon/lib/lanes/index.ts';
 import { DOCS_ID, FERRETRY_ID } from './support.ts';
 
 /** A resolver over fixed facts, recording what it resolved and adopted. */

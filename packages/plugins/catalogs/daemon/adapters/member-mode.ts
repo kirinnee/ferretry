@@ -6,7 +6,7 @@ import type { CatalogMemberService } from '../lib/catalog-members/service.ts';
 import type { MemberPasskeyService } from '../lib/catalog-members/passkeys.ts';
 import type { MemberJoinGate } from '../lib/catalog-members/join.ts';
 import type { LiveMemberSessions } from '../lib/catalog-members/sessions.ts';
-import type { MemberJoinCarrier } from './member-session.ts';
+import type { MemberJoinCarrier } from '../lib/catalog-members/member-session.ts';
 
 /** The kernel's `MemberRedemptionBody`, with the passkey proof typed as Catalogs reads it. */
 type MemberRedemptionBody =

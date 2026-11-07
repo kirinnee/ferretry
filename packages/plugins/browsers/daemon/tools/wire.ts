@@ -59,7 +59,6 @@ import {
  * target's (part b). A tool handler parses its MCP arguments with `{ tool, ...arguments }`.
  */
 
-
 /** Only web pages: an agent has no business opening `file:`, `javascript:` or `chrome:` URLs. */
 export const AgentUrlSchema = z
   .string()

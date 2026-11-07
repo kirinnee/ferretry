@@ -35,16 +35,25 @@ function value(input: unknown): string {
   if (typeof input === 'string') return tomlString(input);
   if (typeof input === 'number') return Number.isFinite(input) ? String(input) : '0';
   if (typeof input === 'boolean') return input ? 'true' : 'false';
-  if (Array.isArray(input)) return `[${input.filter(item => item !== null).map(value).join(', ')}]`;
+  if (Array.isArray(input))
+    return `[${input
+      .filter(item => item !== null)
+      .map(value)
+      .join(', ')}]`;
   if (typeof input === 'object' && input !== null) {
     const entries = Object.entries(input).filter(([, item]) => item !== null && item !== undefined);
-    return entries.length === 0 ? '{}' : `{ ${entries.map(([name, item]) => `${key(name)} = ${value(item)}`).join(', ')} }`;
+    return entries.length === 0
+      ? '{}'
+      : `{ ${entries.map(([name, item]) => `${key(name)} = ${value(item)}`).join(', ')} }`;
   }
   return '""';
 }
 
 /** `[mcp_servers.name]` tables from a record of records, one table per entry, in the order given. */
-export function tomlTables(table: string, entries: Readonly<Record<string, Readonly<Record<string, unknown>>>>): string {
+export function tomlTables(
+  table: string,
+  entries: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+): string {
   return Object.entries(entries)
     .map(([name, fields]) => {
       const lines = Object.entries(fields)

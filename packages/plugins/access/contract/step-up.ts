@@ -1,6 +1,8 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
 import {
+  AppOriginSchema,
+  DeviceKeyRotationSchema,
   type EveryCallerStepUpAct,
   PasteRuleStageIdSchema,
   SignInRuleStageIdSchema,
@@ -56,23 +58,8 @@ const Base64UrlSchema = (max: number) =>
     .max(max)
     .regex(/^[A-Za-z0-9_-]+$/u, 'not unpadded base64url');
 
-/** A web origin as the browser reports it (today's `AppOriginSchema`). */
-export const AppOriginSchema = z
-  .string()
-  .max(512)
-  .refine(value => {
-    try {
-      return new URL(value).origin === value;
-    } catch {
-      return false;
-    }
-  }, 'not a web origin');
-
-/** A device key replacing the one that opened this session (today's `DeviceKeyRotationSchema`). */
-export const DeviceKeyRotationSchema = z.strictObject({
-  deviceKey: Base64UrlSchema(64),
-  proof: Base64UrlSchema(128),
-});
+/** Gate owns the browser's origin and the key-rotation shapes; Access re-exports them for its routes. */
+export { AppOriginSchema, DeviceKeyRotationSchema };
 
 /** What the browser asks for: options for THIS app origin, which becomes the relying-party id. */
 export const PasskeyOptionsRequestSchema = z.strictObject({ origin: AppOriginSchema });

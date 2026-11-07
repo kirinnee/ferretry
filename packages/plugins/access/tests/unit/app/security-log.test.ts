@@ -90,9 +90,12 @@ describe('security log words', () => {
   });
 
   it('reads a record detail as sorted short facts', () => {
-    const base = { at: ago(0), event: 'terminal.input', outcome: 'succeeded', actor: { kind: 'host' } } as unknown as Parameters<
-      typeof auditDetailWords
-    >[0];
+    const base = {
+      at: ago(0),
+      event: 'terminal.input',
+      outcome: 'succeeded',
+      actor: { kind: 'host' },
+    } as unknown as Parameters<typeof auditDetailWords>[0];
     expect(auditDetailWords(base)).toBe('');
     expect(auditDetailWords({ ...base, detail: { count: 3, carrier: 'relay' } })).toBe('carrier: relay · count: 3');
   });

@@ -1,5 +1,5 @@
 import { milliseconds } from '@ferretry/std';
-import type { SpawnPort } from '@ferretry/kernel/contract';
+import type { ExecutableFacts, SpawnPort } from '@ferretry/kernel/contract';
 import {
   type InstallFacts,
   parseNixProfileList,
@@ -8,7 +8,7 @@ import {
   storePathHops,
   symlinkHops,
 } from '../../contract/index.ts';
-import type { UpdateHost } from '../lib/host.ts';
+import type { InstallHost } from '../lib/host.ts';
 import type { InstallFactsSource } from '../lib/ports.ts';
 
 /** How long one fact-finding command may take before its answer is "no". */
@@ -67,7 +67,7 @@ export async function executableNixFacts(
 /**
  * The facts about the running daemon's own executable that decide how it was installed.
  *
- * THE LAUNCHED PATH IS `argv0`, NOT `execPath`. The kernel resolves `execPath` through every link, so
+ * THE LAUNCHED PATH IS `argv0`, NOT `execPath`. The port's `resolvedExecPath` goes through every link, so
  * `~/.nix-profile/bin/fyd` and the `nix shell` store path it points at read the same there. Only the path the service
  * manager actually named tells a stable profile install from an ephemeral one.
  *
@@ -76,38 +76,47 @@ export async function executableNixFacts(
  */
 export class HostInstallFacts implements InstallFactsSource {
   constructor(
-    private readonly host: UpdateHost,
+    private readonly host: InstallHost,
     private readonly run: FactCommand,
   ) {}
 
   async facts(): Promise<InstallFacts> {
-    const launchedPath = this.launchedPath();
-    const resolvedPath = await this.host.realpath(this.host.execPath).catch(() => this.host.execPath);
+    const executable = await this.host.port.executable();
+    const launchedPath = this.launchedPath(executable);
+    const resolvedPath = executable.resolvedExecPath;
     const [nix, systemPackage] = await Promise.all([
-      executableNixFacts(launchedPath, resolvedPath, { run: this.run, readLink: path => this.host.readLink(path) }),
-      this.systemPackage(resolvedPath),
+      executableNixFacts(launchedPath, resolvedPath, { run: this.run, readLink: path => this.readLink(path) }),
+      this.systemPackage(executable.platform, resolvedPath),
     ]);
     return {
       product: this.host.product,
-      compiled: this.host.main.startsWith('/$bunfs/'),
+      compiled: this.host.port.compiled,
       launchedPath,
       resolvedPath,
       homeDirectory: this.host.homeDirectory,
-      platform: this.host.platform,
+      platform: executable.platform,
       ...nix,
       systemPackage,
     };
   }
 
-  private launchedPath(): string {
-    const argv0 = this.host.argv0;
-    if (argv0.startsWith('/')) return argv0;
-    if (argv0.includes('/')) return `${this.host.workingDirectory.replace(/\/+$/u, '')}/${argv0.replace(/^\.\//u, '')}`;
-    return this.host.which(argv0) ?? this.host.execPath;
+  /** A link's target through the bounded `readlink` (declared in the manifest); `undefined` when it is not a link. */
+  private async readLink(path: string): Promise<string | undefined> {
+    const answer = await this.run(['readlink', path]);
+    const target = answer?.code === 0 ? answer.stdout.trim() : '';
+    return target === '' ? undefined : target;
   }
 
-  private async systemPackage(resolvedPath: string): Promise<SystemPackageManager | undefined> {
-    if (this.host.platform !== 'linux' || resolvedPath.startsWith('/nix/store/')) return undefined;
+  private launchedPath(executable: ExecutableFacts): string {
+    const argv0 = executable.argv0;
+    if (argv0.startsWith('/')) return argv0;
+    if (argv0.includes('/'))
+      return `${executable.workingDirectory.replace(/\/+$/u, '')}/${argv0.replace(/^\.\//u, '')}`;
+    return this.host.which(argv0) ?? executable.execPath;
+  }
+
+  private async systemPackage(platform: string, resolvedPath: string): Promise<SystemPackageManager | undefined> {
+    if (platform !== 'linux' || resolvedPath.startsWith('/nix/store/')) return undefined;
     if ((await this.run(['dpkg', '-S', resolvedPath]))?.code === 0) return 'apt';
     if ((await this.run(['rpm', '-qf', resolvedPath]))?.code !== 0) return undefined;
     return this.host.which('dnf') === undefined ? 'yum' : 'dnf';

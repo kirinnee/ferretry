@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, RouterProvider } from '@ferretry/app/testing';
 import { LinksScreen } from '../../../../app/links/links-screen.tsx';
 import { type FakeClient, fakeClient, withClient } from '../../../support/app/client.tsx';
-import { conversation, ferret, hoursAgo, listing, settle } from '../../../support/app/links.ts';
+import { conversation, ferret, hoursAgo, listing, settle, type } from '../../../support/app/links.ts';
 
 const RESUME = 'POST /v1/ferrets/:ferretId/resume';
+const KEEP = 'POST /v1/links/conversations/keep';
 
 const FERRETS = [
   ferret('run-ferret', { name: 'shop', state: 'working', stateAt: hoursAgo(1) }),
@@ -16,7 +17,9 @@ const daemon = (): FakeClient =>
     'GET /v1/ferrets': () => FERRETS,
     // Continue searches the synced listing; Keep reads one CLI’s, which is empty here so no runtime slot is drawn.
     'GET /v1/links/conversations': call =>
-      call.query.harness === undefined ? listing([conversation('shop-cart', { keptBy: 'run-ferret' })]) : listing([]),
+      call.query.harness === undefined
+        ? listing([conversation('shop-cart', { keptBy: 'run-ferret' }), conversation('new-idea')])
+        : listing([]),
     'GET /v1/links/conversations/:harness/:conversationId/preview': call => ({
       id: call.params.conversationId,
       harness: call.params.harness,
@@ -24,6 +27,7 @@ const daemon = (): FakeClient =>
     }),
     'GET /v1/links/history': () => ({ entries: [] }),
     [RESUME]: () => ({}),
+    [KEEP]: () => ({ kept: [{ id: 'new-idea', ferret: 'idea-ferret', name: 'idea', state: 'starting' }], refused: [] }),
   });
 
 let view: Mounted | null = null;
@@ -78,6 +82,22 @@ describe('LinksScreen', () => {
     expect(window.location.pathname).toBe('/d1/conversation/chat');
     expect(new URLSearchParams(window.location.search).get('ferret')).toBe('run-ferret');
     expect(client.callsTo(RESUME)).toHaveLength(0);
+  });
+
+  it('outside a shell with no runtime picker placed, Continue takes a typed runtime name', async () => {
+    await open();
+    await click('[data-continue-row="new-idea"]');
+    await click('[data-continue-action="conversation:claude-code:new-idea"]');
+    const typed = find<HTMLInputElement>('[data-continue-runtimes="new-idea"] [data-runtime-typed]');
+    expect(find('[data-continue-on-runtime]').hasAttribute('disabled')).toBe(true);
+    await type(typed, ' claude-main ');
+    await click('[data-continue-on-runtime="claude-main"]');
+    const [kept] = client.callsTo(KEEP);
+    expect(kept?.body).toEqual({
+      harness: 'claude-code',
+      runtime: 'claude-main',
+      conversations: [{ id: 'new-idea', start: true }],
+    });
   });
 
   it('resumes a stopped ferret through Ferrets’ resume route, then opens it', async () => {

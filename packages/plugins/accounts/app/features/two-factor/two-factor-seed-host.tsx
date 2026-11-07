@@ -71,12 +71,7 @@ const isStageGone = (failure: unknown): boolean =>
   'code' in failure &&
   failure.code === TWO_FACTOR_ERROR_CODES.stageGone;
 
-export function TwoFactorSeedHost({
-  client: given,
-  item,
-  addKey: askKey,
-  onDone,
-}: TwoFactorSeedHostProps) {
+export function TwoFactorSeedHost({ client: given, item, addKey: askKey, onDone }: TwoFactorSeedHostProps) {
   const ref = item.twoFactorSeed;
   const [client, setClient] = useState<AccountsClient | null>(null);
   const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);

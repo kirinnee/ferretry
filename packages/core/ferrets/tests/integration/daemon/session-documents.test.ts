@@ -113,7 +113,9 @@ describe('session documents', () => {
       sessionState(ID, { turn: 1, openTools: ['bash'] }),
       sessionState(ID, { turn: 2, openTools: ['bash'] }),
     ]);
-    should(await storage.readState(ID)).deepEqual(sessionState(ID, { turn: 2, openTools: ['bash'], turnState: 'working' }));
+    should(await storage.readState(ID)).deepEqual(
+      sessionState(ID, { turn: 2, openTools: ['bash'], turnState: 'working' }),
+    );
     should(await storage.readConfig(ID)).deepEqual(sessionConfig(ID, { name: 'Renamed' }));
   });
 

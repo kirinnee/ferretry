@@ -316,4 +316,3 @@ export function unclearedRemovalBlockers(
   const consented = new Set(granted);
   return blockers.filter(blocker => blocker.override === undefined || !consented.has(blocker.override));
 }
-
