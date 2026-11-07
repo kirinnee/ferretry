@@ -1,5 +1,5 @@
-// Vendored from the 4.291.5 sources (packages/daemon/tests/support/session-client.ts); only the imports and the
-// response type were changed. Fixture tooling: never shipped, never imported by a package.
+// Vendored from the 4.291.5 sources (packages/daemon/tests/support/session-client.ts); only the imports, the
+// response type and a send-ready copy of each frame were changed. Fixture tooling: never shipped, never imported by a package.
 /**
  * A device, as a test drives one: a key it cannot export, and the client half of a session.
  *
@@ -27,7 +27,7 @@ import {
   deviceAuthMessage,
   devicePairMessage,
   encodeCreditPayload,
-  encodeFrame,
+  encodeFrame as encodeRelayFrame,
   encodeHandshakeMessage,
   FRAME_KINDS,
   HANDSHAKE_FRAME_SEQUENCE,
@@ -50,6 +50,10 @@ import {
 import { WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
+
+// A frame as WebSocket.send takes it: today's lib types refuse a view over ArrayBufferLike, so copy it once.
+const encodeFrame = (frame: Parameters<typeof encodeRelayFrame>[0]): Uint8Array<ArrayBuffer> =>
+  new Uint8Array(encodeRelayFrame(frame));
 
 export interface TestDevice {
   readonly key: PrivateKeyHandle;
