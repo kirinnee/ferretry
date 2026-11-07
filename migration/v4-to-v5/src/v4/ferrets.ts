@@ -15,6 +15,8 @@ const Instant = z.iso.datetime({ offset: true });
 export const Config = z.object({
   id: V4Id,
   name: z.string().min(1),
+  /** The callsign (`:arleen`); `name` is the free-form title. */
+  teammate: z.string().optional(),
   parent: V4Id.optional(),
   agent: z.string().min(1),
   harness: z.enum(['claude', 'codex']),
