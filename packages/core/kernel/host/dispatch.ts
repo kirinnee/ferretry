@@ -1,6 +1,13 @@
 import type { Admission, AdmissionDecision, OutputGuard } from '../contract/bound.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
-import type { ApiRequest, ApiResponse, PlainApiResponse, PublishedApiResponse } from '../contract/http.ts';
+import type { Actor } from '../contract/act.ts';
+import type {
+  ApiRequest,
+  ApiResponse,
+  PlainApiResponse,
+  PublishedApiResponse,
+  RouteParameters,
+} from '../contract/http.ts';
 import { errorResponse } from '../contract/http.ts';
 import type { PluginId } from '../contract/ids.ts';
 import type {
@@ -235,7 +242,47 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
-    return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
+    const response = await runInCall({ actor: decision.actor }, () =>
+      run(this.bindings, found.route, () => handle(call)),
+    );
+    this.recorded({
+      table: 'route',
+      descriptor: found.route,
+      request,
+      params: found.params,
+      decision,
+      status: response.status,
+      response,
+    });
+    return response;
+  }
+
+  /** Tells Gate about one audited call after its handler settled (`Admission.recorded`); never changes the answer. */
+  private recorded(input: {
+    readonly table: 'route' | 'socket' | 'member';
+    readonly descriptor: (RouteDescriptor | MemberRouteDescriptor) & { readonly audit: RouteDescriptor['audit'] };
+    readonly request: ApiRequest;
+    readonly params: RouteParameters;
+    readonly decision: { readonly standing: object; readonly actor: Actor };
+    readonly status: number;
+    readonly response?: ApiResponse;
+  }): void {
+    if (!('record' in input.descriptor.audit)) return;
+    try {
+      this.bindings.admission()?.recorded?.({
+        table: input.table,
+        descriptor: input.descriptor as ScopedRoute,
+        request: input.request,
+        params: input.params,
+        standing: input.decision.standing,
+        actor: input.decision.actor,
+        ...(input.request.principal === undefined ? {} : { principal: input.request.principal }),
+        status: input.status,
+        ...(input.response === undefined ? {} : { response: input.response }),
+      });
+    } catch {
+      // The record is Gate's; the answer stands.
+    }
   }
 
   private async dispatchMember(request: ApiRequest): Promise<ApiResponse> {
@@ -260,7 +307,19 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as MemberCallContext;
-    return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
+    const response = await runInCall({ actor: decision.actor }, () =>
+      run(this.bindings, found.route, () => handle(call)),
+    );
+    this.recorded({
+      table: 'member',
+      descriptor: found.route,
+      request,
+      params: found.params,
+      decision,
+      status: response.status,
+      response,
+    });
+    return response;
   }
 
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
@@ -276,9 +335,20 @@ export class Dispatcher {
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     try {
       const attach = await runInCall({ actor: decision.actor }, () => accept(call));
+      this.recorded({ table: 'socket', descriptor: found.route, request, params: found.params, decision, status: 101 });
       return { outcome: 'accepted', attach };
     } catch (error) {
-      return { outcome: 'refused', response: failureResponse(error) };
+      const response = failureResponse(error);
+      this.recorded({
+        table: 'socket',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
+      return { outcome: 'refused', response };
     }
   }
 

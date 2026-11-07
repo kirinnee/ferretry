@@ -199,7 +199,11 @@ export interface SessionLayerHost extends SessionLayer {
 export function createSessionLayer(deps: SessionLayerDeps): SessionLayerHost {
   const shared = new LayerState(deps);
   return {
-    open: (carrier, peer) => shared.open(carrier, peer),
+    open: (carrier, peer) => shared.open(carrier, peer, {}),
+    connection: carrier => {
+      const connection = {};
+      return { open: peer => shared.open(carrier, peer, connection) };
+    },
     signer: createIdentitySigner(deps.identity),
     report: () => shared.report(),
     endMode: mode => shared.endMode(mode),
@@ -214,12 +218,16 @@ class LayerState {
 
   constructor(readonly deps: SessionLayerDeps) {}
 
-  open(carrier: CarrierKey, peer: CarrierPeer | undefined): CarrierLink {
-    const session = new SealedSession(this, carrier, peer);
+  /**
+   * `connection` groups the sessions of one transport connection: the pre-credential bound is per connection, as
+   * today's was per `RelayLink` (one per direct socket, one per rendezvous socket), never per carrier key.
+   */
+  open(carrier: CarrierKey, peer: CarrierPeer | undefined, connection: object): CarrierLink {
+    const session = new SealedSession(this, carrier, peer, connection);
     // A session that has not presented a credential yet costs this daemon a slot, and anybody who saw a QR
     // knows the fingerprint that addresses it. An arrival past the bound is refused as BUSY rather than as an
     // error: a client opening several at once did nothing wrong and should retry (R232, R233).
-    if (this.preCredential(carrier) >= MAX_PRE_CREDENTIAL_SESSIONS) {
+    if (this.preCredential(connection) >= MAX_PRE_CREDENTIAL_SESSIONS) {
       session.refuseAtOpen(SESSION_CLOSE_CODES.rendezvousBusy, 'too many sessions are awaiting a credential');
       return session;
     }
@@ -228,9 +236,9 @@ class LayerState {
     return session;
   }
 
-  preCredential(carrier: CarrierKey): number {
+  preCredential(connection: object): number {
     let pending = 0;
-    for (const session of this.sessions) if (session.carrier === carrier && session.preCredential()) pending += 1;
+    for (const session of this.sessions) if (session.connection === connection && session.preCredential()) pending += 1;
     return pending;
   }
 
@@ -362,6 +370,8 @@ class SealedSession implements CarrierLink {
     private readonly layer: LayerState,
     readonly carrier: CarrierKey,
     private readonly peer: CarrierPeer | undefined,
+    /** The transport connection this session rides; the pre-credential bound is counted per connection. */
+    readonly connection: object,
   ) {
     this.outbound = {
       next: () => this.#next(),

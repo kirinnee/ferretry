@@ -57,8 +57,9 @@ export const pluginList: ShellVerb = async ctx => {
   return EXIT.ok;
 };
 
-function names(list: readonly string[] | undefined): string {
-  return list === undefined || list.length === 0 ? '-' : list.join(', ');
+function names(list: readonly (string | { readonly items: string })[] | undefined): string {
+  if (list === undefined || list.length === 0) return '-';
+  return list.map(entry => (typeof entry === 'string' ? entry : `what installed ${entry.items} items name`)).join(', ');
 }
 
 export const pluginShow: ShellVerb = async ctx => {

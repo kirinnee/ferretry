@@ -37,6 +37,7 @@ import type {
 import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
+import { hostPermitted, type ItemReachOf, NO_ITEMS, spawnPermitted } from '../host/permissions.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
@@ -78,6 +79,8 @@ export interface TestHostOptions {
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
   readonly websocket?: (url: URL) => WebSocketClient;
+  /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
+  readonly items?: ItemReachOf;
   /** What `kernel.identity` answers. Default: the throwaway identity's id and `test-daemon`. */
   readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
@@ -580,7 +583,7 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
-          if (!(manifest.permissions?.spawn ?? []).includes(program))
+          if (!spawnPermitted(manifest.permissions?.spawn ?? [], options.items ?? NO_ITEMS, program))
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           if (options.spawn === undefined) throw new Error(`${manifest.id}: spawn ${program} with no spawn fake`);
           return options.spawn(program, args, spawnOptions);
@@ -594,7 +597,7 @@ async function start(world: World): Promise<TestHost> {
       fetch: {
         async request(url, init) {
           const parsed = new URL(url);
-          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+          if (!hostPermitted(manifest.permissions?.network ?? [], options.items ?? NO_ITEMS, parsed.hostname))
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
           return options.fetch(parsed, init);
@@ -605,7 +608,7 @@ async function start(world: World): Promise<TestHost> {
           const parsed = new URL(String(url));
           if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
             throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
-          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+          if (!hostPermitted(manifest.permissions?.network ?? [], options.items ?? NO_ITEMS, parsed.hostname))
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.websocket === undefined)
             throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
