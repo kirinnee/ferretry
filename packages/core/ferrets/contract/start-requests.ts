@@ -1,6 +1,6 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { type FerretId, FerretIdSchema } from '../../../contract/index.ts';
+import { type FerretId, FerretIdSchema } from './ids.ts';
 
 /**
  * Which ferret each start request id produced (today's start retry contract, `session-control.ts`): the protocol
@@ -40,9 +40,7 @@ export const StartRequestsFile = defineState({
 
 /** What a request id already says about a start: nothing, the same body (replay), or another body (conflict). */
 export type StartRequestLookup =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'same'; readonly ferret: FerretId }
-  | { readonly kind: 'conflict' };
+  { readonly kind: 'none' } | { readonly kind: 'same'; readonly ferret: FerretId } | { readonly kind: 'conflict' };
 
 export function lookupStartRequest(
   held: StartRequests | undefined,

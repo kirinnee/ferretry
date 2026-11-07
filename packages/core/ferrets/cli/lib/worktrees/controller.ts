@@ -4,7 +4,7 @@ import type {
   CreateWorktreeRequest,
   WorktreeBase,
   WorktreeRemovalDecision,
-} from '../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../contract/index.ts';
 import {
   grantedConfirmations,
   grantedOverrides,

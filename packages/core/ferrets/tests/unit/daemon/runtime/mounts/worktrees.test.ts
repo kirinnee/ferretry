@@ -8,7 +8,7 @@ import type {
   WorktreeListResponse,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
-} from '../../../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../../../contract/index.ts';
 import should from 'should';
 import {
   WORKTREE_ROUTE_KEYS,
