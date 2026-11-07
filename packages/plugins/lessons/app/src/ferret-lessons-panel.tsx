@@ -55,6 +55,7 @@ export function FerretLessonsPanel({
         <input
           type="checkbox"
           role="switch"
+          aria-checked={on}
           checked={on}
           disabled={!known}
           onChange={event => void toggle(event.target.checked)}
