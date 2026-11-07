@@ -9,27 +9,36 @@ import { TaskPlanHost } from './features/secure-copy/task-plan-host.tsx';
 import { TaskPlansSurface } from './features/secure-copy/task-plans-surface.tsx';
 import { PhoneApprovalHost } from './features/sign-in-approval/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from './features/two-factor/two-factor-seed-host.tsx';
+import { type AccountsPasskeys, useAccountsPasskeys } from './passkeys.ts';
 import type { AccountsClient } from './shell.tsx';
 
 /** Settings › ‹machine› › Accounts: sign-ins, saved logins and 2FA keys (today's Accounts screen). */
 export function accountsTab(client: AccountsClient) {
   return function AccountsTab() {
-    return <AccountsSurface client={client} />;
+    const asks = useAccountsPasskeys(client);
+    return (
+      <AccountsSurface
+        client={client}
+        {...(asks === undefined ? {} : { addKey: asks.addKey, askPasskey: asks.signInRule })}
+      />
+    );
   };
 }
 
 /**
  * Settings › ‹machine› › Secure copy: the pastes approved in advance, the task plans live on this machine and the
- * standing sign-in rules (today's Secure copy panel). No passkey ceremony is handed to these views (it is Access's, and
- * not on this base): what only narrows works as it did, and what would widen is refused with today's no-passkey words.
+ * standing sign-in rules (today's Secure copy panel). What only narrows needs no passkey; what would widen asks the
+ * app's one prompt (Access's), bound to this machine and the staged change. Where nothing can ask, it is refused with
+ * today's no-passkey words and the stage is dropped.
  */
 export function secureCopyTab(client: AccountsClient) {
   return function SecureCopyTab() {
+    const asks = useAccountsPasskeys(client);
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <CopyRulesSurface client={client} />
+        <CopyRulesSurface client={client} {...(asks === undefined ? {} : { askPasskey: asks.pasteRule })} />
         <TaskPlansSurface client={client} />
-        <SignInRulesSurface client={client} />
+        <SignInRulesSurface client={client} {...(asks === undefined ? {} : { askPasskey: asks.signInRule })} />
       </div>
     );
   };
@@ -50,35 +59,58 @@ const PLAIN_FALLBACK = 'Answer it with fy.';
  */
 export function signInApprovalRenderer(client: AccountsClient) {
   return function SignInApproval({ value }: RendererProps) {
-    const ask = AskOnScreenSchema.safeParse(value);
-    if (!ask.success) return null;
-    const ref = SignInApprovalRefSchema.safeParse(ask.data.ref);
-    const { ferret, subject, why, context } = ask.data;
-    if (ref.success) {
-      const card = ref.data;
-      if (card.kind === 'two-factor-seed')
-        return (
-          <TwoFactorSeedHost client={client} item={{ twoFactorSeed: { stage: card.stage }, subject, why, context }} />
-        );
-      if (card.kind === 'task-plan')
-        return <TaskPlanHost client={client} ferret={ferret} planId={card.planId} agentName={ferret} />;
-      if (card.kind === 'rule-suggestion')
-        return (
-          <SignInRuleSuggestionHost client={client} suggestionId={card.suggestion} ferret={ferret} agentName={ferret} />
-        );
-      if (card.kind === 'phone-approval')
-        return <PhoneApprovalHost client={client} approvalId={card.id} ferret={ferret} />;
-    }
-    const where =
-      ref.success && (ref.data.kind === 'rule-suspended' || ref.data.kind === 'recipe-proposal')
-        ? ANSWER_ELSEWHERE[ref.data.kind]
-        : PLAIN_FALLBACK;
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Sign-in approval">
-        <h3 className="m-0 text-row font-semibold text-fg">{subject}</h3>
-        {why === undefined ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{why}</p>}
-        <p className="mb-0 mt-1 text-cell leading-base text-faint">{where}</p>
-      </section>
-    );
+    return signInApprovalCard(client, value, useAccountsPasskeys(client));
   };
+}
+
+/** The card for one ask, with the passkey asks of its machine (`undefined` where nothing can ask). */
+export function signInApprovalCard(client: AccountsClient, value: unknown, asks: AccountsPasskeys | undefined) {
+  const ask = AskOnScreenSchema.safeParse(value);
+  if (!ask.success) return null;
+  const ref = SignInApprovalRefSchema.safeParse(ask.data.ref);
+  const { ferret, subject, why, context } = ask.data;
+  if (ref.success) {
+    const card = ref.data;
+    if (card.kind === 'two-factor-seed')
+      return (
+        <TwoFactorSeedHost
+          client={client}
+          item={{ twoFactorSeed: { stage: card.stage }, subject, why, context }}
+          {...(asks === undefined ? {} : { addKey: asks.addKey })}
+        />
+      );
+    if (card.kind === 'task-plan')
+      return (
+        <TaskPlanHost
+          client={client}
+          ferret={ferret}
+          planId={card.planId}
+          agentName={ferret}
+          {...(asks === undefined ? {} : { askPasskey: asks.taskPlan })}
+        />
+      );
+    if (card.kind === 'rule-suggestion')
+      return (
+        <SignInRuleSuggestionHost
+          client={client}
+          suggestionId={card.suggestion}
+          ferret={ferret}
+          agentName={ferret}
+          {...(asks === undefined ? {} : { askPasskey: asks.signInRule })}
+        />
+      );
+    if (card.kind === 'phone-approval')
+      return <PhoneApprovalHost client={client} approvalId={card.id} ferret={ferret} />;
+  }
+  const where =
+    ref.success && (ref.data.kind === 'rule-suspended' || ref.data.kind === 'recipe-proposal')
+      ? ANSWER_ELSEWHERE[ref.data.kind]
+      : PLAIN_FALLBACK;
+  return (
+    <section className="kt-panel p-panel" role="status" aria-label="Sign-in approval">
+      <h3 className="m-0 text-row font-semibold text-fg">{subject}</h3>
+      {why === undefined ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{why}</p>}
+      <p className="mb-0 mt-1 text-cell leading-base text-faint">{where}</p>
+    </section>
+  );
 }

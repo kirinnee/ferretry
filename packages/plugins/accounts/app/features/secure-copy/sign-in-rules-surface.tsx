@@ -37,7 +37,7 @@ type Ask = RuleAsk | undefined;
 export interface SignInRulesSurfaceProps {
   /** The Accounts client of the machine this tab is on (the app shell builds this half once per machine). */
   readonly client: RuleClient;
-  /** Asks for the passkey bound to the stage; absent where this device cannot ask (no Access ceremony here yet). */
+  /** Asks for the passkey bound to the stage; absent where this device cannot ask. */
   readonly askPasskey?: Ask;
   /** How often the list is read again (the harness and tests). */
   readonly pollMs?: number;

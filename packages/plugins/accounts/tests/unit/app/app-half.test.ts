@@ -6,7 +6,7 @@ import { TaskPlanHost } from '../../../app/features/secure-copy/task-plan-host.t
 import { PhoneApprovalHost } from '../../../app/features/sign-in-approval/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../../../app/features/two-factor/two-factor-seed-host.tsx';
 import { grantRefusalNotice } from '../../../app/shell.tsx';
-import { signInApprovalRenderer } from '../../../app/surfaces.tsx';
+import { signInApprovalCard } from '../../../app/surfaces.tsx';
 import manifest from '../../../manifest.ts';
 import { RULE_ID } from '../../support/app/sign-in-rule-fixtures.ts';
 
@@ -74,7 +74,7 @@ describe('the app half', () => {
 
   it('S101 should draw a staged 2FA seed ask as the seed card, from the daemon-set ref alone', () => {
     const { client } = recording({});
-    const Renderer = signInApprovalRenderer(client);
+    const Renderer = ({ value }: { value: unknown }) => signInApprovalCard(client, value, undefined);
     const seed = Renderer({
       value: {
         ref: { kind: 'two-factor-seed', stage: STAGE },
@@ -91,7 +91,7 @@ describe('the app half', () => {
 
   it('should draw each other sign-in approval kind as its own card, read from the daemon by id, for the ask’s ferret', () => {
     const { client } = recording({});
-    const Renderer = signInApprovalRenderer(client);
+    const Renderer = ({ value }: { value: unknown }) => signInApprovalCard(client, value, undefined);
     const PLAN = 'a'.repeat(32);
     const drawn = (ref: unknown, ferret = 'sess-1') =>
       Renderer({ value: { ref, ferret, ferretName: 'judson', subject: 's', why: 'w' } }) as {
@@ -113,7 +113,7 @@ describe('the app half', () => {
 
   it('should draw a ref it cannot read a card for, a suspended rule and a recipe proposal as the daemon’s words and where to act', () => {
     const { client } = recording({});
-    const Renderer = signInApprovalRenderer(client);
+    const Renderer = ({ value }: { value: unknown }) => signInApprovalCard(client, value, undefined);
     const plain = (ref: unknown, ferret = 'sess-1') =>
       Renderer({ value: { ref, ferret, ferretName: 'judson', subject: 'Approve a rule?', why: 'because' } }) as {
         type: unknown;
