@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type BoardProjectId, type Card, type LaneSet, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  type LaneSet,
+  type PrLink,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import should from 'should';
 import { BoardService } from '../../../daemon/lib/board/index.ts';
 import {

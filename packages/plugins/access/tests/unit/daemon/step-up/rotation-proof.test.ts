@@ -25,7 +25,10 @@ const webCrypto: Ed25519Verifier = {
 };
 
 async function deviceKey() {
-  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as unknown as CryptoKeyPair;
+  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, [
+    'sign',
+    'verify',
+  ])) as unknown as CryptoKeyPair;
   const spki = new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey));
   const sign = async (message: Uint8Array) =>
     toBase64Url(new Uint8Array(await crypto.subtle.sign('Ed25519', pair.privateKey, new Uint8Array(message))));
@@ -75,16 +78,18 @@ describe('the key-rotation proof', () => {
     const message = deviceRotateMessage(transcript, deviceId, next.key);
 
     // Assert
-    should(Buffer.from(message).equals(
-      Buffer.from(
-        concatBytes([
-          utf8Bytes('ferretry-device-rotate-v2'),
-          new Uint8Array([0]),
-          transcript,
-          lengthPrefixed(utf8Bytes(deviceId)),
-          lengthPrefixed(utf8Bytes(next.key)),
-        ]),
+    should(
+      Buffer.from(message).equals(
+        Buffer.from(
+          concatBytes([
+            utf8Bytes('ferretry-device-rotate-v2'),
+            new Uint8Array([0]),
+            transcript,
+            lengthPrefixed(utf8Bytes(deviceId)),
+            lengthPrefixed(utf8Bytes(next.key)),
+          ]),
+        ),
       ),
-    )).be.true();
+    ).be.true();
   });
 });

@@ -157,7 +157,15 @@ function observation(id: string, status: string, kind: 'gone' | 'exited'): Sessi
   return {
     id,
     status,
-    registration: { daemonId: 'd', sessionId: id, tmuxSession: `fy-${id}`, paneId: '%0', pid: 1, processStartTicks: 1, sessionCreated: 1 },
+    registration: {
+      daemonId: 'd',
+      sessionId: id,
+      tmuxSession: `fy-${id}`,
+      paneId: '%0',
+      pid: 1,
+      processStartTicks: 1,
+      sessionCreated: 1,
+    },
     exit: kind === 'gone' ? { kind: 'gone' } : { kind: 'exited', exitStatus: 1 },
   };
 }

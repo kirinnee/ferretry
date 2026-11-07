@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DurableTerminalPaneRegistrar, DurableTerminalPaneStore, ExactTmuxPaneReaper } from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
+import {
+  DurableTerminalPaneRegistrar,
+  DurableTerminalPaneStore,
+  ExactTmuxPaneReaper,
+} from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
 import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
 import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
@@ -304,15 +308,9 @@ describe('registering a pane whose harness has already exited', () => {
   it('should still refuse a live pane whose process start cannot be read', async () => {
     // Arrange
     const subject = await fixture();
-    const registrar = new DurableTerminalPaneRegistrar(
-      DAEMON,
-      subject.controller,
-      subject.files,
-      MEMORY_PATHS,
-      {
-        startOf: async () => undefined,
-      },
-    );
+    const registrar = new DurableTerminalPaneRegistrar(DAEMON, subject.controller, subject.files, MEMORY_PATHS, {
+      startOf: async () => undefined,
+    });
 
     // Act / Assert -- nothing on disk may claim a pane it cannot tell from a later one.
     await should(registrar.register(subject.record)).be.rejectedWith(

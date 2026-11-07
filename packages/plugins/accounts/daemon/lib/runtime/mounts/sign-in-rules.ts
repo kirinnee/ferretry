@@ -1,4 +1,28 @@
-import { type AccountId, AccountIdSchema, SIGN_IN_RULE_ERROR_CODES, SIGN_IN_RULE_REFUSAL_WORDS, type SignInId, SignInIdSchema, SignInRuleAccountRevokedSchema, SignInRuleDraftSchema, SignInRuleEligibilitySchema, type SignInRuleId, SignInRuleIdSchema, SignInRuleListSchema, SignInRuleNarrowSchema, SignInRuleRevokedSchema, SignInRuleStageDroppedSchema, SignInRuleStagedSchema, type SignInRuleStageId, SignInRuleStageIdSchema, SignInRuleStageViewSchema, SignInRuleSuggestionDismissedSchema, SignInRuleSuggestionIdSchema, SignInRuleSuggestionListSchema, SignInRuleViewSchema } from '../../../../contract/routes/index.ts';
+import {
+  type AccountId,
+  AccountIdSchema,
+  SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_REFUSAL_WORDS,
+  type SignInId,
+  SignInIdSchema,
+  SignInRuleAccountRevokedSchema,
+  SignInRuleDraftSchema,
+  SignInRuleEligibilitySchema,
+  type SignInRuleId,
+  SignInRuleIdSchema,
+  SignInRuleListSchema,
+  SignInRuleNarrowSchema,
+  SignInRuleRevokedSchema,
+  SignInRuleStageDroppedSchema,
+  SignInRuleStagedSchema,
+  type SignInRuleStageId,
+  SignInRuleStageIdSchema,
+  SignInRuleStageViewSchema,
+  SignInRuleSuggestionDismissedSchema,
+  SignInRuleSuggestionIdSchema,
+  SignInRuleSuggestionListSchema,
+  SignInRuleViewSchema,
+} from '../../../../contract/routes/index.ts';
 import { parseBody } from '../../http/body.ts';
 import { ApiError, type ApiResponse, decodeParameter, jsonResponse } from '@ferretry/kernel/contract';
 import type { RouteContext } from '../../http/grants.ts';
@@ -35,7 +59,6 @@ import type { StoredStepUpProof } from '../../../../contract/routes/index.ts';
  * `browser.use` too. Those are decided BEFORE the proof is claimed, so a refusal never spends it. Dropping a stage,
  * narrowing and revoking only take away and need `secrets.use`.
  */
-
 
 /** Each suggestion refusal's status: a suggestion error is a refusal the person can act on, never a 500. */
 const SUGGESTION_STATUS = {
@@ -117,7 +140,10 @@ const proofDemand = (): ApiResponse =>
     403,
   );
 
-export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRuleSuggestions): readonly MountedRoute[] {
+export function signInRuleRoutes(
+  rules: SignInRuleService,
+  suggestions: SignInRuleSuggestions,
+): readonly MountedRoute[] {
   return [
     ...suggestionRoutes(suggestions),
     {

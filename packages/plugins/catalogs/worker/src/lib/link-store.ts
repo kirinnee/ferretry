@@ -1,4 +1,3 @@
-/* TODO(kernel contract): temporary byte-copy until the pure kernel wire exports land. */
 /**
  * THE LINK STORE'S WIRE CONTRACT — docs/catalogs.md § Links, docs/relay-protocol.md § signing domains.
  *

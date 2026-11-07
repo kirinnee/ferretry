@@ -127,7 +127,11 @@ describe('the vault at rest', () => {
       ['decrypt'],
     );
     const plain = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: Buffer.from(entry?.iv ?? '', 'base64'), additionalData: new TextEncoder().encode('TOKEN') },
+      {
+        name: 'AES-GCM',
+        iv: Buffer.from(entry?.iv ?? '', 'base64'),
+        additionalData: new TextEncoder().encode('TOKEN'),
+      },
       key,
       Buffer.from(entry?.ciphertext ?? '', 'base64'),
     );

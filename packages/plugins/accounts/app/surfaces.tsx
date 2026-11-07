@@ -47,8 +47,12 @@ export function signInApprovalRenderer(client: AccountsClient) {
         {ask.data.subject === undefined ? null : (
           <h3 className="m-0 text-row font-semibold text-fg">{ask.data.subject}</h3>
         )}
-        {ask.data.why === undefined ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{ask.data.why}</p>}
-        <p className="mb-0 mt-1 text-cell leading-base text-faint">This app cannot answer this yet. Answer it with fy.</p>
+        {ask.data.why === undefined ? null : (
+          <p className="mb-0 mt-1 text-cell leading-base text-muted">{ask.data.why}</p>
+        )}
+        <p className="mb-0 mt-1 text-cell leading-base text-faint">
+          This app cannot answer this yet. Answer it with fy.
+        </p>
       </section>
     );
   };

@@ -277,10 +277,7 @@ function BoardFilterFields({ filters, onChange, choices, archive }: FieldsProps)
         any="Any activity"
         name="activity"
         onPick={value => set({ activity: BoardActivityFilterSchema.safeParse(value).data ?? null })}
-        options={optionsOf(
-          BoardActivityFilterSchema.options,
-          ACTIVITY_LABEL,
-        )}
+        options={optionsOf(BoardActivityFilterSchema.options, ACTIVITY_LABEL)}
         title="Activity"
         value={filters.activity ?? ''}
       />

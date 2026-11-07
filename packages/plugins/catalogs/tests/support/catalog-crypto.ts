@@ -1,2 +1,2 @@
-export * from '../../worker/kernel-wire/index.ts';
-export * from '../../worker/lib/catalog-signature.ts';
+export * from '../../worker/src/kernel-wire/index.ts';
+export * from '../../worker/src/lib/catalog-signature.ts';

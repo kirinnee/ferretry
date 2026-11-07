@@ -5,7 +5,12 @@ import * as browserLogin from '../../../../contract/index.ts';
 import type { BrowserLoginAction, BrowserLoginStatus } from '../../../../contract/index.ts';
 import type { BrowserLoginConnection } from '../../../../daemon/worker/control/login.ts';
 import { INSTANT, LATER_INSTANT } from '../../../support/fixtures.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
+import {
+  assertCoversEverySchema,
+  assertRejects,
+  assertRoundTrips,
+  type SchemaCase,
+} from '../../../support/schema-cases.ts';
 
 const connection = {
   host: '127.0.0.1',
@@ -62,7 +67,10 @@ describe('browser-login schemas', () => {
   it('should round-trip every public schema', () => {
     assertRoundTrips(schemaCases);
     // The sign-in window's schemas, which the contract now holds beside every other Browsers schema.
-    assertCoversEverySchema(Object.fromEntries(Object.entries(browserLogin).filter(([name]) => name.startsWith('BrowserLogin'))), schemaCases);
+    assertCoversEverySchema(
+      Object.fromEntries(Object.entries(browserLogin).filter(([name]) => name.startsWith('BrowserLogin'))),
+      schemaCases,
+    );
   });
 
   it('should represent every login lifecycle state with exactly the fields the daemon emits', () => {

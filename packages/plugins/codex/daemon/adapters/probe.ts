@@ -79,7 +79,8 @@ export class HostCodexProbe implements HarnessProbe {
         timeout: this.#timeout,
       });
       // A killed child reports no exit code: that is the deadline, not a verdict.
-      if (result.exitCode === null) return { failure: `it did not answer within ${Math.round(this.#timeout / 1000)} seconds` };
+      if (result.exitCode === null)
+        return { failure: `it did not answer within ${Math.round(this.#timeout / 1000)} seconds` };
       return result;
     } catch (error) {
       return { failure: error instanceof Error ? error.message : String(error) };

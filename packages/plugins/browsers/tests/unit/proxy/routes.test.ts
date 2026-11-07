@@ -36,7 +36,10 @@ async function drive(
   fresh = false,
   firewall?: FirewallReading,
 ) {
-  const routes = proxyRoutes(subsystem(probed, firewall)) as Record<string, (call: never) => Promise<{ status: number; body: string }>>;
+  const routes = proxyRoutes(subsystem(probed, firewall)) as Record<
+    string,
+    (call: never) => Promise<{ status: number; body: string }>
+  >;
   const handle = routes[`${method} ${path}`];
   if (handle === undefined) throw new Error(`no route ${method} ${path}`);
   const { call, spent } = callOf({ method, path, body, kind, fresh });

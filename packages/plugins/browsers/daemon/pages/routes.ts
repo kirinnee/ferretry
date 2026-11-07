@@ -51,8 +51,10 @@ async function answer(work: () => Promise<BrowserLoginStatus>): Promise<ApiRespo
 async function loginAct(window: BrowserLoginLifecycle, call: CallContext): Promise<ApiResponse> {
   const action = await parseBody(call.request, BrowserLoginActionSchema);
   return await answer(async () => {
-    if (action.action === 'start') return await window.start(action.minutes === undefined ? {} : { minutes: action.minutes });
-    if (action.action === 'stop') return await window.stop(action.primed === undefined ? {} : { primed: action.primed });
+    if (action.action === 'start')
+      return await window.start(action.minutes === undefined ? {} : { minutes: action.minutes });
+    if (action.action === 'stop')
+      return await window.stop(action.primed === undefined ? {} : { primed: action.primed });
     return await window.confirm();
   });
 }
@@ -60,7 +62,14 @@ async function loginAct(window: BrowserLoginLifecycle, call: CallContext): Promi
 export function browserFailure(error: unknown): never {
   if (!(error instanceof BrowserSessionError)) throw error;
   const status = (
-    { not_found: 404, capacity: 409, conflict: 409, not_running: 409, launch_failed: 503, upstream_failed: 502 } as const
+    {
+      not_found: 404,
+      capacity: 409,
+      conflict: 409,
+      not_running: 409,
+      launch_failed: 503,
+      upstream_failed: 502,
+    } as const
   )[error.code];
   throw new ApiError(status, error.message, error.code);
 }
@@ -94,7 +103,9 @@ async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, cal
           kind: 'content' as const,
           data: {
             status: maskedStatus(scope, result.status),
-            ...('result' in result ? { result: { ...maskedSnapshot(scope, result.result), text: scope.text(text) } } : {}),
+            ...('result' in result
+              ? { result: { ...maskedSnapshot(scope, result.result), text: scope.text(text) } }
+              : {}),
           } as never,
         }));
       }),
@@ -106,10 +117,13 @@ async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, cal
     acted(
       await kernel.act(target, 'picture', async () => {
         const result = await browser.act(sessionId, action).catch(browserFailure);
-        answerBody = await kernel.redaction.read(scope => ({
-          status: maskedStatus(scope, result.status),
-          ...('result' in result ? { result: maskedSnapshot(scope, result.result) } : {}),
-        }) as BrowserActionResult);
+        answerBody = await kernel.redaction.read(
+          scope =>
+            ({
+              status: maskedStatus(scope, result.status),
+              ...('result' in result ? { result: maskedSnapshot(scope, result.result) } : {}),
+            }) as BrowserActionResult,
+        );
         const shot = 'result' in result && 'screenshotBase64' in result.result ? result.result.screenshotBase64 : '';
         return { kind: 'picture' as const, mime: 'image/png' as const, bytes: Buffer.from(shot, 'base64') };
       }),
@@ -126,8 +140,10 @@ export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, b
   return {
     'GET /v1/browser/login': (async () => await answer(async () => await window.status())) satisfies RouteHandler,
     'POST /v1/browser/login': (async call => await loginAct(window, call)) satisfies RouteHandler,
-    'GET /v1/sessions/:sessionId/browser': (async call => await browserStatus(kernel, browser, call)) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/browser': (async call => await browserAction(kernel, browser, call)) satisfies RouteHandler,
+    'GET /v1/sessions/:sessionId/browser': (async call =>
+      await browserStatus(kernel, browser, call)) satisfies RouteHandler,
+    'POST /v1/sessions/:sessionId/browser': (async call =>
+      await browserAction(kernel, browser, call)) satisfies RouteHandler,
   } as const;
 }
 

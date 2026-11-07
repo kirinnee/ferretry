@@ -17,14 +17,10 @@ export type PerformanceClient = UsageClient;
 
 /** Starts the daemon's profile over `seconds`; answers the running view (its id and window). */
 export async function startDaemonProfile(client: PerformanceClient, seconds: number): Promise<PerformanceProfileView> {
-  return PerformanceProfileViewSchema.parse(
-    await client.call('POST /v1/diagnostics/profile', { body: { seconds } }),
-  );
+  return PerformanceProfileViewSchema.parse(await client.call('POST /v1/diagnostics/profile', { body: { seconds } }));
 }
 
 /** Reads a profile back: still `running`, or `finished` with its report. */
 export async function readDaemonProfile(client: PerformanceClient, id: string): Promise<PerformanceProfileView> {
-  return PerformanceProfileViewSchema.parse(
-    await client.call('GET /v1/diagnostics/profile/:id', { params: { id } }),
-  );
+  return PerformanceProfileViewSchema.parse(await client.call('GET /v1/diagnostics/profile/:id', { params: { id } }));
 }

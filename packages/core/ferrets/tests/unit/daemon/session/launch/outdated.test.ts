@@ -1,5 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { LaunchInstructionSectionId, SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
+import type {
+  LaunchInstructionSectionId,
+  SessionLaunchInstructions,
+} from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import {
   HYPERMEDIA_ENV,

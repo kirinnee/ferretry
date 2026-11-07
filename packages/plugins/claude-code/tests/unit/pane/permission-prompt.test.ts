@@ -540,7 +540,6 @@ describe('parsePermissionPrompt — shapes no fixture draws', () => {
     should(request).containEql({ tool: 'Read', action: 'read', what: '/etc/passwd' });
   });
 
-
   it('clips every long value to its limit, ending in an ellipsis', () => {
     // Arrange
     const pane = claudeDialog(

@@ -103,4 +103,3 @@ export function gateAnalyticsIngest(evidence: AnalyticsIngestEvidence): Analytic
   if (!readableInstant(createdAt)) return { kind: 'refused', reason: 'unreadable_creation_instant' };
   return { kind: 'ingest', status, createdAt, finishedAt };
 }
-

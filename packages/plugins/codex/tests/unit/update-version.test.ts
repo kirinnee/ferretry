@@ -117,9 +117,9 @@ describe('how a Codex install is classified', () => {
         }),
       ),
     ).eql({ kind: 'nix-profile', element: 'codex' });
-    should(
-      classifyCodexInstall(facts('/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex/bin/codex')).kind,
-    ).equal('nix-shell');
+    should(classifyCodexInstall(facts('/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex/bin/codex')).kind).equal(
+      'nix-shell',
+    );
   });
 
   it('calls a plain file a standalone binary in its directory', () => {
@@ -138,12 +138,17 @@ describe('reading the nix profile and the link chain', () => {
     should(parseNixProfileList(listing, ['/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex/bin/codex']).element).equal(
       'codex',
     );
-    should(parseNixProfileList(undefined, ['/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex']).element).be.undefined();
+    should(
+      parseNixProfileList(undefined, ['/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex']).element,
+    ).be.undefined();
   });
 
   it('follows links one hop at a time and lists the store paths and the home-manager generation it passed', async () => {
     const links = new Map([
-      ['/etc/profiles/per-user/kirin/bin/codex', '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-home-manager-path/bin/codex'],
+      [
+        '/etc/profiles/per-user/kirin/bin/codex',
+        '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-home-manager-path/bin/codex',
+      ],
       [
         '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-home-manager-path/bin/codex',
         '/nix/store/abcdfghijklmnpqrsvwxyz0123456789-codex/bin/codex',
@@ -188,7 +193,10 @@ describe('what updating takes', () => {
   });
 
   it('shows steps instead for a method Ferretry cannot update, and says why for one it cannot name', () => {
-    const shell = codexUpdatePlan({ kind: 'nix-shell', storePath: '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex' }, undefined);
+    const shell = codexUpdatePlan(
+      { kind: 'nix-shell', storePath: '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex' },
+      undefined,
+    );
     should(shell.kind).equal('manual');
     should(codexUpdatePlan({ kind: 'unknown', reason: 'no idea' }, undefined)).containDeep({
       kind: 'manual',

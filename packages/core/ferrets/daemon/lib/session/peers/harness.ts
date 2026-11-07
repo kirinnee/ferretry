@@ -142,7 +142,13 @@ export type RuntimeSwitchPlan =
 
 // --- harness/picker-screen.ts -----------------------------------------------------------------------------------
 
-export type CodexPickerKind = 'quick-models' | 'all-models' | 'reasoning' | 'advanced-reasoning' | 'plan-scope' | 'none';
+export type CodexPickerKind =
+  | 'quick-models'
+  | 'all-models'
+  | 'reasoning'
+  | 'advanced-reasoning'
+  | 'plan-scope'
+  | 'none';
 
 /** One selectable row: the digit that chooses it and the name it shows. */
 export interface CodexPickerRow {

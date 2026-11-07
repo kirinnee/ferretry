@@ -82,6 +82,7 @@ export default definePlugin({
 
   permissions: {
     network: ['api.github.com', 'github.com', 'objects.githubusercontent.com'],
-    spawn: ['nix', 'brew', 'dpkg', 'rpm', 'apt-get', 'dnf', 'yum'],
+    spawn: ['nix', 'brew', 'dpkg', 'rpm', 'apt-get', 'dnf', 'yum', 'readlink'],
+    updateHost: true,
   },
 });

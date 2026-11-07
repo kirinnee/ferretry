@@ -129,11 +129,10 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'tools', { readonly [K in ToolNamesOf<M>]: ToolHandler }> &
   Section<'provides', PortsOf<TokensOf<M, 'provides'>>> &
   Section<'hooks', HookImplsOf<M>> &
-  Section<'subscribers', SubscribersOf<M>> & /**
+  Section<'subscribers', SubscribersOf<M>> /**
    * A declared check with no run still boots: `fy doctor` reports it as a failure that names it (`has no
    * implementation`), so a missing check is seen, never silent. A run for an undeclared id is refused.
-   */
-  { readonly doctor?: { readonly [K in DoctorIdsOf<M>]?: DoctorRun } } & Section<
+   */ & { readonly doctor?: { readonly [K in DoctorIdsOf<M>]?: DoctorRun } } & Section<
     'resolvers',
     { readonly [K in ResolverIdsOf<M>]: NetworkResolver }
   > & {

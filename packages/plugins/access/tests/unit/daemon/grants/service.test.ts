@@ -598,7 +598,9 @@ describe('where a caller stands, for a route that must add one step', () => {
     should(governance.governed).be.true();
     for (const capability of DAEMON_CAPABILITIES) {
       for (const axis of ['use', 'configure'] as const) {
-        should(governance.decide(demandOf(capability, axis))).deepEqual(service.decide(demandOf(capability, axis), remote));
+        should(governance.decide(demandOf(capability, axis))).deepEqual(
+          service.decide(demandOf(capability, axis), remote),
+        );
       }
     }
   });

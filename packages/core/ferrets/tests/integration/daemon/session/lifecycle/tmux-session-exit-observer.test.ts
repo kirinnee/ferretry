@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DurableTerminalPaneRegistrar, DurableTerminalPaneStore } from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
+import {
+  DurableTerminalPaneRegistrar,
+  DurableTerminalPaneStore,
+} from '../../../../../daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts';
 import { InMemoryLaunchGate } from '../../../../../daemon/adapters/session/resume/in-memory-launch-gate.ts';
 import { TmuxSessionExitObserver } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-exit-observer.ts';
 import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
@@ -48,7 +51,12 @@ async function fixture(exitCode: number): Promise<ExitFixture> {
   const { storage } = await memoryStorage({ clock: { now: () => NOW } });
   const record = createSessionRecord(
     { agent: AGENT, cwd: '/workspace/project', mode: 'interactive', prompt: 'Exit when told', command: [AGENT] },
-    { id: parseSessionId('exit-session'), cwd: '/workspace/project', at: NOW, settings: defaultSessionLifecycleSettings },
+    {
+      id: parseSessionId('exit-session'),
+      cwd: '/workspace/project',
+      at: NOW,
+      settings: defaultSessionLifecycleSettings,
+    },
   ).record;
   const id = record.config.id;
   await storage.writeState(id, sessionState(id, { status: 'created' }));

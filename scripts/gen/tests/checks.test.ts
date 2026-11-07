@@ -40,6 +40,8 @@ const ws = (
   made.push(f);
   return f;
 };
+/** The Kernel as a fixture package: the generated command registry always carries its manifest (§9.6). */
+const KERNEL_PACKAGE: FixturePackage = { id: 'kernel', core: true, halves: false };
 const NO_BASE = { base: 'file:/nonexistent/ports-pending.json' };
 const run = async (
   check: { run: (ctx: ReturnType<typeof contextFor>) => Promise<readonly Finding[]> },
@@ -776,7 +778,7 @@ describe('registry generator', () => {
   });
 
   test('pending app halves are omitted, ported halves register, and registries --check stays exact', async () => {
-    const f = ws([{ id: 'alpha' }, { id: 'beta' }]);
+    const f = ws([KERNEL_PACKAGE, { id: 'alpha' }, { id: 'beta' }]);
     f.write(
       'ports-pending.json',
       JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { alpha: ['app'] } }),
@@ -800,7 +802,7 @@ describe('registry generator', () => {
   });
 
   test('registries-fresh planted: a hand-edited generated file', async () => {
-    const f = ws(graph('name'), { pending: ['alpha', 'beta', 'gamma'] });
+    const f = ws([KERNEL_PACKAGE, ...graph('name')], { pending: ['alpha', 'beta', 'gamma'] });
     const model = await buildModel(f.root);
     const files = generateGlobal(model);
     writeFiles(f.root, files);

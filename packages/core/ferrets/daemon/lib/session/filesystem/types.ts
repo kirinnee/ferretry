@@ -1,5 +1,3 @@
-
-
 import { FsError, type FsErrorCode } from '@ferretry/kernel/contract';
 
 /**

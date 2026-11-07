@@ -25,7 +25,7 @@ import {
   type MemberJoinedResponse,
   MemberClientNameSchema,
 } from '../boundary.ts';
-import { MemberBoxKeySchema, MemberKeySchema } from '../../adapters/relay.ts';
+import { MemberBoxKeySchema, MemberKeySchema } from '../relay-wire/index.ts';
 import type { AuditEntry } from '../audit.ts';
 import type {
   MemberJoinAnswer,
@@ -34,7 +34,7 @@ import type {
   MemberJoinOptionsAttempt,
   MemberJoinOptionsResult,
   MemberJoinResult,
-} from '../../adapters/member-session.ts';
+} from './member-session.ts';
 import type { MemberJoinProver } from './join-proof.ts';
 import type { CatalogMemberService, JoinNeeded, JoinProven } from './service.ts';
 import type { MemberAuditSink } from './ports.ts';

@@ -1,6 +1,11 @@
 import type { Clock, FetchPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { type HarnessLatestSource, type LatestReleaseAnswer, NPM_LATEST_URL, parseNpmLatest } from '../lib/update/index.ts';
+import {
+  type HarnessLatestSource,
+  type LatestReleaseAnswer,
+  NPM_LATEST_URL,
+  parseNpmLatest,
+} from '../lib/update/index.ts';
 
 /** How long the newest-version question may take before the answer is 'could not reach npm'. */
 const NPM_CHECK_TIMEOUT_MS = 10_000;

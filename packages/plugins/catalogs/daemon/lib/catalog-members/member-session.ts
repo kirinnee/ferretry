@@ -5,7 +5,7 @@
  * the request session's three needs: the key to verify, the live registration, and the member route table.
  * `dispatch` is the ONLY door a member's request has — the link never hands one to the device dispatcher.
  */
-import type { MemberJoinedResponse, MemberJoinProof, StepUpOptions } from '../lib/boundary.ts';
+import type { MemberJoinedResponse, MemberJoinProof, StepUpOptions } from '../boundary.ts';
 
 /**
  * Where a join arrived. Only a direct socket has a peer worth keying a budget by: a relayed session's

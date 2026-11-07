@@ -19,14 +19,70 @@ export interface TestPreset {
 }
 
 const PRESETS: readonly TestPreset[] = [
-  { id: 'zai-glm', origin: 'built-in', quotaSource: 'zai-coding-plan', keyVariable: 'ANTHROPIC_AUTH_TOKEN', secretName: 'ZAI_API_KEY', unverified: true },
-  { id: 'deepseek', origin: 'built-in', quotaSource: 'deepseek-balance', keyVariable: 'ANTHROPIC_AUTH_TOKEN', secretName: 'DEEPSEEK_API_KEY', unverified: false },
-  { id: 'kimi', origin: 'built-in', quotaSource: 'moonshot-balance', keyVariable: 'ANTHROPIC_AUTH_TOKEN', secretName: 'MOONSHOT_API_KEY', unverified: false },
-  { id: 'vercel-ai-gateway', origin: 'built-in', quotaSource: 'vercel-credits', keyVariable: 'ANTHROPIC_AUTH_TOKEN', secretName: 'AI_GATEWAY_API_KEY', unverified: true },
-  { id: 'litellm', origin: 'built-in', quotaSource: 'litellm-key-info', keyVariable: 'ANTHROPIC_AUTH_TOKEN', secretName: 'LITELLM_API_KEY', unverified: true },
-  { id: 'minimax', origin: 'built-in', quotaSource: 'minimax-token-plan', keyVariable: 'ANTHROPIC_API_KEY', secretName: 'MINIMAX_API_KEY', unverified: false },
-  { id: 'openrouter', origin: 'built-in', quotaSource: 'openrouter-key', keyVariable: 'ANTHROPIC_AUTH_TOKEN', secretName: 'OPENROUTER_API_KEY', unverified: false },
-  { id: 'anthropic-api-key', origin: 'built-in', quotaSource: 'transcript-pricing', keyVariable: 'ANTHROPIC_API_KEY', secretName: 'ANTHROPIC_API_KEY', unverified: false },
+  {
+    id: 'zai-glm',
+    origin: 'built-in',
+    quotaSource: 'zai-coding-plan',
+    keyVariable: 'ANTHROPIC_AUTH_TOKEN',
+    secretName: 'ZAI_API_KEY',
+    unverified: true,
+  },
+  {
+    id: 'deepseek',
+    origin: 'built-in',
+    quotaSource: 'deepseek-balance',
+    keyVariable: 'ANTHROPIC_AUTH_TOKEN',
+    secretName: 'DEEPSEEK_API_KEY',
+    unverified: false,
+  },
+  {
+    id: 'kimi',
+    origin: 'built-in',
+    quotaSource: 'moonshot-balance',
+    keyVariable: 'ANTHROPIC_AUTH_TOKEN',
+    secretName: 'MOONSHOT_API_KEY',
+    unverified: false,
+  },
+  {
+    id: 'vercel-ai-gateway',
+    origin: 'built-in',
+    quotaSource: 'vercel-credits',
+    keyVariable: 'ANTHROPIC_AUTH_TOKEN',
+    secretName: 'AI_GATEWAY_API_KEY',
+    unverified: true,
+  },
+  {
+    id: 'litellm',
+    origin: 'built-in',
+    quotaSource: 'litellm-key-info',
+    keyVariable: 'ANTHROPIC_AUTH_TOKEN',
+    secretName: 'LITELLM_API_KEY',
+    unverified: true,
+  },
+  {
+    id: 'minimax',
+    origin: 'built-in',
+    quotaSource: 'minimax-token-plan',
+    keyVariable: 'ANTHROPIC_API_KEY',
+    secretName: 'MINIMAX_API_KEY',
+    unverified: false,
+  },
+  {
+    id: 'openrouter',
+    origin: 'built-in',
+    quotaSource: 'openrouter-key',
+    keyVariable: 'ANTHROPIC_AUTH_TOKEN',
+    secretName: 'OPENROUTER_API_KEY',
+    unverified: false,
+  },
+  {
+    id: 'anthropic-api-key',
+    origin: 'built-in',
+    quotaSource: 'transcript-pricing',
+    keyVariable: 'ANTHROPIC_API_KEY',
+    secretName: 'ANTHROPIC_API_KEY',
+    unverified: false,
+  },
   { id: 'ollama-codex', origin: 'built-in', quotaSource: 'none', unverified: true },
 ];
 
@@ -34,7 +90,12 @@ export const preset = (id: string): TestPreset => PRESETS.find(entry => entry.id
 
 interface HalfInput {
   readonly env?: Readonly<Record<string, string>>;
-  readonly codexProvider?: { readonly id?: string; readonly name?: string; readonly keyVariable?: string; readonly baseUrl?: string };
+  readonly codexProvider?: {
+    readonly id?: string;
+    readonly name?: string;
+    readonly keyVariable?: string;
+    readonly baseUrl?: string;
+  };
 }
 export interface LoginInput extends HalfInput {
   readonly harness?: string;

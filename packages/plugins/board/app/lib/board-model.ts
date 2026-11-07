@@ -493,11 +493,7 @@ const compareCards = (left: BoardCard, right: BoardCard): number => {
  * `machine`, `mine`, `lane` and the date ranges are applied here (`now` is what a preset counts back
  * from); the rest of the filters were the daemon's.
  */
-export const mergeBoard = (
-  machines: readonly BoardMachineData[],
-  filters: BoardFilters,
-  now: number,
-): BoardModel => {
+export const mergeBoard = (machines: readonly BoardMachineData[], filters: BoardFilters, now: number): BoardModel => {
   const versions = machines.map(({ daemonId, machine, version }) => ({ daemonId, machine, version }));
   const showAgents = showsAgents(filters);
   const kept = machines.filter(data => filters.machine === null || data.daemonId === filters.machine);

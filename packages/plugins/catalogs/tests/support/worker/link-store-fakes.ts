@@ -15,8 +15,8 @@ import {
   LinkOwnerDurableObject,
   LinkStoreControlDurableObject,
   linkStoreFetch,
-} from '../../../worker/adapters/index.ts';
-import type { HostedRelayControlNamespace } from '../../../worker/adapters/durable-storage.ts';
+} from '../../../worker/src/adapters/index.ts';
+import type { HostedRelayControlNamespace } from '../../../worker/src/adapters/durable-storage.ts';
 import {
   type DaemonIdentity,
   encodeLinkUploadBody,
@@ -33,7 +33,7 @@ import {
   linkUploadSignedBody,
   signLinkStoreRequest,
   toBase64Url,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import { FakeHostedRelayControlStorage } from './hosted-control-fakes.ts';
 import { relayCrypto } from './identities.ts';
 import { LINK_AT } from './links.ts';

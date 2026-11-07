@@ -117,9 +117,7 @@ export function oauthRoutes(subsystem: McpOAuthSubsystem): {
 } {
   return {
     'GET /v1/mcp/auth': async () =>
-      await answer(async () =>
-        McpOAuthConnectionListSchema.parse({ connections: await subsystem.connections() }),
-      ),
+      await answer(async () => McpOAuthConnectionListSchema.parse({ connections: await subsystem.connections() })),
     'POST /v1/mcp/auth/:component': async call => {
       const component = parameter(call, 'component', 'server name');
       const request = await parseOptionalBody(call.request, McpOAuthStartRequestSchema);

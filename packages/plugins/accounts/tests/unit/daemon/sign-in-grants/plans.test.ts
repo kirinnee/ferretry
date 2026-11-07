@@ -31,11 +31,7 @@ function source(lines: ApprovedSignInLine[]) {
     lineUsed: () => undefined,
     lineStopped: async () => undefined,
   };
-  return new PlanSignInGrants(
-    plans,
-    async () => undefined,
-    new SignInGrantLedger(),
-  );
+  return new PlanSignInGrants(plans, async () => undefined, new SignInGrantLedger());
 }
 
 describe('PlanSignInGrants', () => {
