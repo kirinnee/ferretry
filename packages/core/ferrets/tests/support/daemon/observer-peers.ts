@@ -15,10 +15,9 @@ import type { QuestionStepPolicy } from '../../../daemon/lib/session/observer/qu
 import { stepTurn, type TurnLook, type TurnStateChange } from '../../../daemon/lib/session/observer/turn.ts';
 import type { AnswerLedger, AnswerOperationRecord, AskedQuestion } from '../../../daemon/lib/session/peers/question.ts';
 import type { TranscriptSendEvidenceFactory } from '../../../daemon/lib/session/peers/send.ts';
-import type { PaneParsers, PaneState } from '../../../daemon/lib/session/peers/tmux.ts';
+import type { PaneParsers } from '../../../daemon/lib/session/peers/tmux.ts';
 import type {
   IncrementalTranscriptTailFactory,
-  TranscriptEvent,
   TranscriptHarness,
   TranscriptSource,
 } from '../../../daemon/lib/session/peers/transcript.ts';
@@ -94,16 +93,6 @@ export const INERT_PANE_WORK: PaneWorkSummarizer = () => ({ toolCommand: false, 
 
 /** The warden plugin's `paneWorkSummary`: not available in core. */
 export const UNWIRED_PANE_WORK: PaneWorkSummarizer = unwired('paneWorkSummary (warden)');
-
-/** Today's `new ClaudeTranscriptParser().parse({ text }).events` / Codex's: the conversation plugin's parsers. */
-export function unwiredTranscriptEvents(harness: TranscriptHarness, _text: string): readonly TranscriptEvent[] {
-  throw new UnwiredPeer(`${harness === 'claude' ? 'ClaudeTranscriptParser' : 'CodexTranscriptParser'} (conversation)`);
-}
-
-/** Today's `paneStateFrom(parsePaneMetadata(metadata), visible)` (`tmux/pane.ts`): the terminals plugin's. */
-export function unwiredPaneState(_metadata: string, _visible: string): PaneState {
-  throw new UnwiredPeer('paneStateFrom / parsePaneMetadata (terminals)');
-}
 
 /** Today's `storagePaneLimits(storage, nowMs)` (conversation `adapters/session/turn/storage-pane-limits.ts`). */
 export async function unwiredPaneLimits(_storage: unknown, _nowMs: number): Promise<ReadonlyMap<string, UsageLimit>> {

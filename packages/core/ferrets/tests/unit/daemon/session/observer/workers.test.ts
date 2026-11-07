@@ -10,8 +10,7 @@ import {
   turnPaneEvidenceOf,
 } from '../../../../../daemon/lib/session/observer/index.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
-import { UNWIRED_PANE_PARSERS } from '../../../../support/daemon/observer-peers.ts';
+import type { PaneParsers, PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
 
 /**
  * The pure halves of the session workers: which thread hosts which session, what a crash costs, what
@@ -171,16 +170,26 @@ describe('observerFactsOf', () => {
 describe('turnPaneEvidenceOf', () => {
   const pane = (visible: string, promptReady: boolean): PaneState =>
     ({ alive: true, dead: false, promptReady, history: '', visible }) as PaneState;
+  const working = '✽ Pontificating… (3s · ↓ 1.2k tokens · esc to interrupt)';
+  const permission = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
+  /**
+   * The pane parsers are the terminals plugin's, and how they read a real frame is tested there. These read the
+   * two frames below as those parsers do: the working line as live work, the proceed prompt as a permission prompt
+   * with no request parsed out of it. What is Ferrets' is how a frame's readings become turn evidence.
+   */
+  const parsers: PaneParsers = {
+    parsePermissionPrompt: () => undefined,
+    paneActiveWork: visible => (visible === working ? 'status' : undefined),
+    paneShowsPermissionPrompt: visible => visible === permission,
+    paneBlockingPrompt: () => undefined,
+    parseHarnessDialog: () => undefined,
+  };
 
   it('should read a working line, an idle prompt and a permission prompt', () => {
-    // Arrange
-    const working = '✽ Pontificating… (3s · ↓ 1.2k tokens · esc to interrupt)';
-    const permission = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
-
     // Act
-    const busy = turnPaneEvidenceOf(pane(working, false), UNWIRED_PANE_PARSERS);
-    const idle = turnPaneEvidenceOf(pane('│ > ', true), UNWIRED_PANE_PARSERS);
-    const asking = turnPaneEvidenceOf(pane(permission, false), UNWIRED_PANE_PARSERS);
+    const busy = turnPaneEvidenceOf(pane(working, false), parsers);
+    const idle = turnPaneEvidenceOf(pane('│ > ', true), parsers);
+    const asking = turnPaneEvidenceOf(pane(permission, false), parsers);
 
     // Assert
     should(busy.working).be.true();

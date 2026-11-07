@@ -15,7 +15,9 @@
  */
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { SessionState } from '../../../../../daemon/lib/protocol/session.ts';
+import type { HarnessDialog } from '../../../../../daemon/lib/protocol/session-dialog.ts';
+import type { PermissionRequest } from '../../../../../daemon/lib/protocol/session-permission.ts';
+import type { PendingQuestion, SessionState } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { backgroundTerminalCount } from '../../../../../daemon/lib/session/peers/move.ts';
 import {
@@ -23,6 +25,7 @@ import {
   INITIAL_OBSERVER_STATE,
   type ObserverState,
   questionDocumentPatch,
+  type QuestionStepPolicy,
   type SendEvidenceWatch,
   SessionObserver,
   type TurnFacts,
@@ -35,6 +38,7 @@ import type {
   TranscriptBatch,
   TranscriptEvent,
   TranscriptIssueCode,
+  TranscriptJsonValue,
   TranscriptParseResult,
 } from '../../../../../daemon/lib/session/peers/transcript.ts';
 import {
@@ -48,26 +52,75 @@ import {
   type TurnPaneEvidence,
   transcriptTurnPhase,
 } from '../../../../../daemon/lib/session/peers/turn.ts';
-import {
-  UNWIRED_PANE_PARSERS,
-  UNWIRED_QUESTIONS,
-  unwiredTranscriptEvents,
-} from '../../../../support/daemon/observer-peers.ts';
 
 /*
- * The question projection, the observed runtime, the pane parsers and the transcript parsers are other owners'
- * (conversation, claude-code/codex, terminals) and host-provided in core: each replay below needs them wired.
+ * THE PEERS BOTH SIDES SHARE. The question projection, the receipt rules, the observed runtime, the pane parsers
+ * and the transcript parsers are other owners' (conversation, claude-code/codex, terminals) and host-provided in
+ * core; their own decisions are tested with them. What parity holds Ferrets to is that the fold ORCHESTRATES them
+ * exactly as the pre-3a code did, so both sides here are handed the same small scripted peers below — each one
+ * reading only the recorded shapes this file replays.
  */
+
+/** The last AskUserQuestion the tail calls: open until a result names it. */
+const QUESTIONS: QuestionStepPolicy = {
+  projectStructuredQuestion: events => {
+    const call = events.findLast(event => event.kind === 'tool-call' && event.call.name === 'AskUserQuestion');
+    if (call?.kind !== 'tool-call') return { kind: 'none' };
+    const id = call.call.id;
+    return events.some(event => event.kind === 'tool-result' && event.result.callId === id)
+      ? { kind: 'resolved', toolUseId: id }
+      : { kind: 'pending', question: { toolUseId: id, questions: [] } as unknown as PendingQuestion };
+  },
+  structuredQuestionStatePatch: (current, projection) => {
+    if (projection.kind === 'pending')
+      return current.pendingQuestion?.toolUseId === projection.question.toolUseId ||
+        current.lastAnsweredQuestionToolUseId === projection.question.toolUseId
+        ? {}
+        : { status: 'awaiting_question', pendingQuestion: projection.question };
+    if (projection.kind === 'resolved' && current.pendingQuestion?.toolUseId === projection.toolUseId)
+      return { status: 'running', pendingQuestion: undefined, lastAnsweredQuestionToolUseId: projection.toolUseId };
+    return {};
+  },
+  reconcileAnswerEvidence: (records, state, observation = {}) => {
+    const reconciled = new Map(records);
+    const settlements: AnswerOperationRecord[] = [];
+    for (const record of records.values()) {
+      if (record.outcome !== 'accepted') continue;
+      const confirmed = state.lastAnsweredQuestionToolUseId === record.toolUseId;
+      if (!confirmed && observation.resolvedToolUseId !== record.toolUseId) continue;
+      const settlement: AnswerOperationRecord = { ...record, outcome: confirmed ? 'confirmed' : 'quarantined' };
+      reconciled.set(record.requestId, settlement);
+      settlements.push(settlement);
+    }
+    return { records: reconciled, settlements };
+  },
+  withAskedQuestion: events => events,
+  projectObservedContext: () => undefined,
+  projectObservedRuntime: events => {
+    const stated = events.findLast(event => event.kind === 'settings' && event.settings.model !== undefined);
+    return stated?.kind === 'settings' && stated.settings.model !== undefined
+      ? { model: stated.settings.model, ...(stated.timestamp === undefined ? {} : { at: stated.timestamp }) }
+      : {};
+  },
+  observedRuntimeStatePatch: (current, observed) =>
+    observed.model === undefined || observed.model === current.observedModel
+      ? {}
+      : { observedModel: observed.model, ...(observed.at === undefined ? {} : { observedModelAt: observed.at }) },
+};
 const {
   projectStructuredQuestion,
   structuredQuestionStatePatch,
   reconcileAnswerEvidence,
   projectObservedRuntime,
   observedRuntimeStatePatch,
-} = UNWIRED_QUESTIONS;
-const { parseHarnessDialog, paneBlockingPrompt, paneShowsPermissionPrompt, parsePermissionPrompt } =
-  UNWIRED_PANE_PARSERS;
-const paneShowsActiveWork = (visible: string): boolean => UNWIRED_PANE_PARSERS.paneActiveWork(visible) !== undefined;
+} = QUESTIONS;
+
+/** The frames this file draws, read as the terminals plugin's parsers read them: work, a proceed prompt, an idle prompt. */
+const paneShowsActiveWork = (visible: string): boolean => visible === CLAUDE_WORKING || visible === CODEX_WORKING;
+const paneShowsPermissionPrompt = (visible: string): boolean => visible === CLAUDE_PERMISSION;
+const parsePermissionPrompt = (_visible: string): PermissionRequest | undefined => undefined;
+const paneBlockingPrompt = (_visible: string): string | undefined => undefined;
+const parseHarnessDialog = (_visible: string): HarnessDialog | undefined => undefined;
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -210,16 +263,97 @@ function referenceSendEvidence(
 
 // ─── Recordings ─────────────────────────────────────────────────────────────────────────────────
 
-/** Today's `ClaudeTranscriptParser` / `CodexTranscriptParser` parse (conversation): host-provided in core. */
-const parse = (harness: 'claude' | 'codex', records: readonly object[]): TranscriptParseResult => ({
-  harness,
-  events: unwiredTranscriptEvents(harness, records.map(record => `${JSON.stringify(record)}\n`).join('')),
-  observedInputs: [],
-  issues: [],
-  remainder: '',
-  parsedRecords: records.length,
-  ignoredRecords: 0,
-});
+/** A recorded line, as the helpers below build them. */
+interface RecordedLine {
+  readonly type: string;
+  readonly timestamp: string;
+  readonly uuid?: string;
+  readonly message?: {
+    readonly content: string | readonly RecordedBlock[];
+    readonly model?: string;
+    readonly stop_reason?: string | null;
+  };
+  readonly payload?: { readonly type?: string; readonly model?: string; readonly effort?: string };
+}
+interface RecordedBlock {
+  readonly type: string;
+  readonly text?: string;
+  readonly id?: string;
+  readonly name?: string;
+  readonly input?: TranscriptJsonValue;
+  readonly tool_use_id?: string;
+  readonly content?: TranscriptJsonValue;
+}
+
+/**
+ * The recorded Claude and Codex lines as the conversation plugin's parsers read them, for the shapes replayed here:
+ * a person's message (and the input it proves), a tool result, an assistant's text and tool calls with the turn
+ * boundary `end_turn` writes, Codex's turn boundaries and the model its `turn_context` states.
+ */
+const parse = (harness: 'claude' | 'codex', records: readonly object[]): TranscriptParseResult => {
+  const events: TranscriptEvent[] = [];
+  const observedInputs: ObservedHumanInput[] = [];
+  for (const record of records as readonly RecordedLine[]) {
+    const meta = { harness, timestamp: record.timestamp };
+    if (harness === 'codex') {
+      const type = record.payload?.type;
+      if (record.type === 'event_msg' && (type === 'task_started' || type === 'task_complete'))
+        events.push({ ...meta, role: 'system', kind: 'turn', state: type === 'task_started' ? 'started' : 'completed' });
+      if (record.type === 'turn_context')
+        events.push({
+          ...meta,
+          role: 'system',
+          kind: 'settings',
+          settings: { model: record.payload?.model, reasoningEffort: record.payload?.effort },
+        });
+      continue;
+    }
+    const message = record.message;
+    if (message === undefined) continue;
+    if (record.type === 'user' && typeof message.content === 'string') {
+      events.push({ ...meta, role: 'user', kind: 'message', text: message.content });
+      observedInputs.push({
+        harness,
+        text: message.content,
+        proof: 'normal-user-record',
+        observedAt: meta.timestamp,
+        proofKey: record.uuid ?? '',
+        shapeVersion: 1,
+      });
+      continue;
+    }
+    for (const block of typeof message.content === 'string' ? [] : message.content) {
+      if (block.type === 'tool_result')
+        events.push({
+          ...meta,
+          role: 'tool',
+          kind: 'tool-result',
+          result: { callId: block.tool_use_id ?? '', content: block.content ?? null, isError: false },
+        });
+      if (block.type === 'text') events.push({ ...meta, role: 'assistant', kind: 'message', text: block.text ?? '' });
+      if (block.type === 'tool_use')
+        events.push({
+          ...meta,
+          role: 'assistant',
+          kind: 'tool-call',
+          call: { id: block.id ?? '', name: block.name ?? '', input: block.input ?? null },
+        });
+    }
+    if (record.type === 'assistant')
+      events.push({ ...meta, role: 'assistant', kind: 'settings', settings: { model: message.model } });
+    if (record.type === 'assistant' && message.stop_reason === 'end_turn')
+      events.push({ ...meta, role: 'system', kind: 'turn', state: 'completed' });
+  }
+  return {
+    harness,
+    events,
+    observedInputs,
+    issues: [],
+    remainder: '',
+    parsedRecords: records.length,
+    ignoredRecords: 0,
+  };
+};
 
 const claudeUser = (id: string, content: unknown) => ({
   type: 'user',
@@ -374,7 +508,7 @@ const TURN_RECORDINGS: readonly (readonly [string, readonly Moment[]])[] = [
 describe('replay parity — the turn part', () => {
   it.each(TURN_RECORDINGS)('should record what the pre-3a watcher recorded: %s', (_name, moments) => {
     // Arrange
-    const subject = new SessionObserver(sha256, UNWIRED_QUESTIONS);
+    const subject = new SessionObserver(sha256, QUESTIONS);
     let referenceDocument: Record<string, unknown> = { id: 's', status: 'running', turn: 1 };
     let foldDocument: Record<string, unknown> = { ...referenceDocument };
     let previous: TurnObservation | undefined;
@@ -472,7 +606,7 @@ const QUESTION_RECORDINGS: readonly (readonly [string, QuestionRecording])[] = [
 describe('replay parity — the question and runtime part', () => {
   it.each(QUESTION_RECORDINGS)('should write what the pre-3a projection wrote: %s', (_name, recording) => {
     // Arrange
-    const subject = new SessionObserver(sha256, UNWIRED_QUESTIONS);
+    const subject = new SessionObserver(sha256, QUESTIONS);
     const harness = recording.records.some(record => 'payload' in record) ? 'codex' : 'claude';
     const events = parse(harness, recording.records).events;
     const current = { id: 's', status: 'running', turn: 1, ...recording.state } as SessionState;
@@ -488,7 +622,7 @@ describe('replay parity — the question and runtime part', () => {
     const patch = step.patches.find(candidate => candidate.kind === 'question');
     let document: Record<string, unknown> | undefined;
     if (patch?.writes === true) {
-      const decided = questionDocumentPatch(locked as unknown as SessionState, patch, UNWIRED_QUESTIONS);
+      const decided = questionDocumentPatch(locked as unknown as SessionState, patch, QUESTIONS);
       document = decided === undefined ? locked : { ...locked, ...decided.fields };
       for (const field of decided?.removals ?? []) delete document[field];
     }
@@ -519,7 +653,7 @@ describe('replay parity — the liveness sample', () => {
     ['nothing readable', undefined, undefined, undefined],
   ] as const)('should sample what the pre-3a sampler sampled: %s', (_name, pane, transcript, observed) => {
     // Arrange
-    const subject = new SessionObserver(sha256, UNWIRED_QUESTIONS);
+    const subject = new SessionObserver(sha256, QUESTIONS);
     const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
 
     // Act

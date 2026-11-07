@@ -18,6 +18,7 @@ function observation(exit: SessionPaneExit, status = 'running'): SessionExitObse
       paneId: '%0',
       pid: 4242,
       processStartTicks: 99,
+      sessionCreated: 1_785_000_000,
     },
     exit,
   };

@@ -16,6 +16,7 @@ const OBSERVATION: SessionExitObservation = {
     paneId: '%1',
     pid: 4242,
     processStartTicks: 99,
+    sessionCreated: 1_785_000_000,
   },
   exit: { kind: 'gone' },
 };

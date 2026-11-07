@@ -695,6 +695,7 @@ describe('session health service', () => {
       paneId: '%3',
       pid: 4242,
       processStartTicks: 99,
+      sessionCreated: 1_785_000_000,
     };
     const exitedWith = (id: string, exitStatus: number | undefined, status = 'running'): SessionExitObservation => ({
       id,

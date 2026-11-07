@@ -15,7 +15,13 @@ import {
   turnFactsOf,
   turnLeftToSettle,
 } from '../../../../../daemon/lib/session/observer/index.ts';
-import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
+import type { QuestionStepPolicy } from '../../../../../daemon/lib/session/observer/question.ts';
+import type { ObservedContext, ObservedRuntime } from '../../../../../daemon/lib/session/peers/harness-observation.ts';
+import type {
+  AnswerOperationRecord,
+  QuestionDocument,
+  StructuredQuestionProjection,
+} from '../../../../../daemon/lib/session/peers/question.ts';
 import type { TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
 import type { TranscriptBatch, TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
 import { UNWIRED_QUESTIONS } from '../../../../support/daemon/observer-peers.ts';
@@ -61,6 +67,57 @@ const accepted: AnswerOperationRecord = {
   acceptedAt: NOW,
   outcome: 'accepted',
 } as AnswerOperationRecord;
+
+/**
+ * The question policy each case scripts. The real one — which question a tail holds open, when a receipt is
+ * settled, which model a harness reported — is its owners' (conversation, claude-code, codex) and tested there.
+ * What these cases hold Ferrets to is what the observer does with its answers: the order of the patches, when a
+ * look implies a write, what it carries, and how the locked document re-decides it.
+ */
+interface QuestionScript {
+  readonly projection?: StructuredQuestionProjection;
+  /** The question fields the projection would write over `current`. */
+  readonly fields?: (current: QuestionDocument) => Partial<SessionState>;
+  readonly settle?: (records: ReadonlyMap<string, AnswerOperationRecord>) => readonly AnswerOperationRecord[];
+  readonly runtime?: ObservedRuntime;
+  readonly context?: ObservedContext;
+}
+
+function scripted(script: QuestionScript = {}): QuestionStepPolicy {
+  return {
+    projectStructuredQuestion: () => script.projection ?? { kind: 'none' },
+    structuredQuestionStatePatch: current => script.fields?.(current) ?? {},
+    reconcileAnswerEvidence: records => {
+      const settlements = script.settle?.(records) ?? [];
+      const reconciled = new Map(records);
+      for (const settlement of settlements) reconciled.set(settlement.requestId, settlement);
+      return { records: reconciled, settlements };
+    },
+    withAskedQuestion: events => events,
+    projectObservedContext: () => script.context,
+    projectObservedRuntime: () => script.runtime ?? {},
+    // Lays a model the document does not hold yet, and nothing it already holds.
+    observedRuntimeStatePatch: (current, observed) =>
+      observed.model === undefined || observed.model === current.observedModel
+        ? {}
+        : { observedModel: observed.model, ...(observed.at === undefined ? {} : { observedModelAt: observed.at }) },
+  };
+}
+
+/** The tail holds `tool-1` open: the projection writes it as the pending question. */
+const ASKING: QuestionScript = {
+  projection: { kind: 'pending', question: { toolUseId: 'tool-1', questions: [] } },
+  fields: () => ({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-1', questions: [] } }),
+};
+/** The form was stamped answered: the accepted receipt is settled confirmed. */
+const SETTLING: QuestionScript = {
+  projection: { kind: 'resolved', toolUseId: 'tool-1' },
+  settle: records =>
+    [...records.values()]
+      .filter(record => record.outcome === 'accepted' && record.toolUseId === 'tool-1')
+      .map(record => ({ ...record, outcome: 'confirmed' as const, reason: 'stamped' })),
+};
+
 
 describe('SessionObserver.step', () => {
   it('should remember the facts it is told, and change nothing else', () => {
@@ -123,7 +180,7 @@ describe('SessionObserver.step', () => {
 
   it('should put the question patch before the turn patch of the same look (#689)', () => {
     // Arrange
-    const subject = new SessionObserver(digest, UNWIRED_QUESTIONS);
+    const subject = new SessionObserver(digest, scripted(ASKING));
     const input = {
       kind: 'look' as const,
       facts: running,
@@ -158,7 +215,7 @@ describe('stepQuestion', () => {
     const input = { state: state(), events: [question], answers: new Map<string, AnswerOperationRecord>() };
 
     // Act
-    const actual = stepQuestion(input, UNWIRED_QUESTIONS);
+    const actual = stepQuestion(input, scripted(ASKING));
 
     // Assert
     should(actual?.writes).be.true();
@@ -171,7 +228,7 @@ describe('stepQuestion', () => {
     const input = { state: state(), events: [] as readonly TranscriptEvent[], answers: new Map() };
 
     // Act + Assert
-    should(stepQuestion(input, UNWIRED_QUESTIONS)).be.undefined();
+    should(stepQuestion(input, scripted())).be.undefined();
   });
 
   it('should settle an accepted receipt the tail shows advanced, even when no field changes', () => {
@@ -183,7 +240,7 @@ describe('stepQuestion', () => {
     };
 
     // Act
-    const actual = stepQuestion(input, UNWIRED_QUESTIONS);
+    const actual = stepQuestion(input, scripted(SETTLING));
 
     // Assert
     should(actual?.settlements.map(record => record.outcome)).deepEqual(['confirmed']);
@@ -195,7 +252,7 @@ describe('stepQuestion', () => {
     const input = { state: state(), events: [usage('claude-opus-5-5')], answers: new Map() };
 
     // Act
-    const actual = stepQuestion(input, UNWIRED_QUESTIONS);
+    const actual = stepQuestion(input, scripted({ runtime: { model: 'claude-opus-5-5', at: NOW } }));
 
     // Assert
     should(actual?.runtime).deepEqual({ model: 'claude-opus-5-5', at: NOW });
@@ -213,7 +270,10 @@ describe('stepQuestion', () => {
     } as TranscriptEvent;
 
     // Act
-    const actual = stepQuestion({ state: state(), events: [sized], answers: new Map() }, UNWIRED_QUESTIONS);
+    const actual = stepQuestion(
+      { state: state(), events: [sized], answers: new Map() },
+      scripted({ runtime: { model: 'claude-opus-5-5', at: NOW }, context: { tokens: 118_000, at: NOW } }),
+    );
 
     // Assert
     should(actual?.runtime).deepEqual({
@@ -231,7 +291,7 @@ describe('questionReceipts', () => {
       state: state({ lastAnsweredQuestionToolUseId: 'tool-1' }),
       events: [question, answered],
       answers: new Map([[accepted.requestId, accepted]]),
-    }, UNWIRED_QUESTIONS);
+    }, scripted(SETTLING));
     if (patch === undefined) throw new Error('the look implied nothing');
     return patch;
   };
@@ -287,12 +347,20 @@ describe('questionReceipts', () => {
 
 describe('questionDocumentPatch', () => {
   it('should re-decide against the locked document and name only the question fields it removes', () => {
-    // Arrange — the question was answered: the projection clears the picker.
+    // Arrange — the question was answered: the projection clears what the document it is decided against
+    // still holds of the picker.
+    const clearing = scripted({
+      projection: { kind: 'resolved', toolUseId: 'tool-1' },
+      fields: current => ({
+        ...(current.pendingQuestion === undefined ? {} : { pendingQuestion: undefined }),
+        ...(current.needsHumanKind === undefined ? {} : { needsHumanKind: undefined }),
+      }),
+    });
     const patch = stepQuestion({
       state: state({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-1', questions: [] } }),
       events: [question, answered],
       answers: new Map(),
-    }, UNWIRED_QUESTIONS);
+    }, clearing);
     const locked = state({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-1', questions: [] },
@@ -300,7 +368,7 @@ describe('questionDocumentPatch', () => {
     });
 
     // Act
-    const actual = patch === undefined ? undefined : questionDocumentPatch(locked, patch, UNWIRED_QUESTIONS);
+    const actual = patch === undefined ? undefined : questionDocumentPatch(locked, patch, clearing);
 
     // Assert
     should(actual?.removals).deepEqual(['pendingQuestion', 'needsHumanKind']);
@@ -309,11 +377,12 @@ describe('questionDocumentPatch', () => {
 
   it('should answer nothing when the locked document already holds the patch', () => {
     // Arrange
-    const patch = stepQuestion({ state: state(), events: [usage('m')], answers: new Map() }, UNWIRED_QUESTIONS);
+    const modelled = scripted({ runtime: { model: 'm', at: NOW } });
+    const patch = stepQuestion({ state: state(), events: [usage('m')], answers: new Map() }, modelled);
     const locked = state({ observedModel: 'm', observedModelAt: NOW });
 
     // Act + Assert
-    should(patch === undefined ? 'missing' : questionDocumentPatch(locked, patch, UNWIRED_QUESTIONS)).be.undefined();
+    should(patch === undefined ? 'missing' : questionDocumentPatch(locked, patch, modelled)).be.undefined();
   });
 });
 
