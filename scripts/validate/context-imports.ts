@@ -70,6 +70,10 @@ export function refusal(edge: ImportEdge): string | undefined {
       return from === 'tests' || from === 'contract-testing' || from === 'kernel-testing'
         ? undefined
         : `${to === 'kernel-testing' ? '@ferretry/kernel/testing' : `${toPkg.name}/contract/testing`} is for tests only`;
+    case 'kernel-worker':
+      return from === 'daemon' || from === 'tests' || from === 'kernel-testing'
+        ? undefined
+        : "@ferretry/kernel/worker is imported only by a daemon half's worker module";
     case 'kernel-host':
       return edge.fromPkg.kind === 'shell' || from === 'tests' || from === 'kernel-testing'
         ? undefined
