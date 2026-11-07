@@ -47,7 +47,7 @@ import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { currentActor, runInCall } from './call-scope.ts';
+import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
 import {
@@ -373,7 +373,13 @@ async function bootLocked(
     manifests.flatMap(manifest => (manifest.data?.config ?? []).map(def => ({ plugin: manifest.id, def }))),
     input => {
       try {
-        return judgeAdmission.current?.judgeConfigWrite?.({ ...input, actor: currentActor() }) === 'apply';
+        return (
+          judgeAdmission.current?.judgeConfigWrite?.({
+            ...input,
+            actor: currentActor(),
+            standing: currentStanding(),
+          }) === 'apply'
+        );
       } catch {
         return false;
       }
@@ -871,7 +877,9 @@ async function bootLocked(
       async () => {
         ran = true;
         try {
-          const built = await runInCall({ actor: decision.actor }, () => handle(call, input));
+          const built = await runInCall({ actor: decision.actor, standing: decision.standing }, () =>
+            handle(call, input),
+          );
           status = built.isError === true ? 500 : 200;
           return built;
         } catch (error) {

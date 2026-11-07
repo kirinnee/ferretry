@@ -64,7 +64,13 @@ import { CORE_IDS } from '../contract/ids.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
-import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
+import type {
+  CallContext,
+  CallStanding,
+  MemberRouteHandler,
+  RouteDescriptor,
+  RouteHandler,
+} from '../contract/route.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
@@ -204,7 +210,7 @@ interface World {
   readonly config: Map<string, unknown>;
 }
 
-const actorScope = new AsyncLocalStorage<Actor>();
+const actorScope = new AsyncLocalStorage<{ readonly actor: Actor; readonly standing?: CallStanding }>();
 
 function actorOf(caller: TestCaller): Actor {
   if (caller.kind === 'ferret') return 'ferret';
@@ -471,8 +477,14 @@ async function start(world: World): Promise<TestHost> {
   const judged = (plugin: string, path: string, removal: boolean, sentences: readonly string[]): boolean => {
     try {
       return (
-        admission.judgeConfigWrite?.({ plugin, path, removal, sentences, actor: actorScope.getStore() ?? 'ferret' }) ===
-        'apply'
+        admission.judgeConfigWrite?.({
+          plugin,
+          path,
+          removal,
+          sentences,
+          actor: actorScope.getStore()?.actor ?? 'ferret',
+          standing: actorScope.getStore()?.standing,
+        }) === 'apply'
       );
     } catch {
       return false;
@@ -823,7 +835,7 @@ async function start(world: World): Promise<TestHost> {
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,
-        actor: () => actorScope.getStore() ?? 'ferret',
+        actor: () => actorScope.getStore()?.actor ?? 'ferret',
         minted: world.minted,
         record: entry => acts.push(entry),
       }),
@@ -1057,7 +1069,9 @@ async function start(world: World): Promise<TestHost> {
       const call = { request, params: found.params, ...decision.standing } as CallContext;
       const caller = callers.get(request) ?? owner();
       return toTestResponse(
-        await actorScope.run(actorOf(caller), () => runHandler(() => handler(call), route.guard, route.noStore)),
+        await actorScope.run({ actor: actorOf(caller), standing: decision.standing }, () =>
+          runHandler(() => handler(call), route.guard, route.noStore),
+        ),
       );
     },
     async doctor(plugin, check) {
@@ -1081,7 +1095,7 @@ async function start(world: World): Promise<TestHost> {
         return { text: skeletonSentence(entry.plugin.manifest.title), isError: true };
       const handler = entry.plugin.half.tools?.[name] as ToolHandler;
       const call = { request, params: new Map(), ...decision.standing } as CallContext;
-      return actorScope.run(actorOf(caller), () => handler(call, input));
+      return actorScope.run({ actor: actorOf(caller), standing: decision.standing }, () => handler(call, input));
     },
     async socket(path, init = {}) {
       const request = makeRequest(init.method ?? 'GET', path, { as: init.as ?? owner() });

@@ -77,6 +77,11 @@ export interface ConfigWriteJudgement {
   readonly sentences: readonly string[];
   /** Who the call in progress runs as. */
   readonly actor: Actor;
+  /**
+   * The standing admission put on the call in progress, for a judge that must tell the owner at the machine from a
+   * remote device (`actor` cannot). Absent when no call is in progress (a job) and on a member call.
+   */
+  readonly standing?: CallStanding;
 }
 
 /** One audited call, as the dispatcher reports it after the handler (or the refusal) settled. */

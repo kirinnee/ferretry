@@ -294,7 +294,7 @@ describe('config writes in the built daemon', () => {
     expect(bodyOf(response).code).toBe('config_not_saved');
   });
 
-  test('a plugin’s own loosening config write is held for the owner by the built admission', () => {
+  test('G131 a plugin’s own loosening config write with no call standing is held by the built admission', () => {
     const built = boot({ config: DEFAULT_GATE_CONFIG });
     for (const actor of ['ferret', 'warden', 'owner-viewer', 'owner-tools', 'owner-input'] as const)
       expect(
