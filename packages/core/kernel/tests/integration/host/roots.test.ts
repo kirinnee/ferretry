@@ -141,6 +141,31 @@ describe('RootHandle: makeDirectory, realPath, lstat and exclusive writes (workt
 });
 
 describe('HH writeBytes, a fenced tree copy or link, and the credentials root', () => {
+  test('S40 copyTree refuses a nested home and a moved-aside home at every walk entry', async () => {
+    const { home, parent } = await layout();
+    const imports = rootsPortFor(
+      fs,
+      { home, plugin: 'skills', worktrees: `${home}-worktrees` },
+      ['imports', 'agent-homes'],
+      () => undefined,
+    );
+    const source = imports.root('imports', { subfolder: parent });
+    const destination = imports.root('agent-homes', { subfolder: 'f1' });
+    const at = (root: typeof source, path: string): FencedPath => {
+      const result = root.resolve(path);
+      if (!result.ok) throw new Error(result.error);
+      return result.value;
+    };
+    await mkdir(`${home}/state/skills/agent-homes/f1`, { recursive: true });
+    await expect(
+      destination.copyTree(source, at(source, ''), at(destination, 'copy'), { maxEntries: 32 }),
+    ).rejects.toThrow('fenced');
+    expect(await Bun.file(`${home}/state/skills/agent-homes/f1/copy/home/state/vault/vault.key`).exists()).toBe(false);
+    await expect(
+      destination.copyTree(source, `${home}-before-2026-11-01-0900` as FencedPath, at(destination, 'before')),
+    ).rejects.toThrow('fenced');
+  });
+
   async function homes() {
     const { home, parent } = await layout();
     const roots = rootsPortFor(
@@ -151,6 +176,7 @@ describe('HH writeBytes, a fenced tree copy or link, and the credentials root', 
     );
     const homesRoot = roots.root('agent-homes', { subfolder: 'f1' });
     const downloads = roots.root('downloads');
+    await mkdir(`${home}/state/skills/agent-homes/f1`, { recursive: true });
     const at = (root: typeof homesRoot, relative: string): FencedPath => {
       const resolved = root.resolve(relative);
       if (!resolved.ok) throw new Error(resolved.error);
