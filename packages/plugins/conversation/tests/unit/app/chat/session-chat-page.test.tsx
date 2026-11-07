@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createLiveActivityHub, PanelSlot } from '@ferretry/app';
+import { createLiveActivityHub, deviceControls, PanelSlot } from '@ferretry/app';
 import { ensureDom, render, run } from '@ferretry/app/testing';
 import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
@@ -31,6 +31,14 @@ type PageProps = ComponentProps<typeof SessionChatPage>;
 const mounted: Array<{ unmount: () => void }> = [];
 afterEach(() => {
   for (const page of mounted.splice(0)) run(() => page.unmount());
+  // The device controls are one shared store: leave every choice at its default for the next case.
+  deviceControls().setControls('alpha', {
+    composerEnterKey: null,
+    composerPhoneEnterKey: null,
+    composerVimMode: false,
+    suggestionKeys: 'ladder',
+    skillSuggestions: true,
+  });
 });
 
 const draw = (overrides: Partial<PageProps> = {}, client: FakeClient = fakeClient({})) => {
@@ -71,6 +79,33 @@ describe('SessionChatPage', () => {
       ['conversation.row', 'shared'],
       ['ferret.side', 'shared'],
     ]);
+  });
+
+  test('hands the composer this device’s Enter-key choices, Vim mode and suggestion families', () => {
+    const page = draw();
+    expect(page.root.findByType(Composer).props).toMatchObject({
+      enterKeyPreference: null,
+      phoneEnterKeyPreference: null,
+      vimMode: false,
+      suggestions: { ladderSuggestions: true, directReferenceSuggestions: false, skillSuggestions: true },
+    });
+
+    // Enter-to-send off (↵ is a new line), a phone that sends on return, Vim on, `@`-less symbols only and no skills.
+    run(() =>
+      deviceControls().setControls('alpha', {
+        composerEnterKey: 'newline',
+        composerPhoneEnterKey: 'send',
+        composerVimMode: true,
+        suggestionKeys: 'symbols',
+        skillSuggestions: false,
+      }),
+    );
+    expect(page.root.findByType(Composer).props).toMatchObject({
+      enterKeyPreference: 'newline',
+      phoneEnterKeyPreference: 'send',
+      vimMode: true,
+      suggestions: { ladderSuggestions: false, directReferenceSuggestions: true, skillSuggestions: false },
+    });
   });
 
   test('reads a message handed over through a file from this ferret, through the half’s client', async () => {

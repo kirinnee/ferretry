@@ -22,6 +22,7 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentGalleryProvider } from '../composer/attachment-gallery.tsx';
 import { Composer } from '../composer/composer.tsx';
+import { useComposerPreferences } from '../composer/use-composer-preferences.ts';
 import { daemonConnection } from '../composer/seam.ts';
 import {
   type PendingQuestion,
@@ -139,6 +140,8 @@ export function SessionChatPage({
 }: SessionChatPageProps) {
   const ferretId = session.config.id;
   const agentName = ferretDisplayName(session);
+  // This device's Enter-key choices, Vim mode and suggestion families, from the one device-controls store.
+  const composerPreferences = useComposerPreferences(daemonId);
   // The ONE reference surface for every Markdown reader in this conversation, rebuilt only with the daemon, the ferret
   // or the navigator — never with a status tick, which would re-parse every rendered block.
   const references = useMemo(
@@ -298,6 +301,7 @@ export function SessionChatPage({
               compacting={liveSample?.compaction?.phase === 'running'}
               {...(session.context === undefined ? {} : { context: session.context })}
               daemon={daemonConnection(daemonId)}
+              {...composerPreferences}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               ferretId={ferretId}
               onSent={onSent}
