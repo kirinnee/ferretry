@@ -13,6 +13,7 @@ import {
   QUESTION_STATE,
   type Question,
   type SendRecord,
+  type SendResult,
   TurnEnded,
 } from '../contract/index.ts';
 import { ClockSendScheduler, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
@@ -21,9 +22,10 @@ import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
 import { clearAskedQuestion } from './questions/adapters/index.ts';
-import { TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
+import { NO_TURN_DOCUMENTS, OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
+import { answerOf } from './queue/lib/answer.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
@@ -56,6 +58,7 @@ export interface ConversationAHalf {
     ConversationApi,
     | 'currentTurn'
     | 'send'
+    | 'ownerWords'
     | 'interrupt'
     | 'queue'
     | 'editQueued'
@@ -100,6 +103,8 @@ export function buildConversationA(deps: {
   const clock: ClockPort = { now: () => kernel.clock.now() };
   const queueSerial = new KeyedSerialExecutor();
   const draftSerial = new KeyedSerialExecutor();
+  /** The one lane of each ferret's `question.json`: its writer, the exact-id clear and the withdrawal (r4 #2). */
+  const questionSerial = new KeyedSerialExecutor();
 
   const queue = new SessionQueueService({
     store: new NotifyingSessionQueueStore(new StateQueueStore(kernel.state), {
@@ -155,6 +160,43 @@ export function buildConversationA(deps: {
     boundaries.markInterrupted(ferret);
   };
 
+  /**
+   * The send a request's own id already made, answered as that send's first request was: the same id twice is ONE message,
+   * across daemon runs, because the queue keeps it as the message's id and the send ledger as its `sendId`. A message
+   * delivered inside a combined turn has no row of its own and is answered from the turn's, as its own id.
+   */
+  const keptSend = async (ferret: SessionId, sendId: string | undefined): Promise<SendResult | undefined> => {
+    if (sendId === undefined) return undefined;
+    const [rows, queued] = await Promise.all([ledger.list(ferret), queue.list(ferret)]);
+    const waiting = queued.find(message => message.id === sendId);
+    const row =
+      rows.find(entry => entry.sendId === sendId) ??
+      (waiting?.deliveredAs === undefined ? undefined : rows.find(entry => entry.sendId === waiting.deliveredAs));
+    if (row === undefined && waiting === undefined) return undefined;
+    const answer = answerOf(row, waiting);
+    return {
+      ferret,
+      disposition: answer.disposition,
+      sendId,
+      fate: answer.fate,
+      ...(answer.waitReason === undefined ? {} : { waitReason: answer.waitReason }),
+      ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
+      ...(waiting?.label === undefined ? {} : { label: waiting.label }),
+      ...(waiting?.holdUntil === undefined ? {} : { heldUntil: waiting.holdUntil }),
+    };
+  };
+  /** What the owner said to a ferret: the queue, the send ledger and its turn documents (none are written yet). */
+  const ownerWords = new OwnerWordsReader({
+    queue,
+    sends: ledger,
+    turns: NO_TURN_DOCUMENTS,
+    startedByFerret: async id => {
+      const found = await ferrets.get(id);
+      if (found === undefined) throw new Error(`ferret ${id} cannot be read`);
+      return found.parent !== undefined;
+    },
+  });
+
   const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => await queue.list(parseSessionId(id));
   const queueFailure = (error: unknown): never => {
     if (error instanceof QueueRefused)
@@ -179,15 +221,16 @@ export function buildConversationA(deps: {
    */
   const answerQuestion = async (ferret: string, request: AnswerToTerminal): Promise<SessionView> => {
     const view = await terminal.answer(ferret, request);
-    await clearAskedQuestion(kernel.state, ferret, request.toolUseId);
+    await clearAskedQuestion(kernel.state, questionSerial, ferret, request.toolUseId);
     return view;
   };
 
   const mounts: MountRoute[] = [
     ...sessionSendRoutes(
       {
-        send: async (id: string, request: { readonly message: string }) =>
-          await terminal.deliver(id, await prepared(id, request.message)),
+        send: async (id: string, request: { readonly message: string; readonly sendId: string }) =>
+          (await keptSend(parseSessionId(id), request.sendId)) ??
+          (await terminal.deliver(id, await prepared(id, request.message))),
         interrupt: async (id: string) => await interruptFerret(id).then(pending),
         sends: records,
         sendStatus: async (id, sendId) => {
@@ -223,6 +266,8 @@ export function buildConversationA(deps: {
     currentTurn: async ferret => boundaries.current(ferret),
     send: async (ferret, _caller, request) => {
       try {
+        const kept = await keptSend(ferret, request.sendId);
+        if (kept !== undefined) return ok(kept);
         await terminal.deliver(ferret, await prepared(ferret, request.message));
       } catch (error) {
         return err({
@@ -231,6 +276,13 @@ export function buildConversationA(deps: {
         });
       }
       return err(pendingRefusal());
+    },
+    ownerWords: async (ferret, options) => {
+      try {
+        return ok({ v: 1, ferret, words: await ownerWords.said(ferret, { strict: options?.strict === true }) });
+      } catch (error) {
+        return err({ code: 'unreadable', message: error instanceof Error ? error.message : String(error) });
+      }
     },
     interrupt: async ferret => {
       try {
@@ -316,7 +368,7 @@ export function buildConversationA(deps: {
     sockets: socketTable(sockets),
     api,
     sitrep,
-    withdrawQuestion: async ferret => await clearAskedQuestion(kernel.state, ferret),
+    withdrawQuestion: async ferret => await clearAskedQuestion(kernel.state, questionSerial, ferret),
     onAskAnswered: async ({ ferret, askId }) => {
       await drafts.discard(ferret, askId).catch(() => undefined);
     },

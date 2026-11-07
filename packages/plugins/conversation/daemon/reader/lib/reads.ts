@@ -22,8 +22,15 @@
  */
 
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { Instant } from '@ferretry/std';
-import type { LogPage, LogSearch, TranscriptMessage, TranscriptPage } from '../../../contract/index.ts';
+import type { Instant, JsonValue } from '@ferretry/std';
+import type {
+  LogPage,
+  LogSearch,
+  TranscriptEvent as TranscriptEventView,
+  TranscriptEventTail,
+  TranscriptMessage,
+  TranscriptPage,
+} from '../../../contract/index.ts';
 import {
   type ConversationMessagePoint,
   type ExactConversationMessagePoint,
@@ -505,6 +512,35 @@ export class TranscriptReadService {
   }
 
   /**
+   * The newest events of the session's transcript as DATA: its messages, the tool calls it made and their results,
+   * oldest first, for a check that reads what a turn did (a PR it opened, a command it ran). Reasoning, attachments,
+   * turn markers and the rest are not carried.
+   *
+   * EVERYTHING IS SCRUBBED, and a tool call is where a secret most likely sits (a command line, a request body, a file
+   * a tool printed), so a call's input and a result's content go through the same redaction read as the text does: one
+   * vault open for the whole tail, every string in it masked, the structure untouched. An UNRESOLVED transcript refuses,
+   * as `logs` does: an empty tail of a file nobody proved is the ferret's would read as "it did nothing".
+   */
+  async transcriptEvents(sessionId: string, limit: number | undefined): Promise<TranscriptEventTail> {
+    const tail = boundedLimit(limit, DEFAULT_LOG_TAIL, MAX_LOG_TAIL, 'limit');
+    const result = await this.transcript.tail(sessionId, tail);
+    if (result.kind === 'unresolved')
+      throw new TranscriptReadError(
+        'no_transcript',
+        `session ${sessionId} has no transcript this daemon can prove is its own`,
+      );
+    if (result.kind === 'unreadable')
+      throw new TranscriptReadError(
+        'transcript_unreadable',
+        `session ${sessionId} has a proved transcript, but this daemon could not read it`,
+      );
+    const events = await this.redactor.batch(scrub =>
+      result.events.flatMap((event): TranscriptEventView[] => eventView(event, scrub)),
+    );
+    return { v: 1, ferret: sessionId as FerretId, events };
+  }
+
+  /**
    * One page of the session's transcript as the chat renders it: the tail, or the page before a byte.
    *
    * The same text as `logs` — one event per line, scrubbed, image markers intact — plus where the page
@@ -896,4 +932,50 @@ function servedRow(
     ...(row.timestamp === undefined ? {} : { timestamp: row.timestamp as Instant }),
     selectionBinding,
   };
+}
+
+/** One transcript event as the tail carries it, scrubbed; `[]` for a kind the tail does not carry. */
+function eventView(event: TranscriptEvent, scrub: TranscriptReadScrub): TranscriptEventView[] {
+  const stamped = event.timestamp === undefined ? {} : { timestamp: event.timestamp as Instant };
+  switch (event.kind) {
+    case 'message':
+      return [
+        {
+          kind: 'message',
+          role: event.role,
+          text: scrub.text(event.text),
+          ...stamped,
+          ...(event.inputSource === undefined ? {} : { inputSource: event.inputSource }),
+        },
+      ];
+    case 'tool-call':
+      return [
+        {
+          kind: 'tool-call',
+          role: event.role,
+          ...stamped,
+          call: {
+            id: event.call.id,
+            name: scrub.text(event.call.name),
+            input: scrub.data(event.call.input) as JsonValue,
+          },
+        },
+      ];
+    case 'tool-result':
+      return [
+        {
+          kind: 'tool-result',
+          role: event.role,
+          ...stamped,
+          result: {
+            callId: event.result.callId,
+            content: scrub.data(event.result.content) as JsonValue,
+            ...(event.result.text === undefined ? {} : { text: scrub.text(event.result.text) }),
+            isError: event.result.isError,
+          },
+        },
+      ];
+    default:
+      return [];
+  }
 }
