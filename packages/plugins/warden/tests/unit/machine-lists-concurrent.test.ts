@@ -36,7 +36,7 @@ describe('the auto-move failures through a notice board', () => {
       current: async (id: string) => ({ agent: 'claude-1', name: `ferret-${id}` }),
       candidate: async () => undefined,
     };
-    const failures = new AutoMoveFailures(new SlowMembers(), machine, facts);
+    const failures = new AutoMoveFailures(new SlowMembers(), machine, facts, () => '2026-11-06T09:00:00.000Z');
 
     // Act
     await Promise.all([failures.note('a', 'Not moved: cap.'), failures.note('b', 'Not moved: busy.')]);

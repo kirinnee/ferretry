@@ -163,7 +163,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       costs: { costUsd: async () => undefined },
       feed: { board: async ferret => await agenda.feed(ferret) },
       fleet: {
-        fleet: async () => await readFleet(ferrets, conversation, turns, ferret => `ferrets/${ferret}`),
+        fleet: async () => await readFleet(ferrets, conversation, asks, turns, ferret => `ferrets/${ferret}`),
       },
       spawner,
       artifacts,

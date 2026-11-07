@@ -4,7 +4,6 @@ import {
   planWardenEscalations,
   planWardenRemedy,
   remedyPermitsEscalation,
-  LEGACY_ESCALATION_NOTE,
   wardenEscalationSourceRef,
   type WardenAnomaly,
   type WardenEscalationBoard,
@@ -610,55 +609,6 @@ describe('telling a person once per episode', () => {
   });
 });
 
-describe('retiring the items escalations wrote before notifications', () => {
-  it('should resolve an old warden item with a note, even while its node is still flagged', () => {
-    // Arrange
-    const old = board('s1', {
-      items: [{ source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' }],
-    });
-
-    // Act
-    const result = plan({ boards: [old] });
-
-    // Assert
-    should(result.resolve).eql([
-      {
-        sessionId: 's1',
-        anomalyKind: 'sus_thinking',
-        source: 'agent-raised',
-        sourceRef: 'warden:sus_thinking',
-        note: LEGACY_ESCALATION_NOTE,
-      },
-    ]);
-    should(result.raise).have.length(1);
-  });
-
-  it.each([
-    {
-      label: 'one somebody else raised',
-      item: { source: 'agent-raised' as const, sourceRef: 'warden:sus_thinking', raisedBy: 'agent' as const },
-    },
-    {
-      label: 'one on another source',
-      item: { source: 'task' as const, sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' as const },
-    },
-    {
-      label: 'one naming a report block',
-      item: { source: 'agent-raised' as const, sourceRef: 'warden:/r.md#sus_thinking', raisedBy: 'daemon' as const },
-    },
-    {
-      label: 'one naming no class',
-      item: { source: 'agent-raised' as const, sourceRef: 'warden:not_a_kind', raisedBy: 'daemon' as const },
-    },
-    {
-      label: 'one with no reference',
-      item: { source: 'agent-raised' as const, sourceRef: null, raisedBy: 'daemon' as const },
-    },
-  ])('should leave $label alone', ({ item }) => {
-    // Act / Assert
-    should(plan({ anomalies: [], boards: [board('s1', { items: [item] })] }).resolve).be.empty();
-  });
-});
 
 describe('clearing an escalation whose reason has gone', () => {
   const live = board('s1', {

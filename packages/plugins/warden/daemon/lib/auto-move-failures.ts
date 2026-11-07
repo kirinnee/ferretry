@@ -52,6 +52,7 @@ export class AutoMoveFailures {
     private readonly store: MachineMembersStore,
     private readonly machine: MachineAgendaPort,
     private readonly facts: AutoMoveFacts,
+    private readonly nowIso: () => string,
   ) {}
 
   /** The Warden could not move `sessionId`; `detail` says why. `quiet` raises without a push (the boot folding). */
@@ -113,7 +114,7 @@ export class AutoMoveFailures {
             : `Ferretry moves a ferret to another login when its login hits a limit. These ${ids.length} couldn't be moved.`,
         context: fitLines([...lines, ...more], MAX_AGENDA_DETAIL_LENGTH),
         howToResolve: 'Run the command under a ferret to move it yourself, or wait as its line says.',
-        waitingSince: new Date().toISOString(),
+        waitingSince: this.nowIso(),
         premise: 'The owner let the Warden move ferrets that hit a limit to another login.',
         notice: true,
         ...(quiet ? {} : { ping: true as const }),

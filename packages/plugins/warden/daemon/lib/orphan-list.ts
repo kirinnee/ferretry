@@ -25,6 +25,7 @@ export class OrphanList {
   constructor(
     private readonly store: MachineMembersStore,
     private readonly machine: MachineAgendaPort,
+    private readonly nowIso: () => string,
   ) {}
 
   /** `quiet` raises without a push (the boot folding). */
@@ -56,7 +57,7 @@ export class OrphanList {
     const listed = ids.slice(0, MAX_LISTED);
     const lines = listed.map(id => `- ${held[id]?.[1] ?? id}`);
     const more = ids.length > MAX_LISTED ? [`…and ${ids.length - MAX_LISTED} more.`] : [];
-    const since = ids.map(id => held[id]?.[2] ?? '').sort()[0] ?? new Date().toISOString();
+    const since = ids.map(id => held[id]?.[2] ?? '').sort()[0] ?? this.nowIso();
     await this.machine.raiseOrUpdate(
       ORPHANS_REF,
       {

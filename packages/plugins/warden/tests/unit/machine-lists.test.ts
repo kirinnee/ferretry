@@ -39,7 +39,7 @@ describe('the auto-move failures item', () => {
 
   it('should list every ferret that could not be moved in one item', async () => {
     const { port, raised } = machine();
-    const failures = new AutoMoveFailures(new Members(), port, facts);
+    const failures = new AutoMoveFailures(new Members(), port, facts, () => '2026-11-06T09:00:00.000Z');
     await failures.note('a', 'Not moved: no login could take it.');
     await failures.note('b', 'Not moved: cap.');
     const last = raised.at(-1)!;
@@ -66,7 +66,7 @@ describe('the auto-move failures item', () => {
         await store.write(members);
       },
     };
-    const failures = new AutoMoveFailures(slow, port, facts);
+    const failures = new AutoMoveFailures(slow, port, facts, () => '2026-11-06T09:00:00.000Z');
 
     // Act
     await Promise.all([failures.note('a', 'x'), failures.reconcile(), failures.note('b', 'y'), failures.reconcile()]);
@@ -79,7 +79,7 @@ describe('the auto-move failures item', () => {
   it('should raise quietly when told to, as the boot folding does', async () => {
     // Arrange
     const { port, raised } = machine();
-    const failures = new AutoMoveFailures(new Members(), port, facts);
+    const failures = new AutoMoveFailures(new Members(), port, facts, () => '2026-11-06T09:00:00.000Z');
 
     // Act
     await failures.note('a', 'x', true);
@@ -95,7 +95,7 @@ describe('the auto-move failures item', () => {
     const failures = new AutoMoveFailures(new Members(), port, {
       ...facts,
       candidate: async id => (id === 'a' ? 'codex-2' : undefined),
-    });
+    }, () => '2026-11-06T09:00:00.000Z');
     await failures.note('a', 'Not moved although its login hit its limit: a background job runs');
     const request = raised.at(-1)!.request;
     should(request.context).equal('a (a): A background job runs. A login can take it now:\n$ fy move a -a codex-2');
@@ -107,20 +107,20 @@ describe('the auto-move failures item', () => {
     const failures = new AutoMoveFailures(new Members(), port, {
       current: async () => ({ agent: 'c', name: 'piper', midTurn: true }),
       candidate: async () => 'codex-2',
-    });
+    }, () => '2026-11-06T09:00:00.000Z');
     await failures.note('p', '');
     should(raised.at(-1)?.request.context).equal('piper (p): It could not be moved. Wait for it to finish its turn.');
   });
 
   it('should name a single ferret in the title', async () => {
     const { port, raised } = machine();
-    await new AutoMoveFailures(new Members(), port, facts).note('a', 'x');
+    await new AutoMoveFailures(new Members(), port, facts, () => '2026-11-06T09:00:00.000Z').note('a', 'x');
     should(raised[0]?.request.title).equal('a could not be moved');
   });
 
   it('should never list a stopped or gone ferret', async () => {
     const { port, raised, resolved } = machine();
-    await new AutoMoveFailures(new Members(), port, facts).note('stopped', 'x');
+    await new AutoMoveFailures(new Members(), port, facts, () => '2026-11-06T09:00:00.000Z').note('stopped', 'x');
     should(raised).be.empty();
     should(resolved).be.empty();
   });
@@ -131,7 +131,7 @@ describe('the auto-move failures item', () => {
     const failures = new AutoMoveFailures(new Members(), port, {
       current: async id => (agents.has(id) ? { agent: agents.get(id)! } : undefined),
       candidate: async () => undefined,
-    });
+    }, () => '2026-11-06T09:00:00.000Z');
     await failures.note('a', 'x');
     await failures.note('b', 'y');
     agents.delete('a');
@@ -148,7 +148,7 @@ describe('the auto-move failures item', () => {
     const failures = new AutoMoveFailures(new Members(), port, {
       current: async id => (many.has(id) ? { agent: 'c' } : undefined),
       candidate: async () => undefined,
-    });
+    }, () => '2026-11-06T09:00:00.000Z');
     for (const id of many.keys()) await failures.note(id, 'x');
     should(raised.at(-1)?.request.context).containEql('…and 3 more.');
   });
@@ -169,7 +169,7 @@ const notice = (id: string, title: string): WardenCardNotice => ({
 describe('the orphaned cards item', () => {
   it('should list the cards in one item, oldest wait first, and name a single card', async () => {
     const { port, raised } = machine();
-    const list = new OrphanList(new Members(), port);
+    const list = new OrphanList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
     await list.add(notice('F1', 'A card has nobody working on it'));
     should(raised[0]).containDeep({
       ref: ORPHANS_REF,
@@ -205,7 +205,7 @@ describe('the orphaned cards item', () => {
         await store.write(members);
       },
     };
-    const list = new OrphanList(slow, port);
+    const list = new OrphanList(slow, port, () => '2026-11-06T09:00:00.000Z');
 
     // Act
     await Promise.all([list.add(notice('F1', 'a'), true), list.add(notice('F2', 'b')), list.remove('F9')]);
@@ -218,7 +218,7 @@ describe('the orphaned cards item', () => {
 
   it('should close the item when the last card leaves, and ignore a card it never held', async () => {
     const { port, resolved, raised } = machine();
-    const list = new OrphanList(new Members(), port);
+    const list = new OrphanList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
     await list.remove('F9');
     should(raised).be.empty();
     await list.add(notice('F1', 'a'));
@@ -228,7 +228,7 @@ describe('the orphaned cards item', () => {
 
   it('should say how many more than a dozen', async () => {
     const { port, raised } = machine();
-    const list = new OrphanList(new Members(), port);
+    const list = new OrphanList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
     for (let index = 0; index < 14; index += 1)
       await list.add(notice(`F${String(index + 10)}`, `card ${String(index)}`));
     should(raised.at(-1)?.request.context).containEql('…and 2 more.');
@@ -245,7 +245,7 @@ describe('the stuck-input item (B144)', () => {
 
   it('should list every stuck ferret in one item that pings, oldest wait first, and name a single one', async () => {
     const { port, raised } = machine();
-    const list = new StuckInputList(new Members(), port);
+    const list = new StuckInputList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
 
     await list.add(stuck('annabeth', '2026-11-02T15:00:00Z'));
     should(raised[0]).containDeep({
@@ -261,7 +261,7 @@ describe('the stuck-input item (B144)', () => {
 
   it('should close the item when the last ferret leaves, and ignore one it never held', async () => {
     const { port, resolved, raised } = machine();
-    const list = new StuckInputList(new Members(), port);
+    const list = new StuckInputList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
     await list.remove('nobody');
     should(raised).be.empty();
     await list.add(stuck('annabeth', '2026-11-02T15:00:00Z'));
@@ -280,7 +280,7 @@ describe('the stuck-inbox item (B148)', () => {
 
   it('should list every stuck inbox in one item that pings, oldest wait first, and name a single one', async () => {
     const { port, raised } = machine();
-    const list = new StuckInboxList(new Members(), port);
+    const list = new StuckInboxList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
 
     await list.add(stuck('ryu', '2026-11-02T08:12:00Z'));
     should(raised[0]).containDeep({
@@ -301,7 +301,7 @@ describe('the stuck-inbox item (B148)', () => {
 
   it('should list twelve and count the rest', async () => {
     const { port, raised } = machine();
-    const list = new StuckInboxList(new Members(), port);
+    const list = new StuckInboxList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
 
     for (let index = 10; index < 24; index += 1) await list.add(stuck(`f${index}`, `2026-11-02T08:${index}:00Z`));
     should(raised.at(-1)?.request.title).equal('14 ferrets have stuck inboxes');
@@ -311,7 +311,7 @@ describe('the stuck-inbox item (B148)', () => {
 
   it('should close the item when the last inbox drains, and ignore one it never held', async () => {
     const { port, resolved, raised } = machine();
-    const list = new StuckInboxList(new Members(), port);
+    const list = new StuckInboxList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
     await list.remove('nobody');
     should(raised).be.empty();
     await list.add(stuck('ryu', '2026-11-02T08:12:00Z'));

@@ -78,7 +78,6 @@ import { instantMs } from './time.ts';
 import { isTerminalStatus, type WardenSessionConfig, type WardenSessionStatus } from './types.ts';
 import {
   parseWardenAnomalyKind,
-  parseWardenVerdictSourceRef,
   type WardenRecommendation,
   type WardenVerdict,
 } from './verdicts.ts';
@@ -210,14 +209,6 @@ export function isWardenEscalationItem(item: WardenEscalationBoardItem): boolean
   return daemonRow(item) && parseWardenEscalationSourceRef(item.sourceRef) !== undefined;
 }
 
-/** The class an OLD escalation item (`warden:<kind>`, before notifications) is about, if it is one. */
-function legacyKindOf(item: WardenEscalationBoardItem): WardenAnomalyKind | undefined {
-  if (!daemonRow(item) || item.sourceRef === null || item.sourceRef.startsWith(ASK_PREFIX)) return undefined;
-  const identity = parseWardenVerdictSourceRef(item.sourceRef);
-  // The bare-class form only: `warden:<report>#<kind>` named one report block and was never ours.
-  return identity?.reportPath === undefined ? identity?.anomalyKind : undefined;
-}
-
 /** One thing the Warden can need the owner about this sweep. */
 interface Subject {
   /** Its identity across sweeps: what `notified` remembers. */
@@ -329,10 +320,6 @@ export interface WardenEscalationInput {
   /** The sweep's instant: the wait of a notification nothing else dates. */
   readonly at?: string;
 }
-
-/** The note an old escalation item is resolved with. */
-export const LEGACY_ESCALATION_NOTE =
-  'Cleared by the Warden: it now tells you this as a notification from "Warden" instead of an item here.';
 
 const flatten = (value: string): string => value.replaceAll(/\s+/gu, ' ').trim();
 
@@ -820,17 +807,6 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
   for (const board of input.boards) {
     for (const item of board.items) {
       if (item.sourceRef === null) continue;
-      const legacy = legacyKindOf(item);
-      if (legacy !== undefined) {
-        resolve.push({
-          sessionId: board.sessionId,
-          anomalyKind: legacy,
-          source: item.source,
-          sourceRef: item.sourceRef,
-          note: LEGACY_ESCALATION_NOTE,
-        });
-        continue;
-      }
       if (!isWardenEscalationItem(item) || kept.has(JSON.stringify([board.sessionId, item.sourceRef]))) continue;
       const identity = parseWardenEscalationSourceRef(item.sourceRef) as WardenEscalationIdentity;
       // The ferret it is about: the one a scoped reference names, else the board it sits on.

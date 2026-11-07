@@ -157,7 +157,7 @@ export class WardenReviveService {
 
     const actions: WardenAction[] = [];
     const revived = new Set<string>();
-    if (plan.waves.length > 0 && plan.cascade && !(await this.waitForTmux())) {
+    if (plan.waves.length > 0 && plan.cascade && !(await this.untilTmuxReady())) {
       this.ports.journal.record('fleet.warden_revive_deferred', {
         why: 'tmux_unavailable',
         sessions: plan.waves.flat().map(planned => planned.id),
@@ -247,7 +247,7 @@ export class WardenReviveService {
     return { subjects, state: next };
   }
 
-  private async waitForTmux(): Promise<boolean> {
+  private async untilTmuxReady(): Promise<boolean> {
     for (let attempt = 0; attempt < REVIVE_TMUX_WAIT_TRIES; attempt++) {
       if (await this.ports.tmuxReady()) return true;
       await this.ports.sleep(REVIVE_TMUX_WAIT_MS);

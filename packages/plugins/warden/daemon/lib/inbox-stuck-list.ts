@@ -31,6 +31,7 @@ export class StuckInboxList {
   constructor(
     private readonly store: MachineMembersStore,
     private readonly machine: MachineAgendaPort,
+    private readonly nowIso: () => string,
   ) {}
 
   add(notice: StuckInboxNotice): Promise<void> {
@@ -60,7 +61,7 @@ export class StuckInboxList {
     }
     const lines = ids.slice(0, MAX_LISTED).map(id => `- ${held[id]?.[1] ?? id}`);
     const more = ids.length > MAX_LISTED ? [`…and ${ids.length - MAX_LISTED} more.`] : [];
-    const since = ids.map(id => held[id]?.[2] ?? '').sort()[0] ?? new Date().toISOString();
+    const since = ids.map(id => held[id]?.[2] ?? '').sort()[0] ?? this.nowIso();
     const only = held[ids[0] ?? ''];
     await this.machine.raiseOrUpdate(
       INBOX_STUCK_REF,

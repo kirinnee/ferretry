@@ -1,3 +1,4 @@
+import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { type WardenFleetSession, WARDEN_LABEL, type WardenSessionStatus } from './lib/index.ts';
@@ -62,6 +63,7 @@ export function wardenFleetSession(
   turn: number,
   turnEndedAt: string | undefined,
   directory: string,
+  questionSince?: string,
 ): WardenFleetSession {
   const isWarden = WARDEN_NAME.test(ferret.name);
   const stoppedAt = ferret.state === 'stopped' ? ferret.stateAt : undefined;
@@ -79,12 +81,14 @@ export function wardenFleetSession(
       ...(HARNESS_OF[ferret.harness] === undefined ? {} : { harness: HARNESS_OF[ferret.harness] }),
     },
     state: {
-      status: statusOf(ferret),
+      // A ferret with a question open on its board is waiting on someone (`unattended_question` measures how long).
+      status: questionSince !== undefined && ferret.state !== 'stopped' ? 'awaiting_question' : statusOf(ferret),
       startedAt: ferret.createdAt,
-      ...(stoppedAt === undefined ? { lastActivityAt: ferret.stateAt } : { finishedAt: stoppedAt }),
+      ...(stoppedAt === undefined ? { lastActivityAt: questionSince ?? ferret.stateAt } : { finishedAt: stoppedAt }),
+      ...(questionSince !== undefined && ferret.state !== 'stopped' ? { turnState: 'needs-input' as const, turnStateAt: questionSince } : {}),
       turn,
-      ...(ferret.state === 'working' ? { turnState: 'working' as const, turnStateAt: ferret.stateAt } : {}),
-      ...(ferret.state === 'idle' ? { turnState: 'your-turn' as const, turnStateAt: turnEndedAt ?? ferret.stateAt } : {}),
+      ...(questionSince === undefined && ferret.state === 'working' ? { turnState: 'working' as const, turnStateAt: ferret.stateAt } : {}),
+      ...(questionSince === undefined && ferret.state === 'idle' ? { turnState: 'your-turn' as const, turnStateAt: turnEndedAt ?? ferret.stateAt } : {}),
     },
     directory,
     cwd: ferret.folder,
@@ -98,15 +102,30 @@ export function wardenFleetSession(
 export async function readFleet(
   ferrets: FerretsApi,
   conversation: ConversationApi,
+  asks: AsksApi,
   turns: TurnOrdinals,
   directoryOf: (ferret: string) => string,
 ): Promise<readonly WardenFleetSession[]> {
   const all = await ferrets.list();
+  const questions = await openQuestions(asks);
   return await Promise.all(
     all.map(async ferret => {
       const current = ferret.state === 'stopped' ? undefined : await conversation.currentTurn(ferret.id).catch(() => undefined);
       const ordinal = turns.see(ferret.id, current);
-      return wardenFleetSession(ferret, ordinal, turns.endedAt(ferret.id), directoryOf(ferret.id));
+      return wardenFleetSession(ferret, ordinal, turns.endedAt(ferret.id), directoryOf(ferret.id), questions.get(ferret.id));
     }),
   );
+}
+
+/** The oldest open question each ferret has raised itself (a ferret's own ask that wants an answer, not a notice). */
+async function openQuestions(asks: AsksApi): Promise<ReadonlyMap<string, string>> {
+  const since = new Map<string, string>();
+  try {
+    for (const ask of await asks.open({ source: 'ferret' as never, state: 'open' }))
+      if (ask.ferret !== undefined && ask.kind !== 'notice' && ask.kind !== 'task' && (since.get(ask.ferret) ?? '\uffff') > ask.raisedAt)
+        since.set(ask.ferret, ask.raisedAt);
+  } catch {
+    // Asks unreadable: no ferret is thought to be waiting, which is the quiet reading.
+  }
+  return since;
 }
